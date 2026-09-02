@@ -221,6 +221,19 @@ export function verifyWorkflowIdentity(token: string, options: VerifyOptions): W
         `the future by more than the ${skew} second tolerance. Check both clocks.`,
     )
   }
+  // `nbf` as well as `iat`, and not because GitHub sends one: it does not,
+  // today. A claim that says "not before" and is not read is a claim an issuer
+  // can start sending, or an attacker can add, in the belief that it narrows
+  // the window, while this accepts the token outside it. Honouring a standard
+  // claim costs three lines; discovering later that it was ignored costs an
+  // argument about whether anything was ever bounded.
+  if (typeof claims.nbf === 'number' && claims.nbf - skew > now) {
+    throw new TokenRefused(
+      'not_yet_valid',
+      `The identity token is not valid before ${new Date(claims.nbf * 1000).toISOString()}, ` +
+        `which is in the future by more than the ${skew} second tolerance. Check both clocks.`,
+    )
+  }
 
   const repository = claims.repository
   if (typeof repository !== 'string' || !/^[^/]+\/[^/]+$/.test(repository)) {
@@ -289,7 +302,25 @@ export class ActionsKeys {
   }
 
   private async refetch(): Promise<void> {
-    const res = await this.fetchImpl(this.url, { headers: { accept: 'application/json' } })
+    // The network failure is turned into the same refusal as a bad status,
+    // rather than being allowed to escape. Two reasons, and neither is tidiness.
+    //
+    // A `fetch` that cannot reach github.com rejects with a TypeError, which is
+    // indistinguishable at the call site from a programming mistake, so a
+    // caller that means to answer "GitHub is unreachable, try again" answers
+    // 500 with no reason instead. And the thing that must NOT happen either way
+    // is failing open: there is no branch here that leaves the previous key set
+    // in place and carries on, because a verifier that keeps working when it
+    // cannot check who signed anything has stopped verifying.
+    let res: Response
+    try {
+      res = await this.fetchImpl(this.url, { headers: { accept: 'application/json' } })
+    } catch (err) {
+      throw new TokenRefused(
+        'keys_unavailable',
+        `GitHub's signing keys could not be fetched: ${err instanceof Error ? err.message : String(err)}.`,
+      )
+    }
     if (!res.ok) {
       throw new TokenRefused(
         'keys_unavailable',

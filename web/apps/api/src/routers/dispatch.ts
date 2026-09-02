@@ -47,7 +47,7 @@ import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
  * or that keeps its checks under a different one, would otherwise be unable to
  * use any of this.
  */
-const workflowFile = z
+export const workflowFile = z
   .string()
   .min(1)
   .max(100)
@@ -57,7 +57,7 @@ const workflowFile = z
 /** A git ref a dispatch may name. Not a commit: GitHub refuses a SHA here. */
 const gitRef = z.string().min(1).max(255)
 
-interface Installation extends Record<string, unknown> {
+export interface Installation extends Record<string, unknown> {
   installation_id: string
   account_login: string
 }
@@ -70,7 +70,7 @@ interface Installation extends Record<string, unknown> {
  * of this product, not a fault in it, and the person reading the message is
  * the one who can fix it.
  */
-async function installationFor(c: OrgContext): Promise<Installation> {
+export async function installationFor(c: OrgContext): Promise<Installation> {
   const installation = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<Installation>(sql`
       SELECT installation_id, account_login FROM github_installations
@@ -97,7 +97,7 @@ async function installationFor(c: OrgContext): Promise<Installation> {
  * reached the ingestion path. A verb that dispatched work during a suspension
  * would be the switch quietly not working.
  */
-async function refuseWhileSuspended(c: OrgContext): Promise<void> {
+export async function refuseWhileSuspended(c: OrgContext): Promise<void> {
   const reason = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<{ suspended_reason: string | null }>(sql`
       SELECT suspended_reason FROM organizations
@@ -123,7 +123,7 @@ async function refuseWhileSuspended(c: OrgContext): Promise<void> {
  * they read as a bug in this control plane and the sentence that names the fix
  * is thrown away, which is exactly what `members.sync` found.
  */
-async function dispatch(
+export async function dispatch(
   c: OrgContext,
   installation: Installation,
   repository: string,
@@ -158,7 +158,7 @@ function noRepository(fullName: string): TRPCError {
   })
 }
 
-interface Target {
+export interface Target {
   repository: string
   ref: string
   envId: string
@@ -173,7 +173,7 @@ interface Target {
  * produces a run that fails in the customer's CI for a reason the console
  * already knew.
  */
-async function targetFor(db: Db, envId: string): Promise<Target> {
+export async function targetFor(db: Db, envId: string): Promise<Target> {
   const rows = await db.execute<{
     env_id: string
     branch: string

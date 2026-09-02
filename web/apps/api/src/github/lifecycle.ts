@@ -1376,6 +1376,76 @@ export function hashCallback(token: string): Buffer {
   return createHash('sha256').update(token, 'utf8').digest()
 }
 
+/** How long an engine credential minted from a workflow identity is good for.
+ *
+ *  Shorter than the callback credential, because this one is spent continuously
+ *  through a run rather than once at the end, and a run that outlives it is a
+ *  run that was going to be killed by the job timeout anyway. Long enough to
+ *  cover the slowest honest `af ci` and nothing beyond it. */
+export const WORKFLOW_ENGINE_TTL_MS = 6 * 60 * 60 * 1000
+
+/**
+ * Trades a verified workflow identity for a credential the ingestion endpoint
+ * accepts.
+ *
+ * A separate credential from the callback one, because they answer different
+ * questions and have different blast radii. The callback credential says "this
+ * job may publish the result for this commit" and is bound to one generation.
+ * This one says "this job may report events for this organization", because an
+ * event stream is not about a commit: it is about an environment coming up and
+ * going down again, and it starts before anybody knows what the result will be.
+ *
+ * The scope is the organization the repository belongs to, which is the same
+ * scope a pasted AF_CONTROL_PLANE_TOKEN has. What makes it better than a pasted
+ * one is not that it can reach less, it is that it expires, that nobody has to
+ * store it, and that it cannot be minted at all by a fork's pull request.
+ *
+ * Refused when the repository is not connected here, which is the same refusal
+ * `issueCallback` gives and for the same reason: a signed statement about a
+ * repository this control plane has never heard of proves who the job is
+ * without giving it anywhere to report to.
+ */
+export async function issueWorkflowEngineToken(
+  deps: LifecycleDeps,
+  login: string,
+  claim: { repository: string; workflowRunId: number | null },
+): Promise<{ token: string; expiresAt: Date } | { refused: string }> {
+  const now = deps.clock.now()
+  const expiresAt = new Date(now.getTime() + WORKFLOW_ENGINE_TTL_MS)
+
+  // Two contexts, because the tenant is the answer to the first one. The
+  // repository lookup runs under the GitHub account, which is the only handle a
+  // request with no session and no token has; the insert runs under the
+  // organization that lookup resolved, because engine_tokens is isolated by
+  // organization and a write with no tenant is a write the policy refuses.
+  const orgId = await deps.pool.withGitHubAccount(login, async (db) => {
+    const repo = await repositoryByName(db, claim.repository)
+    return repo?.org_id ?? null
+  })
+  if (!orgId) {
+    return { refused: `${claim.repository} is not connected to this control plane` }
+  }
+
+  // The same width and shape as every other engine token, so an operator
+  // looking at the token list sees one kind of thing. The name says where it
+  // came from, because a row nobody can account for is worse than a long list.
+  const token = `aft_${randomBytes(32).toString('base64url')}`
+  const hash = createHash('sha256').update(token, 'utf8').digest()
+  const prefix = token.slice(0, 12)
+  const name = claim.workflowRunId === null
+    ? `${claim.repository} workflow`
+    : `${claim.repository} run ${claim.workflowRunId}`
+
+  await deps.pool.withTenant({ orgId }, async (db) => {
+    await db.execute(sql`
+      INSERT INTO engine_tokens (org_id, name, token_hash, prefix, kind, created_at, expires_at)
+      VALUES (${orgId}::uuid, ${name.slice(0, 200)}, ${hash}, ${prefix}, 'engine',
+              ${now.toISOString()}, ${expiresAt.toISOString()})`)
+  })
+
+  return { token, expiresAt }
+}
+
 /**
  * Issues a credential scoped to one generation.
  *
@@ -1385,6 +1455,14 @@ export function hashCallback(token: string): Buffer {
  * entirely. Both are real and neither is sufficient alone: GitHub's covers the
  * repository's own secrets, and this covers the credential this control plane
  * would otherwise hand out.
+ *
+ * Neither covers the third thing, and this comment used to read as though there
+ * were only two. Both halves above are about what GitHub hands a job. Neither
+ * says anything about what is already sitting on the machine the job runs on: on
+ * a self hosted runner the Docker daemon, an existing registry login and the
+ * network are ambient, and GitHub withholds none of them from a fork's code. The
+ * engine's own fork gate is what covers that, and it has to, because this control
+ * plane never sees that machine.
  */
 export async function issueCallback(
   deps: LifecycleDeps,

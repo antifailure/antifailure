@@ -34,6 +34,9 @@ export const PERMISSIONS = [
   'sessions.manage',
   'data.export',
   'account.close',
+  'workloads.view',
+  'workloads.edit',
+  'workloads.run',
   'analytics.read',
 ] as const
 
@@ -70,6 +73,10 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'data.export': 'Take a copy of the organization’s configuration and history out of the product.',
   'account.close':
     'Close your own account: erase your name, address and identity, and leave the organization.',
+  'workloads.view': 'See workload definitions, their versions, and what their runs measured.',
+  'workloads.edit':
+    'Create a workload, add a version to one, archive one, and promote an exploration into a workflow.',
+  'workloads.run': 'Start, cancel, and retry a workload run.',
   'analytics.read':
     'Read the analytics dashboard for this control plane installation. Granted here and ' +
     'checked again against the organization that operates the installation, because this is ' +
@@ -109,6 +116,14 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
  * the only case where leaving is destructive, which is the last owner, and says
  * what to do about it.
  *
+ * Workloads are three permissions rather than one, and rather than being folded
+ * into agents.run and load.run. Reading a workload's history is oversight and a
+ * viewer gets it. Authoring a definition and starting a run are different acts
+ * on different days: a definition is a thing somebody edits and reviews, and a
+ * run costs money and moves an environment. Folding them into the two existing
+ * run permissions would have meant a role could start a browser workload and
+ * not a load workload, which is a distinction about the engine's internals
+ * rather than about anything an organization decides.
  * Owner and admin hold analytics.read and member and viewer do not, and it is
  * the only permission on this list where the grant is not the whole gate. The
  * dashboard covers the installation rather than the organization, so it is
@@ -123,14 +138,16 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'agents.run', 'load.run', 'members.manage',
     'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
     'organization.settings', 'sessions.manage', 'data.export', 'account.close',
+    'workloads.view', 'workloads.edit', 'workloads.run',
     'analytics.read',
   ],
   member: [
     'environments.view', 'environments.create', 'environments.teardown',
     'masking.edit', 'network.edit', 'agents.run', 'load.run',
     'audit.read', 'account.close',
+    'workloads.view', 'workloads.edit', 'workloads.run',
   ],
-  viewer: ['environments.view', 'audit.read', 'account.close'],
+  viewer: ['environments.view', 'audit.read', 'account.close', 'workloads.view'],
 }
 
 export function roleHas(role: Role, permission: Permission): boolean {

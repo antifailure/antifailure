@@ -404,6 +404,34 @@
         "member",
         "viewer"
       ]
+    },
+    {
+      "name": "workloads.view",
+      "description": "See workload definitions, their versions, and what their runs measured.",
+      "roles": [
+        "owner",
+        "admin",
+        "member",
+        "viewer"
+      ]
+    },
+    {
+      "name": "workloads.edit",
+      "description": "Create a workload, add a version to one, archive one, and promote an exploration into a workflow.",
+      "roles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    {
+      "name": "workloads.run",
+      "description": "Start, cancel, and retry a workload run.",
+      "roles": [
+        "owner",
+        "admin",
+        "member"
+      ]
     }
   ],
   "x-antifailure-event-types": [
@@ -695,6 +723,212 @@
             }
           }
         }
+      }
+    },
+    "/v1/auth/github-oidc": {
+      "post": {
+        "operationId": "exchangeWorkflowIdentity",
+        "summary": "Exchange a GitHub Actions workflow identity for an engine token",
+        "description": "How a job in a customer's CI authenticates with no token, no environment variable and no repository secret. The workflow asks GitHub for an identity token with the audience antifailure-control-plane (it needs `id-token: write`), posts it here, and receives an engine token good for 15 minutes on POST /v1/events.\n\nThe signature, issuer, audience and expiry are all checked, and none of that is what decides which organization the token belongs to. A signed identity proves which repository a job runs in and nothing about who that repository belongs to, because anybody can run Actions in a repository they own. Access comes from a claim on the repository instead.\n\nMost callers never make that claim themselves. When a repository has no claim and exactly one organization holds a live GitHub App installation on its owner, the claim is created on this first exchange and recorded as having come from the installation. What is refused is a repository with no claim AND no installation to stand in for one: an owner nobody has installed the App on reaches nobody, and an owner two organizations have installed on is refused rather than guessed at. POST /v1/oidc/bindings claims one by hand, for a repository the App is not installed on.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The workflow identity token, minted for audience antifailure-control-plane."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An engine token, returned once and stored nowhere. Present it as a bearer token on POST /v1/events exactly as a static one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "expires_at"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "org_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "repository": {
+                      "type": "string",
+                      "description": "owner/name."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON, or carries no token."
+          },
+          "401": {
+            "description": "The identity token did not verify. `reason` is one of malformed, bad_algorithm, no_key, invalid_signature, wrong_issuer, wrong_audience, expired, not_yet_valid, no_repository or keys_unavailable, and `error` is a sentence the workflow author can act on."
+          },
+          "403": {
+            "description": "The identity verified and grants nothing. `reason` is no_binding when the repository has not been claimed, binding_revoked when the claim was withdrawn, or installation_suspended."
+          },
+          "429": {
+            "description": "Too many exchanges for this repository. A job needs one credential.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workloads/claim": {
+      "post": {
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The answer."
+          },
+          "400": {
+            "description": "The body is not JSON, or is missing a field."
+          },
+          "401": {
+            "description": "The token is not valid."
+          },
+          "403": {
+            "description": "The organization is suspended."
+          },
+          "404": {
+            "description": "No such environment in this organization."
+          },
+          "409": {
+            "description": "This token does not hold the lease."
+          }
+        },
+        "operationId": "claimWorkloadRun",
+        "summary": "Take the workload run waiting for an environment",
+        "description": "Moves the oldest requested run for the environment to accepted and returns its compiled version, with a lease. Answers 200 and a null run when nothing is waiting, so a poller can tell that apart from a failure. The engine pulls rather than being told because a workflow_dispatch carries only the inputs the workflow declares."
+      }
+    },
+    "/v1/workloads/runs/{runId}/heartbeat": {
+      "post": {
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The answer."
+          },
+          "400": {
+            "description": "The body is not JSON, or is missing a field."
+          },
+          "401": {
+            "description": "The token is not valid."
+          },
+          "403": {
+            "description": "The organization is suspended."
+          },
+          "404": {
+            "description": "No such environment in this organization."
+          },
+          "409": {
+            "description": "This token does not hold the lease."
+          }
+        },
+        "operationId": "heartbeatWorkloadRun",
+        "summary": "Say the run is still going",
+        "description": "Extends the lease and the deadline. A run whose deadline passes with nothing said about it ends as abandoned, which is the control plane admitting it never heard rather than a claim that the work failed."
+      }
+    },
+    "/v1/commands/claim": {
+      "post": {
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The answer."
+          },
+          "400": {
+            "description": "The body is not JSON, or is missing a field."
+          },
+          "401": {
+            "description": "The token is not valid."
+          },
+          "403": {
+            "description": "The organization is suspended."
+          },
+          "404": {
+            "description": "No such environment in this organization."
+          },
+          "409": {
+            "description": "This token does not hold the lease."
+          }
+        },
+        "operationId": "claimRuntimeCommands",
+        "summary": "Take the runtime commands waiting for this organization",
+        "description": "Teardowns and cancellations, with a lease. Reachable while the organization is suspended, deliberately: a suspension stops new work, and stopping what is running is the opposite of new work."
+      }
+    },
+    "/v1/commands/{id}/ack": {
+      "post": {
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The answer."
+          },
+          "400": {
+            "description": "The body is not JSON, or is missing a field."
+          },
+          "401": {
+            "description": "The token is not valid."
+          },
+          "403": {
+            "description": "The organization is suspended."
+          },
+          "404": {
+            "description": "No such environment in this organization."
+          },
+          "409": {
+            "description": "This token does not hold the lease."
+          }
+        },
+        "operationId": "ackRuntimeCommand",
+        "summary": "Say what happened to a command",
+        "description": "Only the holder of the lease may acknowledge, and an acknowledgement that matches no row answers 409 rather than 200: an acknowledgement nobody applied is the silent nothing the durable command exists to end."
       }
     },
     "/trpc/account.close": {
@@ -2343,6 +2577,13 @@
                   "reason": {
                     "type": "string",
                     "maxLength": 500
+                  },
+                  "workflow": {
+                    "default": "antifailure.yml",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$"
                   }
                 },
                 "required": [
@@ -6882,6 +7123,1163 @@
           },
           "403": {
             "description": "The role does not hold tokens.manage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.addVersion": {
+      "post": {
+        "operationId": "trpc_workloads_addVersion",
+        "summary": "workloads.addVersion",
+        "description": "Requires the workloads.edit permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "body": {},
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "slug",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.edit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.archive": {
+      "post": {
+        "operationId": "trpc_workloads_archive",
+        "summary": "workloads.archive",
+        "description": "Requires the workloads.edit permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "slug"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.edit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.cancel": {
+      "post": {
+        "operationId": "trpc_workloads_cancel",
+        "summary": "workloads.cancel",
+        "description": "Requires the workloads.run permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "runId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.create": {
+      "post": {
+        "operationId": "trpc_workloads_create",
+        "summary": "workloads.create",
+        "description": "Requires the workloads.edit permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "observed_load",
+                      "http_scenario",
+                      "browser_workflow",
+                      "exploration"
+                    ]
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "body": {}
+                },
+                "required": [
+                  "repository",
+                  "slug",
+                  "name",
+                  "kind",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.edit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.get": {
+      "get": {
+        "operationId": "trpc_workloads_get",
+        "summary": "workloads.get",
+        "description": "Requires the workloads.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    }
+                  },
+                  "required": [
+                    "slug"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.inspect": {
+      "get": {
+        "operationId": "trpc_workloads_inspect",
+        "summary": "workloads.inspect",
+        "description": "Requires the workloads.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "runId"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.list": {
+      "get": {
+        "operationId": "trpc_workloads_list",
+        "summary": "workloads.list",
+        "description": "Requires the workloads.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": false,
+            "description": "JSON-encoded tRPC input. Every field has a default, so it may be omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": {
+                    "includeArchived": false,
+                    "limit": 50
+                  },
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "observed_load",
+                        "http_scenario",
+                        "browser_workflow",
+                        "exploration"
+                      ]
+                    },
+                    "includeArchived": {
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "default": 50,
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 200
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.promote": {
+      "post": {
+        "operationId": "trpc_workloads_promote",
+        "summary": "workloads.promote",
+        "description": "Requires the workloads.edit permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "fromRunId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "exploration": {},
+                  "persona": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "repository",
+                  "exploration"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.edit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.retry": {
+      "post": {
+        "operationId": "trpc_workloads_retry",
+        "summary": "workloads.retry",
+        "description": "Requires the workloads.run permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "workflow": {
+                    "default": "antifailure.yml",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$"
+                  }
+                },
+                "required": [
+                  "runId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.runs": {
+      "get": {
+        "operationId": "trpc_workloads_runs",
+        "summary": "workloads.runs",
+        "description": "Requires the workloads.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": false,
+            "description": "JSON-encoded tRPC input. Every field has a default, so it may be omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": {
+                    "limit": 50
+                  },
+                  "type": "object",
+                  "properties": {
+                    "slug": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 63,
+                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    },
+                    "envId": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "requested",
+                        "accepted",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "timed_out",
+                        "abandoned"
+                      ]
+                    },
+                    "limit": {
+                      "default": 50,
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 200
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/workloads.start": {
+      "post": {
+        "operationId": "trpc_workloads_start",
+        "summary": "workloads.start",
+        "description": "Requires the workloads.run permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-antifailure-csrf",
+            "in": "header",
+            "required": true,
+            "description": "The CSRF token returned by GET /auth/session.",
+            "schema": {
+              "type": "string",
+              "minLength": 32
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 63,
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "envId": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "requestKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "workflow": {
+                    "default": "antifailure.yml",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$"
+                  }
+                },
+                "required": [
+                  "slug",
+                  "envId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold workloads.run.",
             "content": {
               "application/json": {
                 "schema": {

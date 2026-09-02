@@ -5,7 +5,7 @@ import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
 import { CONTROL_PLANE_URL } from "@/lib/site";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
-import { waitlistSubmitted } from "@/lib/analytics";
+import { ctaEngaged, waitlistSubmitted } from "@/lib/analytics";
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -34,6 +34,12 @@ function GitHubMark({ className }: { className?: string }) {
  * if you have not. The page said "there is no hosted control plane to sign in
  * to yet" for as long as there was one, which reads to an invited person as
  * being turned away.
+ *
+ * The signup heading is "Request access" rather than "Get started", because
+ * nothing here starts. Both routes render this same screen and neither creates
+ * an account: one of the two doors is opened by an invitation somebody else
+ * holds, and the other is a list. A heading promising a beginning is the same
+ * false state the browser tab used to carry, moved onto the page.
  *
  * And the two are kept independent, which they were not. Joining the waitlist
  * used to replace the entire screen with a confirmation, remembered in local
@@ -72,6 +78,17 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [already, setAlready] = useState(false);
+
+  // One engagement per time this screen is reached. It moved here when the
+  // waitlist dialog was replaced by a page: the producer lived in AuthModal,
+  // which no longer exists, and site.cta_engaged would otherwise be a
+  // catalogued event with no caller anywhere in the tree. In an effect on
+  // mount rather than on the links that lead here, for the same reason it was
+  // an effect before: several routes arrive at this screen and instrumenting
+  // each of them is one more place for the next one to be forgotten.
+  useEffect(() => {
+    ctaEngaged("waitlist_open");
+  }, []);
 
   useEffect(() => {
     const known = rememberedEmail();
@@ -121,7 +138,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
           <div className="w-full max-w-[400px]">
             <>
               <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-                {mode === "signup" ? "Get started" : "Sign in"}
+                {mode === "signup" ? "Request access" : "Sign in"}
               </h1>
               <p className="mt-4 text-[14px] leading-6 text-black/55">
                 The hosted control plane is invitation only while it is in

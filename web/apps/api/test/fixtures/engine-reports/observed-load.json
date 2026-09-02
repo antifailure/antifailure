@@ -1,0 +1,128 @@
+{
+  "duration_ms": 0,
+  "engine": {
+    "commit": "bb1579d9",
+    "edition": "oss",
+    "version": "0.0.0-dev"
+  },
+  "environment": {
+    "branch": "w-studio-engine",
+    "env_id": "aftest-04e645",
+    "url": "http://127.0.0.1:8081"
+  },
+  "evidence": [],
+  "finished_at": "2026-09-01T06:40:00Z",
+  "kind": "observed_load",
+  "outcome": "succeeded",
+  "reproduce": {
+    "argv": [
+      "af",
+      "load",
+      "run",
+      "--duration",
+      "1m0s",
+      "--scale",
+      "1",
+      "--seed",
+      "0"
+    ],
+    "command": "af load run --duration 1m0s --scale 1 --seed 0",
+    "manifest_digest": "sha256:0d1e2f",
+    "note": "run this from the repository root, against an environment that is already up for the same branch"
+  },
+  "result": {
+    "achieved_rate": 19.7,
+    "duration_ms": 60000,
+    "error_rate": 0.0125,
+    "errors": {
+      "500": 9,
+      "timeout": 6
+    },
+    "failures": 15,
+    "findings": null,
+    "goals": null,
+    "goals_reached": null,
+    "iterations": null,
+    "max_ms": 812,
+    "p50_ms": 41.2,
+    "p90_ms": 88.5,
+    "p95_ms": 121.9,
+    "p99_ms": 240.4,
+    "refused_routes": [],
+    "requests": 1200,
+    "scheduled_ms": null,
+    "sessions": null,
+    "source": "otlp",
+    "steps": null,
+    "target_rate": 20,
+    "workflows": null,
+    "workflows_blocked": null,
+    "workflows_failed": null,
+    "workflows_flaky": null,
+    "workflows_passed": null,
+    "workflows_unverified": null
+  },
+  "routes": [
+    {
+      "baseline_p95_ms": 96,
+      "errors": 9,
+      "max_ms": 640,
+      "p50_ms": 38,
+      "p90_ms": 80,
+      "p95_increase": 0.1458,
+      "p95_ms": 110,
+      "p99_ms": 210,
+      "position": 0,
+      "route": "GET /checkout",
+      "sent": 640
+    },
+    {
+      "baseline_p95_ms": null,
+      "errors": 6,
+      "max_ms": 812,
+      "p50_ms": 45,
+      "p90_ms": 96,
+      "p95_increase": null,
+      "p95_ms": 138,
+      "p99_ms": 268,
+      "position": 1,
+      "route": "POST /api/orders",
+      "sent": 560
+    }
+  ],
+  "run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91",
+  "schema": "antifailure.workload.result/v1",
+  "started_at": "2026-09-01T06:40:00Z",
+  "state": "succeeded",
+  "thresholds": [
+    {
+      "measure": "error_rate",
+      "name": "error_rate",
+      "observed": 0.0125,
+      "position": 0,
+      "threshold": 0.01,
+      "value": "fail"
+    },
+    {
+      "measure": "p95_increase",
+      "name": "p95_increase",
+      "observed": 0.1458,
+      "position": 1,
+      "scope": "GET /checkout",
+      "threshold": 0.2,
+      "value": "pass"
+    },
+    {
+      "detail": "the traffic shape carried no baseline for this route, so there is nothing to compare against",
+      "measure": "p95_increase",
+      "name": "p95_increase",
+      "observed": null,
+      "position": 2,
+      "scope": "POST /api/orders",
+      "threshold": 0.2,
+      "value": "unverified"
+    }
+  ],
+  "verdict": "fail",
+  "workload_run_id": "5e4a1c8e-1f0b-4a35-9a1b-0c6d2f8e7a91"
+}
