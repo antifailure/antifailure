@@ -38,7 +38,7 @@ const CATEGORIES: Category[] = ["added", "fixed", "changed", "security"];
  * was broken, then what was insecure. It runs from the entry you read because
  * you are curious to the entry you read because you have to.
  */
-export const CATEGORY_ORDER: Category[] = ["added", "changed", "fixed", "security"];
+const CATEGORY_ORDER: Category[] = ["added", "changed", "fixed", "security"];
 
 export type Span =
   | { kind: "text"; text: string }
@@ -81,8 +81,9 @@ export type Entry = {
   /**
    * Every category this entry declares, in the order it declares them. Twelve
    * of the public fragments declare two. The first one files the entry under a
-   * heading; all of them are shown on its row and all of them match a filter,
-   * because an entry that both adds and fixes is not found under one word.
+   * heading, so that it appears once and one anchor reaches it; the rest are
+   * printed on its row, because an entry filed under Added that also fixes
+   * something should say so where somebody scanning can see it.
    */
   categories: Category[];
   sections: Section[];
