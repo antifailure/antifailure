@@ -108,6 +108,14 @@ type candidate struct {
 	// nameRank is how much the name is worth as an identity, from the source
 	// that produced it. See nameRankOf.
 	nameRank int
+	// contextWhy explains which directory the Dockerfile is built from, and
+	// contextAmbiguous holds the directory when the evidence does not settle
+	// it, so the caller asks instead of choosing.
+	contextWhy       string
+	contextAmbiguous string
+	// contextDefault is the answer an unattended run takes, which is not
+	// always the directory. See detect.contextFor.
+	contextDefault string
 }
 
 func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
@@ -216,7 +224,13 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 				if t := f.Extra["target"]; t != "" {
 					b.Target = t
 				}
+				if ctx := f.Extra["context"]; ctx != "" {
+					b.Context = ctx
+				}
 				c.build = b
+				c.contextWhy = f.Extra["context_why"]
+				c.contextAmbiguous = f.Extra["context_ambiguous"]
+				c.contextDefault = f.Extra["context_default"]
 			}
 			if d := f.Extra["dir"]; d != "" && c.dir == "" {
 				c.dir = d
@@ -299,6 +313,22 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 					Why:     c.portWhy,
 				})
 			}
+		}
+		// A Dockerfile in a subdirectory is built either from that directory,
+		// which is what 'docker build <dir>' does, or from the repository
+		// root, which is what a monorepo image needs to reach a lockfile at
+		// the top of the tree. Both are common, so where the COPY lines do not
+		// settle it this is a question rather than a default.
+		if c.contextAmbiguous != "" {
+			*questions = append(*questions, Question{
+				ID:      "service." + c.name + ".context",
+				Prompt:  fmt.Sprintf("Which directory is %s built from?", c.name),
+				Options: []string{c.contextAmbiguous, "."},
+				Default: c.contextDefault,
+				Why: c.contextWhy + " " + fmt.Sprintf(
+					"'docker build %s' would use %s; a monorepo image that needs a file from the top of the tree wants '.'.",
+					c.contextAmbiguous, c.contextAmbiguous),
+			})
 		}
 		if c.command == "" && c.build == nil && c.kind != schema.ServiceCron {
 			*questions = append(*questions, Question{
@@ -481,6 +511,19 @@ func (c *candidate) absorb(o *candidate) {
 	}
 	if c.build == nil {
 		c.build = o.build
+	}
+	// These describe the Dockerfile, and only one candidate in a group has
+	// one, so they follow it. Leaving them behind was silent rather than
+	// loud: an inferred context rides inside build and survived the fold on
+	// its own, while an AMBIGUOUS context lived only here, so the question
+	// that should have been asked disappeared exactly when the Dockerfile was
+	// folded into the package that named it, which is the common case.
+	if c.contextWhy == "" {
+		c.contextWhy = o.contextWhy
+	}
+	if c.contextAmbiguous == "" {
+		c.contextAmbiguous = o.contextAmbiguous
+		c.contextDefault = o.contextDefault
 	}
 	// The command the image runs beats a package script of equal confidence.
 	// A Dockerfile that ships a standalone server declares CMD ["node",

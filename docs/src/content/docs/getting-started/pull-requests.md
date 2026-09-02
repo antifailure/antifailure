@@ -30,6 +30,10 @@ and a step that leaves the report:
   run: af ci --report report.md
 ```
 
+Both steps write `report.md`, on purpose. `af change` writes it so that a change
+needing no environment still leaves a comment saying why, and `af ci` overwrites
+the file when it runs.
+
 Two steps rather than one because the installer writes its bin directory to
 `GITHUB_PATH`, which is how a step extends the PATH of the steps after it. That
 is the only reason the second step finds `af` without naming a path.
