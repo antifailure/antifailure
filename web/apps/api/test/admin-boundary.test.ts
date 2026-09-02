@@ -16,6 +16,7 @@ import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
+import { appendAdminAudit } from '@antifailure/db'
 import {
   adminSignIn,
   adminSignOut,
@@ -106,6 +107,37 @@ describe('operator sign-in', { skip: hasDb ? false : 'no database' }, () => {
       VALUES (${email}, 'Provisioned Operator', 'super_admin', ${hash}, ${salt}, now())
       RETURNING id`
     operatorId = row!.id
+
+    // The two rows the impersonation tests below BORROW rather than create:
+    // `SELECT id FROM users LIMIT 1` and the newest admin_audit_entries seq.
+    //
+    // Without them this file fails on a fresh database with "Cannot read
+    // properties of undefined", and it fails FIRST, because `admin-boundary`
+    // sorts ahead of every other api suite. It passed only when something else
+    // had already run and left a user and an audit entry behind, which is a
+    // suite that depends on the alphabet.
+    await h.admin`
+      INSERT INTO users (github_id, github_login, email, name)
+      VALUES (${Math.floor(Math.random() * 1e12)}, ${`impersonated-${randomUUID().slice(0, 8)}`},
+              ${`impersonated-${randomUUID().slice(0, 8)}@example.test`}, 'Impersonated')`
+    // An entry to point impersonation_audit_seq at. The constraint the second
+    // test asserts is that a session cannot record an impersonation without the
+    // audit entry that authorised it, so there has to be one to succeed with.
+    // Through withAdminSignin, which is the one scope that may append with no
+    // session yet. withoutTenant cannot: the append policy requires either a
+    // live operator or a declared sign-in email, and that is the whole reason
+    // a failed sign-in is recordable at all.
+    await h.pool.withAdminSignin(email, (db) =>
+      appendAdminAudit(db, {
+        adminUserId: operatorId,
+        actorLabel: email,
+        action: 'admin.fixture',
+        targetType: 'fixture',
+        origin: 'admin',
+        severity: 'info',
+        detail: { why: 'a seq for the impersonation tests to reference' },
+      }),
+    )
   })
 
   after(async () => {
