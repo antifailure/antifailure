@@ -1,0 +1,606 @@
+[
+  {
+    "page": "/product",
+    "vp": "1440",
+    "wellsShot": 4,
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "overflow": false,
+    "overflowers": [],
+    "textHits": [
+      {
+        "a": "Antifailure",
+        "b": "Not universal multicloud cloning.",
+        "ox": 75,
+        "oy": 20
+      },
+      {
+        "a": "Product",
+        "b": "Not universal multicloud cloning.",
+        "ox": 5,
+        "oy": 19
+      },
+      {
+        "a": "Core",
+        "b": "Teams",
+        "ox": 35,
+        "oy": 14
+      },
+      {
+        "a": "Core",
+        "b": "Exclusive locks, table rewrites, pool ex",
+        "ox": 35,
+        "oy": 9
+      },
+      {
+        "a": "Overview",
+        "b": "B2B SaaS",
+        "ox": 69,
+        "oy": 20
+      },
+      {
+        "a": "Overview",
+        "b": "Exclusive locks, table rewrites, pool ex",
+        "ox": 69,
+        "oy": 11
+      },
+      {
+        "a": "Twin, state, containment, judgment",
+        "b": "Daily deploys, migration anxiety",
+        "ox": 192,
+        "oy": 16
+      },
+      {
+        "a": "Twin, state, containment, judgment",
+        "b": "Exclusive locks, table rewrites, pool ex",
+        "ox": 212,
+        "oy": 5
+      },
+      {
+        "a": "Twin, state, containment, judgment",
+        "b": "Exclusive locks, table rewrites, pool ex",
+        "ox": 212,
+        "oy": 4
+      },
+      {
+        "a": "Isolated Twin",
+        "b": "Fintech",
+        "ox": 54,
+        "oy": 20
+      },
+      {
+        "a": "Temporary copy of the application stack",
+        "b": "Billing and ledger-safe twins",
+        "ox": 171,
+        "oy": 16
+      },
+      {
+        "a": "Safe State",
+        "b": "Queues, workers, dual-writes",
+        "ox": 74,
+        "oy": 14
+      },
+      {
+        "a": "Side-Effect Firewall",
+        "b": "Schema changes on large tables",
+        "ox": 141,
+        "oy": 14
+      },
+      {
+        "a": "Side-Effect Firewall",
+        "b": "takes: the strongest lock mode and its h",
+        "ox": 141,
+        "oy": 15
+      },
+      {
+        "a": "Simulators instead of real-world side ef",
+        "b": "takes: the strongest lock mode and its h",
+        "ox": 91,
+        "oy": 10
+      },
+      {
+        "a": "Traffic shaped like production's access ",
+        "b": "af insights · rehearsal",
+        "ox": 24,
+        "oy": 12
+      },
+      {
+        "a": "Traffic shaped like production's access ",
+        "b": "×",
+        "ox": 8,
+        "oy": 12
+      }
+    ],
+    "wells": [
+      {
+        "i": 0,
+        "wellH": 333,
+        "winH": 285,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 1,
+        "wellH": 515,
+        "winH": 467,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 2,
+        "wellH": 453,
+        "winH": 405,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 3,
+        "wellH": 490,
+        "winH": 442,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      }
+    ]
+  },
+  {
+    "page": "/product",
+    "vp": "390",
+    "wellsShot": 4,
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "overflow": false,
+    "overflowers": [],
+    "textHits": [
+      {
+        "a": "Antifailure",
+        "b": "Session",
+        "ox": 45,
+        "oy": 12
+      },
+      {
+        "a": "A disposable production twin that proves",
+        "b": "A disposable production twin that proves",
+        "ox": 338,
+        "oy": 3
+      },
+      {
+        "a": "A disposable production twin that proves",
+        "b": "A disposable production twin that proves",
+        "ox": 295,
+        "oy": 3
+      },
+      {
+        "a": "Seven pieces, one decision.",
+        "b": "None of these is the product on its own.",
+        "ox": 291,
+        "oy": 2
+      },
+      {
+        "a": "None of these is the product on its own.",
+        "b": "None of these is the product on its own.",
+        "ox": 80,
+        "oy": 2
+      },
+      {
+        "a": "The question staging cannot answer.",
+        "b": "The question staging cannot answer.",
+        "ox": 81,
+        "oy": 2
+      },
+      {
+        "a": "The question staging cannot answer.",
+        "b": "What happens when this change meets real",
+        "ox": 216,
+        "oy": 2
+      },
+      {
+        "a": "The question staging cannot answer.",
+        "b": "What happens when this change meets real",
+        "ox": 81,
+        "oy": 2
+      },
+      {
+        "a": "What happens when this change meets real",
+        "b": "What happens when this change meets real",
+        "ox": 169,
+        "oy": 2
+      },
+      {
+        "a": "What happens when this change meets real",
+        "b": "What happens when this change meets real",
+        "ox": 250,
+        "oy": 2
+      },
+      {
+        "a": "What happens when this change meets real",
+        "b": "What happens when this change meets real",
+        "ox": 167,
+        "oy": 2
+      },
+      {
+        "a": "Postgres migrations first.",
+        "b": "Not universal multicloud cloning.",
+        "ox": 259,
+        "oy": 2
+      },
+      {
+        "a": "Not universal multicloud cloning.",
+        "b": "Not universal multicloud cloning.",
+        "ox": 37,
+        "oy": 2
+      },
+      {
+        "a": "The output is a decision.",
+        "b": "Not a dataset. Not a preview URL alone.",
+        "ox": 254,
+        "oy": 2
+      },
+      {
+        "a": "Not a dataset. Not a preview URL alone.",
+        "b": "Not a dataset. Not a preview URL alone.",
+        "ox": 113,
+        "oy": 2
+      },
+      {
+        "a": "What people ask first.",
+        "b": "Answered here rather than in a sales cal",
+        "ox": 226,
+        "oy": 2
+      },
+      {
+        "a": "Answered here rather than in a sales cal",
+        "b": "Answered here rather than in a sales cal",
+        "ox": 89,
+        "oy": 2
+      }
+    ],
+    "wells": [
+      {
+        "i": 0,
+        "wellH": 241,
+        "winH": 201,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 1,
+        "wellH": 740,
+        "winH": 700,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 2,
+        "wellH": 395,
+        "winH": 355,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 3,
+        "wellH": 510,
+        "winH": 470,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      }
+    ]
+  },
+  {
+    "page": "/product/twins",
+    "vp": "1440",
+    "wellsShot": 5,
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "overflow": false,
+    "overflowers": [],
+    "textHits": [
+      {
+        "a": "Antifailure",
+        "b": "af up",
+        "ox": 7,
+        "oy": 13
+      },
+      {
+        "a": "Antifailure",
+        "b": "af ci",
+        "ox": 29,
+        "oy": 13
+      },
+      {
+        "a": "Product",
+        "b": "af down",
+        "ox": 16,
+        "oy": 13
+      },
+      {
+        "a": "Core",
+        "b": "Teams",
+        "ox": 35,
+        "oy": 14
+      },
+      {
+        "a": "Overview",
+        "b": "B2B SaaS",
+        "ox": 69,
+        "oy": 20
+      },
+      {
+        "a": "Twin, state, containment, judgment",
+        "b": "Daily deploys, migration anxiety",
+        "ox": 192,
+        "oy": 16
+      },
+      {
+        "a": "Isolated Twin",
+        "b": "Fintech",
+        "ox": 54,
+        "oy": 20
+      },
+      {
+        "a": "Temporary copy of the application stack",
+        "b": "Billing and ledger-safe twins",
+        "ox": 171,
+        "oy": 16
+      },
+      {
+        "a": "Safe State",
+        "b": "Queues, workers, dual-writes",
+        "ox": 74,
+        "oy": 14
+      },
+      {
+        "a": "Safe State",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 74,
+        "oy": 20
+      },
+      {
+        "a": "Sanitized production-shaped Postgres",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 232,
+        "oy": 16
+      },
+      {
+        "a": "Side-Effect Firewall",
+        "b": "Schema changes on large tables",
+        "ox": 141,
+        "oy": 14
+      },
+      {
+        "a": "Side-Effect Firewall",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 141,
+        "oy": 20
+      },
+      {
+        "a": "Simulators instead of real-world side ef",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 187,
+        "oy": 16
+      },
+      {
+        "a": "Simulators instead of real-world side ef",
+        "b": "Resource deletion is not a background co",
+        "ox": 35,
+        "oy": 16
+      },
+      {
+        "a": "Simulators instead of real-world side ef",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 42,
+        "oy": 4
+      },
+      {
+        "a": "Simulators instead of real-world side ef",
+        "b": "Resource deletion is not a background co",
+        "ox": 42,
+        "oy": 16
+      }
+    ],
+    "wells": [
+      {
+        "i": 0,
+        "wellH": 388,
+        "winH": 340,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 1,
+        "wellH": 321,
+        "winH": 273,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 2,
+        "wellH": 582,
+        "winH": 534,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 3,
+        "wellH": 278,
+        "winH": 230,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      },
+      {
+        "i": 4,
+        "wellH": 406,
+        "winH": 358,
+        "topGap": 24,
+        "botGap": 24,
+        "emptyBoth": false
+      }
+    ]
+  },
+  {
+    "page": "/product/twins",
+    "vp": "390",
+    "wellsShot": 5,
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "overflow": false,
+    "overflowers": [],
+    "textHits": [
+      {
+        "a": "A disposable production twin for every r",
+        "b": "A disposable production twin for every r",
+        "ox": 264,
+        "oy": 3
+      },
+      {
+        "a": "A disposable production twin for every r",
+        "b": "A disposable production twin for every r",
+        "ox": 113,
+        "oy": 3
+      },
+      {
+        "a": "Every transition is idempotent and recov",
+        "b": "Every transition is idempotent and recov",
+        "ox": 175,
+        "oy": 2
+      },
+      {
+        "a": "Every transition is idempotent and recov",
+        "b": "A resource is journaled the moment it ex",
+        "ox": 133,
+        "oy": 2
+      },
+      {
+        "a": "Every transition is idempotent and recov",
+        "b": "A resource is journaled the moment it ex",
+        "ox": 175,
+        "oy": 2
+      },
+      {
+        "a": "A resource is journaled the moment it ex",
+        "b": "A resource is journaled the moment it ex",
+        "ox": 142,
+        "oy": 2
+      },
+      {
+        "a": "A resource is journaled the moment it ex",
+        "b": "A resource is journaled the moment it ex",
+        "ox": 280,
+        "oy": 2
+      },
+      {
+        "a": "Isolation is a spec, not a hope.",
+        "b": "An unresolved secret fails closed and st",
+        "ox": 310,
+        "oy": 2
+      },
+      {
+        "a": "An unresolved secret fails closed and st",
+        "b": "An unresolved secret fails closed and st",
+        "ox": 188,
+        "oy": 2
+      },
+      {
+        "a": "A preview URL is not the product.",
+        "b": "The twin exists to answer whether the de",
+        "ox": 264,
+        "oy": 2
+      },
+      {
+        "a": "The twin exists to answer whether the de",
+        "b": "The twin exists to answer whether the de",
+        "ox": 264,
+        "oy": 2
+      },
+      {
+        "a": "The twin exists to answer whether the de",
+        "b": "The twin exists to answer whether the de",
+        "ox": 203,
+        "oy": 2
+      },
+      {
+        "a": "Cleanup is a first-class safety property",
+        "b": "Cleanup is a first-class safety property",
+        "ox": 95,
+        "oy": 2
+      },
+      {
+        "a": "Cleanup is a first-class safety property",
+        "b": "Resource deletion is not a background co",
+        "ox": 212,
+        "oy": 2
+      },
+      {
+        "a": "Cleanup is a first-class safety property",
+        "b": "Resource deletion is not a background co",
+        "ox": 95,
+        "oy": 2
+      },
+      {
+        "a": "Resource deletion is not a background co",
+        "b": "Resource deletion is not a background co",
+        "ox": 216,
+        "oy": 2
+      },
+      {
+        "a": "Know what happens",
+        "b": "before you deploy.",
+        "ox": 120,
+        "oy": 2
+      }
+    ],
+    "wells": [
+      {
+        "i": 0,
+        "wellH": 288,
+        "winH": 248,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 1,
+        "wellH": 304,
+        "winH": 264,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 2,
+        "wellH": 878,
+        "winH": 838,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 3,
+        "wellH": 260,
+        "winH": 220,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      },
+      {
+        "i": 4,
+        "wellH": 389,
+        "winH": 349,
+        "topGap": 20,
+        "botGap": 20,
+        "emptyBoth": false
+      }
+    ]
+  }
+]

@@ -1,0 +1,24 @@
+---
+description: This agent owns visual UI only. Never change behavior, backend, or other people's work.
+alwaysApply: true
+---
+
+# UI-only split
+
+Two people work on this product. This agent is the UI person. Another person owns functionality and backend. Treat that split as a hard wall.
+
+## Do
+
+- Change only visual UI: layout, spacing, type, color, motion chrome, and copy presentation when the user asks.
+- Stay inside the surface the user named. If they ask about a page, restyle that page. Do not "while you're here" other files.
+- If something functional looks broken, leave it. Report it at most. Do not fix it unless they explicitly ask for a UI-only workaround that does not change behavior.
+
+## Do not
+
+- Do not touch backend, APIs, auth, waitlist, CI, infra, engine, `api/`, `web/` control-plane logic, `ee/`, providers, or data.
+- Do not change routes, handlers, props contracts, fetch calls, env vars, or what a click/submit actually does.
+- Do not move, rename, or delete files, components, or folders unless the user asked for that UI change.
+- Do not "improve" working behavior, refactor for cleanliness, or update dependencies as a side effect of a visual pass.
+- Do not start new product or site features. Wait for an explicit UI instruction.
+
+Copy and category stay as in the product brief. Visual restyle is not a chance to rewrite the product.

@@ -58,7 +58,7 @@ export function MigrationsPage() {
             kicker="The finding"
             title="<strong>A 27-second lock is a finding.</strong> Not a line in a log nobody reads."
           />
-          <ul className="mt-16 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-10">
+          <ul className="mt-8 divide-y divide-black/[0.08] border-y border-black/[0.08] max-md:mt-6">
             {FINDINGS.map((item) => (
               <li key={item.label} className="flex items-baseline justify-between gap-8 py-4 max-sm:flex-col max-sm:gap-2">
                 <div className="min-w-0">
@@ -166,7 +166,7 @@ export function MigrationsPage() {
       <RelatedGrid
         items={[
           { href: "/solutions", title: "Solutions", description: "The teams who feel this first." },
-          { href: "/product/report", title: "Safety Report", description: "How the lock becomes a GitHub check." },
+          { href: "/product/load", title: "Load", description: "Traffic sent at the same production-shaped branch." },
           { href: "/docs/guides/invariants", title: "Invariants docs", description: "The subscriptions demo in full." },
         ]}
       />
