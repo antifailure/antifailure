@@ -58,15 +58,18 @@ function operatorUrl(base = adminUrl): string {
 }
 
 /**
- * What 0023 does, plus the grant 0029 still owes.
+ * What 0023 already did, minus the one thing a test has to supply.
  *
- * The second half is a real gap and not test scaffolding: 0029 creates
- * admin_audit_entries, and 0023 cannot grant on a table that does not exist
- * when it runs, so on a database with both migrations applied the operator role
- * can read every tenant and cannot write its own audit chain. Whoever lands
- * 0029 needs a role-existence-guarded GRANT for it. Until then this line is
- * what stands in for it, and it is why the audit tests below would fail against
- * a plain migrated database.
+ * 0023 creates antifailure_admin and 0030 grants on the chains, so a migrated
+ * database needs nothing from this function except a way to CONNECT as the
+ * role: 0023 deliberately creates it NOLOGIN so a self-hosted installation
+ * supplies its own credential rather than inheriting one written down in a
+ * public repository. The suite is that installation.
+ *
+ * The grants are restated rather than assumed, so this suite still runs against
+ * a database built before 0030 landed. If this block and the migrations ever
+ * disagree, the migrations are right: the report checks the real privileges by
+ * asking has_table_privilege rather than by reading either.
  */
 async function createOperatorRole(admin: postgres.Sql): Promise<void> {
   await admin.unsafe(`

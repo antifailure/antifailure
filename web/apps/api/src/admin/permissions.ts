@@ -201,7 +201,7 @@ export const ADMIN_ROLE_ORDER: readonly AdminRole[] = [...ADMIN_ROLES]
 /**
  * The root operator's role, which the database also enforces.
  *
- * A trigger in 0029 refuses to let the root row be demoted from owner, so this
+ * A trigger in 0030 refuses to let the root row be demoted from owner, so this
  * constant and that trigger have to agree. They are checked against each other
  * by a test rather than by anybody remembering.
  */

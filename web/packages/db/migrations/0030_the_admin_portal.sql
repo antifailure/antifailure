@@ -394,13 +394,13 @@ REVOKE UPDATE, DELETE, TRUNCATE ON admin_audit_entries FROM antifailure_app;
 -- ---------------------------------------------------------------------------
 -- The operator role
 --
--- antifailure_admin is created in 0029 and holds BYPASSRLS, so the policies
+-- antifailure_admin is created in 0023 and holds BYPASSRLS, so the policies
 -- below do not apply to it. BYPASSRLS is not a GRANT, though: it exempts a
 -- role from row level security and gives it no table privileges at all. A
 -- connection as antifailure_admin with no grant on these tables gets 42501 on
 -- every statement, which is the failure this block exists to prevent.
 --
--- That ordering is why this file is 0030 and not 0029. A GRANT cannot name a
+-- That ordering is why this file comes after 0023. A GRANT cannot name a
 -- table that does not exist yet, and it cannot name a role that does not exist
 -- yet, so the role has to be created first and the grants have to live in
 -- whichever migration comes second. There is exactly one order in which both
