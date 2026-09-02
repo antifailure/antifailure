@@ -709,6 +709,15 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.sweeper': '',
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
+          // The two operator settings, cleared here like everywhere else. This
+          // scope arrived from main while the operator boundary was still on a
+          // branch, so it was the one scope in this file that did not name
+          // them, and a pooled connection borrowed straight after an operator
+          // request would have entered the sweeper still carrying a live
+          // session hash. The source check in test/admin.test.ts counts the
+          // scopes and found it.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
           // Last, and through set_config for the same reason as everything
           // else here: SET LOCAL ROLE would need the identifier spliced into
           // the statement text. Every setting above is cleared first so that
