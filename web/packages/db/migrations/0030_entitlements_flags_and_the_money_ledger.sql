@@ -63,30 +63,27 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- The role that administers other people's tenants
+-- Who may write any of this
 -- ---------------------------------------------------------------------------
 --
--- Created here rather than assumed, so a fresh database is a working one, and
--- created with NOLOGIN so it is something a connection is granted rather than
--- something that can be connected as. It is deliberately NOT NOBYPASSRLS and
--- deliberately not BYPASSRLS either: whether the admin surface bypasses row
--- level security is a decision that belongs to whoever builds that boundary,
--- and this file only has to make sure that when they make it, the tables below
--- are reachable and the tenant-facing role still cannot write them.
+-- 0029 already answered this and the answer is not a database role, so this
+-- file deliberately creates none.
 --
--- What IS decided here: `antifailure_app`, the role every ordinary request
--- runs as, gets SELECT on the parts of this that describe its own tenant and
--- INSERT/UPDATE on none of it. An override that a tenant could write is not an
--- override, it is a self-service upgrade.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
-    CREATE ROLE antifailure_admin NOLOGIN;
-  END IF;
-END
-$$;
-
-GRANT USAGE ON SCHEMA public TO antifailure_admin;
+-- An operator is `antifailure_app`, the same role every request runs as,
+-- holding a connection that has declared the hash of a live operator session.
+-- `current_admin_user()` resolves to a row only for such a connection, so a
+-- policy keyed on it is keyed on a credential rather than on a claim. A second
+-- role here would be a second boundary: two things to grant, two things to
+-- revoke, and two answers to "who can move money", which is the question that
+-- must have one.
+--
+-- What that means for the grants below, and it is the opposite of what it looks
+-- like: `antifailure_app` is granted INSERT and UPDATE on all four tables, and
+-- a tenant still cannot write a single row. The grant is what makes the write
+-- POSSIBLE; the policy is what makes it permitted, and every write policy here
+-- requires current_admin_user() to be non-null, which it is not on a tenant
+-- connection. Withholding the grant instead would also withhold it from the
+-- operator, because they are the same role.
 
 -- ---------------------------------------------------------------------------
 -- Overrides
@@ -406,48 +403,21 @@ CREATE INDEX admin_operations_in_flight_idx ON admin_operations (started_at)
 -- ---------------------------------------------------------------------------
 -- Grants
 --
--- Exactly the verbs each role uses, per table, the rule 0002 states.
+-- Exactly the verbs used, per table, the rule 0002 states. One role, because
+-- 0029 decided that; see the note above for why a grant that looks wide is not.
 --
--- The asymmetry is the point. `antifailure_app` runs every ordinary request
--- and can READ what applies to its own tenant, because the resolver and the
--- flag evaluator run inside a tenant transaction on the request path. It can
--- write none of it. `antifailure_admin` writes all of it and never deletes:
--- an override is revoked, a flag is killed, an operation is settled. Nothing
--- here is removable, because "who granted this and when did it stop" is a
--- question that has to survive somebody wanting the answer to go away.
+-- Nothing gets DELETE. An override is revoked, a flag is killed, an operation
+-- is settled. "Who granted this, and when did it stop" is a question that has
+-- to survive somebody wanting the answer to go away, and withholding DELETE is
+-- what makes removing an answer take a schema change and a conversation.
 -- ---------------------------------------------------------------------------
-
-GRANT SELECT ON entitlement_overrides, feature_flags, feature_flag_targets TO antifailure_app;
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
-  entitlement_overrides, feature_flags, feature_flag_targets FROM antifailure_app;
-
--- Nothing at all on the ledger for the tenant-facing role. It records what an
--- operator did across tenants; a customer's own view of what was done to them
--- is their audit log, which is where these actions are also written.
-REVOKE ALL ON admin_operations FROM antifailure_app;
 
 GRANT SELECT, INSERT, UPDATE ON
   entitlement_overrides, feature_flags, feature_flag_targets, admin_operations
-TO antifailure_admin;
+TO antifailure_app;
 REVOKE DELETE, TRUNCATE ON
   entitlement_overrides, feature_flags, feature_flag_targets, admin_operations
-FROM antifailure_admin;
-
--- The administrator reads the tenant tables it is administering. SELECT only:
--- moving a plan goes through the billing path that talks to Stripe, not
--- through an UPDATE on organizations, or the database and the provider
--- disagree about what somebody is paying for and the provider is right.
-GRANT SELECT ON organizations, members, users, repositories, environments,
-  billing_customers, subscriptions, invoices, payment_methods, billing_events
-TO antifailure_admin;
--- The administrator writes the audit entry for what it did, in the tenant's
--- own chain, and can never rewrite one. The same append-only shape 0002 gives
--- the application, for the same reason and with more force: an operator who
--- could edit the record of their own cross-tenant actions is the exact threat
--- the chain exists for.
-GRANT SELECT, INSERT ON audit_entries TO antifailure_admin;
-GRANT USAGE, SELECT ON SEQUENCE audit_entries_seq_seq TO antifailure_admin;
-REVOKE UPDATE, DELETE, TRUNCATE ON audit_entries FROM antifailure_admin;
+FROM antifailure_app;
 
 -- ---------------------------------------------------------------------------
 -- Isolation
@@ -492,16 +462,14 @@ CREATE POLICY tenant_reads_own_targets ON feature_flag_targets
   FOR SELECT TO antifailure_app
   USING (org_id IS NULL OR org_id = current_org());
 
--- The administrator's policies.
+-- The operator's policies.
 --
--- These are permissive and say so plainly. `antifailure_admin` is the role
--- that administers every tenant, so scoping its policies to one tenant would
--- be theatre: the boundary that decides which tenant an operator may touch is
--- the admin session and the permission behind it, one layer up, and pretending
--- otherwise here would tell a reader that the database is enforcing something
--- it is not. What the policies below DO enforce is the shape of the grants
--- above: the role has no DELETE on anything, so there is no policy that could
--- give it one.
+-- One per table, and each is true only for a connection physically holding a
+-- live operator session, exactly as 0029's cross tenant reads are. They are
+-- FOR ALL rather than FOR SELECT because these four tables ARE the operator's
+-- workspace: an override is granted by an operator, a flag is killed by one,
+-- and an operation is claimed and settled by one. There is no DELETE to permit,
+-- because the grants above withhold it.
 DO $$
 DECLARE
   t text;
@@ -510,57 +478,68 @@ BEGIN
     'entitlement_overrides', 'feature_flags', 'feature_flag_targets', 'admin_operations']
   LOOP
     EXECUTE format($p$
-      CREATE POLICY administrator ON %I FOR ALL TO antifailure_admin
-        USING (true) WITH CHECK (true)
+      CREATE POLICY admin_writes ON %I FOR ALL TO antifailure_app
+        USING (current_admin_user() IS NOT NULL)
+        WITH CHECK (current_admin_user() IS NOT NULL)
     $p$, t);
   END LOOP;
 END
 $$;
 
--- The tenant tables the administrator reads, and the one it appends to.
+-- The billing tables an operator has to READ, which 0029 does not cover.
 --
--- This is the part that is easy to leave out and impossible to notice: row
--- level security is ENABLED and FORCED on every one of these tables, and a
--- role with no policy on a table with RLS enabled reads zero rows. It does not
--- raise. So without this block the grants above would look complete, every
--- statement would succeed, and every admin billing page would render an empty
--- customer who has no subscription and no invoices, which reads as a customer
--- who has never paid rather than as a missing policy. That is the same failure
--- 0020 records for `stripe_delivery_reads_org`, and it cost that file a
--- feature that every unit test passed.
+-- 0029 opens organizations, users, members, sessions, repositories,
+-- installations, environments, runs, verdicts, engine tokens, audit entries and
+-- the two policy tables. It deliberately stops short of the five tables that
+-- say what a company pays, because those are a different kind of disclosure and
+-- because nothing was reading them across tenants yet. This file is what reads
+-- them, so this file opens them, and the extension is visible in the diff of
+-- the feature that needed it rather than buried in the boundary.
 --
--- SELECT only, and the list is exactly what the admin billing, entitlement and
--- flag screens read. A table not named here is a table the administrator
--- cannot see, which is the direction a mistake should fail in.
+-- SELECT only, and that is not a formality. Moving a plan goes through Stripe
+-- and comes back as a webhook; an operator with UPDATE on `subscriptions` could
+-- make this database disagree with the provider about what somebody is paying
+-- for, and the provider would be right.
 DO $$
 DECLARE
   t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'organizations', 'members', 'users', 'repositories', 'environments',
     'billing_customers', 'subscriptions', 'invoices', 'payment_methods',
-    'billing_events']
+    'billing_events', 'golden_versions']
   LOOP
     EXECUTE format($p$
-      CREATE POLICY administrator_reads ON %I FOR SELECT TO antifailure_admin
-        USING (true)
+      CREATE POLICY admin_reads ON %I
+        FOR SELECT TO antifailure_app
+        USING (current_admin_user() IS NOT NULL)
     $p$, t);
   END LOOP;
 END
 $$;
 
--- Appending to a tenant's own audit chain, and never anything else.
+-- Appending to a TENANT's own chain, as an operator.
 --
--- Two policies rather than one FOR ALL, and the split is load bearing.
--- appendAudit READS the tail of the chain to link to it, so SELECT is
--- required or every admin action would compute a null previous hash and fork
--- the chain it was supposed to extend. INSERT is the write. There is
--- deliberately no UPDATE or DELETE policy, and no grant that could use one:
--- the record of what an operator did to somebody else's tenant is the one
--- record that operator must not be able to edit.
-CREATE POLICY administrator_reads_audit ON audit_entries
-  FOR SELECT TO antifailure_admin USING (true);
-CREATE POLICY administrator_appends_audit ON audit_entries
-  FOR INSERT TO antifailure_admin WITH CHECK (true);
+-- 0029 opens `audit_entries` to an operator for SELECT and stops there, while
+-- its own comment says "the tenant-visible half of an operator's action is
+-- written into that tenant's own audit_entries instead". Both are right and
+-- together they are incomplete: there was no policy that let the write happen,
+-- so the first administrative refund raised on the INSERT with the money
+-- already moved at Stripe and the ledger row already settled. That is the worst
+-- possible place for this to fail, which is why it is a policy here rather than
+-- a caught exception in the application.
+--
+-- INSERT only, and no UPDATE or DELETE policy to go with it, so an operator can
+-- add to the record of what they did to somebody and can never edit it. The
+-- SELECT half is already open by 0029, and appendAudit needs it: the chain is
+-- linked by reading its own tail, and an operator who could not read it would
+-- write an entry claiming a null predecessor and fork the tenant's chain.
+--
+-- What this deliberately does NOT do is restrict which organization an operator
+-- may write about. An operator administers every tenant by definition, so a
+-- predicate naming one would be theatre; the boundary that decides which tenant
+-- is the operator session and the permission behind it, one layer up.
+CREATE POLICY admin_appends_tenant_audit ON audit_entries
+  FOR INSERT TO antifailure_app
+  WITH CHECK (current_admin_user() IS NOT NULL);
 
 COMMIT;
