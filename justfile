@@ -70,6 +70,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
@@ -490,6 +491,9 @@ docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
+licensecheck:
+    go run ./tools/licensecheck .
+
 prosecheck:
     go run ./tools/prosecheck .
 

@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 // Audit forwarding, tested against the failures a log aggregator actually has.
 
 import { describe, it } from 'node:test'
