@@ -14,7 +14,25 @@ export default defineConfig({
   vite: { plugins: [tailwindcss()] },
   site: "https://antifailure.dev",
   base: "/docs",
-  trailingSlash: "ignore",
+  // "never", to match the host, rather than Astro's default of "ignore".
+  //
+  // www/public/staticwebapp.config.json sets "trailingSlash": "never" for the
+  // whole site, so Azure answers /docs/reference/cli/ with a 301 to
+  // /docs/reference/cli. Astro under "ignore" wrote the slashed form into
+  // every canonical and every sitemap entry, so all 82 documentation pages
+  // declared a canonical the host does not serve and the sitemap offered 81
+  // URLs that redirect. Documentation is about seventy percent of the site,
+  // so that was the majority of it pointing an engine at an address it then
+  // has to be told again is somewhere else.
+  //
+  // The site's own catalogue names this: seo-geo-catalog.md item 8, "pick one
+  // trailing-slash policy and enforce it; mixed policies split signals". Two
+  // policies were in force, one per build, and nothing compared them.
+  //
+  // build.format stays "directory", the default, so the files on disk do not
+  // move: a page is still <route>/index.html, which is what SWA resolves the
+  // slash-free address to. Only the URLs Astro writes change.
+  trailingSlash: "never",
   integrations: [
     starlight({
       title: "Antifailure",

@@ -127,7 +127,7 @@ workflow reached a verdict. When it does exit non zero, the code names why:
 | `9` | No workflow reached a verdict, so nothing about the application was tested. |
 | `10` | Teardown left resources behind. The journal remembers them; `af down` finishes the job. |
 
-The full list of exit codes is in the [error reference](/docs/reference/errors/).
+The full list of exit codes is in the [error reference](/docs/reference/errors).
 
 ## Verdicts on one workflow
 
