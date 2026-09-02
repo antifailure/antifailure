@@ -27,7 +27,7 @@ import { CONTROL_NAMES, CONTROLS, controlStates, setControl, type ControlName } 
 
 const controlName = z.enum(CONTROL_NAMES as unknown as [ControlName, ...ControlName[]])
 
-const infraRouter = router({
+export const infraRouter = router({
   /**
    * Every health check, plus the single worst verdict.
    *
@@ -153,7 +153,7 @@ const infraRouter = router({
     }),
 })
 
-const emergencyRouter = router({
+export const emergencyRouter = router({
   /** Every switch and whether it is engaged, including the ones nobody has
    *  touched, so a fresh installation renders the full set. */
   controls: adminProcedure('admin.emergency.read').query(async ({ ctx }) => {
@@ -217,13 +217,11 @@ const emergencyRouter = router({
           c.clock.now(),
           input.name,
           input.engaged,
-          // AdminActor.label IS the operator's address in this version: its
-          // own doc comment says "the operator's email, which is what an audit
-          // entry should name a year from now when the row may be gone". If a
-          // separate `email` field is added later, this becomes that field,
-          // because what belongs in the row is the identifying value and not a
-          // display name, which is not unique.
-          { label: c.admin.label },
+          // The address, not the display name. A name is not unique and can
+          // change; the address is what still identifies the person when the
+          // admin_users row is gone, which is what an audit entry has to
+          // survive. `email` exists as a separate field for exactly that.
+          { label: c.admin.email },
           input.reason ?? null,
         )
         return after
@@ -231,7 +229,9 @@ const emergencyRouter = router({
     }),
 })
 
-export const adminInfraRouter = router({
-  infra: infraRouter,
-  emergency: emergencyRouter,
-})
+// Deliberately NOT mounted here. admin/router.ts is the ONE `admin:` key, and
+// a second one does not conflict in git, does not fail to compile, and wins or
+// loses on object key order. That is exactly what happened when both were
+// present: `admin: adminInfraRouter` sat after `admin: adminRouter` in the same
+// literal, so the whole operator portal silently resolved to this file's two
+// sub-routers and every tenant, user, session and audit route disappeared.

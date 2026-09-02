@@ -113,6 +113,91 @@ describe('the operator audit chain', { skip: hasDb ? false : 'no database' }, ()
     assert.equal(row!.actor_label, 'someone@example.test')
   })
 
+  test('a failed sign-in does not fork the chain', async () => {
+    // The regression this guards is not hypothetical: it shipped. appendAdminAudit
+    // links the chain by reading its own tail, the sign-in scope holds no
+    // session, and without a SELECT policy admitting that scope every failed
+    // sign-in wrote prev_hash = NULL. The verifier then reported breaks that
+    // were its own, which is worse than no verifier because a real break is
+    // indistinguishable from the noise.
+    const { adminSignIn, AdminSignInError, hashPassword } = await import(
+      '../../../apps/api/src/admin/session.ts'
+    )
+    const email = `forker-${randomUUID().slice(0, 8)}@example.test`
+    const { hash, salt } = await hashPassword('the-right-password')
+    await h.admin`
+      INSERT INTO admin_users (email, name, role, password_hash, password_salt)
+      VALUES (${email}, 'Forker', 'support', ${hash}, ${salt})`
+
+    for (let i = 0; i < 3; i += 1) {
+      await assert.rejects(
+        () => adminSignIn(h.pool, { email, password: 'wrong' }, new Date()),
+        AdminSignInError,
+      )
+    }
+
+    const report = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
+    assert.equal(
+      report.ok,
+      true,
+      `three failed sign-ins broke the chain: ${JSON.stringify(report.problems)}`,
+    )
+  })
+
+  test('deleting an organization does not make the chain report tampering', async () => {
+    // Found by admin-money, reproduced here before fixing.
+    //
+    // subject_org_id carries ON DELETE SET NULL, so deleting an organization
+    // rewrites that column on every operator entry about it. If the hash covers
+    // that column, the verifier then reports every one of those entries as
+    // `altered`, which is its word for tampered.
+    //
+    // Why that is worse than an ordinary bug: the chain's whole job is to tell
+    // "somebody edited history" from "nothing happened", and this made it cry
+    // wolf on the single most important record it holds. An operator deleting a
+    // customer is exactly the entry a reader would come looking for, and it is
+    // exactly the one that would be sitting in a wall of false alterations.
+    const [org] = await h.admin<{ id: string; slug: string }[]>`
+      INSERT INTO organizations (slug, name)
+      VALUES (${`doomed-${randomUUID().slice(0, 8)}`}, 'Doomed') RETURNING id, slug`
+
+    await append({
+      adminUserId: operatorId,
+      actorLabel: 'Auditor',
+      action: 'organization.deleted',
+      targetType: 'organization',
+      targetId: org!.id,
+      subjectOrgId: org!.id,
+      subjectOrgLabel: org!.slug,
+      origin: 'admin',
+      severity: 'critical',
+      // The tenant copy would be deleted with the organization, so it is not
+      // written: this entry exists precisely to outlive the row.
+      tenantCopy: false,
+    })
+
+    const before = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
+    assert.equal(before.ok, true, `chain broken before the deletion: ${JSON.stringify(before.problems)}`)
+
+    await h.admin`DELETE FROM audit_entries WHERE org_id = ${org!.id}::uuid`
+    await h.admin`DELETE FROM organizations WHERE id = ${org!.id}::uuid`
+
+    const after = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
+    assert.equal(
+      after.ok,
+      true,
+      `deleting an organization made the chain report tampering: ${JSON.stringify(after.problems)}`,
+    )
+
+    // And the record still says which organization it was about, which is the
+    // whole reason the label is carried as text beside the foreign key.
+    const [row] = await h.admin<{ subject_org_id: string | null; subject_org_label: string }[]>`
+      SELECT subject_org_id, subject_org_label FROM admin_audit_entries
+      WHERE action = 'organization.deleted' ORDER BY seq DESC LIMIT 1`
+    assert.equal(row!.subject_org_id, null, 'the foreign key did not clear, so this proved nothing')
+    assert.equal(row!.subject_org_label, org!.slug, 'the record no longer says which organization')
+  })
+
   test('the chain verifies, and detects an alteration', async () => {
     const before = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
     assert.equal(before.ok, true, `chain broken before tampering: ${JSON.stringify(before.problems)}`)

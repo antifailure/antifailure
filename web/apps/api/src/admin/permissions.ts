@@ -184,12 +184,12 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
     'admin.tenants.read', 'admin.tenants.suspend',
-    'admin.users.read', 'admin.sessions.read',
     'admin.infra.read', 'admin.infra.teardown',
     // Sees the switches, cannot throw them. An infrastructure operator
     // debugging "their runs will not start" must be able to discover that runs
     // are frozen; pausing the installation is a different decision.
     'admin.emergency.read',
+    'admin.users.read', 'admin.sessions.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -237,7 +237,7 @@ export const ADMIN_ROLE_ORDER: readonly AdminRole[] = [...ADMIN_ROLES]
 /**
  * The root operator's role, which the database also enforces.
  *
- * A trigger in 0029 refuses to let the root row be demoted from owner, so this
+ * A trigger in 0030 refuses to let the root row be demoted from owner, so this
  * constant and that trigger have to agree. They are checked against each other
  * by a test rather than by anybody remembering.
  */

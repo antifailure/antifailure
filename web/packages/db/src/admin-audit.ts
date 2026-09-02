@@ -128,16 +128,28 @@ export async function appendAdminAudit(
 
   // The hash covers severity and the subject organization by folding them into
   // the fields auditEntryHash already length-prefixes, rather than by writing a
-  // second hash function. targetType carries the severity and orgId carries the
-  // subject, both in a form that cannot collide with a plain value: a severity
-  // is one of four known words and an organization id is a uuid, so
-  // `high|organization` cannot be produced by any targetType a caller passes.
+  // second hash function. The point of reusing it is that a verifier written
+  // against either chain verifies both.
   //
-  // The point of reusing the function rather than writing a variant is that a
-  // verifier written against either chain verifies both.
+  // THE SUBJECT IS HASHED BY LABEL, NEVER BY ID, and that is a fix rather than
+  // a preference. subject_org_id carries ON DELETE SET NULL, so deleting an
+  // organization rewrites that column on every operator entry about it. An
+  // earlier version hashed the id, so a deletion silently changed a hashed
+  // field and the verifier then reported every one of those entries as
+  // `altered`, which is its word for tampered.
+  //
+  // That is worse than an ordinary bug. The chain's whole job is to tell
+  // "somebody edited history" from "nothing happened", and it cried wolf on the
+  // single most important record it holds: an operator deleting a customer is
+  // exactly the entry a reader comes looking for, and it sat in a wall of false
+  // alterations. Found by admin-money, reproduced, then fixed.
+  //
+  // subject_org_label is text with no foreign key, carried beside the id for
+  // precisely this reason, the same way actor_label outlives its user. Never
+  // hash a column a foreign key can rewrite.
   const entryHash = auditEntryHash({
     seq,
-    orgId: input.subjectOrgId ?? '',
+    orgId: input.subjectOrgLabel ?? '',
     actorUserId: input.adminUserId ?? null,
     actorLabel: input.actorLabel,
     action: input.action,
@@ -221,6 +233,7 @@ export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
     target_type: string
     target_id: string | null
     subject_org_id: string | null
+    subject_org_label: string | null
     origin: string
     severity: AdminAuditSeverity
     detail: unknown
@@ -229,7 +242,8 @@ export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
     entry_hash: string
   }>(sql`
     SELECT seq, admin_user_id, actor_label, action, target_type, target_id,
-           subject_org_id, origin, severity, detail, occurred_at, prev_hash, entry_hash
+           subject_org_id, subject_org_label, origin, severity, detail,
+           occurred_at, prev_hash, entry_hash
     FROM admin_audit_entries ORDER BY seq ASC`)
 
   const problems: AdminChainReport['problems'] = []
@@ -243,7 +257,10 @@ export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
 
     const recomputed = auditEntryHash({
       seq,
-      orgId: row.subject_org_id ?? '',
+      // The label, matching what was hashed at write time. Reading
+      // subject_org_id here would reintroduce the defect on the verify side
+      // only, which is the version that is hardest to notice.
+      orgId: row.subject_org_label ?? '',
       actorUserId: row.admin_user_id,
       actorLabel: row.actor_label,
       action: row.action,

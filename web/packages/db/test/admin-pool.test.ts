@@ -16,13 +16,17 @@
 //   granted membership, which is the difference between a credential and a
 //   claim and the reason this is a second pool.
 //
-// WHY THE ROLE IS CREATED HERE. antifailure_admin is created by 0023 on the
-// w-admin-ops branch, which is not merged into this one, so this suite builds
-// the role and its grants itself and says so. That makes the suite honest about
-// what it proves: it proves createAdminPool's behaviour GIVEN a role shaped the
-// way 0023 shapes one. It does not prove 0023 exists, and it would keep passing
-// if 0023 were deleted, which is stated here rather than left for somebody to
-// discover.
+// WHY THE ROLE IS STILL TOUCHED HERE, now that 0023 creates it. admin-ops's
+// migration has landed on main, so antifailure_admin and its BYPASSRLS exist
+// after a plain migrate and this suite no longer stands in for them. What it
+// still does is give the role LOGIN and a password, because 0023 deliberately
+// creates it NOLOGIN so that a self-hosted installation supplies its own
+// credential rather than inheriting one written down in a public repository.
+// A test needs to connect as it, so the test is the installation here.
+//
+// The grants below are 0023's and 0030's, restated. They are asserted rather
+// than assumed by the fresh-migration check in the report, and if this block
+// and the migrations ever disagree it is the migrations that are right.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -54,15 +58,18 @@ function operatorUrl(base = adminUrl): string {
 }
 
 /**
- * What 0023 does, plus the grant 0029 still owes.
+ * What 0023 already did, minus the one thing a test has to supply.
  *
- * The second half is a real gap and not test scaffolding: 0029 creates
- * admin_audit_entries, and 0023 cannot grant on a table that does not exist
- * when it runs, so on a database with both migrations applied the operator role
- * can read every tenant and cannot write its own audit chain. Whoever lands
- * 0029 needs a role-existence-guarded GRANT for it. Until then this line is
- * what stands in for it, and it is why the audit tests below would fail against
- * a plain migrated database.
+ * 0023 creates antifailure_admin and 0030 grants on the chains, so a migrated
+ * database needs nothing from this function except a way to CONNECT as the
+ * role: 0023 deliberately creates it NOLOGIN so a self-hosted installation
+ * supplies its own credential rather than inheriting one written down in a
+ * public repository. The suite is that installation.
+ *
+ * The grants are restated rather than assumed, so this suite still runs against
+ * a database built before 0030 landed. If this block and the migrations ever
+ * disagree, the migrations are right: the report checks the real privileges by
+ * asking has_table_privilege rather than by reading either.
  */
 async function createOperatorRole(admin: postgres.Sql): Promise<void> {
   await admin.unsafe(`

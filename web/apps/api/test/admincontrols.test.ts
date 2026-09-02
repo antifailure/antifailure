@@ -263,6 +263,23 @@ describe('the emergency switches actually stop things', { concurrency: 1 }, asyn
     const who = (await session.json()) as { signedIn: boolean }
     assert.equal(who.signedIn, true, 'the session issued during maintenance did not resolve')
 
+    // THE OPERATOR'S OWN SIGN-IN, driven rather than reasoned about. This is
+    // the route the route-table test caught living at /v1/admin/signin,
+    // outside the /admin/ prefix, which would have meant the person who
+    // engaged maintenance could not authenticate to release it. A 401 for bad
+    // credentials is a PASS here: it proves the request reached the handler.
+    // A 503 is the lockout.
+    const operatorSignIn = await h.fetch('/v1/admin/signin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'nobody@example.test', password: 'wrong' }),
+    })
+    assert.notEqual(
+      operatorSignIn.status,
+      503,
+      'operator sign-in was refused by maintenance mode, which is the lockout',
+    )
+
     // The terminal path too, which is a POST and therefore actually passes
     // through the middleware rather than being waved through as a GET.
     const device = await h.fetch('/auth/device/code', {

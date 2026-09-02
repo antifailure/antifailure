@@ -19,12 +19,13 @@
 // the identity provider is a third party, and the account that recovers a
 // broken integration with that provider must not depend on it.
 
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
 import { appendAdminAudit } from '@antifailure/db'
 import type { AdminRole } from './permissions.ts'
+import { readCookie } from '../auth/session.ts'
 
 const scrypt = promisify(scryptCb) as (
   password: string,
@@ -100,6 +101,86 @@ export async function passwordMatches(
   return timingSafeEqual(stored.hash, candidate)
 }
 
+/* ---------------------------------------------------------------------------
+ * Cross-site request forgery on the operator surface
+ *
+ * WHY THE COOKIE IS NOT ENOUGH, even though it is stricter than the product's.
+ * The operator cookie is `__Host-` prefixed and SameSite=Strict, which closes
+ * ordinary cross-site forgery outright. It does NOT close the case auth/session
+ * .ts already names for the product: SameSite is SITE scoped rather than ORIGIN
+ * scoped, so a subdomain an attacker controls is INSIDE it. A takeover of any
+ * host under the registrable domain can then issue same-site POSTs carrying the
+ * operator's cookie.
+ *
+ * That reasoning was written for a tenant session. It applies with more force
+ * here, because these are the highest value mutations in the product: an
+ * operator route suspends a customer, changes what they pay, and moves money.
+ *
+ * WHY A TOKEN RATHER THAN AN ORIGIN CHECK. An `Origin` or `Sec-Fetch-Site`
+ * check is cheaper and needs no state, and it was the other candidate. It is
+ * rejected as the SOLE control for one reason: it fails OPEN when the header is
+ * absent, and something between the browser and this process may strip it. A
+ * token fails closed, because a request that does not carry it is refused
+ * whatever any header says. The header check is worth adding as a second layer
+ * and is not a substitute for the first.
+ *
+ * WHY IT IS DERIVED RATHER THAN STORED. HMAC(session token, "admin-csrf"), the
+ * same construction the product uses and for the same three reasons: it is safe
+ * to hand to the page because it is a one way function of the cookie rather
+ * than the cookie; an attacker on another origin cannot read the cookie and so
+ * cannot derive it; and nothing is stored, so nothing has to be kept in step
+ * when a session is issued or ended.
+ *
+ * DELIBERATELY A DIFFERENT LABEL from the product's "csrf". Two tokens derived
+ * from two different secrets can never collide, but if a future refactor ever
+ * let one session token reach both derivations, the distinct label means the
+ * tenant token is not also a valid operator token.
+ * ------------------------------------------------------------------------ */
+
+/** The header a mutating operator request must present it in. */
+export const ADMIN_CSRF_HEADER = 'x-antifailure-admin-csrf'
+
+export function adminCsrfTokenFor(sessionToken: string): string {
+  return createHmac('sha256', sessionToken).update('admin-csrf').digest('base64url')
+}
+
+/**
+ * Whether the presented token matches, in constant time.
+ *
+ * Length first, because timingSafeEqual throws on a mismatch and the length of
+ * a token is not a secret. Same shape as csrfMatches in auth/session.ts.
+ */
+export function adminCsrfMatches(
+  sessionToken: string,
+  presented: string | undefined | null,
+): boolean {
+  if (!presented) return false
+  const expected = Buffer.from(adminCsrfTokenFor(sessionToken), 'utf8')
+  const actual = Buffer.from(presented, 'utf8')
+  if (expected.length !== actual.length) return false
+  return timingSafeEqual(expected, actual)
+}
+
+/**
+ * Whether the request looks same origin, as a SECOND layer.
+ *
+ * Never the only check, because it fails open: a request with neither header is
+ * treated as acceptable, since something between the browser and this process
+ * may strip them and refusing every such request would break the portal for
+ * reasons nobody could diagnose. What it adds is that a request which DOES
+ * declare a cross site origin is refused before its token is even looked at.
+ */
+export function looksSameOrigin(
+  headers: { origin?: string | null; secFetchSite?: string | null },
+  expectedOrigin: string,
+): boolean {
+  const site = headers.secFetchSite?.trim().toLowerCase()
+  if (site && site !== 'same-origin' && site !== 'none') return false
+  const origin = headers.origin?.trim()
+  if (origin && origin !== expectedOrigin) return false
+  return true
+}
+
 export class AdminSignInError extends Error {}
 
 /**
@@ -113,6 +194,9 @@ const REFUSED = 'That email and password do not match an operator account.'
 
 export interface AdminSignInResult {
   token: string
+  /** What a mutating request must present, derived from the token the caller
+   *  already holds rather than stored beside it. */
+  csrfToken: string
   expiresAt: Date
   actor: { adminUserId: string; label: string; email: string; role: AdminRole }
 }
@@ -216,6 +300,7 @@ export async function adminSignIn(
 
   return {
     token,
+    csrfToken: adminCsrfTokenFor(token),
     expiresAt,
     actor: { adminUserId: row!.id, label: row!.name, email: row!.email, role: row!.role },
   }
@@ -269,6 +354,31 @@ export function adminSessionCookie(token: string, expiresAt: Date, secure: boole
   ]
   if (secure) parts.push('Secure')
   return parts.join('; ')
+}
+
+/**
+ * Reads the operator cookie back, under whichever name it was written.
+ *
+ * THIS EXISTS BECAUSE THE TWO NAMES ARE NOT THE SAME STRING. adminSessionCookie
+ * writes `__Host-af_admin_session` when secure and the bare name when not, so a
+ * reader that only knows the bare name works in local development and NEVER
+ * resolves in production. The failure has no error in it: the operator signs
+ * in, gets a 200 and a Set-Cookie, and is returned to the sign-in screen
+ * forever, because the next request carries a cookie nobody looks for.
+ *
+ * It lives beside the two writers rather than at the call site so the three
+ * stay in step. A reader in another file is a reader that does not move when
+ * the prefix rule changes.
+ *
+ * Prefixed first, because that is the name a correctly configured deployment
+ * writes, and the bare name is accepted as well rather than instead: a cookie
+ * issued before somebody turned Secure on is still a live session, and
+ * refusing it would sign every operator out on deploy.
+ */
+export function readAdminSessionCookie(header: string | null | undefined): string | null {
+  return (
+    readCookie(header, `__Host-${ADMIN_SESSION_COOKIE}`) ?? readCookie(header, ADMIN_SESSION_COOKIE)
+  )
 }
 
 export function clearedAdminCookie(secure: boolean): string {
