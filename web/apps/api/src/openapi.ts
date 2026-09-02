@@ -445,7 +445,10 @@ export function openApiDocument(): Record<string, unknown> {
         'identity token for an engine token. Needed when the App is not installed on the ' +
         'owner, which is the case the first exchange cannot resolve on its own.\n\n' +
         'Behind the same permission as minting an engine token, because a claim grants a ' +
-        'workflow the standing ability to mint one.',
+        'workflow the standing ability to mint one.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`. ' +
+        'OpenAPI cannot express a scope on a bearer scheme, so the requirement is stated ' +
+        'here rather than in `security`, where only OAuth2 flows can carry scopes.',
       requestBody: {
         required: true,
         content: json({
@@ -475,7 +478,8 @@ export function openApiDocument(): Record<string, unknown> {
       description:
         'Every claim this organization holds, with the audience a workflow must ask GitHub ' +
         'for. The audience is returned rather than documented alone so a caller building a ' +
-        'workflow file reads it from the server that will check it.',
+        'workflow file reads it from the server that will check it.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.',
       responses: {
         '200': {
           description: 'The claims and the audience.',
@@ -540,7 +544,8 @@ export function openApiDocument(): Record<string, unknown> {
       summary: 'Revoke a repository claim by id',
       description:
         'Revokes the claim and kills every engine token minted through it. The count of tokens ' +
-        'killed is in the answer.',
+        'killed is in the answer.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.',
       parameters: [{
         name: 'binding', in: 'path', required: true,
         schema: { type: 'string', format: 'uuid' },
@@ -693,8 +698,16 @@ export function openApiDocument(): Record<string, unknown> {
             id: { type: 'string', format: 'uuid' },
             repository: { type: 'string', example: 'acme/app' },
             createdAt: { type: 'string', format: 'date-time' },
-            lastUsedAt: { type: 'string', format: 'date-time', nullable: true },
-            revokedAt: { type: 'string', format: 'date-time', nullable: true },
+            // `['string', 'null']` and not `nullable: true`. This document is
+            // 3.1.0, whose Schema Object is JSON Schema 2020-12, and 2020-12
+            // has no `nullable`: it was a 3.0 keyword. An unknown keyword in
+            // 2020-12 is an ignored annotation, so `nullable: true` would say
+            // nothing and leave the field declared as a non-null string. A
+            // generated client would then reject the first binding nobody has
+            // used yet, and a client decoding the whole `bindings` array at
+            // once would lose every row rather than one.
+            lastUsedAt: { type: ['string', 'null'], format: 'date-time' },
+            revokedAt: { type: ['string', 'null'], format: 'date-time' },
           },
           required: ['id', 'repository', 'createdAt', 'lastUsedAt', 'revokedAt'],
           additionalProperties: false,
