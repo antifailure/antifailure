@@ -18,12 +18,27 @@ export function Hero() {
         </h1>
         <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:gap-y-3 max-md:[&_a]:w-full">
           <Button href="/signup" theme="filled">
-            Get started
+            Request access
           </Button>
           <Button href="/docs" theme="outlined">
             Read the docs
           </Button>
         </div>
+        {/* The state of the product, on the page that sends the most people to
+            /signup. This button said "Get started" and led to an invitation
+            wall, and the only page that admitted it was /pricing, which most
+            visitors never open. Worded to match that page rather than beside
+            it: two descriptions of one product state is how the first of them
+            goes stale. */}
+        <p className="mt-6 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-5 max-lg:max-w-[520px] max-md:text-[14px]">
+          The hosted control plane is invitation only while it is in development.
+          {/* Broken at the sentence, the same way the h1 above is, rather than
+              left to text-balance, which put the first sentence's "The" alone
+              at the end of a line. */}
+          <br className="max-lg:hidden" />{" "}
+          The engine is open source and runs in your own continuous integration
+          today.
+        </p>
         <div className="relative mt-36 max-md:mt-24 max-sm:mt-16">
           <HeroServices />
         </div>
