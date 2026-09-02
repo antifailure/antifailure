@@ -53,6 +53,10 @@ function inputsFor(org: Org): Record<string, unknown> {
     // PRECONDITION_FAILED, which is what the matrix accepts and what proves the
     // gate let the call through rather than what GitHub then made of it.
     'environments.create': { repository: org.repository, branch: 'main' },
+    // Guarded by environments.create, because it answers one question about
+    // that one route: whether pressing it would work. It refuses nothing, so
+    // an allowed role gets an answer here rather than PRECONDITION_FAILED.
+    'environments.readiness': { repository: org.repository },
     'agents.run': { envId: org.envId },
     'load.run': { envId: org.envId },
     'runs.list': { envId: org.envId },
@@ -106,6 +110,46 @@ function inputsFor(org: Org): Record<string, unknown> {
     'subscriptions.reconcile': {},
     'org.suspend': { reason: 'testing the matrix' },
     'org.resume': {},
+
+    // Running the organization.
+    //
+    // Every input below is chosen so that a role holding the permission
+    // REACHES the handler and then gets a refusal that is about the input
+    // rather than about the role: a name that is already the fixture's name, an
+    // identifier that is deliberately not a row, a confirmation string that is
+    // deliberately wrong. The matrix accepts NOT_FOUND, BAD_REQUEST and
+    // PRECONDITION_FAILED as the gate having let the call through, which is all
+    // it claims to test, and this way running the tests cannot rename the
+    // fixture, delete it, or close the four accounts it signs in as.
+    'org.settings': {},
+    'org.rename': { name: 'matrix' },
+    'org.billingContact': {},
+    'org.setBillingContact': { email: 'finance@matrix.test' },
+    'invitations.list': {},
+    // Two roles hold members.manage, so the second one to run finds an open
+    // invitation for the same address and gets BAD_REQUEST. That is the gate
+    // having let it through; what the route actually does is proved in
+    // enterprise.test.ts.
+    'invitations.create': { email: 'matrix-invite@example.test', role: 'member' },
+    'invitations.resend': { id: '00000000-0000-0000-0000-000000000000' },
+    'invitations.revoke': { id: '00000000-0000-0000-0000-000000000000' },
+    'sessions.list': { includeRevoked: false },
+    'sessions.revoke': { id: '00000000-0000-0000-0000-000000000000' },
+    // A login that is deliberately nobody, so the matrix cannot sign its own
+    // fixtures out halfway through its own run.
+    'sessions.revokeForPerson': { githubLogin: 'nobody-here' },
+    'members.remove': { githubLogin: 'nobody-here' },
+    'exports.organization': {},
+    'deletion.status': {},
+    // Deliberately not the slug, so the confirmation refuses and the matrix
+    // cannot start deleting the organization it is running against.
+    'deletion.request': { confirm: 'not-the-slug', reason: 'testing the matrix' },
+    'deletion.advance': {},
+    'deletion.cancel': {},
+    'deletion.destroyExport': {},
+    'account.context': {},
+    // Deliberately not anybody's login, for the same reason.
+    'account.close': { confirm: 'not-your-login' },
   }
 }
 

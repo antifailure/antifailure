@@ -39,6 +39,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/internal/masking"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/policy"
@@ -953,32 +954,50 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 
 // pickGolden chooses the version a branch is made from.
 //
-// Verified, and made under the rules this manifest declares. It returns how
-// many verified versions were refused for the second reason so that the
-// caller can say something better than "no golden": a store with six goldens
-// in it and none of them usable here is a different situation from an empty
-// one, and telling them apart is the difference between "run af golden
-// refresh" and "something is wrong".
+// Verified, and made for this project. It returns how many verified versions
+// were refused for the second reason so that the caller can say something
+// better than "no golden": a store with six goldens in it and none of them
+// usable here is a different situation from an empty one, and telling them
+// apart is the difference between "run af golden refresh" and "something is
+// wrong".
 //
-// A version that records no rules at all is refused too, and that is the part
-// worth arguing about. The first version of this accepted one, reasoning that
-// a missing record should not break a machine that had goldens on it already.
-// That reasoning is wrong: a golden whose provenance is unknown cannot be shown
-// to match this manifest, and branching it is exactly the cross contamination
+// A version that records no provenance at all is refused too, and that is the
+// part worth arguing about. The first version of this accepted one, reasoning
+// that a missing record should not break a machine that had goldens on it
+// already. That reasoning is wrong: a golden whose origin is unknown cannot be
+// shown to belong here, and branching it is exactly the cross contamination
 // this exists to stop. It is not hypothetical. With the lenient rule in place,
-// bringing the control plane up branched an empty golden the masking test suite
-// had published minutes earlier, and the environment came up with a schema and
-// no data in it.
+// bringing the control plane up branched an empty golden the masking test
+// suite had published minutes earlier, and the environment came up with a
+// schema and no data in it.
+//
+// That is the half the previous author closed. This is the other half, and it
+// was the common case rather than the corner one. The predicate used to be the
+// masking rules digest, which answers "were these masked the same way" and not
+// "may this environment branch that". Two unrelated projects with no
+// masking.yaml declare the same rules, namely none, so they hashed to the same
+// eight bytes and shared one pool. Reproduced with the released binary and two
+// ordinary Express repositories: acme-billing refreshed a golden from its
+// production database; nova-shop declared no database at all, printed in its
+// own manifest that "branches will start empty", and came up holding
+// acme-billing's customers and regions tables with acme-billing's rows in
+// them. See internal/env/provenance.go for what the identity is made of and
+// why each part of it survives the reuse that has to keep working.
 //
 // Refusing costs a refresh, and the error says to run one. Accepting costs
 // somebody a preview built on another project's data, and says nothing.
-func pickGolden(goldens []provider.GoldenVersion, wantRules string) (string, int) {
+func pickGolden(goldens []provider.GoldenVersion, want string) (string, int) {
 	refused := 0
 	for _, g := range goldens {
 		if !g.Verified {
 			continue
 		}
-		if g.RulesHash != wantRules {
+		// Compared against the empty string as well as against want, because
+		// want is never empty: provenance always carries at least the manifest
+		// name and the major version. A version recording nothing would
+		// otherwise match a caller that could not compute its own identity,
+		// which is the lenient rule this comment exists to refuse.
+		if g.Provenance == "" || g.Provenance != want {
 			refused++
 			continue
 		}
@@ -1471,29 +1490,29 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		return "", zero, secrets.Value{}, secrets.Value{}, err
 	}
 
-	// Which rules produced it, not merely that something produced it.
+	// Whose golden it is, not merely that something produced it.
 	//
-	// The store is per repository and a repository holds more than one
-	// manifest. Selecting the newest verified golden and nothing else means a
-	// preview of one project branches a masked copy of another project's
-	// database, which is what actually happened here: bringing the control
-	// plane up branched a golden an example had refreshed thirty seconds
-	// earlier, and the environment came up with the wrong schema entirely.
-	// Copying one project's data into another project's preview is the failure
-	// this product is sold to prevent.
+	// The pool is shared. The Docker provider keeps goldens as images on a
+	// machine wide daemon, and a configured store is shared by a fleet on
+	// purpose, so selecting the newest verified golden and nothing else means
+	// a preview of one project branches a masked copy of another project's
+	// database. That happened twice. First with no filter at all: bringing the
+	// control plane up branched a golden an example had refreshed thirty
+	// seconds earlier. Then again with a filter on the masking rules digest,
+	// which looks like a project key and is not one, because two projects with
+	// no masking.yaml declare identical rules and hash to the same value.
 	//
-	// The rules digest is the right key and it was already recorded for this,
-	// unread: GoldenVersion.RulesHash says it "identifies the masking rules
-	// that produced it, so that a rules change can be detected without
-	// re-reading the data". Matching on it is stronger than matching on a
-	// name, because it also refuses a golden of the right database masked
-	// under rules somebody has since changed, which is a golden whose
-	// attestation is about a different question than the one being asked.
-	_, wantRules, rulesErr := o.rules()
-	if rulesErr != nil {
-		return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+	// The identity that does separate projects is built in provenance.go, out
+	// of the manifest name, the variable naming production, the seed command,
+	// the masking digest, the subset and the major version. It is exact
+	// equality rather than a prefix or a subset match: a golden either was
+	// made for this work or it was not.
+	prov, provErr := o.provenanceOf()
+	if provErr != nil {
+		return "", zero, secrets.Value{}, secrets.Value{}, provErr
 	}
-	version, refused := pickGolden(goldens, wantRules)
+	want := prov.digest()
+	version, refused := pickGolden(goldens, want)
 	// A configured source and nothing to branch is a refusal rather than an
 	// empty database.
 	//
@@ -1517,7 +1536,13 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	if pinned := o.opts.PinGolden; pinned != "" {
 		version = ""
 		for _, g := range goldens {
-			if g.ID == pinned && g.Verified {
+			// The provenance is checked on this path too. A pin says which of
+			// this project's goldens to use, not that the check is waived, and
+			// the only thing standing between a pin and another project's data
+			// is that today's only caller happens to pass a version it made
+			// itself. That is a property of the caller and not of this code,
+			// and the next caller will not know it was load bearing.
+			if g.ID == pinned && g.Verified && g.Provenance == want {
 				version = g.ID
 				break
 			}
@@ -1526,8 +1551,8 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
 				aferrors.AFORC009, "version", pinned)
 		}
-		o.progress("branching the database from " + version + ", pinned by the caller")
-		return o.branchFrom(ctx, s, version)
+		return o.branchFrom(ctx, s, version,
+			"pinned by the caller, "+prov.describe())
 	}
 
 	// A cron expression on a laptop has nothing to fire it, so the next
@@ -1568,20 +1593,21 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		if o.opts.Manifest.Database != nil {
 			seed = o.opts.Manifest.Database.Seed
 		}
-		gv, refreshErr := s.dbProv.RefreshGolden(ctx, provider.GoldenSpec{
-			Version:   databaseVersion(o.opts.Manifest),
-			RulesHash: seedRulesHash(seed),
-			// No source database is configured, so the golden is built from
-			// nothing. Where the manifest names a seed command, that command
-			// is what puts data in it; otherwise the schema arrives with the
-			// migrations and the golden is empty. Masking and verification
-			// still run either way, because a seeded database is still a
-			// database somebody could have put an address into.
-			Mask: func(ctx context.Context, candidate secrets.Value) error {
-				return o.runSeed(ctx, s, seed, candidate)
-			},
-			Verify: func(context.Context, secrets.Value) (string, error) { return `{"rows":0}`, nil },
-		})
+		// The masking key and the rules, read before the refresh rather than
+		// inside the callback, so a manifest with an unreadable masking.yaml
+		// fails before a candidate database exists rather than halfway
+		// through building one.
+		key, keyErr := o.MaskingKey(ctx, s)
+		if keyErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, keyErr
+		}
+		rules, hash, rulesErr := o.rules()
+		if rulesErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+		}
+
+		gv, refreshErr := s.dbProv.RefreshGolden(ctx,
+			o.seedGoldenSpec(s, seed, key, rules, hash, want))
 		if refreshErr != nil {
 			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
 		}
@@ -1598,7 +1624,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			events.F("phase", "golden"), events.F("version", version),
 			events.F("verified", true))
 	}
-	return o.branchFrom(ctx, s, version)
+	return o.branchFrom(ctx, s, version, prov.describe())
 }
 
 // branchFrom creates this environment's branch of a chosen golden.
@@ -1607,13 +1633,21 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 // as a chosen one. Two copies of the journal, branch and connection string
 // sequence would be two places to forget to record an intent, and a branch
 // created before its journal entry is a branch teardown cannot find.
+//
+// origin says where the golden came from, in a clause a person can check. The
+// line used to be "branching the database from gv_20260901033741_74234e98" and
+// nothing else, which reads exactly the same when the choice is right as when
+// it is wrong: the run that branched an unrelated project's production data
+// printed that sentence and looked correct. A decision nobody can check is one
+// refactor away from an incorrect one nobody notices.
 func (o *Orchestrator) branchFrom(
-	ctx context.Context, s *session, version string,
+	ctx context.Context, s *session, version, origin string,
 ) (string, provider.Branch, secrets.Value, secrets.Value, error) {
 	var zero provider.Branch
-	o.progress("branching the database from " + version)
+	o.progress("branching the database from " + version + ", " + origin)
 	o.event(s, events.DBBranching, "branching from "+version,
-		events.F("phase", "branching"), events.F("version", version))
+		events.F("phase", "branching"), events.F("version", version),
+		events.F("origin", origin))
 
 	// Recorded against the provider that is about to create it, not against
 	// "docker". The provider name is the first half of the key the compensating
@@ -2261,6 +2295,99 @@ func serviceDir(inContext func(string) (string, bool), dir, name string) string 
 		return joinPath(dir, name)
 	}
 	return rel
+}
+
+// seedGoldenSpec is the golden a project with no production database gets.
+//
+// Extracted so that the two hooks can be reached by a test. They are the whole
+// masking guarantee on this path and they were both wrong: Mask ran the seed
+// command instead of the masker, and Verify returned the literal {"rows":0}
+// without opening a connection, while four lines above them a comment said
+// masking and verification still run either way. The docker provider then
+// reports Verified as `spec.Verify != nil`, which is true, so a database
+// nothing had read was published as verified.
+//
+// The README says a scanner reads back every column of every table and signs
+// an attestation, that an unverified golden cannot be branched, and that this
+// is enforced in code rather than in a checklist. On this path it was a
+// checklist. A customer whose seed.sql is a trimmed production export got no
+// scan and a green light, and af fidelity later read the {"rows":0} back,
+// found no public key in it, and told them their attestation had been changed
+// after it was signed: an accusation about a document the product wrote.
+//
+// An ordinary seed is not refused by this. verify/detect.go treats
+// example.com, example.org, example.net and the reserved test domains as
+// synthetic, so a seed full of fake addresses passes and a seed carrying real
+// ones does not, which is the whole claim.
+func (o *Orchestrator) seedGoldenSpec(
+	s *session, seed string, key *masking.Key, rules *masking.RuleSet, hash string,
+	provenance string,
+) provider.GoldenSpec {
+	return provider.GoldenSpec{
+		Version:   databaseVersion(o.opts.Manifest),
+		RulesHash: seedRulesHash(seed),
+		// Recorded here as well as on the refresh path, and it is what
+		// makes this golden reusable at all. Before provenance existed
+		// this branch stamped seedRulesHash(seed), which for a project
+		// with no seed is the literal string "empty", while selection
+		// asked for the digest of an empty rule set. Those two never
+		// matched, so a project with no production database built a fresh
+		// golden on every single `af up` and branched it once. The fix for
+		// the leak is also the fix for that: one identity, written by
+		// every path that publishes and read by the path that selects.
+		Provenance: provenance,
+		// No source database is configured, so the golden is built from
+		// nothing. Where the manifest names a seed command, that command
+		// is what puts data in it; otherwise the schema arrives with the
+		// migrations and the golden is empty.
+		//
+		// Then the same mask and the same scan the refresh path runs, on
+		// the same candidate, because this comment used to say masking and
+		// verification still run either way and four lines below it the
+		// Mask hook ran the seed command and the Verify hook returned the
+		// literal {"rows":0} without opening a connection. The provider
+		// then reports Verified: spec.Verify != nil, which is true, so a
+		// database nothing had read was published as verified.
+		//
+		// The README says a scanner reads back every column of every table
+		// and signs an attestation, that an unverified golden cannot be
+		// branched, and that this is enforced in code rather than in a
+		// checklist. On this path it was a checklist. A customer whose
+		// seed.sql is a trimmed production export got no scan and a green
+		// light, and af fidelity later read the {"rows":0} back, found no
+		// public key in it, and told them their attestation had been
+		// changed after it was signed: an accusation about a document the
+		// product itself wrote.
+		//
+		// An ordinary seed is not refused by this. verify/detect.go treats
+		// example.com, example.org, example.net and the reserved test
+		// domains as synthetic, so a seed full of fake addresses passes
+		// and a seed carrying real ones does not, which is the whole
+		// claim.
+		Mask: func(ctx context.Context, candidate secrets.Value) error {
+			if seedErr := o.runSeed(ctx, s, seed, candidate); seedErr != nil {
+				return seedErr
+			}
+			// Declared rules applied to seeded data. A manifest that names
+			// a rule and a seed together meant the rule silently did
+			// nothing; there is no reason a seed should be the one input
+			// masking is not allowed to touch.
+			_, _, maskErr := o.maskDatabase(ctx, s, candidate, key, rules, hash)
+			return maskErr
+		},
+		// The provenance is signed into the attestation, not just stamped on
+		// the golden. main made it an argument to verifyDatabase for the two
+		// paths that already had one, and a seeded golden whose attestation
+		// named no provenance would be the one publish that could not be
+		// traced back to the work it was made for.
+		Verify: func(ctx context.Context, candidate secrets.Value) (string, error) {
+			_, att, verifyErr := o.verifyDatabase(ctx, s, candidate, hash, provenance)
+			if verifyErr != nil {
+				return "", verifyErr
+			}
+			return att, nil
+		},
+	}
 }
 
 // seedRulesHash identifies a golden built from a seed command.

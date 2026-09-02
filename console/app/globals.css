@@ -163,9 +163,6 @@ body {
     display: grid;
     grid-template-columns: minmax(0, 10.5ch) minmax(0, 1fr);
     align-items: baseline;
-    /* start, or a badge stretches to the full width of the value column and
-       reads as a filled bar rather than as a word. */
-    justify-items: start;
     gap: 14px;
     max-width: none;
     border: 0;
@@ -173,6 +170,28 @@ body {
     text-align: left;
   }
 
+  /*
+   * The box every percentage width inside a cell resolves against, so its
+   * inline size has to stay definite.
+   *
+   * The rule above carried `justify-items: start`, with a comment saying it
+   * stopped a badge stretching to the full width of the value column and
+   * reading as a filled bar rather than as a word. It never did that. This
+   * wrapper landed in the same commit, so the badge has never been the grid
+   * item: the wrapper is, and a badge is inline-flex inside it, so it is word
+   * sized whatever the wrapper does. Measured at 390px, the state badges on
+   * /runs are 51.6, 57.8, 65.9 and 80.8px wide with the declaration and
+   * exactly the same four widths without it.
+   *
+   * What it did do was make this box shrink to fit: in the grid branch, and,
+   * because Chromium aligns block level children the same way, in the
+   * `td:not([data-label])` branch as well. A percentage inside a shrink to fit
+   * box has no basis to resolve against, so it computes to zero, and the box
+   * then shrinks to that zero. Every skeleton bar in the console is a
+   * percentage of this box, so the loading state of all 22 of them, on seven
+   * pages, was a stack of empty boxes on a phone: 33 bars on /runs, every one
+   * 0px wide at 390px, and 54.8 to 168.2px at 1280px where nothing stacks.
+   */
   .af-table td > .af-cell {
     display: block;
     max-width: 100%;

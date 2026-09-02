@@ -65,33 +65,104 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $name"
 fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" || die "could not download $base/$name.tar.gz"
 
-# The checksum is checked rather than assumed. A download over a hijacked
-# network is exactly the thing a tool that runs unreviewed code should not
-# shrug at.
-if fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null; then
-  expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
-  if [ -n "$expected" ]; then
-    if command -v shasum >/dev/null 2>&1; then
-      actual=$(shasum -a 256 "$tmp/$name.tar.gz" | awk '{print $1}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-      actual=$(sha256sum "$tmp/$name.tar.gz" | awk '{print $1}')
-    else
-      actual=""
-      say "warning: no sha256 tool was found, so the download was not verified"
-    fi
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-      die "the download does not match its published checksum; refusing to install"
-    fi
-    [ -n "$actual" ] && say "Checksum verified"
+# The checksum is checked rather than assumed, and there is no path through
+# this block that installs an unverified archive.
+#
+# IT USED TO FAIL OPEN THREE WAYS, and README told people it did not. A missing
+# checksums.txt printed a warning and installed; a machine with neither shasum
+# nor sha256sum printed a warning and installed; a checksums.txt with no line
+# for this archive skipped the comparison in silence. Only a positive mismatch
+# stopped anything. Every one of those is the case an attacker arranges: the
+# whole point of tampering with a download is that you also control what else
+# the same server hands out, so "the checksum file was not there" is not the
+# benign case, it is the interesting one.
+#
+# A warning inside `curl | sh` is worth nothing anyway. It scrolls past on a
+# machine that is already executing the thing being warned about.
+#
+# The cost of closing it is real and it is small: an installer that stops on a
+# release with no checksums.txt. Both published releases have one, the release
+# workflow builds it from the per-artifact .sha256 files and signs it with
+# sigstore, and it verifies the archives against it before publishing. So this
+# refuses nothing that exists today, and it refuses everything that should be
+# refused tomorrow.
+# Three tools rather than two. openssl reports either "SHA256(f)= hash" or
+# "SHA2-256(f)= hash" depending on its major version, so the hash is taken as
+# the last field rather than by matching the label.
+need_sum() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    return 1
   fi
-else
-  say "warning: no checksum file was published for $VERSION"
-fi
+}
 
-tar -C "$tmp" -xzf "$tmp/$name.tar.gz"
+fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
+  || die "no checksums.txt was published for $VERSION, so the download cannot be verified; refusing to install"
+
+expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
+[ -n "$expected" ] \
+  || die "checksums.txt for $VERSION names no $name.tar.gz, so the download cannot be verified; refusing to install"
+
+actual=$(need_sum "$tmp/$name.tar.gz") \
+  || die "no sha256 tool was found, so the download cannot be verified; install one of shasum, sha256sum or openssl and run this again"
+
+[ -n "$actual" ] \
+  || die "the sha256 tool on this machine produced no hash, so this download cannot be verified; refusing to install"
+[ "$actual" = "$expected" ] \
+  || die "the download does not match its published checksum; refusing to install"
+say "Checksum verified"
+
+# Everything below unpacks and places what the archive holds, and every step of
+# it reports its own failure.
+#
+# It used to let `set -e` deliver somebody else's error, which turned out not to
+# be true either. `A || { B && C; }` is an AND-OR list, and this machine's
+# /bin/sh does not apply -e to it at all: with no af inside the archive, cp
+# printed "No such file or directory" and the script went on to print
+# "Installed $VERSION to $BIN_DIR/af", write the profile line, and exit 0. So a
+# release assembled wrong reported a successful install of a file that was not
+# there. Each step is an explicit `if !` now, for that reason.
+tar -C "$tmp" -xzf "$tmp/$name.tar.gz" 2>/dev/null \
+  || die "$name.tar.gz could not be unpacked, although it matched its published checksum; the release archive is damaged, so please report it at https://github.com/$REPO/issues"
+
+# The archive is checked against what it promises before anything is placed. A
+# hash proves the bytes arrived intact; it says nothing about the release having
+# been assembled with every file in it, and that is a mistake made at build time
+# rather than in transit, so the hash cannot see it.
+#
+# Only the files without which the install does not work. The runner's
+# package-lock.json is checked separately below and NOT required, and the
+# distinction is not a softening: this script ships on every push to main,
+# independently of release.yml, so it runs against releases that were built
+# before it existed. Every archive up to and including v0.1.1 shipped no
+# lockfile, and requiring one here would have refused `AF_VERSION=v0.1.1 curl |
+# sh` outright, turning a dependency pinning defect into an installer that
+# installs nothing. Refuse what cannot be verified; say what is missing where
+# the thing still works.
+for want in af runner/src/main.ts runner/package.json; do
+  [ -e "$tmp/$name/$want" ] \
+    || die "$name.tar.gz unpacked with no $want in it, so this release is incomplete; refusing to install, and please report it at https://github.com/$REPO/issues"
+done
+
+# Said loudly and once, rather than silently or fatally. Without the lockfile
+# `af runner install` resolves the version ranges in package.json afresh, so the
+# runner this release was tested with is not the runner it runs, and two people
+# installing one release get two different trees. af runner check reports the
+# same thing about the installed tree.
+unpinned=0
+[ -e "$tmp/$name/runner/package-lock.json" ] || unpinned=1
+
 mkdir -p "$BIN_DIR" "$PREFIX"
-install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
-  || { cp "$tmp/$name/af" "$BIN_DIR/af" && chmod 0755 "$BIN_DIR/af"; }
+if ! install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null; then
+  cp "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
+    && chmod 0755 "$BIN_DIR/af" 2>/dev/null \
+    || die "af could not be written to $BIN_DIR; check that you can write to it, or set AF_PREFIX to somewhere you can"
+fi
 
 # The runner source travels with the binary rather than being fetched later,
 # and it lands where `af runner install` looks for it.
@@ -115,7 +186,8 @@ install -m 0755 "$tmp/$name/af" "$BIN_DIR/af" 2>/dev/null \
 # changes; the file just goes where the engine was already looking.
 rm -rf "$PREFIX/share/antifailure/runner"
 mkdir -p "$PREFIX/share/antifailure"
-cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner"
+cp -R "$tmp/$name/runner" "$PREFIX/share/antifailure/runner" 2>/dev/null \
+  || die "the runner could not be written to $PREFIX/share/antifailure; check that you can write to it, or set AF_PREFIX to somewhere you can"
 
 # A tree left at the old location by an earlier installer is a source with no
 # dependencies, and af test finds it before it finds anything else. Removing it
@@ -126,6 +198,12 @@ fi
 
 say ""
 say "Installed $VERSION to $BIN_DIR/af"
+if [ "$unpinned" = 1 ]; then
+  say ""
+  say "warning: $VERSION shipped no runner/package-lock.json, so af runner install"
+  say "will resolve the runner's dependency ranges as they are today rather than"
+  say "installing what this release was tested with. af runner check reports it."
+fi
 
 # ---------------------------------------------------------------------------
 # Putting af where the shell will actually find it.
@@ -218,7 +296,7 @@ case "${home:+$shell_name}" in
   zsh)
     profile="${ZDOTDIR:-$home}/.zshrc"
     profile_line=$export_line
-    session_line="$export_line && af doctor"
+    session_line="$export_line && af start"
     ;;
   bash)
     # macOS terminals start login shells, which read .bash_profile and never
@@ -230,7 +308,7 @@ case "${home:+$shell_name}" in
       profile="$home/.bashrc"
     fi
     profile_line=$export_line
-    session_line="$export_line && af doctor"
+    session_line="$export_line && af start"
     ;;
   fish)
     # fish_add_path rather than a set -gx line, because it both persists and
@@ -239,7 +317,7 @@ case "${home:+$shell_name}" in
     # It also refuses to add a path twice by itself.
     profile="$home/.config/fish/config.fish"
     profile_line=$fish_line
-    session_line="$fish_line && af doctor"
+    session_line="$fish_line && af start"
     ;;
 esac
 
@@ -253,28 +331,26 @@ in_profile() {
   return 1
 }
 
-# af doctor is the first of the three, and the paste line below already runs it,
-# so a list printed after that line starts at the second.
+# One command rather than three.
+#
+# This printed `af doctor`, `af runner install` and `af init`, in that order,
+# which was right about the order and wrong about the shape. Three commands is a
+# sequence, a sequence can be interrupted, and nothing in it told somebody who
+# came back an hour later which of the three they had already run. Worse, the
+# list stopped at the third: `af init` writes a manifest and leaves the reader
+# in front of a manifest with no idea that `af up` comes next.
+#
+# `af start` is the whole path, and it reports where you are on it every time
+# you run it, so the installer only has to name one thing and the product
+# carries the rest. It reads the machine and never writes to it, so a reader who
+# pastes it before they have decided anything has changed nothing.
 next_steps() {
-  say "  af doctor          check this machine"
-  next_steps_rest ""
+  say "  af start           where you are, and what to run next"
 }
-# ${1:-} rather than $1, because set -u turns a call that forgets the argument
-# into "unbound variable" printed where the next steps belong, which is how the
-# numbering change first ran.
-next_steps_rest() {
-  say "  ${1:-}af runner install  finish the agent runner, which needs node"
-  say "  ${1:-}af init            read your repository and write a manifest"
-}
-
-# The same three for a branch that could not put af on the PATH, so the reader
-# gets something that runs rather than a name that will not resolve. No aligned
-# gloss column here: a full path plus a description does not fit in eighty
-# columns, and a wrapped command is a command somebody pastes wrong.
+# The same command for a branch that could not put af on the PATH, so the reader
+# gets something that runs rather than a name that will not resolve.
 next_steps_full() {
-  say "     $1/af doctor"
-  say "     $1/af runner install"
-  say "     $1/af init"
+  say "     $1/af start"
 }
 
 # Said by the installer rather than left for af runner install to discover,
@@ -345,14 +421,15 @@ elif [ -n "$wrote" ]; then
     say "Next:"
     next_steps
   else
+    # One line and no numbered list. This used to print the paste line as step
+    # one and then "2. Then:" followed by three commands, which was right when
+    # there were three. There is one now, the paste line already runs it, and a
+    # step two that repeats step one reads as a second thing to do.
     say ""
-    say "1. This terminal started before that line existed. Start here:"
+    say "This terminal started before that line existed. Paste this to fix it"
+    say "here and see where you are:"
     say ""
     say "     $session_line"
-    say ""
-    say "2. Then:"
-    say ""
-    next_steps_rest "   "
   fi
 elif [ "$reason" = already ] || [ "$reason" = managed ]; then
   if on_path; then
@@ -360,15 +437,9 @@ elif [ "$reason" = already ] || [ "$reason" = managed ]; then
     next_steps
   else
     say "$(display_path "$profile") already puts af on the PATH. This terminal started"
-    say "before that line existed."
-    say ""
-    say "1. Start here:"
+    say "before that line existed. Paste this to fix it here and see where you are:"
     say ""
     say "     $session_line"
-    say ""
-    say "2. Then:"
-    say ""
-    next_steps_rest "   "
   fi
 else
   # PATH was not set up and will not be, so nothing below may print a bare af.
@@ -422,8 +493,8 @@ else
     say "     $export_line"
   fi
   say ""
-  say "2. Until then af answers to its full path. Check the machine, finish the"
-  say "   runner, which needs node, then read your repository into a manifest:"
+  say "2. Until then af answers to its full path. This says where you are on the"
+  say "   first run and what to run next, every time you run it:"
   say ""
   next_steps_full "$(display_path "$BIN_DIR")"
 fi

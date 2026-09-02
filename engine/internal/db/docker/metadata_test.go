@@ -41,10 +41,11 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	defer cancel()
 
 	const rules = "abc123def456"
+	const prov = "gp1-metadata-round-trip"
 	const attestation = `{"report":{"columns":84},"golden":"x","signature":"sig"}`
 
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
-		Version: 17, RulesHash: rules,
+		Version: 17, RulesHash: rules, Provenance: prov,
 		Mask: func(context.Context, secrets.Value) error { return nil },
 		Verify: func(context.Context, secrets.Value) (string, error) {
 			return attestation, nil
@@ -58,6 +59,7 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	}()
 
 	require.Equal(t, rules, gv.RulesHash, "the refresh itself has to report it")
+	require.Equal(t, prov, gv.Provenance, "and the project it was made for")
 
 	// The part that was broken: a different process, asking the provider what
 	// exists, rather than the struct the refresh happened to return.
@@ -73,6 +75,9 @@ func TestGoldenMetadata_SurvivesARoundTrip(t *testing.T) {
 	require.NotNil(t, found, "the golden that was just published is not listed")
 	require.Equal(t, rules, found.RulesHash,
 		"the rules digest did not survive, so golden selection cannot use it")
+	require.Equal(t, prov, found.Provenance,
+		"the project the golden was made for did not survive, so `af up` cannot tell "+
+			"this project's golden from another project's and will refuse both")
 	require.Equal(t, attestation, found.Attestation,
 		"the attestation did not survive, so the comment cannot report the masking")
 	require.True(t, found.Verified)
@@ -91,4 +96,57 @@ func freePort(t *testing.T) int {
 		t.Fatalf("closing the probe listener: %v", err)
 	}
 	return port
+}
+
+// A golden nobody verified must not come back verified.
+//
+// The case nobody wrote, and the reason the overwrite survived: the round trip
+// above publishes a golden WITH a verifier and asserts Verified is true, which
+// an unconditional true satisfies perfectly. Only a refresh with no verifier
+// can tell an honest read from a hardcoded one.
+//
+// What it cost: RefreshGolden recorded Verified as spec.Verify != nil, a real
+// value, and ListGoldens reported true for every image regardless. pickGolden
+// reads the listing, so the recorded false was discarded by the read and af up
+// branched an unverified golden without a word.
+func TestAGoldenRefreshedWithoutAVerifierIsNotListedAsVerified(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipped in short mode: this needs a Docker daemon")
+	}
+	p, err := dockerdb.New(dockerdb.Options{Version: 17, Clock: clock.New(), PortFrom: freePort(t)})
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
+		Version: 17, RulesHash: "noverify1234", Provenance: "gp1-no-verifier",
+		Mask: func(context.Context, secrets.Value) error { return nil },
+		// No Verify. Nothing checked this data, and every surface downstream
+		// has to keep saying so.
+	})
+	require.NoError(t, err)
+	defer func() {
+		c, cancel2 := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel2()
+		_ = p.DestroyGolden(c, gv.ID)
+	}()
+
+	require.False(t, gv.Verified, "the refresh knows no verifier ran")
+
+	listed, err := p.ListGoldens(ctx)
+	require.NoError(t, err)
+	var found *provider.GoldenVersion
+	for i := range listed {
+		if listed[i].ID == gv.ID {
+			found = &listed[i]
+		}
+	}
+	require.NotNil(t, found, "the golden that was just published is not listed")
+	require.False(t, found.Verified,
+		"ListGoldens reported an unverified golden as verified, so pickGolden will branch it and af up will say nothing")
+	require.Empty(t, found.Attestation, "there is no attestation because nothing verified it")
 }

@@ -29,9 +29,39 @@ import (
 var (
 	// A command line inside a fenced block: a line beginning with af, before
 	// any shell operator that would make the rest something else.
-	afLine = regexp.MustCompile(`(?m)^\s*(?:[a-z_]+=\$\()?af\s+([^\n|>&;#]*)`)
+	//
+	// The optional `run:` is not decoration. Without it this pattern requires
+	// af to be the first word on the line, and a GitHub Actions step that runs
+	// one command writes it as `run: af ci ...` on a single line. Six such
+	// invocations were invisible to both this gate and the workflow one next
+	// door, across examples/github-workflow.yml and three documentation pages,
+	// and one of them was `af ci --output report.md` on the page that teaches
+	// the pull request integration. That is the SAME defect this gate's
+	// neighbour was written to catch, surviving in the one form neither
+	// pattern could see. A `- ` is allowed only in front of `run:`, so a
+	// markdown list item that merely mentions af in prose is still not read as
+	// an invocation.
+	afLine = regexp.MustCompile(`(?m)^\s*(?:(?:-\s+)?run:\s+)?(?:[a-z_]+=\$\()?af\s+([^\n|>&;#]*)`)
 	// A long flag, with or without a value.
 	longFlag = regexp.MustCompile(`--[a-zA-Z][a-zA-Z0-9-]*`)
+	// A command inside an inline code span or inside single quotes, which is
+	// how prose names one and how the generated error reference renders every
+	// remedy.
+	//
+	// afLine alone was not enough, and the gap was invisible for the reason
+	// Standard 28a names: it is a correct instrument pointed at an assumption
+	// about SHAPE. Anchoring on ^ says a command occupies its own line, which
+	// is true of a fenced example and false of a sentence, so all 127 remedies
+	// on reference/errors.md were outside what this gate could see. Three
+	// instances of a command that does not exist accumulated underneath it,
+	// one of them printed by the engine itself: AF-DB-004 told a reader to run
+	// af up --golden, and af up has no such flag.
+	//
+	// Delimited on both sides on purpose. An unterminated span is prose with an
+	// apostrophe in it, and reading to the end of the line would turn "the
+	// environment's af doctor output" into a command.
+	afInBackticks = regexp.MustCompile("`af\\s+([^`\n]*)`")
+	afInQuotes    = regexp.MustCompile(`'af\s+([^'\n]*)'`)
 )
 
 func docsDir() string {
@@ -60,7 +90,11 @@ func TestEveryCommandInTheDocsExists(t *testing.T) {
 
 		enterprisePage := strings.HasPrefix(rel, "enterprise"+string(filepath.Separator))
 
-		for _, match := range afLine.FindAllStringSubmatch(string(body), -1) {
+		var matches [][]string
+		for _, re := range []*regexp.Regexp{afLine, afInBackticks, afInQuotes} {
+			matches = append(matches, re.FindAllStringSubmatch(string(body), -1)...)
+		}
+		for _, match := range matches {
 			line := strings.TrimSpace(match[1])
 			if line == "" {
 				continue
@@ -138,9 +172,19 @@ func checkInvocation(root *cobra.Command, line string) string {
 		cmd = child
 		consumed++
 	}
-	if consumed == 0 {
+	// consumed == 0 with a leading flag means the command is the root itself,
+	// as in `af --help`, which is a real invocation. Only a leading word that
+	// resolves to no subcommand is a command that does not exist. The flag
+	// check below still runs either way, so `af --nonsense` is still caught.
+	if consumed == 0 && !strings.HasPrefix(fields[0], "-") {
 		return fmt.Sprintf("%q is not a command", fields[0])
 	}
+
+	// Cobra registers --help lazily, when a command is executed rather than
+	// when it is built, so without this the flag every command really does
+	// accept looks like one none of them have.
+	cmd.InitDefaultHelpFlag()
+	root.InitDefaultHelpFlag()
 
 	for _, flag := range longFlag.FindAllString(line, -1) {
 		name := strings.TrimPrefix(flag, "--")

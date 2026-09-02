@@ -35,6 +35,8 @@ export type Route = {
   priority: number;
   /** Parent path, for the breadcrumb trail. Undefined at the root. */
   parent?: string;
+  /** A more specific Schema.org page type when WebPage is too broad. */
+  schemaType?: "AboutPage" | "ContactPage";
 };
 
 export const ROUTES: readonly Route[] = [
@@ -211,6 +213,19 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
+  {
+    path: "/changelog",
+    title: pageTitle("Changelog"),
+    description:
+      "Every change to the engine, the control plane and the site, written when it was made and dated by the commit that landed it.",
+    summary:
+      "What has changed and when, newest first, built from the repository's own changelog fragments.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+  },
+
   // Writing
   {
     path: "/blog",
@@ -290,13 +305,50 @@ export const ROUTES: readonly Route[] = [
     parent: "/terms",
   },
 
+  // Trust and contact. Kept as real pages rather than footer-only labels so a
+  // person or agent can verify what the project is and which channels work.
+  {
+    path: "/about",
+    title: pageTitle("About"),
+    description:
+      "What Antifailure builds, how a run produces evidence, where the project stands, and the limits it states plainly.",
+    summary:
+      "What Antifailure is, how it works, its public status record, and what it does not promise.",
+    section: "company",
+    indexable: true,
+    priority: 0.7,
+    parent: "/",
+    schemaType: "AboutPage",
+  },
+  {
+    path: "/contact",
+    title: pageTitle("Contact"),
+    description:
+      "Verified routes for private security reports, public product work, community discussion, documentation, and hosted-product interest.",
+    summary:
+      "Working routes for private security reports, product issues, questions, documentation, and hosted-product interest.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+    schemaType: "ContactPage",
+  },
+
   // Utility. Real pages, deliberately not in the index: they are a waitlist
   // form with nothing to rank for, and indexing them spends crawl budget that
   // belongs to the product pages.
+  //
+  // Both descriptions used to say "There is no hosted control plane yet",
+  // which was true when it was written and had become the opposite of what the
+  // page under it says: AuthScreen offers sign-in with GitHub above a line
+  // reading "The hosted control plane is invitation only", and
+  // app.antifailure.dev answers. These strings are the meta description, so
+  // the contradiction was served to every crawler and every link preview while
+  // the visible page was correct. Nothing read them.
   {
     path: "/signin",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,
@@ -306,7 +358,7 @@ export const ROUTES: readonly Route[] = [
   {
     path: "/signup",
     title: pageTitle("Join the waitlist"),
-    description: "There is no hosted control plane yet. Leave an address and we will tell you when there is.",
+    description: "The hosted control plane is invitation only while it is in private beta. Sign in with GitHub if you have been invited, or join the waitlist.",
     summary: "Waitlist form.",
     section: "utility",
     indexable: false,

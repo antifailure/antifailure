@@ -64,6 +64,20 @@ export const users = pgTable('users', {
   identitySource: text('identity_source').notNull().default('github'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
+  // Set when somebody closes their own account. The row survives because
+  // audit_entries points at it with NO ACTION; see migrations/0022 for why a
+  // delete is refused and what is erased instead.
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  // Set by an operator to stop this person signing in anywhere, without
+  // destroying the memberships an investigation needs. The same three columns
+  // organizations has carried since 0001, deliberately: two vocabularies for
+  // one idea is how a check ends up reading the wrong one.
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: text('suspended_by'),
+  // Null on every account that predates the column. A DEFAULT here would be a
+  // claim that they were all verified, which is a lie told by a schema.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('users_github_id_key').on(t.githubId), index('users_email_idx').on(t.email)])
@@ -104,6 +118,21 @@ export const sessions = pgTable('sessions', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  // Impersonation travels on the session row rather than in a side table.
+  // resolveSession reads this row on every request, and a marker it cannot
+  // reach in one query is a marker some code path will forget to consult: an
+  // impersonated session that looks ordinary to the gate is the whole failure
+  // this is built to prevent.
+  impersonatedBy: uuid('impersonated_by'),
+  /** Who the operator was, kept as text so the banner still names them after
+   *  their own account is closed. */
+  impersonatorLabel: text('impersonator_label'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised this session. The database refuses a row
+   *  that sets impersonatedBy without it, which is what makes "the record was
+   *  written before the session existed" a property rather than an intention.
+   *  See migrations/0023. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
 }, (t) => [index('sessions_user_idx').on(t.userId), index('sessions_expiry_idx').on(t.expiresAt)])
 
 export const oauthStates = pgTable('oauth_states', {
@@ -645,6 +674,101 @@ export const billingEvents = pgTable('billing_events', {
 })
 
 // ---------------------------------------------------------------------------
+// Running the organization
+//
+// See migrations/0022 for the isolation, which is the part that cannot be
+// expressed here: three of these four tables are reached by somebody who is not
+// an ordinary member of the organization the row belongs to.
+// ---------------------------------------------------------------------------
+
+// An invitation for somebody who is not in the GitHub organization, or does not
+// have an account at all. The token is stored as a hash, the same as a session:
+// the value exists in the link and nowhere else.
+export const invitations = pgTable('invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  email: text('email').notNull(),
+  role: memberRole('role').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  invitedBy: uuid('invited_by'),
+  // A copy of how the inviter was named at the time, so an invitation accepted
+  // after they have left still says who sent it.
+  invitedByLabel: text('invited_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  acceptedUserId: uuid('accepted_user_id'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedByLabel: text('revoked_by_label'),
+}, (t) => [
+  uniqueIndex('invitations_open_key').on(t.orgId, t.email),
+  index('invitations_org_created_idx').on(t.orgId, t.createdAt),
+])
+
+// Where the invoices go. Not derived from the members table: a billing address
+// and a sign-in address are different things and finance departments insist on
+// the difference.
+export const billingContacts = pgTable('billing_contacts', {
+  orgId: uuid('org_id').primaryKey(),
+  email: text('email').notNull(),
+  name: text('name'),
+  updatedByLabel: text('updated_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// The deletion state machine. Deliberately has no foreign key to organizations:
+// it is the record that has to outlive the row it is deleting.
+export const organizationDeletions = pgTable('organization_deletions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  orgSlug: text('org_slug').notNull(),
+  orgName: text('org_name').notNull(),
+  requestedBy: uuid('requested_by'),
+  requestedByLabel: text('requested_by_label').notNull(),
+  reason: text('reason'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  workStoppedAt: timestamp('work_stopped_at', { withTimezone: true }),
+  environmentsStopped: integer('environments_stopped'),
+  runsCancelled: integer('runs_cancelled'),
+  subscriptionCancelledAt: timestamp('subscription_cancelled_at', { withTimezone: true }),
+  subscriptionId: text('subscription_id'),
+  entitlementEndsAt: timestamp('entitlement_ends_at', { withTimezone: true }),
+  credentialsRevokedAt: timestamp('credentials_revoked_at', { withTimezone: true }),
+  engineTokensRevoked: integer('engine_tokens_revoked'),
+  providerKeysRevoked: integer('provider_keys_revoked'),
+  sessionsRevoked: integer('sessions_revoked'),
+  installationsRevoked: integer('installations_revoked'),
+  exportedAt: timestamp('exported_at', { withTimezone: true }),
+  purgedAt: timestamp('purged_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelledByLabel: text('cancelled_by_label'),
+  lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+  lastErrorStep: text('last_error_step'),
+  lastErrorMessage: text('last_error_message'),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('organization_deletions_live_key').on(t.orgId),
+  index('organization_deletions_org_idx').on(t.orgId, t.requestedAt),
+])
+
+// The export the customer is owed, held apart from the state machine because it
+// is the only part carrying customer data and because its lifetime is shorter.
+export const organizationDeletionExports = pgTable('organization_deletion_exports', {
+  deletionId: uuid('deletion_id').primaryKey(),
+  orgId: uuid('org_id').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  document: jsonb('document').notNull(),
+  entryCount: integer('entry_count').notNull(),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  downloadedAt: timestamp('downloaded_at', { withTimezone: true }),
+  downloadCount: integer('download_count').notNull().default(0),
+  destroyedAt: timestamp('destroyed_at', { withTimezone: true }),
+}, (t) => [index('organization_deletion_exports_expiry_idx').on(t.expiresAt)])
 // The pull request lifecycle. See migrations/0021.
 // ---------------------------------------------------------------------------
 
@@ -739,6 +863,36 @@ export const teardownRequests = pgTable('teardown_requests', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
 
+/**
+ * What an operator wrote down about an account.
+ *
+ * Deliberately NOT tenant scoped, and deliberately not reachable by the
+ * application role at all. These are the operator's words about a customer
+ * rather than the customer's own data, so a note must not turn up in that
+ * organization's export, in its audit log, or on any page it can open. The
+ * grant that would make that possible is the one migrations/0023 withholds.
+ *
+ * subjectType and subjectId rather than three nullable foreign keys. The cost
+ * is a reference the database cannot enforce; the benefit is that a note about
+ * an account that has since been deleted survives, and a note about the
+ * deleted account is exactly the note an investigation comes looking for.
+ */
+export const adminNotes = pgTable('admin_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  subjectType: text('subject_type').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  body: text('body').notNull(),
+  authorUserId: uuid('author_user_id'),
+  /** Kept as text so the note still says who wrote it once that operator's own
+   *  account is gone, the same reason auditEntries carries actorLabel. */
+  authorLabel: text('author_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Soft deleted: a note somebody retracted is still a thing an operator
+   *  wrote about a customer, and the retraction is worth being able to see. */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -750,5 +904,6 @@ export const tenantScopedTables = [
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
   billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
+  invitations, billingContacts, organizationDeletions, organizationDeletionExports,
   githubDeliveries, pullRequests, prGenerations, teardownRequests,
 ] as const

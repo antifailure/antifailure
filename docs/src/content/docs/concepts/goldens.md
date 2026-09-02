@@ -35,6 +35,58 @@ af golden gc            # remove versions nothing came from
 af golden pull [ver]    # bring a published one onto this machine
 ```
 
+## Which golden an environment branches
+
+A golden pool is shared. With the Docker provider a golden is an image on the
+daemon, and a daemon is machine wide, so every repository on your laptop draws
+from one pool. A published store is shared by a whole fleet on purpose.
+
+So `af up` does not take the newest verified golden. It takes the newest
+verified golden **made for this project**, and a golden records what made it:
+
+| Recorded | Why it separates two projects |
+| --- | --- |
+| `name` | The project the manifest names. |
+| `source_url_env` | The variable naming production, or nothing. |
+| `seed` | The command that fills a golden when there is no production. |
+| masking rules | The digest of `masking.yaml`, or of no rules at all. |
+| `subset` | A slice and the whole database are different content. |
+| `version` | The Postgres major the golden holds. |
+
+The variable's **name** is recorded, never the connection string it resolves
+to. The machine that pulls a published golden has no production credential,
+which is the entire point of publishing, so an identity built from the resolved
+host would differ between the machine that made a golden and every machine
+entitled to use it.
+
+The repository's path on disk is deliberately not part of it either. CI checks
+out somewhere new on every run and a separate checkout per branch is a different
+directory, so keying on the path would refuse the golden every time and cost a
+full copy of production.
+
+Nothing changes for the ordinary case: one project, many branches, one golden.
+What changes is that a golden belonging to a different project, or made under
+masking rules you have since edited, or taken as a subset when this manifest
+asks for the whole database, is refused rather than branched:
+
+```
+AF-DB-012 No golden here was made for this project, and 3 were made for
+something else.
+  Next: Run 'af golden refresh' to make one from the source this manifest names.
+```
+
+Every run says where its data came from, so the choice can be checked rather
+than assumed:
+
+```
+branching the database from gv_20260901033741_74234e98, made for acme-billing
+from the database named by PRODUCTION_DATABASE_URL, under masking rules a91f0c
+```
+
+`af golden list` marks each version with the project it belongs to, and
+`af golden gc` only collects this project's, so running it in one repository
+never removes another repository's goldens.
+
 ## Refreshing
 
 ```yaml
@@ -152,6 +204,21 @@ verification scan runs again, on the machine that pulled it, against the
 database that actually arrived. Skipping that would make the store a way to get
 an unverified database branched, which is the one thing the product refuses.
 
+Nor is it trusted to be yours. The attestation carries the project the golden
+was made for, signed along with everything else, and a version made for another
+project is refused before any of it is restored:
+
+```
+AF-DB-015 The published golden gv_20260901033741_74234e98 in the local store at
+/srv/goldens was made for a different project.
+  Next: Name a version this project published with 'af golden pull <version>',
+  or run 'af golden refresh' on a machine that can reach the source.
+```
+
+That matters most for `af golden pull` with no version named, which takes the
+newest complete object in the store. In a bucket several projects publish to,
+the newest object is not necessarily yours.
+
 The local copy gets a new version identifier, because an identifier carries when
 the version was made and this copy was made now. `af golden pull` prints both.
 
@@ -162,7 +229,7 @@ trade. The failure is printed.
 
 Publishing goes through memory, so it is bounded, and it refuses a dump larger
 than the bound rather than swallowing the machine. If you are publishing you
-almost certainly want [subsetting](/docs/concepts/subsetting/) as well: a slice is
+almost certainly want [subsetting](/docs/concepts/subsetting) as well: a slice is
 what makes a golden small enough to move.
 
 ## Collection
@@ -204,7 +271,7 @@ provider such as Neon this is rarer, because a branch shares its parent's
 storage rather than copying it.
 
 The other answer is to make each golden smaller. See
-[subsetting](/docs/concepts/subsetting/).
+[subsetting](/docs/concepts/subsetting).
 
 ## What a golden is not
 
@@ -212,5 +279,5 @@ It is not a backup. It is masked, which means it is deliberately not the data
 production has. Do not restore one into production, and do not treat a
 successful branch as evidence that your backups work.
 
-Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/),
-[subsetting](/docs/concepts/subsetting/), [providers](/docs/providers/overview/).
+Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verification),
+[subsetting](/docs/concepts/subsetting), [providers](/docs/providers/overview).

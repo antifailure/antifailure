@@ -23,6 +23,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "masking.edit", "masking.approve", "network.edit", "network.approve",
     "agents.run", "load.run", "members.manage", "billing.manage",
     "audit.read", "audit.export", "runtimes.manage", "tokens.manage",
+    "organization.settings", "organization.delete", "sessions.manage",
+    "data.export", "account.close",
     "workloads.view", "workloads.edit", "workloads.run",
   ],
   admin: [
@@ -30,15 +32,16 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "masking.edit", "masking.approve", "network.edit", "network.approve",
     "agents.run", "load.run", "members.manage",
     "audit.read", "audit.export", "runtimes.manage", "tokens.manage",
+    "organization.settings", "sessions.manage", "data.export", "account.close",
     "workloads.view", "workloads.edit", "workloads.run",
   ],
   member: [
     "environments.view", "environments.create", "environments.teardown",
     "masking.edit", "network.edit", "agents.run", "load.run",
-    "audit.read",
+    "audit.read", "account.close",
     "workloads.view", "workloads.edit", "workloads.run",
   ],
-  viewer: ["environments.view", "audit.read", "workloads.view"],
+  viewer: ["environments.view", "audit.read", "account.close", "workloads.view"],
 };
 
 export function may(role: string | null | undefined, permission: string): boolean {

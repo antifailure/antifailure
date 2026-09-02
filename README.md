@@ -20,11 +20,18 @@ Every pull request gets its own environment built from the shape of production: 
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
-af init          # reads your repo, writes antifailure.yaml
-af up            # masked database branch, built services, sealed network
-af test          # agents run your workflows and return verdicts with evidence
-af down          # every resource it created, gone
+af start           # where you are on the first run, and what to run next
+af runner install  # the agent runner, which drives a real browser and needs node
+af init            # reads your repo, writes antifailure.yaml
+af up              # masked database branch, built services, sealed network
+af test            # agents run your workflows and return verdicts with evidence
+af down            # every resource it created, gone
 ```
+
+`af start` is the one to remember. It reports every step of that list as
+observed on this machine right now and names the single next command, so a first
+run you walked away from is one you can walk back into. It runs nothing and
+writes nothing.
 
 The installer puts `af` under `~/.antifailure` and puts that on your PATH, by
 appending one line to the startup file your login shell reads. It prints the
@@ -34,7 +41,7 @@ paste, because a running shell cannot see a file written a second ago.
 
 ## What it does
 
-**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
+**Masked data, verified.** Masking is compiled to SQL and executed in resumable chunks, deterministic so the same customer maps to the same fake customer across every table and every refresh. Then a scanner reads back every column of every table, sampling rows rather than reading all of them, looking for anything that still parses as an email, a card, a phone number, or a key, and signs an attestation that records the sample size it used. An unverified golden cannot be branched. That is enforced in code, not in a checklist.
 
 **A network you control.** Every environment gets a sidecar that owns its network namespace. Nothing leaves except through it. Each host gets a mode: `BLOCK` refuses with a decision you can read, `ALLOW` lets it through with a rate limit, `SANDBOX` swaps in test credentials and trips a wire if a live key ever appears, `CAPTURE` records the email or SMS into a searchable inbox your agents can read, `MOCK` answers from a stateful offline pack, and `SYNTH` asks a model to invent a response and marks every result that touched it as unverified rather than passed. The Stripe pack is complete enough to run checkout, subscribe, renew, and cancel with signed webhooks and no network at all.
 
@@ -50,15 +57,24 @@ paste, because a running shell cannot see a file written a second ago.
 curl -fsSL https://antifailure.dev/install.sh | sh
 ```
 
-The installer downloads the release for your platform, checks it against the published checksum, and puts `af` and its runner under `~/.antifailure`. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
+The installer downloads the release for your platform, refuses to install it unless it matches the published checksum, and puts `af` and its runner under `~/.antifailure`. There is no path through that check that installs an unverified archive: a missing `checksums.txt`, a `checksums.txt` with no line for your platform's archive, and a machine with neither `shasum` nor `sha256sum` all stop the install rather than warning and carrying on. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
 
-Check that your machine has what the engine needs:
+Then install the agent runner, which is a separate program in a separate language because it drives a real browser:
 
 ```bash
-af doctor
+af runner install
 ```
 
-Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a working environment.
+It needs node 22.6 or newer. The runner is copied from the source that ships beside `af` rather than downloaded, so the source a release was tested with is the source it runs, and its dependencies come from the lockfile that ships with it, so two people installing one release get one tree. It then downloads chromium, which is the slow part and is not fatal if it fails: a workflow that needs a page read comes back `unverified` rather than guessed at.
+
+Two commands report on the machine, and neither one guesses:
+
+```bash
+af doctor          # disk, ports, DNS, egress, kernel isolation, leftovers
+af runner check    # the runner source, its dependencies, node, and the browser
+```
+
+Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a proven run.
 
 ## A manifest example
 
@@ -115,21 +131,23 @@ For self-hosting:
 docker run --rm \
   -e AF_MIGRATION_DATABASE_URL=postgres://owner:...@db:5432/antifailure \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
-  ghcr.io/antifailure/control-plane:v0.1.1 node bootstrap.mjs
+  ghcr.io/antifailure/control-plane:main-b53906a node bootstrap.mjs
 
 docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
   -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
-  -p 8080:8080 ghcr.io/antifailure/control-plane:v0.1.1
+  -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
 On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`. The Helm chart is developed against kind and runs on any conformant cluster. See [self-hosting documentation](/docs/src/content/docs/self-hosting/) for configuration, operations, upgrades, and runbooks.
 
 ## Status
 
-Pre-1.0 and under construction. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of three states: proven (it runs and its tests pass in CI), written (the code exists and its fakes pass, but it has not been exercised against the real service), and planned. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. Breaking changes are announced in the changelog.
+Version 1.0. That is a promise about what keeps working, and it is written down surface by surface in [what is stable](https://antifailure.dev/docs/reference/stability/) rather than made as a blanket claim: a manifest declaring `version: 1`, the commands and their flags and exit codes, the documented `--output json` fields, the provider interfaces, and the error codes. Breaking any of those costs a major version. That page also names what is deliberately not covered, which is the half worth reading before you build against something.
+
+It is a promise about interfaces, not a claim that every component is finished. [docs/plan/STATUS.md](docs/plan/STATUS.md) tracks every component with one of four words, and the words are the ones that file defines rather than a paraphrase of them: proven (the code exists, its tests pass, and the behavior has been exercised end to end against the real thing), written (the code exists and passes its tests against a fake that enforces the real service's validation rules, and has never talked to the real service), planned (specified, not built), and mixed (the parts are genuinely in different states, and the row says which are which). Proven does not mean it runs in CI: a suite that needs a real Neon or Supabase account cannot run on a fork's pull request, so those rows say in their own prose that they are run by hand. That table is the honest answer to "does it do X yet", and it is updated in the same pull request as the code. [CHANGELOG.md](CHANGELOG.md) is what changed in each release.
 
 ## Contributing
 
@@ -138,7 +156,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to bu
 Before opening a pull request:
 
 1. Run `just gate` locally or the targeted gates for what you changed.
-2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`.
+2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`. `just changecheck` says whether your change needs one, and [the changelog](https://antifailure.dev/changelog) is built from them.
 3. Update `docs/plan/STATUS.md` surgically: touch only the rows your work changes.
 4. Update published docs under `docs/src/content/docs/` if a user-visible behavior changes.
 
@@ -148,4 +166,4 @@ Every commit is signed with `git commit -s` per the Developer Certificate of Ori
 
 This repository is MIT licensed, except for the `ee/` directory, which is licensed under the Antifailure Enterprise License (see [ee/LICENSE.md](ee/LICENSE.md)).
 
-The `ee/` directory is never compiled into the community binary, images, or Helm chart. Those are built from `antifailure/antifailure-foss`, a generated mirror of this repository with `ee/` deleted, so the boundary is proved by the community build passing green rather than asserted in a comment.
+The `ee/` directory is never compiled into the community binary, images, or Helm chart, and the boundary is proved by the community build passing green rather than asserted in a comment. The proof is run in place rather than in a mirror: the `edition boundary` job in `.github/workflows/ci.yml` deletes `ee`, then builds and tests the engine from what is left, and then inspects the binary it shipped for enterprise package paths. `.dockerignore` keeps `ee` out of the image build context.

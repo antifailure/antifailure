@@ -336,6 +336,13 @@ interrupt at any point leaves something af down can clean up.`),
 					"up: --hud draws a dashboard and --format json writes a document, " +
 						"and one stream cannot be both; drop one of them")
 			}
+			// The same gate af ci applies, at the other door. `af up` is
+			// what a dispatch runs and what somebody writing their own
+			// workflow reaches for, and a gate on only the command in the
+			// template is a gate around the front of the building.
+			if fork := forkGate(e); fork.Refused {
+				return refuseFork(fork)
+			}
 			o, err := orchestratorWithManifest3(e, lifecycleOptions{
 				branch: branch, rebuild: rebuild, silent: live,
 			})

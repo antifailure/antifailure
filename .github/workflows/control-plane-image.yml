@@ -53,6 +53,22 @@ on:
         default: false
         type: boolean
 
+# Superseded runs are cancelled, EXCEPT on a tag.
+#
+# Five agents pushing to the same branch left this workflow's runs queued
+# against commits nobody wanted any more, holding runners while every other
+# job waited. ci.yml and dogfood.yml already cancel; this file had no
+# concurrency block at all.
+#
+# The exception matters more than the rule. This workflow PUBLISHES on a tag
+# push, so cancelling one would abandon a release part way through and leave
+# a tag with no image behind it. A branch run can be safely thrown away and
+# a publish cannot, so tags are excluded rather than sharing the branch
+# policy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 permissions:
   contents: read
 

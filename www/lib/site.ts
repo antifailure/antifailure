@@ -103,9 +103,19 @@ export const SITE_DESCRIPTION =
 /**
  * The longer form, for places with room to be specific: the JSON-LD
  * Organization description, llms.txt, and the documentation landing page.
+ *
+ * "builds your services and then runs them inside a sandbox" is worded that
+ * way on purpose and the word order is the claim. It used to say "builds and
+ * runs your services inside a sandbox that cannot reach the internet", which
+ * put the build inside the sandbox and was false: `ImageBuildOptions` in
+ * engine/internal/build/docker.go sets no NetworkMode, and the buildpack path
+ * runs `npm ci` and `pip install`, so a build necessarily has a route out. The
+ * containment is real and adversarially tested, and it applies to the running
+ * services. This string is read by search engines and by models through
+ * JSON-LD and llms.txt, so it is the one place a loose word travels furthest.
  */
 export const SITE_DESCRIPTION_LONG =
-  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds and runs your services inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for exclusive locks, table rewrites and query plan regressions before any of it reaches production.";
+  "Antifailure builds a disposable copy of your production stack for every pull request. It branches a masked, referentially consistent Postgres from a verified golden, builds your services and then runs them inside a sandbox that cannot reach the internet except where you say it can, drives real workflows with agents that use the accessibility tree the way a person does, and rehearses pending migrations for exclusive locks, table rewrites and query plan regressions before any of it reaches production.";
 
 /** The category, stated outright rather than implied, so an engine can place it. */
 export const SITE_CATEGORY = "Pre-production testing and release safety for teams that deploy to Postgres";
@@ -113,6 +123,36 @@ export const SITE_CATEGORY = "Pre-production testing and release safety for team
 export const REPO_URL = "https://github.com/antifailure/antifailure";
 export const REPO_SLUG = "antifailure/antifailure";
 export const DOCS_URL = `${SITE_URL}/docs`;
+
+/** Public contact routes checked against the live repository and site. The
+ * domain currently has no MX records, so no email address is presented as a
+ * working channel. */
+export const CONTACT_POINTS = [
+  {
+    id: "security",
+    label: "Private security reports",
+    url: `${REPO_URL}/security/advisories/new`,
+    contactType: "security",
+  },
+  {
+    id: "issues",
+    label: "Bugs and feature requests",
+    url: `${REPO_URL}/issues/new/choose`,
+    contactType: "technical support",
+  },
+  {
+    id: "discussions",
+    label: "Questions and ideas",
+    url: `${REPO_URL}/discussions`,
+    contactType: "community support",
+  },
+  {
+    id: "waitlist",
+    label: "Hosted product interest",
+    url: "/signup",
+    contactType: "early access",
+  },
+] as const;
 
 /**
  * Every profile the project owns, in one array.

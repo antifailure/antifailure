@@ -1,4 +1,5 @@
 import {
+  CONTACT_POINTS,
   DOCS_URL,
   OG_IMAGE,
   REPO_URL,
@@ -66,6 +67,12 @@ export function SiteJsonLd() {
       // How a knowledge graph confirms that this site, the GitHub
       // organization, and anything else the project owns are one entity.
       sameAs: [...SAME_AS],
+      contactPoint: CONTACT_POINTS.map((point) => ({
+        "@type": "ContactPoint",
+        contactType: point.contactType,
+        url: point.url.startsWith("/") ? absoluteUrl(point.url) : point.url,
+        availableLanguage: "en",
+      })),
       knowsAbout: [
         "PostgreSQL schema migrations",
         "Database branching",
@@ -98,6 +105,7 @@ export function SiteJsonLd() {
       applicationSubCategory: SITE_CATEGORY,
       operatingSystem: "Linux, macOS",
       codeRepository: REPO_URL,
+      downloadUrl: absoluteUrl("/install.sh"),
       programmingLanguage: ["Go", "TypeScript", "SQL"],
       runtimePlatform: "Docker",
       softwareHelp: { "@type": "CreativeWork", url: DOCS_URL },
@@ -129,16 +137,18 @@ export function PageJsonLd({ path }: { path: string }) {
 
   const page = trail[trail.length - 1];
   const url = absoluteUrl(page.path);
+  const organizationPage = page.schemaType === "AboutPage" || page.schemaType === "ContactPage";
 
   const graph: Record<string, unknown>[] = [
     {
-      "@type": "WebPage",
+      "@type": page.schemaType ?? "WebPage",
       "@id": `${url}#webpage`,
       url,
       name: page.title,
       description: page.description,
       isPartOf: { "@id": SITE_ID },
-      about: { "@id": SOFTWARE_ID },
+      about: { "@id": organizationPage ? ORG_ID : SOFTWARE_ID },
+      ...(organizationPage ? { mainEntity: { "@id": ORG_ID } } : {}),
       inLanguage: "en",
       primaryImageOfPage: absoluteUrl(OG_IMAGE.url),
     },

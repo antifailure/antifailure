@@ -217,6 +217,68 @@ describe('installation tokens', () => {
       new Response('{}', { status: 404 })) as unknown as typeof fetch)
     await assert.rejects(() => tokens.for(42), /App ID does not match the private key/)
   })
+
+  /**
+   * The lookup that answers "was Actions write actually granted here".
+   *
+   * It is the only honest answer to that question, and the reason it exists is
+   * a distinction nothing else in this file makes: an App DECLARING a
+   * permission and an installation HOLDING it are different facts. Widening an
+   * App's permissions asks every installation to accept the new grant and
+   * changes nothing at all until a person does, so the App's own settings page
+   * can read `actions: write` while every installation of it still refuses a
+   * dispatch with 403.
+   */
+  describe('which installation covers a repository', () => {
+    function answering(status: number, body: string, seen: string[] = []) {
+      return new InstallationTokens(config, clock, (async (input: string | URL) => {
+        seen.push(String(input))
+        return new Response(body, { status })
+      }) as unknown as typeof fetch)
+    }
+
+    test('reports the permissions the installation actually holds', async () => {
+      const seen: string[] = []
+      const tokens = answering(
+        200,
+        JSON.stringify({ id: 157834739, permissions: { actions: 'write', metadata: 'read' } }),
+        seen,
+      )
+      const installed = await tokens.onRepository('acme/store front')
+      assert.deepEqual(installed, {
+        id: 157834739,
+        permissions: { actions: 'write', metadata: 'read' },
+      })
+      // Owner and name are two path segments, not one containing a %2F, and
+      // the name is still escaped inside its own segment.
+      assert.match(seen[0]!, /\/repos\/acme\/store%20front\/installation$/)
+    })
+
+    test('an installation GitHub reports without a permissions map is empty, not undefined', async () => {
+      // A caller reads `permissions.actions`, and an undefined map there is a
+      // TypeError on the diagnosis path rather than an answer on it.
+      const tokens = answering(200, JSON.stringify({ id: 7 }))
+      assert.deepEqual((await tokens.onRepository('acme/storefront'))?.permissions, {})
+    })
+
+    test('404 is the answer and not a failure', async () => {
+      // It is what GitHub says both for a repository this App holds no
+      // installation on and for one that does not exist. Null lets the caller
+      // separate those with a second question; throwing would not.
+      const tokens = answering(404, '{"message":"Not Found"}')
+      assert.equal(await tokens.onRepository('acme/storefront'), null)
+    })
+
+    test('anything else throws rather than reading as no installation', async () => {
+      // A rate limit read as "the App is not installed" would tell somebody to
+      // install an App that is already installed.
+      const tokens = answering(429, '{"message":"API rate limit exceeded"}')
+      await assert.rejects(
+        () => tokens.onRepository('acme/storefront'),
+        /refused to say which installation covers acme\/storefront: 429/,
+      )
+    })
+  })
 })
 
 describe('slugs', () => {
@@ -597,6 +659,88 @@ describe('the webhook endpoint', {
     const res = await api.fetch('/webhooks/github', { method: 'POST', headers, body })
     return { status: res.status, body: await res.text() }
   }
+
+  /**
+   * The hour of wrong answers, closed end to end.
+   *
+   * Not a unit test of `forget`, because the defect was never that `forget` did
+   * not work. It was that nothing called it: a real `InstallationTokens` holds
+   * a token for a full hour, GitHub invalidates the outstanding ones the moment
+   * a grant changes, and the delivery saying so did nothing to the cache. On
+   * 2026-08-31 that put a 403 in front of a person from 00:38:54Z, when the
+   * Actions write grant was accepted, until roughly 01:36Z, when the token it
+   * was still using finally expired.
+   *
+   * So this runs the real cache, delivers a real signed `installation` webhook
+   * over HTTP, and asks whether the NEXT mint is a new token. A test that
+   * asserted `forget` empties a Map would have passed on every day of that
+   * hour.
+   */
+  test('a permission acceptance invalidates the cached token, over HTTP', async () => {
+    let minted = 0
+    const tokens = new InstallationTokens(
+      { appId: '1', privateKey, webhookSecret: SECRET },
+      frozen,
+      (async () => {
+        minted++
+        return new Response(
+          JSON.stringify({ token: `ghs_${minted}`, expires_at: '2026-08-28T13:00:00Z' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch,
+    )
+    const wired = await startApi({
+      githubWebhookSecret: SECRET,
+      forgetInstallationToken: (id) => tokens.forget(id),
+    })
+    try {
+      // A token, cached the way a page load caches one.
+      assert.equal(await tokens.for(4242), 'ghs_1')
+      assert.equal(await tokens.for(4242), 'ghs_1', 'the cache is not caching')
+      assert.equal(minted, 1)
+
+      // The delivery GitHub sends the instant somebody accepts a permission.
+      const body = JSON.stringify({
+        action: 'new_permissions_accepted',
+        installation: {
+          id: 4242,
+          account: { login: `forget-test-${run}`, type: 'Organization' },
+        },
+        repositories: [],
+      })
+      const res = await wired.fetch('/webhooks/github', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-github-event': 'installation',
+          // Suffixed with `run`, like every other delivery in this file, and
+          // for a reason the fixed id hid. `claimDelivery` is keyed on the
+          // delivery id, so a second run of this test against a database that
+          // already holds the row is answered as a REPLAY and never reaches
+          // handleDelivery at all. With a fixed id the test passes exactly once
+          // per database: green in CI, which builds a fresh one, and red for
+          // anybody who runs the suite twice. It also made the mutation proof
+          // meaningless, because a broken build and a replayed delivery fail
+          // with the same assertion.
+          'x-github-delivery': `forget-test-${run}`,
+          'x-hub-signature-256': sign(body, SECRET),
+        },
+        body,
+      })
+      assert.equal(res.status, 200, await res.text())
+
+      // The clock has not moved, so the cached token is still inside its hour.
+      // Anything but a fresh one here means the delivery changed nothing.
+      assert.equal(await tokens.for(4242), 'ghs_2', 'the cached token survived the delivery')
+      assert.equal(minted, 2)
+    } finally {
+      await wired.admin`DELETE FROM github_deliveries WHERE delivery_id = ${`forget-test-${run}`}`
+      const rows = await wired.admin<{ id: string }[]>`
+        SELECT id FROM organizations WHERE github_login = ${`forget-test-${run}`}`
+      for (const row of rows) await dropOrg(wired.admin, row.id)
+      await wired.close()
+    }
+  })
 
   test('an unsigned delivery is refused and writes nothing', async () => {
     const res = await deliver(

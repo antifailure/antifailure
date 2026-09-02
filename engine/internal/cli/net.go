@@ -389,6 +389,14 @@ func parseRequest(method, raw string) (policy.Request, error) {
 }
 
 // DecisionJSON is one line of af net log.
+//
+// Every fact the sidecar records about a request appears here, and
+// TestEveryFactTheSidecarRecordsReachesASurface holds it to that. The keys
+// below the first block were recorded on every request and published on none
+// of them, which meant the one question the sandbox exists to answer, "did the
+// credential actually get swapped", had no answer a script could read. A field
+// the proxy spends a line writing and no surface can show is a field that does
+// not exist as far as anybody outside the container is concerned.
 type DecisionJSON struct {
 	At      string `json:"at"`
 	Request string `json:"request"`
@@ -399,6 +407,34 @@ type DecisionJSON struct {
 	Bytes   int64  `json:"bytes,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	Error   string `json:"error,omitempty"`
+
+	// Substituted and Synthesized are never omitted, because false is the
+	// answer somebody is checking for. A key that disappears when it is false
+	// makes "the credential was not swapped" and "this build does not report
+	// swaps" the same document.
+	Substituted bool `json:"substituted"`
+	Synthesized bool `json:"synthesized"`
+	// Pack and Fixture name what answered a mocked request.
+	Pack    string `json:"pack,omitempty"`
+	Fixture string `json:"fixture,omitempty"`
+	// Duration is how long the request took, WaitedMs how much of that the
+	// policy itself held it for, and Limit that rate in words. Without the
+	// last two, a request the policy deliberately slowed reads as an
+	// application that is simply slow.
+	Duration string `json:"duration,omitempty"`
+	WaitedMs int64  `json:"waited_ms,omitempty"`
+	Limit    string `json:"limit,omitempty"`
+	// Via says how the request arrived: as a proxy request from a client that
+	// read its proxy variables, or transparently from one that did not.
+	Via string `json:"via,omitempty"`
+	// HostOnly marks a decision made without seeing the path or the method,
+	// which is every HTTPS request until the environment certificate lands. A
+	// reader comparing a rule to a decision needs to know the rule could only
+	// half apply.
+	HostOnly bool `json:"host_only,omitempty"`
+	// Seq is the sidecar's own ordering, which survives lines sharing a
+	// timestamp.
+	Seq uint64 `json:"seq,omitempty"`
 }
 
 func newNetLogCommand(env *Env) *cobra.Command {
@@ -438,11 +474,7 @@ question somebody asks after an incident.`),
 			if env.Out.Format == FormatJSON {
 				docs := make([]DecisionJSON, 0, len(decisions))
 				for _, d := range decisions {
-					docs = append(docs, DecisionJSON{
-						At: d.AtRaw, Request: decisionRequest(d), Mode: d.Mode,
-						Rule: d.Rule, Allowed: d.Allowed, Status: d.Status,
-						Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
-					})
+					docs = append(docs, decisionDoc(d))
 				}
 				return env.Out.JSON(docs)
 			}
@@ -481,6 +513,25 @@ question somebody asks after an incident.`),
 	return cmd
 }
 
+// decisionDoc is the whole translation from what the sidecar decided to what a
+// script reads.
+//
+// A function rather than a literal inside the command, so that a test can
+// check every key is filled. Declaring a key and never assigning it produces
+// JSON that is valid, parses, and lies by omission, and the struct tag alone
+// cannot tell the difference.
+func decisionDoc(d local.Decision) DecisionJSON {
+	return DecisionJSON{
+		At: d.AtRaw, Request: decisionRequest(d), Mode: d.Mode,
+		Rule: d.Rule, Allowed: d.Allowed, Status: d.Status,
+		Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
+		Substituted: d.Substituted, Synthesized: d.Synthesized,
+		Pack: d.Pack, Fixture: d.Fixture,
+		Duration: d.Duration, WaitedMs: d.WaitedMs, Limit: d.Limit,
+		Via: d.Via, HostOnly: d.HostOnly, Seq: d.Seq,
+	}
+}
+
 func decisionRequest(d local.Decision) string {
 	scheme := "http"
 	if d.TLS {
@@ -514,17 +565,55 @@ func outcomeOf(d local.Decision) string {
 	// indistinguishable in this table from an application that is simply
 	// slow. That is the wrong answer to give somebody debugging latency,
 	// because it sends them to profile their own code.
+	// An invented response says so, here rather than nowhere. Before this the
+	// only difference between a charge Stripe made and one a model wrote was
+	// the word in the MODE column, and a reader auditing an incident is
+	// entitled to something less subtle than that.
+	if d.Synthesized {
+		if out == "" {
+			out = "invented by a model"
+		} else {
+			out += ", invented by a model"
+		}
+	}
+	// And a mocked one says which fixture answered it. The sidecar has
+	// recorded both halves from the beginning, against its own comment that a
+	// mock which cannot name its fixture is a mock nobody can debug.
+	if d.Fixture != "" {
+		from := "from " + d.Fixture
+		if d.Pack != "" {
+			from = "from " + d.Pack + "/" + d.Fixture
+		}
+		if out == "" {
+			out = from
+		} else {
+			out += ", " + from
+		}
+	}
 	if d.WaitedMs > 0 {
 		held := fmt.Sprintf("held %dms", d.WaitedMs)
 		if d.Limit != "" {
 			held += " by " + d.Limit
 		}
-		if out == "" {
-			return held
-		}
-		return out + ", " + held
+		out = join(out, held)
+	}
+	// Whether the credential was swapped is the question the sandbox exists to
+	// answer, and until now the answer was in the sidecar's log and nowhere a
+	// person or a script could reach. A row that reached a real service and a
+	// row that reached a sandbox looked identical.
+	if d.Substituted {
+		out = join(out, "sandbox credential")
 	}
 	return out
+}
+
+// join puts the next clause after the outcome, or makes it the outcome when
+// there is nothing yet to put it after.
+func join(out, next string) string {
+	if out == "" {
+		return next
+	}
+	return out + ", " + next
 }
 
 // shortTime keeps the clock time and drops the date, because every line in one

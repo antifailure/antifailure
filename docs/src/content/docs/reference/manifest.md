@@ -13,6 +13,12 @@ The rule worth knowing before reading anything else: an environment can reach
 nothing on the network except the hosts listed under `egress`, each in the mode
 named. Everything else is refused with a decision you can read.
 
+A manifest declaring `version: 1` keeps working for the whole of version 1 of
+Antifailure. Keys are added and existing ones gain new accepted values; a key is
+not removed, renamed, or given a different meaning without a major version.
+[What is stable](/docs/reference/stability) is the whole commitment, including
+what it deliberately does not cover.
+
 ## Top level
 
 | Key | Type | What it is |
@@ -26,7 +32,7 @@ named. Everything else is refused with a decision you can read.
 | `workflows` | list | What the agents do. |
 | `invariants` | list | Statements about the data that must stay true. |
 | `insights` | block | The Postgres native checks. |
-| `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis/), for a layout the built in rules do not predict. |
+| `change` | block | Path rules for [change analysis](/docs/concepts/change-analysis), for a layout the built in rules do not predict. |
 | `fidelity` | block | The component inventory of what this environment reproduces. |
 | `load` | block | Production shaped traffic. |
 | `policy` | block | What each class of finding does to the check. |
@@ -161,7 +167,7 @@ subset silently breaks.
 | --- | --- |
 | `default` | Any mode: `block` (default), `allow`, `capture`, `mock`, `sandbox` or `synth`. |
 | `allow_ipv6` | Off by default. |
-| `rules` | See [egress](/docs/concepts/egress/). |
+| `rules` | See [egress](/docs/concepts/egress). |
 
 ## `policy`
 
@@ -182,15 +188,16 @@ refused at the line rather than treated as the weakest one.
 | `egress_surprise` | `fail` | The environment reached for a host the manifest does not mention. |
 | `masking` | `fail` | The branch read back with data that still parses as real. |
 | `cleanup` | `fail` | Teardown left a resource behind. |
+| `workflows_unverified` | `fail` | No workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. |
 
-See [verdicts](/docs/concepts/verdicts/) for what each level does to the run
+See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
 ## `fidelity`
 
 | Key | Notes |
 | --- | --- |
 | `enabled` | On by default. Turning it off means the inventory is not taken, which is not the same as everything having passed. |
-| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory/). |
+| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory). |
 
 There is no threshold here. A single percentage hides the one dimension that
 matters to a particular change, so what a manifest requires is a dimension by
@@ -209,39 +216,53 @@ name.
 
 | Key | Read by | Notes |
 | --- | --- | --- |
-| `mode` | `af explain` only | `actions`, `app` or `off`. |
-| `comment` | `af explain` only | Whether to maintain one comment on the pull request. |
-| `fork_policy` | `af explain` only | `never`, `label` or `always`. |
-| `teardown_on` | `af explain` only | Which events tear the environment down. |
+| `mode` | `af explain` only | `actions`, `app` or `off`. Which half does the work is decided by your workflow, which has the address of a control plane or does not. |
+| `comment` | `af change`, `af ci` | Whether to maintain one comment on the pull request. |
+| `fork_policy` | `af ci`, `af up`, `af test`, `af load run` | `never`, `label` or `always`. Read from the BASE branch, not from the pull request. |
+| `teardown_on` | `af explain` only | Accepted and read by nothing. Teardown is unconditional. |
 
-**Read by `af explain` only** means what it says, and it is worth being blunt
-about rather than leaving somebody to find out by setting one. These four are
-validated, defaulted, printed by `af explain`, and consumed by nothing else.
-Setting `fork_policy: always` does not make a fork run, and removing `close`
-from `teardown_on` does not stop a closed pull request being torn down.
+**`fork_policy`** is enforced in the engine, before an environment is named and
+before the Docker daemon is touched, on `pull_request` and on
+`pull_request_target`. The policy is read from the base branch rather than from
+the checked out tree, because the manifest is a file in your repository and a
+fork's pull request carries its own copy of it: reading the setting from there
+would let anybody lift their own restriction. A checkout that does not carry
+the base branch falls back to `label` and says so. See
+[Forks](/docs/guides/github#forks).
 
-The reason is architectural rather than an oversight, and it is the same
-sentence the whole product rests on: **the hosted control plane never reads your
-manifest.** The manifest lives in your repository beside your code, and the
-control plane holds organizations, policy and aggregated reports. A control
-plane that read the manifest would be a control plane that had to fetch your
-repository, which is the boundary this product exists to keep.
+The control plane applies `label` behaviour to every repository regardless of
+what this says, and cannot do otherwise, for the reason two paragraphs down. Its
+approval covers that exact commit: the next push withdraws it.
 
-What happens instead, so you can decide whether you need these at all:
+**`comment: false`** makes `af change` and `af ci` write `comment=false` to
+`GITHUB_OUTPUT`, and the workflow's comment step is gated on it. The report
+files are still written. That is the distinction the setting draws: do not
+comment, not do not produce a report. The same `report.md` is the job summary
+and the payload a control plane is sent, and a publish step that reads a file
+somebody deleted fails rather than skipping. Outside GitHub Actions there is no
+pull request for the setting to be about and nothing changes. Which half writes
+the comment is still not this setting's business: with a control plane it
+maintains one and the workflow's own step stands down, and without one the
+workflow comments for itself.
 
-- A pull request from a **fork** is always blocked until a maintainer adds the
-  `antifailure:allow` label, and the approval covers that exact commit: the next
-  push withdraws it. That is `fork_policy: label` behaviour, permanently, and it
-  is the only one of the three that is safe to apply to a repository whose
-  manifest the control plane cannot see.
-- **Teardown** is always asked for when the pull request closes or merges, when
-  a newer commit supersedes the run, and when the check times out. A run that is
-  stopping leaks its environment if nothing cleans up after it, so this is not a
-  setting.
-- The **comment** is maintained by whichever half is doing the work. With a
-  control plane, it maintains one comment and the workflow's own comment step
-  is skipped; without one, the workflow comments for itself. See
-  [GitHub](/docs/guides/github/).
+**`mode` and `teardown_on` are read by `af explain` only**, and that is worth
+being blunt about rather than leaving somebody to find out by setting one.
+Removing `close` from `teardown_on` does not stop a closed pull request being
+torn down, and no combination of its values turns teardown off. Teardown is
+always asked for when the pull request closes or merges, when a newer commit
+supersedes the run, and when the check times out, because a run that is stopping
+leaks its environment if nothing cleans up after it. `af ci` tears down before
+it writes the report, whatever the outcome, including on a cancelled job. The
+`ttl` outcome is real and comes from a different key,
+[`runtime.max_ttl`](#runtime).
+
+The reason those two are inert is architectural rather than an oversight, and it
+is the sentence the whole product rests on: **the hosted control plane never
+reads your manifest.** The manifest lives in your repository beside your code,
+and the control plane holds organizations, policy and aggregated reports. A
+control plane that read the manifest would be a control plane that had to fetch
+your repository, which is the boundary this product exists to keep. Anything in
+this block that only a control plane could act on is therefore not acted on.
 
 A test in `internal/manifest` fails if one of these fields gains a reader
 without this table being updated, and if a new field is added to the block
@@ -271,5 +292,5 @@ an edit.
 test validates real manifests against both, so a field in one and not the other
 fails the build. Point your editor at it for completion and inline errors.
 
-Related: [detection](/docs/concepts/detection/), [egress](/docs/concepts/egress/),
-[providers](/docs/providers/overview/).
+Related: [detection](/docs/concepts/detection), [egress](/docs/concepts/egress),
+[providers](/docs/providers/overview).

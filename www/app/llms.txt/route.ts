@@ -1,3 +1,4 @@
+import { documentationPageCount } from "@/lib/docs-facts";
 import { INDEXABLE_ROUTES, pageName, type RouteSection } from "@/lib/routes";
 import {
   DOCS_URL,
@@ -50,6 +51,23 @@ export function GET() {
   lines.push("");
   lines.push(`> ${SITE_DESCRIPTION_LONG}`);
   lines.push("");
+
+  lines.push("## When to use Antifailure");
+  lines.push("");
+  lines.push(
+    "Use Antifailure when a pull request changes a Postgres-backed application and you need",
+    "evidence from a disposable production-shaped environment before merge. It is a fit for",
+    "masked database branches, migration lock and rewrite rehearsal, browser workflows,",
+    "contained third-party API behavior, and load comparisons against a recorded baseline.",
+  );
+  lines.push("");
+  lines.push(
+    "Do not use it as a production database, a general browser automation service, a load",
+    "generator against production, or a replacement for unit tests. Start with `af init` in",
+    "the repository you want to evaluate; use the control-plane API only when you need shared",
+    "organization history or engine ingestion.",
+  );
+  lines.push("");
   lines.push(
     "Antifailure answers one question: if this pull request merged, what would break? It",
     "answers it by building a disposable copy of the production stack, not by running a",
@@ -83,9 +101,10 @@ export function GET() {
     "- A masked Postgres branch. Masking is compiled to SQL and executed in resumable",
     "  chunks, deterministic so the same customer maps to the same fake customer across",
     "  every table and every refresh. A scanner then reads back every column of every",
-    "  table looking for anything that still parses as an email, a card, a phone number",
-    "  or a key, and signs an attestation. An unverified golden cannot be branched, and",
-    "  that is enforced in code rather than in a checklist.",
+    "  table, sampling rows rather than reading all of them, looking for anything that",
+    "  still parses as an email, a card, a phone number or a key, and signs an",
+    "  attestation that records the sample size it used. An unverified golden cannot be",
+    "  branched, and that is enforced in code rather than in a checklist.",
     "- A sealed network. Every environment gets a sidecar that owns its network",
     "  namespace. Each host gets one of six modes: BLOCK refuses with a readable",
     "  decision, ALLOW passes with a rate limit, SANDBOX swaps in test credentials and",
@@ -118,11 +137,24 @@ export function GET() {
   lines.push("");
   lines.push(`- [Documentation](${DOCS_URL}): installation, concepts, guides, provider setup, and the full reference.`);
   lines.push(
-    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): all 41 documentation pages as one plain-text file. ` +
+    `- [API reference](${DOCS_URL}/reference/api): hosts, authentication, errors, and endpoint boundaries.`,
+  );
+  lines.push(
+    `- [OpenAPI 3.1 document](${SITE_URL}/openapi.json): typed control-plane inputs, response envelopes, permissions, and stable operation IDs.`,
+  );
+  lines.push(
+    `- [CLI reference](${DOCS_URL}/reference/cli): every af command and option. Install with ` +
+      "`curl -fsSL https://antifailure.dev/install.sh | sh`.",
+  );
+  lines.push(
+    `- [Machine-readable error catalog](${SITE_URL}/errors.v1.json): error codes, messages, recovery steps, retryability, and exit codes.`,
+  );
+  lines.push(
+    `- [Full text of the documentation](${DOCS_URL}/llms-full.txt): all ${documentationPageCount()} documentation pages as one plain-text file. ` +
       `Start here if you are answering a question about how to use Antifailure.`,
   );
   lines.push(`- [Source](${REPO_URL}): the engine, the runner, the adapters, and the masking catalog.`);
-  lines.push(`- [Full text of this site](${SITE_URL}/llms-full.txt): every page above, concatenated, for a single fetch.`);
+  lines.push(`- [Full text of this site](${SITE_URL}/llms-full.txt): rendered text from every indexable page above, concatenated for a single fetch.`);
   lines.push("");
 
   return new Response(lines.join("\n"), {

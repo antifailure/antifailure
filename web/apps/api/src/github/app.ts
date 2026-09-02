@@ -25,6 +25,7 @@
 
 import { createPrivateKey, createSign, timingSafeEqual, createHmac } from 'node:crypto'
 import type { Clock } from '../clock.ts'
+import type { InstalledOn } from '../auth/github.ts'
 
 export class GitHubAppError extends Error {}
 
@@ -190,9 +191,87 @@ export class InstallationTokens {
     return json.token
   }
 
+  /**
+   * The installation covering a repository, or null when there is none.
+   *
+   * The App JWT, not an installation token, because only the App may ask which
+   * installations exist. That is also what makes this the one honest answer to
+   * "was this App granted Actions write here": the response carries the
+   * permissions GitHub actually recorded for the installation, which is not
+   * the same set the App declares. An App can declare `actions: write` and
+   * every existing installation still hold none of it, because widening an
+   * App's permissions asks each installation to accept the new grant and
+   * changes nothing until somebody does.
+   *
+   * Not cached. It is read on a failure path and on a page load, both of them
+   * rare next to the token this class exists for, and a cached permission map
+   * would keep telling somebody their grant is missing for an hour after they
+   * granted it, which is the moment they are most likely to be looking.
+   */
+  async onRepository(repository: string): Promise<InstalledOn | null> {
+    const path = `/repos/${repository.split('/').map(encodeURIComponent).join('/')}/installation`
+    const res = await this.fetchImpl(new URL(path, this.apiBase), {
+      headers: {
+        authorization: `Bearer ${appJwt(this.config, this.clock)}`,
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+      },
+    })
+    // 404 is the answer, not a failure: it is what GitHub says for a
+    // repository this App holds no installation on, and for one that does not
+    // exist. The caller separates those with a second question.
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new GitHubAppError(
+        `GitHub refused to say which installation covers ${repository}: ${res.status}. ${body.slice(0, 200)}`,
+      )
+    }
+    const json = (await res.json()) as { id: number; permissions?: Record<string, string> }
+    return { id: json.id, permissions: json.permissions ?? {} }
+  }
+
   /** Drops a cached token, for when GitHub says one is no longer valid. */
   forget(installationId: number): void {
     this.cache.delete(installationId)
+  }
+
+  /**
+   * Uninstalls the App from an account.
+   *
+   * The App JWT rather than an installation token, because an installation
+   * token is minted BY the installation and cannot outlive it: asking an
+   * installation to remove itself with its own credential is a request that
+   * races its own authorisation.
+   *
+   * 404 is success. GitHub answers 404 for an installation that is already
+   * gone, and a deletion that has to be re-entered after an interruption will
+   * reach this a second time; treating "already gone" as a failure would make
+   * the resumable path the one that cannot complete. The cached token is
+   * dropped either way, because keeping a token for an installation that no
+   * longer exists is how a permission change once took an hour to take effect.
+   */
+  async revoke(installationId: number): Promise<{ removed: boolean }> {
+    const res = await this.fetchImpl(
+      new URL(`/app/installations/${installationId}`, this.apiBase),
+      {
+        method: 'DELETE',
+        headers: {
+          authorization: `Bearer ${appJwt(this.config, this.clock)}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+        },
+      },
+    )
+    this.forget(installationId)
+    if (res.status === 404) return { removed: false }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new GitHubAppError(
+        `GitHub refused to uninstall ${installationId}: ${res.status}. ${body.slice(0, 200)}`,
+      )
+    }
+    return { removed: true }
   }
 }
 

@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Lede, Standalone } from "@/components/ui";
+
+/** This one is a server component already, so it needs no layout of its own. */
+export const metadata: Metadata = { title: "That page is not here" };
 
 export default function NotFound() {
   return (
