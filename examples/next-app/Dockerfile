@@ -1,12 +1,12 @@
 # Three stages, so the image that runs carries the server and the modules it
 # actually reached rather than a toolchain and a module cache.
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 # The lockfile first, so a change to a page does not reinstall the world.
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -15,7 +15,7 @@ COPY . .
 # trying to connect to something that does not exist yet.
 RUN npm run build
 
-FROM node:22-alpine
+FROM node:26-alpine
 # psql, because the manifest's migrate command uses it and that command runs in
 # this image. postgresql-client, not postgresql17-client: Alpine has no such
 # package, and the unversioned name gives psql 16, which talks to a 17 server.

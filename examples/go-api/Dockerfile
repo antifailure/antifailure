@@ -1,7 +1,7 @@
 # Multi stage, so the image that runs carries a binary and nothing else: no
 # compiler, no module cache, no source. It is the smallest thing that can be
 # the service, which is what makes an image worth scanning.
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Dependencies first, so a change to the source does not re-download them.
@@ -11,7 +11,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/api .
 
-FROM alpine:3.20
+FROM alpine:3.24
 # psql, because the manifest's migrate command uses it and it runs inside this
 # image. Leaving it out made `af up` wait on a migration that could never run,
 # which the walkthrough found and reading the Dockerfile did not.
