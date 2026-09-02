@@ -187,6 +187,14 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
   await admin`
     INSERT INTO engine_tokens (org_id, name, token_hash, prefix)
     VALUES (${orgId}, 'ci', ${tokenHash(slug)}, ${'aft_' + slug.slice(0, 6)})`
+  // The claim that lets this organization's repository exchange a GitHub
+  // Actions identity token for a credential. Lower-cased and slug-unique: the
+  // table carries a partial unique index over live rows across every tenant,
+  // so two fixtures naming the same repository would collide rather than prove
+  // isolation.
+  await admin`
+    INSERT INTO oidc_repository_bindings (org_id, repository)
+    VALUES (${orgId}, ${`${slug}/app`.toLowerCase()})`
   await admin`
     INSERT INTO events (org_id, idempotency_key, env_id, environment_id, type, occurred_at, sequence)
     VALUES (${orgId}, ${`ev-${slug}`}, ${`env-${slug}`}, ${envId}, 'environment.ready', now(), 1)`

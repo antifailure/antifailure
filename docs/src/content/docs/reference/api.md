@@ -61,8 +61,9 @@ below that take no session either.
 | `POST /v1/events` | engine token | Where an engine sends what it did. |
 | `POST /v1/workloads/claim` | engine token | Takes the workload run waiting for an environment. |
 | `POST /v1/workloads/runs/{id}/heartbeat` | engine token | Says a claimed run is still going. |
-| `POST /v1/commands/claim` | engine token | Takes the teardown and cancel requests waiting for this organization. |
+| `POST /v1/commands/claim` | engine token | Takes the cancel requests waiting for this organization. |
 | `POST /v1/commands/{id}/ack` | engine token | Says what happened to one of them. |
+| `POST /v1/auth/github-oidc` | a GitHub Actions workflow identity token, in the body | Exchanges a job's own identity for a short lived engine token, so nothing has to be pasted into a repository secret. The identity says which repository the job runs in and never whose, so the organization comes from a claim on that repository. See [GitHub](/docs/guides/github#sending-events-with-no-token-at-all). |
 | `POST /v1/pr/callback-token` | a GitHub Actions workflow identity token | Exchanges a job's own identity for a credential scoped to one commit. |
 | `POST /v1/pr/report` | that credential | What a job says about the commit it checked. |
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |

@@ -156,9 +156,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
-        # version that builds it in the Dockerfile a user copies.
+        # version that builds it in the Dockerfile a user copies. That is a
+        # promise this file has to keep by hand: nothing reads the Dockerfile
+        # and compares, so a base image bump that leaves this line alone makes
+        # the comment false and the job green.
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
           cache-dependency-path: examples/*/package-lock.json
 
