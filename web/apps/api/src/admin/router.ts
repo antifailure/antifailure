@@ -366,6 +366,94 @@ export const adminRouter = router({
           organizations: Number(r.orgs),
         }))
       }),
+
+    /**
+     * Suspends an ACCOUNT, which is not the same as revoking a session.
+     *
+     * Revoking ends one sign-in. Suspending ends every current session AND
+     * every future one, because resolveSession reads users.suspended_at on
+     * every request beside the session's own revoked_at.
+     *
+     * That enforcement is what makes this route mean anything, and it did not
+     * exist until this commit: the column was added by an earlier migration
+     * and read by nothing, so a Suspend would have changed a row, written an
+     * audit entry, and left the person working. The route came second on
+     * purpose.
+     */
+    suspend: adminProcedure('admin.users.write')
+      .input(z.object({ userId: z.string().uuid(), reason: z.string().trim().min(1).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ github_login: string; suspended_at: Date | null }>(sql`
+            SELECT github_login, suspended_at FROM users WHERE id = ${input.userId}::uuid`)
+          const user = found[0]
+          if (!user) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'No account with that id.' })
+          }
+          if (user.suspended_at) {
+            throw new TRPCError({
+              code: 'PRECONDITION_FAILED',
+              message: 'That account is already suspended.',
+            })
+          }
+          // The record first, in the same transaction, so a failed update
+          // takes its entry with it and the update cannot commit without one.
+          await adminAudit(db, c, {
+            action: 'user.suspended',
+            targetType: 'user',
+            targetId: input.userId,
+            severity: 'high',
+            detail: { reason: input.reason, githubLogin: user.github_login },
+          })
+          await db.execute(sql`
+            UPDATE users
+            SET suspended_at = ${c.clock.now().toISOString()},
+                suspended_reason = ${input.reason},
+                suspended_by = ${c.admin.email},
+                updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.userId}::uuid`)
+          return {
+            suspended: true,
+            // Said in the response as well as the console, because this is the
+            // sentence an operator repeats to whoever asked for it. Unlike an
+            // organization suspension, this one DOES lock the person out.
+            effect:
+              'Every session this account holds stops working on its next request, and it cannot sign in again until restored.',
+          }
+        })
+      }),
+
+    restore: adminProcedure('admin.users.write')
+      .input(z.object({ userId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ github_login: string }>(sql`
+            SELECT github_login FROM users WHERE id = ${input.userId}::uuid`)
+          if (!found[0]) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'No account with that id.' })
+          }
+          await adminAudit(db, c, {
+            action: 'user.restored',
+            targetType: 'user',
+            targetId: input.userId,
+            severity: 'high',
+            detail: { githubLogin: found[0].github_login },
+          })
+          await db.execute(sql`
+            UPDATE users
+            SET suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL,
+                updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.userId}::uuid`)
+          // Restoring does NOT bring old sessions back. They were not revoked,
+          // so they resolve again if they have not otherwise expired, which is
+          // the honest behaviour: suspension paused the account rather than
+          // ending its sign-ins, and saying otherwise would be a promise the
+          // sessions table does not keep.
+          return { suspended: false }
+        })
+      }),
   }),
 
   sessions: router({

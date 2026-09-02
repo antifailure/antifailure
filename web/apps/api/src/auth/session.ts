@@ -157,11 +157,12 @@ export async function resolveSession(
         expires_at: Date | string
         last_seen_at: Date | string
         revoked_at: Date | string | null
+        suspended_at: Date | string | null
         github_login: string
         name: string | null
       }>(sql`
         SELECT s.id, s.user_id, s.org_id, s.expires_at, s.last_seen_at,
-               s.revoked_at, u.github_login, u.name
+               s.revoked_at, u.suspended_at, u.github_login, u.name
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ${tokenHash}`)
@@ -169,6 +170,22 @@ export async function resolveSession(
       const row = rows[0]
       if (!row) return null
       if (row.revoked_at) return null
+      // A suspended ACCOUNT, checked on every request beside the revoked
+      // session, because they are the same kind of fact and want the same
+      // enforcement point.
+      //
+      // This is what makes an operator's Suspend mean anything. The column
+      // migration 0029 added was read by nothing: an operator could suspend an
+      // account, the row would change, the audit entry would be written, and
+      // the person would keep working until their session happened to expire.
+      // A Suspend that does not suspend is the canonical failure this project
+      // exists to catch, and it was sitting one join away from the check that
+      // already worked.
+      //
+      // Here rather than at sign-in, for the reason the comment on the role
+      // read below gives: enforcing at sign-in takes effect whenever somebody
+      // next signs in, which for a live session may be never.
+      if (row.suspended_at) return null
 
       const expiresAt = asDate(row.expires_at)
       const lastSeen = asDate(row.last_seen_at)

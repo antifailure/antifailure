@@ -36,7 +36,7 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 8,
+    atLeast: 14,
   })
 })
 
@@ -296,6 +296,86 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
 
     const after = await resolveSession(h.pool, h.clock, person.token)
     assert.equal(after, null, 'the session still resolved after an operator revoked it')
+  })
+
+  describe('suspending an account actually ends it', () => {
+    // The canonical failure of this project, aimed at the exact column that
+    // had it: users.suspended_at was added by a migration and read by NOTHING,
+    // so a Suspend would have changed a row, written an audit entry, and left
+    // the person working until their session happened to expire.
+    //
+    // So this proves the observable end state rather than the write. It signs
+    // a real customer in, resolves their session to show it works, suspends
+    // the account through the operator route, and resolves the SAME token
+    // again expecting null. Nothing here trusts a return value.
+    test('a live session stops resolving on the next request', async () => {
+      const { signInAs } = await import('./harness.ts')
+      const { resolveSession } = await import('../src/auth/session.ts')
+      const person = await signInAs(h, alice, 'member')
+
+      const before = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(before, 'the customer session did not resolve before suspension')
+
+      const { caller } = await callerFor('security')
+      const result = await caller.admin.users.suspend({
+        userId: before.userId,
+        reason: 'credential stuffing from one address',
+      })
+      assert.equal(result.suspended, true)
+
+      const after = await resolveSession(h.pool, h.clock, person.token)
+      assert.equal(
+        after,
+        null,
+        'the account was suspended and its session still resolved, so Suspend does not suspend',
+      )
+    })
+
+    test('restoring lets the same session resolve again', async () => {
+      const { signInAs } = await import('./harness.ts')
+      const { resolveSession } = await import('../src/auth/session.ts')
+      const person = await signInAs(h, bob, 'member')
+      const live = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(live)
+
+      const { caller } = await callerFor('security')
+      await caller.admin.users.suspend({ userId: live.userId, reason: 'under review' })
+      assert.equal(await resolveSession(h.pool, h.clock, person.token), null)
+
+      await caller.admin.users.restore({ userId: live.userId })
+      const back = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(back, 'restore did not bring the account back')
+      assert.equal(back.userId, live.userId)
+    })
+
+    test('the suspension is recorded with its reason', async () => {
+      const [entry] = await h.admin<{ detail: { reason: string }; severity: string }[]>`
+        SELECT detail, severity FROM admin_audit_entries
+        WHERE action = 'user.suspended' ORDER BY seq DESC LIMIT 1`
+      assert.equal(entry!.severity, 'high')
+      assert.ok(entry!.detail.reason.length > 0, 'a suspension was recorded with no reason')
+    })
+
+    test('suspending an account that does not exist records nothing', async () => {
+      const { caller } = await callerFor('security')
+      const [before] = await h.admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM admin_audit_entries`
+      await assert.rejects(() =>
+        caller.admin.users.suspend({ userId: randomUUID(), reason: 'nobody' }),
+      )
+      const [after] = await h.admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM admin_audit_entries`
+      assert.equal(after!.n, before!.n, 'an audit entry survived a refused suspension')
+    })
+
+    test('support can read accounts and cannot suspend one', async () => {
+      const { caller } = await callerFor('support')
+      await assert.doesNotReject(() => caller.admin.users.list({ limit: 5 }))
+      await assert.rejects(
+        () => caller.admin.users.suspend({ userId: randomUUID(), reason: 'no' }),
+        (err: Error) => /admin\.users\.write/.test(err.message),
+      )
+    })
   })
 
   test('an operator read is itself recorded, without the route asking', async () => {
