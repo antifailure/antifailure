@@ -1,0 +1,267 @@
+# The workflow the hosted console dispatches, and only that.
+#
+# `environments.create`, `agents.run` and `load.run` in the console at
+# app.antifailure.dev do not run anything on the control plane. They ask GitHub
+# to run THIS file, on the branch the environment is on, through the GitHub App
+# installation. That is the only way a hosted button starts work without a
+# masked copy of the database and the credentials leaving the cloud they are
+# already in.
+#
+# Copied from examples/github-workflow.yml, which is the file customers copy,
+# with four changes this repository needs. Each is a decision rather than a
+# tidy up, so each says why.
+#
+# 1. NO `pull_request` TRIGGER. The example carries one, because a customer
+#    wants a preview per pull request. Here dogfood.yml already runs the whole
+#    product against every pull request against this repository, and a second
+#    copy would double the runner time, stand two environments up beside each
+#    other, and leave two report comments of which only one is read. So this
+#    file runs when somebody asks for it and at no other time.
+#
+# 2. THE BINARY IS BUILT FROM SOURCE. The example installs a release with
+#    curl piped into sh, which is right for a customer and wrong here: a run
+#    against this repository is asking what THIS commit does to the product,
+#    and testing yesterday's release against today's diff answers a different
+#    question. It also removes a remote script piped to a shell.
+#
+# 3. ACTIONS ARE PINNED TO A COMMIT. Every other workflow in this repository
+#    pins, all thirty one of them. A tag is a moving reference somebody else
+#    controls.
+#
+# 4. IT DOES NOT CANCEL ITSELF. See the concurrency block.
+
+name: Antifailure
+
+on:
+  # The four inputs are exactly what web/apps/api/src/routers/dispatch.ts
+  # sends, and the names are load bearing: GitHub answers 422 "Unexpected
+  # inputs provided" for anything it is handed that is not declared here.
+  #
+  # GitHub reads this trigger list from the DEFAULT branch. Adding the file on
+  # a feature branch alone changes nothing, and the dispatch keeps answering
+  # 404 as though the file did not exist.
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Which part to run
+        required: true
+        default: up
+        type: choice
+        options: [up, agents, load]
+      workflows:
+        description: Comma separated workflow names for agents. Empty means all of them.
+        required: false
+        default: ''
+      duration:
+        description: How long to send load for, as a Go duration such as 60s.
+        required: false
+        default: ''
+      scale:
+        description: Multiplier on production's rate, for load.
+        required: false
+        default: ''
+
+concurrency:
+  group: antifailure-dispatch-${{ github.ref_name }}
+  # False, and this is the one line in the file that is not copied from the
+  # example. The console's three buttons are meant to run one after another
+  # against the same branch: somebody presses "Ask for an environment", waits,
+  # then presses "Run agents" against the environment that made. With
+  # cancel-in-progress the second dispatch would kill the first, so pressing
+  # "Run agents" would destroy the environment it was about to run against.
+  # False makes the second run queue behind the first instead.
+  cancel-in-progress: false
+
+# Read, and nothing else. The example grants pull-requests: write so that it
+# can leave the report comment on a pull request, and a dispatch has no pull
+# request to leave one on. So this token cannot write anything at all to the
+# repository, and the report goes to the artifact below and to the control
+# plane over /v1/events, which is where the console reads it from anyway.
+permissions:
+  contents: read
+
+jobs:
+  dispatched:
+    name: ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    # Larger than the budgets inside it, for the reason dogfood.yml gives: a
+    # step over its budget fails and writes a report saying which one and by
+    # how much, and a runner timeout kills the job and writes nothing.
+    timeout-minutes: 75
+
+    # The database the golden is copied from. Synthesised here rather than
+    # restored from anywhere: a control plane that copied a real customer's
+    # database into a public runner would be the single worst thing this
+    # repository could do, and what the masking rules are about is the shape
+    # rather than the rows.
+    services:
+      staging:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: staging
+          POSTGRES_DB: antifailure
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
+
+    steps:
+      # No fetch-depth here, unlike dogfood.yml. That exists so `af change` can
+      # diff against a merge base, and a dispatch has no base to diff against:
+      # nobody asked what this change touches, they asked for an environment.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the binary under test
+        run: go build -o bin/af ./engine/cmd/af
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - name: A pg_dump new enough to read that Postgres
+        # The service above is a Postgres 17 and the runner ships a 16 client.
+        # pg_dump refuses outright to read a server newer than itself, so a
+        # golden refresh cannot copy the source at all. The engine detects the
+        # mismatch and refuses by name, which is a good error message and not a
+        # working environment.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+
+      - name: Install the runner and its browser
+        # Only the agents need a browser, and only `af test` runs agents. The
+        # install is four minutes, so it is skipped for the two commands that
+        # cannot use it rather than paid on every dispatch.
+        if: inputs.command == 'agents'
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+        working-directory: runner
+
+      - name: Shape the staging database
+        run: npm run seed --workspace @antifailure/db
+        working-directory: web
+        env:
+          AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
+
+      - name: The rules classify every column
+        # Before anything is copied. `af mask plan` refuses a column no rule
+        # names and no default can decide, so this fails on a migration that
+        # added a column nobody classified, at the point where the fix is one
+        # line in masking.yaml rather than after a golden has been published.
+        run: ./bin/af -C . mask plan
+
+      - name: Refresh the golden, with the attestation required
+        # Copy, mask, verify, publish. Verification is not a flag: an
+        # unverified version cannot be branched, so a golden that reaches the
+        # next step is one whose attestation was signed.
+        run: ./bin/af -C . golden refresh
+
+      - name: Run what the console asked for
+        # The inputs go through the environment and never into the script text.
+        # A `${{ inputs.workflows }}` interpolated into a run block is a shell
+        # injection available to anybody who can dispatch this workflow, which
+        # is everybody with write access to the repository.
+        #
+        # No key is set for the model. There is no ANTHROPIC_API_KEY secret on
+        # this repository, so the agents run and any workflow needing a page
+        # read comes back unverified rather than guessed at, which is the
+        # documented behaviour and not a failure.
+        env:
+          AF_COMMAND: ${{ inputs.command }}
+          AF_WORKFLOWS: ${{ inputs.workflows }}
+          AF_DURATION: ${{ inputs.duration }}
+          AF_SCALE: ${{ inputs.scale }}
+        run: |
+          set -euo pipefail
+          case "$AF_COMMAND" in
+            up)
+              # No branch flag: the dispatch ran on the branch the environment
+              # belongs to, so the checked out one is already right.
+              ./bin/af -C . up
+              ;;
+            agents)
+              args=()
+              # `|| true`, and `if` rather than `[ ... ] && ...`, because both
+              # of those return non zero on the ordinary empty case and set -e
+              # would end the job there with no output at all.
+              IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+              for name in "${names[@]:-}"; do
+                if [ -n "$name" ]; then args+=(--only "$name"); fi
+              done
+              # ${args[@]+"${args[@]}"} rather than "${args[@]}": under set -u
+              # an empty array is an unbound variable on bash 3.2, and "run
+              # everything" is the ordinary case here.
+              ./bin/af -C . test ${args[@]+"${args[@]}"}
+              ;;
+            load)
+              args=()
+              if [ -n "$AF_DURATION" ]; then args+=(--duration "$AF_DURATION"); fi
+              if [ -n "$AF_SCALE" ]; then args+=(--scale "$AF_SCALE"); fi
+              ./bin/af -C . load run ${args[@]+"${args[@]}"}
+              ;;
+            *)
+              echo "::error::unknown command $AF_COMMAND"
+              exit 1
+              ;;
+          esac
+
+      - name: Nothing was left behind
+        # The claim this product makes about itself, asserted here as well as
+        # inside the tool, because the tool could be the thing that is broken.
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          echo "containers: $left, networks: $nets"
+
+      - name: Keep the record
+        # A dispatched run leaves no pull request comment, so without this it
+        # produces nothing a person can read. The environment itself reaches
+        # the console over /v1/events; this is the local stream, for the run.
+        #
+        # `.antifailure/logs`, and the path is worth stating rather than
+        # copying. dogfood.yml uploads `.antifailure/events`, which is where
+        # the log lived before `attachEventLog` was removed, and telemetry's
+        # FileSink has written to `logs` since. STATUS.md records that same
+        # wrong path being fixed inside tools/dogfood, where it had silently
+        # killed every check downstream of the stream; the copy in the workflow
+        # was not fixed with it, and `if-no-files-found: warn` is why nobody
+        # noticed a record that recorded nothing.
+        #
+        # No report.md here. `af ci --output report.md` writes that file and
+        # none of the three commands this workflow runs is `af ci`, so naming
+        # it would be a path that can never match pretending to be an artifact.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: antifailure-${{ inputs.command }}-${{ github.run_id }}
+          path: .antifailure/logs
+          retention-days: 14
+          # warn rather than error. A run that failed before it opened the log
+          # has nothing to upload and is already failing for its own reason,
+          # and turning that into a second red step buries the first.
+          if-no-files-found: warn

@@ -350,9 +350,6 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 			gv := provider.GoldenVersion{
 				ID: id, CreatedAt: time.Unix(img.Created, 0).UTC(),
 				SizeBytes: img.Size, ProviderRef: tag,
-				// A committed image only exists because verification passed;
-				// the commit is the last step of a refresh.
-				Verified:   true,
 				RulesHash:  img.Labels[dockerutil.LabelRules],
 				Provenance: img.Labels[dockerutil.LabelProvenance],
 			}
@@ -361,6 +358,24 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 					gv.Attestation = string(decoded)
 				}
 			}
+			// Read from the attestation rather than assumed.
+			//
+			// This said Verified: true for every image, with a comment
+			// reasoning that a committed image only exists because
+			// verification passed. Half of that is true: a verification that
+			// fails never commits. The half that is not is that a refresh with
+			// no verifier at all commits too, and RefreshGolden records that
+			// honestly as Verified: false. Nothing read the honest value:
+			// pickGolden reads this path, so the false was overwritten with
+			// true on the way back in and an unverified golden was branched by
+			// af up exactly as if it had been checked.
+			//
+			// The attestation is the durable record, written as a label at
+			// commit time and only ever produced by a verifier that ran and
+			// returned. So no new label and no migration: a golden that was
+			// verified stays verified, and one that never was now says so and
+			// costs its owner the one refresh pickGolden's comment describes.
+			gv.Verified = gv.Attestation != ""
 			out = append(out, gv)
 		}
 	}

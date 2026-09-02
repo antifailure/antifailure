@@ -81,14 +81,20 @@ type Command struct {
 // The context carries whatever the caller attached to it, which is how an
 // enterprise build's licence status reaches a hook deep inside a command
 // without a licence argument threaded through every signature between them.
-func Run(ctx context.Context, args []string, opts Options) int {
+//
+// forced is the channel WithSignals returns, and passing it is what makes a
+// second control C mean "stop now" in a wrapping binary too. A wrapper is free
+// to pass nil, and then a second interrupt does nothing, which is a decision
+// rather than an accident: this argument exists because it was possible to
+// hold the channel and never ask, and both binaries did exactly that.
+func Run(ctx context.Context, forced <-chan struct{}, args []string, opts Options) int {
 	extra := make([]cli.ExtraCommand, 0, len(opts.Extra))
 	for _, c := range opts.Extra {
 		extra = append(extra, cli.ExtraCommand{
 			Use: c.Use, Short: c.Short, Long: c.Long, Run: c.Run,
 		})
 	}
-	return cli.Execute(ctx, args, cli.Options{
+	return cli.Run(ctx, forced, args, cli.Options{
 		Stdout:  opts.Stdout,
 		Stderr:  opts.Stderr,
 		Stdin:   opts.Stdin,
@@ -107,8 +113,9 @@ func Run(ctx context.Context, args []string, opts Options) int {
 // journal intact. A wrapper that handled signals its own way would be a wrapper
 // where control C means something different, which is worse than no wrapper.
 //
-// The second return value reports whether an interrupt has been seen. The third
-// stops handling and must be deferred.
-func WithSignals(ctx context.Context) (context.Context, func() bool, func()) {
+// The second return value is a channel closed by a second interrupt; pass it to
+// Run, which is what turns it into the exit. The third stops handling and must
+// be deferred.
+func WithSignals(ctx context.Context) (context.Context, <-chan struct{}, func()) {
 	return cli.WithSignals(ctx)
 }

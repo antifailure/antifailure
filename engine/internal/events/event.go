@@ -95,6 +95,19 @@ const (
 	LoadSample     Type = "load.sample"
 	LoadFinished   Type = "load.finished"
 
+	// Hosted workloads.
+	//
+	// The only events in this catalog that are not about an environment. A
+	// hosted run is created by a control plane, which mints the identifier and
+	// hands it to this engine through a claim, so these are keyed on
+	// workload_run_id in their data rather than on the environment they ran
+	// against. Two runs of two workloads share one environment and one
+	// sequence, and the run identifier is the only thing that tells them
+	// apart.
+	WorkloadStarted   Type = "workload.started"
+	WorkloadFinished  Type = "workload.finished"
+	WorkloadCancelled Type = "workload.cancelled"
+
 	// Engine internals worth surfacing
 	Progress    Type = "engine.progress"
 	Warning     Type = "engine.warning"
@@ -167,11 +180,17 @@ var typeDocs = map[Type]string{
 	InsightFinding:   "A database insight was found: a lock, a regression, or a plan change.",
 	LoadSample:       "A load test metric sample.",
 	LoadFinished:     "A load run finished. The data carries the comparison against main.",
-	Progress:         "A step in a long running operation, for work with no more specific event of its own.",
-	Warning:          "Something is not right but the operation continues.",
-	Error:            "An operation failed. The data carries the error code.",
-	Retry:            "A provider call is being retried after a transient failure.",
-	SinkDropped:      "A sink fell behind and dropped events. The data carries the count.",
+	WorkloadStarted: "A hosted workload run has been claimed and started. " +
+		"The data carries the control plane's run identifier.",
+	WorkloadFinished: "A hosted workload run ended and reported what it measured. " +
+		"The data is the result document, which says whether the work happened and, separately, what it found.",
+	WorkloadCancelled: "A hosted workload run stopped before finishing, because a signal or a " +
+		"cancel command reached it.",
+	Progress:    "A step in a long running operation, for work with no more specific event of its own.",
+	Warning:     "Something is not right but the operation continues.",
+	Error:       "An operation failed. The data carries the error code.",
+	Retry:       "A provider call is being retried after a transient failure.",
+	SinkDropped: "A sink fell behind and dropped events. The data carries the count.",
 }
 
 // Level classifies an event for display and filtering.

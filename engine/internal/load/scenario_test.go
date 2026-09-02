@@ -603,3 +603,76 @@ func TestRunScenarios_ASlowApplicationDelaysTheScheduleRatherThanLosingRequests(
 	require.Greater(t, r.DurationMs, r.ScheduledMs,
 		"the run took longer than the schedule asked for, which is the finding")
 }
+
+func TestRunScenarios_AnAssertionSaysWhatItMeasuredAndNotOnlyWhatItConcluded(t *testing.T) {
+	t.Parallel()
+	// The sentence is for a person. A console has to chart the same answer and
+	// store it in columns, and it cannot do either from "served a p95 of 240ms,
+	// over 200ms" without parsing English, nor tell that measure from another.
+	server := newJourneyServer(t)
+	server.delay["/slow"] = 60 * time.Millisecond
+
+	results, err := load.RunScenarios(context.Background(), load.ScenarioOptions{
+		BaseURL: server.URL,
+		Runs: []load.ScenarioRun{{
+			Scenario: mustParse(t, `
+scenario: measures
+ramp_ms: 0
+steps:
+  - request: GET /slow
+  - request: GET /fast
+assertions:
+  - name: slow_step_under_ten_ms
+    step: GET /slow
+    p95_below_ms: 10
+  - name: nothing_failed
+    every_request_succeeded: true
+  - name: errors_under_one_percent
+    error_rate_below: 0.01
+  - name: about_a_step_nothing_sent
+    step: GET /missing
+    p95_below_ms: 5
+`),
+			Sessions: 1, Iterations: 1,
+		}},
+		SafeRoutes: []string{"GET /**"}, Seed: 1, Clock: clock.New(),
+	})
+	require.NoError(t, err)
+
+	byName := map[string]load.AssertionResult{}
+	for _, a := range results[0].Assertions {
+		byName[a.Name] = a
+	}
+
+	slow := byName["slow_step_under_ten_ms"]
+	require.Equal(t, "p95_below_ms", slow.Measure)
+	require.Equal(t, "GET /slow", slow.Scope, "spelled the way a route is spelled everywhere else")
+	require.NotNil(t, slow.Threshold)
+	require.InDelta(t, 10, *slow.Threshold, 1e-9)
+	require.NotNil(t, slow.Observed)
+	require.Greater(t, *slow.Observed, 10.0, "the observed value is the p95 the verdict was decided on")
+
+	// A measure that is not a numeric comparison carries no numbers. Inventing
+	// a threshold of one for "every request succeeded" would put a number on a
+	// chart that means nothing.
+	every := byName["nothing_failed"]
+	require.Equal(t, "every_request_succeeded", every.Measure)
+	require.Empty(t, every.Scope, "a scenario wide assertion has no scope")
+	require.Nil(t, every.Threshold)
+	require.Nil(t, every.Observed)
+
+	rate := byName["errors_under_one_percent"]
+	require.Equal(t, "error_rate_below", rate.Measure)
+	require.NotNil(t, rate.Threshold)
+	require.NotNil(t, rate.Observed)
+	require.InDelta(t, 0, *rate.Observed, 1e-9)
+
+	// Nothing was sent to it, so there is no observation. Zero would read as a
+	// perfect application rather than as a question nobody asked.
+	missing := byName["about_a_step_nothing_sent"]
+	require.Equal(t, "unverified", missing.Verdict)
+	require.Equal(t, "p95_below_ms", missing.Measure)
+	require.NotNil(t, missing.Threshold)
+	require.Nil(t, missing.Observed,
+		"an unmeasured p95 is absent, not zero")
+}
