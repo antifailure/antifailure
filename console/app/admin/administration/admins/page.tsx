@@ -1,20 +1,14 @@
 "use client";
 
+import { Card, Loaded, TableSkeleton, When } from "@/components/ui";
 import {
-  Badge,
-  Card,
-  Empty,
-  Loaded,
-  Row,
-  Table,
-  TableSkeleton,
-  TableWrap,
-  Td,
-  Th,
-  When,
-} from "@/components/ui";
-import { AdminPage } from "@/components/admin/primitives";
-import { useOperators } from "@/lib/admin";
+  AdminPage,
+  DataTable,
+  EmptyList,
+  StatusChip,
+  type Column,
+} from "@/components/admin/primitives";
+import { useOperators, type Operator } from "@/lib/admin";
 
 /**
  * Who can reach this portal, and with what role.
@@ -38,75 +32,69 @@ export default function AdminOperatorsPage() {
     >
       <Card>
         <Loaded state={state} skeleton={<TableSkeleton rows={4} cols={5} />}>
-          {(operators) =>
-            operators.length === 0 ? (
-              // Reachable in principle and alarming in practice: you are
-              // reading this page, so at least one operator exists. Saying so
-              // is more useful than an empty table that reads like a bug.
-              <Empty title="No operator accounts">
-                This installation has no operator accounts, which cannot be true if you are
-                reading this page. Check that the portal is pointed at the database you expect.
-              </Empty>
-            ) : (
-              <TableWrap>
-                <Table>
-                  <thead>
-                    <tr>
-                      <Th>Operator</Th>
-                      <Th>Role</Th>
-                      <Th>Can sign in</Th>
-                      <Th>Last signed in</Th>
-                      <Th>State</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {operators.map((o) => (
-                      <Row key={o.id}>
-                        <Td>
-                          <span className="block truncate font-medium text-ink">{o.name}</span>
-                          <span className="block truncate text-[12px] text-muted">{o.email}</span>
-                        </Td>
-                        <Td label="Role">
-                          {/* Underscores are a database convention and not a
-                              word. The role reads as English here and the value
-                              is unchanged underneath. */}
-                          {o.role.replace(/_/g, " ")}
-                          {o.isRoot ? (
-                            <span className="mt-1 block text-[12px] text-muted">
-                              The root operator, which cannot be deleted, demoted or suspended
-                            </span>
-                          ) : null}
-                        </Td>
-                        <Td label="Can sign in">
-                          {o.provisioned ? (
-                            "Yes"
-                          ) : (
-                            <span className="text-muted">Not provisioned</span>
-                          )}
-                        </Td>
-                        <Td label="Last signed in">
-                          {o.lastSignedInAt ? (
-                            <When value={o.lastSignedInAt} />
-                          ) : (
-                            <span className="text-muted">Never</span>
-                          )}
-                        </Td>
-                        <Td label="State">
-                          {o.suspended ? (
-                            <Badge tone="fail">suspended</Badge>
-                          ) : (
-                            <Badge tone="pass">active</Badge>
-                          )}
-                        </Td>
-                      </Row>
-                    ))}
-                  </tbody>
-                </Table>
-              </TableWrap>
-            )
-          }
+          {(operators) => (
+            <DataTable
+              columns={columns}
+              rows={operators}
+              keyOf={(o) => o.id}
+              empty={
+                // Reachable in principle and alarming in practice: you are
+                // reading this page, so at least one operator exists. Saying so
+                // is more useful than an empty table that reads like a bug.
+                <EmptyList title="No operator accounts">
+                  This installation has no operator accounts, which cannot be true if you are
+                  reading this page. Check that the portal is pointed at the database you expect.
+                </EmptyList>
+              }
+            />
+          )}
         </Loaded>
       </Card>
     </AdminPage>
   );
 }
+
+const columns: Column<Operator>[] = [
+  {
+    key: "operator",
+    header: "Operator",
+    cell: (o) => (
+      <>
+        <span className="block truncate font-medium text-ink">{o.name}</span>
+        <span className="block truncate text-[12px] text-muted">{o.email}</span>
+      </>
+    ),
+  },
+  {
+    key: "role",
+    header: "Role",
+    cell: (o) => (
+      <>
+        {/* Underscores are a database convention and not a word. The role reads
+            as English here and the value is unchanged underneath. */}
+        {o.role.replace(/_/g, " ")}
+        {o.isRoot ? (
+          <span className="mt-1 block text-[12px] text-muted">
+            The root operator, which cannot be deleted, demoted or suspended
+          </span>
+        ) : null}
+      </>
+    ),
+  },
+  {
+    key: "provisioned",
+    header: "Can sign in",
+    cell: (o) => (o.provisioned ? "Yes" : <span className="text-muted">Not provisioned</span>),
+  },
+  {
+    key: "lastSignedIn",
+    header: "Last signed in",
+    cell: (o) =>
+      o.lastSignedInAt ? <When value={o.lastSignedInAt} /> : <span className="text-muted">Never</span>,
+  },
+  {
+    key: "state",
+    header: "State",
+    cell: (o) => <StatusChip value={o.suspended ? "suspended" : "active"} />,
+  },
+];
