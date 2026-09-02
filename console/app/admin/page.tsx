@@ -17,6 +17,7 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
+import { More } from "@/components/pagination";
 import { useTenants } from "@/lib/admin";
 
 /**
@@ -51,8 +52,8 @@ export default function AdminTenantsPage() {
     >
       <Card>
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
-          {(page) =>
-            page.rows.length === 0 ? (
+          {(rows) =>
+            rows.length === 0 ? (
               <Empty title={search ? "No tenant matches that" : "No organizations yet"}>
                 {search
                   ? "Nothing on this installation has that name or slug. Clear the search to see every tenant."
@@ -75,7 +76,7 @@ export default function AdminTenantsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {page.rows.map((t) => (
+                    {rows.map((t) => (
                       <Row key={t.id}>
                         {/* No label on this one: it names the row, and leads
                             the stacked record on a phone by itself.
@@ -118,6 +119,18 @@ export default function AdminTenantsPage() {
                     ))}
                   </tbody>
                 </Table>
+                {/* Always rendered, in both states. "All 24 organizations." is
+                    the only place this screen ever says the list is complete,
+                    and a footer that hid itself at the end could only ever say
+                    the opposite. */}
+                <More
+                  shown={rows.length}
+                  noun={{ one: "organization", many: "organizations" }}
+                  hasMore={state.hasMore}
+                  busy={state.busy}
+                  error={state.moreError}
+                  onMore={state.more}
+                />
               </TableWrap>
             )
           }
