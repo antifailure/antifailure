@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/egress"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
@@ -497,32 +498,9 @@ func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 }
 
 // summariseEgress counts what the environment reached.
+// summariseEgress delegates to the shared reader.
 func summariseEgress(decisions []local.Decision) *report.Egress {
-	out := &report.Egress{}
-	surprises := map[string]bool{}
-	for _, d := range decisions {
-		switch d.Mode {
-		case "allow", "sandbox":
-			out.Allowed++
-		case "capture":
-			out.Captured++
-		case "mock":
-			out.Mocked++
-		default:
-			out.Refused++
-			if d.Rule == "" && d.Host != "" {
-				// No rule matched at all, which means the manifest does not
-				// mention this host. Usually a dependency somebody added
-				// without noticing.
-				surprises[d.Host] = true
-			}
-		}
-	}
-	for host := range surprises {
-		out.Surprises = append(out.Surprises, host)
-	}
-	sort.Strings(out.Surprises)
-	return out
+	return egress.Summarise(decisions)
 }
 
 func branchName(e *Env, override string) string {

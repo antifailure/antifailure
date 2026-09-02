@@ -20,11 +20,18 @@ Every pull request gets its own environment built from the shape of production: 
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
-af init          # reads your repo, writes antifailure.yaml
-af up            # masked database branch, built services, sealed network
-af test          # agents run your workflows and return verdicts with evidence
-af down          # every resource it created, gone
+af start           # where you are on the first run, and what to run next
+af runner install  # the agent runner, which drives a real browser and needs node
+af init            # reads your repo, writes antifailure.yaml
+af up              # masked database branch, built services, sealed network
+af test            # agents run your workflows and return verdicts with evidence
+af down            # every resource it created, gone
 ```
+
+`af start` is the one to remember. It reports every step of that list as
+observed on this machine right now and names the single next command, so a first
+run you walked away from is one you can walk back into. It runs nothing and
+writes nothing.
 
 The installer puts `af` under `~/.antifailure` and puts that on your PATH, by
 appending one line to the startup file your login shell reads. It prints the
@@ -52,13 +59,22 @@ curl -fsSL https://antifailure.dev/install.sh | sh
 
 The installer downloads the release for your platform, refuses to install it unless it matches the published checksum, and puts `af` and its runner under `~/.antifailure`. There is no path through that check that installs an unverified archive: a missing `checksums.txt`, a `checksums.txt` with no line for your platform's archive, and a machine with neither `shasum` nor `sha256sum` all stop the install rather than warning and carrying on. It is POSIX sh rather than bash, so it works in an Alpine container as well as on a laptop.
 
-Check that your machine has what the engine needs:
+Then install the agent runner, which is a separate program in a separate language because it drives a real browser:
 
 ```bash
-af doctor
+af runner install
 ```
 
-Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a working environment.
+It needs node 22.6 or newer. The runner is copied from the source that ships beside `af` rather than downloaded, so the source a release was tested with is the source it runs, and its dependencies come from the lockfile that ships with it, so two people installing one release get one tree. It then downloads chromium, which is the slow part and is not fatal if it fails: a workflow that needs a page read comes back `unverified` rather than guessed at.
+
+Two commands report on the machine, and neither one guesses:
+
+```bash
+af doctor          # disk, ports, DNS, egress, kernel isolation, leftovers
+af runner check    # the runner source, its dependencies, node, and the browser
+```
+
+Read the [quickstart](/docs/src/content/docs/getting-started/quickstart.md) for a complete walkthrough from an empty machine to a proven run.
 
 ## A manifest example
 
