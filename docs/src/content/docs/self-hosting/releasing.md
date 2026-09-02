@@ -187,13 +187,17 @@ only a stale sentence.
 
 The `migrations/` half is not resolved and is read below rather than here.
 ```sh
-git tag -s v0.1.2 -m "v0.1.2"
+git tag -a v0.1.2 -m "v0.1.2"
 git push origin v0.1.2
 ```
 
-Signed, and pushed on its own. Do not push the tag in the same command as a
-branch: a tag that arrives before its commit is on `main` has no CI run for
-`cd.yml` to wait for.
+Annotated and unsigned, and pushed on its own. The signing in this pipeline is
+cosign over `checksums.txt` and the bill of materials, done by the publish job,
+and it does not depend on the tag carrying a signature. Setting up signed tags
+is optional and the steps are on the
+[releases page](/docs/security/releases#signing-the-tags-too). Do not push the
+tag in the same command as a branch: a tag that arrives before its commit is on
+`main` has no CI run for `cd.yml` to wait for.
 
 ## Watching release.yml
 
