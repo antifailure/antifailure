@@ -235,6 +235,17 @@ examples/*/report.md
 /www/public/home/*.avif
 /www/public/home/*.webp
 
+# Screenshot and scratch trees a contributor's own verification pass leaves
+# behind. They are the evidence for one review, not the record of the product,
+# and 64MB of them arrived in one pull request before this line existed.
+.verify/
+.verify-shots/
+
+# Per-contributor agent configuration. Which assistant somebody drives, and the
+# standing instructions they give it, are theirs rather than the repository's.
+.agents/
+.cursor/
+
 # Written by `next dev`, which appends its own block to both files every time it
 # starts: see node_modules/next/dist/server/lib/generate-agent-files.js. Nothing
 # ignored them, so any `git add -A` in a worktree where somebody had run the dev

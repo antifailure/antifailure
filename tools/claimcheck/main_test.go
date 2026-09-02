@@ -636,10 +636,13 @@ func siteFixture(t *testing.T, real, name, body string) string {
 	// AuthScreen is a premise and also a file the real tree exempts, so the
 	// exemption has something to excuse in the fixture too. Chrome carries the
 	// second exemption on that rule: it is where the note about the deleted
-	// AuthModal lives now.
+	// AuthModal lives now. The list is the exempted files, so one that stops
+	// being exempted leaves it: the architecture page was named here until it
+	// folded into the product overview, and a name kept after the file went
+	// fails every test in this package with a read error rather than a finding.
 	for _, f := range []string{
 		"www/components/AuthScreen.tsx", "www/components/Chrome.tsx",
-		"www/lib/routes.ts", "www/components/pages/product/Architecture.tsx",
+		"www/lib/routes.ts",
 	} {
 		src, err := os.ReadFile(filepath.Join(real, filepath.FromSlash(f)))
 		if err != nil {

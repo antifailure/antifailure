@@ -53,21 +53,6 @@ export const HEADER_MENUS: HeaderMenu[] = [
           },
         ],
       },
-      {
-        title: "Judgment",
-        items: [
-          {
-            title: "Safety Report",
-            href: "/product/report",
-            description: "Pass or fail on the PR, with evidence",
-          },
-          {
-            title: "Architecture",
-            href: "/product/architecture",
-            description: "Control plane and customer data plane",
-          },
-        ],
-      },
     ],
     featured: [
       {
@@ -77,9 +62,9 @@ export const HEADER_MENUS: HeaderMenu[] = [
         visual: "fleet",
       },
       {
-        title: "Pass or fail, with evidence",
-        description: "A gate on the pull request carrying the video and trace behind the verdict.",
-        href: "/product/report",
+        title: "Isolated Twin",
+        description: "A temporary copy of the application stack, destroyed with the pull request.",
+        href: "/product/twins",
         visual: "twin",
       },
     ],
@@ -160,7 +145,6 @@ export const FOOTER_MENUS = [
       { text: "Safe State", href: "/product/safe-state" },
       { text: "Load", href: "/product/load" },
       { text: "Pricing", href: "/pricing" },
-      { text: "Architecture", href: "/product/architecture" },
     ],
   },
   {
@@ -168,7 +152,6 @@ export const FOOTER_MENUS = [
     items: [
       { text: "Side-Effect Firewall", href: "/product/firewall" },
       { text: "Migration Safety", href: "/product/migrations" },
-      { text: "Safety Report", href: "/product/report" },
       { text: "Insights", href: "/docs/concepts/insights" },
       { text: "Agents", href: "/docs/concepts/agents" },
       { text: "Egress", href: "/docs/concepts/egress" },

@@ -19,12 +19,22 @@
     },
     {
       "route": "/product/oracle",
-      "redirect": "/product/report",
+      "redirect": "/product",
       "statusCode": 301
     },
     {
       "route": "/product/fidelity",
-      "redirect": "/product/report",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/report",
+      "redirect": "/product",
+      "statusCode": 301
+    },
+    {
+      "route": "/product/architecture",
+      "redirect": "/product",
       "statusCode": 301
     },
     {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { useInViewPlay } from "@/lib/useInViewPlay";
 import { usePausedRaf } from "@/lib/usePausedRaf";
@@ -10,14 +10,6 @@ const SPEED = 0.5;
 const FILM = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 const NAV = ["Build", "Restore", "Contain", "Destroy"] as const;
-
-const INK = "#111111";
-const MUTED = "#797d86";
-const CUT = "#C43D3D";
-const OK = "#33bf00";
-const PAPER = "#ffffff";
-const FONT = "var(--font-sans), ui-sans-serif, system-ui, sans-serif";
-const MONO = "var(--font-mono), ui-monospace, monospace";
 
 function beatIndex(t: number) {
   if (t >= 9) return 3;
@@ -30,410 +22,416 @@ function remainingOf(beat: number) {
   return beat >= 3 ? 0 : 4;
 }
 
-function fiducial(x: number, y: number, dx: number, dy: number) {
-  return `M${x + dx * 10} ${y} H${x} V${y + dy * 10}`;
-}
-
-function Zone({
-  x,
-  y,
-  w,
-  h,
-  label,
-  dashed,
-}: {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  label: string;
-  dashed?: boolean;
-}) {
-  const lw = label.length * 6.4 + 18;
-  return (
-    <g>
-      <rect
-        x={x}
-        y={y}
-        width={w}
-        height={h}
-        rx="12"
-        fill="rgba(0,0,0,0.018)"
-        stroke={dashed ? "rgba(0,0,0,0.28)" : INK}
-        strokeWidth="1"
-        strokeDasharray={dashed ? "4 3" : undefined}
-      />
-      <rect x={x + 16} y={y - 7} width={lw} height="14" rx="4" fill={PAPER} />
-      <text x={x + 25} y={y + 4} fill={MUTED} fontSize="9" fontFamily={MONO} letterSpacing="0.14em">
-        {label}
-      </text>
-    </g>
-  );
-}
-
-function Port({ x, y, dir }: { x: number; y: number; dir: "n" | "s" | "e" | "w" }) {
-  const d =
-    dir === "n"
-      ? `M${x} ${y} v-4`
-      : dir === "s"
-        ? `M${x} ${y} v4`
-        : dir === "e"
-          ? `M${x} ${y} h4`
-          : `M${x} ${y} h-4`;
-  return <path d={d} stroke={INK} strokeWidth="1.15" />;
-}
-
-function Glyph({ kind, x, y, dim }: { kind: "dns" | "app" | "wrk" | "key"; x: number; y: number; dim?: boolean }) {
-  const s = dim ? "rgba(0,0,0,0.35)" : INK;
+function Glyph({ kind, dim }: { kind: "dns" | "app" | "wrk" | "key" | "db"; dim?: boolean }) {
+  const s = dim ? "rgba(0,0,0,0.32)" : "#111111";
   if (kind === "dns") {
     return (
-      <g transform={`translate(${x} ${y})`} stroke={s} strokeWidth="1">
-        <circle r="6.5" fill={PAPER} />
-        <ellipse rx="3" ry="6.5" />
-        <path d="M-6.5 0h13M0 -6.5v13" />
-      </g>
+      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="6.2" stroke={s} strokeWidth="1.15" />
+        <ellipse cx="8" cy="8" rx="2.8" ry="6.2" stroke={s} strokeWidth="1.15" />
+        <path d="M1.8 8h12.4M8 1.8v12.4" stroke={s} strokeWidth="1.15" />
+      </svg>
     );
   }
   if (kind === "app") {
     return (
-      <g transform={`translate(${x} ${y})`} stroke={s} strokeWidth="1" fill={PAPER}>
-        <rect x="-7" y="-5" width="11" height="8" rx="1.5" />
-        <rect x="-3" y="-2" width="11" height="8" rx="1.5" />
-      </g>
+      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden>
+        <rect x="1.6" y="3.2" width="9.2" height="7" rx="1.4" stroke={s} strokeWidth="1.15" fill="#fff" />
+        <rect x="5.2" y="5.6" width="9.2" height="7" rx="1.4" stroke={s} strokeWidth="1.15" fill="#fff" />
+      </svg>
     );
   }
   if (kind === "wrk") {
     return (
-      <g transform={`translate(${x} ${y})`} stroke={s} strokeWidth="1.15">
-        <path d="M-6 -5v10M0 -5v10M6 -5v10" />
-      </g>
+      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden>
+        <path d="M3.2 3.2v9.6M8 3.2v9.6M12.8 3.2v9.6" stroke={s} strokeWidth="1.2" />
+      </svg>
+    );
+  }
+  if (kind === "db") {
+    return (
+      <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden>
+        <ellipse cx="8" cy="4.2" rx="5.1" ry="2.1" stroke={s} strokeWidth="1.15" />
+        <path d="M2.9 4.2v7.4c0 1.16 2.28 2.1 5.1 2.1s5.1-.94 5.1-2.1V4.2" stroke={s} strokeWidth="1.15" />
+        <path d="M2.9 7.8c0 1.16 2.28 2.1 5.1 2.1s5.1-.94 5.1-2.1" stroke={s} strokeWidth="1.15" />
+      </svg>
     );
   }
   return (
-    <g transform={`translate(${x} ${y})`} stroke={s} strokeWidth="1.15" fill="none">
-      <circle cx="-3" cy="0" r="3.2" />
-      <path d="M0 0h8M5 0v3M8 0v3" strokeLinecap="round" />
-    </g>
+    <svg viewBox="0 0 16 16" className="size-3.5 shrink-0" fill="none" aria-hidden>
+      <circle cx="5.4" cy="8" r="3" stroke={s} strokeWidth="1.15" />
+      <path d="M8.4 8h6.1M12.2 8v2.6M14.5 8v2.6" stroke={s} strokeWidth="1.15" strokeLinecap="round" />
+    </svg>
   );
 }
 
-function Box({
-  x,
-  y,
-  w,
-  h,
-  label,
-  kicker,
-  glyph,
-  dim,
-  live,
-}: {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  label: string;
-  kicker: string;
-  glyph: "dns" | "app" | "wrk" | "key";
-  dim?: boolean;
-  live?: boolean;
-}) {
-  const stroke = dim ? "rgba(0,0,0,0.3)" : INK;
+function DenyMark({ size = "md" }: { size?: "sm" | "md" }) {
   return (
-    <g>
-      <rect x={x} y={y} width={w} height={h} rx="8" fill={PAPER} stroke={stroke} strokeWidth="1.15" />
-      <text x={x + 10} y={y + 14} fill={MUTED} fontSize="7.5" fontFamily={MONO} letterSpacing="0.12em">
-        {kicker}
-      </text>
-      <text x={x + 10} y={y + 30} fill={dim ? MUTED : INK} fontSize="12" fontFamily={FONT}>
-        {label}
-      </text>
-      <Glyph kind={glyph} x={x + w - 18} y={y + 22} dim={dim} />
-      {live ? <circle cx={x + w - 10} cy={y + 10} r="2.6" fill={OK} /> : null}
-    </g>
+    <span
+      className={cn(
+        "relative grid place-items-center rounded-full border-[1.4px] border-[#C43D3D] bg-white",
+        size === "md" ? "size-7" : "size-4",
+      )}
+    >
+      <span
+        className={cn("absolute rotate-[-38deg] rounded-full bg-[#C43D3D]", size === "md" ? "h-[1.5px] w-3.5" : "h-px w-2")}
+      />
+    </span>
   );
 }
 
-function Cylinder({
-  cx,
-  cy,
-  rx,
-  ry,
-  h,
+function SealPill({
   label,
+  on,
+  tone = "ok",
+}: {
+  label: string;
+  on: boolean;
+  tone?: "ok" | "cut";
+}) {
+  const cut = tone === "cut";
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-[3px] text-[10px] font-medium tracking-tight transition-colors duration-500",
+        on && !cut && "border-[#33bf00] bg-[rgba(51,191,0,0.12)] text-[#111111]",
+        on && cut && "border-[#C43D3D] bg-[rgba(196,61,61,0.10)] text-[#111111]",
+        !on && "border-black/[0.14] bg-white text-[#797d86]",
+      )}
+      style={{ transitionTimingFunction: FILM }}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          on && !cut && "bg-[#33bf00]",
+          on && cut && "bg-[#C43D3D]",
+          !on && "bg-black/20",
+        )}
+      />
+      {label}
+    </span>
+  );
+}
+
+function Gate({
+  label,
+  sub,
+  tone,
+}: {
+  label: string;
+  sub?: string;
+  tone: "ok" | "cut" | "idle";
+}) {
+  return (
+    <div className="flex flex-col items-center gap-0.5 py-1">
+      {tone === "cut" ? (
+        <DenyMark size="sm" />
+      ) : (
+        <span
+          className={cn(
+            "size-2.5 rounded-full border transition-colors duration-500",
+            tone === "ok"
+              ? "border-[#33bf00] bg-[#33bf00]"
+              : "border-black/25 bg-white",
+          )}
+          style={{ transitionTimingFunction: FILM }}
+        />
+      )}
+      <span
+        className={cn(
+          "whitespace-nowrap font-mono text-[8px] tracking-[0.14em]",
+          tone === "cut" ? "text-[#C43D3D]" : tone === "ok" ? "text-[#111111]" : "text-[#797d86]",
+        )}
+      >
+        {label}
+      </span>
+      {sub ? (
+        <span className={cn("text-[9px] tracking-tight", tone === "cut" ? "text-[#C43D3D]" : "text-[#797d86]")}>
+          {sub}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function Wire({ lines, dim }: { lines: [string, string, string]; dim?: boolean }) {
+  const widths = ["w-[86%]", "w-[68%]", "w-[52%]"];
+  return (
+    <div className="mt-2 space-y-[3px]">
+      {lines.map((line, i) => (
+        <div
+          key={line}
+          className={cn("h-[7px] overflow-hidden rounded-[3px]", dim ? "bg-black/[0.06]" : "bg-black/[0.08]")}
+        >
+          <div className={cn("h-full rounded-[3px]", widths[i], dim ? "bg-black/[0.10]" : "bg-black/[0.14]")} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NodeCard({
   kicker,
+  title,
+  glyph,
+  live,
   dim,
   cut,
+  gone,
 }: {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-  h: number;
-  label: string;
   kicker: string;
+  title: string;
+  glyph: "dns" | "app" | "wrk" | "key" | "db";
+  live?: boolean;
   dim?: boolean;
   cut?: boolean;
+  gone?: boolean;
 }) {
-  const stroke = cut ? CUT : dim ? "rgba(0,0,0,0.3)" : INK;
-  const top = cy - h / 2;
-  const bot = cy + h / 2;
   return (
-    <g>
-      <path
-        d={`M${cx - rx} ${top + ry} V${bot - ry} A${rx} ${ry} 0 0 0 ${cx + rx} ${bot - ry} V${top + ry}`}
-        fill={PAPER}
-        stroke={stroke}
-        strokeWidth="1.15"
-      />
-      <ellipse cx={cx} cy={bot - ry} rx={rx} ry={ry} fill={PAPER} stroke={stroke} strokeWidth="1.15" />
-      <ellipse cx={cx} cy={top + ry} rx={rx} ry={ry} fill={PAPER} stroke={stroke} strokeWidth="1.15" />
-      <Caption x={cx - rx - 16} y={cy + 3} text={kicker} fill={MUTED} anchor="end" mono />
-      <Caption x={cx} y={bot + 26} text={label} fill={cut ? CUT : dim ? MUTED : INK} anchor="middle" />
-    </g>
+    <div
+      className={cn(
+        "relative min-w-0 rounded-[10px] border bg-white p-2.5 shadow-[0_1px_2px_rgba(17,17,17,0.06),0_8px_18px_rgba(17,17,17,0.05)] transition-opacity duration-700",
+        dim ? "border-dashed border-black/30" : "border-black/[0.14]",
+        gone && !dim ? "opacity-45" : dim ? "opacity-70" : "opacity-100",
+      )}
+      style={{ transitionTimingFunction: FILM }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-mono text-[8px] tracking-[0.14em] text-[#797d86]">{kicker}</div>
+          <div className={cn("mt-0.5 truncate text-[12px] tracking-tight", cut ? "text-[#C43D3D]" : dim ? "text-[#797d86]" : "text-[#111111]")}>
+            {title}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Glyph kind={glyph} dim={dim || cut} />
+          {live ? <span className="size-1.5 rounded-full bg-[#33bf00]" /> : <span className="size-1.5 rounded-full bg-black/15" />}
+        </div>
+      </div>
+      {glyph === "app" ? (
+        <div className={cn("mt-2 overflow-hidden rounded-[6px] border", dim ? "border-black/10" : "border-black/[0.08]")}>
+          <div className="flex h-2.5 items-center gap-0.5 bg-black/[0.04] px-1.5">
+            <span className="size-1 rounded-full bg-black/20" />
+            <span className="size-1 rounded-full bg-black/12" />
+            <span className="ml-1 h-px flex-1 bg-black/10" />
+          </div>
+          <div className="space-y-[3px] px-1.5 py-1.5">
+            <div className="h-[5px] w-[78%] rounded-sm bg-black/[0.10]" />
+            <div className="h-[5px] w-[54%] rounded-sm bg-black/[0.07]" />
+          </div>
+        </div>
+      ) : glyph === "db" ? (
+        <div className="mt-2 flex items-center gap-2">
+          <svg viewBox="0 0 40 28" className="h-7 w-10 shrink-0" fill="none" aria-hidden>
+            <ellipse cx="20" cy="6" rx="14" ry="5" fill="#fff" stroke={cut ? "#C43D3D" : dim ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.38)"} />
+            <path
+              d="M6 6v14c0 2.8 6.3 5 14 5s14-2.2 14-5V6"
+              fill="#fff"
+              stroke={cut ? "#C43D3D" : dim ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.38)"}
+            />
+            <ellipse cx="20" cy="20" rx="14" ry="5" fill="#fff" stroke={cut ? "#C43D3D" : dim ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.38)"} />
+          </svg>
+          <div className="min-w-0 flex-1 space-y-[3px]">
+            <div className="h-[5px] w-full rounded-sm bg-black/[0.10]" />
+            <div className="h-[5px] w-[70%] rounded-sm bg-black/[0.07]" />
+          </div>
+        </div>
+      ) : (
+        <Wire lines={["a", "b", "c"]} dim={dim} />
+      )}
+      {cut ? (
+        <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2">
+          <DenyMark size="sm" />
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-function Cut({ x, y, s = 6.5 }: { x: number; y: number; s?: number }) {
-  return (
-    <g>
-      <circle cx={x} cy={y} r={s + 3.5} fill={PAPER} />
-      <line x1={x - s} y1={y - s} x2={x + s} y2={y + s} stroke={CUT} strokeWidth="1.25" />
-      <line x1={x + s} y1={y - s} x2={x - s} y2={y + s} stroke={CUT} strokeWidth="1.25" />
-    </g>
-  );
-}
-
-function Caption({
-  x,
-  y,
-  text,
-  fill = MUTED,
-  anchor = "start",
-  mono,
+function Cluster({
+  title,
+  kicker,
+  dashed,
+  dim,
+  aside,
+  children,
+  footer,
 }: {
-  x: number;
-  y: number;
-  text: string;
-  fill?: string;
-  anchor?: "start" | "middle" | "end";
-  mono?: boolean;
+  title: string;
+  kicker: string;
+  dashed?: boolean;
+  dim?: boolean;
+  aside?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
 }) {
-  const w = text.length * (mono ? 5.8 : 5.1) + 10;
-  const left = anchor === "middle" ? x - w / 2 : anchor === "end" ? x - w : x;
   return (
-    <g>
-      <rect x={left} y={y - 11} width={w} height="16" rx="4" fill={PAPER} />
-      <text
-        x={x}
-        y={y}
-        textAnchor={anchor}
-        fill={fill}
-        fontSize={mono ? 8 : 9}
-        fontFamily={mono ? MONO : FONT}
-        letterSpacing={mono ? "0.08em" : undefined}
-      >
-        {text}
-      </text>
-    </g>
+    <div
+      className={cn(
+        "relative min-w-0 rounded-[14px] border bg-white p-3 shadow-[0_1px_2px_rgba(17,17,17,0.05),0_12px_28px_rgba(17,17,17,0.06)] sm:p-3.5",
+        dashed ? "border-dashed border-black/35" : "border-black/15",
+        dim && "opacity-[0.78]",
+      )}
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold tracking-tight text-[#111111]">{title}</div>
+          <div className="mt-0.5 font-mono text-[9px] tracking-[0.14em] text-[#797d86]">{kicker}</div>
+        </div>
+        {aside ? <div className="shrink-0">{aside}</div> : null}
+      </div>
+      {children}
+      {footer ? <div className="mt-3">{footer}</div> : null}
+    </div>
+  );
+}
+
+function Fiducial({
+  className,
+  dx,
+  dy,
+}: {
+  className?: string;
+  dx: 1 | -1;
+  dy: 1 | -1;
+}) {
+  const x = dx === 1 ? 1.2 : 10.8;
+  const y = dy === 1 ? 1.2 : 10.8;
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      className={cn("pointer-events-none absolute size-3 overflow-visible", className)}
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d={`M${x + dx * 9} ${y} H${x} V${y + dy * 9}`}
+        stroke="#111111"
+        strokeWidth="0.9"
+        strokeLinejoin="miter"
+        strokeLinecap="butt"
+      />
+    </svg>
   );
 }
 
 function TwinSchematic({ beat, gone }: { beat: number; gone: boolean }) {
   const sealed = (from: number) => beat >= from && !gone;
-  const dash = "4 3";
-  const shift = 492;
+  const twinLive = !gone;
 
   return (
-    <svg viewBox="0 0 940 528" className="h-auto w-full overflow-visible" fill="none" aria-hidden>
-      <path d={fiducial(10, 10, 1, 1)} stroke={INK} strokeWidth="0.9" />
-      <path d={fiducial(930, 10, -1, 1)} stroke={INK} strokeWidth="0.9" />
-      <path d={fiducial(10, 518, 1, -1)} stroke={INK} strokeWidth="0.9" />
-      <path d={fiducial(930, 518, -1, -1)} stroke={INK} strokeWidth="0.9" />
+    <div className="relative select-none px-3.5 pt-3.5 pb-3 font-sans tracking-tight" aria-hidden>
+      <Fiducial className="top-0 left-0" dx={1} dy={1} />
+      <Fiducial className="top-0 right-0" dx={-1} dy={1} />
+      <Fiducial className="bottom-0 left-0" dx={1} dy={-1} />
+      <Fiducial className="right-0 bottom-0" dx={-1} dy={-1} />
 
-      <text x="24" y="28" fill={MUTED} fontSize="9" fontFamily={MONO} letterSpacing="0.16em">
-        FIG. 01
-      </text>
-      <text x="88" y="28" fill={INK} fontSize="9" fontFamily={MONO} letterSpacing="0.12em">
-        ISOLATED TWIN
-      </text>
-      <text x="210" y="28" fill={MUTED} fontSize="9" fontFamily={FONT}>
-        production not in path
-      </text>
-      <text x="916" y="28" textAnchor="end" fill={MUTED} fontSize="9" fontFamily={MONO} letterSpacing="0.12em">
-        SHEET 01 / 01
-      </text>
-      <path d="M24 36 H916" stroke="rgba(0,0,0,0.12)" strokeWidth="1" />
+      <div className="flex items-baseline justify-between gap-3 font-mono text-[9px] tracking-[0.12em] text-[#797d86]">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+          <span>FIG. 01</span>
+          <span className="tracking-[0.12em] text-[#111111]">ISOLATED TWIN</span>
+          <span className="font-sans tracking-tight">production not in path</span>
+        </div>
+        <span className="shrink-0">SHEET 01 / 01</span>
+      </div>
+      <div className="mt-1.5 h-px bg-black/[0.10]" />
 
-      <g>
-        <Zone x={20} y={54} w={404} h={392} label="ISOLATED TWIN" />
-        <rect
-          x={44}
-          y={84}
-          width={356}
-          height={308}
-          rx="10"
-          fill="none"
-          stroke="rgba(0,0,0,0.16)"
-          strokeWidth="0.9"
-          strokeDasharray={dash}
-        />
-        <rect x={56} y={77} width={92} height="12" rx="3" fill={PAPER} />
-        <text x={62} y={87} fill={MUTED} fontSize="8" fontFamily={MONO} letterSpacing="0.12em">
-          CLONE-LOCAL
-        </text>
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_6.25rem_minmax(0,1fr)] items-stretch gap-2 max-md:grid-cols-1 max-md:gap-3 sm:gap-3">
+        <Cluster
+          title="Isolated Twin"
+          kicker="CLONE-LOCAL"
+          footer={
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[8px] tracking-[0.12em] text-[#797d86]">SEALS</span>
+              <SealPill label="clone-local DNS" on={sealed(0)} />
+              <SealPill label="secrets replaced" on={sealed(1)} />
+              <SealPill label="no egress" on={sealed(2)} />
+            </div>
+          }
+        >
+          <NodeCard kicker="DNS" title="clone-local" glyph="dns" live={sealed(0)} gone={gone} />
+          <Gate label="RESOLVE" tone={sealed(0) ? "ok" : "idle"} />
+          <div className="grid grid-cols-2 gap-2">
+            <NodeCard kicker="APP" title="candidate" glyph="app" live={twinLive} gone={gone} />
+            <NodeCard kicker="WORKERS" title="isolated" glyph="wrk" live={twinLive} gone={gone} />
+          </div>
+          <Gate label="MASK · KEEP" tone={twinLive ? "ok" : "idle"} />
+          <div className="grid grid-cols-2 gap-2">
+            <NodeCard kicker="STATE" title="postgres" glyph="db" live={twinLive} gone={gone} />
+            <NodeCard kicker="CREDS" title="replaced" glyph="key" live={sealed(1)} gone={gone} />
+          </div>
+        </Cluster>
 
-        <path d="M220 132 V162 H112 Q104 162 104 170 V186" stroke={INK} strokeWidth="1.15" />
-        <path d="M220 162 H328 Q336 162 336 170 V186" stroke={INK} strokeWidth="1.15" />
-        <path d="M112 226 V268 H220 V296" stroke={INK} strokeWidth="1.15" />
-        <path d="M328 226 V268 H278" stroke={INK} strokeWidth="1.15" />
-        <path d="M328 268 H340 V300" stroke={INK} strokeWidth="1.15" />
+        <div className="relative flex min-h-[4.5rem] flex-col items-center justify-center gap-3 max-md:flex-row max-md:py-1">
+          <span className="absolute inset-y-4 left-1/2 w-px -translate-x-1/2 bg-black/25 max-md:inset-x-10 max-md:top-1/2 max-md:h-px max-md:w-auto max-md:translate-x-0" />
+          <span className="absolute top-1/2 bottom-4 left-1/2 w-px -translate-x-1/2 border-l border-dashed border-black/35 max-md:top-1/2 max-md:right-10 max-md:left-1/2 max-md:h-px max-md:w-auto max-md:translate-x-0 max-md:border-l-0 max-md:border-t" />
+          <div className="relative z-[1] bg-[#f7f7f5] px-1">
+            <Gate label="NO EGRESS" tone={sealed(2) ? "ok" : "idle"} />
+          </div>
+          <div className="relative z-[1] flex flex-col items-center gap-1 bg-[#f7f7f5] px-1 py-1">
+            <span className="font-mono text-[9px] tracking-[0.14em] text-[#C43D3D]">DENY</span>
+            <DenyMark />
+            <span className="text-[9px] tracking-tight text-[#C43D3D]">no route</span>
+          </div>
+        </div>
 
-        <Port x={220} y={132} dir="s" />
-        <Port x={112} y={186} dir="n" />
-        <Port x={328} y={186} dir="n" />
-        <Port x={112} y={226} dir="s" />
-        <Port x={328} y={226} dir="s" />
-        <Port x={220} y={296} dir="n" />
-        <Port x={340} y={300} dir="n" />
+        <Cluster
+          title="Production"
+          kicker="LIVE"
+          dashed
+          dim
+          aside={<SealPill label="NOT IN PATH" on tone="cut" />}
+          footer={
+            <div className="text-[10px] tracking-tight text-[#C43D3D]">prod-db cut · live keys unreachable</div>
+          }
+        >
+          <NodeCard kicker="DNS" title="public resolver" glyph="dns" dim />
+          <Gate label="RESOLVE" tone="idle" />
+          <div className="grid grid-cols-2 gap-2">
+            <NodeCard kicker="APP" title="live" glyph="app" dim />
+            <NodeCard kicker="WORKERS" title="live" glyph="wrk" dim />
+          </div>
+          <Gate label="CUT" tone="cut" sub="not in path" />
+          <div className="grid grid-cols-2 gap-2 pb-1">
+            <NodeCard kicker="STATE" title="prod-db" glyph="db" dim cut />
+            <NodeCard kicker="CREDS" title="live keys" glyph="key" dim cut />
+          </div>
+        </Cluster>
+      </div>
 
-        <Caption x={248} y={148} text="resolve" mono />
-        <Caption x={220} y={208} text="MASK · KEEP" anchor="middle" mono />
-
-        <Box x={140} y={92} w={160} h={40} kicker="DNS" label="clone-local" glyph="dns" live={sealed(0)} />
-        <Box x={52} y={186} w={120} h={40} kicker="APP" label="candidate" glyph="app" live={!gone} />
-        <Box x={268} y={186} w={120} h={40} kicker="WORKERS" label="isolated" glyph="wrk" live={!gone} />
-        <Cylinder cx={220} cy={324} rx={44} ry={8} h={56} kicker="STATE" label="postgres" />
-        <Box x={286} y={300} w={108} h={40} kicker="CREDS" label="replaced" glyph="key" live={sealed(1)} />
-
-        <g>
-          <rect x={36} y={408} width={44} height="14" rx="4" fill={PAPER} stroke="rgba(0,0,0,0.12)" />
-          <text x={42} y={418} fill={MUTED} fontSize="8" fontFamily={MONO} letterSpacing="0.1em">
-            SEALS
-          </text>
-          {[
-            { x: 88, label: "clone-local DNS", on: sealed(0) },
-            { x: 214, label: "secrets replaced", on: sealed(1) },
-            { x: 336, label: "no egress", on: sealed(2) },
-          ].map((s) => (
-            <g key={s.label}>
-              <rect
-                x={s.x}
-                y={406}
-                width={s.label.length * 6.1 + 22}
-                height="18"
-                rx="6"
-                fill={s.on ? "rgba(51,191,0,0.1)" : PAPER}
-                stroke={s.on ? OK : "rgba(0,0,0,0.14)"}
-              />
-              <circle cx={s.x + 9} cy={415} r="2.2" fill={s.on ? OK : "rgba(0,0,0,0.18)"} />
-              <text x={s.x + 16} y={419} fill={s.on ? INK : MUTED} fontSize="9" fontFamily={FONT}>
-                {s.label}
-              </text>
-            </g>
-          ))}
-        </g>
-      </g>
-
-      <path d="M424 210 H448" stroke={INK} strokeWidth="1.15" />
-      <Cut x={468} y={210} />
-      <path d="M488 210 H512" stroke="rgba(0,0,0,0.3)" strokeWidth="1" strokeDasharray={dash} />
-      <Caption x={468} y={186} text="DENY" fill={CUT} anchor="middle" mono />
-      <Caption x={468} y={240} text="no route" fill={CUT} anchor="middle" />
-
-      <g opacity="0.5">
-        <Zone x={20 + shift} y={54} w={404} h={392} label="PRODUCTION" dashed />
-        <rect
-          x={44 + shift}
-          y={84}
-          width={356}
-          height={308}
-          rx="10"
-          fill="none"
-          stroke="rgba(0,0,0,0.18)"
-          strokeWidth="0.9"
-          strokeDasharray={dash}
-        />
-        <rect x={56 + shift} y={77} width={48} height="12" rx="3" fill={PAPER} />
-        <text x={62 + shift} y={87} fill={MUTED} fontSize="8" fontFamily={MONO} letterSpacing="0.12em">
-          LIVE
-        </text>
-
-        <path
-          d={`M${220 + shift} 132 V162 H${112 + shift} Q${104 + shift} 162 ${104 + shift} 170 V186`}
-          stroke="rgba(0,0,0,0.45)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-        />
-        <path
-          d={`M${220 + shift} 162 H${328 + shift} Q${336 + shift} 162 ${336 + shift} 170 V186`}
-          stroke="rgba(0,0,0,0.45)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-        />
-        <path
-          d={`M${112 + shift} 226 V268 H${220 + shift} V296`}
-          stroke="rgba(0,0,0,0.45)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-        />
-        <path
-          d={`M${328 + shift} 226 V268 H${278 + shift}`}
-          stroke="rgba(0,0,0,0.45)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-        />
-        <path
-          d={`M${328 + shift} 268 H${340 + shift} V300`}
-          stroke="rgba(0,0,0,0.45)"
-          strokeWidth="1"
-          strokeDasharray={dash}
-        />
-
-        <Box x={140 + shift} y={92} w={160} h={40} kicker="DNS" label="public resolver" glyph="dns" dim />
-        <Box x={52 + shift} y={186} w={120} h={40} kicker="APP" label="live" glyph="app" dim />
-        <Box x={268 + shift} y={186} w={120} h={40} kicker="WORKERS" label="live" glyph="wrk" dim />
-        <Cylinder cx={220 + shift} cy={324} rx={44} ry={8} h={56} kicker="STATE" label="prod-db" dim cut />
-        <Box x={286 + shift} y={300} w={108} h={40} kicker="CREDS" label="live keys" glyph="key" dim />
-        <Cut x={220 + shift} y={280} s={5} />
-        <Cut x={340 + shift} y={282} s={5} />
-
-        <rect x={36 + shift} y={406} width={84} height="18" rx="6" fill={PAPER} stroke="rgba(196,61,61,0.35)" />
-        <text x={44 + shift} y={419} fill={CUT} fontSize="8" fontFamily={MONO} letterSpacing="0.1em">
-          NOT IN PATH
-        </text>
-        <Caption x={128 + shift} y={419} text="prod-db cut · live keys unreachable" />
-      </g>
-
-      <path d="M24 458 H700" stroke="rgba(0,0,0,0.1)" />
-      <text x="24" y="486" fill={MUTED} fontSize="8" fontFamily={MONO} letterSpacing="0.1em">
-        LEGEND
-      </text>
-      <path d="M80 482 h16" stroke={INK} strokeWidth="1.15" />
-      <text x="100" y="486" fill={MUTED} fontSize="9" fontFamily={FONT}>
-        twin path
-      </text>
-      <path d="M164 482 h16" stroke="rgba(0,0,0,0.4)" strokeWidth="1" strokeDasharray={dash} />
-      <text x="184" y="486" fill={MUTED} fontSize="9" fontFamily={FONT}>
-        not in path
-      </text>
-      <Cut x={264} y={480} s={4.5} />
-      <text x="274" y="486" fill={MUTED} fontSize="9" fontFamily={FONT}>
-        deny
-      </text>
-      <circle cx="324" cy="480" r="2.4" fill={OK} />
-      <text x="332" y="486" fill={MUTED} fontSize="9" fontFamily={FONT}>
-        sealed
-      </text>
-
-      <rect x={728} y={466} width={188} height="34" rx="8" fill={PAPER} stroke="rgba(0,0,0,0.12)" />
-      <text x={740} y={480} fill={MUTED} fontSize="8" fontFamily={MONO} letterSpacing="0.12em">
-        RUN  pr-4182
-      </text>
-      <text x={740} y={494} fill={gone ? OK : INK} fontSize="8" fontFamily={MONO} letterSpacing="0.12em">
-        {gone ? "0 REMAINING  ·  DESTROYED" : "4 LIVE  ·  CONTAINED"}
-      </text>
-    </svg>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-black/[0.08] pt-2.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] tracking-tight text-[#797d86]">
+          <span className="font-mono text-[8px] tracking-[0.12em]">LEGEND</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-px w-3.5 bg-[#111111]" />
+            twin path
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-px w-3.5 border-t border-dashed border-black/40" />
+            not in path
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <DenyMark size="sm" />
+            deny
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-1.5 rounded-full bg-[#33bf00]" />
+            sealed
+          </span>
+        </div>
+        <div className="rounded-[8px] border border-black/[0.10] bg-white px-2.5 py-1.5">
+          <div className="font-mono text-[8px] tracking-[0.12em] text-[#797d86]">RUN  pr-4182</div>
+          <div
+            className={cn(
+              "font-mono text-[8px] tracking-[0.12em] transition-colors duration-700",
+              gone ? "text-[#33bf00]" : "text-[#111111]",
+            )}
+          >
+            {gone ? "0 REMAINING  ·  DESTROYED" : "4 LIVE  ·  CONTAINED"}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -507,7 +505,7 @@ function TwinDocsLanding() {
         </span>
       </header>
 
-      <div className="border-t border-black/[0.06] px-3 pb-3 pt-2 sm:px-5 sm:pb-5 sm:pt-3">
+      <div className="border-t border-black/[0.06] bg-[#f7f7f5] px-3 py-3 sm:px-4 sm:py-4">
         <TwinSchematic beat={beat} gone={gone} />
       </div>
     </div>
