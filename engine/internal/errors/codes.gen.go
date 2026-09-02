@@ -244,6 +244,9 @@ const (
 	AFMSK008 Code = "AF-MSK-008"
 	// Masking could not run: {detail}
 	AFMSK010 Code = "AF-MSK-010"
+	// Verification could not read {table}.{column}, so the golden was not
+	// verified: {detail}
+	AFMSK011 Code = "AF-MSK-011"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -1204,6 +1207,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/masking",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFMSK011: {
+		Code:      AFMSK011,
+		Area:      "MSK",
+		Message:   "Verification could not read {table}.{column}, so the golden was not verified: {detail}",
+		NextStep:  "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.",
+		Docs:      "concepts/verification",
+		Retryable: false,
+		ExitCode:  ExitVerification,
 	},
 	AFNET001: {
 		Code:      AFNET001,

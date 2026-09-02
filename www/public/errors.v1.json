@@ -773,6 +773,17 @@
       "planned": false
     },
     {
+      "code": "AF-MSK-011",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "Verification could not read {table}.{column}, so the golden was not verified: {detail}",
+      "resolution": "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.",
+      "docs": "https://antifailure.dev/docs/concepts/verification",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
       "code": "AF-NET-001",
       "area": "NET",
       "areaName": "Egress",
