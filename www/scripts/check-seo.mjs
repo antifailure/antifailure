@@ -22,6 +22,36 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "out");
 
+/**
+ * The one origin every absolute URL the site emits has to resolve to.
+ *
+ * This is a literal rather than an import of SITE_URL because SITE_URL is
+ * `process.env.NEXT_PUBLIC_SITE_URL ?? "https://antifailure.dev"`, and a check
+ * that reads its subject's own configuration cannot disagree with it. Every
+ * canonical, og:url, sitemap <loc>, robots Host and JSON-LD @id on the site is
+ * built from that variable, so one wrong value in one build environment ships
+ * the whole site canonicalised to the wrong scheme or the wrong host, and
+ * nothing about the pages themselves looks wrong.
+ *
+ * That is not hypothetical. Google's top result for this site is the http://
+ * spelling of the home page, because the site shipped with no canonical at all
+ * for long enough to be indexed that way. The scheme costs nothing to a
+ * visitor, since .dev is an HSTS-preloaded TLD and no browser will emit a
+ * plaintext request to one, but it is the wrong URL in the index and it splits
+ * every signal that points at the site between two spellings of it.
+ *
+ * Both wrong spellings are asserted against, not just the scheme: www is a
+ * second live origin serving this same build on its own certificate, so
+ * https://www.antifailure.dev is reachable, returns 200, and is exactly as
+ * wrong to canonicalise to as the http:// one.
+ */
+const ORIGIN = "https://antifailure.dev";
+const WRONG_ORIGINS = [
+  "http://antifailure.dev",
+  "http://www.antifailure.dev",
+  "https://www.antifailure.dev",
+];
+
 let failures = 0;
 let checks = 0;
 
@@ -49,11 +79,22 @@ if (!existsSync(OUT)) {
 const read = (rel) => readFileSync(path.join(OUT, rel), "utf8");
 const has = (rel) => existsSync(path.join(OUT, rel));
 
+function jsonLdNodes(html) {
+  const nodes = [];
+  for (const match of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/gi)) {
+    const parsed = JSON.parse(match[1]);
+    nodes.push(...(Array.isArray(parsed?.["@graph"]) ? parsed["@graph"] : [parsed]));
+  }
+  return nodes;
+}
+
 console.log("\nCrawl surfaces");
 assert(has("robots.txt"), "robots.txt exists");
 assert(has("sitemap.xml"), "sitemap.xml exists");
 assert(has("llms.txt"), "llms.txt exists");
 assert(has("llms-full.txt"), "llms-full.txt exists");
+assert(has("404.md"), "the visual 404 has a machine-readable recovery page");
+assert(has("errors.v1.json"), "the machine-readable error catalog exists");
 assert(has("og.png"), "og.png exists (docs/astro.config.mjs references it)");
 assert(has("manifest.webmanifest"), "web app manifest exists");
 assert(has("staticwebapp.config.json"), "host config exists (headers, 301s, 404 status)");
@@ -78,6 +119,35 @@ if (has("robots.txt")) {
     "robots.txt advertises the documentation sitemap too",
     "the docs are 41 of the site's 72 pages; leaving them out halves what a crawler finds",
   );
+  const groups = robots.split(/\n\s*\n/).filter((block) => /User-Agent:/i.test(block));
+  for (const bot of ["GPTBot", "OAI-SearchBot", "ClaudeBot", "Claude-SearchBot", "PerplexityBot"]) {
+    const group = groups.find((block) =>
+      new RegExp(`^User-Agent:\\s*${bot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(block),
+    );
+    assert(
+      Boolean(group) && /^Allow:\s*\/$/im.test(group) && !/^Disallow:\s*\/$/im.test(group),
+      `robots.txt permits ${bot} to crawl public pages`,
+    );
+  }
+
+  // Advertising a sitemap and advertising it at the right URL are different
+  // claims, and the check above only made the first one. `includes("Sitemap:")`
+  // is true of `Sitemap: http://www.antifailure.dev/sitemap.xml`, which names a
+  // different origin from the one every page canonicalises to and hands a
+  // crawler a second spelling of the site to reconcile.
+  const advertised = [...robots.matchAll(/^Sitemap:\s*(\S+)$/gim)].map((m) => m[1]);
+  const offOrigin = advertised.filter((url) => !url.startsWith(`${ORIGIN}/`));
+  assert(
+    advertised.length > 0 && offOrigin.length === 0,
+    `robots.txt advertises every sitemap on ${ORIGIN}`,
+    offOrigin.length > 0 ? offOrigin.join(", ") : "no Sitemap: line at all",
+  );
+  const host = robots.match(/^Host:\s*(\S+)$/im)?.[1];
+  assert(
+    host === ORIGIN,
+    `robots.txt names ${ORIGIN} as the host`,
+    host ? `it names ${host}` : "no Host: line",
+  );
 }
 
 if (has("sitemap.xml")) {
@@ -93,6 +163,17 @@ if (has("sitemap.xml")) {
   assert(
     !sitemap.includes("/signin") && !sitemap.includes("/signup"),
     "sitemap excludes the noindex waitlist routes",
+  );
+  // The count above is a canary against a truncated sitemap and says nothing
+  // about what the URLs in it are. A sitemap listing 32 URLs on a host the
+  // pages do not canonicalise to passes it and is worse than no sitemap,
+  // because it actively submits the wrong spelling for indexing.
+  const locs = [...sitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+  const strays = locs.filter((url) => url !== ORIGIN && !url.startsWith(`${ORIGIN}/`));
+  assert(
+    locs.length > 0 && strays.length === 0,
+    `every sitemap URL is on ${ORIGIN}`,
+    strays.length > 0 ? `${strays.length} are not: ${strays.slice(0, 3).join(", ")}` : "",
   );
   // The property that matters is that lastmod came from content history, not
   // from the clock. Requiring several distinct values was the first version of
@@ -131,6 +212,24 @@ if (has("sitemap.xml")) {
   );
 }
 
+if (has("404.html") && has("404.md")) {
+  const notFound = read("404.html");
+  const recovery = read("404.md");
+  const alternate = (notFound.match(/<link\b[^>]*>/gi) ?? []).find(
+    (tag) =>
+      /rel="alternate"/i.test(tag) &&
+      /type="text\/markdown"/i.test(tag) &&
+      /href="https:\/\/antifailure\.dev\/404\.md"/i.test(tag),
+  );
+  assert(
+    Boolean(alternate),
+    "404 HTML advertises its Markdown recovery body",
+  );
+  for (const address of ["/sitemap.xml", "/llms.txt", "/docs", "/openapi.json"]) {
+    assert(recovery.includes(address), `404 Markdown points at ${address}`);
+  }
+}
+
 // Every indexable page, checked individually. A site-wide tag that is present
 // on the home page and missing on eleven product pages is the normal failure.
 function htmlFiles(dir) {
@@ -144,16 +243,30 @@ function htmlFiles(dir) {
   return found;
 }
 
+/**
+ * The path a built file is the page for, in the spelling the host serves.
+ *
+ * staticwebapp.config.json sets "trailingSlash": "never", so /about is the one
+ * address /about answers on and /about/ is a 301 to it. The canonical has to
+ * be the address that answers, and the home page is the origin itself with no
+ * trailing slash, which is what absoluteUrl() in lib/site.ts produces.
+ */
+const routeOf = (rel) =>
+  rel === "index.html" ? "" : `/${rel.replace(/\.html$/, "").replace(/\/index$/, "")}`;
+
 const pages = htmlFiles(OUT);
 console.log(`\nPer-page tags (${pages.length} HTML files)`);
 
 const missing = {
   canonical: [],
+  canonicalTarget: [],
   ogTitle: [],
   ogImage: [],
+  ogUrl: [],
   twitter: [],
   description: [],
   jsonld: [],
+  jsonldPage: [],
   breadcrumb: [],
   h1: [],
   oneMain: [],
@@ -168,11 +281,51 @@ for (const file of pages) {
   if (noindex) continue;
 
   if (!/<link rel="canonical"/i.test(html)) missing.canonical.push(rel);
+  // What the canonical POINTS AT, which the presence check above never looked
+  // at. A page carrying `<link rel="canonical" href="http://www.antifailure.dev/pricing">`
+  // satisfies that check completely. Downgrading every URL in the built output
+  // to that spelling moved this gate by zero checks before this assertion
+  // existed, so a site-wide scheme or host regression, which is the only way
+  // this failure ever actually happens, shipped green.
+  //
+  // Asserted as the exact expected URL rather than as a prefix, because that
+  // costs nothing more and additionally catches a page canonicalising to a
+  // different page, which is the cannibalisation bug that silently drops a
+  // page out of the index entirely.
+  const want = ORIGIN + routeOf(rel);
+  const canonicalValue = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1] ?? "";
+  if (canonicalValue && canonicalValue !== want) {
+    missing.canonicalTarget.push(`${rel} (want ${JSON.stringify(want)}, got ${JSON.stringify(canonicalValue)})`);
+  }
+  // og:url is a second, independent claim about the page's address, and a
+  // crawler that disagrees with the canonical has two candidates rather than
+  // one. They are built from the same absoluteUrl() call today; this is what
+  // notices if they ever stop being.
+  // Checking og:url against the canonical rather than against the expected
+  // address would pass whenever both are wrong the same way, which is the only
+  // shape this failure has ever taken: one SITE_URL feeds both, so a bad value
+  // moves them together and a relative check sees two values that agree.
+  const ogUrl = html.match(/<meta property="og:url" content="([^"]*)"/i)?.[1];
+  if (ogUrl !== want) {
+    missing.ogUrl.push(`${rel} (want ${JSON.stringify(want)}, og:url ${JSON.stringify(ogUrl ?? null)})`);
+  }
   if (!/property="og:title"/i.test(html)) missing.ogTitle.push(rel);
   if (!/property="og:image"/i.test(html)) missing.ogImage.push(rel);
   if (!/name="twitter:card"/i.test(html)) missing.twitter.push(rel);
   if (!/<meta name="description"/i.test(html)) missing.description.push(rel);
   if (!/application\/ld\+json/i.test(html)) missing.jsonld.push(rel);
+  if (rel !== "index.html") {
+    let nodes = [];
+    try {
+      nodes = jsonLdNodes(html);
+    } catch {
+      missing.jsonldPage.push(`${rel} (JSON-LD does not parse)`);
+    }
+    const page = nodes.find((node) => node?.["@id"] === `${canonicalValue}#webpage`);
+    if (!page || page.url !== canonicalValue) {
+      missing.jsonldPage.push(`${rel} (WebPage identity does not match ${canonicalValue})`);
+    }
+  }
   // A trail a reader can see and no BreadcrumbList describing it is the failure
   // this catches: the blog posts rendered the visible trail and shipped no
   // markup for it, because they use PostJsonLd rather than the PageHero that
@@ -305,11 +458,14 @@ assert(
 
 const LABELS = {
   canonical: "every indexable page has a canonical",
+  canonicalTarget: "every canonical is the page's own https://antifailure.dev address",
+  ogUrl: "every og:url agrees with the canonical",
   ogTitle: "every indexable page has og:title",
   ogImage: "every indexable page has og:image",
   twitter: "every indexable page has a twitter card",
   description: "every indexable page has a meta description",
   jsonld: "every indexable page has JSON-LD",
+  jsonldPage: "every page below the root has a matching WebPage JSON-LD node",
   breadcrumb: "every indexable page below the root has a BreadcrumbList",
   h1: "every indexable page has an h1",
   oneMain: "every indexable page has exactly one <main>",
@@ -323,6 +479,166 @@ for (const [key, list] of Object.entries(missing)) {
     LABELS[key],
     list.length > 0 ? `missing on ${list.length}: ${list.slice(0, 5).join(", ")}${list.length > 5 ? " ..." : ""}` : "",
   );
+}
+
+console.log("\nMarkdown twins carry the page's tables and definition lists");
+// The twin is what an answer engine reads instead of 300KB of markup, and the
+// extractor matched headings, paragraphs and list items only. So
+// /product/safe-state's masking table and /product/overview's manifest
+// definition list, which are the most specific claims either page makes,
+// were in the HTML and absent from the twin. Nothing said so: the twin was
+// present, well formed, and the right length.
+//
+// Derived from the built pages rather than from a fixture, so a cell added to a
+// page is covered the day it ships and a hardcoded list cannot go stale.
+{
+  const cellText = (html) =>
+    html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
+      .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\s+/g, " ")
+      .trim();
+
+  let cellsChecked = 0;
+  const absent = [];
+  for (const file of pages) {
+    const twinPath = file.replace(/\.html$/, ".md");
+    if (!existsSync(twinPath)) continue;
+    const html = readFileSync(file, "utf8");
+    const main = html.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1];
+    if (!main) continue;
+    // The extractor drops these wholesale, so a string inside one is not
+    // content and its absence from the twin is correct.
+    const body = main.replace(
+      /<(script|style|svg|noscript|template|nav)\b[^>]*>[\s\S]*?<\/\1>/gi,
+      " ",
+    );
+    const twin = readFileSync(twinPath, "utf8");
+    for (const match of body.matchAll(/<(th|td|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+      const value = cellText(match[2]);
+      if (value.length < 3) continue;
+      cellsChecked++;
+      if (!twin.includes(value)) {
+        absent.push(`${path.relative(OUT, file)} <${match[1].toLowerCase()}> ${JSON.stringify(value)}`);
+      }
+    }
+  }
+
+  // Standard 24. Every assertion here is an absence, and a page set with no
+  // cells in it produces exactly the same green as an extractor that works.
+  assert(
+    cellsChecked >= 20,
+    `the twin check examined ${cellsChecked} table and definition cells`,
+    "under twenty means the scan found nothing to check, which is what a broken scan looks like",
+  );
+  assert(
+    absent.length === 0,
+    "every table cell and definition on a page is in its markdown twin",
+    absent.slice(0, 8).join("; "),
+  );
+}
+
+console.log("\nMachine-readable corpus");
+if (has("llms.txt") && has("llms-full.txt") && has("sitemap.xml")) {
+  const index = read("llms.txt");
+  const full = read("llms-full.txt");
+  const sitemapUrls = [...read("sitemap.xml").matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+  assert(index.includes("## When to use Antifailure"), "llms.txt says when an agent should use Antifailure");
+  for (const address of ["/openapi.json", "/errors.v1.json", "/docs/reference/api", "/docs/reference/cli"]) {
+    assert(index.includes(address), `llms.txt discovers ${address}`);
+  }
+  assert(full.length >= 50_000, `llms-full.txt contains substantive rendered text (${full.length} bytes)`);
+  const absent = sitemapUrls.filter((url) => !full.includes(`> Canonical: ${url}`));
+  assert(
+    absent.length === 0,
+    "llms-full.txt contains every marketing sitemap page",
+    absent.length ? `missing ${absent.join(", ")}` : "",
+  );
+}
+
+console.log("\nCanonical inventory");
+if (has("sitemap.xml")) {
+  const sitemapUrls = new Set([...read("sitemap.xml").matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]));
+  const pageUrls = new Set();
+  for (const file of pages) {
+    const html = readFileSync(file, "utf8");
+    if (/<meta name="robots" content="[^"]*noindex/i.test(html)) continue;
+    const canonical = html.match(/<link rel="canonical" href="([^"]+)"/i)?.[1];
+    if (canonical) pageUrls.add(canonical);
+  }
+  const missingFromMap = [...pageUrls].filter((url) => !sitemapUrls.has(url));
+  const missingPage = [...sitemapUrls].filter((url) => !pageUrls.has(url));
+  assert(
+    missingFromMap.length === 0 && missingPage.length === 0,
+    "sitemap URLs and indexable page canonicals are the same set",
+    `not in sitemap: ${missingFromMap.join(", ")}; no page: ${missingPage.join(", ")}`,
+  );
+}
+
+console.log("\nTrust pages");
+const trustPages = [
+  {
+    route: "/about",
+    file: "about.html",
+    schemaType: "AboutPage",
+    links: ["/docs", "https://github.com/antifailure/antifailure", "/privacy", "/contact"],
+  },
+  {
+    route: "/contact",
+    file: "contact.html",
+    schemaType: "ContactPage",
+    links: [
+      "https://github.com/antifailure/antifailure/security/advisories/new",
+      "https://github.com/antifailure/antifailure/issues/new/choose",
+      "https://github.com/antifailure/antifailure/discussions",
+      "/signup",
+    ],
+  },
+];
+const home = read("index.html");
+for (const page of trustPages) {
+  assert(has(page.file), `${page.route} was built`);
+  if (!has(page.file)) continue;
+  const html = read(page.file);
+  const canonical = `https://antifailure.dev${page.route}`;
+  const node = jsonLdNodes(html).find((item) => item?.["@id"] === `${canonical}#webpage`);
+  assert(
+    node?.["@type"] === page.schemaType &&
+      node?.url === canonical &&
+      node?.about?.["@id"] === "https://antifailure.dev/#organization",
+    `${page.route} carries linked ${page.schemaType} JSON-LD`,
+  );
+  assert(home.includes(`href="${page.route}"`), `home navigation links to ${page.route}`);
+  for (const href of page.links) {
+    assert(html.includes(`href="${href}"`), `${page.route} visibly links to ${href}`);
+  }
+  const markdown = read(page.file.replace(/\.html$/, ".md"));
+  assert(
+    markdown.replace(/\s+/g, " ").trim().length > 500,
+    `${page.route} has more than 500 characters of raw content`,
+  );
+}
+if (has("contact.html")) {
+  const html = read("contact.html");
+  const organization = jsonLdNodes(html).find(
+    (node) => node?.["@id"] === "https://antifailure.dev/#organization",
+  );
+  const contacts = new Set((organization?.contactPoint ?? []).map((point) => point.url));
+  for (const url of [
+    "https://github.com/antifailure/antifailure/security/advisories/new",
+    "https://github.com/antifailure/antifailure/issues/new/choose",
+    "https://github.com/antifailure/antifailure/discussions",
+    "https://antifailure.dev/signup",
+  ]) {
+    assert(contacts.has(url), `Organization JSON-LD publishes ${url}`);
+  }
+  assert(!html.includes("mailto:"), "/contact does not advertise dead email channels");
 }
 
 // Reachability, which is a different question from "does this link resolve".
@@ -441,6 +757,41 @@ assert(
   dupes.length === 0,
   "every indexable page has a unique title",
   dupes.length > 0 ? dupes.map(([t, n]) => `"${t}" x${n}`).join("; ") : "",
+);
+
+// One origin, everywhere, in every file the host will serve.
+//
+// The tag checks above reach canonicals and og:urls. They do not reach a
+// JSON-LD @id, a link written by hand in MDX, a URL baked into a JS chunk, or
+// the markdown twins, and every one of those is a place the site states its own
+// address. This is the assertion that covers all of them at once, and it is
+// deliberately a search for the wrong answer rather than a survey of the right
+// one: it needs no list of the files that are allowed to mention the site, so
+// a file added later cannot fall outside it.
+console.log("\nOne origin");
+const SERVED = /\.(html|md|txt|xml|json|js|webmanifest)$/i;
+function servedFiles(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) found.push(...servedFiles(full));
+    else if (SERVED.test(entry)) found.push(full);
+  }
+  return found;
+}
+const offOrigin = [];
+for (const file of servedFiles(OUT)) {
+  const body = readFileSync(file, "utf8");
+  for (const wrong of WRONG_ORIGINS) {
+    if (body.includes(wrong)) offOrigin.push(`${path.relative(OUT, file)} (${wrong})`);
+  }
+}
+assert(
+  offOrigin.length === 0,
+  `no built file spells the site any way but ${ORIGIN}`,
+  offOrigin.length > 0
+    ? `${offOrigin.length} occurrences: ${offOrigin.slice(0, 5).join(", ")}${offOrigin.length > 5 ? " ..." : ""}`
+    : "",
 );
 
 console.log(`\n${checks - failures}/${checks} passed`);

@@ -1,3 +1,9 @@
+//go:build unix
+
+// syscall.Kill is not on Windows, and this test is about delivering a real
+// SIGINT to this process rather than about simulating one, so there is
+// nothing to run there rather than something to port.
+
 package cli_test
 
 import (

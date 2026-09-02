@@ -220,7 +220,7 @@ that went from `pass` to anything else is counted as a regression; one that went
 from `unverified` to `fail` is reported as changed and not as a regression,
 because it was never passing.
 
-This is not [the differential oracle](/docs/concepts/oracle/). `af oracle`
+This is not [the differential oracle](/docs/concepts/oracle). `af oracle`
 brings a second environment up from a baseline revision, branches one golden for
 both so they start from identical rows, sends both the same probes and diffs the
 responses and the database contents. That is a far stronger claim. `af workload

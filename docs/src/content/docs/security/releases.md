@@ -56,11 +56,18 @@ This proves the file is not corrupt. It proves nothing about who wrote
 
 ## Check the signature
 
+Everything on this page works from v1.0.0 onwards. v0.1.0 and v0.1.1 were built
+before the signing and the reproducible archives existed, so they carry no
+`.sigstore.json` bundle and rebuilding them does not produce the bytes that were
+published. A release that ran these steps carries `checksums.txt.sigstore.json`
+and `sbom.spdx.json`; a release that carries neither did not, and that is a
+thing you can check rather than take on trust.
+
 Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
 The identity is long and you need it three times, so name it once:
 
 ```sh
-TAG=v0.1.0
+TAG=v1.0.0
 REPO=antifailure/antifailure
 WORKFLOW=.github/workflows/release.yml
 
@@ -129,10 +136,10 @@ trusting either of us.
 ```sh
 git clone https://github.com/antifailure/antifailure
 cd antifailure
-git checkout v0.1.0
-./tools/release/build.sh linux amd64 0.1.0 \
+git checkout v1.0.0
+./tools/release/build.sh linux amd64 1.0.0 \
   "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" dist stage
-sha256sum dist/antifailure_0.1.0_linux_amd64.tar.gz
+sha256sum dist/antifailure_1.0.0_linux_amd64.tar.gz
 ```
 
 That hash should be the line for your platform in `checksums.txt`. You need the
@@ -185,14 +192,23 @@ chosen yet.
 For maintainers. Everything below runs from a tag and nothing runs from a
 branch, because a release built from a branch is a release nobody can reproduce.
 
+The same tag also deploys the hosted control plane, which this page does not
+cover because it is not something a person verifying a download needs to know.
+[Cutting a release](/docs/self-hosting/releasing) is the operational runbook:
+what green looks like at every stage of both workflows, and what to do when one
+of them goes red.
+
 1. Confirm the gates are green on the commit you are about to tag. `just gate`
    locally, and CI green on the merge.
-2. Add the changelog fragments to a release note if the version deserves one.
+2. Write the release's section in `CHANGELOG.md`, headed `## vX.Y.Z`. The
+   release publishes that section and nothing else, so a tag with no section, or
+   with a heading and nothing under it, does not publish at all. `just relnotes`
+   is that check and it runs on every pull request.
 3. Tag and push:
 
    ```sh
-   git tag -s v0.1.0 -m "v0.1.0"
-   git push origin v0.1.0
+   git tag -s v1.0.0 -m "v1.0.0"
+   git push origin v1.0.0
    ```
 
 4. Watch `.github/workflows/release.yml`. It builds four platforms, packages
@@ -202,6 +218,29 @@ branch, because a release built from a branch is a release nobody can reproduce.
    the release.
 5. Check the published artifacts the way this page tells a user to. If the
    instructions do not work, the release is not done.
+6. **After the tag has published, and in its own commit,** bump the Terraform
+   `image_tag` defaults in `infra/terraform/stacks/control-plane/variables.tf`
+   and `infra/terraform/modules/control-plane/variables.tf` to the new tag.
+
+Step 6 is separate on purpose and it is the one step here that must not be done
+early. Those defaults are live: `azurerm_container_app_job.maintenance` reads
+the image with no `ignore_changes`, so an apply from `main` takes whatever they
+say. A default naming a tag that has not published yet does not produce a stale
+deployment, it produces a failed apply on the stack that runs the product.
+`tools/tagsync` is that ordering as a gate, so the mistake is a red check rather
+than a bad afternoon.
+
+Step 6 is a person's job on purpose, and it is not an oversight waiting to be
+automated. A release job that opened the bump as a pull request would need
+`contents: write` and `pull-requests: write` on a workflow whose stated rule is
+that only the publishing job gets write at all, and widening that surface is a
+change that deserves its own review rather than riding along with a release.
+The risk worth removing was the silent one, doing the bump too early, and
+`tagsync` removes it. Doing it late costs a stale default and nothing else.
+
+Pushing the tag also publishes `ghcr.io/antifailure/control-plane:<tag>` and
+**moves `:latest` onto it**, which changes what anybody self hosting off
+`latest` gets on their next pull. Say so in the release notes.
 
 The workflow fails rather than publishing when any of those checks fail. That
 ordering is the point: every previous version of this pipeline signed and

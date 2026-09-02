@@ -9,7 +9,7 @@ The production control plane is one `terraform apply` and eight things a person
 has to do in a browser or a shell, and the order matters because several of them
 fail if done early.
 
-Read [Azure](/docs/self-hosting/azure/) first. Everything on that page about
+Read [Azure](/docs/self-hosting/azure) first. Everything on that page about
 policy, regions, the Key Vault name and the revision mode trap applies here and
 is not repeated.
 
@@ -382,6 +382,6 @@ it refuses cleanly if any of the above was skipped.
   0 and it fires on two failed probe locations.
 - Run the backup drill and write down the number it prints. That number is your
   recovery time objective and nothing else is. The
-  [operations page](/docs/self-hosting/operations/) has the command.
-- The [runbooks](/docs/self-hosting/runbooks/) are the pages the alerts link to.
+  [operations page](/docs/self-hosting/operations) has the command.
+- The [runbooks](/docs/self-hosting/runbooks) are the pages the alerts link to.
   Read the index once now, while nothing is broken.
