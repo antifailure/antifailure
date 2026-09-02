@@ -50,6 +50,7 @@ subsetting
 supabase
 syft
 testcontainers
+tfvars
 tripwire
 tripwires
 trufflehog

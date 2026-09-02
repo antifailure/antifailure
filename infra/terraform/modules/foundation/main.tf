@@ -20,7 +20,7 @@ terraform {
 locals {
   # Enforced here as well as in azguard, because a module is easier to reach
   # than a wrapper script and both should refuse.
-  name_is_owned = startswith(var.name, "af-")
+  name_is_owned = startswith(var.resource_group_name, "af-")
 
   tags = merge(var.tags, {
     project     = "antifailure"
@@ -33,13 +33,13 @@ resource "terraform_data" "name_guard" {
   lifecycle {
     precondition {
       condition     = local.name_is_owned
-      error_message = "Resource group ${var.name} does not start with af-. Antifailure creates resource groups it owns and nothing else; this subscription holds groups belonging to other projects."
+      error_message = "Resource group ${var.resource_group_name} does not start with af-. Antifailure creates resource groups it owns and nothing else; this subscription holds groups belonging to other projects."
     }
   }
 }
 
 resource "azurerm_resource_group" "this" {
-  name     = var.name
+  name     = var.resource_group_name
   location = var.location
   tags     = local.tags
 
@@ -56,8 +56,8 @@ resource "azurerm_resource_group" "this" {
 # this answers ("what happened during that incident") are asked within days and
 # a longer retention is a bill rather than a benefit.
 resource "azurerm_log_analytics_workspace" "this" {
-  count               = var.log_analytics ? 1 : 0
-  name                = "${var.name}-logs"
+  count               = var.log_analytics_enabled ? 1 : 0
+  name                = "${var.resource_group_name}-logs"
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
   sku                 = "PerGB2018"
@@ -71,7 +71,7 @@ resource "azurerm_log_analytics_workspace" "this" {
 # is the one worth waking up for.
 resource "azurerm_consumption_budget_resource_group" "this" {
   count             = var.monthly_budget_usd > 0 ? 1 : 0
-  name              = "${var.name}-budget"
+  name              = "${var.resource_group_name}-budget"
   resource_group_id = azurerm_resource_group.this.id
 
   amount     = var.monthly_budget_usd

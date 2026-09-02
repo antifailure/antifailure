@@ -43,11 +43,28 @@ Stable, and breaking any of these costs a major version:
   surface and is treated as one.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
+- **The self-hosting configuration.** Every key in the Helm chart's
+  `values.yaml`, and every variable and output in the Terraform under
+  `infra/terraform`. A key or a variable will not be removed, renamed, or given
+  a different type, an optional input will not become required, and a new input
+  arrives with a default. This one changed in this release: it used to be on
+  the list below. A self hoster's values file and tfvars file are their
+  configuration, kept in their repository and applied by their pipeline, and a
+  rename does not fail that pipeline loudly. Helm accepts a key no template
+  reads and Terraform only warns about a variable nothing declares, so the
+  setting stops being in force while the apply still reports success. Outputs
+  are promised by name because two runbook commands read one. The values
+  themselves are not promised: `image_tag` names the release being cut, and
+  `tools/tagsync` exists to make sure it does. `tools/inputcheck` holds the tree
+  to a snapshot of every one of them, so a rename fails in the pull request
+  that proposes it rather than in somebody's upgrade.
 
 Explicitly not stable, and free to change in a minor release:
 
-- The Helm chart's values and the Terraform module's variables. The chart is
-  versioned separately and is at 0.1.1 for that reason.
+- The defaults and the validation rules those self-hosting inputs carry, and
+  what the Terraform creates behind them. The names and the types are the
+  contract; the resources are an implementation and a default moves with a
+  release.
 - The control plane's HTTP API, which the console and the engine speak to each
   other and which is not a published integration surface.
 - Every Go package except the two named above, and everything under
@@ -211,8 +228,37 @@ manifest or pipeline does.
   always promised that an exploration cannot fail your build, and the promise
   held for `af explore` and broke for the path the console drives. A run that
   measured nothing at all is still blocked and still exits non zero.
+- **Five Terraform variables were renamed, and this is the last release in
+  which that is allowed.** The line above promises these names for the whole of
+  version 1, so the ones that were wrong had to be fixed before the promise
+  started rather than lived with until a 2.0. The foundation module's `name` is
+  `resource_group_name`, because that is what its own description called it and
+  what the stack already passed to it, while `name` on the control plane module
+  a few lines away means a four character resource prefix. Its `log_analytics`
+  is `log_analytics_enabled`, because it is a switch and it sat one line from an
+  output called `log_analytics_id` that is a different thing. The alerting
+  module's `connection_percent` is `database_connection_percent`, joining the
+  two database thresholds it belongs beside. The control plane module's
+  `golden_replication` and `golden_soft_delete_days` are `goldens_replication`
+  and `goldens_soft_delete_days`, so that all three variables of one family
+  share one prefix. If you set any of them, rename them in the same commit as
+  the upgrade: a tfvars file naming the old one is not refused, it is ignored,
+  and the apply reports success.
+- The Helm chart is version 1.0.0 rather than 0.1.1. Nothing about installing it
+  changes. A chart at 0.x says in the only language its ecosystem has that its
+  values may be rearranged at any time, which was true and is not any more.
 
 ### Added
+
+**Who may sign in, from the Helm chart.** `config.signinAllowlist` sets
+`AF_SIGNIN_ALLOWLIST` on the Deployment. The chart named every other setting the
+application reads and not this one, so a control plane installed from it on a
+public address accepted any GitHub account in the world, which is exactly the
+week the Terraform module's own comment describes. Left alone it sets nothing
+and behaviour is unchanged. An empty list is a real answer and means nobody, so
+the variable is set whenever the operator said anything at all, including an
+empty list: a block that vanished when the list was empty would turn the most
+restrictive intent into the least restrictive deployment.
 
 **Before an environment exists.** `af change` reads the diff of a pull request
 and says which checks will exercise what it touched, opening no environment and

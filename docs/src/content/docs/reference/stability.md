@@ -65,13 +65,56 @@ A code in the [error reference](/docs/reference/errors) keeps its meaning. The
 code is the stable identifier for a refusal; the sentence printed beside it is
 not, and it is reworded whenever a clearer one exists. Match on the code.
 
+### The self-hosting configuration
+
+Every key in the Helm chart's `values.yaml`, and every variable and output in
+the Terraform under `infra/terraform`. Within version 1:
+
+- A key or a variable will not be removed or renamed.
+- Its type will not change.
+- An optional input will not become required, and a new input arrives with a
+  default rather than without one.
+
+The reason this is a promise and not a preference is that the values file and
+the tfvars file somebody self hosting writes are their configuration. They are
+written once, kept in that operator's own repository, and applied by that
+operator's own pipeline. A rename does not fail that pipeline loudly, it fails it silently:
+Helm accepts a key no template reads, and Terraform only warns about a variable
+nothing declares. The setting stops being in force and the apply still says it
+succeeded.
+
+Terraform outputs are on the list by name, because a runbook reads them.
+[Standing up on Azure](/docs/self-hosting/azure) pipes `backend_hcl` into a
+backend configuration and [rotating
+secrets](/docs/self-hosting/rotating-secrets) scopes a role assignment with
+`key_vault_id`, and an output missing under the name a command asks for prints
+nothing rather than failing.
+
+What is promised is the input, not the value it carries. Defaults move, and one
+of them has to: `image_tag` names the release being cut, and `tools/tagsync`
+exists to make sure it does.
+
+`tools/inputcheck` holds the tree to a snapshot of this surface taken at
+v1.0.0, so a rename fails in the pull request that proposes it rather than in
+somebody's upgrade.
+
+The chart carries its own version, and it is 1.0.0 for this reason. A chart at
+0.x says in the only language its ecosystem has that its values may be
+rearranged at any time.
+
 ## Not stable
 
 These are free to change in a minor release, and saying so plainly is more
 useful than a promise that quietly bends.
 
-- **The Helm chart's values and the Terraform module's variables.** The chart
-  carries its own version, which is why it is not at 1.0.0 alongside the engine.
+- **The defaults and validation rules on the self-hosting inputs.** The names
+  and the types are promised above. A default moves with a release, and a
+  validation tightens as a cloud teaches us what it refuses at apply time that
+  it accepted at plan time. Set the values that matter to you rather than
+  inheriting them.
+- **What the Terraform actually creates.** The inputs are a contract; the
+  resources behind them are not. A module may reach the same outcome with
+  different resources, and the Azure guide says which changes force a replace.
 - **The control plane's HTTP API.** It is how the console and the engine speak
   to each other, not a published integration surface. The endpoints that are
   published as an interface are named in the

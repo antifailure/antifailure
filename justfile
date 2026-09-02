@@ -75,6 +75,7 @@ gate: _reports
     run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
+    run "self-hosting inputs are stable" just inputcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "the mode lists are the real one" just modecheck
@@ -840,6 +841,21 @@ manifestcheck:
 # one version and never revisited looks like.
 constcheck:
     go run ./tools/constcheck .
+
+# The Helm values and the Terraform variables still say what v1.0.0 promised
+# they would say.
+#
+# A self hoster's values file and tfvars file ARE their configuration, kept in
+# their repository and applied by their pipeline. Until v1.0.0 the release
+# notes said both surfaces could be rearranged in a minor release, which makes
+# every upgrade a hand migration nobody can automate. The promise replaces
+# that sentence and this holds the tree to it: an input is not removed, not
+# renamed, does not change type, and does not become required.
+#
+# Adding an optional input is compatible and allowed. It fails here only until
+# `go run ./tools/inputcheck -update .` records it in the snapshot.
+inputcheck:
+    go run ./tools/inputcheck .
 
 # This justfile runs what CI runs.
 gatecheck:
