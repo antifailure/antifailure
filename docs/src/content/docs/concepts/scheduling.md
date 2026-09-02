@@ -51,4 +51,4 @@ requests is the fastest way to shorten a queue, and
 `af env prune --older-than 24h` does it in bulk after printing what it would
 remove.
 
-Related: [provider limits](/docs/providers/limits/), [the journal](/docs/concepts/journal/).
+Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal).

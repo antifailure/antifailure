@@ -37,7 +37,7 @@ The standby has the same rows. A bad migration, a `DROP TABLE` or a corrupting
 defect reaches it instantly. The thing that protects against those is point in
 time recovery, which production holds for 35 days at a five minute recovery
 point objective, and the restore procedure is on the
-[operations page](/docs/self-hosting/operations/).
+[operations page](/docs/self-hosting/operations).
 
 **Read that page before restoring anything.** A restore that appears to succeed
 can leave a control plane that answers every query and isolates nothing,

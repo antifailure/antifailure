@@ -124,6 +124,36 @@ export const REPO_URL = "https://github.com/antifailure/antifailure";
 export const REPO_SLUG = "antifailure/antifailure";
 export const DOCS_URL = `${SITE_URL}/docs`;
 
+/** Public contact routes checked against the live repository and site. The
+ * domain currently has no MX records, so no email address is presented as a
+ * working channel. */
+export const CONTACT_POINTS = [
+  {
+    id: "security",
+    label: "Private security reports",
+    url: `${REPO_URL}/security/advisories/new`,
+    contactType: "security",
+  },
+  {
+    id: "issues",
+    label: "Bugs and feature requests",
+    url: `${REPO_URL}/issues/new/choose`,
+    contactType: "technical support",
+  },
+  {
+    id: "discussions",
+    label: "Questions and ideas",
+    url: `${REPO_URL}/discussions`,
+    contactType: "community support",
+  },
+  {
+    id: "waitlist",
+    label: "Hosted product interest",
+    url: "/signup",
+    contactType: "early access",
+  },
+] as const;
+
 /**
  * Every profile the project owns, in one array.
  *

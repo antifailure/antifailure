@@ -39,9 +39,20 @@ var commandExamples = map[string]string{
 		"# --report is Markdown for a person, --report-json is the same run\n" +
 		"# for a program.\n" +
 		"af ci --report report.md --report-json report.json --keep",
+	"af mcp": "" +
+		"# Started by an MCP client, not typed. It speaks the protocol on\n" +
+		"# standard input and output, so running it in a terminal looks idle.\n" +
+		"af mcp\n" +
+		"# It serves exactly the checkout it starts in, so the client is\n" +
+		"# configured to run it there.\n" +
+		"af mcp",
 	"af doctor": "af doctor\naf doctor -o json",
-	"af down":   "af down\naf down --branch feature/checkout",
-	"af env":    "af env list",
+	"af start": "" +
+		"# Where you are on the first run, and the one command that moves you on.\n" +
+		"af start\n" +
+		"af start -o json",
+	"af down": "af down\naf down --branch feature/checkout",
+	"af env":  "af env list",
 	"af env list": "" +
 		"af env list\n" +
 		"af env list -o json",
@@ -178,7 +189,7 @@ var commandExamples = map[string]string{
 	"af support bundle": "" +
 		"# Redacted on the way in, with a list of what it included.\n" +
 		"af support bundle\n" +
-		"af support bundle --output af-support.zip",
+		"af support bundle --archive af-support.zip",
 	"af test": "" +
 		"af test\n" +
 		"af test --only checkout --headed",

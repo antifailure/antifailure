@@ -25,11 +25,18 @@ import (
 )
 
 // Version information, set by the linker at release time.
+//
+// Every variable in this group is stamped by tools/release/build.sh, and
+// tools/ldcheck fails a build in which one of them is not. Edition used to sit
+// here and nothing stamped it, so af version read "community" out of a variable
+// no build ever wrote while af license status, in the same enterprise binary,
+// correctly reported enterprise. The edition is not a build time string: it is
+// what the running binary attached to its context, and declaredEdition is the
+// one place that answers it.
 var (
 	Version   = "dev"
 	Commit    = "none"
 	BuildDate = "unknown"
-	Edition   = "community"
 )
 
 // Env carries everything a command needs that is not a flag.
@@ -422,6 +429,7 @@ and real data volume with every identifier masked and the masking proved, your
 services running in a sandbox that cannot reach the internet except where you
 say it can, and inbound webhooks simulated so flows actually finish.
 
+  af start    say where you are on the first run, and what to run next
   af init     read the repository and write antifailure.yaml
   af up       create an environment
   af test     run the agent workflows against it
@@ -479,6 +487,7 @@ recoverable by replay.`),
 		"Do not emit colour, regardless of the terminal")
 
 	root.AddCommand(
+		newStartCommand(env),
 		newInitCommand(env),
 		newUpCommand(env),
 		newDownCommand(env),
@@ -503,6 +512,7 @@ recoverable by replay.`),
 		newDoctorCommand(env),
 		newSupportCommand(env),
 		newCICommand(env),
+		newMCPCommand(env),
 		newRunnerCommand(env),
 		newSecretCommand(env),
 		newModelCommand(env),
