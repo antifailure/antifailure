@@ -36,7 +36,7 @@
 
 import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
-import { appendAudit, canonicalJson, type Db } from '@antifailure/db'
+import { appendAdminAudit, canonicalJson, type Db } from '@antifailure/db'
 
 /** How long an in-flight operation is believed to be somebody else's before it
  *  is treated as a crash to recover from.
@@ -67,7 +67,15 @@ export interface OperationRequest {
   targetType: string
   /** Stripe's identifier for the thing being acted on. */
   targetId: string | null
-  actorUserId: string | null
+  /**
+   * The OPERATOR, from admin_users.
+   *
+   * A different id space from `users(id)`, and naming it wrongly is not a
+   * cosmetic mistake: `admin_audit_entries.admin_user_id` has a foreign key to
+   * admin_users, so a customer's user id here raises rather than mislabelling
+   * somebody, which is the direction this should fail in.
+   */
+  adminUserId: string | null
   actorLabel: string
   /** Why. Refused when empty; see the migration for why this is not optional. */
   reason: string
@@ -92,6 +100,11 @@ export interface OperationRequest {
    * two DIFFERENT refunds that happen to be for the same charge.
    */
   idempotencyKey?: string
+  /** The tenant's slug, kept as text on the audit entry for the same reason as
+   *  actorLabel: it has to still name the organization once the row is gone. */
+  orgLabel?: string | null
+  /** Where the request came from, recorded on the operator's entry. */
+  ip?: string | null
 }
 
 export interface OperationOutcome<T> {
@@ -240,11 +253,11 @@ export async function runOnce<T>(
       const inserted = await db.execute<{ idempotency_key: string }>(sql`
         INSERT INTO admin_operations (
           idempotency_key, action, org_id, target_type, target_id,
-          actor_user_id, actor_label, reason, request, request_fingerprint,
+          admin_user_id, actor_label, reason, request, request_fingerprint,
           state, before_state, started_at)
         VALUES (
           ${key}, ${req.action}, ${req.orgId}, ${req.targetType}, ${req.targetId},
-          ${req.actorUserId}, ${req.actorLabel}, ${req.reason},
+          ${req.adminUserId}, ${req.actorLabel}, ${req.reason},
           ${JSON.stringify(req.params)}::jsonb, ${print},
           'in_flight', ${before === undefined ? null : JSON.stringify(before)}::jsonb,
           ${now.toISOString()})
@@ -354,7 +367,7 @@ export async function runOnce<T>(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as { code?: string | null }).code ?? null
-    // Whether the provider answered. See the column comment in 0030: this
+    // Whether the provider answered. See the column comment in 0031: this
     // decides whether the NEXT deliberate retry may have a key of its own or
     // has to reuse this one. Anything that is not a provider error is treated
     // as unanswered, which is the direction that cannot double charge.
@@ -385,22 +398,35 @@ export async function runOnce<T>(
           finished_at = ${now.toISOString()}
       WHERE idempotency_key = ${key}`)
 
-    // Into the CUSTOMER's own audit chain, deliberately.
+    // ONE call, TWO chains.
     //
-    // A refund is something that happened to them, and a log of what was done
-    // to a tenant that the tenant cannot read is a log that only protects the
-    // person who did it. The actor label says who, `origin` says it came from
-    // the administrative surface rather than from their own console, and the
-    // detail carries the reason, the amount and the idempotency key so the
-    // entry can be matched to the ledger row and to the object at Stripe.
-    await appendAudit(db, {
-      orgId: req.orgId,
-      actorUserId: req.actorUserId,
+    // appendAdminAudit writes the operator's entry and, because subjectOrgId is
+    // set, the customer's copy in the same transaction. An earlier version of
+    // this called appendAudit directly and wrote only the tenant's, which left
+    // a money action absent from the platform chain entirely; writing both by
+    // hand would have given the customer two entries for one refund.
+    //
+    // The tenant copy is not optional here and the default is deliberately not
+    // overridden. A refund is something that happened to that customer, and a
+    // record only the vendor can read is a vendor's private note rather than
+    // accountability.
+    //
+    // `high` on every one of these. The severity vocabulary is coarse on
+    // purpose and money is the case it was made coarse for: there is no
+    // administrative write in this file that is routine, so a severity that
+    // varied per action would be a judgement call somebody eventually gets
+    // wrong in the quiet direction.
+    await appendAdminAudit(db, {
+      adminUserId: req.adminUserId,
       actorLabel: req.actorLabel,
       action: req.action,
       targetType: req.targetType,
       targetId: req.targetId,
+      subjectOrgId: req.orgId,
+      subjectOrgLabel: req.orgLabel ?? null,
       origin: 'admin',
+      ip: req.ip ?? null,
+      severity: 'high',
       occurredAt: now,
       detail: {
         reason: req.reason,

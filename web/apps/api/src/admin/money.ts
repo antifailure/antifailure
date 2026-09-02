@@ -42,8 +42,15 @@ export interface MoneyContext {
    *  two with different ideas about what it may touch. */
   withAdmin: <R>(fn: (db: Db) => Promise<R>) => Promise<R>
   now: Date
-  actorUserId: string | null
+  /** The OPERATOR, from admin_users. A different id space from users(id); the
+   *  audit chain has a foreign key that makes the confusion raise rather than
+   *  mislabel somebody. */
+  adminUserId: string | null
   actorLabel: string
+  /** The tenant's slug and the caller's address, both carried onto the audit
+   *  entry so it still reads correctly once the rows are gone. */
+  orgLabel?: string | null
+  ip?: string | null
 }
 
 /** What the caller says about WHY, on every one of these. */
@@ -198,9 +205,11 @@ export async function refundCharge(
         orgId: input.orgId,
         targetType: 'charge',
         targetId: input.chargeId,
-        actorUserId: ctx.actorUserId,
+        adminUserId: ctx.adminUserId,
         actorLabel: ctx.actorLabel,
         reason: input.reason,
+        orgLabel: ctx.orgLabel ?? null,
+        ip: ctx.ip ?? null,
         // Everything the outcome depends on. The amount is in here, so a
         // second refund for a DIFFERENT amount gets a different key and is a
         // different operation rather than a silent replay of the first.
@@ -298,9 +307,11 @@ export async function creditCustomer(
         orgId: input.orgId,
         targetType: 'customer',
         targetId: input.customerId,
-        actorUserId: ctx.actorUserId,
+        adminUserId: ctx.adminUserId,
         actorLabel: ctx.actorLabel,
         reason: input.reason,
+        orgLabel: ctx.orgLabel ?? null,
+        ip: ctx.ip ?? null,
         params: {
           customerId: input.customerId,
           amountMinor: input.amountMinor,
@@ -393,9 +404,11 @@ async function changeSubscription(
       orgId: intent.orgId,
       targetType: 'subscription',
       targetId: intent.subscriptionId,
-      actorUserId: ctx.actorUserId,
+      adminUserId: ctx.adminUserId,
       actorLabel: ctx.actorLabel,
       reason: intent.reason,
+      orgLabel: ctx.orgLabel ?? null,
+      ip: ctx.ip ?? null,
       params: { subscriptionId: intent.subscriptionId, ...describe },
       ...(intent.idempotencyKey ? { idempotencyKey: intent.idempotencyKey } : {}),
     },
@@ -594,9 +607,11 @@ export async function retryPayment(
         orgId: input.orgId,
         targetType: 'invoice',
         targetId: input.invoiceId,
-        actorUserId: ctx.actorUserId,
+        adminUserId: ctx.adminUserId,
         actorLabel: ctx.actorLabel,
         reason: input.reason,
+        orgLabel: ctx.orgLabel ?? null,
+        ip: ctx.ip ?? null,
         params: { invoiceId: input.invoiceId },
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       },
@@ -632,9 +647,11 @@ export async function resendInvoice(
         orgId: input.orgId,
         targetType: 'invoice',
         targetId: input.invoiceId,
-        actorUserId: ctx.actorUserId,
+        adminUserId: ctx.adminUserId,
         actorLabel: ctx.actorLabel,
         reason: input.reason,
+        orgLabel: ctx.orgLabel ?? null,
+        ip: ctx.ip ?? null,
         params: { invoiceId: input.invoiceId },
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       },
