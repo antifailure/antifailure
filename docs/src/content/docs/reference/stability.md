@@ -41,7 +41,7 @@ a manifest to take a patch release.
 
 ### The command line
 
-The commands in the [command reference](/docs/reference/cli/), their flags, and
+The commands in the [command reference](/docs/reference/cli), their flags, and
 their exit codes. A command will not be removed or renamed and a flag will not
 change what it means. New commands and new flags arrive in minor releases.
 
@@ -61,7 +61,7 @@ which they carry across the boundary.
 
 ### The error codes
 
-A code in the [error reference](/docs/reference/errors/) keeps its meaning. The
+A code in the [error reference](/docs/reference/errors) keeps its meaning. The
 code is the stable identifier for a refusal; the sentence printed beside it is
 not, and it is reworded whenever a clearer one exists. Match on the code.
 
@@ -75,7 +75,7 @@ useful than a promise that quietly bends.
 - **The control plane's HTTP API.** It is how the console and the engine speak
   to each other, not a published integration surface. The endpoints that are
   published as an interface are named in the
-  [HTTP endpoints reference](/docs/reference/api/).
+  [HTTP endpoints reference](/docs/reference/api).
 - **Every Go package except the two named above.** `engine/pkg/afcli`,
   `engine/pkg/edition` and `engine/pkg/extension` are the sockets the enterprise
   binary plugs into and are deliberately narrow rather than a general embedding
@@ -102,5 +102,5 @@ commit and the build date, and `af version --output json` is the machine
 readable form.
 
 Every release is signed and carries a bill of materials.
-[Releases and reproducibility](/docs/security/releases/) has the commands to
+[Releases and reproducibility](/docs/security/releases) has the commands to
 verify one and to rebuild the archives yourself.

@@ -22,6 +22,36 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "out");
 
+/**
+ * The one origin every absolute URL the site emits has to resolve to.
+ *
+ * This is a literal rather than an import of SITE_URL because SITE_URL is
+ * `process.env.NEXT_PUBLIC_SITE_URL ?? "https://antifailure.dev"`, and a check
+ * that reads its subject's own configuration cannot disagree with it. Every
+ * canonical, og:url, sitemap <loc>, robots Host and JSON-LD @id on the site is
+ * built from that variable, so one wrong value in one build environment ships
+ * the whole site canonicalised to the wrong scheme or the wrong host, and
+ * nothing about the pages themselves looks wrong.
+ *
+ * That is not hypothetical. Google's top result for this site is the http://
+ * spelling of the home page, because the site shipped with no canonical at all
+ * for long enough to be indexed that way. The scheme costs nothing to a
+ * visitor, since .dev is an HSTS-preloaded TLD and no browser will emit a
+ * plaintext request to one, but it is the wrong URL in the index and it splits
+ * every signal that points at the site between two spellings of it.
+ *
+ * Both wrong spellings are asserted against, not just the scheme: www is a
+ * second live origin serving this same build on its own certificate, so
+ * https://www.antifailure.dev is reachable, returns 200, and is exactly as
+ * wrong to canonicalise to as the http:// one.
+ */
+const ORIGIN = "https://antifailure.dev";
+const WRONG_ORIGINS = [
+  "http://antifailure.dev",
+  "http://www.antifailure.dev",
+  "https://www.antifailure.dev",
+];
+
 let failures = 0;
 let checks = 0;
 
@@ -99,6 +129,25 @@ if (has("robots.txt")) {
       `robots.txt permits ${bot} to crawl public pages`,
     );
   }
+
+  // Advertising a sitemap and advertising it at the right URL are different
+  // claims, and the check above only made the first one. `includes("Sitemap:")`
+  // is true of `Sitemap: http://www.antifailure.dev/sitemap.xml`, which names a
+  // different origin from the one every page canonicalises to and hands a
+  // crawler a second spelling of the site to reconcile.
+  const advertised = [...robots.matchAll(/^Sitemap:\s*(\S+)$/gim)].map((m) => m[1]);
+  const offOrigin = advertised.filter((url) => !url.startsWith(`${ORIGIN}/`));
+  assert(
+    advertised.length > 0 && offOrigin.length === 0,
+    `robots.txt advertises every sitemap on ${ORIGIN}`,
+    offOrigin.length > 0 ? offOrigin.join(", ") : "no Sitemap: line at all",
+  );
+  const host = robots.match(/^Host:\s*(\S+)$/im)?.[1];
+  assert(
+    host === ORIGIN,
+    `robots.txt names ${ORIGIN} as the host`,
+    host ? `it names ${host}` : "no Host: line",
+  );
 }
 
 if (has("sitemap.xml")) {
@@ -114,6 +163,17 @@ if (has("sitemap.xml")) {
   assert(
     !sitemap.includes("/signin") && !sitemap.includes("/signup"),
     "sitemap excludes the noindex waitlist routes",
+  );
+  // The count above is a canary against a truncated sitemap and says nothing
+  // about what the URLs in it are. A sitemap listing 32 URLs on a host the
+  // pages do not canonicalise to passes it and is worse than no sitemap,
+  // because it actively submits the wrong spelling for indexing.
+  const locs = [...sitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1]);
+  const strays = locs.filter((url) => url !== ORIGIN && !url.startsWith(`${ORIGIN}/`));
+  assert(
+    locs.length > 0 && strays.length === 0,
+    `every sitemap URL is on ${ORIGIN}`,
+    strays.length > 0 ? `${strays.length} are not: ${strays.slice(0, 3).join(", ")}` : "",
   );
   // The property that matters is that lastmod came from content history, not
   // from the clock. Requiring several distinct values was the first version of
@@ -183,11 +243,23 @@ function htmlFiles(dir) {
   return found;
 }
 
+/**
+ * The path a built file is the page for, in the spelling the host serves.
+ *
+ * staticwebapp.config.json sets "trailingSlash": "never", so /about is the one
+ * address /about answers on and /about/ is a 301 to it. The canonical has to
+ * be the address that answers, and the home page is the origin itself with no
+ * trailing slash, which is what absoluteUrl() in lib/site.ts produces.
+ */
+const routeOf = (rel) =>
+  rel === "index.html" ? "" : `/${rel.replace(/\.html$/, "").replace(/\/index$/, "")}`;
+
 const pages = htmlFiles(OUT);
 console.log(`\nPer-page tags (${pages.length} HTML files)`);
 
 const missing = {
   canonical: [],
+  canonicalTarget: [],
   ogTitle: [],
   ogImage: [],
   ogUrl: [],
@@ -209,13 +281,36 @@ for (const file of pages) {
   if (noindex) continue;
 
   if (!/<link rel="canonical"/i.test(html)) missing.canonical.push(rel);
+  // What the canonical POINTS AT, which the presence check above never looked
+  // at. A page carrying `<link rel="canonical" href="http://www.antifailure.dev/pricing">`
+  // satisfies that check completely. Downgrading every URL in the built output
+  // to that spelling moved this gate by zero checks before this assertion
+  // existed, so a site-wide scheme or host regression, which is the only way
+  // this failure ever actually happens, shipped green.
+  //
+  // Asserted as the exact expected URL rather than as a prefix, because that
+  // costs nothing more and additionally catches a page canonicalising to a
+  // different page, which is the cannibalisation bug that silently drops a
+  // page out of the index entirely.
+  const want = ORIGIN + routeOf(rel);
+  const canonicalValue = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1] ?? "";
+  if (canonicalValue && canonicalValue !== want) {
+    missing.canonicalTarget.push(`${rel} (want ${JSON.stringify(want)}, got ${JSON.stringify(canonicalValue)})`);
+  }
+  // og:url is a second, independent claim about the page's address, and a
+  // crawler that disagrees with the canonical has two candidates rather than
+  // one. They are built from the same absoluteUrl() call today; this is what
+  // notices if they ever stop being.
+  // Checking og:url against the canonical rather than against the expected
+  // address would pass whenever both are wrong the same way, which is the only
+  // shape this failure has ever taken: one SITE_URL feeds both, so a bad value
+  // moves them together and a relative check sees two values that agree.
+  const ogUrl = html.match(/<meta property="og:url" content="([^"]*)"/i)?.[1];
+  if (ogUrl !== want) {
+    missing.ogUrl.push(`${rel} (want ${JSON.stringify(want)}, og:url ${JSON.stringify(ogUrl ?? null)})`);
+  }
   if (!/property="og:title"/i.test(html)) missing.ogTitle.push(rel);
   if (!/property="og:image"/i.test(html)) missing.ogImage.push(rel);
-  const canonicalValue = html.match(/<link rel="canonical" href="([^"]+)"/i)?.[1] ?? "";
-  const ogUrl = html.match(/<meta property="og:url" content="([^"]+)"/i)?.[1] ?? "";
-  if (!canonicalValue || ogUrl !== canonicalValue) {
-    missing.ogUrl.push(`${rel} (canonical ${JSON.stringify(canonicalValue)}, og:url ${JSON.stringify(ogUrl)})`);
-  }
   if (!/name="twitter:card"/i.test(html)) missing.twitter.push(rel);
   if (!/<meta name="description"/i.test(html)) missing.description.push(rel);
   if (!/application\/ld\+json/i.test(html)) missing.jsonld.push(rel);
@@ -363,9 +458,10 @@ assert(
 
 const LABELS = {
   canonical: "every indexable page has a canonical",
+  canonicalTarget: "every canonical is the page's own https://antifailure.dev address",
+  ogUrl: "every og:url agrees with the canonical",
   ogTitle: "every indexable page has og:title",
   ogImage: "every indexable page has og:image",
-  ogUrl: "every indexable page has an og:url matching its canonical",
   twitter: "every indexable page has a twitter card",
   description: "every indexable page has a meta description",
   jsonld: "every indexable page has JSON-LD",
@@ -661,6 +757,41 @@ assert(
   dupes.length === 0,
   "every indexable page has a unique title",
   dupes.length > 0 ? dupes.map(([t, n]) => `"${t}" x${n}`).join("; ") : "",
+);
+
+// One origin, everywhere, in every file the host will serve.
+//
+// The tag checks above reach canonicals and og:urls. They do not reach a
+// JSON-LD @id, a link written by hand in MDX, a URL baked into a JS chunk, or
+// the markdown twins, and every one of those is a place the site states its own
+// address. This is the assertion that covers all of them at once, and it is
+// deliberately a search for the wrong answer rather than a survey of the right
+// one: it needs no list of the files that are allowed to mention the site, so
+// a file added later cannot fall outside it.
+console.log("\nOne origin");
+const SERVED = /\.(html|md|txt|xml|json|js|webmanifest)$/i;
+function servedFiles(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) found.push(...servedFiles(full));
+    else if (SERVED.test(entry)) found.push(full);
+  }
+  return found;
+}
+const offOrigin = [];
+for (const file of servedFiles(OUT)) {
+  const body = readFileSync(file, "utf8");
+  for (const wrong of WRONG_ORIGINS) {
+    if (body.includes(wrong)) offOrigin.push(`${path.relative(OUT, file)} (${wrong})`);
+  }
+}
+assert(
+  offOrigin.length === 0,
+  `no built file spells the site any way but ${ORIGIN}`,
+  offOrigin.length > 0
+    ? `${offOrigin.length} occurrences: ${offOrigin.slice(0, 5).join(", ")}${offOrigin.length > 5 ? " ..." : ""}`
+    : "",
 );
 
 console.log(`\n${checks - failures}/${checks} passed`);
