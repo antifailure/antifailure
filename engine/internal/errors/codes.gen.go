@@ -111,8 +111,8 @@ const (
 	// The published golden {version} in {store} was made for a different
 	// project.
 	AFDB015 Code = "AF-DB-015"
-	// database.source_url_env names {variable}, and {variable} holds
-	// nothing in this shell.
+	// database.source_url_env names {variable}, and no configured source
+	// has a value for it.
 	AFDB016 Code = "AF-DB-016"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
@@ -362,6 +362,8 @@ const (
 	// The encrypted local store has no passphrase: no system keyring
 	// answered and AF_SECRET_PASSPHRASE is not set.
 	AFSEC004 Code = "AF-SEC-004"
+	// The variable {name} could not be looked up: {detail}
+	AFSEC005 Code = "AF-SEC-005"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
 
@@ -770,8 +772,8 @@ var catalog = map[Code]Entry{
 	AFDB016: {
 		Code:      AFDB016,
 		Area:      "DB",
-		Message:   "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
-		NextStep:  "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+		Message:   "database.source_url_env names {variable}, and no configured source has a value for it.",
+		NextStep:  "Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -1609,6 +1611,15 @@ var catalog = map[Code]Entry{
 		Area:      "SEC",
 		Message:   "The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.",
 		NextStep:  "Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.",
+		Docs:      "guides/secrets",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFSEC005: {
+		Code:      AFSEC005,
+		Area:      "SEC",
+		Message:   "The variable {name} could not be looked up: {detail}",
+		NextStep:  "Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

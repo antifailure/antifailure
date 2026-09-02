@@ -143,6 +143,13 @@ errors:
     docs: guides/secrets
     retryable: false
     exit_code: 6
+  - code: AF-SEC-005
+    area: SEC
+    message: "The variable {name} could not be looked up: {detail}"
+    next_step: "Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 3
   - code: AF-SEC-010
     area: SEC
     message: "The environment certificate could not be created: {detail}"
@@ -232,8 +239,8 @@ errors:
     exit_code: 5
   - code: AF-DB-016
     area: DB
-    message: "database.source_url_env names {variable}, and {variable} holds nothing in this shell."
-    next_step: "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead."
+    message: "database.source_url_env names {variable}, and no configured source has a value for it."
+    next_step: "Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead."
     docs: concepts/goldens
     retryable: false
     exit_code: 3
