@@ -20,21 +20,31 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile, readdir } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { sql, type Db } from '@antifailure/db'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import {
+  applyDiscount,
   cancelSubscription,
   changePlan,
   creditCustomer,
   extendTrial,
   money,
+  reactivateSubscription,
   refundCharge,
+  resendInvoice,
   retryPayment,
 } from '../src/admin/money.ts'
-import { IN_FLIGHT_GRACE_MS, fingerprint, keyFor } from '../src/admin/ledger.ts'
+import { IN_FLIGHT_GRACE_MS, MAX_ATTEMPTS, fingerprint, keyFor } from '../src/admin/ledger.ts'
 import { available, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
+
+/** This file's own source, so the check below can ask whether an operation is
+ *  ever actually invoked here rather than merely imported. */
+const s_self = await readFile(fileURLToPath(import.meta.url), 'utf8')
 
 // ---------------------------------------------------------------------------
 // The simulator
@@ -174,6 +184,15 @@ class StripeSim {
         status: 'paid', amount_due: 5000, amount_paid: 5000, currency: 'usd',
       })
     }
+    if (/^\/v1\/invoices\/[^/]+\/send$/.test(path)) {
+      // Sending returns the SAME invoice, still open. An implementation that
+      // issued a new one would show up as a different id here.
+      const id = path.split('/')[3]!
+      return json(200, {
+        id, object: 'invoice', customer: 'cus_1', subscription: 'sub_1', number: 'AF-1',
+        status: 'open', amount_due: 5000, amount_paid: 0, currency: 'usd',
+      })
+    }
     return json(404, { error: { message: `no route for ${path}` } })
   }
 
@@ -307,7 +326,7 @@ describe('money moves once', async () => {
       idempotency_key: string; state: string; action: string
       amount_minor: string | null; currency: string | null
       provider_object_id: string | null; before_state: unknown; after_state: unknown
-      error_message: string | null; error_answered: boolean | null
+      error_message: string | null; error_answered: boolean | null; request: unknown
     }[]>`SELECT * FROM admin_operations WHERE org_id = ${org.orgId}
          -- By key rather than by started_at: this suite runs on a fixed clock,
          -- so two attempts of one intent share a timestamp and ordering by it
@@ -638,6 +657,84 @@ describe('money moves once', async () => {
     assert.equal(sim.countOf('DELETE /v1/subscriptions/sub_1'), 0)
   })
 
+  it('reactivating clears the cancellation rather than making a new subscription', async () => {
+    await reset()
+    // Cancel first, so reactivation has something to undo and the before state
+    // in the ledger is the cancelled one rather than a subscription that was
+    // never cancelled.
+    await cancelSubscription(ctx(), {
+      orgId: org.orgId, subscriptionId: 'sub_1', reason: 'Customer left, AF-930',
+    })
+    const run = await reactivateSubscription(ctx(), {
+      orgId: org.orgId, subscriptionId: 'sub_1', reason: 'Customer changed their mind, AF-931',
+    })
+    assert.equal(run.result.subscription.cancelAtPeriodEnd, false)
+    // No new subscription was created, which is the mistake reactivation is
+    // usually implemented as and which would charge somebody twice.
+    assert.equal(sim.countOf('POST /v1/subscriptions'), 0)
+    const rows = await ledger()
+    assert.equal(rows.length, 2)
+    assert.equal(
+      rows.map((r) => r.action).sort().join(','),
+      'billing.subscription_canceled,billing.subscription_reactivated',
+    )
+  })
+
+  it('a discount is applied to the subscription and recorded with its coupon', async () => {
+    await reset()
+    await applyDiscount(ctx(), {
+      orgId: org.orgId, subscriptionId: 'sub_1', coupon: 'LOYALTY20',
+      reason: 'Renewal concession agreed by the account team, AF-932',
+    })
+    const rows = await ledger()
+    assert.equal(rows[0]!.action, 'billing.discount_applied')
+    // The coupon is in the request, so a second application of a DIFFERENT
+    // coupon is a different operation rather than a silent replay of the first.
+    assert.equal((rows[0]!.request as { coupon: string }).coupon, 'LOYALTY20')
+    await applyDiscount(ctx(), {
+      orgId: org.orgId, subscriptionId: 'sub_1', coupon: 'LOYALTY50', reason: 'AF-933',
+    })
+    assert.equal((await ledger()).length, 2)
+  })
+
+  it('resending an invoice sends the existing one rather than issuing another', async () => {
+    await reset()
+    const run = await resendInvoice(ctx(), {
+      orgId: org.orgId, invoiceId: 'in_1',
+      reason: 'Finance never received the original, AF-934',
+    })
+    assert.equal(run.providerObjectId, 'in_1')
+    // Never POST /v1/invoices. Issuing a second invoice for a period already
+    // invoiced is a duplicate bill, which is the same class of failure as a
+    // duplicate refund pointing the other way.
+    assert.equal(sim.countOf('POST /v1/invoices'), 0)
+    assert.equal(sim.countOf('POST /v1/invoices/in_1/send'), 1)
+    // And a second press sends nothing again.
+    const again = await resendInvoice(ctx(), {
+      orgId: org.orgId, invoiceId: 'in_1',
+      reason: 'Finance never received the original, AF-934',
+    })
+    assert.equal(again.replayed, true)
+    assert.equal(sim.countOf('POST /v1/invoices/in_1/send'), 1)
+  })
+
+  it('an intent that is refused forever stops minting keys instead of looping', async () => {
+    await reset()
+    const intent = { orgId: org.orgId, invoiceId: 'in_11', reason: 'AF-935' }
+    // Every attempt is refused BY THE PROVIDER, which is the branch that mints
+    // a fresh key. Without a bound this walks attempt keys forever, claiming a
+    // ledger row each time, for a card that is never going to work.
+    sim.failNext = MAX_ATTEMPTS + 5
+    for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+      await assert.rejects(() => retryPayment(ctx(), intent))
+    }
+    await assert.rejects(
+      () => retryPayment(ctx(), intent),
+      /attempted 20 times and refused every time/,
+    )
+    assert.equal((await ledger()).length, MAX_ATTEMPTS)
+  })
+
   it('an operation with no reason is refused', async () => {
     await reset()
     await assert.rejects(
@@ -653,8 +750,12 @@ describe('money moves once', async () => {
       orgId: org.orgId, chargeId: 'ch_seen', amountMinor: 100, reason: 'AF-920',
     })
     // The operator, holding a live session, sees it.
+    // Scoped to this organization. The suite shares a database with every
+    // other suite in the run, so a bare count would be asserting on whatever
+    // else happened to be there.
     const asOperator = await withAdmin(async (db) =>
-      db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM admin_operations`))
+      db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM admin_operations WHERE org_id = ${org.orgId}`))
     assert.equal(Number(asOperator[0]!.n), 1)
 
     // The same role, the same statement, without an operator session. Zero
@@ -664,7 +765,8 @@ describe('money moves once', async () => {
     // row, which is the case worth asserting: what an operator did is
     // recorded in the tenant's audit log, not in the operator's ledger.
     const asTenant = await h.pool.withTenant({ orgId: org.orgId }, async (db) =>
-      db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM admin_operations`))
+      db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM admin_operations WHERE org_id = ${org.orgId}`))
     assert.equal(Number(asTenant[0]!.n), 0)
 
     // And it cannot write one either.
@@ -724,5 +826,86 @@ describe('money is never rendered without its currency', () => {
 
   it('says the code rather than throwing for a currency Intl has not heard of', () => {
     assert.match(money(1000, 'zzz'), /ZZZ/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The gap between "implemented" and "reachable"
+// ---------------------------------------------------------------------------
+
+describe('every money operation is either routed or recorded as not yet routed', async () => {
+  // The failure this exists for is the one that looks like success from every
+  // direction: a function that works, has tests, and that nothing calls. The
+  // entitlement catalogue guards it with `enforcedAt`; this is the same guard
+  // for the nine operations, and it is here rather than in a comment because a
+  // comment does not fail when somebody adds a tenth.
+  //
+  // The admin router is owned by the `/admin` boundary and does not exist yet,
+  // so today the honest answer for every operation is "not routed". When it
+  // lands, each of these moves out of the map and this test fails until it is
+  // removed, which is the point: nothing here can be quietly left unreachable.
+  const notRoutedYet = new Map<string, string>([
+    ['refundCharge', 'the admin router is blocked on the /admin procedure builder'],
+    ['creditCustomer', 'the admin router is blocked on the /admin procedure builder'],
+    ['changePlan', 'the admin router is blocked on the /admin procedure builder'],
+    ['extendTrial', 'the admin router is blocked on the /admin procedure builder'],
+    ['cancelSubscription', 'the admin router is blocked on the /admin procedure builder'],
+    ['reactivateSubscription', 'the admin router is blocked on the /admin procedure builder'],
+    ['applyDiscount', 'the admin router is blocked on the /admin procedure builder'],
+    ['retryPayment', 'the admin router is blocked on the /admin procedure builder'],
+    ['resendInvoice', 'the admin router is blocked on the /admin procedure builder'],
+  ])
+
+  const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src')
+  const money = await readFile(path.join(src, 'admin', 'money.ts'), 'utf8')
+  const operations = [...money.matchAll(/^export async function ([A-Za-z]+)\(/gm)]
+    .map((m) => m[1]!)
+    // Not an operation: the kill switch guard the operations themselves call.
+    .filter((n) => n !== 'refuseWhenKilled')
+
+  it('finds the operations rather than trusting a list somebody typed', () => {
+    assert.equal(operations.length, 9, `found ${operations.join(', ')}`)
+  })
+
+  it('every operation is exercised by this file, routed or not', () => {
+    // An unroutable operation must at least be PROVEN to work, or "not routed
+    // yet" becomes a place to park code nobody has ever run.
+    for (const op of operations) {
+      assert.ok(
+        new RegExp(`\\b${op}\\(`).test(s_self),
+        `${op} has no test in this file, so nothing has ever run it`,
+      )
+    }
+  })
+
+  it('every operation is either called from a router or recorded as not yet routed', async () => {
+    const routers = path.join(src, 'routers')
+    const files = await readdir(routers)
+    const routed = new Set<string>()
+    for (const file of files) {
+      const body = await readFile(path.join(routers, file), 'utf8')
+      // Only a file that IMPORTS from admin/money.ts counts. Matching the bare
+      // name found `client.cancelSubscription(...)` in subscriptions.ts, which
+      // is the Stripe client's method of the same name on the customer-facing
+      // route: a name collision would have reported a dead operation as routed,
+      // which is the exact failure this test exists to catch.
+      if (!/from ['"]\.\.\/admin\/money\.ts['"]/.test(body)) continue
+      for (const op of operations) if (new RegExp(`\\b${op}\\(`).test(body)) routed.add(op)
+    }
+    for (const op of operations) {
+      if (routed.has(op)) {
+        assert.ok(
+          !notRoutedYet.has(op),
+          `${op} IS routed now; take it out of notRoutedYet so the list stays true`,
+        )
+        continue
+      }
+      assert.ok(
+        notRoutedYet.has(op),
+        `${op} is implemented, nothing calls it, and nobody wrote down why. That is a dead ` +
+          'feature that looks finished: wire it to a route, or record here that it is waiting ' +
+          'on one.',
+      )
+    }
   })
 })
