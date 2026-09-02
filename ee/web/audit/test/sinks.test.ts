@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 // The concrete sinks, tested for the two things that are easy to get wrong:
 // what goes on the wire, and which failures stop the retries.
 

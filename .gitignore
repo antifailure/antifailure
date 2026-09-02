@@ -142,6 +142,7 @@ runner/artifacts/
 /installcheck
 /installsh
 /ldcheck
+/licensecheck
 /licensegen
 /manifestcheck
 /modecheck

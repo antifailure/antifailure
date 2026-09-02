@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 // The enterprise half of "every table a screen reads is written by something
 // that is not a fixture".
 //
