@@ -73,6 +73,10 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 0.5, burst: 5, key: 'ip',
     reason: 'Signing in to the operator portal is a human action a few times a day, and what is behind it is every tenant on the instance. One attempt per two seconds is far above honest use and far below useful guessing.',
   },
+  'GET /v1/admin/session': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The operator portal asks on load and after a focus change, the same shape as GET /auth/session, and for the same reason: it carries the CSRF token every operator mutation needs, so refusing it does not merely blank a page, it makes the portal unable to act.',
+  },
   'POST /v1/admin/signout': {
     rate: 2, burst: 10, key: 'ip',
     reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',

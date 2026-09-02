@@ -25,7 +25,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import postgres from 'postgres'
-import { createAdminPool, sql, type AdminPool, type Db } from '@antifailure/db'
+import { sql, type Db } from '@antifailure/db'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import {
@@ -43,41 +43,6 @@ import {
 import { IN_FLIGHT_GRACE_MS, MAX_ATTEMPTS, fingerprint, keyFor } from '../src/admin/ledger.ts'
 import { adminUrl, available, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
 
-/** The operator role, with BYPASSRLS, created before the migrations run.
- *
- *  It has to exist first because 0030 and 0031 both GRANT to it, and a GRANT
- *  naming a role that does not exist raises. That the role is created HERE and
- *  not by a migration is a gap in the boundary rather than a choice of this
- *  suite's; admin-pool.test.ts says the same thing in its own words. When a
- *  migration creates it, this function goes. */
-const OPERATOR_PASSWORD = 'operator-test-password'
-async function createOperatorRole(): Promise<void> {
-  const root = postgres(adminUrl, { max: 1, onnotice: () => {} })
-  try {
-    await root.unsafe(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
-          CREATE ROLE antifailure_admin NOLOGIN BYPASSRLS;
-        ELSE
-          ALTER ROLE antifailure_admin BYPASSRLS;
-        END IF;
-      END
-      $$;
-      ALTER ROLE antifailure_admin LOGIN PASSWORD '${OPERATOR_PASSWORD}';
-      GRANT USAGE ON SCHEMA public TO antifailure_admin;
-    `)
-  } finally {
-    await root.end({ timeout: 5 })
-  }
-}
-
-function operatorUrl(): string {
-  const u = new URL(adminUrl)
-  u.username = 'antifailure_admin'
-  u.password = OPERATOR_PASSWORD
-  return u.toString()
-}
 
 /** This file's own source, so the check below can ask whether an operation is
  *  ever actually invoked here rather than merely imported. */
@@ -306,7 +271,6 @@ describe('money moves once', async () => {
   let org: Org
   let operator: Buffer
   let operatorUserId: string
-  let adminPool: AdminPool
   let sim: StripeSim
 
   // The operator scope exactly as an admin route gets it: `ctx.adminDb`, which
@@ -319,7 +283,7 @@ describe('money moves once', async () => {
   // test below is the proof from the other side: the application's own pool,
   // same database, same instant, cannot write or read the ledger at all.
   const withAdmin = <R,>(fn: (db: Db) => Promise<R>) =>
-    adminPool.withOperator({ adminUserId: operatorUserId, label: 'ops@antifailure.test' }, fn)
+    h.adminPool.withOperator({ adminUserId: operatorUserId, label: 'ops@antifailure.test' }, fn)
 
   function ctx(now = new Date('2026-03-01T12:00:00Z')) {
     const config: StripeConfig = {
@@ -337,9 +301,7 @@ describe('money moves once', async () => {
   }
 
   before(async () => {
-    await createOperatorRole()
     h = await startApi()
-    adminPool = createAdminPool({ url: operatorUrl(), max: 4, connectTimeoutSeconds: 30 })
     org = await seedOrg(h.admin, 'money')
     const email = `money-op-${randomUUID().slice(0, 8)}@example.test`
     const [row] = await h.admin<{ id: string }[]>`
@@ -366,7 +328,6 @@ describe('money moves once', async () => {
     // separately; this stops this file from being the one that triggers it.
     await h.admin`DELETE FROM admin_audit_entries WHERE subject_org_id = ${org.orgId}`
     await dropOrg(h.admin, org.orgId)
-    await adminPool.close()
     await h.close()
   })
 

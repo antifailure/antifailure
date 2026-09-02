@@ -21,53 +21,30 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import postgres from 'postgres'
-import { createAdminPool, sql, type AdminPool } from '@antifailure/db'
+import { sql } from '@antifailure/db'
 import { adminRouter } from '../src/admin/router.ts'
+import { hashPassword } from '../src/admin/session.ts'
 import type { AdminContext } from '../src/admin/trpc.ts'
 import type { AdminRole } from '../src/admin/permissions.ts'
 import { adminUrl, available, dropOrg, seedOrg, startApi, stripeAgainstMockPack, type ApiHarness, type Org } from './harness.ts'
 
-const OPERATOR_PASSWORD = 'operator-test-password'
 
-describe('the operator money routes', async () => {
-  if (!(await available())) {
-    it('skipped: no database', () => {})
-    return
-  }
+/** Asked once, at module scope, rather than inside each describe.
+ *
+ *  A `describe(async () => {...})` that awaits before registering its tests
+ *  registers them after the runner has moved on, and every one of them is
+ *  reported as "did not finish before its parent and was cancelled" rather than
+ *  as a failure anybody can read. One await here and the skip option below is
+ *  the shape that does not have that trap. */
+const hasDatabase = await available()
 
+describe('the operator money routes', { skip: hasDatabase ? false : 'no database' }, () => {
   let h: ApiHarness
   let org: Org
-  let adminPool: AdminPool
   let operatorId: string
 
   before(async () => {
-    // The role first: 0030 and 0031 both grant to it and a grant naming a role
-    // that does not exist raises. See adminmoney.test.ts for why this is here
-    // and not in a migration.
-    const root = postgres(adminUrl, { max: 1, onnotice: () => {} })
-    try {
-      await root.unsafe(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
-            CREATE ROLE antifailure_admin NOLOGIN BYPASSRLS;
-          ELSE
-            ALTER ROLE antifailure_admin BYPASSRLS;
-          END IF;
-        END
-        $$;
-        ALTER ROLE antifailure_admin LOGIN PASSWORD '${OPERATOR_PASSWORD}';
-        GRANT USAGE ON SCHEMA public TO antifailure_admin;
-      `)
-    } finally {
-      await root.end({ timeout: 5 })
-    }
-
     h = await startApi({ stripe: (await stripeAgainstMockPack()).billing })
-    const u = new URL(adminUrl)
-    u.username = 'antifailure_admin'
-    u.password = OPERATOR_PASSWORD
-    adminPool = createAdminPool({ url: u.toString(), max: 4, connectTimeoutSeconds: 30 })
 
     org = await seedOrg(h.admin, 'routes')
     const [row] = await h.admin<{ id: string }[]>`
@@ -84,7 +61,6 @@ describe('the operator money routes', async () => {
     await h.admin`DELETE FROM admin_operations WHERE org_id = ${org.orgId}`
     await h.admin`DELETE FROM admin_audit_entries WHERE subject_org_id = ${org.orgId}`
     await dropOrg(h.admin, org.orgId)
-    await adminPool.close()
     await h.close()
   })
 
@@ -95,7 +71,7 @@ describe('the operator money routes', async () => {
   function callerAs(role: AdminRole, label = 'ops@antifailure.test') {
     const ctx = {
       pool: h.pool,
-      adminPool,
+      adminPool: h.adminPool,
       admin: {
         adminUserId: operatorId,
         label,
@@ -109,7 +85,7 @@ describe('the operator money routes', async () => {
         impersonatedUserId: null,
       },
       adminDb: <T,>(fn: (db: never) => Promise<T>) =>
-        adminPool.withOperator({ adminUserId: operatorId, label }, fn as never),
+        h.adminPool.withOperator({ adminUserId: operatorId, label }, fn as never),
       clock: h.clock,
       github: h.github,
       stripe: null,
