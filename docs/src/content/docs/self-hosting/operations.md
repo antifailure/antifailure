@@ -359,9 +359,9 @@ the refusal. Restore beside it and switch.
 records who ran it and why, in a log the customer can export. It is for restoring
 access somebody already had, not for acquiring access nobody granted.
 
-**Do not run `af down --all` to clean up during an incident.** It removes every
-environment on the machine, including ones somebody is using to debug the
-incident.
+**Do not run `af env prune --older-than 0` to clean up during an incident.** It
+removes every environment on the machine, including ones somebody is using to
+debug the incident. `af down --branch <branch>` takes one.
 
 **Do not delete a golden to reclaim space while environments are running.**
 `af golden gc` already refuses to collect a version an environment came from, and

@@ -152,6 +152,7 @@ runner/artifacts/
 /release
 /releasecheck
 /relnotes
+/relpack
 /reltar
 /sbomcheck
 /scanrepo

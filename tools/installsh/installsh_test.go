@@ -81,6 +81,12 @@ func fixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(stage, "runner", "package.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The lockfile is part of what a release archive promises, and the
+	// installer refuses an archive without it, so the fixture has to carry one
+	// or every test here would be testing that refusal instead.
+	if err := os.WriteFile(filepath.Join(stage, "runner", "package-lock.json"), []byte("{\"lockfileVersion\": 3}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	tarball := name() + ".tar.gz"
 	cmd := exec.Command("tar", "-C", dir, "-czf", filepath.Join(dir, tarball), name())
@@ -133,6 +139,10 @@ type session struct {
 	stubs    string
 	fixtures string
 	root     string
+	// hidden accumulates tools removed from this session's PATH, so a test
+	// about a machine missing all three sha256 tools can hide them one call at
+	// a time and have the third hiding keep the first two.
+	hidden []string
 }
 
 func newSession(t *testing.T) *session {
@@ -285,8 +295,12 @@ func assertPrintedFullPathsRun(t *testing.T, s *session, out string) {
 		}
 		found++
 	}
-	if found != 3 {
-		t.Errorf("expected the three next steps as full paths, found %d\n--- output ---\n%s", found, out)
+	// One, not three. The installer used to print af doctor, af runner install
+	// and af init, which was right about the order and wrong about the shape:
+	// nothing in a printed list tells somebody who came back an hour later
+	// which of them they had already run. af start reports that itself.
+	if found != 1 {
+		t.Errorf("expected one next step as a full path, found %d\n--- output ---\n%s", found, out)
 	}
 }
 
@@ -373,7 +387,7 @@ func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
 
 	paste := ""
 	for _, c := range printedCommands(out) {
-		if strings.Contains(c, "&& af doctor") {
+		if strings.Contains(c, "&& af start") {
 			paste = c
 		}
 	}
@@ -383,7 +397,7 @@ func TestThePastedLineFixesTheCurrentTerminal(t *testing.T) {
 
 	// A shell with the installer's PATH and no profile sourced, which is what
 	// the terminal that ran curl | sh actually is.
-	cmd := exec.Command(zshPath(t), "-c", strings.Replace(paste, "af doctor", "af", 1))
+	cmd := exec.Command(zshPath(t), "-c", strings.Replace(paste, "af start", "af", 1))
 	cmd.Env = []string{"HOME=" + s.home, "PATH=/usr/bin:/bin:/usr/sbin:/sbin", "TERM=dumb"}
 	got, err := cmd.CombinedOutput()
 	if err != nil {
@@ -451,7 +465,7 @@ func TestAlreadyOnPathWritesNothingExtraAndSaysNothingAboutPath(t *testing.T) {
 	out := s.install()
 
 	contains(t, out, "Next:")
-	contains(t, out, "af doctor")
+	contains(t, out, "af start")
 	absent(t, out, "start here")
 	assertEveryPrintedAfIsReachable(t, out, true)
 	if s.read(".zshrc") != before {
@@ -675,7 +689,7 @@ func TestNoHomeStillInstalls(t *testing.T) {
 		t.Fatalf("install.sh failed with no HOME: %v\n%s", err, out)
 	}
 	contains(t, string(out), "HOME is not set")
-	contains(t, string(out), filepath.Join(prefix, "bin")+"/af doctor")
+	contains(t, string(out), filepath.Join(prefix, "bin")+"/af start")
 	assertEveryPrintedAfIsReachable(t, string(out), false)
 	assertPrintedFullPathsRun(t, s, string(out))
 	if _, err := os.Stat(filepath.Join(prefix, "bin", "af")); err != nil {
