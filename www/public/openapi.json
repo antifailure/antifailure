@@ -2214,6 +2214,100 @@
         }
       }
     },
+    "/trpc/environments.readiness": {
+      "get": {
+        "operationId": "trpc_environments_readiness",
+        "summary": "environments.readiness",
+        "description": "Requires the environments.create permission, held by: owner, admin, member.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string"
+                    },
+                    "workflow": {
+                      "default": "antifailure.yml",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100,
+                      "pattern": "^[A-Za-z0-9._-]+\\.ya?ml$"
+                    }
+                  },
+                  "required": [
+                    "repository"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold environments.create.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trpc/environments.teardown": {
       "post": {
         "operationId": "trpc_environments_teardown",
