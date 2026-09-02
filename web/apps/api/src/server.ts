@@ -31,6 +31,7 @@ import {
   ADMIN_SESSION_COOKIE,
   AdminSignInError,
   adminCsrfMatches,
+  adminCsrfTokenFor,
   adminSessionCookie,
   adminSignIn,
   adminSignOut,
@@ -682,6 +683,35 @@ export function createServer(options: ServerOptions) {
       if (err instanceof AdminSignInError) return c.json({ error: err.message }, 401)
       throw err
     }
+  })
+
+  /**
+   * The operator session, and the CSRF token that goes with it.
+   *
+   * Mirrors GET /auth/session, and exists for the same reason: the token is
+   * derived from the session cookie, the cookie is HttpOnly, so a browser
+   * cannot compute it and a page reload would otherwise lose the one the
+   * sign-in response carried. Without this endpoint the operator portal can
+   * mutate exactly once per sign-in, which is a guard that looks like it works
+   * and fails on the first refresh.
+   *
+   * It returns the token to whoever already holds the cookie, which is what a
+   * CSRF token is: not a secret, but a value an attacker on another site cannot
+   * read because they cannot make this request and see its response.
+   */
+  app.get('/v1/admin/session', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (!token) return c.json({ signedIn: false }, 200)
+    const session = await resolveAdminSession(options.pool, token, clock.now())
+    if (!session) return c.json({ signedIn: false }, 200)
+    return c.json({
+      signedIn: true,
+      csrfToken: adminCsrfTokenFor(token),
+      label: session.label,
+      email: session.email,
+      role: session.role,
+      impersonating: session.impersonating,
+    })
   })
 
   app.post('/v1/admin/signout', async (c) => {
