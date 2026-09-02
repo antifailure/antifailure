@@ -16,13 +16,17 @@
 //   granted membership, which is the difference between a credential and a
 //   claim and the reason this is a second pool.
 //
-// WHY THE ROLE IS CREATED HERE. antifailure_admin is created by 0023 on the
-// w-admin-ops branch, which is not merged into this one, so this suite builds
-// the role and its grants itself and says so. That makes the suite honest about
-// what it proves: it proves createAdminPool's behaviour GIVEN a role shaped the
-// way 0023 shapes one. It does not prove 0023 exists, and it would keep passing
-// if 0023 were deleted, which is stated here rather than left for somebody to
-// discover.
+// WHY THE ROLE IS STILL TOUCHED HERE, now that 0023 creates it. admin-ops's
+// migration has landed on main, so antifailure_admin and its BYPASSRLS exist
+// after a plain migrate and this suite no longer stands in for them. What it
+// still does is give the role LOGIN and a password, because 0023 deliberately
+// creates it NOLOGIN so that a self-hosted installation supplies its own
+// credential rather than inheriting one written down in a public repository.
+// A test needs to connect as it, so the test is the installation here.
+//
+// The grants below are 0023's and 0030's, restated. They are asserted rather
+// than assumed by the fresh-migration check in the report, and if this block
+// and the migrations ever disagree it is the migrations that are right.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'

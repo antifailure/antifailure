@@ -13,8 +13,11 @@
 -- left it, and nothing here grants it membership of any other role.
 --
 -- THE ONE RULE ABOUT THE OPERATOR ROLE, and it is narrower than an earlier
--- draft of this comment claimed. antifailure_admin, created in 0029, holds
--- BYPASSRLS, and this file grants privileges to it.
+-- draft of this comment claimed. antifailure_admin, created by admin-ops's
+-- migration which is now on main, holds BYPASSRLS, and this file grants
+-- privileges to it. That ordering is forced rather than preferred: a GRANT
+-- cannot name a role that does not exist yet, so the role's migration lands
+-- first and the grants live in whichever file is second.
 --
 -- NEVER WRITE A `CREATE POLICY` NAMING antifailure_admin.
 --
