@@ -500,7 +500,25 @@ func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 func summariseEgress(decisions []local.Decision) *report.Egress {
 	out := &report.Egress{}
 	surprises := map[string]bool{}
+	// Hosts a sandbox rule let out without replacing the credential. Kept as
+	// a set so one provider called forty times is named once.
+	leaked := map[string]bool{}
 	for _, d := range decisions {
+		if d.Mode == "sandbox" {
+			out.Sandbox++
+			if d.Substituted {
+				out.Substituted++
+			} else {
+				// The containment failure that presents as a success. The
+				// sidecar records Substituted only when a value existed for
+				// the rule's credential name, so this counts the requests
+				// that carried whatever the application sent.
+				out.Unsubstituted++
+				if d.Host != "" {
+					leaked[d.Host] = true
+				}
+			}
+		}
 		switch d.Mode {
 		case "allow", "sandbox":
 			out.Allowed++
@@ -522,6 +540,10 @@ func summariseEgress(decisions []local.Decision) *report.Egress {
 		out.Surprises = append(out.Surprises, host)
 	}
 	sort.Strings(out.Surprises)
+	for host := range leaked {
+		out.UnsubstitutedHosts = append(out.UnsubstitutedHosts, host)
+	}
+	sort.Strings(out.UnsubstitutedHosts)
 	return out
 }
 
