@@ -4,11 +4,12 @@
  * What /api answers, and what it answers for a path that is not there.
  *
  * The case worth having is the last one. The catch-all route this function is
- * bound to must never be able to take a request the waitlist should have had,
- * because that would turn a signup into a 404 silently and the form would go
- * on saying something went wrong. The router decides precedence, which a unit
- * test cannot reach, so the guarantee is made a second way that a test can:
- * the binding accepts GET and HEAD only, and the waitlist is POST only.
+ * bound to must never be able to take a request an endpoint added later should
+ * have had, because that would turn a submission into a silent 404 and the
+ * caller would go on believing something went wrong at their end. The router
+ * decides precedence, which a unit test cannot reach, so the guarantee is made
+ * a second way that a test can: the binding accepts GET and HEAD only, so
+ * nothing that changes anything can ever land here.
  */
 
 const test = require("node:test");
@@ -37,10 +38,11 @@ test("GET /api discovers every public endpoint and machine-readable resource", a
   const answer = await invoke({ path: "" });
   assert.equal(answer.status, 200);
   assert.equal(answer.body.service, "antifailure.dev");
-  assert.deepEqual(
-    answer.body.endpoints.map((e) => `${e.method} ${e.path}`),
-    ["POST /api/waitlist"],
-  );
+  // Empty, and asserted rather than skipped. This host accepts nothing now that
+  // signing up is a GitHub exchange against the control plane, and an entry
+  // appearing here without a function behind it is the shape of the failure
+  // this file exists for: a documented endpoint that answers 404.
+  assert.deepEqual(answer.body.endpoints, []);
   // The two documents an agent comes here for are static files the site
   // publishes, not endpoints this app serves, and they are listed as what they
   // are. An earlier version proxied the OpenAPI document through this app; see
@@ -80,7 +82,7 @@ test("the documented address points at a page that exists", () => {
 });
 
 test("an unknown path is a 404 that says so, not a 500 and not an empty body", async () => {
-  for (const requested of ["nope", "v1/users", "waitlist/all", "../../etc/passwd"]) {
+  for (const requested of ["nope", "v1/users", "signup", "../../etc/passwd"]) {
     const answer = await invoke({ path: requested });
     assert.equal(answer.status, 404);
     assert.equal(answer.body.ok, false);
@@ -106,22 +108,21 @@ test("a missing or malformed route parameter is treated as the bare path", async
   }
 });
 
-test("the catch-all cannot take a signup away from the waitlist", () => {
+test("the catch-all can never take a request that changes something", () => {
+  // The one function left is a reader. Its binding is what keeps that true: a
+  // catch-all that accepted POST would answer, with a 404 and a cheerful body,
+  // for any endpoint somebody adds under /api and forgets to route, and the
+  // caller would see a submission that silently did nothing.
   const catchAll = binding("index");
-  const waitlist = binding("waitlist");
-
   assert.equal(catchAll.route, "{*path}");
   assert.deepEqual(catchAll.methods, ["get", "head"]);
-  assert.deepEqual(waitlist.methods, ["post"]);
   assert.equal(
     catchAll.methods.includes("post"),
     false,
-    "a catch-all that accepts POST could swallow a signup if route precedence ever changed",
+    "a catch-all that accepts POST could swallow a submission if route precedence ever changed",
   );
 });
 
-test("both functions are anonymous, because the platform is what fronts them", () => {
-  for (const name of ["index", "waitlist"]) {
-    assert.equal(binding(name).authLevel, "anonymous");
-  }
+test("the function is anonymous, because the platform is what fronts it", () => {
+  assert.equal(binding("index").authLevel, "anonymous");
 });

@@ -45,12 +45,21 @@
   },
   {
     "id": "site-api",
-    "name": "Waitlist API",
+    "name": "Site API",
     "group": "Website and documentation",
-    "description": "The managed function behind the sign-up form.",
+    "description": "The managed function that answers /api on the marketing host.",
     "url": "https://antifailure.dev/api",
     "check": "http",
-    "expect_body": "/api/waitlist"
+    "expect_body": "https://app.antifailure.dev"
+  },
+  {
+    "id": "signup",
+    "name": "Sign-up",
+    "group": "Hosted control plane",
+    "description": "The front door: starting a sign-in redirects to GitHub rather than being refused.",
+    "url": "https://app.antifailure.dev/auth/github",
+    "check": "redirect",
+    "expect_location": "https://github.com/login/oauth/authorize"
   },
   {
     "id": "staging",

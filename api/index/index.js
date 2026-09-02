@@ -18,25 +18,28 @@
  * control plane's. So the answer says that, and says where to go.
  *
  * The route is `{*path}`, which has the lowest precedence in the Functions
- * router, so a literal route like `waitlist` always wins. The methods are
- * narrowed to GET and HEAD as well, which is belt and braces: the waitlist is
- * POST only, so even if precedence ever went the other way this could not
- * shadow it and swallow a signup.
+ * router, so a literal route added later always wins. The methods stay narrowed
+ * to GET and HEAD as well, which is belt and braces: a catch-all that accepted
+ * POST could shadow a future endpoint and swallow its requests silently, which
+ * is exactly what a submitted form looks like when it goes nowhere.
+ *
+ * This app answered a waitlist as well until sign-up became real. Signing up is
+ * now a GitHub exchange against the control plane at app.antifailure.dev, which
+ * has a session, a database and an audit chain, so there is nothing for this
+ * host to accept and `endpoints` is empty. Empty rather than removed: the
+ * question an agent typing /api is asking is what this host offers a machine,
+ * and "nothing, and here is where the product's API lives" is an answer.
  */
 
 const { failure, published } = require("../shared/errors");
 
 const INDEX = {
   service: "antifailure.dev",
-  description: "The public API and machine-readable resources behind the Antifailure website.",
-  endpoints: [
-    {
-      method: "POST",
-      path: "/api/waitlist",
-      description:
-        "Adds one email address to the design partner waitlist. Idempotent on the address. There is no endpoint that reads the list back.",
-    },
-  ],
+  description: "The machine-readable resources behind the Antifailure website.",
+  // This host serves the marketing site and accepts nothing. Everything that
+  // takes an action is on the control plane, behind a session or an engine
+  // token, and productApi below says where.
+  endpoints: [],
   // Static files the site publishes rather than endpoints this app serves.
   // Listed here because the question somebody typing /api is asking is what
   // this host offers a machine, and the answer is mostly these.

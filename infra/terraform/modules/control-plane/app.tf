@@ -334,28 +334,45 @@ resource "azurerm_container_app" "this" {
         }
       }
 
-      # Who may sign in. ALWAYS set, including when the list is empty.
+      # Who may sign in. Set for every value of the variable EXCEPT null.
       #
-      # The distinction is the whole feature: the application reads an unset
-      # variable as "open to every GitHub account" and an empty one as "nobody".
-      # So this is not a dynamic block that disappears when the list is empty --
-      # that would turn the most restrictive intent into the least restrictive
-      # deployment, which is how this went wrong the first time.
-      env {
-        name  = "AF_SIGNIN_ALLOWLIST"
-        value = join(",", var.signin_allowlist)
+      # Read the condition carefully, because the obvious simplification of it
+      # is the bug this deployment already shipped once. The application reads
+      # an unset variable as "open to every GitHub account" and an EMPTY one as
+      # "nobody". So a dynamic block keyed on the list being empty would turn
+      # the most restrictive intent into the least restrictive deployment.
+      #
+      # It is keyed on null instead, which is a different value from an empty
+      # list in Terraform and is the only way to say "everybody" here. An empty
+      # list still renders `AF_SIGNIN_ALLOWLIST=""` and still closes the plane
+      # to everyone, exactly as before.
+      dynamic "env" {
+        for_each = var.signin_allowlist == null ? [] : [1]
+        content {
+          name  = "AF_SIGNIN_ALLOWLIST"
+          value = join(",", var.signin_allowlist)
+        }
       }
 
-      # The other half of the same decision. Unset means the refusal page has
-      # nowhere to send anybody, which is correct for an installation with no
-      # waitlist and wrong for ours, so it is a dynamic block rather than
-      # always set: an empty string here would be a link to nothing.
+      # What the ones it turns away see. Unset means the refusal page has
+      # nowhere to send anybody, which is correct for an installation whose
+      # operator has their own way of being asked, so it is a dynamic block
+      # rather than always set: an empty string here would be a link to nothing.
       dynamic "env" {
         for_each = var.signup_url == "" ? [] : [var.signup_url]
         content {
           name  = "AF_SIGNUP_URL"
           value = env.value
         }
+      }
+
+      # Whether signing in ends somewhere. Always set, both ways, because the
+      # value a reader of the revision needs is the answer rather than the
+      # absence of a question, and the application's "1 or 0 or unset" grammar
+      # accepts an explicit 0.
+      env {
+        name  = "AF_SELF_SERVE_SIGNUP"
+        value = var.self_serve_signup ? "1" : "0"
       }
 
       dynamic "env" {
