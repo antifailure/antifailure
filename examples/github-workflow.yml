@@ -273,6 +273,11 @@ jobs:
               # The real teardown, with an acknowledgement saying what was
               # removed and what is still standing. A row marked torn down
               # while the containers keep running is worse than a failure.
+              #
+              # No branch flag, for the same reason 'up' has none: the dispatch
+              # ran on the branch the environment belongs to. It exits 10 when
+              # something could not be removed, which has to fail this job
+              # rather than read as a clean teardown in the control plane.
               af workload teardown --result teardown-result.json
               ;;
             scenario)
@@ -293,13 +298,6 @@ jobs:
               done
               if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
               af explore ${args[@]+"${args[@]}"}
-              ;;
-            down)
-              # No branch flag, for the same reason 'up' has none: the dispatch
-              # ran on the branch the environment belongs to. Teardown exits 10
-              # when something could not be removed, which has to fail this job
-              # rather than read as a clean teardown in the control plane.
-              af down
               ;;
             *)
               # Everything else is a workload, and one command runs all four

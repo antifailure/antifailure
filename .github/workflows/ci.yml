@@ -7,8 +7,9 @@ on:
     branches: [main]
   pull_request:
 
-# A second push cancels the first run on the same branch, because the answer
-# about the older commit stopped mattering the moment the newer one arrived.
+# A second push cancels the first run on a BRANCH, because the answer about the
+# older commit stopped mattering the moment the newer one arrived. On main it
+# does not, and the reason is directly below.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   # A run on main is the verdict a tag and a deploy are read against, so it
@@ -17,11 +18,29 @@ concurrency:
   #
   # Six merges landed inside one run's length on 2026-09-02 and each cancelled
   # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
-  # run at all. Cancelled is not red, but it is not a verdict either, and
-  # `release.yml` has no gate of its own, so the only thing standing between
-  # an unverified commit and published binaries was somebody holding merges
-  # by hand. Tags are excluded for the same reason.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  # run at all. Cancelled is not red, but it is not a verdict either, and at
+  # the time `release.yml` had no gate of its own, so the only thing standing
+  # between an unverified commit and published binaries was somebody holding
+  # merges by hand.
+  #
+  # `release.yml` has a gate now and it reads THIS workflow's conclusion, which
+  # makes this line matter more rather than less: the gate refuses a cancelled
+  # run, so a main run that never finished is a release that cannot be cut.
+  #
+  # There is no clause for tags here because this workflow does not run on
+  # one. The `on:` block above is a push to main and a pull request, and
+  # nothing else, so `refs/tags/` is a ref this expression is never evaluated
+  # against. The first version of this line excluded tags anyway, which read
+  # as protection and was a condition that could not be true.
+  #
+  # What this does NOT buy, so nobody reads more into it than it does: a run
+  # that has already STARTED is never cancelled, and that is the whole of it.
+  # GitHub still cancels a run that is merely PENDING when a newer one queues
+  # behind the same in progress run. So the newest commit always reaches a
+  # verdict, which is what a tag and a deploy are read against, and commits in
+  # between a burst of merges still get skipped. Every commit reaching a
+  # verdict needs a merge queue, not a bigger timeout.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read, and only read. No job in this workflow writes anything back, and a
 # token that could is a token an action pulled from the internet could use.
@@ -155,6 +174,19 @@ jobs:
         # release, which is about as often as anybody remembers anything.
         run: go run ./tools/tagsync .
 
+      - name: The license is detectable and the ee carve out is stated
+        # LICENSE carried the MIT text plus one paragraph naming the ee carve
+        # out. The paragraph was correct and it made the license undetectable:
+        # Licensee folds appended prose into the text it compares, so GitHub
+        # reported NOASSERTION for an MIT project. No license in the sidebar,
+        # absent from the license filter, and to anyone scanning it, all rights
+        # reserved. Nobody looks at a badge, so nothing found it.
+        #
+        # Both halves are checked together on purpose. Holding LICENSE to pure
+        # MIT alone would be satisfied by deleting the carve out, and a paid
+        # directory nobody knows is paid is the worse of the two failures.
+        run: go run ./tools/licensecheck .
+
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
         # Nothing watched that, so a job added here would quietly stop being
@@ -162,6 +194,22 @@ jobs:
         # passed locally failed here, which is the moment the promise was
         # supposed to prevent.
         run: go run ./tools/gatecheck .
+
+      - name: Every script this repository runs by path can be executed
+        # tools/site/check-tls.sh was committed at mode 100644. Both of the
+        # places that run it name it as a bare relative path, the certificate
+        # step in deploy.yml and the `check-tls` recipe, so the kernel refused
+        # to exec it and the step died with "Permission denied" and status 126.
+        # It had never run anywhere: the only job that calls it fires on a push
+        # to main and not on a pull request, so the first push that reached the
+        # deploy job was also the first time anybody learned that the
+        # certificate check had never checked a certificate.
+        #
+        # The mode is read from the git index rather than from the disk, which
+        # is what makes this a gate rather than a check on whoever ran it: a
+        # `chmod +x` without a `git update-index --chmod=+x` leaves a working
+        # tree that runs the script and a commit that does not.
+        run: go run ./tools/execcheck .
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
@@ -246,6 +294,22 @@ jobs:
         # while before anything enforced it, which is how a claim in
         # documentation quietly stops being true.
         run: go run ./tools/errcheck .
+
+      - name: The Go packages version 1 promised are the ones it still has
+        # Two sentences of the release notes, held to the tree. The engine's
+        # stable packages are engine/pkg/provider, engine/pkg/schema,
+        # engine/pkg/secret and engine/conformance, everything else is free to
+        # change, and engine/internal cannot be imported from outside the module
+        # at all. The last of those is the toolchain's and needs nothing; the
+        # rest had nothing behind them.
+        #
+        # It caught a live one. provider.Database.ConnString returned a type
+        # from engine/internal/secrets, so the interface the notes call an
+        # integration surface could not be implemented from outside the
+        # repository: the return type has no spelling an outside package is
+        # allowed to use. It compiled here, reviewed as correct, and would have
+        # failed on the first line of the first real provider anybody wrote.
+        run: go run ./tools/surfacecheck .
 
       - name: Vet
         run: cd engine && go vet ./...

@@ -282,7 +282,7 @@
       "area": "DB",
       "areaName": "Database",
       "message": "The source database is Postgres {found}, and this provider supports {supported}.",
-      "resolution": "Use a provider that supports Postgres {found}, or upgrade the source.",
+      "resolution": "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
       "docs": "https://antifailure.dev/docs/providers/overview",
       "retryable": false,
       "exitCode": 3,
@@ -770,6 +770,17 @@
       "docs": "https://antifailure.dev/docs/concepts/masking",
       "retryable": false,
       "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-MSK-011",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "Verification could not read {table}.{column}, so the golden was not verified: {detail}",
+      "resolution": "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.",
+      "docs": "https://antifailure.dev/docs/concepts/verification",
+      "retryable": false,
+      "exitCode": 7,
       "planned": false
     },
     {

@@ -98,6 +98,46 @@ const serverFailure = {
   content: json({ $ref: '#/components/schemas/ServerFailure' }),
 }
 
+/**
+ * Whether a procedure belongs in the document published at the apex.
+ *
+ * `admin.*` does not, and the reason that matters is the AUDIENCE, not the
+ * mechanics. This document exists so a customer can generate a client against
+ * the tenant API. An operator route is not something a customer can call: it
+ * takes an operator session from a different table, issued by a different sign
+ * in, carried in a differently named `__Host-` cookie with its own CSRF token.
+ * Describing one correctly would still be describing an API that no reader of
+ * this document is able to use, and the reliable effect of publishing it is a
+ * map of the operator surface for somebody enumerating it. If the operator API
+ * ever needs documenting it needs its own document with its own audience, not a
+ * section of the public one.
+ *
+ * That is why this exclusion is permanent rather than provisional. There is a
+ * second and more visible problem, which is that this generator reads a
+ * procedure's authorisation from `Meta.permission`, the tenant catalogue, while
+ * operator routes declare `Meta.adminPermission` in a separate one. So
+ * `declaredPermissions()` returns nothing for them and the branch below
+ * publishes `security: []` with the sentence "Requires no permission." over
+ * `admin.operators.create`. It is worth knowing, and it is deliberately not the
+ * headline: someone who reads it as THE reason will teach the generator to read
+ * the admin catalogue, and then the document will describe the operator control
+ * surface accurately, at the apex, which is worse than describing it wrongly.
+ *
+ * This narrows the DOCUMENT and nothing else. `listProcedures` still returns
+ * every procedure, because `limits.test.ts` and `permissions.test.ts` walk it to
+ * prove that each route has a rate limit and a declared permission, and an
+ * operator route that fell out of those two walks would lose both gates in
+ * exchange for a tidier JSON file. Narrowing what a guard enumerates does not
+ * show up in the guard's result: both tests would have stayed green while
+ * covering eighteen routes fewer. `openapi.test.ts` pins both directions of this
+ * predicate, and pins that the excluded set is not empty, without pinning its
+ * size, which is a constant that stops guarding when it drifts rather than
+ * failing.
+ */
+export function isPublishedProcedure(path: string): boolean {
+  return !path.startsWith('admin.')
+}
+
 /** Walks the router tree and returns every procedure with its kind. */
 export function listProcedures(): { path: string; type: 'query' | 'mutation' }[] {
   const out: { path: string; type: 'query' | 'mutation' }[] = []
@@ -412,11 +452,168 @@ export function openApiDocument(): Record<string, unknown> {
     },
   }
 
+  // The repository claims behind the workflow identity exchange.
+  //
+  // These are documented because a customer reaches them with `curl` rather
+  // than through `af`. `docs/guides/github.md` hands them the command line,
+  // so the HTTP call IS the surface here, and a surface a customer is told to
+  // call and cannot look up is undocumented rather than internal.
+  //
+  // Hand written rather than generated, like every other route in this block,
+  // because they are Hono routes and not tRPC procedures. There is no
+  // validator to read a schema out of.
+  const bindingsAuth = {
+    security: [{ cliToken: [] }],
+    tags: ['Workflow identity'],
+  }
+  const bindingRefusals = {
+    '401': refusal('The bearer token is not a valid CLI token.'),
+    '402': refusal('This organization\'s plan does not include the hosted control plane.'),
+    '403': refusal(
+      'The token does not carry `tokens.manage`. The message names the command that fixes it, ' +
+      'because a caller told only that they are forbidden goes looking for a role problem.',
+    ),
+    '500': serverFailure,
+  }
+  paths['/v1/oidc/bindings'] = {
+    post: {
+      ...bindingsAuth,
+      operationId: 'claimRepositoryBinding',
+      summary: 'Claim a repository for workflow identity',
+      description:
+        'Claims `owner/name` for this organization, so a workflow in it can exchange a GitHub ' +
+        'identity token for an engine token. Needed when the App is not installed on the ' +
+        'owner, which is the case the first exchange cannot resolve on its own.\n\n' +
+        'Behind the same permission as minting an engine token, because a claim grants a ' +
+        'workflow the standing ability to mint one.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`. ' +
+        'OpenAPI cannot express a scope on a bearer scheme, so the requirement is stated ' +
+        'here rather than in `security`, where only OAuth2 flows can carry scopes.',
+      requestBody: {
+        required: true,
+        content: json({
+          type: 'object',
+          properties: { repository: { type: 'string', example: 'acme/app' } },
+          required: ['repository'],
+          additionalProperties: false,
+        }),
+      },
+      responses: {
+        '201': {
+          description: 'The claim, as the list renders it.',
+          content: json({ $ref: '#/components/schemas/OidcBinding' }),
+        },
+        '400': refusal('The body is not JSON, or the repository is not `owner/name`.'),
+        '409': refusal(
+          'Another organization already holds this repository. Nothing about the request is ' +
+          'malformed, and sending it again unchanged will never work, which is why it is not a 400.',
+        ),
+        ...bindingRefusals,
+      },
+    },
+    get: {
+      ...bindingsAuth,
+      operationId: 'listRepositoryBindings',
+      summary: 'List this organization\'s repository claims',
+      description:
+        'Every claim this organization holds, with the audience a workflow must ask GitHub ' +
+        'for. The audience is returned rather than documented alone so a caller building a ' +
+        'workflow file reads it from the server that will check it.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.',
+      responses: {
+        '200': {
+          description: 'The claims and the audience.',
+          content: json({
+            type: 'object',
+            properties: {
+              audience: { type: 'string', example: CALLBACK_AUDIENCE },
+              bindings: { type: 'array', items: { $ref: '#/components/schemas/OidcBinding' } },
+            },
+            required: ['audience', 'bindings'],
+          }),
+        },
+        ...bindingRefusals,
+      },
+    },
+  }
+
+  // Two paths for one operation, and that is not duplication.
+  //
+  // A repository is `owner/name` and a slash is a path separator, so a single
+  // `{binding}` segment cannot match one. Before the second path existed,
+  // `DELETE /v1/oidc/bindings/acme/app` matched no route at all and was
+  // answered by the "this endpoint has no declared rate limit" refusal, which
+  // is the loudest possible way to say a revocation is unreachable. Somebody
+  // holding the repository name, which is what the list shows and what a
+  // person has in front of them during an incident, must not have to go and
+  // find a uuid first.
+  const revokeResponses = {
+    '200': {
+      description: 'What the revocation did.',
+      content: json({
+        type: 'object',
+        properties: {
+          revoked: { type: 'boolean' },
+          repository: { type: 'string' },
+          alreadyRevoked: {
+            type: 'boolean',
+            description: 'True when the claim was already revoked, so a retry is not an error.',
+          },
+          tokensRevoked: {
+            type: 'integer',
+            description:
+              'How many live engine tokens this killed. Named, because "revoked" on its own ' +
+              'does not tell somebody in an incident whether the credentials already out ' +
+              'there are dead.',
+          },
+        },
+        required: ['revoked', 'repository', 'alreadyRevoked', 'tokensRevoked'],
+      }),
+    },
+    '400': refusal('The identifier is neither a uuid nor `owner/name`.'),
+    '404': refusal(
+      'No claim here has that id or repository. The same answer whether it belongs to another ' +
+      'organization or does not exist, which is what every other lookup on this server does.',
+    ),
+    ...bindingRefusals,
+  }
+  paths['/v1/oidc/bindings/{binding}'] = {
+    delete: {
+      ...bindingsAuth,
+      operationId: 'revokeRepositoryBindingById',
+      summary: 'Revoke a repository claim by id',
+      description:
+        'Revokes the claim and kills every engine token minted through it. The count of tokens ' +
+        'killed is in the answer.\n\n' +
+        'Needs a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.',
+      parameters: [{
+        name: 'binding', in: 'path', required: true,
+        schema: { type: 'string', format: 'uuid' },
+      }],
+      responses: revokeResponses,
+    },
+  }
+  paths['/v1/oidc/bindings/{owner}/{name}'] = {
+    delete: {
+      ...bindingsAuth,
+      operationId: 'revokeRepositoryBindingByRepository',
+      summary: 'Revoke a repository claim by repository name',
+      description:
+        'The same operation as revoking by id, reachable with the name a person has in front ' +
+        'of them. See the note above about why this is a second path rather than one segment.',
+      parameters: [
+        { name: 'owner', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'name', in: 'path', required: true, schema: { type: 'string' } },
+      ],
+      responses: revokeResponses,
+    },
+  }
+
   // The tRPC procedures. They are described rather than fully typed, because
   // tRPC's own client carries the types and this document exists for callers
   // that are not that client.
   const permissions = declaredPermissions()
-  for (const { path, type } of listProcedures()) {
+  for (const { path, type } of listProcedures().filter((p) => isPublishedProcedure(p.path))) {
     const permission = permissions.get(path)
     const input = procedureInput(path)
     const isQuery = type === 'query'
@@ -524,8 +721,37 @@ export function openApiDocument(): Record<string, unknown> {
       securitySchemes: {
         session: { type: 'apiKey', in: 'cookie', name: 'af_session' },
         engineToken: { type: 'http', scheme: 'bearer' },
+        // A third credential and not a spelling of the second. An engine token
+        // is minted for one workflow run and lasts minutes; a CLI token comes
+        // from `af login`, carries scopes, and belongs to a person. Declaring
+        // one scheme for both would tell a reader they are interchangeable.
+        cliToken: { type: 'http', scheme: 'bearer' },
       },
       schemas: {
+        OidcBinding: {
+          type: 'object',
+          description:
+            'A repository claimed for workflow identity. `lastUsedAt` and `revokedAt` are null ' +
+            'rather than absent, so a caller can tell "never used" from a field this version ' +
+            'does not send.',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            repository: { type: 'string', example: 'acme/app' },
+            createdAt: { type: 'string', format: 'date-time' },
+            // `['string', 'null']` and not `nullable: true`. This document is
+            // 3.1.0, whose Schema Object is JSON Schema 2020-12, and 2020-12
+            // has no `nullable`: it was a 3.0 keyword. An unknown keyword in
+            // 2020-12 is an ignored annotation, so `nullable: true` would say
+            // nothing and leave the field declared as a non-null string. A
+            // generated client would then reject the first binding nobody has
+            // used yet, and a client decoding the whole `bindings` array at
+            // once would lose every row rather than one.
+            lastUsedAt: { type: ['string', 'null'], format: 'date-time' },
+            revokedAt: { type: ['string', 'null'], format: 'date-time' },
+          },
+          required: ['id', 'repository', 'createdAt', 'lastUsedAt', 'revokedAt'],
+          additionalProperties: false,
+        },
         Refusal: {
           type: 'object',
           description:

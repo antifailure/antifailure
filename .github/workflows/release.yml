@@ -6,14 +6,88 @@ on:
     tags: ['v*']
 
 # Read by default. The one job that publishes asks for write, and nothing else
-# gets it. Four of the five jobs here only compile a binary, and a compiler
-# with permission to create a release is permission nobody needed to grant.
+# gets it. Four of the six jobs here only compile a binary and one only asks
+# GitHub a question, and a compiler with permission to create a release is
+# permission nobody needed to grant.
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Nothing publishes that CI has not passed.
+  #
+  # A tag is the whole trigger for this workflow, and a tag is one command
+  # anybody with push access can run on any commit. Before this job existed, a
+  # tag on a red commit built four binaries, wrote a checksum file, generated a
+  # bill of materials, signed both with cosign and published the lot, green the
+  # whole way. The signature was even honest: it says this workflow in this
+  # repository produced these bytes, which was true. Nothing anywhere said the
+  # commit worked.
+  #
+  # cd.yml has answered the same question for deployment since the beginning,
+  # and this is the same rule with the same reasoning and the same 38 minute
+  # budget behind it. It defers to CI rather than re-running the checks, because
+  # CI already ran on this commit and a second opinion that disagrees with the
+  # first leaves nobody able to say which verdict was real.
+  #
+  # WHY IT DOES NOT DEADLOCK ITS OWN TAG. ci.yml runs on a push to main and on a
+  # pull request, and not on tags. The run this waits for is the one the commit
+  # already had when it landed on main, found by head_sha, so it is normally
+  # complete before the tag exists. Nothing here waits for a run the tag itself
+  # would trigger, because no such run is ever created.
+  #
+  # WHY THE JUDGEMENT IS A COMMAND AND NOT FIFTEEN LINES OF SHELL. Shell in a
+  # tag triggered workflow can be watched refusing exactly once, on a real red
+  # tag, which is the rehearsal nobody gets to do twice. tools/cigate has a
+  # test per state GitHub can report, and the two that look like a pass and are
+  # not, `cancelled` and `skipped`, each have their own.
+  #
+  # `cancelled` refuses. GitHub uses that one word for a job that hit its own
+  # timeout, a run somebody stopped by hand, and a run a newer push superseded,
+  # and none of the three is a verdict about the commit. ci.yml stopped
+  # cancelling superseded runs on main and on tags precisely so that the commit
+  # a release is cut from reaches one.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    # The 115 attempts at 20 seconds inside cigate are sized against this
+    # number, exactly as cd.yml's are against its own. Changing one without the
+    # other turns a slow queue into a failed release.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Reading another workflow's runs. The default token cannot, and the
+      # answer without it is a 403 rather than an empty list, which cigate
+      # refuses on rather than mistaking for a commit nobody has tested.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: CI is green on the commit this tag names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # github.sha, which is the same value the build job stamps into every
+        # binary below and the same value cd.yml gates on. Gating the exact
+        # commit that gets stamped is the property that makes this worth
+        # anything.
+        run: |
+          GOTOOLCHAIN=local go run ./tools/cigate \
+            -repo "${{ github.repository }}" \
+            -sha "${{ github.sha }}"
+
   build:
     name: build ${{ matrix.os }}-${{ matrix.arch }}
+    # Gated too, rather than only the publish job. Compiling a binary from a red
+    # commit harms nobody, and a green build job sitting above a refused gate is
+    # a release that looks four fifths finished to whoever reads the run. It
+    # also costs nothing: ci.yml does not run on tags, so the conclusion this
+    # waits for already exists and the gate normally resolves on its first ask.
+    needs: gate
     runs-on: ubuntu-latest
     strategy:
       matrix:

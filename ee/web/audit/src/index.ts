@@ -1,3 +1,7 @@
+// The public surface of the audit streaming package.
+//
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 export {
   Queue,
   PermanentError,

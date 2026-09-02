@@ -72,7 +72,16 @@ function sourcesFor(routePath: string): string[] {
   } else if (routePath === "/blog") {
     candidates.push("app/blog/page.tsx", "lib/blog.ts");
   } else if (routePath === "/changelog") {
-    candidates.push("app/changelog/page.tsx", "lib/changelog.ts");
+    // Controls.tsx as well, because this list is written by hand and a file
+    // added to a route after somebody wrote its line here is exactly what it
+    // fails to notice. It is a fallback either way: contentLastModified
+    // answers /changelog from the fragments and never reaches this unless git
+    // cannot date them.
+    candidates.push(
+      "app/changelog/page.tsx",
+      "app/changelog/Controls.tsx",
+      "lib/changelog.ts",
+    );
   } else if (routePath === "/pricing") {
     candidates.push("app/pricing/page.tsx", "components/pages/company/Pricing.tsx");
   } else if (routePath === "/signin" || routePath === "/signup") {

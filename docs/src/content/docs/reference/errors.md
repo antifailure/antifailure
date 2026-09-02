@@ -344,7 +344,7 @@ The source database at {host} could not be reached.
 
 The source database is Postgres {found}, and this provider supports {supported}.
 
-**What to do.** Use a provider that supports Postgres {found}, or upgrade the source.
+**What to do.** Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.
 
 | | |
 | --- | --- |
@@ -895,6 +895,18 @@ Masking could not run: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking) |
+
+### AF-MSK-011
+
+Verification could not read {table}.{column}, so the golden was not verified: {detail}
+
+**What to do.** Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verification](/docs/concepts/verification) |
 
 ## Egress
 

@@ -244,6 +244,9 @@ const (
 	AFMSK008 Code = "AF-MSK-008"
 	// Masking could not run: {detail}
 	AFMSK010 Code = "AF-MSK-010"
+	// Verification could not read {table}.{column}, so the golden was not
+	// verified: {detail}
+	AFMSK011 Code = "AF-MSK-011"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -651,7 +654,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB003,
 		Area:      "DB",
 		Message:   "The source database is Postgres {found}, and this provider supports {supported}.",
-		NextStep:  "Use a provider that supports Postgres {found}, or upgrade the source.",
+		NextStep:  "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
 		Docs:      "providers/overview",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
@@ -1204,6 +1207,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/masking",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFMSK011: {
+		Code:      AFMSK011,
+		Area:      "MSK",
+		Message:   "Verification could not read {table}.{column}, so the golden was not verified: {detail}",
+		NextStep:  "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.",
+		Docs:      "concepts/verification",
+		Retryable: false,
+		ExitCode:  ExitVerification,
 	},
 	AFNET001: {
 		Code:      AFNET001,
