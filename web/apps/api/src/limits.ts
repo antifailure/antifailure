@@ -51,6 +51,36 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   // eight characters from a 28 character alphabet, and the arithmetic that makes
   // guessing it hopeless assumes these limits exist. They are not a nicety here,
   // they are the third of the three things holding that code up.
+  // The operator portal's front door, and the tightest limit in this table.
+  //
+  // A password endpoint is guessable in a way none of the token endpoints are,
+  // and what is behind this one is not one tenant's data, it is EVERY tenant's.
+  // So this is deliberately below what a person would notice and far below what
+  // an attacker needs: one attempt per two seconds sustained, five at once for
+  // somebody who genuinely fat-fingered it twice and then pasted from a manager.
+  //
+  // Keyed by ip, which is the only key available: the whole point of this
+  // endpoint is that the caller has no session yet, and keying on the submitted
+  // email would let an attacker spread attempts across addresses to raise the
+  // ceiling, while also letting them lock out a known operator by exhausting
+  // that operator's bucket.
+  //
+  // This bounds ONLINE guessing only. What bounds offline guessing is scrypt at
+  // N = 2^15 over a per-row salt, and what bounds the damage of a success is the
+  // audit entry every failure writes, which is the line that shows somebody
+  // being targeted before they succeed.
+  'POST /v1/admin/signin': {
+    rate: 0.5, burst: 5, key: 'ip',
+    reason: 'Signing in to the operator portal is a human action a few times a day, and what is behind it is every tenant on the instance. One attempt per two seconds is far above honest use and far below useful guessing.',
+  },
+  'GET /v1/admin/session': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The operator portal asks on load and after a focus change, the same shape as GET /auth/session, and for the same reason: it carries the CSRF token every operator mutation needs, so refusing it does not merely blank a page, it makes the portal unable to act.',
+  },
+  'POST /v1/admin/signout': {
+    rate: 2, burst: 10, key: 'ip',
+    reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',
+  },
   'POST /auth/device/code': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Starting a terminal login is a human action. Ten at once covers somebody retrying in three shells; a sustained one per second does not.',

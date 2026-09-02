@@ -36,6 +36,7 @@ import {
   normaliseEmail,
   INVITATION_TTL_MS,
 } from '../enterprise/invitations.ts'
+import { resolveEntitlements, seatVerdict } from '../entitlements.ts'
 import { buildExport } from '../enterprise/export.ts'
 import {
   advanceDeletion,
@@ -383,6 +384,33 @@ export const invitationsRouter = router({
             code: 'BAD_REQUEST',
             message: `${email} is already a member of this organization.`,
           })
+        }
+
+        // Seats, before anything is written.
+        //
+        // Counted here rather than when the invitation is ACCEPTED, and that
+        // is the decision: refusing at acceptance lands the refusal on the
+        // person joining, who cannot do anything about it and did not cause
+        // it. Refusing here lands it on the person who is one seat over, who
+        // can withdraw an invitation or change the plan. The count is members
+        // plus invitations that are still open for the same reason.
+        const held = await db.execute<{ members: string; open_invitations: string }>(sql`
+          SELECT (SELECT count(*) FROM members) AS members,
+                 (SELECT count(*) FROM invitations
+                   WHERE accepted_at IS NULL AND revoked_at IS NULL
+                     AND expires_at > ${c.clock.now().toISOString()}) AS open_invitations`)
+        const seats = await resolveEntitlements(db, c.clock.now(), {
+          orgId: c.actor.orgId,
+          plan: c.actor.plan,
+          userId: c.actor.userId,
+        })
+        const seatCheck = seatVerdict(
+          seats,
+          Number(held[0]?.members ?? 0),
+          Number(held[0]?.open_invitations ?? 0),
+        )
+        if (!seatCheck.allowed) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: seatCheck.reason })
         }
 
         const open = await db.execute<{ id: string }>(sql`

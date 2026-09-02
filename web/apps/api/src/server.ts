@@ -25,7 +25,22 @@ import {
 } from './tokens.ts'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
-import type { Pool } from '@antifailure/db'
+import type { Pool, AdminPool } from '@antifailure/db'
+import {
+  ADMIN_CSRF_HEADER,
+  ADMIN_SESSION_COOKIE,
+  AdminSignInError,
+  adminCsrfMatches,
+  adminCsrfTokenFor,
+  adminSessionCookie,
+  adminSignIn,
+  adminSignOut,
+  clearedAdminCookie,
+  looksSameOrigin,
+  readAdminSessionCookie,
+  resolveAdminSession,
+} from './admin/session.ts'
+import { actorOf } from './admin/trpc.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
@@ -143,6 +158,16 @@ import {
 
 export interface ServerOptions {
   pool: Pool
+  /**
+   * The operator database credential, for the admin portal.
+   *
+   * A SEPARATE pool with a separate role, never `pool` handed in twice: the
+   * cross tenant read has to be a credential the application cannot acquire.
+   * Absent means this installation has no operator portal, which is the correct
+   * default for somebody running this for one team, and the admin procedures
+   * say so by name rather than rendering an empty portal.
+   */
+  adminPool?: AdminPool | null
   github: GitHubClient
   clock?: Clock
   /** Set false only for local HTTP development. The cookie is Secure otherwise. */
@@ -763,6 +788,95 @@ export function createServer(options: ServerOptions) {
         actions: [{ href: '/auth/github', label: 'Start again' }],
       })
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // The operator portal's own sign-in
+  //
+  // SEPARATE ROUTES FROM /auth/*, and that is the whole design rather than
+  // tidiness. The product's sessions table is populated by GitHub OAuth, so if
+  // operator power were a flag on a product session then compromising somebody's
+  // GitHub account would be compromising the platform. Two credentials that fail
+  // independently is the point, and these routes never touch `sessions`.
+  //
+  // These exist because without them the operator portal cannot be signed into
+  // AT ALL: adminSignIn, adminSessionCookie and their siblings had no caller
+  // outside tests, so ctx.admin was null on every request and all twelve
+  // procedures in the admin router answered UNAUTHORIZED. The functions were
+  // correct and unreachable, which is the failure mode that looks most like
+  // working software.
+  //
+  // Rate limited on the same bucket as the product's sign-in, because this is a
+  // password endpoint and the operator credential is the one that reads every
+  // customer's data.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/admin/signin', async (c) => {
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    const body = await c.req.json().catch(() => null)
+    const email = typeof body?.email === 'string' ? body.email : ''
+    const password = typeof body?.password === 'string' ? body.password : ''
+
+    try {
+      const result = await adminSignIn(
+        options.pool,
+        { email, password, ip: c.req.header('x-forwarded-for'), userAgent: c.req.header('user-agent') },
+        clock.now(),
+      )
+      c.header('set-cookie', adminSessionCookie(result.token, result.expiresAt, secure))
+      return c.json({ signedIn: true })
+    } catch (err) {
+      // ONE MESSAGE FOR EVERY REFUSAL, and the same one adminSignIn composes:
+      // a wrong password, an unknown address, an operator with no password set
+      // and a suspended operator must be indistinguishable from outside, or
+      // this endpoint answers "which of your guesses was closer".
+      //
+      // 401 rather than 400: the credential was refused, not malformed.
+      if (err instanceof AdminSignInError) return c.json({ error: err.message }, 401)
+      throw err
+    }
+  })
+
+  /**
+   * The operator session, and the CSRF token that goes with it.
+   *
+   * Mirrors GET /auth/session, and exists for the same reason: the token is
+   * derived from the session cookie, the cookie is HttpOnly, so a browser
+   * cannot compute it and a page reload would otherwise lose the one the
+   * sign-in response carried. Without this endpoint the operator portal can
+   * mutate exactly once per sign-in, which is a guard that looks like it works
+   * and fails on the first refresh.
+   *
+   * It returns the token to whoever already holds the cookie, which is what a
+   * CSRF token is: not a secret, but a value an attacker on another site cannot
+   * read because they cannot make this request and see its response.
+   */
+  app.get('/v1/admin/session', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (!token) return c.json({ signedIn: false }, 200)
+    const session = await resolveAdminSession(options.pool, token, clock.now())
+    if (!session) return c.json({ signedIn: false }, 200)
+    return c.json({
+      signedIn: true,
+      csrfToken: adminCsrfTokenFor(token),
+      label: session.label,
+      email: session.email,
+      role: session.role,
+      impersonating: session.impersonating,
+    })
+  })
+
+  app.post('/v1/admin/signout', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (token) await adminSignOut(options.pool, token, clock.now())
+    // Cleared whether or not there was a session, so a stale or unparseable
+    // cookie can still be got rid of by pressing the button.
+    c.header('set-cookie', clearedAdminCookie(secure))
+    return c.json({ signedOut: true })
   })
 
   app.post('/auth/signout', async (c) => {
@@ -2419,6 +2533,55 @@ export function createServer(options: ServerOptions) {
           )
         }
       }
+
+      // The same check for the OPERATOR cookie, and it is not redundant with
+      // the one above.
+      //
+      // The two cookies are independent credentials in independent tables, and
+      // a request can legitimately carry both. A mutation authenticated by the
+      // operator cookie is checked against the operator token; the product's
+      // token says nothing about it, and an operator with no product session
+      // would otherwise pass this middleware having presented nothing at all.
+      //
+      // Why it is needed when the operator cookie is already SameSite=Strict:
+      // SameSite is SITE-scoped rather than origin-scoped, so a subdomain an
+      // attacker controls is inside it, which is the same sentence the block
+      // above is written for. It matters more here, because the mutations
+      // behind this cookie move money.
+      //
+      // The origin check runs FIRST and fails OPEN by design, per its own
+      // comment: a request that DECLARES a cross-site origin is refused before
+      // its token is looked at, and one that declares nothing is left to the
+      // token. Something between a browser and this process may strip those
+      // headers, and refusing every such request would break the portal for a
+      // reason nobody could diagnose.
+      const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+      if (adminToken) {
+        const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
+        if (operator) {
+          if (
+            !looksSameOrigin(
+              {
+                origin: c.req.header('origin') ?? null,
+                secFetchSite: c.req.header('sec-fetch-site') ?? null,
+              },
+              options.appBaseUrl ?? '',
+            )
+          ) {
+            return c.json({ error: 'This operator request came from another site.' }, 403)
+          }
+          if (!adminCsrfMatches(adminToken, c.req.header(ADMIN_CSRF_HEADER))) {
+            return c.json(
+              {
+                error:
+                  `This operator request needs the ${ADMIN_CSRF_HEADER} header from the ` +
+                  'operator session endpoint.',
+              },
+              403,
+            )
+          }
+        }
+      }
     }
     return next()
   })
@@ -2461,8 +2624,22 @@ export function createServer(options: ServerOptions) {
             }
           }
         }
+        // The operator cookie, resolved beside the product one and never
+        // instead of it. A request can legitimately carry both: an operator
+        // signed in to the product as themselves is still an operator, and the
+        // two sessions are independent credentials in independent tables.
+        // readAdminSessionCookie, not readCookie: the cookie is written under
+        // the __Host- prefix when Secure, so the bare name resolves in local
+        // development and never in production. See its comment.
+        const adminToken = readAdminSessionCookie(c.req.header('cookie'))
+        const adminSession = adminToken
+          ? await resolveAdminSession(options.pool, adminToken, clock.now())
+          : null
+
         const context: TrpcContext = {
           pool: options.pool,
+          admin: adminSession ? actorOf(adminSession) : null,
+          adminPool: options.adminPool ?? null,
           clock,
           github: options.github,
           stripe: options.stripe ?? null,

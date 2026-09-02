@@ -2,7 +2,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { openApiDocument } from '../src/openapi.ts'
+import { openApiDocument, isPublishedProcedure, listProcedures } from '../src/openapi.ts'
 import { appRouter } from '../src/routers/index.ts'
 
 type Operation = {
@@ -98,6 +98,9 @@ describe('the OpenAPI document', () => {
     for (const [path, procedure] of Object.entries(procedures)) {
       const kind = procedure._def.type
       if (kind !== 'query' && kind !== 'mutation') continue
+      // Operator routes are deliberately absent from the document. The two
+      // tests below pin that, in both directions.
+      if (!isPublishedProcedure(path)) continue
       const operation = byId.get(`trpc_${path.replace(/[^a-zA-Z0-9]+/g, '_')}`)
       assert.ok(operation, `${path} is not in the document`)
       const inputs = procedure._def.inputs ?? []
@@ -152,5 +155,46 @@ describe('the OpenAPI document', () => {
       assert.ok(operation, `${id} is missing`)
       assert.ok(operation.responses?.['200']?.content ?? operation.responses?.['202']?.content, `${id} has no success schema`)
     }
+  })
+})
+
+// The document is published at antifailure.dev/openapi.json and read by agents
+// that generate clients from it. What it leaves out is as load bearing as what
+// it carries, and both directions fail quietly: an operator route that leaks in
+// is published as `security: []` because this generator reads the tenant
+// permission catalogue and operator routes declare their permission in a
+// different one, and a tenant route that falls out stops being documented at
+// all with nothing to say so.
+describe('what the published document leaves out', () => {
+  const documented = new Set(
+    Object.keys((openApiDocument() as { paths: Record<string, unknown> }).paths),
+  )
+
+  it('publishes no operator route, because this generator cannot describe one honestly', () => {
+    const leaked = [...documented].filter((path) => path.startsWith('/trpc/admin.'))
+    assert.deepEqual(
+      leaked,
+      [],
+      'these operator routes reached the public document, where they would be published as ' +
+        'requiring no permission and no session: ' + leaked.join(', '),
+    )
+  })
+
+  it('publishes every tenant route, so the exclusion cannot widen by accident', () => {
+    const tenant = listProcedures().filter(({ path }) => isPublishedProcedure(path))
+    // A predicate that excluded everything would satisfy the test above.
+    assert.ok(tenant.length > 50, `only ${tenant.length} tenant procedures, which is too few to be right`)
+    const missing = tenant
+      .map(({ path }) => `/trpc/${path}`)
+      .filter((path) => !documented.has(path))
+    assert.deepEqual(missing, [], `these tenant routes are not in the document: ${missing.join(', ')}`)
+  })
+
+  it('excludes the operator routes the router actually mounts, not an empty set', () => {
+    const operator = listProcedures().filter(({ path }) => !isPublishedProcedure(path))
+    assert.ok(
+      operator.length > 0,
+      'no procedure was excluded, so this exclusion is no longer testing anything',
+    )
   })
 })

@@ -98,6 +98,46 @@ const serverFailure = {
   content: json({ $ref: '#/components/schemas/ServerFailure' }),
 }
 
+/**
+ * Whether a procedure belongs in the document published at the apex.
+ *
+ * `admin.*` does not, and the reason that matters is the AUDIENCE, not the
+ * mechanics. This document exists so a customer can generate a client against
+ * the tenant API. An operator route is not something a customer can call: it
+ * takes an operator session from a different table, issued by a different sign
+ * in, carried in a differently named `__Host-` cookie with its own CSRF token.
+ * Describing one correctly would still be describing an API that no reader of
+ * this document is able to use, and the reliable effect of publishing it is a
+ * map of the operator surface for somebody enumerating it. If the operator API
+ * ever needs documenting it needs its own document with its own audience, not a
+ * section of the public one.
+ *
+ * That is why this exclusion is permanent rather than provisional. There is a
+ * second and more visible problem, which is that this generator reads a
+ * procedure's authorisation from `Meta.permission`, the tenant catalogue, while
+ * operator routes declare `Meta.adminPermission` in a separate one. So
+ * `declaredPermissions()` returns nothing for them and the branch below
+ * publishes `security: []` with the sentence "Requires no permission." over
+ * `admin.operators.create`. It is worth knowing, and it is deliberately not the
+ * headline: someone who reads it as THE reason will teach the generator to read
+ * the admin catalogue, and then the document will describe the operator control
+ * surface accurately, at the apex, which is worse than describing it wrongly.
+ *
+ * This narrows the DOCUMENT and nothing else. `listProcedures` still returns
+ * every procedure, because `limits.test.ts` and `permissions.test.ts` walk it to
+ * prove that each route has a rate limit and a declared permission, and an
+ * operator route that fell out of those two walks would lose both gates in
+ * exchange for a tidier JSON file. Narrowing what a guard enumerates does not
+ * show up in the guard's result: both tests would have stayed green while
+ * covering eighteen routes fewer. `openapi.test.ts` pins both directions of this
+ * predicate, and pins that the excluded set is not empty, without pinning its
+ * size, which is a constant that stops guarding when it drifts rather than
+ * failing.
+ */
+export function isPublishedProcedure(path: string): boolean {
+  return !path.startsWith('admin.')
+}
+
 /** Walks the router tree and returns every procedure with its kind. */
 export function listProcedures(): { path: string; type: 'query' | 'mutation' }[] {
   const out: { path: string; type: 'query' | 'mutation' }[] = []
@@ -573,7 +613,7 @@ export function openApiDocument(): Record<string, unknown> {
   // tRPC's own client carries the types and this document exists for callers
   // that are not that client.
   const permissions = declaredPermissions()
-  for (const { path, type } of listProcedures()) {
+  for (const { path, type } of listProcedures().filter((p) => isPublishedProcedure(p.path))) {
     const permission = permissions.get(path)
     const input = procedureInput(path)
     const isQuery = type === 'query'
