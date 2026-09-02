@@ -99,28 +99,38 @@ const serverFailure = {
 /**
  * Whether a procedure belongs in the document published at the apex.
  *
- * `admin.*` does not, and the reason is not squeamishness about naming the
- * operator surface. This generator describes a procedure's authorisation from
- * `Meta.permission`, which is the tenant catalogue. Operator procedures declare
- * `Meta.adminPermission` instead, a separate catalogue on a separate session
- * and a separate database role, so `declaredPermissions()` returns nothing for
- * them and the branch below documents them as `security: []` with the sentence
- * "Requires no permission." That is not an omission, it is a false statement
- * about an operator route, published at antifailure.dev/openapi.json and handed
- * to whatever agent generates a client from it.
+ * `admin.*` does not, and the reason that matters is the AUDIENCE, not the
+ * mechanics. This document exists so a customer can generate a client against
+ * the tenant API. An operator route is not something a customer can call: it
+ * takes an operator session from a different table, issued by a different sign
+ * in, carried in a differently named `__Host-` cookie with its own CSRF token.
+ * Describing one correctly would still be describing an API that no reader of
+ * this document is able to use, and the reliable effect of publishing it is a
+ * map of the operator surface for somebody enumerating it. If the operator API
+ * ever needs documenting it needs its own document with its own audience, not a
+ * section of the public one.
  *
- * Describing them correctly is not the fix either. The document advertises one
- * server, the tenant API, and no customer credential can reach `admin.*` at
- * all: `adminProcedure` refuses a tenant session before it looks at the input.
- * So a correct entry would document a route every reader of this document is
- * structurally unable to call.
+ * That is why this exclusion is permanent rather than provisional. There is a
+ * second and more visible problem, which is that this generator reads a
+ * procedure's authorisation from `Meta.permission`, the tenant catalogue, while
+ * operator routes declare `Meta.adminPermission` in a separate one. So
+ * `declaredPermissions()` returns nothing for them and the branch below
+ * publishes `security: []` with the sentence "Requires no permission." over
+ * `admin.operators.create`. It is worth knowing, and it is deliberately not the
+ * headline: someone who reads it as THE reason will teach the generator to read
+ * the admin catalogue, and then the document will describe the operator control
+ * surface accurately, at the apex, which is worse than describing it wrongly.
  *
  * This narrows the DOCUMENT and nothing else. `listProcedures` still returns
- * every procedure, because `limits.test.ts` and `permissions.test.ts` walk it
- * to prove that each route has a rate limit and a declared permission, and an
+ * every procedure, because `limits.test.ts` and `permissions.test.ts` walk it to
+ * prove that each route has a rate limit and a declared permission, and an
  * operator route that fell out of those two walks would lose both gates in
- * exchange for a tidier JSON file. `openapi.test.ts` pins both directions of
- * this predicate.
+ * exchange for a tidier JSON file. Narrowing what a guard enumerates does not
+ * show up in the guard's result: both tests would have stayed green while
+ * covering eighteen routes fewer. `openapi.test.ts` pins both directions of this
+ * predicate, and pins that the excluded set is not empty, without pinning its
+ * size, which is a constant that stops guarding when it drifts rather than
+ * failing.
  */
 export function isPublishedProcedure(path: string): boolean {
   return !path.startsWith('admin.')
