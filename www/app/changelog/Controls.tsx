@@ -6,9 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * Search across the changelog, and a way to open all of it at once.
  *
  * It filters the page that is already there rather than owning the entries
- * itself. Passing 190 entries into a client component would put every
- * paragraph on the page twice, once as HTML and once as serialised props, on
- * the page that is already the largest on this site. So the entries stay
+ * itself. Passing every entry into a client component would put all two
+ * hundred of their paragraphs on the page twice, once as HTML and once as
+ * serialised props, on the page that is already the largest on this site. So the entries stay
  * server rendered and this reads the DOM: `[data-entry]` is one entry, and the
  * text it searches is that entry's own `textContent`, which costs nothing to
  * ship because it is the entry. A collapsed entry is in the document, so the

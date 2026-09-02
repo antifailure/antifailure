@@ -26,16 +26,16 @@ export const metadata = pageMetadata("/changelog");
  * Two readers, and they want opposite things. One wants to know what a release
  * means and will read a few hundred words; the other is looking for one change
  * and wants it in seconds. The page used to serve neither. Every entry was open
- * on one list, so v1.0.0 rendered as a hundred and ninety paragraphs in a column
- * 127,000 pixels tall on a desktop and 203,000 on a phone, with one entry above
- * the fold and no way to see the shape of the release at all.
+ * on one list, so v1.0.0 rendered as two hundred entries in a column 136,766
+ * pixels tall on a desktop and 264,772 on a phone, one entry fully on screen in
+ * the whole of it, and no way to see the shape of the release at all.
  *
  * So: a release states its size and its dates and links to its categories,
  * every entry is one scannable line headed by its author's own opening
  * sentence, and opening one is a `details` element. The first reader gets a
- * release they can take in without scrolling; the second gets a hundred and
- * ninety headlines to run an eye down, four category jumps, and a search that
- * reads the entries the page is not showing.
+ * release they can take in without scrolling; the second gets two hundred
+ * headlines to run an eye down, eight of them on a screen, four category
+ * jumps, and a search that reads the entries the page is not showing.
  *
  * Collapsed is not hidden. The prose is in the HTML, which is what a crawler,
  * an answer engine and the markdown twin all read, and what the search here
@@ -43,7 +43,7 @@ export const metadata = pageMetadata("/changelog");
  * box, because `details` needs no script to open.
  *
  * No cards. A changelog is a list of paragraphs with labels, and a border
- * around each one would add a hundred and ninety boxes and no information.
+ * around each one would add two hundred boxes and no information.
  * Separation is a hairline and space.
  */
 export default function ChangelogPage() {
@@ -250,7 +250,7 @@ function CategoryGroup({ release, group }: { release: Release; group: Group }) {
             and list items out of the built HTML, and a list item is taken
             whole: wrapping each entry in an `li` collapsed all of its
             paragraphs into one bullet, so the twin an answer engine reads was
-            a hundred and ninety unbroken lines with the headings inside them.
+            one unbroken line per entry with the heading inside it.
             As sibling `details` the same content comes out as a heading and
             its paragraphs, which is what the file is for. */}
         <div className="min-w-0 max-w-[1040px] max-lg:mt-6">

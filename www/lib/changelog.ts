@@ -71,7 +71,7 @@ export type Entry = {
    * `installcheck` and `billing-stripe` say nothing, while their opening
    * sentences say "the control plane can take money". Measured over every
    * public fragment: all of them open with a paragraph, all of them have a
-   * sentence boundary in it, the median lead is 90 characters and the longest
+   * sentence boundary in it, the median lead is 94 characters and the longest
    * is 315, which the page clamps rather than cuts.
    *
    * It is removed from the body, so an open entry reads as a lede and the
@@ -79,8 +79,8 @@ export type Entry = {
    */
   headline: Span[];
   /**
-   * Every category this entry declares, in the order it declares them. Twelve
-   * of the public fragments declare two. The first one files the entry under a
+   * Every category this entry declares, in the order it declares them.
+   * Fourteen of the public fragments declare two. The first one files the entry under a
    * heading, so that it appears once and one anchor reaches it; the rest are
    * printed on its row, because an entry filed under Added that also fixes
    * something should say so where somebody scanning can see it.
@@ -110,9 +110,9 @@ export type Release = {
    *
    * This page grouped by day first, and the day is the right axis for a
    * project with a release every fortnight. It is the wrong one for a release
-   * that carries 190 entries landed over one week: it produced seven headings
-   * with twenty-seven entries under each, which is the same wall with dates
-   * on it. The question a reader of a release actually asks is what kind of
+   * that carries two hundred entries landed over one week: it produced seven
+   * headings with thirty entries under each, which is the same wall with
+   * dates on it. The question a reader of a release actually asks is what kind of
    * change it is, and whether there is a security entry in it. Every row still
    * carries the day it landed, so the chronology is not lost, only demoted.
    */
@@ -140,7 +140,7 @@ const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)]+\))/g;
 /**
  * Inline markup, and only the shapes the fragments actually contain.
  *
- * Measured rather than assumed, across the 190 public fragments: 1349 spans of
+ * Measured rather than assumed, across the 204 public fragments: 1398 spans of
  * inline code, 12 of bold, two of italic, one link, no fenced blocks, no
  * heading below the first level, and one file using bullets. Writing a general
  * markdown parser for that would be several hundred lines guarding against
