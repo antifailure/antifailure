@@ -189,6 +189,33 @@ export function declaredPermissions(): Map<string, Permission> {
   return out
 }
 
+/**
+ * The PLATFORM permission each operator route declares.
+ *
+ * Read the same way declaredPermissions() reads the tenant one, from metadata
+ * set at construction rather than recorded when a middleware runs, so it is
+ * complete the moment the module loads.
+ *
+ * It exists so the TENANT matrix can tell an operator route from an unguarded
+ * one. Skipping by PATH PREFIX was the obvious alternative and it is wrong: a
+ * route named `admin.something` that declares nothing at all would then be
+ * skipped by the tenant matrix and absent from the platform one, guarded by
+ * neither and visible to no test. Skipping only routes that DECLARE a platform
+ * permission means an undeclared route still fails somewhere.
+ */
+export function declaredAdminPermissions(): Map<string, string> {
+  const out = new Map<string, string>()
+  const procedures = (routerRef?._def.procedures ?? {}) as Record<
+    string,
+    { _def: { meta?: Meta } }
+  >
+  for (const [path, procedure] of Object.entries(procedures)) {
+    const permission = procedure._def.meta?.adminPermission
+    if (permission) out.set(path, permission)
+  }
+  return out
+}
+
 // Set once, by the router module, to avoid an import cycle: the router imports
 // the procedure builders from here, so this cannot import the router.
 let routerRef: { _def: { procedures: unknown } } | null = null
