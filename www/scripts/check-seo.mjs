@@ -260,7 +260,6 @@ console.log(`\nPer-page tags (${pages.length} HTML files)`);
 const missing = {
   canonical: [],
   canonicalTarget: [],
-  ogUrl: [],
   ogTitle: [],
   ogImage: [],
   ogUrl: [],
@@ -294,23 +293,24 @@ for (const file of pages) {
   // different page, which is the cannibalisation bug that silently drops a
   // page out of the index entirely.
   const want = ORIGIN + routeOf(rel);
-  const canonicalHref = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1];
-  if (canonicalHref !== undefined && canonicalHref !== want) {
-    missing.canonicalTarget.push(`${rel} (${canonicalHref})`);
+  const canonicalValue = html.match(/<link rel="canonical" href="([^"]*)"/i)?.[1] ?? "";
+  if (canonicalValue && canonicalValue !== want) {
+    missing.canonicalTarget.push(`${rel} (want ${JSON.stringify(want)}, got ${JSON.stringify(canonicalValue)})`);
   }
   // og:url is a second, independent claim about the page's address, and a
   // crawler that disagrees with the canonical has two candidates rather than
   // one. They are built from the same absoluteUrl() call today; this is what
   // notices if they ever stop being.
+  // Checking og:url against the canonical rather than against the expected
+  // address would pass whenever both are wrong the same way, which is the only
+  // shape this failure has ever taken: one SITE_URL feeds both, so a bad value
+  // moves them together and a relative check sees two values that agree.
   const ogUrl = html.match(/<meta property="og:url" content="([^"]*)"/i)?.[1];
-  if (ogUrl !== want) missing.ogUrl.push(`${rel} (${ogUrl})`);
+  if (ogUrl !== want) {
+    missing.ogUrl.push(`${rel} (want ${JSON.stringify(want)}, og:url ${JSON.stringify(ogUrl ?? null)})`);
+  }
   if (!/property="og:title"/i.test(html)) missing.ogTitle.push(rel);
   if (!/property="og:image"/i.test(html)) missing.ogImage.push(rel);
-  const canonicalValue = html.match(/<link rel="canonical" href="([^"]+)"/i)?.[1] ?? "";
-  const ogUrl = html.match(/<meta property="og:url" content="([^"]+)"/i)?.[1] ?? "";
-  if (!canonicalValue || ogUrl !== canonicalValue) {
-    missing.ogUrl.push(`${rel} (canonical ${JSON.stringify(canonicalValue)}, og:url ${JSON.stringify(ogUrl)})`);
-  }
   if (!/name="twitter:card"/i.test(html)) missing.twitter.push(rel);
   if (!/<meta name="description"/i.test(html)) missing.description.push(rel);
   if (!/application\/ld\+json/i.test(html)) missing.jsonld.push(rel);
@@ -462,7 +462,6 @@ const LABELS = {
   ogUrl: "every og:url agrees with the canonical",
   ogTitle: "every indexable page has og:title",
   ogImage: "every indexable page has og:image",
-  ogUrl: "every indexable page has an og:url matching its canonical",
   twitter: "every indexable page has a twitter card",
   description: "every indexable page has a meta description",
   jsonld: "every indexable page has JSON-LD",
