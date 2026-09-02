@@ -96,7 +96,7 @@ Both run inside the image, from its working directory, so reach them with
 `docker exec` on the running container or `docker run --rm ... node
 apps/api/src/backup-cli.ts`. Installed on a host they are on the path as
 `af-control-plane-backup`, which is how the [operations
-page](/docs/self-hosting/operations/#nobody-can-sign-in) writes break-glass.
+page](/docs/self-hosting/operations#nobody-can-sign-in) writes break-glass.
 
 Step 3 prints what it did:
 
@@ -128,7 +128,7 @@ there and leaves its name and GitHub login exactly as they are, in case an
 installation has adopted it since.
 
 Every variable it reads is in the [configuration
-reference](/docs/reference/control-plane/), including retention and the schema
+reference](/docs/reference/control-plane), including retention and the schema
 maintenance that keeps the events table partitioned.
 
 On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`, which
@@ -283,4 +283,4 @@ role has `INSERT` and `SELECT` on it and nothing else, and `UPDATE`, `DELETE`
 and `TRUNCATE` are explicitly revoked. Entries are hash chained, so removing one
 from the middle leaves a break that anybody can detect.
 
-Related: [configuration](/docs/reference/control-plane/), [GitHub](/docs/guides/github/).
+Related: [configuration](/docs/reference/control-plane), [GitHub](/docs/guides/github).

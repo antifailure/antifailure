@@ -24,7 +24,7 @@ can run is worse than a short one.
 | Control plane on Kubernetes instead | **works**, the Helm chart, installed on a real cluster in CI |
 | Goldens storage | **off by default**, see below |
 | Alerting, an action group and eleven rules | **written**, `infra/terraform/modules/alerting`, off unless `alerting_enabled` |
-| Production, `app.antifailure.dev` | **written**, `production.tfvars`, not applied. [Standing up production](/docs/self-hosting/production/) |
+| Production, `app.antifailure.dev` | **written**, `production.tfvars`, not applied. [Standing up production](/docs/self-hosting/production) |
 | Environment pool on AKS | **does not exist** |
 
 The goldens storage account is `goldens_enabled = false` on purpose. Nothing in
@@ -252,7 +252,7 @@ module rather than by discipline. Terraform seeds them once and then carries
 `ignore_changes` on the value, because it cannot know them and must not
 overwrite them: creating an OAuth application is a human act on another service.
 That is also what makes the rotation instruction in
-[the control plane page](/docs/self-hosting/control-plane/) true. Without it,
+[the control plane page](/docs/self-hosting/control-plane) true. Without it,
 the next apply would quietly put the placeholder back.
 
 `resource_provider_registrations = "none"` is set on the provider, so Terraform
@@ -264,7 +264,7 @@ provider is not yet registered, apply fails naming the namespace and the fix is
 Container Apps rather than AKS, deliberately. The control plane is one web
 process and a database. The cheapest always-on AKS control plane is around 75
 USD a month before a single node runs, and buys nothing here. If you want it on
-Kubernetes anyway, the [Helm chart](/docs/self-hosting/control-plane/) installs on
+Kubernetes anyway, the [Helm chart](/docs/self-hosting/control-plane) installs on
 any conformant cluster.
 
 ### After an upgrade that carries new migrations
@@ -619,7 +619,7 @@ moving regions works. Nothing can make same-region recreation work inside the
 window, because that is precisely the sequence purge protection exists to
 prevent. Set `key_vault_name` yourself if you need to sidestep it knowingly.
 
-Related: [the control plane](/docs/self-hosting/control-plane/),
-[standing up production](/docs/self-hosting/production/),
-[the runbooks](/docs/self-hosting/runbooks/),
-[configuration](/docs/reference/control-plane/).
+Related: [the control plane](/docs/self-hosting/control-plane),
+[standing up production](/docs/self-hosting/production),
+[the runbooks](/docs/self-hosting/runbooks),
+[configuration](/docs/reference/control-plane).

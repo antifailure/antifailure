@@ -11,7 +11,10 @@ import { getCollection } from "astro:content";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "") || "/docs";
 const catalog = (await getCollection("docs")).map((page) => {
   const slug = page.id.replace(/\/index$/, "");
-  const url = !slug || slug === "index" ? `${base}/` : `${base}/${slug}`;
+  // The index page is `base` itself. It used to be `${base}/`, which the
+  // host answers with a 301, so picking the front page out of search cost a
+  // redirect that no other result did.
+  const url = !slug || slug === "index" ? base : `${base}/${slug}`;
   return { url, title: page.data.title };
 });
 ---

@@ -44,7 +44,10 @@ export const metadata: Metadata = {
   // `null` rather than a self-referential URL, because this file is served for
   // every mistyped path in the site under `output: "export"`. There is no one
   // address it could name that would be true.
-  alternates: { canonical: null },
+  alternates: {
+    canonical: null,
+    types: { "text/markdown": "https://antifailure.dev/404.md" },
+  },
 };
 
 // Where somebody who mistyped a URL most plausibly meant to go. Deliberately

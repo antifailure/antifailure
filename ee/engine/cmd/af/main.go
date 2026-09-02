@@ -43,8 +43,9 @@ func main() {
 	// The same signal handling the community binary has, from the same
 	// function, so that control C means the same thing in both. The first
 	// interrupt cancels so in flight work rolls back and teardown runs; the
-	// second exits with the journal intact.
-	ctx, _, stop := afcli.WithSignals(context.Background())
+	// second exits with the journal intact, which is what passing forced to
+	// Run below is for.
+	ctx, forced, stop := afcli.WithSignals(context.Background())
 	defer stop()
 
 	// The licence is attached to the context rather than passed as an argument,
@@ -119,7 +120,7 @@ func main() {
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)
 	}
-	os.Exit(afcli.Run(ctx, os.Args[1:], afcli.Options{
+	os.Exit(afcli.Run(ctx, forced, os.Args[1:], afcli.Options{
 		Extra: []afcli.Command{compliance.Contributed(gatherEvidence)},
 	}))
 }

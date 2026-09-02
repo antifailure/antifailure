@@ -178,6 +178,17 @@ Run af logout to remove it from this machine and revoke it everywhere.`),
 				return fmt.Errorf("complete the login: %w", err)
 			}
 
+			// Between the approval landing and the summary below there is a
+			// whoami call and a write to the credential store, and on macOS
+			// that write can put a keychain unlock prompt in front of somebody.
+			// Until this line existed the screen still read "Waiting for
+			// approval" through all of it, so the last thing the command said
+			// was the one thing that had stopped being true, and there was no
+			// line at all between that and success.
+			if waited && e.Out.Format != FormatJSON {
+				e.Out.Println("  Approved. Storing the credential...")
+			}
+
 			// Who the token is for, asked of the server rather than assumed, so
 			// that what is stored is what the control plane believes.
 			id, err := client.Whoami(ctx, token.AccessToken)
