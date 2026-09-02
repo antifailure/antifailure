@@ -64,44 +64,42 @@ import {
 const root = fileURLToPath(new URL('../../', import.meta.url))
 
 /**
- * The three files the vocabulary and column checks read, or the reason they
- * are not here.
+ * The three files the vocabulary and column checks read.
  *
- * The Studio schema and the store it is read through arrive with
- * `w-studio-persistence`, and this console branch is landing beside it rather
- * than after it. On a tree that has both, every check below runs. On a tree
- * that has only the console, the ones that compare against the schema say
- * WHICH FILE is missing and skip, and the decoder checks underneath them run
- * either way.
+ * MISSING IS A FAILURE, NOT A SKIP, and it was a skip until the console and
+ * the schema landed as one change. While they were two branches, a tree with
+ * only the console genuinely could not compare itself against a migration
+ * that was not on it, so the comparisons named the absent file and stood
+ * down. Both halves are in this commit, so that reason is spent.
  *
- * A skip reads as a pass in a summary, which is why the reason names the file
- * rather than saying "unavailable", and why it can never be reached once the
- * two branches are on one main: the file is committed, so its absence is a
- * fact about an unmerged branch and nothing else.
+ * Leaving the skip in would be worse than never having written these checks.
+ * A migration's filename carries its number, and the numbers are renumbered
+ * every time a branch ahead of this one lands: these three files moved from
+ * 0024 to 0026 on the way here. A skip keyed on a filename therefore has a
+ * live trigger rather than a dead one, and it fires silently, reporting
+ * twenty absent comparisons as twenty passes. That is the failure this
+ * repository already paid for once with the published-document gate, which
+ * was dark for the length of a queue and whose darkness was invisible.
+ *
+ * So this throws, and the message names the file and says the likely cause,
+ * because the person who reads it will be mid-renumber and needs to be told
+ * where the other end of the reference is.
  */
-function readIfPresent(relative: string): string | null {
+function readOrFail(relative: string): string {
   try {
     return readFileSync(`${root}${relative}`, 'utf8')
   } catch {
-    return null
+    throw new Error(
+      `${relative} is not on this tree, so the console cannot be compared against the schema. ` +
+        `If a migration was just renumbered, this reference has to move with it: the checks ` +
+        `below read the migration BY FILENAME and cannot find it under its new number.`,
+    )
   }
 }
 
-const initSql = readIfPresent('web/packages/db/migrations/0001_init.sql')
-const studioSql = readIfPresent('web/packages/db/migrations/0026_load_definitions_and_runs.sql')
-const storeTs = readIfPresent('web/apps/api/src/workloads/store.ts')
-
-const missing = [
-  studioSql === null ? '0026_load_definitions_and_runs.sql' : null,
-  storeTs === null ? 'src/workloads/store.ts' : null,
-  initSql === null ? '0001_init.sql' : null,
-].filter((f): f is string => f !== null)
-
-const noSchema =
-  missing.length === 0
-    ? false
-    : `${missing.join(' and ')} is not on this branch, so the console cannot be compared against ` +
-      `the schema here. This runs the moment w-studio-persistence and w-studio-console are on one tree.`
+const initSql = readOrFail('web/packages/db/migrations/0001_init.sql')
+const studioSql = readOrFail('web/packages/db/migrations/0026_load_definitions_and_runs.sql')
+const storeTs = readOrFail('web/apps/api/src/workloads/store.ts')
 
 /**
  * The values a Postgres enum declares, read out of the migration.
@@ -155,7 +153,7 @@ function columnNames(source: string | null, constant: string): string[] {
 // The vocabularies
 // ---------------------------------------------------------------------------
 
-describe('the console knows exactly the values the database can send', { skip: noSchema }, () => {
+describe('the console knows exactly the values the database can send', () => {
   /**
    * Values the console knows before the migration declares them.
    *
@@ -313,7 +311,7 @@ const RUN_ROW: Record<string, unknown> = {
 }
 
 describe('a run row', () => {
-  test('the fixture names exactly the columns the route selects', { skip: noSchema }, () => {
+  test('the fixture names exactly the columns the route selects', () => {
     // The drift gate. Rename a column in runColumns and this fails here rather
     // than in a browser three weeks later, showing a dash where a number was.
     assert.deepEqual(Object.keys(RUN_ROW).sort(), columnNames(storeTs, 'runColumns'))
@@ -371,7 +369,7 @@ const WORKLOAD_ROW: Record<string, unknown> = {
 }
 
 describe('a workload row', () => {
-  test('the fixture names exactly the columns the route selects', { skip: noSchema }, () => {
+  test('the fixture names exactly the columns the route selects', () => {
     assert.deepEqual(Object.keys(WORKLOAD_ROW).sort(), columnNames(storeTs, 'workloadColumns'))
   })
 
