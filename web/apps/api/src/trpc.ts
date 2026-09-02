@@ -91,6 +91,17 @@ export interface Context {
  *  OpenAPI generator without a request having to be made. */
 export interface Meta {
   permission?: Permission
+  /**
+   * The PLATFORM permission an operator route declares, kept separate from
+   * `permission` rather than sharing the field.
+   *
+   * One field holding either kind would let a tenant route accidentally
+   * declare an operator permission and pass the tenant matrix test by being
+   * absent from the tenant catalog, which is the exact hole a shared field
+   * creates. Two fields means each matrix test sees only its own routes and a
+   * route carrying neither is unguarded in both.
+   */
+  adminPermission?: string
 }
 
 /** What the client is told when the control plane broke rather than refused.
