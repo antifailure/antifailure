@@ -152,7 +152,7 @@ setup:
     }
 
     echo "Toolchain"
-    need go     "go1.25"  "https://go.dev/dl/ , or: brew install go"           go version
+    need go     "go1.26"  "https://go.dev/dl/ , or: brew install go"           go version
     need node   "v24"     "https://nodejs.org/ , or: brew install node@24"     node --version
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
