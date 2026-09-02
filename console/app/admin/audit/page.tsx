@@ -111,7 +111,13 @@ export default function AdminAuditPage() {
                         <Td>
                           <span className="block truncate font-medium text-ink">{e.action}</span>
                           {e.targetId ? (
-                            <span className="block truncate font-mono text-[12px] text-muted">
+                            // truncate keeps this to one line in the table,
+                            // but the table stacks into records on a phone
+                            // where there is no column to truncate against, so
+                            // break-words is what stops a long target id
+                            // widening the record. Same defect as the
+                            // suspension reason, one screen over.
+                            <span className="block truncate break-words font-mono text-[12px] text-muted">
                               {e.targetType} {e.targetId}
                             </span>
                           ) : (

@@ -274,14 +274,34 @@ function Fact({
   hint?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-rule px-4 py-3 last:border-b-0">
+    // min-w-0 on the row and break-words on the value, and this is a real
+    // defect rather than defensive styling.
+    //
+    // A suspension reason is 500 characters of whatever an operator pasted,
+    // and what they paste is an abuse-report URL, a ticket link, a uuid or an
+    // evidence hash: one unbreakable token. With overflow-wrap at its default
+    // `normal` that token cannot break, so it forces this flex row to its own
+    // width, and every SIBLING row is justify-between, so all their values are
+    // pushed off-screen together.
+    //
+    // What makes it worse than a layout bug is that the page reports
+    // scrollWidth === clientWidth, so there is NO horizontal scrollbar. An
+    // operator triaging a suspended tenant sees Members, Environments, Plan
+    // and Created with labels and no values, and reads that as "this tenant
+    // has no data" rather than as clipping. Measured at 390px: eleven elements
+    // computing 1747px wide, values pushed to x=1768.
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-rule px-4 py-3 last:border-b-0">
       <dt className="text-[12.5px] text-muted">
         {label}
         {hint ? <span className="ml-1.5 text-[11.5px] text-dim">{hint}</span> : null}
       </dt>
       {/* tnum on the figures so Members and Environments line up with each
           other down the card rather than drifting by digit width. */}
-      <dd className={`text-[13.5px] text-ink ${numeric ? "tnum tabular-nums" : ""}`}>{value}</dd>
+      <dd
+        className={`min-w-0 break-words text-[13.5px] text-ink ${numeric ? "tnum tabular-nums" : ""}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
