@@ -2,7 +2,7 @@
 title: GitHub
 description: An environment per pull request, and the two ways to run it.
 sidebar:
-  order: 12
+  order: 13
 ---
 
 ```yaml

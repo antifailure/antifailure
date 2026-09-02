@@ -2,7 +2,7 @@
 title: Personas
 description: The users an agent signs in as, and how they come to exist.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 A persona is a user of your application. Agents sign in as one, and different
