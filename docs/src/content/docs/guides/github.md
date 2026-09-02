@@ -274,7 +274,7 @@ on:
 ```
 
 `up` and `down` bring the environment up and take it away. The four other
-values run a [workload](/docs/concepts/workloads/), and the step that handles
+values run a [workload](/docs/concepts/workloads), and the step that handles
 them is one `af workload run` invocation rather than a case arm per verb. That
 command refuses an input the verb's own command has no flag for, rather than
 dropping it, and writes a result document carrying what was measured and the
