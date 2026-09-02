@@ -498,9 +498,9 @@ database.source_url_env names {variable}, and {variable} holds nothing in this s
 
 ### AF-DB-017
 
-pg_dump was refused when it read {object} in the source database.
+The role in the connection string cannot read all of the source database: {detail}
 
-**What to do.** The role in the connection string needs USAGE on every schema being copied and SELECT on every table and sequence in it, in every schema and not only public. Grant all three: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES.
+**What to do.** Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.
 
 | | |
 | --- | --- |
@@ -510,7 +510,7 @@ pg_dump was refused when it read {object} in the source database.
 
 ### AF-DB-018
 
-Row level security on {table} stops pg_dump from reading it as this role.
+Row level security stops pg_dump from reading the source as this role: {detail}
 
 **What to do.** Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.
 

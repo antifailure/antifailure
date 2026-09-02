@@ -114,10 +114,11 @@ const (
 	// database.source_url_env names {variable}, and {variable} holds
 	// nothing in this shell.
 	AFDB016 Code = "AF-DB-016"
-	// pg_dump was refused when it read {object} in the source database.
+	// The role in the connection string cannot read all of the source
+	// database: {detail}
 	AFDB017 Code = "AF-DB-017"
-	// Row level security on {table} stops pg_dump from reading it as this
-	// role.
+	// Row level security stops pg_dump from reading the source as this
+	// role: {detail}
 	AFDB018 Code = "AF-DB-018"
 	// {program} stopped while copying the source database: {detail}
 	AFDB019 Code = "AF-DB-019"
@@ -791,8 +792,8 @@ var catalog = map[Code]Entry{
 	AFDB017: {
 		Code:      AFDB017,
 		Area:      "DB",
-		Message:   "pg_dump was refused when it read {object} in the source database.",
-		NextStep:  "The role in the connection string needs USAGE on every schema being copied and SELECT on every table and sequence in it, in every schema and not only public. Grant all three: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES.",
+		Message:   "The role in the connection string cannot read all of the source database: {detail}",
+		NextStep:  "Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitAuth,
@@ -800,7 +801,7 @@ var catalog = map[Code]Entry{
 	AFDB018: {
 		Code:      AFDB018,
 		Area:      "DB",
-		Message:   "Row level security on {table} stops pg_dump from reading it as this role.",
+		Message:   "Row level security stops pg_dump from reading the source as this role: {detail}",
 		NextStep:  "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.",
 		Docs:      "concepts/goldens",
 		Retryable: false,

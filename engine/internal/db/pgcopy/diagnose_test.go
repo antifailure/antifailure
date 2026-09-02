@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 )
 
 // Every transcript below was copied out of a real run against a Postgres 17
@@ -99,7 +100,7 @@ func TestTranscriptError_ClassifiesWhatARealDatabaseSaid(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := transcriptError(tc.program, tc.transcript)
+			err := transcriptError(t.Context(), secrets.Value{}, tc.program, tc.transcript)
 			require.Error(t, err)
 
 			var coded *aferrors.Error
@@ -121,7 +122,7 @@ func TestTranscriptError_ClassifiesWhatARealDatabaseSaid(t *testing.T) {
 // role missing SELECT on sequences is the case that produced the transcript, so
 // the sentence has to name sequences and not tables alone.
 func TestTranscriptError_ThePermissionRemedyNamesSequencesAndEverySchema(t *testing.T) {
-	err := transcriptError("pg_dump", sequencePermissionTranscript)
+	err := transcriptError(t.Context(), secrets.Value{}, "pg_dump", sequencePermissionTranscript)
 	var coded *aferrors.Error
 	require.True(t, aferrors.As(err, &coded))
 

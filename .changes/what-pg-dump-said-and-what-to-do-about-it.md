@@ -43,6 +43,24 @@ A host that is not listening keeps AF-DB-002, which it always should have had.
 Anything not recognised keeps its whole transcript under AF-DB-019 and is told
 to run the program itself, rather than being forced into the nearest code.
 
+pg_dump stops at the first object it cannot read and says nothing about the
+rest, so a read only role missing several grants used to cost one refresh per
+grant, and each refresh starts a Postgres container before it discovers the
+next one. Against the schema above that was three rounds: a sequence in one
+schema, then row level security on a table, then USAGE on another schema.
+
+So when a refusal is about privileges, the source is asked what else this role
+cannot read, and all of it arrives at once:
+
+    AF-DB-017 The role in the connection string cannot read all of the source
+              database: no SELECT on sequence "Mixed Case
+              Schema"."UserProfile_Id_seq"; no USAGE on schema analytics; row
+              level security applies to public.customers
+
+Applying every remedy that message names, in one go, publishes the golden. The
+question is only asked after pg_dump has already refused, so it cannot stop a
+copy that would have worked.
+
 The transcript is still there under `-v` on every path, including the ones
 where a code has replaced the headline.
 
