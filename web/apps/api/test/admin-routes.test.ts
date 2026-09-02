@@ -19,50 +19,24 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { appRouter } from '../src/routers/index.ts'
 import { adminSignIn, hashPassword, hashAdminToken } from '../src/admin/session.ts'
-import { ADMIN_PERMISSIONS, type AdminRole } from '../src/admin/permissions.ts'
+import { type AdminRole } from '../src/admin/permissions.ts'
+import { assertOperatorRoutesAreGuarded } from './admin-matrix.ts'
 import { createAdminPool, type AdminPool } from '@antifailure/db'
 import { available, startApi, seedOrg, adminUrl, type ApiHarness, type Org } from './harness.ts'
 
 const hasDb = await available()
 
 describe('every operator route declares a permission', () => {
-  // No database needed, and that is the point: this is the gate that catches a
-  // route added next month, on the machine where it was added.
-  const procedures = (appRouter as unknown as {
-    _def: { procedures: Record<string, { _def: { meta?: { adminPermission?: string } } }> }
-  })._def.procedures
-
-  const adminPaths = Object.keys(procedures).filter((p) => p.startsWith('admin.'))
-
-  test('there are operator routes at all, so the checks below are not vacuous', () => {
-    // Without this every assertion under it passes on an empty list, which is
-    // how a matrix test comes to guard nothing.
-    assert.ok(adminPaths.length >= 8, `only ${adminPaths.length} operator routes are mounted`)
-  })
-
-  test('none of them is unguarded', () => {
-    const unguarded = adminPaths.filter((p) => !procedures[p]!._def.meta?.adminPermission)
-    assert.deepEqual(
-      unguarded,
-      [],
-      `these operator routes declare no permission, so they run unguarded:\n  ${unguarded.join('\n  ')}`,
-    )
-  })
-
-  test('every permission they declare is in the catalog', () => {
-    const known = new Set<string>(ADMIN_PERMISSIONS)
-    const bogus = adminPaths
-      .map((p) => [p, procedures[p]!._def.meta!.adminPermission!] as const)
-      .filter(([, perm]) => !known.has(perm))
-    assert.deepEqual(bogus, [], `these declare permissions that do not exist: ${JSON.stringify(bogus)}`)
-  })
-
-  test('the router is mounted under admin., which maintenance mode exempts', () => {
-    // admin-infra's maintenance mode returns 503 on every mutation except
-    // /auth, /v1/events and /trpc/admin.*, so that an operator can still reach
-    // the switch that releases it. If this prefix moves, enabling maintenance
-    // mode locks the operator out of the control that ends the outage.
-    assert.ok(adminPaths.every((p) => p.startsWith('admin.')))
+  // The walk itself lives in admin-matrix.ts so a SECOND tree can be pointed at
+  // it. admin-money mounts its money routes separately at /admin/trpc, and a
+  // second tree needs a second walk or it is guarded by neither matrix. A route
+  // nobody enumerates is worse than one in a tree that does, because the second
+  // at least fails.
+  assertOperatorRoutesAreGuarded({
+    name: 'appRouter',
+    router: appRouter,
+    prefix: 'admin.',
+    atLeast: 8,
   })
 })
 
