@@ -30,11 +30,25 @@ export function SageWell({
   );
 }
 
-export function FloatWindow({ children, className }: { children: ReactNode; className?: string }) {
+// `chrome` is a prop rather than something a caller cancels from className.
+// `cn` is a plain join, so a class passed in does not replace the one already
+// here: both land on the element and the cascade picks, and the receipt tape
+// spent three `!` utilities that were never emitted trying to win that race.
+// Only one of these two strings is ever written, so there is no race.
+export function FloatWindow({
+  children,
+  className,
+  chrome = true,
+}: {
+  children: ReactNode;
+  className?: string;
+  chrome?: boolean;
+}) {
   return (
     <div
       className={cn(
-        "rounded-[16px] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.10),0_2px_8px_rgba(0,0,0,0.04)]",
+        chrome &&
+          "rounded-[16px] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.10),0_2px_8px_rgba(0,0,0,0.04)]",
         className,
       )}
     >

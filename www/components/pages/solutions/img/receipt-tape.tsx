@@ -38,7 +38,7 @@ export function ReceiptTape() {
       <div className="flex justify-center px-1">
         <div className="w-full max-w-[300px] drop-shadow-[0_10px_22px_rgba(0,0,0,0.12)] sm:max-w-[320px]">
           <div className="bg-[#f7f7f5]" style={{ clipPath: LEDGER_CLIP }}>
-            <FloatWindow className="!rounded-none !bg-transparent !shadow-none">
+            <FloatWindow chrome={false}>
               <div className="flex">
                 <div
                   className="flex w-[18px] shrink-0 flex-col items-center justify-between py-[22px]"

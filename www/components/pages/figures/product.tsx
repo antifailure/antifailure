@@ -665,13 +665,27 @@ function ProviderBoard({
         {lines.map((line, i) => (
           <div
             key={line}
+            // One colour per row, chosen rather than layered. Written as
+            // separate `&&` clauses these all landed on the element together
+            // and the cascade picked text-black, so the mock row and the
+            // failed row rendered in the same black as an ordinary one.
             className={cn(
               "truncate px-2.5 py-1 font-mono text-[10px] leading-4",
-              i === 0 ? "text-black" : "border-t border-black/[0.06] text-black/55",
-              i === 0 && rail === "mock" && "bg-[#E4F1EB] text-[#285D49]",
-              i === 0 && rail === "capture" && "bg-[#f7f7f5] text-black",
-              i === 0 && tone === "FAIL" && "bg-[#f8e4e4] text-[#C43D3D]",
-              i > 0 && rail === "capture" && i === lines.length - 1 && "text-[#285D49]",
+              i === 0 &&
+                (tone === "FAIL"
+                  ? "bg-[#f8e4e4] text-[#C43D3D]"
+                  : rail === "capture"
+                    ? "bg-[#f7f7f5] text-black"
+                    : rail === "mock"
+                      ? "bg-[#E4F1EB] text-[#285D49]"
+                      : "text-black"),
+              i > 0 &&
+                cn(
+                  "border-t border-black/[0.06]",
+                  rail === "capture" && i === lines.length - 1
+                    ? "text-[#285D49]"
+                    : "text-black/55",
+                ),
             )}
           >
             {line}
