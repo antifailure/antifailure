@@ -35,12 +35,16 @@ publishes nothing. It waits for about 38 minutes before giving up, and giving up
 is a refusal too. The judgement is `tools/cigate`.
 
 That gate refuses a run GitHub reports as `cancelled`, and this is the case
-worth knowing about before you tag. GitHub uses that one word for two unrelated
-things: a job that hit its own time limit, and a run that a newer push
-superseded. `ci.yml` sets `cancel-in-progress`, so a merge to `main` cancels the
-CI run of the commit before it. If the commit you tag was overtaken that way, it
-has no CI verdict and the release refuses it. Re-run CI on that commit, wait for
-green, then re-run the release from the Actions page.
+worth knowing about before you tag. GitHub uses that one word for three
+unrelated things: a job that hit its own time limit, a run somebody stopped by
+hand, and a run that a newer push superseded. None of them is a verdict, so none
+of them publishes.
+
+`ci.yml` no longer cancels a superseded run on `main` or on a tag, which is why
+this is now rare rather than routine. Six merges once landed inside one run's
+length and each cancelled the one before it, and `main` went hours with no
+completed run. If you do meet a cancelled run on the commit you want to tag,
+re-run CI on it, wait for green, then re-run the release from the Actions page.
 
 Checking before you tag is still the cheaper order. The gate turns a mistake
 into a refused release rather than a published one, which is not the same as

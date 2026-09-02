@@ -69,18 +69,19 @@ func TestEveryStateGitHubCanReport(t *testing.T) {
 }
 
 // A cancelled run is the trap this repository has walked into before. GitHub
-// spells a job that hit its own timeout-minutes and a run superseded by a newer
-// push with the same word, and neither is a verdict about the commit. The
-// message has to say so, because "cancelled" on its own sends somebody looking
-// for a person who pressed a button.
-func TestCancelledRefusesAndSaysWhichTwoThingsItCouldMean(t *testing.T) {
+// spells a job that hit its own timeout-minutes, a run somebody stopped by hand
+// and a run superseded by a newer push with the same word, and not one of them
+// is a verdict about the commit. The message has to name more than one cause,
+// because "cancelled" on its own sends somebody looking for a person who
+// pressed a button and that is the least likely of the three.
+func TestCancelledRefusesAndNamesMoreThanOneCause(t *testing.T) {
 	got, why, _ := decide([]run{{
 		Path: ciWorkflow, Status: "completed", Conclusion: "cancelled", CreatedAt: time.Unix(1, 0),
 	}}, ciWorkflow)
 	if got != refuse {
 		t.Fatalf("a cancelled CI run was treated as %s", got)
 	}
-	for _, want := range []string{"timeout-minutes", "superseded", "cancel-in-progress"} {
+	for _, want := range []string{"never reached a verdict", "timeout-minutes", "by hand", "superseded"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the refusal never mentions %q, so it does not point at the real cause: %s", want, why)
 		}

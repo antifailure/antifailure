@@ -27,11 +27,18 @@
 //	not completed, or no run     wait, and refuse when the budget runs out
 //
 // `cancelled` refuses, and that is the part worth writing down, because GitHub
-// spells two unrelated things with that one word. A job that hits its own
-// `timeout-minutes` is reported cancelled. A run superseded by a newer push is
-// also reported cancelled, and ci.yml sets `cancel-in-progress`, so on this
-// repository most cancelled runs are the second kind. Neither is a verdict
-// about the commit, and a thing that is not a verdict is not a pass.
+// spells several unrelated things with that one word. A job that hits its own
+// `timeout-minutes` is reported cancelled. So is a run somebody stopped by
+// hand, and so is a run superseded by a newer push on the same branch. Not one
+// of them is a verdict about the commit, and a thing that is not a verdict is
+// not a pass.
+//
+// ci.yml no longer cancels a superseded run on main or on a tag, and the reason
+// it was changed is this one: six merges landed inside one run's length on
+// 2026-09-02 and each cancelled the one before it, so main went hours with no
+// completed run and no commit a release could have been cut from. Superseding
+// is still why the word appears on a branch. On main it now means something
+// else, and something worth reading before re-running anything.
 //
 // `skipped` refuses for the same reason and is easier to get wrong, because a
 // skipped run and a passing run render as the same absence of red in a list. A
@@ -138,10 +145,11 @@ func (v verdict) String() string {
 // is almost always the concurrency group.
 var refusals = map[string]string{
 	"failure": "CI failed on this commit. The release publishes nothing.",
-	"cancelled": "CI on this commit was cancelled, so it never reached a verdict. " +
-		"Two unrelated things are spelled that way: a job that hit its own timeout-minutes, " +
-		"and a run superseded by a newer push, which ci.yml's cancel-in-progress does to " +
-		"every main run the next merge overtakes. Neither says the commit is good. " +
+	"cancelled": "CI on this commit was cancelled, so it never reached a verdict. Several " +
+		"unrelated things are spelled that way: a job that hit its own timeout-minutes, a run " +
+		"somebody stopped by hand, and a run superseded by a newer push on the same branch. " +
+		"None of them says the commit is good. ci.yml no longer cancels a superseded run on " +
+		"main or on a tag, so a cancelled run here is worth reading rather than assuming. " +
 		"Re-run CI on this commit, and re-run this release once it is green.",
 	"timed_out":       "CI on this commit ran out of time and never reached a verdict.",
 	"startup_failure": "CI on this commit never started, so nothing was checked.",

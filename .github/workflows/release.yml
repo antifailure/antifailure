@@ -41,6 +41,12 @@ jobs:
   # tag, which is the rehearsal nobody gets to do twice. tools/cigate has a
   # test per state GitHub can report, and the two that look like a pass and are
   # not, `cancelled` and `skipped`, each have their own.
+  #
+  # `cancelled` refuses. GitHub uses that one word for a job that hit its own
+  # timeout, a run somebody stopped by hand, and a run a newer push superseded,
+  # and none of the three is a verdict about the commit. ci.yml stopped
+  # cancelling superseded runs on main and on tags precisely so that the commit
+  # a release is cut from reaches one.
   # ---------------------------------------------------------------------------
   gate:
     name: gate

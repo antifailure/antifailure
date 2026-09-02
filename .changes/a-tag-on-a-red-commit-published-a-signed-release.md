@@ -17,10 +17,10 @@ refuses. Still running waits, because a busy queue is not a broken commit.
 
 Two conclusions that read like a pass and are not: a run GitHub reports as
 `cancelled`, which is the same word it uses for a job that hit its own time
-limit and for a run a newer push superseded, and a run reported as `skipped`,
-which looks in a list exactly like one that passed and means nothing ran. Both
-refuse. So does a conclusion nobody has invented yet.
+limit, for a run somebody stopped by hand and for a run a newer push superseded,
+and a run reported as `skipped`, which looks in a list exactly like one that
+passed and means nothing ran. Both refuse. So does a conclusion nobody has
+invented yet.
 
-If your tag is refused with `cancelled`, the usual cause is that another merge
-reached main while your commit's CI was still running. Re-run CI on that
-commit, then re-run the release.
+If your tag is refused with `cancelled`, re-run CI on that commit, wait for
+green, then re-run the release.
