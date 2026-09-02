@@ -1,6 +1,6 @@
 // The operator boundary, and the four ways it could quietly stop being one.
 //
-// 0030 adds the only policies in this schema that read ACROSS tenants. Every
+// 0029 adds the only policies in this schema that read ACROSS tenants. Every
 // other suite in this directory proves that a tenant cannot reach another
 // tenant's rows; this one proves that the escape hatch built for the operator
 // portal is not reachable by anybody else, and that it is genuinely reachable
@@ -250,7 +250,7 @@ describe('the operator boundary', { skip: hasDb ? false : 'no database' }, () =>
   // -------------------------------------------------------------------------
   // 4. The root operator invariant
   //
-  // Four refusals. Each was watched failing before the trigger in 0030
+  // Four refusals. Each was watched failing before the trigger in 0029
   // existed: with the trigger dropped, every one of these four statements
   // succeeds and this block goes green while the invariant is gone.
   // -------------------------------------------------------------------------
