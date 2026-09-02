@@ -25,7 +25,22 @@ import {
 } from './tokens.ts'
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
-import type { Pool } from '@antifailure/db'
+import type { Pool, AdminPool } from '@antifailure/db'
+import {
+  ADMIN_CSRF_HEADER,
+  ADMIN_SESSION_COOKIE,
+  AdminSignInError,
+  adminCsrfMatches,
+  adminCsrfTokenFor,
+  adminSessionCookie,
+  adminSignIn,
+  adminSignOut,
+  clearedAdminCookie,
+  looksSameOrigin,
+  readAdminSessionCookie,
+  resolveAdminSession,
+} from './admin/session.ts'
+import { actorOf } from './admin/trpc.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
@@ -50,6 +65,7 @@ import {
   safeRedirect,
   type SignInAllowlist,
 } from './auth/signin.ts'
+import { problem, type Problem, type ProblemAction } from './errorpage.ts'
 import {
   beginEmailSignIn,
   redeemEmailSignIn,
@@ -144,6 +160,16 @@ import {
 
 export interface ServerOptions {
   pool: Pool
+  /**
+   * The operator database credential, for the admin portal.
+   *
+   * A SEPARATE pool with a separate role, never `pool` handed in twice: the
+   * cross tenant read has to be a credential the application cannot acquire.
+   * Absent means this installation has no operator portal, which is the correct
+   * default for somebody running this for one team, and the admin procedures
+   * say so by name rather than rendering an empty portal.
+   */
+  adminPool?: AdminPool | null
   github: GitHubClient
   clock?: Clock
   /** Set false only for local HTTP development. The cookie is Secure otherwise. */
@@ -200,9 +226,18 @@ export interface ServerOptions {
   /** Null for self-hosting. The hosted service requires this plan everywhere
    *  except authentication, billing, health, and sign-out. */
   hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Whether the plan may be written by hand through `billing.set`. False by
+   *  default, deliberately: the safe answer is the one an operator who has not
+   *  thought about billing gets without doing anything. See hosted.ts. */
+  operatorSetsPlan?: boolean
   /** Public GitHub App installation address shown to a signed-in user who has
    *  no organization yet. */
   githubAppInstallUrl?: string
+  /** Where somebody this installation will not admit is sent instead, which on
+   *  the hosted planes is the marketing site's request page. Undefined is the
+   *  self-hosted default and means the refusal page offers no link, because
+   *  pointing an operator's users at the vendor's waitlist would be wrong. */
+  signupUrl?: string
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
   /** Where the providers live. Overridden in tests so nothing reaches a real
@@ -315,6 +350,7 @@ export function createServer(options: ServerOptions) {
   const secure = options.secureCookies ?? true
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
+  const operatorSetsPlan = options.operatorSetsPlan ?? false
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
@@ -633,9 +669,124 @@ export function createServer(options: ServerOptions) {
   // Sign in
   // -------------------------------------------------------------------------
 
+  /**
+   * Where a refused person is offered to go, and nothing when there is
+   * nowhere.
+   *
+   * One place, so the sentence and the link cannot disagree between the two
+   * routes that refuse.
+   */
+  function wayOut(): { actions: ProblemAction[]; sentence: string } {
+    if (options.signupUrl) {
+      return {
+        actions: [{ href: options.signupUrl, label: 'Join the waitlist' }],
+        sentence:
+          'Leave an address on the waitlist and we will tell you when it opens. The engine ' +
+          'itself is open source, runs on your own machine, and needs no account at all.',
+      }
+    }
+    return {
+      actions: [],
+      sentence:
+        'Ask an owner of this installation to add your GitHub account to its sign-in ' +
+        'allowlist.',
+    }
+  }
+
+  /** The page somebody sees when this installation will not let them in. */
+  function notInvited(refusal: SignInError): Problem {
+    const out = wayOut()
+    return {
+      status: 403,
+      // The sentence the refusal itself carries, not a second copy of it. Every
+      // existing client reads this field and a literal here is one rewording
+      // away from the API and the page saying different things.
+      error: refusal.message,
+      title: 'You have not been invited yet',
+      body: [
+        'This control plane is invitation only, and the GitHub account you just signed in ' +
+          'with is not on the list of accounts it admits.',
+        refusal.authorizationRevoked
+          ? 'Nothing was created here, and the authorization you granted on GitHub a moment ' +
+            'ago has already been withdrawn, so nothing of yours is left connected to it.'
+          : 'Nothing was created here. You can withdraw the access you granted under ' +
+            'Applications in your GitHub settings.',
+        out.sentence,
+      ],
+      actions: out.actions,
+    }
+  }
+
+  /** The same, for a link that arrived by email. The way back is different:
+   *  the form that sends one is on the sign-in screen, not at /auth/github. */
+  function staleEmailLink(): Problem {
+    return {
+      status: 400,
+      error: 'This sign-in link is no longer valid. Ask for another one.',
+      title: 'This sign-in link is no longer valid',
+      body: [
+        'A link signs you in once, and it expires. This one has been used already or it has ' +
+          'run out of time.',
+        'Nothing is wrong with your account. Ask for another link and it will work.',
+      ],
+      actions: [{ href: options.appBaseUrl ?? '/', label: 'Ask for another link' }],
+    }
+  }
+
+  /** The one message for a state that was never issued, already used, or has
+   *  expired. They are deliberately indistinguishable: telling them apart tells
+   *  somebody probing state values which of their guesses was once real. */
+  function staleSignIn(): Problem {
+    return {
+      status: 400,
+      error: 'This sign-in link is no longer valid. Start again.',
+      title: 'This sign-in link is no longer valid',
+      body: [
+        'A sign-in can only be completed once, and it has a few minutes to finish. This one ' +
+          'has been used already or it has run out of time.',
+        'Nothing is wrong with your account. Start again and the next one will work.',
+      ],
+      actions: [{ href: '/auth/github', label: 'Start again' }],
+    }
+  }
+
   app.get('/auth/github', async (c) => {
     const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')))
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    // Refused here, before the redirect, when the answer cannot depend on who
+    // is asking.
+    //
+    // An allowlist that names nobody closes this installation to every GitHub
+    // account there is, which is a property of the deployment and not of the
+    // visitor. Sending them to GitHub, having them authorise an application,
+    // and refusing them on the way back would be asking for something in order
+    // to give an answer already known before they left.
+    //
+    // A list that names SOMEBODY cannot be resolved this early and this says
+    // so rather than pretending. The list is keyed on the GitHub login, the
+    // login arrives with the code exchange, and there is nothing in the
+    // request that carries it: no cookie, no session, and no identity in the
+    // OAuth protocol before the callback. So a non-empty list is still decided
+    // at the callback, and what is done about the grant by then is in
+    // completeSignIn.
+    if (options.signInAllowlist?.size === 0) {
+      const out = wayOut()
+      return problem(c, {
+        status: 403,
+        error:
+          'This installation is not open for sign-ups. Ask an owner to add your GitHub ' +
+          'account to the allowlist.',
+        title: 'This control plane is not open for sign-ups',
+        body: [
+          'Sign-in is closed on this installation. No GitHub account can sign in while it ' +
+            'stays that way, so you have not been sent to GitHub and nothing has been asked ' +
+            'of your account.',
+          out.sentence,
+        ],
+        actions: out.actions,
+      })
+    }
 
     const { url } = await beginSignIn(
       options.pool,
@@ -652,9 +803,7 @@ export function createServer(options: ServerOptions) {
 
     const code = c.req.query('code')
     const state = c.req.query('state')
-    if (!code || !state) {
-      return c.json({ error: 'This sign-in link is no longer valid. Start again.' }, 400)
-    }
+    if (!code || !state) return problem(c, staleSignIn())
 
     try {
       const result = await completeSignIn(
@@ -698,9 +847,123 @@ export function createServer(options: ServerOptions) {
       if (decision.note) landing.searchParams.set('note', decision.note)
       return c.redirect(landing.toString(), 302)
     } catch (err) {
-      if (err instanceof SignInError) return c.json({ error: err.message }, 400)
-      return c.json({ error: 'GitHub refused the sign in. Try again.' }, 400)
+      if (err instanceof SignInError) {
+        if (err.refusal === 'not-invited') return problem(c, notInvited(err))
+        if (err.refusal === 'link-expired') return problem(c, staleSignIn())
+        // Something else refused, and it is not a link that ran out. The
+        // sentence it carries is the only thing that knows what, so the page
+        // shows that rather than a guess: syncMembership refusing to apply an
+        // empty member list reaches here, and telling that person their link
+        // expired would send them to press the same button forever.
+        return problem(c, {
+          status: 400,
+          error: err.message,
+          title: 'The sign-in could not be completed',
+          body: [err.message, 'Nothing was created here.'],
+          actions: [{ href: '/auth/github', label: 'Try again' }],
+        })
+      }
+      return problem(c, {
+        status: 400,
+        error: 'GitHub refused the sign in. Try again.',
+        title: 'GitHub did not finish the sign-in',
+        body: [
+          'GitHub would not complete the exchange. That usually means the link was already ' +
+            'used, or that too long passed between pressing the button and coming back.',
+          'Nothing was created here. Starting again is the whole of the fix.',
+        ],
+        actions: [{ href: '/auth/github', label: 'Start again' }],
+      })
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // The operator portal's own sign-in
+  //
+  // SEPARATE ROUTES FROM /auth/*, and that is the whole design rather than
+  // tidiness. The product's sessions table is populated by GitHub OAuth, so if
+  // operator power were a flag on a product session then compromising somebody's
+  // GitHub account would be compromising the platform. Two credentials that fail
+  // independently is the point, and these routes never touch `sessions`.
+  //
+  // These exist because without them the operator portal cannot be signed into
+  // AT ALL: adminSignIn, adminSessionCookie and their siblings had no caller
+  // outside tests, so ctx.admin was null on every request and all twelve
+  // procedures in the admin router answered UNAUTHORIZED. The functions were
+  // correct and unreachable, which is the failure mode that looks most like
+  // working software.
+  //
+  // Rate limited on the same bucket as the product's sign-in, because this is a
+  // password endpoint and the operator credential is the one that reads every
+  // customer's data.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/admin/signin', async (c) => {
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    const body = await c.req.json().catch(() => null)
+    const email = typeof body?.email === 'string' ? body.email : ''
+    const password = typeof body?.password === 'string' ? body.password : ''
+
+    try {
+      const result = await adminSignIn(
+        options.pool,
+        { email, password, ip: c.req.header('x-forwarded-for'), userAgent: c.req.header('user-agent') },
+        clock.now(),
+      )
+      c.header('set-cookie', adminSessionCookie(result.token, result.expiresAt, secure))
+      return c.json({ signedIn: true })
+    } catch (err) {
+      // ONE MESSAGE FOR EVERY REFUSAL, and the same one adminSignIn composes:
+      // a wrong password, an unknown address, an operator with no password set
+      // and a suspended operator must be indistinguishable from outside, or
+      // this endpoint answers "which of your guesses was closer".
+      //
+      // 401 rather than 400: the credential was refused, not malformed.
+      if (err instanceof AdminSignInError) return c.json({ error: err.message }, 401)
+      throw err
+    }
+  })
+
+  /**
+   * The operator session, and the CSRF token that goes with it.
+   *
+   * Mirrors GET /auth/session, and exists for the same reason: the token is
+   * derived from the session cookie, the cookie is HttpOnly, so a browser
+   * cannot compute it and a page reload would otherwise lose the one the
+   * sign-in response carried. Without this endpoint the operator portal can
+   * mutate exactly once per sign-in, which is a guard that looks like it works
+   * and fails on the first refresh.
+   *
+   * It returns the token to whoever already holds the cookie, which is what a
+   * CSRF token is: not a secret, but a value an attacker on another site cannot
+   * read because they cannot make this request and see its response.
+   */
+  app.get('/v1/admin/session', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (!token) return c.json({ signedIn: false }, 200)
+    const session = await resolveAdminSession(options.pool, token, clock.now())
+    if (!session) return c.json({ signedIn: false }, 200)
+    return c.json({
+      signedIn: true,
+      csrfToken: adminCsrfTokenFor(token),
+      label: session.label,
+      email: session.email,
+      role: session.role,
+      impersonating: session.impersonating,
+    })
+  })
+
+  app.post('/v1/admin/signout', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (token) await adminSignOut(options.pool, token, clock.now())
+    // Cleared whether or not there was a session, so a stale or unparseable
+    // cookie can still be got rid of by pressing the button.
+    c.header('set-cookie', clearedAdminCookie(secure))
+    return c.json({ signedOut: true })
   })
 
   app.post('/auth/signout', async (c) => {
@@ -803,9 +1066,7 @@ export function createServer(options: ServerOptions) {
       if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
       const token = c.req.query('token')
-      if (!token) {
-        return c.json({ error: 'This sign-in link is no longer valid. Ask for another one.' }, 400)
-      }
+      if (!token) return problem(c, staleEmailLink())
 
       try {
         const result = await redeemEmailSignIn(options.pool, clock, token)
@@ -825,7 +1086,9 @@ export function createServer(options: ServerOptions) {
         const target = result.redirectTo ?? '/'
         return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
       } catch (err) {
-        if (err instanceof EmailSignInError) return c.json({ error: err.message }, 400)
+        if (err instanceof EmailSignInError) {
+          return problem(c, { ...staleEmailLink(), error: err.message })
+        }
         throw err
       }
     })
@@ -1096,7 +1359,18 @@ export function createServer(options: ServerOptions) {
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
     const token = c.req.query('token') ?? ''
-    if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
+    if (!token) {
+      return problem(c, {
+        status: 400,
+        error: 'That link is missing its token.',
+        title: 'This export link is incomplete',
+        body: [
+          'The address has no token on it, so there is nothing to look up. It was probably ' +
+            'cut short somewhere between the message it arrived in and the address bar.',
+          'Open the original link again, in full.',
+        ],
+      })
+    }
 
     // `describe` answers the page that the link opens, which has to say whether
     // the export is still there BEFORE it offers a download. Without it the
@@ -1113,10 +1387,26 @@ export function createServer(options: ServerOptions) {
       // 404 for a link that names nothing, 409 for one that names an export
       // which is not ready yet. The second is a real link and the caller should
       // come back rather than go looking for another one.
-      return c.json(
-        { error: held.reason, state: held.state },
-        held.state === 'not_ready' ? 409 : 404,
-      )
+      //
+      // This link is handed to a person and opened in a browser, so a refusal
+      // that answered only JSON put the sentence explaining what happened into
+      // an unstyled body. The `state` field stays in the JSON, because the
+      // console's export page reads it.
+      const notReady = held.state === 'not_ready'
+      return problem(c, {
+        status: notReady ? 409 : 404,
+        error: held.reason,
+        json: { state: held.state },
+        title: notReady ? 'This export is not ready yet' : 'This export link is not valid',
+        body: [
+          held.reason,
+          notReady
+            ? 'The link itself is good. Come back to this same address rather than looking ' +
+              'for another one.'
+            : 'An export is held for a limited time after an organization is deleted, and ' +
+              'then it is destroyed. There is nothing to recover from this address.',
+        ],
+      })
     }
     if (describe) {
       return c.json({
@@ -2367,6 +2657,55 @@ export function createServer(options: ServerOptions) {
           )
         }
       }
+
+      // The same check for the OPERATOR cookie, and it is not redundant with
+      // the one above.
+      //
+      // The two cookies are independent credentials in independent tables, and
+      // a request can legitimately carry both. A mutation authenticated by the
+      // operator cookie is checked against the operator token; the product's
+      // token says nothing about it, and an operator with no product session
+      // would otherwise pass this middleware having presented nothing at all.
+      //
+      // Why it is needed when the operator cookie is already SameSite=Strict:
+      // SameSite is SITE-scoped rather than origin-scoped, so a subdomain an
+      // attacker controls is inside it, which is the same sentence the block
+      // above is written for. It matters more here, because the mutations
+      // behind this cookie move money.
+      //
+      // The origin check runs FIRST and fails OPEN by design, per its own
+      // comment: a request that DECLARES a cross-site origin is refused before
+      // its token is looked at, and one that declares nothing is left to the
+      // token. Something between a browser and this process may strip those
+      // headers, and refusing every such request would break the portal for a
+      // reason nobody could diagnose.
+      const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+      if (adminToken) {
+        const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
+        if (operator) {
+          if (
+            !looksSameOrigin(
+              {
+                origin: c.req.header('origin') ?? null,
+                secFetchSite: c.req.header('sec-fetch-site') ?? null,
+              },
+              options.appBaseUrl ?? '',
+            )
+          ) {
+            return c.json({ error: 'This operator request came from another site.' }, 403)
+          }
+          if (!adminCsrfMatches(adminToken, c.req.header(ADMIN_CSRF_HEADER))) {
+            return c.json(
+              {
+                error:
+                  `This operator request needs the ${ADMIN_CSRF_HEADER} header from the ` +
+                  'operator session endpoint.',
+              },
+              403,
+            )
+          }
+        }
+      }
     }
     return next()
   })
@@ -2409,8 +2748,22 @@ export function createServer(options: ServerOptions) {
             }
           }
         }
+        // The operator cookie, resolved beside the product one and never
+        // instead of it. A request can legitimately carry both: an operator
+        // signed in to the product as themselves is still an operator, and the
+        // two sessions are independent credentials in independent tables.
+        // readAdminSessionCookie, not readCookie: the cookie is written under
+        // the __Host- prefix when Secure, so the bare name resolves in local
+        // development and never in production. See its comment.
+        const adminToken = readAdminSessionCookie(c.req.header('cookie'))
+        const adminSession = adminToken
+          ? await resolveAdminSession(options.pool, adminToken, clock.now())
+          : null
+
         const context: TrpcContext = {
           pool: options.pool,
+          admin: adminSession ? actorOf(adminSession) : null,
+          adminPool: options.adminPool ?? null,
           clock,
           github: options.github,
           stripe: options.stripe ?? null,
@@ -2425,6 +2778,7 @@ export function createServer(options: ServerOptions) {
           analytics,
           analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
           hostedRequiredPlan,
+          operatorSetsPlan,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,
@@ -2608,9 +2962,26 @@ function countIngestion(
   }
 }
 
-function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown, s: 429) => Response }, seconds: number) {
+/**
+ * The rate limiter's answer, on the routes a person opens directly.
+ *
+ * Negotiated for the same reason the refusals above are: every caller of this
+ * helper is a GET a browser navigates to, so a bare JSON body here is a line
+ * of quoting on a white page at the moment somebody is already stuck.
+ */
+function tooMany(c: Parameters<typeof problem>[0], seconds: number) {
   c.header('retry-after', String(seconds))
-  return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: seconds }, 429)
+  return problem(c, {
+    status: 429,
+    error: 'Too many attempts. Try again shortly.',
+    json: { retryAfterSeconds: seconds },
+    title: 'Too many attempts',
+    body: [
+      `This address has been asked for too many times at once. Wait about ${seconds} ` +
+        'seconds and try again.',
+      'Nothing is wrong with your account, and nothing has been locked.',
+    ],
+  })
 }
 
 // Re-exported so that an edition built on top of this can import the permission

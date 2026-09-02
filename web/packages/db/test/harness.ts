@@ -202,6 +202,36 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO audit_entries (org_id, actor_label, action, target_type, origin, entry_hash)
     VALUES (${orgId}, ${label}, 'environment.created', 'environment', 'web', ${'seed-' + slug})`
 
+  // Entitlements, flags and the money ledger. All three carry org_id, so the
+  // cross-tenant suite picks them up from the database and demands a row per
+  // tenant: a query that returns nothing because the fixture never inserted
+  // anything looks exactly like isolation working.
+  //
+  // Inserted through the OWNER connection, deliberately. A tenant cannot write
+  // any of these and an operator connection would be a second thing for this
+  // fixture to depend on, which is precisely what the suite is trying to test
+  // rather than assume.
+  await admin`
+    INSERT INTO entitlement_overrides
+      (scope, scope_id, org_id, feature, value, reason, created_by_label)
+    VALUES ('organization', ${orgId}, ${orgId}, 'environments', ${'40'}::jsonb,
+            ${`seed grant for ${label}`}, 'seed@example.test')`
+  await admin`
+    INSERT INTO feature_flags (key, description, state, updated_by_label)
+    VALUES ('seed.flag', 'A flag the tenancy fixture targets.', 'targeted', 'seed@example.test')
+    ON CONFLICT (key) DO NOTHING`
+  await admin`
+    INSERT INTO feature_flag_targets (flag_key, kind, value, allow, org_id, reason, created_by_label)
+    VALUES ('seed.flag', 'organization', ${orgId}, true, ${orgId},
+            ${`seed target for ${label}`}, 'seed@example.test')`
+  await admin`
+    INSERT INTO admin_operations (
+      idempotency_key, action, org_id, target_type, target_id,
+      actor_label, reason, request, request_fingerprint, state, finished_at)
+    VALUES (${`seed-op-${slug}`}, 'billing.refunded', ${orgId}, 'charge', ${`ch_${slug}`},
+            'seed@example.test', ${`seed refund for ${label}`}, '{}'::jsonb,
+            ${`seed-print-${slug}`}, 'succeeded', now())`
+
   // Single sign-on and provisioning. Every one of these tables carries org_id,
   // so the cross-tenant suite picks them up from the database and requires a
   // row per tenant to prove against: a query that returns nothing because the

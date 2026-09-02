@@ -177,7 +177,7 @@ errors:
   - code: AF-DB-003
     area: DB
     message: "The source database is Postgres {found}, and this provider supports {supported}."
-    next_step: "Use a provider that supports Postgres {found}, or upgrade the source."
+    next_step: "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for."
     docs: providers/overview
     retryable: false
     exit_code: 3
@@ -562,6 +562,13 @@ errors:
     docs: concepts/masking
     retryable: false
     exit_code: 3
+  - code: AF-MSK-011
+    area: MSK
+    message: "Verification could not read {table}.{column}, so the golden was not verified: {detail}"
+    next_step: "Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed."
+    docs: concepts/verification
+    retryable: false
+    exit_code: 7
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."

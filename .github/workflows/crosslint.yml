@@ -34,7 +34,31 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is the verdict a tag and a deploy are read against, so it
+  # is never cancelled. On a branch the saving is real and nothing depends
+  # on the superseded answer, so cancelling stays.
+  #
+  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
+  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
+  # run at all. Cancelled is not red, but it is not a verdict either, and
+  # `release.yml` had no gate of its own, so the only thing standing between
+  # an unverified commit and published binaries was somebody holding merges
+  # by hand.
+  #
+  # There is no clause for tags here because this workflow does not run on
+  # one. The `on:` block above is a push to main and a pull request, and
+  # nothing else, so `refs/tags/` is a ref this expression is never evaluated
+  # against. The first version of this line excluded tags anyway, which read
+  # as protection and was a condition that could not be true.
+  #
+  # What this does NOT buy, so nobody reads more into it than it does: a run
+  # that has already STARTED is never cancelled, and that is the whole of it.
+  # GitHub still cancels a run that is merely PENDING when a newer one queues
+  # behind the same in progress run. So the newest commit always reaches a
+  # verdict, which is what a tag and a deploy are read against, and commits in
+  # between a burst of merges still get skipped. Every commit reaching a
+  # verdict needs a merge queue, not a bigger timeout.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read

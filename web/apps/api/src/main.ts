@@ -7,14 +7,14 @@
 // fails in production rather than at deploy time.
 
 import { serve } from '@hono/node-server'
-import { createPool, migrate } from '@antifailure/db'
+import { createPool, createAdminPool, migrate } from '@antifailure/db'
 import postgres from 'postgres'
 import { createServer } from './server.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
-import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
+import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -29,7 +29,11 @@ import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
-import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
+import {
+  githubAppInstallUrlFrom,
+  hostedRequiredPlanFrom,
+  operatorSetsPlanFrom,
+} from './hosted.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -69,6 +73,34 @@ if (process.env.AF_MIGRATE === '1') {
 }
 
 const pool = createPool({ url: databaseUrl, max: Number(process.env.AF_POOL_MAX ?? 10) })
+
+// The operator portal's own connection, when this installation has one.
+//
+// A SEPARATE variable and not a flag on the line above, because the whole
+// boundary is that the cross tenant read needs a credential the application
+// role cannot acquire. Deriving this URL from databaseUrl by swapping the user
+// would mean the application holds everything needed to build it, which is the
+// property being denied.
+//
+// Absent is a supported state and the right default for a single team running
+// this themselves: there is no operator portal, and the admin procedures answer
+// PRECONDITION_FAILED naming this variable rather than rendering an empty
+// portal that looks like a platform with no customers.
+const adminDatabaseUrl = process.env.AF_ADMIN_DATABASE_URL
+const adminPool = adminDatabaseUrl
+  ? createAdminPool({ url: adminDatabaseUrl, max: Number(process.env.AF_ADMIN_POOL_MAX ?? 4) })
+  : null
+if (adminPool) {
+  // Proved at start up rather than on the first support request. A role without
+  // BYPASSRLS reads zero rows through the tenant policies, so the failure this
+  // catches would otherwise look exactly like a working portal with nothing in
+  // it. Refusing to start is correct: an operator portal that silently shows
+  // nothing is worse than one that is plainly not configured.
+  await adminPool.ensureBypass()
+  console.log('the operator portal has its own database credential')
+} else {
+  console.log('AF_ADMIN_DATABASE_URL is not set: this installation has no operator portal')
+}
 
 // The GitHub App, if there is one. Null is a supported state: sign-in works
 // without it, and the parts that need an installation say which variables are
@@ -197,9 +229,13 @@ console.log(
 
 let hostedRequiredPlan
 let githubAppInstallUrl
+let signupUrl
+let operatorSetsPlan = false
 try {
   hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
   githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
+  signupUrl = signupUrlFrom(process.env.AF_SIGNUP_URL)
+  operatorSetsPlan = operatorSetsPlanFrom(process.env.AF_OPERATOR_SETS_PLAN)
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(2)
@@ -210,10 +246,31 @@ if (hostedRequiredPlan && !stripe.config) {
   )
   process.exit(2)
 }
+// The other contradiction, refused for the same reason and in the same place.
+//
+// A route that grants any plan by hand, on a process that also sells those
+// plans, is a product nobody has to pay for. Refusing it HERE rather than only
+// inside `billing.set` is the point: a start-up refusal covers whatever writes
+// the plan next, and a check inside one procedure covers one procedure. The
+// pair of them is what makes `operatorSetsPlan` mean "this process takes no
+// money at all" wherever it is read.
+if (operatorSetsPlan && (stripe.config || hostedRequiredPlan)) {
+  console.error(
+    'AF_OPERATOR_SETS_PLAN is set on an installation that takes payment. A plan that can be ' +
+      'granted by hand is not a plan anybody has to buy: unset it, or unset the Stripe ' +
+      'variables and AF_HOSTED_REQUIRED_PLAN.',
+  )
+  process.exit(2)
+}
 console.log(
   hostedRequiredPlan
     ? `hosted access requires the ${hostedRequiredPlan} plan`
     : 'no hosted plan gate: this installation serves every plan',
+)
+console.log(
+  operatorSetsPlan
+    ? 'plans are set by hand: billing.set writes the plan on this installation'
+    : 'plans are not set by hand: billing.set is refused (AF_OPERATOR_SETS_PLAN is not set)',
 )
 
 // Located once, here, and said out loud either way. A control plane running
@@ -233,6 +290,7 @@ const billing = stripe.config
 
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
+  adminPool,
   github,
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
@@ -249,7 +307,9 @@ const { app, ingestLimiter, authLimiter } = createServer({
     : {}),
   stripe: billing,
   hostedRequiredPlan,
+  operatorSetsPlan,
   githubAppInstallUrl,
+  signupUrl,
   modelPrices,
   consoleBuild,
   analyticsSecret,

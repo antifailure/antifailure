@@ -1,8 +1,8 @@
 # changed
 
-The analytics migration is `0029`. It has been renamed five times, every time
-because another branch landed ahead of it: from `0021`, `0024`, `0025`, `0026`
-and `0027`.
+The analytics migration is `0031`. It has been renamed six times, every time
+because another branch landed ahead of it: from `0021`, `0024`, `0025`, `0026`,
+`0027` and `0029`.
 
 `migration-order` refuses a GAP as well as a duplicate, so a branch cannot hold
 a number open for another branch that has not landed. The reservation has to be
