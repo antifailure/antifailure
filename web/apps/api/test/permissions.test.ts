@@ -16,7 +16,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { listProcedures } from '../src/openapi.ts'
-import { declaredPermissions } from '../src/trpc.ts'
+import { declaredAdminPermissions, declaredPermissions } from '../src/trpc.ts'
 import {
   PERMISSIONS, ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role,
 } from '../src/permissions.ts'
@@ -174,10 +174,22 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 
   it('every route declares a permission or is deliberately public', () => {
+    // Operator routes declare a PLATFORM permission and are walked by their own
+    // matrix in admin-routes.test.ts, which asserts the same three properties
+    // against the platform catalog.
+    //
+    // Skipped by DECLARATION and never by path prefix. A prefix skip would let
+    // a route named `admin.something` that declares nothing at all fall through
+    // this test AND be absent from the platform one, guarded by neither and
+    // visible to no test, which is worse than the problem it solves.
     const declared = declaredPermissions()
+    const operatorRoutes = declaredAdminPermissions()
     const undeclared = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !declared.has(path) && !PUBLIC_ROUTES.has(path))
+      .filter(
+        (path) =>
+          !declared.has(path) && !PUBLIC_ROUTES.has(path) && !operatorRoutes.has(path),
+      )
 
     assert.deepEqual(
       undeclared,
@@ -188,10 +200,16 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 
   it('every route has a sample input, so none drops out of the matrix', () => {
+    // Operator routes are excluded for the same reason and by the same test as
+    // above: they are driven by their own matrix against the platform catalog,
+    // and they take an operator session this org-scoped harness does not have.
+    // Excluded by DECLARATION, so an operator route that declares nothing is
+    // still missing here and still fails.
     const inputs = inputsFor(org)
+    const operatorRoutes = declaredAdminPermissions()
     const missing = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !(path in inputs))
+      .filter((path) => !(path in inputs) && !operatorRoutes.has(path))
     assert.deepEqual(missing, [], `no sample input for: ${missing.join(', ')}`)
   })
 
@@ -234,12 +252,19 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
     }
   })
 
+  /** Operator routes, excluded from the TENANT matrix by declaration rather
+   *  than by path, so one that declares nothing still fails above. */
+  const operatorPaths = declaredAdminPermissions()
+
   // The matrix itself. One test per role per route, named so that a failure
   // says which cell broke.
   for (const role of ROLES) {
     describe(`as ${role}`, () => {
       for (const { path, type } of listProcedures()) {
         if (PUBLIC_ROUTES.has(path)) continue
+        // Operator routes take an operator session, which this org-scoped
+        // harness cannot mint. admin-routes.test.ts drives them with one.
+        if (operatorPaths.has(path)) continue
 
         it(`${type} ${path}`, async () => {
           const permission = declaredPermissions().get(path) as Permission
@@ -284,6 +309,7 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   it('no session at all is unauthorized, not forbidden and not allowed', async () => {
     for (const { path, type } of listProcedures()) {
       if (PUBLIC_ROUTES.has(path)) continue
+      if (operatorPaths.has(path)) continue
       const { body } = await callProcedure(h, null, path, type, inputsFor(org)[path])
       assert.equal(
         errorCode(body),
