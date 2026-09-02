@@ -38,7 +38,7 @@ $ just gate
 ## Checklist
 
 - [ ] Commits are signed off (`git commit -s`)
-- [ ] A changelog fragment exists under `.changes/`
+- [ ] A changelog fragment exists under `.changes/`, or a commit carries a `Changelog-None:` trailer saying why not (`just changecheck`)
 - [ ] Documentation is updated for anything user visible
 - [ ] Every new error code has a catalog entry
 - [ ] No secret, real customer record, or unredacted screenshot is included

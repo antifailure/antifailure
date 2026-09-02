@@ -23,7 +23,14 @@ export function Breadcrumbs({ path }: { path: string }) {
 
   return (
     <nav aria-label="Breadcrumb" className="mb-6 max-md:mb-4">
-      <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tracking-extra-tight text-gray-new-50">
+      {/* gray-new-40 rather than 50, and it is a contrast fix rather than a
+          preference. 50 is #797d86, which at 13px measures 3.85:1 on the paper
+          ground, 4.13:1 on white and 3.55:1 on the sage bands, so the crumb
+          trail failed 4.5:1 on every page of the site that renders it. 40 is
+          the next token up and clears it on all three: 5.53, 5.93 and 5.10.
+          Nothing outside the scale was invented; the scale already had a
+          passing grey one step away. */}
+      <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tracking-extra-tight text-gray-new-40">
         {trail.map((route, i) => {
           const last = i === trail.length - 1;
           const label = pageName(route, "label");
@@ -31,7 +38,14 @@ export function Breadcrumbs({ path }: { path: string }) {
           return (
             <li key={route.path} className="flex items-center gap-x-2">
               {i > 0 ? (
-                <span aria-hidden="true" className="text-gray-new-80">
+                // 80 is #c9cbcf, 1.51:1 on paper, which is a separator you
+                // cannot see. 50 is the lightest token that reads, and it
+                // stays lighter than the crumbs either side of it so the
+                // hierarchy is unchanged. It is stated rather than implied
+                // that this one does NOT reach 4.5:1: it is aria-hidden and
+                // carries no information, and darkening it to the label's own
+                // weight would make the separator compete with the labels.
+                <span aria-hidden="true" className="text-gray-new-50">
                   /
                 </span>
               ) : null}

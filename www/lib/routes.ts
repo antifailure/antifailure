@@ -188,6 +188,19 @@ export const ROUTES: readonly Route[] = [
     parent: "/",
   },
 
+  {
+    path: "/changelog",
+    title: pageTitle("Changelog"),
+    description:
+      "Every change to the engine, the control plane and the site, written when it was made and dated by the commit that landed it.",
+    summary:
+      "What has changed and when, newest first, built from the repository's own changelog fragments.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+  },
+
   // Writing
   {
     path: "/blog",

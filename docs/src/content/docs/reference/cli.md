@@ -684,6 +684,15 @@ ahead of a compose key ahead of a Procfile process ahead of the directory.
 Where one source declares two services in a directory, which is what a compose
 file with a web and an admin container on one build context is, they stay two.
 
+A Dockerfile in a subdirectory is built either from that directory, which is
+what 'docker build <dir>' does, or from the repository root, which is what a
+monorepo image reaching a lockfile at the top of the tree needs. Its COPY lines
+say which: a path that exists beside the Dockerfile and not at the root means
+the directory, and one that exists only at the root means the root. Where they
+do not settle it, this is a question rather than a default, because building
+from the wrong one either fails on a missing path or, with COPY . ., succeeds
+and produces an image assembled from the wrong directory.
+
 --answer settles a question, and also overrides a value detection read with
 confidence, which is how you separate two services a repository really does
 have on one port. An id naming nothing is refused with the ids that would have
@@ -1145,6 +1154,40 @@ af mask verify
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
+
+### `af mcp`
+
+Serve the rehearsal tools to a model over the Model Context Protocol.
+
+Serve this repository's rehearsal tools to an MCP client on standard input and
+output.
+
+The agent on the other end chooses what to rehearse. It does not choose how
+safely the rehearsal runs: there is no argument on any tool that can disable
+sanitization, widen the egress policy, lower a threshold or name a database.
+Thresholds come from this project's manifest, and the verdict is decided by the
+same evaluator af ci uses, so a tool call and a pull request check cannot
+disagree about the same change.
+
+The server serves exactly this checkout. A tool call may state which project it
+believes it is talking to, and a call naming a different one is refused rather
+than followed.
+
+Standard output carries the protocol and nothing else. Progress, warnings and
+errors go to standard error, where the client's log will show them.
+
+```
+af mcp
+```
+
+```
+# Started by an MCP client, not typed. It speaks the protocol on
+# standard input and output, so running it in a terminal looks idle.
+af mcp
+# It serves exactly the checkout it starts in, so the client is
+# configured to run it there.
+af mcp
+```
 
 ### `af model`
 

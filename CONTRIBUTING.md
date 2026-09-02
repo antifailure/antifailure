@@ -94,9 +94,38 @@ filled in:
 3. Security considerations, or an explicit "none, and here is why".
 4. Evidence: pasted command output, not a paraphrase.
 
-Every pull request adds a changelog fragment under `.changes/` with the
-category and one sentence. A missing fragment fails a gate. If the change is
-genuinely invisible to users, `.changes/<pr>.internal.md` records that.
+## The changelog
+
+Every change to something a user can see adds a fragment under `.changes/`.
+The first line is one of `# added`, `# fixed`, `# changed` or `# security`,
+and the rest is prose: what changed, and what it means for somebody using it.
+The published changelog at https://antifailure.dev/changelog is built from
+these files and from nothing else, so a change with no fragment is a change
+nobody outside this repository hears about.
+
+If the change is real but genuinely invisible to a user, name it
+`.changes/<slug>.internal.md`. Those are kept and never published.
+
+`just changecheck` is the gate, and it runs the range CI runs, so you find out
+locally rather than twenty minutes later. It asks whether anything a user
+could NOTICE changed, not whether anything changed: a test, a fixture, a
+documentation page, a gate under `tools/`, a workflow, a lock file and a
+generated file all pass in silence. `tools/changecheck/classify.go` holds the
+list, and every exemption in it names the change on main that taught it.
+
+For the genuine exception, say so in the commit and say why:
+
+```
+git commit -s --trailer "Changelog-None: a lint fix with no behaviour change"
+```
+
+The reason is the point, and it is why this is a trailer rather than a label:
+a reviewer reads it in the diff, `git log --grep` finds it later, and the
+local gate can see it. A trailer with nothing after it is refused.
+
+This paragraph promised a gate from the first week of the project and there
+was none until 2026-08-31. The sign-off rule above went the same way, and by
+the time anybody counted, 65 of the first 80 commits carried no trailer.
 
 ## Writing tests
 

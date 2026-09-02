@@ -171,6 +171,53 @@ CREATE TABLE env_leases (
 ) STRICT;
 `,
 	},
+	{
+		Version: 3,
+		Name:    "mcp_runs",
+		SQL: `
+-- One rehearsal a model asked for through the MCP server.
+--
+-- Durable rather than in memory because the whole point of submitting a run
+-- and polling it is that the two halves are separate calls, and a server that
+-- forgot everything when it restarted would answer the second half with "no
+-- such run" for work that really did happen. A run outlives the process that
+-- started it.
+--
+-- inputs_sha is the hash of the canonical arguments, and it is what makes an
+-- idempotency key safe. A retry carrying the same key and the same inputs is
+-- the same request and gets the same run back; the same key with different
+-- inputs is a caller reusing a key by mistake, and answering it with the old
+-- run would report one experiment's verdict for a different experiment.
+CREATE TABLE mcp_runs (
+    id               TEXT PRIMARY KEY,
+    caller           TEXT NOT NULL,
+    project          TEXT NOT NULL,
+    tool             TEXT NOT NULL,
+    idem_key         TEXT NOT NULL DEFAULT '',
+    inputs_sha       TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    phase            TEXT NOT NULL DEFAULT '',
+    verdict          TEXT NOT NULL DEFAULT '',
+    native_verdict   TEXT NOT NULL DEFAULT '',
+    result           TEXT NOT NULL DEFAULT '',
+    error_code       TEXT NOT NULL DEFAULT '',
+    error_detail     TEXT NOT NULL DEFAULT '',
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    created_at       INTEGER NOT NULL,
+    updated_at       INTEGER NOT NULL
+) STRICT;
+
+-- The idempotency index. Scoped to the caller, the project and the tool as
+-- well as the key, so that two callers choosing the same key, or one caller
+-- reusing a key across two different tools, are not silently merged into one
+-- run. Partial, because a run submitted without a key is not part of the
+-- idempotency scheme and must not collide with every other keyless run.
+CREATE UNIQUE INDEX mcp_runs_idem
+    ON mcp_runs(caller, project, tool, idem_key) WHERE idem_key != '';
+CREATE INDEX mcp_runs_status ON mcp_runs(status);
+CREATE INDEX mcp_runs_project ON mcp_runs(project);
+`,
+	},
 }
 
 // SchemaVersion is the version a new database is created at.
