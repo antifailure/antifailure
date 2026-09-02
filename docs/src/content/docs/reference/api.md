@@ -59,6 +59,7 @@ below that take no session either.
 | `/trpc/*` | session cookie | The console's own API. Every procedure states the permission it needs. |
 | `/v1/*` | session cookie | Sign-in state and provider keys, for a browser. Answers `401` without one. |
 | `POST /v1/events` | engine token | Where an engine sends what it did. |
+| `POST /v1/auth/github-oidc` | a GitHub Actions workflow identity token, in the body | Exchanges a job's own identity for a short lived engine token, so nothing has to be pasted into a repository secret. The identity says which repository the job runs in and never whose, so the organization comes from a claim on that repository. See [GitHub](/docs/guides/github#sending-events-with-no-token-at-all). |
 | `POST /v1/pr/callback-token` | a GitHub Actions workflow identity token | Exchanges a job's own identity for a credential scoped to one commit. |
 | `POST /v1/pr/report` | that credential | What a job says about the commit it checked. |
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |

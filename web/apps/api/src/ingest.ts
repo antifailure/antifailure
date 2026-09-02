@@ -148,6 +148,16 @@ export function hashEngineToken(token: string): Buffer {
  * side channel in principle; it is not one in practice here because the value
  * compared is already a hash of a 256-bit secret, so there is nothing to learn
  * by narrowing it.
+ *
+ * REVOKED AND EXPIRED ARE BOTH REFUSALS, and only one of them used to be. This
+ * read `revoked_at` and nothing else, which was correct for exactly as long as
+ * every row in the table was immortal. It has not been since the device grant:
+ * `expires_at` is set on the ninety day CLI token that `af login` mints, and
+ * src/auth/device.ts honours it, so an expired CLI token was refused by
+ * /v1/whoami and accepted here. The engine surface is the one that writes, and
+ * a credential whose expiry only some of the server believes in has no expiry.
+ * The exchanged workflow identity tokens in src/github/exchange.ts live fifteen
+ * minutes and rest entirely on this line.
  */
 export async function authenticateEngine(
   pool: Pool,
@@ -180,6 +190,12 @@ export async function authenticateEngine(
     // have cost everything the moment one was not: a workflow identity is
     // traded for a token that is supposed to die within the hour, and without
     // this line it would authenticate forever.
+    //
+    // Compared in this process against the clock this server runs on rather
+    // than as `expires_at > now()` in the statement, so that a test can move
+    // time and watch a token stop working. A database side comparison would
+    // read the wall clock and quietly ignore the FakeClock, which is how an
+    // expiry ends up shipped and untested.
     if (row.expires_at !== null && new Date(row.expires_at).getTime() <= clock.now().getTime()) {
       return null
     }
