@@ -135,12 +135,24 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 
 			if len(plan.Unclassified) > 0 {
 				env.Out.Section("Columns no rule covers")
+				// Which of these actually shipped, per row.
+				//
+				// This said "so they ship as they are" about the whole list, and
+				// most of the list is emptied by the default rather than shipped.
+				// The two are genuinely different outcomes and a person reading
+				// their own schema could not tell which had happened to which
+				// column, which is the one thing the list is for.
 				env.Out.Println(env.Out.Wrap(
-					"These hold text and nothing decided what happens to them, so they ship as they "+
-						"are. Add a rule for each, or decide that shipping it is fine.", 0))
+					"Nothing decided what happens to these. Each one says what the default did "+
+						"with it. Add a rule for each, or decide that what happened is fine.", 0))
 				env.Out.Println("")
 				for _, a := range plan.Unclassified {
-					env.Out.Printf("  %s.%s  (%s)\n", a.Table, a.Column.Name, a.Column.Type)
+					did := "COPIED UNCHANGED"
+					if a.Transform != "" {
+						did = "emptied by default (" + a.Transform + ")"
+					}
+					env.Out.Printf("  %s.%s  (%s)  %s\n",
+						a.Table, a.Column.Name, a.Column.Type, did)
 				}
 				env.Out.Println("")
 			}

@@ -896,6 +896,18 @@ Masking could not run: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking) |
 
+### AF-MSK-011
+
+Verification could not read {table}.{column}, so the golden was not verified: {detail}
+
+**What to do.** Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verification](/docs/concepts/verification) |
+
 ## Egress
 
 ### AF-NET-001
