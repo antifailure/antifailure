@@ -163,6 +163,38 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   },
 
   // ---------------------------------------------------------------------------
+  // Exchanging a GitHub Actions workflow identity for an engine token, and the
+  // claims that decide which organization one may be exchanged for.
+  // ---------------------------------------------------------------------------
+  'POST /v1/auth/github-oidc': {
+    rate: 10, burst: 100, key: 'ip',
+    reason:
+      'The one endpoint here a caller reaches with no credential of ours at all, so the address ' +
+      'is the only key available and it is a weak one: every GitHub-hosted runner egresses from ' +
+      'a shared pool of Azure addresses, so a real customer and somebody probing arrive from the ' +
+      'same neighbourhood. Sized to stop a flood rather than to be the real bound. The real ' +
+      'bound is per repository and lives in src/github/exchange.ts, applied after the signature ' +
+      'check, because a limiter keyed on an unverified claim is one an attacker fills on ' +
+      "somebody else's behalf.",
+  },
+  'POST /v1/oidc/bindings': {
+    rate: 1, burst: 5, key: 'token',
+    reason: 'Claiming a repository, which is what lets its workflows mint credentials. The same number as minting an engine token because it grants the same thing standing, and a person does it once per repository.',
+  },
+  'GET /v1/oidc/bindings': {
+    rate: 5, burst: 50, key: 'token',
+    reason: 'Listing the claims an organization holds. One query, and the read somebody runs before deciding which claim to revoke, so it is as generous as the other reads.',
+  },
+  'DELETE /v1/oidc/bindings/:binding': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Withdrawing a claim by its id, which also kills the credentials it issued. Same shape as revoking a token and deliberately not tighter: this is the call somebody makes in a hurry.',
+  },
+  'DELETE /v1/oidc/bindings/:owner/:name': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'The same withdrawal, named by the repository rather than by a uuid. Two segments because a repository is owner/name and a slash is a path separator, so one parameter could never match it, and the number is the same because it is the same call.',
+  },
+
+  // ---------------------------------------------------------------------------
   // The console.
   //
   // The console is a static export now, so its URL space is a set of files

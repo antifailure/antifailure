@@ -327,13 +327,35 @@ export const engineTokens = pgTable('engine_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  // 'engine' or 'cli'. A cli token acts as a person and carries user_id; an
-  // engine token is a machine and deliberately has none. See migration 0012.
+  // 'engine', 'cli' or 'oidc'. A cli token acts as a person and carries
+  // user_id; an engine token is a machine and deliberately has none. See
+  // migration 0012. An oidc token is one workflow job, minted by exchanging a
+  // GitHub Actions identity token, and it carries the binding that earned it
+  // and an expiry the database insists on. See migration 0025.
   kind: text('kind').notNull().default('engine'),
   userId: uuid('user_id'),
   scopes: text('scopes').array().notNull().default([]),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+  bindingId: uuid('binding_id'),
 }, (t) => [index('engine_tokens_org_idx').on(t.orgId)])
+
+// Which organization a GitHub repository may report as.
+//
+// A workflow identity token proves which repository a job runs in and nothing
+// about who that repository belongs to, because anybody can mint one naming
+// their own repository. This is the table that turns the proven name into an
+// organization, and a repository with no live row here is refused rather than
+// resolved. See migration 0025 for why `repositories` cannot play this part.
+export const oidcRepositoryBindings = pgTable('oidc_repository_bindings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  /** owner/name, lower-cased, because GitHub compares both halves that way. */
+  repository: text('repository').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (t) => [index('oidc_repository_bindings_org_idx').on(t.orgId)])
 
 // A terminal signing in. It has no tenant until somebody approves it, which is
 // why it is not in tenantScopedTables and is classified separately in the
@@ -971,4 +993,5 @@ export const tenantScopedTables = [
   billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
   invitations, billingContacts, organizationDeletions, organizationDeletionExports,
   githubDeliveries, pullRequests, prGenerations, teardownRequests,
+  oidcRepositoryBindings,
 ] as const

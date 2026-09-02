@@ -120,6 +120,7 @@ import {
   TokenRefused,
   verifyWorkflowIdentity,
 } from './github/oidc.ts'
+import { registerWorkflowIdentityRoutes, repositoryLimiter } from './github/exchange.ts'
 import {
   handleStripeDelivery,
   parseStripeEvent,
@@ -1608,6 +1609,22 @@ export function createServer(options: ServerOptions) {
   const actionsKeys = options.actionsKeys ?? new ActionsKeys(clock)
   const consoleBase = options.appBaseUrl ? options.appBaseUrl.replace(/\/+$/, '') : null
   const githubApi = options.githubApi ?? null
+
+  // The other way to get an engine token, and the one a customer in CI should
+  // use: no token, no environment variable, no repository secret. A job posts
+  // the workflow identity GitHub minted for it and gets back a credential that
+  // expires within the quarter hour. Registered as one call because the
+  // exchange and the claims that authorize it must not be added apart: an
+  // exchange with no way to claim a repository refuses every request, and
+  // claims with no exchange are rows nothing reads. See src/github/exchange.ts
+  // for why the `repository` claim is an identity and never a permission.
+  registerWorkflowIdentityRoutes(app, {
+    pool: options.pool,
+    clock,
+    actionsKeys,
+    limiter: repositoryLimiter(clock),
+    cliCaller,
+  })
 
   function lifecycleDeps(): LifecycleDeps | null {
     if (!githubApi) return null

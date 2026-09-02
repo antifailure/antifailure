@@ -379,6 +379,53 @@ for (const file of pages) {
   }
 }
 
+// Every markdown twin a page ADVERTISES has to be a file that exists.
+//
+// The per-page loop above skips noindex pages, so it only ever asked whether
+// an indexable page had a twin. It could not see the opposite failure, which
+// is the one that shipped: /signin and /signup are deliberately noindex, the
+// twin generator deliberately refuses to write a twin for a noindex page, and
+// lib/seo.ts advertised one anyway. Two <link rel="alternate"> tags pointed at
+// https://antifailure.dev/signin.md and /signup.md, the host answered 404 for
+// both, and the only thing that noticed was the external link checker, after
+// the build was green and merged.
+//
+// So this walks every built page, indexable or not, reads the address it
+// claims its markdown lives at, and asserts the build actually wrote that
+// file. It is deliberately driven by the advertised href rather than by the
+// route registry: the tag is what a crawler follows, so the tag is what has to
+// be true.
+console.log("\nAdvertised markdown twins");
+{
+  const dangling = [];
+  let advertised = 0;
+  for (const file of pages) {
+    const html = readFileSync(file, "utf8");
+    const rel = path.relative(OUT, file);
+    const tag = (html.match(/<link\b[^>]*>/gi) ?? []).find(
+      (t) => /rel="alternate"/i.test(t) && /type="text\/markdown"/i.test(t),
+    );
+    if (!tag) continue;
+    const href = tag.match(/href="([^"]*)"/i)?.[1] ?? "";
+    advertised++;
+    // Same-origin only. An absolute address on another host is somebody
+    // else's file and this check has no opinion about it.
+    if (!href.startsWith(ORIGIN + "/")) {
+      dangling.push(`${rel} advertises ${JSON.stringify(href)}, which is not on ${ORIGIN}`);
+      continue;
+    }
+    const target = href.slice(ORIGIN.length + 1);
+    if (!has(target)) dangling.push(`${rel} advertises /${target}, which the build did not write`);
+  }
+  assert(
+    advertised > 0 && dangling.length === 0,
+    `every advertised markdown twin exists (${advertised} pages advertise one)`,
+    advertised === 0
+      ? "no page advertises a markdown twin at all, which is itself the regression"
+      : dangling.join("\n         "),
+  );
+}
+
 // The skip link is in the root layout, so it is on every page, but the element
 // it points at is not: three pages do not use SiteLayout and had no id="main",
 // and one of them had no <main> at all. That made the first thing a keyboard

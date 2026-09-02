@@ -1,12 +1,12 @@
 # Three stages, so the image that runs carries the server and the modules it
 # actually reached rather than a toolchain and a module cache.
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 # The lockfile first, so a change to a page does not reinstall the world.
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -15,10 +15,11 @@ COPY . .
 # trying to connect to something that does not exist yet.
 RUN npm run build
 
-FROM node:22-alpine
+FROM node:26-alpine
 # psql, because the manifest's migrate command uses it and that command runs in
-# this image. postgresql-client, not postgresql17-client: Alpine has no such
-# package, and the unversioned name gives psql 16, which talks to a 17 server.
+# this image. postgresql-client, rather than a version in the name: node:26-alpine
+# is built on Alpine 3.24, where the unversioned package gives psql 18, and a
+# client newer than the server is the direction libpq supports.
 RUN apk add --no-cache postgresql-client \
  && addgroup -S app && adduser -S -u 10001 -G app app
 WORKDIR /app
