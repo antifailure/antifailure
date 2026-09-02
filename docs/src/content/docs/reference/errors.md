@@ -342,7 +342,7 @@ The source database is Postgres {found}, and this provider supports {supported}.
 
 The golden version {version} no longer exists.
 
-**What to do.** Run 'af golden list' to see the available versions, then 'af up --golden <version>'.
+**What to do.** Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.
 
 | | |
 | --- | --- |
@@ -479,6 +479,18 @@ Personas cannot be provisioned because {provider} creates users only through its
 | | |
 | --- | --- |
 | Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas/) |
+
+### AF-DB-022
+
+No table that looks like a users table was found, so there is nowhere to create the personas that sign in.
+
+**What to do.** Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/personas](/docs/guides/personas/) |
 
@@ -788,7 +800,7 @@ The manifest at {path} is not valid: {detail}
 
 The manifest at {path} declares schema version {found}, which this build does not understand.
 
-**What to do.** Upgrade with 'af version -check' and install the release that supports version {found}.
+**What to do.** Check the build you are running with 'af version' and install the release that supports version {found}.
 
 | | |
 | --- | --- |

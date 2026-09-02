@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -190,9 +191,8 @@ func (o *Orchestrator) personaScheme(
 			return personas.Scheme{}, err
 		}
 		if !found {
-			return personas.Scheme{}, fmt.Errorf(
-				"the direct adapter is selected and %w; describe it with auth.table",
-				personas.ErrNoUsersTable)
+			return personas.Scheme{}, aferrors.Wrap(personas.ErrNoUsersTable, aferrors.AFDB022,
+				"detail", "the direct adapter is selected and no users table could be found")
 		}
 		return withExtraSessions(scheme, auth), nil
 	}
@@ -211,10 +211,19 @@ func (o *Orchestrator) personaScheme(
 		return personas.Scheme{}, err
 	}
 	if !found {
-		return personas.Scheme{}, fmt.Errorf(
-			"%w, so there is nowhere to create a persona; "+
-				"describe the table with auth.table, or use auth.adapter: seed",
-			personas.ErrNoUsersTable)
+		// Coded, because this is the one refusal on the first run path that a
+		// new user is most likely to meet and it had no code at all: no AF
+		// number, no next step, no docs link, while the control from the same
+		// binary a moment earlier is AF-MAN-001 with all three. Standard 7 is
+		// not a formatting rule here. A person whose af test has just failed
+		// needs to be told that auth.table, auth.adapter: seed and login: none
+		// are the three ways out, and a bare sentence tells them none of it.
+		//
+		// Wrapped rather than replaced, so NoAccountNeeded still recognises it
+		// and a manifest where nobody signs in still carries on rather than
+		// being refused by a message about accounts it never wanted.
+		return personas.Scheme{}, aferrors.Wrap(personas.ErrNoUsersTable, aferrors.AFDB022,
+			"detail", "no table that looks like a users table was found")
 	}
 	o.progress("personas will be created in " + scheme.Users.Name)
 	return withExtraSessions(scheme, auth), nil

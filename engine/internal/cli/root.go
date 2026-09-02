@@ -422,6 +422,7 @@ and real data volume with every identifier masked and the masking proved, your
 services running in a sandbox that cannot reach the internet except where you
 say it can, and inbound webhooks simulated so flows actually finish.
 
+  af start    say where you are on the first run, and what to run next
   af init     read the repository and write antifailure.yaml
   af up       create an environment
   af test     run the agent workflows against it
@@ -479,6 +480,7 @@ recoverable by replay.`),
 		"Do not emit colour, regardless of the terminal")
 
 	root.AddCommand(
+		newStartCommand(env),
 		newInitCommand(env),
 		newUpCommand(env),
 		newDownCommand(env),
