@@ -341,6 +341,54 @@ describe('an override changes what a route answers', async () => {
     }
   })
 
+  it('the plan screen reports the limit that is actually enforced', async () => {
+    // The failure this guards is not cosmetic. Before the reporting paths were
+    // moved onto the resolver, dispatch refused at forty and billing.get said
+    // twenty five, so a customer who had been sold extra capacity was told they
+    // were over a limit they were not over. A reported limit that disagrees
+    // with the enforced one is worse than no reported limit.
+    await h.admin`
+      INSERT INTO entitlement_overrides
+        (scope, scope_id, org_id, feature, value, reason, ticket, created_by_label)
+      VALUES ('organization', ${org.orgId}, ${org.orgId}, 'environments', ${'40'}::jsonb,
+              'Sold 40 on a bespoke contract', 'AF-118', 'ops@antifailure.test')`
+    try {
+      const answer = await callProcedure(h, owner, 'billing.get', 'query', undefined)
+      const body = answer.body as {
+        result: { data: { entitlements: {
+          key: string; value: number; planValue: number
+          override: { scope: string; reason: string; ticket: string | null } | null
+        }[] } }
+      }
+      const envs = body.result.data.entitlements.find((e) => e.key === 'environments')!
+      assert.equal(envs.value, 40)
+      // The plan's own number travels beside it, or the screen cannot show
+      // what was changed without a second request.
+      assert.equal(envs.planValue, 3)
+      assert.equal(envs.override!.scope, 'organization')
+      assert.equal(envs.override!.reason, 'Sold 40 on a bespoke contract')
+      assert.equal(envs.override!.ticket, 'AF-118')
+
+      // And org.status, which is what the rest of the console reads.
+      const status = await callProcedure(h, owner, 'org.status', 'query', undefined)
+      const quotas = (status.body as {
+        result: { data: { quotas: { environments: { limit: number; allowed: boolean } } } }
+      }).result.data.quotas
+      assert.equal(quotas.environments.limit, 40)
+      assert.equal(quotas.environments.allowed, true, 'reported as over a limit it is not over')
+
+      // Every entitlement the catalogue has, so a new one cannot be added to
+      // the resolver and quietly left off the screen.
+      assert.equal(
+        body.result.data.entitlements.length,
+        Object.keys(ENTITLEMENTS).length,
+        'the plan screen is not showing every entitlement',
+      )
+    } finally {
+      await h.admin`DELETE FROM entitlement_overrides WHERE org_id = ${org.orgId}`
+    }
+  })
+
   it('the tenant role cannot write itself a grant', async () => {
     const { sql } = await import('drizzle-orm')
     let thrown: unknown
