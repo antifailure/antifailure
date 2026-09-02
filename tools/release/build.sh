@@ -30,6 +30,16 @@ dist="$6"; stage="$7"
 root=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$dist" "$stage"
 
+# Absolute, before anything uses them. Both callers pass these relative, and
+# the go build below runs from $root/engine, so a relative -o resolved against
+# engine/ rather than against the directory this script just made: the binary
+# landed in engine/stage/<name>/af, the archive was assembled from the staged
+# directory without it, and the script exited 0 having packaged a release with
+# no `af` in it. Nothing caught it because tools/relpack passed absolute paths,
+# which is the one shape neither caller uses.
+dist=$(cd "$dist" && pwd)
+stage=$(cd "$stage" && pwd)
+
 name="antifailure_${version}_${goos}_${goarch}"
 binary="$stage/$name/af"
 mkdir -p "$stage/$name/runner"

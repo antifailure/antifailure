@@ -1,6 +1,6 @@
 {
   "name": "@antifailure/site-api",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "The managed functions behind antifailure.dev.",
   "scripts": {
