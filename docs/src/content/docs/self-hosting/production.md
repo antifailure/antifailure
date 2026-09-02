@@ -213,7 +213,7 @@ Repository permissions, and what each one is actually for:
 | Metadata | Read-only | Mandatory for every App. |
 | Contents | Read-only | Reading the manifest and the workflow file. |
 | Pull requests | Read and write | The one comment per pull request, and the pull request a masking rule change becomes. |
-| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**, and cancelling the run that holds an environment when a pull request closes. |
+| Actions | Read and write | The console's **Create environment**, **Run agents**, **Run load** and **Tear down**, and cancelling the run that holds an environment when a pull request closes. |
 | Checks | Read and write | The one check run per commit that a branch protection rule can require. |
 
 Organization permissions:
@@ -227,7 +227,8 @@ use yet.** It is the one on this list where waiting is worse than granting:
 widening an existing App's permissions makes GitHub ask every installation to
 accept the new grant, so adding it later interrupts every customer, and until
 somebody accepts, the App declares a permission that no installation holds.
-Those three controls dispatch a `workflow_dispatch` run of the customer's own
+Every one of those controls, including starting a workload and tearing an
+environment down, dispatches a `workflow_dispatch` run of the customer's own
 workflow through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and
 without the permission GitHub refuses with
 `403 Resource not accessible by integration`.

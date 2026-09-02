@@ -2,7 +2,7 @@
 title: Next.js
 description: What a Next.js service needs in an environment, and the four things that go wrong.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 A Next.js application needs nothing Antifailure specific. It reads
