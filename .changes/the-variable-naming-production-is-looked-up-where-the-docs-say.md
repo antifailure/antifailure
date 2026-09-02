@@ -37,3 +37,10 @@ sources answered, or refuses to call the step finished:
 AF-DB-016 said the variable held nothing "in this shell", which was accurate
 about the old behaviour and would now be half the answer. It names the searched
 sources instead.
+
+`af up` also names the variable itself now. With no golden and a manifest naming
+production it returned AF-DB-012, "No golden here was made for this project, and
+117 were made for something else", which is the right answer when the source is
+reachable and a refresh has not run, and a count of other people's goldens in
+front of somebody whose problem is one unset variable. Its next step,
+`af golden refresh`, existed only to produce the right message a command later.

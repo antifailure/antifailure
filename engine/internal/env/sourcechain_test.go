@@ -124,3 +124,35 @@ func TestRefresh_ASourceInDotEnvReachesTheProvider(t *testing.T) {
 	require.NotEqual(t, aferrors.AFDB016, codeOf(err))
 	require.Equal(t, 1, prov.refreshes)
 }
+
+// af up names the unset variable itself rather than sending the reader to a
+// second command to be told.
+//
+// With no golden and a manifest naming production, `af up` returned AF-DB-012:
+// "No golden here was made for this project, and 117 were made for something
+// else". That is the right answer when the source is reachable and a refresh
+// has simply not run. When the variable holds nothing it is a count of other
+// people's goldens in front of somebody whose problem is one unset variable,
+// and its next step, 'af golden refresh', exists only to produce AF-DB-016 a
+// command later.
+func TestUp_ANamedSourceThatNothingHoldsIsNamedByTheFirstCommand(t *testing.T) {
+	o, s, _ := refreshFixture(t,
+		&schema.Database{SourceURLEnv: "PRODUCTION_DATABASE_URL"}, nil)
+
+	_, _, _, _, err := o.database(t.Context(), s)
+	require.Equal(t, aferrors.AFDB016, codeOf(err),
+		"the reader was counted other projects' goldens at instead of being told "+
+			"which variable to set")
+}
+
+// And the golden selection refusal survives, for the case it was written for.
+func TestUp_ASourceThatIsThereAndNoGoldenIsStillAFailedSelection(t *testing.T) {
+	o, s, _ := refreshFixture(t,
+		&schema.Database{SourceURLEnv: "PRODUCTION_DATABASE_URL"}, nil)
+	writeDotEnv(t, o.opts.Root,
+		"PRODUCTION_DATABASE_URL=postgres://reader:secret@db.internal:5432/app\n")
+
+	_, _, _, _, err := o.database(t.Context(), s)
+	require.Equal(t, aferrors.AFDB012, codeOf(err),
+		"a source that is there and no golden is the refusal AF-DB-012 was written for")
+}

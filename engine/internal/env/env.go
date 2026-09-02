@@ -1523,6 +1523,26 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	// environment came up looking correct with none of production's shape or
 	// volume in it, which is the one thing a preview is for.
 	if version == "" && o.opts.Manifest.Database != nil && o.opts.Manifest.Database.SourceURLEnv != "" {
+		// Which of the two refusals this is depends on whether the source can
+		// be read at all, and the more specific one wins.
+		//
+		// AF-DB-012 says no golden here was made for this project and names
+		// how many were made for something else, which is the right answer
+		// when the source is there and a refresh has simply not run. When the
+		// variable naming production holds nothing, that sentence is a count
+		// of other people's goldens in front of a reader whose actual problem
+		// is one unset variable, and its next step sends them to
+		// 'af golden refresh' to be told so by the second command instead of
+		// the first.
+		source, sourceErr := o.sourceURL(ctx)
+		if sourceErr != nil {
+			return "", zero, secrets.Value{}, secrets.Value{}, sourceErr
+		}
+		if source.IsZero() {
+			return "", zero, secrets.Value{}, secrets.Value{},
+				aferrors.Coded(aferrors.AFDB016,
+					"variable", o.opts.Manifest.Database.SourceURLEnv)
+		}
 		return "", zero, secrets.Value{}, secrets.Value{},
 			aferrors.Coded(aferrors.AFDB012, "count", fmt.Sprint(refused))
 	}
