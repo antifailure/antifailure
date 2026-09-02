@@ -102,7 +102,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'every request has to be able to learn that the installation is paused. Writing is ' +
           'not granted to the application role at all, only to antifailure_admin, so a tenant ' +
           'route that reached this table raises permission denied rather than writing nothing ' +
-          'and reporting success. See migrations/0031.',
+          'and reporting success. See migrations/0032.',
       ],
       [
         'admin_notes',
