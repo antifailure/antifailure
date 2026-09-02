@@ -1,3 +1,63 @@
 [
-  { "name": "staging", "url": "https://app.dev.antifailure.dev" }
+  {
+    "id": "control-plane-api",
+    "name": "Control plane API",
+    "group": "Hosted control plane",
+    "description": "Organizations, policy, reports and the endpoints the engine posts to.",
+    "url": "https://app.antifailure.dev/readyz",
+    "check": "readyz"
+  },
+  {
+    "id": "console",
+    "name": "Console",
+    "group": "Hosted control plane",
+    "description": "The signed-in web application at app.antifailure.dev.",
+    "url": "https://app.antifailure.dev/",
+    "check": "http",
+    "expect_body": "/_next/static/"
+  },
+  {
+    "id": "website",
+    "name": "Website",
+    "group": "Website and documentation",
+    "description": "antifailure.dev, including sign-up and pricing.",
+    "url": "https://antifailure.dev/",
+    "check": "http",
+    "expect_body": "/_next/static/"
+  },
+  {
+    "id": "docs",
+    "name": "Documentation",
+    "group": "Website and documentation",
+    "description": "Every page the engine's error codes link a reader to.",
+    "url": "https://antifailure.dev/docs",
+    "check": "http",
+    "expect_body": "/docs/_astro/"
+  },
+  {
+    "id": "installer",
+    "name": "CLI installer",
+    "group": "Website and documentation",
+    "description": "The script antifailure.dev/install.sh serves to curl.",
+    "url": "https://antifailure.dev/install.sh",
+    "check": "http",
+    "expect_body": "#!/bin/sh"
+  },
+  {
+    "id": "site-api",
+    "name": "Waitlist API",
+    "group": "Website and documentation",
+    "description": "The managed function behind the sign-up form.",
+    "url": "https://antifailure.dev/api",
+    "check": "http",
+    "expect_body": "/api/waitlist"
+  },
+  {
+    "id": "staging",
+    "name": "Control plane, staging",
+    "group": "Pre-production",
+    "description": "Where main lands before production. Not a customer surface.",
+    "url": "https://app.dev.antifailure.dev/readyz",
+    "check": "readyz"
+  }
 ]

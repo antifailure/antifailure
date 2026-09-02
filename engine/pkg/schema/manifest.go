@@ -669,6 +669,10 @@ type Policy struct {
 	Masking PolicyLevel `json:"masking,omitempty" yaml:"masking,omitempty"`
 	// Cleanup is teardown leaving a resource behind.
 	Cleanup PolicyLevel `json:"cleanup,omitempty" yaml:"cleanup,omitempty"`
+	// WorkflowsUnverified is a run in which no workflow reached a verdict
+	// about the application, because every one was blocked or unverified or
+	// because none was declared.
+	WorkflowsUnverified PolicyLevel `json:"workflows_unverified,omitempty" yaml:"workflows_unverified,omitempty"`
 }
 
 // LockPolicy is the two thresholds on how long a migration held a lock.

@@ -104,6 +104,18 @@ The {provider} endpoint could not be reached: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/model-keys](/docs/guides/model-keys/) |
 
+### AF-AGT-007
+
+No workflow reached a verdict about the application: {detail}
+
+**What to do.** Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.
@@ -213,6 +225,18 @@ The build context for {service} holds more than {count} files; {path} is where t
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
+
+### AF-BLD-005
+
+The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.
+
+**What to do.** If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest/) |
 
 ### AF-BLD-010
 

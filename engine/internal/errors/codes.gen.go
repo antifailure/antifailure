@@ -18,6 +18,8 @@ const (
 	AFAGT005 Code = "AF-AGT-005"
 	// The {provider} endpoint could not be reached: {detail}
 	AFAGT006 Code = "AF-AGT-006"
+	// No workflow reached a verdict about the application: {detail}
+	AFAGT007 Code = "AF-AGT-007"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -39,6 +41,10 @@ const (
 	// The build context for {service} holds more than {count} files;
 	// {path} is where the count was reached.
 	AFBLD004 Code = "AF-BLD-004"
+	// The build for service {service} failed after {duration}, and its
+	// Dockerfile is {dockerfile} inside a build context rooted at the
+	// repository.
+	AFBLD005 Code = "AF-BLD-005"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -426,6 +432,15 @@ var catalog = map[Code]Entry{
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
+	AFAGT007: {
+		Code:      AFAGT007,
+		Area:      "AGT",
+		Message:   "No workflow reached a verdict about the application: {detail}",
+		NextStep:  "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
+	},
 	AFAGT010: {
 		Code:      AFAGT010,
 		Area:      "AGT",
@@ -506,6 +521,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/build",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFBLD005: {
+		Code:      AFBLD005,
+		Area:      "BLD",
+		Message:   "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
+		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFBLD010: {
 		Code:      AFBLD010,
