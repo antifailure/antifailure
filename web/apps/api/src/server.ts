@@ -12,8 +12,10 @@
 //
 // /auth/* is the sign-in exchange, which by definition has no session yet.
 
+import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import type { ApiEnv } from './env.ts'
 import {
   mintEngineToken,
   listEngineTokens,
@@ -264,6 +266,30 @@ export const GRANTABLE_SCOPES: readonly string[] = [
 ]
 
 
+/**
+ * The code the unexpected path returns.
+ *
+ * A literal from `engine/internal/errors/catalog.yaml`, and written out rather
+ * than imported because the catalog is Go. `tools/errcheck` reads this file for
+ * quoted codes, so an entry that stops being returned here, or a code returned
+ * here with no entry, is a build failure in both directions.
+ *
+ * The value matters to a caller: it is the key into
+ * https://antifailure.dev/errors.v1.json, which carries the same message,
+ * resolution and retryability an engine-side failure would.
+ *
+ * Named for what it is rather than for the code it holds, and the obvious name
+ * was the code with its hyphens turned into underscores.
+ * `test/config-docs.test.ts` refused that: it reads this directory for anything
+ * shaped like an AF prefixed screaming-case identifier and requires it on the
+ * configuration reference page, because an environment variable the process
+ * reads and nobody documents is an operator's afternoon. An identifier that
+ * reads like a variable and is not one puts a setting on that page that does
+ * nothing. Writing the rejected name into this comment fails the same test, for
+ * the same reason, which is worth knowing before trying it.
+ */
+const CONTROL_PLANE_FAILURE = 'AF-CP-003'
+
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
@@ -272,7 +298,66 @@ export function createServer(options: ServerOptions) {
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
-  const app = new Hono()
+  const app = new Hono<ApiEnv>()
+
+  // One identifier per request, on the response and on the log line.
+  //
+  // Without it the 500 below told a caller to go and find their request in the
+  // logs and gave them nothing to find it with: no id in the body, no id on the
+  // header, and deliberately no query, no parameters and no payload in the log,
+  // so there was nothing on either side to match. That is a resolution step
+  // nobody can carry out, which is worse than no resolution step, because it
+  // reads like one.
+  //
+  // A caller-supplied x-request-id is honoured so a trace crossing a proxy
+  // stays one identifier, and it is bounded and filtered first: it is echoed
+  // into a response header and written to a log, and an unbounded caller string
+  // in either is how a header injection or a forged log line happens.
+  app.use('*', async (c, next) => {
+    const supplied = c.req.header('x-request-id')
+    const id =
+      supplied && /^[A-Za-z0-9._-]{1,64}$/.test(supplied) ? supplied : randomUUID()
+    c.set('requestId', id)
+    await next()
+    c.header('x-request-id', id)
+  })
+
+  // Hono's default unhandled-error response is plain text. Every expected
+  // refusal below is JSON already, and the unexpected path has to keep that
+  // contract too: an agent should not need an HTML or text parser only when
+  // the service is least healthy.
+  //
+  // What reaches the log is the class of the error, the driver's own code, the
+  // method and the route, and the id. NOT the error object and NOT its message:
+  // Drizzle writes a query failure as "Failed query: <the whole statement>"
+  // with the parameters after it, so its message can carry event payloads and
+  // anything else a caller sent. This is the same reason the tRPC formatter
+  // withholds the stack, applied to the member beside it.
+  app.onError((err, c) => {
+    const cause = (err as { cause?: { code?: unknown } }).cause
+    const requestId = c.get('requestId') ?? 'unassigned'
+    console.error('unhandled request error', {
+      requestId,
+      method: c.req.method,
+      route: c.req.routePath,
+      type: err instanceof Error ? err.name : typeof err,
+      providerCode: typeof cause?.code === 'string' ? cause.code : undefined,
+    })
+    c.header('x-request-id', requestId)
+    return c.json(
+      {
+        error: {
+          code: CONTROL_PLANE_FAILURE,
+          message: 'The control plane could not complete this request.',
+          resolution:
+            'Retry once. If it fails again, quote the requestId below: it is the only thing ' +
+            'that ties this answer to a log line.',
+        },
+        requestId,
+      },
+      500,
+    )
+  })
 
   // Two limiters with different shapes. Ingestion is high volume from few
   // callers, so the burst is large. Authentication is low volume from many

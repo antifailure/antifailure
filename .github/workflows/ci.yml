@@ -36,7 +36,16 @@ jobs:
       # rather than skip on purpose: a check that cannot find its answer and
       # reports green is the false green this repository has produced twice.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with:
+          # Full history, for the claimcheck tests described above.
+          fetch-depth: 0
+          # The tags, which a checkout does not fetch by default. tools/tagsync
+          # compares a version pin against the tags that exist, and against an
+          # empty tag list every pin would look unpublished. It refuses to run
+          # on an empty list rather than passing over nothing, so without this
+          # the job fails loudly instead of checking quietly, which is the right
+          # direction and still not the one anybody wants.
+          fetch-tags: true
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -119,6 +128,22 @@ jobs:
         # log and a green step, and the release goes out short an asset
         # looking finished.
         run: go run ./tools/releasecheck .
+
+      - name: The release notes for a tag exist and say something
+        # A changelog section that is a heading and nothing under it reads as
+        # finished in the diff and would publish a release that says nothing.
+        # Checked here rather than only at tag time, because at tag time the
+        # only remedy is to delete a tag people may already have fetched.
+        run: go run ./tools/relnotes .
+
+      - name: No version pin names a tag nobody published
+        # The Terraform image_tag defaults are live: the maintenance container
+        # app job reads them with no ignore_changes, so an apply from main takes
+        # the value. Bumping them in the same commit as the tag points the next
+        # apply at an image that does not exist yet. This is that ordering as a
+        # gate rather than as a sentence somebody has to remember once a
+        # release, which is about as often as anybody remembers anything.
+        run: go run ./tools/tagsync .
 
       - name: The one command runs what this workflow runs
         # CONTRIBUTING.md promises that a green `just gate` means a green CI.
@@ -644,6 +669,19 @@ jobs:
 
       - name: Test
         run: npm test --workspaces --if-present
+        working-directory: web
+
+      - name: The published OpenAPI document is the one this router serves
+        # www/public/openapi.json is what antifailure.dev/openapi.json serves,
+        # and it is generated from the router in this job's workspace rather
+        # than proxied from production at request time. The reason is in
+        # web/apps/api/scripts/openapi.ts; the consequence is that it can go
+        # stale against the router silently, exactly like any other generated
+        # file, and the site would publish a contract this revision does not
+        # serve. This is the step that stops that, and it validates the
+        # document before comparing, so a malformed one cannot be committed
+        # either.
+        run: npm run openapi:check --workspace apps/api
         working-directory: web
 
   edition-boundary:
