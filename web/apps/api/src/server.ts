@@ -39,6 +39,10 @@ import {
   type IncomingEvent,
 } from './ingest.ts'
 import type { GitHubClient } from './auth/github.ts'
+import { claimRun, heartbeat, resolveOverdueRuns } from './workloads/store.ts'
+import {
+  acknowledgeCommand, claimCommands, expireOverdueCommands,
+} from './workloads/commands.ts'
 import {
   beginSignIn,
   completeSignIn,
@@ -1934,6 +1938,21 @@ export function createServer(options: ServerOptions) {
   // Ingestion
   // -------------------------------------------------------------------------
 
+  /** The body as an object, or null when it is not JSON or is not one. Every
+ *  engine endpoint reads its body the same way, so a caller sending an array or
+ *  a bare string gets the same answer everywhere rather than a type error from
+ *  whichever property was touched first. */
+  async function readJson(c: Context): Promise<Record<string, unknown> | null> {
+    try {
+      const parsed: unknown = await c.req.json()
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null
+    } catch {
+      return null
+    }
+  }
+
   async function engineFrom(header: string | undefined) {
     const auth = header ?? ''
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
@@ -2039,6 +2058,167 @@ export function createServer(options: ServerOptions) {
       return c.json({ error: `No environment named ${envId} in this organization.` }, 404)
     }
     return c.json(rows[0])
+  })
+
+  // -------------------------------------------------------------------------
+  // Studio, for an engine
+  //
+  // An engine on a CI runner has no browser, no cookie and no way to obtain
+  // one, so everything it needs is here behind its bearer token rather than
+  // behind the session the console uses.
+  //
+  // WHY THE ENGINE PULLS RATHER THAN BEING TOLD. A workload run is dispatched
+  // as a workflow run in the customer's own repository, and a workflow_dispatch
+  // carries only the inputs the workflow declares. Passing the run identifier
+  // through one would mean an input the engine's CLI has no flag for, which is
+  // the dead socket routers/dispatch.ts exists to refuse. So the dispatch says
+  // what to run and this says which recorded request it belongs to: the engine
+  // asks what is waiting for the environment it is working on, and takes it.
+  //
+  // That also makes the correlation robust to the dispatch failing. A run whose
+  // dispatch was refused is still claimable by an engine somebody starts by
+  // hand, and a run nobody ever claims ends as `abandoned` at its deadline
+  // rather than as a row that reads like it is still going.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/workloads/claim', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const suspended = await suspensionReason(options.pool, engine.orgId)
+    if (suspended !== null) {
+      // The same answer /v1/events gives, and for the same reason: a suspension
+      // stops new work, and handing out a run to start is new work.
+      return c.json({ error: `This organization is suspended: ${suspended}` }, 403)
+    }
+
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const envId = typeof body.envId === 'string' ? body.envId.trim() : ''
+    if (!envId) return c.json({ error: 'The body needs an envId.' }, 400)
+
+    const claimed = await options.pool.withTenant({ orgId: engine.orgId }, async (db) => {
+      // Overdue runs are resolved first, so a stuck run of the same workload
+      // does not hold the live-run index against the one being claimed now.
+      await resolveOverdueRuns(db, clock.now())
+      const environments = await db.execute<{ id: string }>(rawSql`
+        SELECT id FROM environments WHERE env_id = ${envId}`)
+      const environmentId = environments[0]?.id
+      if (!environmentId) return { unknown: true as const }
+
+      const run = await claimRun(db, {
+        environmentId,
+        holder: engine.tokenId,
+        now: clock.now(),
+      })
+      if (!run) return { run: null }
+
+      const rows = await db.execute<Record<string, unknown>>(rawSql`
+        SELECT wr.id AS "runId", w.slug AS workload, w.kind::text AS kind,
+               v.version, v.body, wr.attempt,
+               to_char(wr.deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "deadlineAt",
+               to_char(wr.lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "leaseExpiresAt"
+        FROM workload_runs wr
+        JOIN workloads w ON w.id = wr.workload_id
+        JOIN workload_versions v ON v.id = wr.workload_version_id
+        WHERE wr.id = ${run.runId}`)
+      return { run: rows[0] ?? null }
+    })
+
+    if ('unknown' in claimed) {
+      // The same answer whether the environment belongs to another organization
+      // or does not exist, for the reason /v1/environments/:envId gives.
+      return c.json({ error: `No environment named ${envId} in this organization.` }, 404)
+    }
+    // 200 with a null run rather than 204, because a poller that reads a status
+    // code and not a body is a poller that cannot tell "nothing waiting" from
+    // "something went wrong with the shape".
+    return c.json({ run: claimed.run })
+  })
+
+  app.post('/v1/workloads/runs/:runId/heartbeat', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const runId = c.req.param('runId')
+    const beat = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
+      heartbeat(db, { runId, holder: engine.tokenId, now: clock.now() }),
+    )
+    if (!beat.held) {
+      // Named rather than answered with a bare 404. An engine that has lost its
+      // lease is about to have its run claimed by somebody else, and it needs
+      // to know that rather than to keep working and report at the end.
+      return c.json(
+        {
+          error:
+            `Run ${runId} is not held by this token. It may have finished, been cancelled, ` +
+            `or had its lease taken after it expired. Stop and claim again.`,
+        },
+        409,
+      )
+    }
+    // cancelRequested rides the beat, so an engine learns about a cancel on a
+    // request it was making anyway rather than by polling for a command.
+    return c.json({ held: true, cancelRequested: beat.cancelRequested })
+  })
+
+  app.post('/v1/commands/claim', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    // Deliberately reachable while suspended. A suspension stops new work; a
+    // teardown is the opposite of new work, and refusing it would leave a
+    // suspended organization unable to stop paying for what is running.
+
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const envId = typeof body.envId === 'string' && body.envId.trim() !== '' ? body.envId.trim() : null
+    const limit = Number.isInteger(body.limit) ? Math.min(Math.max(Number(body.limit), 1), 50) : 10
+
+    const commands = await options.pool.withTenant({ orgId: engine.orgId }, async (db) => {
+      await expireOverdueCommands(db, { now: clock.now() })
+      return claimCommands(db, {
+        orgId: engine.orgId,
+        envId,
+        holder: engine.tokenId,
+        limit,
+        now: clock.now(),
+      })
+    })
+    return c.json({ commands })
+  })
+
+  app.post('/v1/commands/:id/ack', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const outcome = body.outcome === 'failed' ? 'failed' : body.outcome === 'done' ? 'done' : null
+    if (outcome === null) {
+      return c.json({ error: 'The body needs an outcome of "done" or "failed".' }, 400)
+    }
+    const detail = typeof body.detail === 'string' ? body.detail.slice(0, 2000) : null
+
+    const acknowledged = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
+      acknowledgeCommand(db, {
+        commandId: c.req.param('id'),
+        holder: engine.tokenId,
+        outcome,
+        detail,
+        now: clock.now(),
+      }),
+    )
+    if (!acknowledged) {
+      // A 409 and a sentence rather than a 200. An acknowledgement that matched
+      // no row is exactly the silent nothing the durable command exists to end,
+      // and answering it with a 200 would put the old defect back one level up.
+      return c.json(
+        {
+          error:
+            'That command is not claimed by this token. It may have expired, been superseded, ' +
+            'or had its lease taken after it ran out.',
+        },
+        409,
+      )
+    }
+    return c.json({ acknowledged: true })
   })
 
   // -------------------------------------------------------------------------

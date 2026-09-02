@@ -25,11 +25,16 @@ import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
 import {
   createEnvironment,
-  environmentReadiness,
   agentsRouter,
   loadRouter,
+  dispatch,
+  installationFor,
+  workflowFile,
+  environmentReadiness,
 } from './dispatch.ts'
 import { runtimesRouter } from './runtimes.ts'
+import { workloadsRouter } from './workloads.ts'
+import { expireOverdueCommands } from '../workloads/commands.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
 
@@ -68,6 +73,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,
@@ -99,6 +111,13 @@ const environmentsRouter = router({
     .query(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
+        // Housekeeping on a read, and the same shape workloads.list uses. A
+        // teardown that expired has to stop reading as though it were still
+        // going, and every policy on runtime_commands keys on current_org(), so
+        // a sweeper with no tenant set would match nothing and report success.
+        // One indexed update against a partial index holding only the commands
+        // that can still expire, so it costs nothing when there is nothing.
+        await expireOverdueCommands(db, { now: c.clock.now() })
         const rows = await db.execute<EnvironmentRow>(sql`
           SELECT e.id, e.env_id, e.branch, e.pull_request, e.state, e.preview_url,
                  e.runtime, e.golden_version, e.created_at, e.updated_at, e.expires_at,
@@ -167,23 +186,57 @@ const environmentsRouter = router({
    * over /v1/events. Where there is no route to the runtime at all, the request
    * is given up on after its attempts and says so in as many words, naming
    * `af down`, rather than reporting a cleanup that never happened.
+   *
+   * IT ALSO DISPATCHES NOW, AND THE DISPATCH IS OUTSIDE THE TRANSACTION. The
+   * request on its own only waits for the sweeper; asking the customer's own
+   * workflow to run `af down` is what gives a runtime something to do about it
+   * promptly. GitHub is a network call to somebody else's service, so holding
+   * the row lock across it would make a slow GitHub into a queue every other
+   * writer in the organization waits behind.
+   *
+   * A REFUSED DISPATCH IS RECORDED RATHER THAN THROWN, so `requested: true`
+   * with `dispatched: false` is a legitimate outcome and not a half failure.
+   * The durable half is already written when the dispatch is attempted, and
+   * throwing would tell the caller nothing was recorded while the row sits
+   * there waiting for the sweeper. The two answers are separate on the response
+   * because they answer different questions: `teardown` says what has happened
+   * to the ENVIRONMENT, and `dispatched` with `detail` says whether the request
+   * to the runtime actually left and why not. Folding them together would make
+   * `pending` mean both "waiting for the runtime" and "the dispatch never
+   * left", which are the two cases a customer most needs to tell apart.
+   *
+   * There is no command id to hand back. This writes a `teardown_requests` row
+   * and no `runtime_commands` row, so there is no command to have an id; the
+   * correlation handle is `workflow_run_id` on the request.
    */
   teardown: orgProcedure('environments.teardown')
-    .input(z.object({ envId: z.string(), reason: z.string().max(500).optional() }))
+    .input(z.object({
+      envId: z.string(),
+      reason: z.string().max(500).optional(),
+      workflow: workflowFile,
+    }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
-      return c.pool.withTenant(c.tenant, async (db) => {
+      const prepared = await c.pool.withTenant(c.tenant, async (db) => {
+        // The branch and the repository's full name come back with it, because
+        // the dispatch below needs both and reading them in a second round trip
+        // after the transaction would be a second chance for them to disagree.
         const rows = await db.execute<{
           id: string
           state: string
           repository_id: string
+          branch: string
+          repository: string
         }>(sql`
-          SELECT id, state::text AS state, repository_id FROM environments
-          WHERE env_id = ${input.envId}`)
+          SELECT e.id, e.state::text AS state, e.repository_id, e.branch,
+                 r.full_name AS repository
+          FROM environments e
+          JOIN repositories r ON r.id = e.repository_id
+          WHERE e.env_id = ${input.envId}`)
         const environment = rows[0]
         if (!environment) throw notFound('environment', input.envId)
         if (environment.state === 'torn_down') {
-          return { requested: false, envId: input.envId, teardown: 'acknowledged' as const }
+          return null
         }
 
         // The workflow run that built it, when this environment came from a
@@ -228,18 +281,78 @@ const environmentsRouter = router({
           },
         })
         return {
-          requested: true,
-          envId: input.envId,
-          teardown: 'pending' as const,
-          // Said out loud, because "requested" and "removed" are different
-          // things and this endpoint used to report the second while doing the
-          // first. `already` covers the second press.
-          pending:
-            requested.length === 0
-              ? 'A teardown was already asked for and has not been confirmed yet.'
-              : 'The environment disappears here when the runtime confirms it is gone.',
+          environment,
+          // Empty when a live request already existed, which is the second
+          // press of the button rather than a second instruction.
+          fresh: requested.length > 0,
         }
       })
+
+      // Already gone before this was asked. Nothing to dispatch and nothing to
+      // record, and `dispatched: false` here is a statement about this call
+      // rather than about a request that is waiting.
+      if (prepared === null) {
+        return {
+          requested: false,
+          envId: input.envId,
+          teardown: 'acknowledged' as const,
+          dispatched: false,
+          detail: 'This environment was already torn down.',
+        }
+      }
+
+      // Outside the transaction. See the note on this procedure: GitHub is
+      // somebody else's service and a row lock must not span a call to it.
+      let dispatched = false
+      let detail = 'no runtime was reached yet; the sweeper will keep trying'
+      try {
+        const installation = await installationFor(c)
+        await dispatch(
+          c,
+          installation,
+          prepared.environment.repository,
+          input.workflow,
+          prepared.environment.branch,
+          { command: 'down', workflows: '', duration: '', scale: '' },
+        )
+        dispatched = true
+        detail = `dispatched ${input.workflow} on ${prepared.environment.branch}`
+      } catch (error) {
+        // Recorded, not thrown. The request is already durable, so throwing
+        // would tell the caller nothing was written while the row sits waiting
+        // for the sweeper. A refusal that cannot be read afterwards is a silent
+        // failure, so it goes on the row as well as into the response.
+        detail =
+          `the dispatch was refused: ` +
+          `${error instanceof TRPCError ? error.message : String(error)}`.slice(0, 1500)
+      }
+      if (!dispatched) {
+        await c.pool.withTenant(c.tenant, async (db) => {
+          await db.execute(sql`
+            UPDATE teardown_requests
+            SET last_error = ${detail}, updated_at = ${c.clock.now().toISOString()}::timestamptz
+            WHERE env_id = ${input.envId} AND state IN ('pending', 'leased')`)
+        })
+      }
+
+      return {
+        requested: true,
+        envId: input.envId,
+        // What has happened to the ENVIRONMENT. `pending` here is the same
+        // word, and the same meaning, the console already renders for a
+        // command nothing has picked up yet.
+        teardown: 'pending' as const,
+        // Whether the request to the runtime actually left, which is a
+        // different question from the one above and is why both are here.
+        dispatched,
+        detail,
+        // Said out loud, because "requested" and "removed" are different
+        // things and this endpoint used to report the second while doing the
+        // first. The second press gets the sentence about already having asked.
+        pending: prepared.fresh
+          ? 'The environment disappears here when the runtime confirms it is gone.'
+          : 'A teardown was already asked for and has not been confirmed yet.',
+      }
     }),
 })
 
@@ -1113,6 +1226,7 @@ export const appRouter = router({
   audit: auditRouter,
   members: membersRouter,
   runtimes: runtimesRouter,
+  workloads: workloadsRouter,
   billing: billingRouter,
   tokens: tokensRouter,
   org: orgRouter,
