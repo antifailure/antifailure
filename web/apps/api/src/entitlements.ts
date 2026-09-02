@@ -414,7 +414,16 @@ function coerce(spec: EntitlementSpec, raw: unknown): EntitlementValue | null {
   return null
 }
 
-function asDate(v: string | Date): Date {
+/**
+ * `db.execute` hands back what the driver parsed, and for a `timestamptz` in a
+ * raw statement that is a STRING, not a `Date`: `2026-04-14 19:00:00-05`. A
+ * field typed `Date` that holds one of those compiles, reads correctly in a log
+ * line, and throws the first time anybody calls `.getTime()` on it.
+ *
+ * Exported so `billing-summary.ts` uses this one rather than growing a second
+ * copy that rounds or parses differently.
+ */
+export function asDate(v: string | Date): Date {
   return v instanceof Date ? v : new Date(v)
 }
 

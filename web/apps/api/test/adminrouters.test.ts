@@ -135,6 +135,14 @@ describe('the operator money routes', { skip: hasDatabase ? false : 'no database
     // A screen that rendered nothing here would read as a failed load. The
     // organization and its plan are still returned so it can say so.
     assert.equal(seen.org.plan, 'free')
+    // And the half of the answer that exists before anybody has checked out.
+    // This is the route's only call site for getOrgBillingSummary, so an
+    // assertion here is what keeps that function from being defined, exported,
+    // tested and reached by nothing.
+    assert.ok(seen.summary, 'the local billing summary is missing')
+    assert.equal(seen.summary.plan, 'free')
+    assert.equal(seen.summary.subscription, null)
+    assert.equal(seen.summary.seats.limit, 5)
   })
 
   it('a grant changes what the entitlement route reports, and records who and why', async () => {

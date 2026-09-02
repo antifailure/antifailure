@@ -25,6 +25,7 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import { router } from '../trpc.ts'
 import { adminAudit, adminProcedure, type AdminContext } from './trpc.ts'
+import { getOrgBillingSummary } from '../billing-summary.ts'
 import {
   applyDiscount,
   cancelSubscription,
@@ -124,6 +125,13 @@ export const adminBillingRouter = router({
       const org = await subject(c, input.orgId)
       const customerId = await customerFor(c, input.orgId)
 
+      // What this deployment believes it sold, read from its own tables. It is
+      // fetched even when there is no Stripe customer, because the seats and
+      // the hand-written grants are the half of the answer that exists before
+      // anybody has checked out, and an operator on a support call is usually
+      // asking about exactly that half.
+      const summary = await c.adminDb((db) => getOrgBillingSummary(db, input.orgId, c.clock.now()))
+
       const operations = await c.adminDb(async (db) =>
         db.execute<Record<string, unknown>>(sql`
           SELECT idempotency_key, action, target_type, target_id, actor_label, reason,
@@ -139,6 +147,7 @@ export const adminBillingRouter = router({
         // rendered blank would read as a failed load.
         return {
           org: { id: input.orgId, slug: org.slug, plan: org.plan },
+          summary,
           takesPayment: c.stripe !== null,
           customer: null,
           subscriptions: [],
@@ -160,6 +169,7 @@ export const adminBillingRouter = router({
 
       return {
         org: { id: input.orgId, slug: org.slug, plan: org.plan },
+        summary,
         takesPayment: true,
         customer: customer
           ? {
