@@ -414,6 +414,37 @@ REVOKE UPDATE, DELETE, TRUNCATE ON admin_audit_entries FROM antifailure_app;
 -- withheld here exactly as they are for the application, because "the operator
 -- cannot rewrite what the operator did" is the whole value of the chain, and a
 -- role that could rewrite it would make the hashes decorative.
+-- The role itself, before anything grants to it.
+--
+-- Added by the billing lane because the deploy proved it missing: the kind
+-- install in `control-plane-image` failed its bootstrap job here with
+-- `role "antifailure_admin" does not exist`. The only CREATE ROLE in the tree
+-- was in `packages/db/test/admin-pool.test.ts`, which is exactly why every
+-- suite passed and no deployment could work: the test creates the role, so the
+-- grants below always found one, and a real database never had it.
+--
+-- Guarded both ways on purpose. A cluster that already has the role from a test
+-- run has it WITHOUT BYPASSRLS, so CREATE ROLE would raise while leaving the
+-- attribute wrong; the ALTER runs either way. BYPASSRLS is not decoration: it
+-- is the whole mechanism by which an operator reads across tenants, and a role
+-- without it reads zero rows rather than failing, which is the silent outcome
+-- admin-pool.ts exists to turn loud.
+--
+-- Roles are CLUSTER-wide while a migration is per-database, so on a shared
+-- cluster the second database to run this finds the role already there. That is
+-- why the check is on pg_roles rather than on anything local.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
+    CREATE ROLE antifailure_admin NOLOGIN BYPASSRLS;
+  ELSE
+    ALTER ROLE antifailure_admin BYPASSRLS;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO antifailure_admin;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON admin_users, admin_sessions TO antifailure_admin;
 GRANT SELECT, INSERT ON admin_audit_entries TO antifailure_admin;
 GRANT USAGE, SELECT ON SEQUENCE admin_audit_entries_seq_seq TO antifailure_admin;
