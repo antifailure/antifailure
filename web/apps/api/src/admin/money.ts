@@ -27,6 +27,7 @@ import { StripeError } from '../billing/stripe.ts'
 import type { StripeConfig, PaidPlan } from '../billing/plans.ts'
 import { PAID_PLANS } from '../billing/plans.ts'
 import { OperationConflict, runOnce, type OperationRun } from './ledger.ts'
+import { killSwitch, killedMessage } from '../flags.ts'
 
 /** What every operation here needs to reach the provider and the ledger. */
 export interface MoneyContext {
@@ -74,6 +75,26 @@ export function money(minor: number, currency: string): string {
   }
 }
 
+/**
+ * Refuses every administrative money write while the switch is off.
+ *
+ * One switch over all nine operations rather than nine, because the incident
+ * this is for is "something is moving money and we do not yet know which part
+ * of it", and an operator who has to find and flip nine switches during that
+ * has not been given a control.
+ *
+ * Read through the admin transaction, so it works for an operator acting on a
+ * tenant they are not a member of.
+ */
+export async function refuseWhenKilled(ctx: MoneyContext, orgId: string, what: string): Promise<void> {
+  const killed = await ctx.withAdmin(async (db) =>
+    killSwitch(db, 'billing.admin_writes', { orgId }),
+  )
+  if (killed) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: killedMessage(killed, what) })
+  }
+}
+
 /** Turns the two failures this surface has into answers a person can act on. */
 function asTrpc(err: unknown): never {
   if (err instanceof OperationConflict) {
@@ -117,6 +138,7 @@ export async function refundCharge(
   ctx: MoneyContext,
   input: RefundInput,
 ): Promise<OperationRun<{ refundId: string; amountMinor: number; currency: string }>> {
+  await refuseWhenKilled(ctx, input.orgId, 'Refunding a charge')
   try {
     const before = await beforeCharge(ctx, input.chargeId)
     return await runOnce(
@@ -209,6 +231,7 @@ export async function creditCustomer(
   ctx: MoneyContext,
   input: CreditInput,
 ): Promise<OperationRun<{ transactionId: string; endingBalance: number; currency: string }>> {
+  await refuseWhenKilled(ctx, input.orgId, 'Crediting a customer')
   try {
     const customer = await ctx.stripe.client.getCustomer(input.customerId)
     if (!customer) {
@@ -294,6 +317,7 @@ async function changeSubscription(
    *  same subscription differ even when the parameter maps happen to collide. */
   describe: Record<string, unknown>,
 ): Promise<OperationRun<{ subscription: Record<string, unknown> }>> {
+  await refuseWhenKilled(ctx, intent.orgId, 'Changing a subscription')
   const before = await ctx.stripe.client.getSubscription(intent.subscriptionId)
   if (!before) {
     throw new TRPCError({
@@ -487,6 +511,7 @@ export async function retryPayment(
   ctx: MoneyContext,
   input: MoneyIntent & { invoiceId: string },
 ) {
+  await refuseWhenKilled(ctx, input.orgId, 'Retrying a payment')
   try {
     const before = await beforeInvoice(ctx, input.invoiceId)
     if (before.status === 'paid') {
@@ -531,6 +556,7 @@ export async function resendInvoice(
   ctx: MoneyContext,
   input: MoneyIntent & { invoiceId: string },
 ) {
+  await refuseWhenKilled(ctx, input.orgId, 'Resending an invoice')
   try {
     const before = await beforeInvoice(ctx, input.invoiceId)
     return await runOnce(
