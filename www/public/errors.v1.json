@@ -69,6 +69,17 @@
       "planned": false
     },
     {
+      "code": "AF-AGT-007",
+      "area": "AGT",
+      "areaName": "Agents",
+      "message": "No workflow reached a verdict about the application: {detail}",
+      "resolution": "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+      "docs": "https://antifailure.dev/docs/concepts/verdicts",
+      "retryable": false,
+      "exitCode": 9,
+      "planned": false
+    },
+    {
       "code": "AF-AGT-010",
       "area": "AGT",
       "areaName": "Agents",
@@ -165,6 +176,17 @@
       "docs": "https://antifailure.dev/docs/guides/build",
       "retryable": false,
       "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-BLD-005",
+      "area": "BLD",
+      "areaName": "Build",
+      "message": "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
+      "resolution": "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": false,
+      "exitCode": 1,
       "planned": false
     },
     {
@@ -336,8 +358,8 @@
       "code": "AF-DB-012",
       "area": "DB",
       "areaName": "Database",
-      "message": "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-      "resolution": "Run 'af golden refresh' to make one from the source this manifest names.",
+      "message": "No golden here was made for this project, and {count} were made for something else.",
+      "resolution": "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.",
       "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 5,
@@ -360,6 +382,17 @@
       "areaName": "Database",
       "message": "No database branch exists for {env}.",
       "resolution": "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 5,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-015",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The published golden {version} in {store} was made for a different project.",
+      "resolution": "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.",
       "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 5,
@@ -531,6 +564,17 @@
       "planned": false
     },
     {
+      "code": "AF-GH-003",
+      "area": "GH",
+      "areaName": "GitHub",
+      "message": "Nothing ran, because of the fork policy on the base branch. {detail}",
+      "resolution": "Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.",
+      "docs": "https://antifailure.dev/docs/getting-started/pull-requests",
+      "retryable": false,
+      "exitCode": 6,
+      "planned": false
+    },
+    {
       "code": "AF-INF-002",
       "area": "INF",
       "areaName": "Infrastructure",
@@ -602,6 +646,17 @@
       "areaName": "Load",
       "message": "The scenario {scenario} proved nothing: {detail}",
       "resolution": "A scenario is blocked when a route it sends is not named in load.safe_routes, and unverified when an assertion names a step that nothing sent. Both are fixed in the manifest or in the scenario document.",
+      "docs": "https://antifailure.dev/docs/concepts/load",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-LOD-016",
+      "area": "LOD",
+      "areaName": "Load",
+      "message": "The p95_increase threshold proved nothing: {detail}",
+      "resolution": "The threshold divides a measured p95 by production's own p95 for that route, and only a trace export carries one. Read the traffic with source: otel, or judge the run on error_rate alone.",
       "docs": "https://antifailure.dev/docs/concepts/load",
       "retryable": false,
       "exitCode": 3,
@@ -931,7 +986,7 @@
       "area": "RUN",
       "areaName": "Runtime",
       "message": "No free port was found in the range {range} to publish the environment on.",
-      "resolution": "Free a port in that range, or set runtime.port_from in the manifest to a range that is clear.",
+      "resolution": "Free a port in that range, or set AF_PORT_RANGE_START to the first port of a range that is clear.",
       "docs": "https://antifailure.dev/docs/guides/local-runtime",
       "retryable": true,
       "exitCode": 1,
@@ -1037,6 +1092,17 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-046",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "AF_PORT_RANGE_START is set to {value}, which is not a port number.",
+      "resolution": "Set it to the first port of a free range, between {limit}, or unset it to use the default.",
+      "docs": "https://antifailure.dev/docs/guides/local-runtime",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-SEC-001",
       "area": "SEC",
       "areaName": "Secrets",
@@ -1089,6 +1155,105 @@
       "docs": "https://antifailure.dev/docs/concepts/egress",
       "retryable": true,
       "exitCode": 1,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-001",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "There is no workload kind called {kind}.",
+      "resolution": "Use one of {known}, spelled the way the control plane spells it.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-002",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The {kind} kind cannot set {knobs}.",
+      "resolution": "Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-003",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The {knob} value {value} is not what this workload's command takes: {detail}",
+      "resolution": "Correct the value in the workload version, then run it again.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-004",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The {kind} kind must name what it runs: {detail}",
+      "resolution": "List the scenarios or goals the workload selects, by the names the manifest declares.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-010",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The exploration {exploration} cannot be promoted: {detail}",
+      "resolution": "Promote an exploration that reached its goal. One that was blocked has no journey to compile.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-011",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "These two workload results cannot be compared: {detail}",
+      "resolution": "Compare two runs of the same workload kind. A mix and a browser workflow measure different things and a difference between them would be arithmetic on unlike numbers.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 2,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-012",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The workload found a failure: {detail}",
+      "resolution": "The result document above names what failed. Reproduce it with the command it carries.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 8,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-013",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The workload proved nothing: {detail}",
+      "resolution": "A run that measured nothing is not a run that found nothing. The result says which routes were refused or which selection matched no declared name.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-WLD-014",
+      "area": "WLD",
+      "areaName": "Workloads",
+      "message": "The workload did not finish: {detail}",
+      "resolution": "The environment was torn down where the run asked for it. Run it again, or raise the deadline.",
+      "docs": "https://antifailure.dev/docs/concepts/workloads",
+      "retryable": true,
+      "exitCode": 9,
       "planned": false
     }
   ]

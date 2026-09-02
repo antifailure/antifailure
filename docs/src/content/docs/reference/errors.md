@@ -114,7 +114,7 @@ No workflow reached a verdict about the application: {detail}
 | --- | --- |
 | Exit code | `9` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+| More | [concepts/verdicts](/docs/concepts/verdicts) |
 
 ### AF-AGT-010
 
@@ -236,7 +236,7 @@ The build for service {service} failed after {duration}, and its Dockerfile is {
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-BLD-010
 
@@ -470,7 +470,7 @@ The published golden {version} in {store} was made for a different project.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-020
 
@@ -670,7 +670,7 @@ Nothing ran, because of the fork policy on the base branch. {detail}
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [getting-started/pull-requests](/docs/getting-started/pull-requests/) |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests) |
 
 ## Infrastructure
 
@@ -770,7 +770,7 @@ The p95_increase threshold proved nothing: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ## Manifest
 
@@ -1260,7 +1260,7 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ## Secrets
 
@@ -1336,7 +1336,7 @@ There is no workload kind called {kind}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-002
 
@@ -1348,7 +1348,7 @@ The {kind} kind cannot set {knobs}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-003
 
@@ -1360,7 +1360,7 @@ The {knob} value {value} is not what this workload's command takes: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-004
 
@@ -1372,7 +1372,7 @@ The {kind} kind must name what it runs: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-010
 
@@ -1384,7 +1384,7 @@ The exploration {exploration} cannot be promoted: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-011
 
@@ -1396,7 +1396,7 @@ These two workload results cannot be compared: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-012
 
@@ -1408,7 +1408,7 @@ The workload found a failure: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-013
 
@@ -1420,7 +1420,7 @@ The workload proved nothing: {detail}
 | --- | --- |
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-014
 
@@ -1432,5 +1432,5 @@ The workload did not finish: {detail}
 | --- | --- |
 | Exit code | `9` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 

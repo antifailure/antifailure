@@ -132,7 +132,7 @@ export function ContactPage() {
         </ul>
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="plain">
         <div className="grid grid-cols-[minmax(0,720px)_minmax(260px,420px)] gap-x-20 gap-y-10 max-lg:grid-cols-1">
           <div>
             <PageHeading

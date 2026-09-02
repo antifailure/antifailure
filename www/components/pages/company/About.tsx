@@ -99,7 +99,7 @@ export function AboutPage() {
         </div>
       </PageSection>
 
-      <PageSection tone="sage">
+      <PageSection tone="panel">
         <PageHeading
           kicker="How it works"
           title="<strong>One run, four accountable stages.</strong> Each stage leaves evidence for the next."
@@ -107,7 +107,7 @@ export function AboutPage() {
         <Steps items={RUN_STEPS} />
       </PageSection>
 
-      <PageSection tone="white">
+      <PageSection tone="plain">
         <div className="grid grid-cols-2 gap-x-20 gap-y-12 max-lg:grid-cols-1">
           <div>
             <PageHeading title="<strong>Inspectable where trust matters.</strong>" />
