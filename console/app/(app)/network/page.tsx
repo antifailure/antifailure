@@ -328,16 +328,16 @@ function Queue({
                   {rows.map((r) => (
                     <Row key={r.id}>
                       <Td mono>{r.host}</Td>
-                      <Td>
+                      <Td label="Mode">
                         <Badge tone={modeTone(r.mode)}>{r.mode}</Badge>
                       </Td>
-                      <Td>{r.repository ?? "the whole organization"}</Td>
-                      <Td>{r.proposed_by ?? "unknown"}</Td>
-                      <Td>
+                      <Td label="Scope">{r.repository ?? "the whole organization"}</Td>
+                      <Td label="Proposed by">{r.proposed_by ?? "unknown"}</Td>
+                      <Td label="When">
                         <span title={when(r.created_at)}>{ago(r.created_at)}</span>
                       </Td>
                       {mayApprove ? (
-                        <Td>
+                        <Td label="Approve">
                           <Button
                             variant="primary"
                             busy={busy === r.id}

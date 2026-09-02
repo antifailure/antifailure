@@ -166,6 +166,7 @@ describe('dispatching a workflow against GitHub', () => {
       onRepository: async () =>
         w.installation === null ? null : { id: 4242, permissions: w.installation.permissions },
       forget: () => {},
+      revoke: async () => ({ removed: true }),
     }
   }
 
@@ -173,6 +174,7 @@ describe('dispatching a workflow against GitHub', () => {
     for(id: number): Promise<string>
     onRepository(repository: string): Promise<{ id: number; permissions: Record<string, string> } | null>
     forget(id: number): void
+    revoke(id: number): Promise<{ removed: boolean }>
   }): RealGitHubClient {
     return new RealGitHubClient({
       clientId: 'id',
@@ -347,6 +349,7 @@ describe('dispatching a workflow against GitHub', () => {
           throw new Error('the App JWT was refused')
         },
         forget: () => {},
+        revoke: async () => ({ removed: true }),
       })
       await assert.rejects(
         () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),
@@ -443,6 +446,7 @@ describe('dispatching a workflow against GitHub', () => {
         for: async () => (minted++ === 0 ? 'ghs_stale' : 'ghs_fresh'),
         onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
         forget: (id) => forgotten.push(id),
+        revoke: async () => ({ removed: true }),
       })
       await client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {})
       assert.deepEqual(forgotten, [99], 'the stale token was not dropped from the cache')
@@ -466,6 +470,7 @@ describe('dispatching a workflow against GitHub', () => {
         for: async () => 'ghs_never_works',
         onRepository: async () => ({ id: 4242, permissions: { actions: 'write' } }),
         forget: () => forgotten++,
+        revoke: async () => ({ removed: true }),
       })
       await assert.rejects(
         () => client.dispatchWorkflow(99, 'acme/storefront', 'antifailure.yml', 'main', {}),

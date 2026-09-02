@@ -660,6 +660,88 @@ describe('the webhook endpoint', {
     return { status: res.status, body: await res.text() }
   }
 
+  /**
+   * The hour of wrong answers, closed end to end.
+   *
+   * Not a unit test of `forget`, because the defect was never that `forget` did
+   * not work. It was that nothing called it: a real `InstallationTokens` holds
+   * a token for a full hour, GitHub invalidates the outstanding ones the moment
+   * a grant changes, and the delivery saying so did nothing to the cache. On
+   * 2026-08-31 that put a 403 in front of a person from 00:38:54Z, when the
+   * Actions write grant was accepted, until roughly 01:36Z, when the token it
+   * was still using finally expired.
+   *
+   * So this runs the real cache, delivers a real signed `installation` webhook
+   * over HTTP, and asks whether the NEXT mint is a new token. A test that
+   * asserted `forget` empties a Map would have passed on every day of that
+   * hour.
+   */
+  test('a permission acceptance invalidates the cached token, over HTTP', async () => {
+    let minted = 0
+    const tokens = new InstallationTokens(
+      { appId: '1', privateKey, webhookSecret: SECRET },
+      frozen,
+      (async () => {
+        minted++
+        return new Response(
+          JSON.stringify({ token: `ghs_${minted}`, expires_at: '2026-08-28T13:00:00Z' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      }) as unknown as typeof fetch,
+    )
+    const wired = await startApi({
+      githubWebhookSecret: SECRET,
+      forgetInstallationToken: (id) => tokens.forget(id),
+    })
+    try {
+      // A token, cached the way a page load caches one.
+      assert.equal(await tokens.for(4242), 'ghs_1')
+      assert.equal(await tokens.for(4242), 'ghs_1', 'the cache is not caching')
+      assert.equal(minted, 1)
+
+      // The delivery GitHub sends the instant somebody accepts a permission.
+      const body = JSON.stringify({
+        action: 'new_permissions_accepted',
+        installation: {
+          id: 4242,
+          account: { login: `forget-test-${run}`, type: 'Organization' },
+        },
+        repositories: [],
+      })
+      const res = await wired.fetch('/webhooks/github', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-github-event': 'installation',
+          // Suffixed with `run`, like every other delivery in this file, and
+          // for a reason the fixed id hid. `claimDelivery` is keyed on the
+          // delivery id, so a second run of this test against a database that
+          // already holds the row is answered as a REPLAY and never reaches
+          // handleDelivery at all. With a fixed id the test passes exactly once
+          // per database: green in CI, which builds a fresh one, and red for
+          // anybody who runs the suite twice. It also made the mutation proof
+          // meaningless, because a broken build and a replayed delivery fail
+          // with the same assertion.
+          'x-github-delivery': `forget-test-${run}`,
+          'x-hub-signature-256': sign(body, SECRET),
+        },
+        body,
+      })
+      assert.equal(res.status, 200, await res.text())
+
+      // The clock has not moved, so the cached token is still inside its hour.
+      // Anything but a fresh one here means the delivery changed nothing.
+      assert.equal(await tokens.for(4242), 'ghs_2', 'the cached token survived the delivery')
+      assert.equal(minted, 2)
+    } finally {
+      await wired.admin`DELETE FROM github_deliveries WHERE delivery_id = ${`forget-test-${run}`}`
+      const rows = await wired.admin<{ id: string }[]>`
+        SELECT id FROM organizations WHERE github_login = ${`forget-test-${run}`}`
+      for (const row of rows) await dropOrg(wired.admin, row.id)
+      await wired.close()
+    }
+  })
+
   test('an unsigned delivery is refused and writes nothing', async () => {
     const res = await deliver(
       'installation',

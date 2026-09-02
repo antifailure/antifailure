@@ -121,7 +121,8 @@ func Explain(m *schema.Manifest, width int) string {
 		fmt.Fprintf(&b, "  seeded by    %s\n", value(d.Seed, 15, width))
 	} else {
 		fmt.Fprintf(&b, "  source       %s\n",
-			value("none declared, so branches start from an empty database", 15, width))
+			value("none declared, so branches start from an empty database this "+
+				"project makes for itself, never another project's golden", 15, width))
 	}
 	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules, 15, width))
 	fmt.Fprintf(&b, "  golden       %s\n", value(fmt.Sprintf("refresh %s, keep %d, storage %s",
@@ -253,7 +254,7 @@ func Explain(m *schema.Manifest, width int) string {
 	fmt.Fprintf(&b, "  mode         %s\n", value(string(m.GitHub.Mode), 15, width))
 	fmt.Fprintf(&b, "  comment      %s\n", value(enabledWord(deref(m.GitHub.Comment)), 15, width))
 	fmt.Fprintf(&b, "  forks        %s\n", value(forkWord(m.GitHub.ForkPolicy), 15, width))
-	fmt.Fprintf(&b, "  teardown on  %s\n", value(strings.Join(m.GitHub.TeardownOn, ", "), 15, width))
+	fmt.Fprintf(&b, "  teardown on  %s\n", value(teardownWord(m.GitHub.TeardownOn), 15, width))
 
 	// Printed only when the block is there, because the oracle is the one
 	// subsystem that does not run unless a manifest asks for it. A section
@@ -331,6 +332,27 @@ func deref(b *bool) bool { return b != nil && *b }
 
 func formatUSD(v float64) string {
 	return fmt.Sprintf("$%.2f", v)
+}
+
+// teardownWord says what actually tears an environment down.
+//
+// It used to print the configured list, which read as a setting in force and
+// was not one: nothing anywhere reads github.teardown_on. Teardown is
+// unconditional in `actions` mode, because af ci tears down whatever the
+// outcome and the runner goes away regardless, and it is unconditional in the
+// control plane, which never reads your manifest and so cannot honour a
+// choice made in it. The `ttl` outcome does happen, and it comes from
+// runtime.max_ttl, which is a different key.
+//
+// The configured value is still shown, because somebody who wrote a line in
+// their manifest is owed the sentence that says what it did, not silence.
+func teardownWord(on []string) string {
+	said := strings.Join(on, ", ")
+	if said == "" {
+		said = "nothing"
+	}
+	return "always, whatever the outcome. github.teardown_on (" + said +
+		") is accepted and not read; the lifetime ceiling is runtime.max_ttl"
 }
 
 func forkWord(p schema.ForkPolicy) string {
@@ -434,6 +456,7 @@ func failingPolicies(p *schema.Policy) string {
 		{"query_regression", p.QueryRegression},
 		{"load_regression", p.LoadRegression},
 		{"egress_surprise", p.EgressSurprise},
+		{"workflows_unverified", p.WorkflowsUnverified},
 		{"masking", p.Masking},
 		{"cleanup", p.Cleanup},
 	}

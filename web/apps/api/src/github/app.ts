@@ -235,6 +235,44 @@ export class InstallationTokens {
   forget(installationId: number): void {
     this.cache.delete(installationId)
   }
+
+  /**
+   * Uninstalls the App from an account.
+   *
+   * The App JWT rather than an installation token, because an installation
+   * token is minted BY the installation and cannot outlive it: asking an
+   * installation to remove itself with its own credential is a request that
+   * races its own authorisation.
+   *
+   * 404 is success. GitHub answers 404 for an installation that is already
+   * gone, and a deletion that has to be re-entered after an interruption will
+   * reach this a second time; treating "already gone" as a failure would make
+   * the resumable path the one that cannot complete. The cached token is
+   * dropped either way, because keeping a token for an installation that no
+   * longer exists is how a permission change once took an hour to take effect.
+   */
+  async revoke(installationId: number): Promise<{ removed: boolean }> {
+    const res = await this.fetchImpl(
+      new URL(`/app/installations/${installationId}`, this.apiBase),
+      {
+        method: 'DELETE',
+        headers: {
+          authorization: `Bearer ${appJwt(this.config, this.clock)}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+        },
+      },
+    )
+    this.forget(installationId)
+    if (res.status === 404) return { removed: false }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new GitHubAppError(
+        `GitHub refused to uninstall ${installationId}: ${res.status}. ${body.slice(0, 200)}`,
+      )
+    }
+    return { removed: true }
+  }
 }
 
 /**

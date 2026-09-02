@@ -18,6 +18,8 @@ const (
 	AFAGT005 Code = "AF-AGT-005"
 	// The {provider} endpoint could not be reached: {detail}
 	AFAGT006 Code = "AF-AGT-006"
+	// No workflow reached a verdict about the application: {detail}
+	AFAGT007 Code = "AF-AGT-007"
 	// Invariant {invariant} did not finish within {timeout}.
 	AFAGT010 Code = "AF-AGT-010"
 	// Invariant {invariant} is not read only.
@@ -39,6 +41,10 @@ const (
 	// The build context for {service} holds more than {count} files;
 	// {path} is where the count was reached.
 	AFBLD004 Code = "AF-BLD-004"
+	// The build for service {service} failed after {duration}, and its
+	// Dockerfile is {dockerfile} inside a build context rooted at the
+	// repository.
+	AFBLD005 Code = "AF-BLD-005"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -93,13 +99,16 @@ const (
 	AFDB010 Code = "AF-DB-010"
 	// The subset could not be taken: {detail}
 	AFDB011 Code = "AF-DB-011"
-	// No golden matches this manifest's masking rules, and {count} were
-	// made under different ones.
+	// No golden here was made for this project, and {count} were made for
+	// something else.
 	AFDB012 Code = "AF-DB-012"
 	// The database seed command failed: {detail}
 	AFDB013 Code = "AF-DB-013"
 	// No database branch exists for {env}.
 	AFDB014 Code = "AF-DB-014"
+	// The published golden {version} in {store} was made for a different
+	// project.
+	AFDB015 Code = "AF-DB-015"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -158,6 +167,8 @@ const (
 	AFGH001 Code = "AF-GH-001"
 	// The GitHub API rejected the request: {detail}
 	AFGH002 Code = "AF-GH-002"
+	// Nothing ran, because of the fork policy on the base branch. {detail}
+	AFGH003 Code = "AF-GH-003"
 
 	// Infrastructure
 	// The cloud API returned a quota error for {quota} in {region}.
@@ -342,6 +353,27 @@ const (
 	AFSEC004 Code = "AF-SEC-004"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
+
+	// Workloads
+	// There is no workload kind called {kind}.
+	AFWLD001 Code = "AF-WLD-001"
+	// The {kind} kind cannot set {knobs}.
+	AFWLD002 Code = "AF-WLD-002"
+	// The {knob} value {value} is not what this workload's command takes:
+	// {detail}
+	AFWLD003 Code = "AF-WLD-003"
+	// The {kind} kind must name what it runs: {detail}
+	AFWLD004 Code = "AF-WLD-004"
+	// The exploration {exploration} cannot be promoted: {detail}
+	AFWLD010 Code = "AF-WLD-010"
+	// These two workload results cannot be compared: {detail}
+	AFWLD011 Code = "AF-WLD-011"
+	// The workload found a failure: {detail}
+	AFWLD012 Code = "AF-WLD-012"
+	// The workload proved nothing: {detail}
+	AFWLD013 Code = "AF-WLD-013"
+	// The workload did not finish: {detail}
+	AFWLD014 Code = "AF-WLD-014"
 )
 
 // catalog is the generated lookup table.
@@ -399,6 +431,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/model-keys",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFAGT007: {
+		Code:      AFAGT007,
+		Area:      "AGT",
+		Message:   "No workflow reached a verdict about the application: {detail}",
+		NextStep:  "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.",
+		Docs:      "concepts/verdicts",
+		Retryable: false,
+		ExitCode:  ExitInterruptedClean,
 	},
 	AFAGT010: {
 		Code:      AFAGT010,
@@ -480,6 +521,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/build",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFBLD005: {
+		Code:      AFBLD005,
+		Area:      "BLD",
+		Message:   "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
+		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFBLD010: {
 		Code:      AFBLD010,
@@ -664,8 +714,8 @@ var catalog = map[Code]Entry{
 	AFDB012: {
 		Code:      AFDB012,
 		Area:      "DB",
-		Message:   "No golden matches this manifest's masking rules, and {count} were made under different ones.",
-		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names.",
+		Message:   "No golden here was made for this project, and {count} were made for something else.",
+		NextStep:  "Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -684,6 +734,15 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "No database branch exists for {env}.",
 		NextStep:  "Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
+	AFDB015: {
+		Code:      AFDB015,
+		Area:      "DB",
+		Message:   "The published golden {version} in {store} was made for a different project.",
+		NextStep:  "Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -876,6 +935,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/github",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFGH003: {
+		Code:      AFGH003,
+		Area:      "GH",
+		Message:   "Nothing ran, because of the fork policy on the base branch. {detail}",
+		NextStep:  "Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.",
+		Docs:      "getting-started/pull-requests",
+		Retryable: false,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFINF001: {
 		Code:      AFINF001,
@@ -1506,5 +1574,86 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/egress",
 		Retryable: true,
 		ExitCode:  ExitFailure,
+	},
+	AFWLD001: {
+		Code:      AFWLD001,
+		Area:      "WLD",
+		Message:   "There is no workload kind called {kind}.",
+		NextStep:  "Use one of {known}, spelled the way the control plane spells it.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD002: {
+		Code:      AFWLD002,
+		Area:      "WLD",
+		Message:   "The {kind} kind cannot set {knobs}.",
+		NextStep:  "Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD003: {
+		Code:      AFWLD003,
+		Area:      "WLD",
+		Message:   "The {knob} value {value} is not what this workload's command takes: {detail}",
+		NextStep:  "Correct the value in the workload version, then run it again.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD004: {
+		Code:      AFWLD004,
+		Area:      "WLD",
+		Message:   "The {kind} kind must name what it runs: {detail}",
+		NextStep:  "List the scenarios or goals the workload selects, by the names the manifest declares.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD010: {
+		Code:      AFWLD010,
+		Area:      "WLD",
+		Message:   "The exploration {exploration} cannot be promoted: {detail}",
+		NextStep:  "Promote an exploration that reached its goal. One that was blocked has no journey to compile.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFWLD011: {
+		Code:      AFWLD011,
+		Area:      "WLD",
+		Message:   "These two workload results cannot be compared: {detail}",
+		NextStep:  "Compare two runs of the same workload kind. A mix and a browser workflow measure different things and a difference between them would be arithmetic on unlike numbers.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitUsage,
+	},
+	AFWLD012: {
+		Code:      AFWLD012,
+		Area:      "WLD",
+		Message:   "The workload found a failure: {detail}",
+		NextStep:  "The result document above names what failed. Reproduce it with the command it carries.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitTestFailure,
+	},
+	AFWLD013: {
+		Code:      AFWLD013,
+		Area:      "WLD",
+		Message:   "The workload proved nothing: {detail}",
+		NextStep:  "A run that measured nothing is not a run that found nothing. The result says which routes were refused or which selection matched no declared name.",
+		Docs:      "concepts/workloads",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFWLD014: {
+		Code:      AFWLD014,
+		Area:      "WLD",
+		Message:   "The workload did not finish: {detail}",
+		NextStep:  "The environment was torn down where the run asked for it. Run it again, or raise the deadline.",
+		Docs:      "concepts/workloads",
+		Retryable: true,
+		ExitCode:  ExitInterruptedClean,
 	},
 }

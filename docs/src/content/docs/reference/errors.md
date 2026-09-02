@@ -104,6 +104,18 @@ The {provider} endpoint could not be reached: {detail}
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [guides/model-keys](/docs/guides/model-keys/) |
 
+### AF-AGT-007
+
+No workflow reached a verdict about the application: {detail}
+
+**What to do.** Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+
 ### AF-AGT-010
 
 Invariant {invariant} did not finish within {timeout}.
@@ -213,6 +225,18 @@ The build context for {service} holds more than {count} files; {path} is where t
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/build](/docs/guides/build/) |
+
+### AF-BLD-005
+
+The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.
+
+**What to do.** If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest/) |
 
 ### AF-BLD-010
 
@@ -388,9 +412,9 @@ The subset could not be taken: {detail}
 
 ### AF-DB-012
 
-No golden matches this manifest's masking rules, and {count} were made under different ones.
+No golden here was made for this project, and {count} were made for something else.
 
-**What to do.** Run 'af golden refresh' to make one from the source this manifest names.
+**What to do.** Run 'af golden refresh' to make one from the source this manifest names. A golden is chosen by the project it was made for, the database it was copied from, the masking rules, the subset and the Postgres version, so one belonging to another project on this machine is never branched here.
 
 | | |
 | --- | --- |
@@ -415,6 +439,18 @@ The database seed command failed: {detail}
 No database branch exists for {env}.
 
 **What to do.** Run 'af up' to create one. This is not a missing golden: nothing has been branched for this environment yet.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens/) |
+
+### AF-DB-015
+
+The published golden {version} in {store} was made for a different project.
+
+**What to do.** Name a version this project published with 'af golden pull <version>', or run 'af golden refresh' on a machine that can reach the source. A store is shared, so the newest object in it is not necessarily yours.
 
 | | |
 | --- | --- |
@@ -607,6 +643,20 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/inventory](/docs/concepts/inventory/) |
+
+## GitHub
+
+### AF-GH-003
+
+Nothing ran, because of the fork policy on the base branch. {detail}
+
+**What to do.** Add the antifailure:allow label to the pull request, or change github.fork_policy on the base branch.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests/) |
 
 ## Infrastructure
 
@@ -1259,4 +1309,114 @@ The environment certificate could not be created: {detail}
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [concepts/egress](/docs/concepts/egress/) |
+
+## Workloads
+
+### AF-WLD-001
+
+There is no workload kind called {kind}.
+
+**What to do.** Use one of {known}, spelled the way the control plane spells it.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-002
+
+The {kind} kind cannot set {knobs}.
+
+**What to do.** Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-003
+
+The {knob} value {value} is not what this workload's command takes: {detail}
+
+**What to do.** Correct the value in the workload version, then run it again.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-004
+
+The {kind} kind must name what it runs: {detail}
+
+**What to do.** List the scenarios or goals the workload selects, by the names the manifest declares.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-010
+
+The exploration {exploration} cannot be promoted: {detail}
+
+**What to do.** Promote an exploration that reached its goal. One that was blocked has no journey to compile.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-011
+
+These two workload results cannot be compared: {detail}
+
+**What to do.** Compare two runs of the same workload kind. A mix and a browser workflow measure different things and a difference between them would be arithmetic on unlike numbers.
+
+| | |
+| --- | --- |
+| Exit code | `2` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-012
+
+The workload found a failure: {detail}
+
+**What to do.** The result document above names what failed. Reproduce it with the command it carries.
+
+| | |
+| --- | --- |
+| Exit code | `8` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-013
+
+The workload proved nothing: {detail}
+
+**What to do.** A run that measured nothing is not a run that found nothing. The result says which routes were refused or which selection matched no declared name.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
+
+### AF-WLD-014
+
+The workload did not finish: {detail}
+
+**What to do.** The environment was torn down where the run asked for it. Run it again, or raise the deadline.
+
+| | |
+| --- | --- |
+| Exit code | `9` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [concepts/workloads](/docs/concepts/workloads/) |
 

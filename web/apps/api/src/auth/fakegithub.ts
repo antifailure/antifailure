@@ -264,4 +264,44 @@ export class FakeGitHub implements GitHubClient {
     if (blocker) throw new GitHubError(blocker.message)
     this.dispatched.push({ installationId, repository, workflow, ref, inputs })
   }
+
+  /**
+   * The installations this fake believes exist, and whether the App is set up
+   * at all.
+   *
+   * `installed` starts empty and `appConfigured` starts true, so a test that
+   * says nothing gets the honest answer for an App that is configured and an
+   * installation GitHub has already forgotten: configured, not removed. A test
+   * that wants to prove the removal happened adds one first.
+   */
+  private readonly installed = new Set<number>()
+  private appConfigured = true
+  private revokeRefusal: string | null = null
+  readonly revoked: number[] = []
+
+  addInstallation(installationId: number): void {
+    this.installed.add(installationId)
+  }
+
+  /** No GitHub App at all, which is the ordinary self-hosted case. */
+  withoutApp(): void {
+    this.appConfigured = false
+  }
+
+  /** Makes the next uninstall fail the way GitHub does when it will not answer. */
+  refuseRevocations(reason: string | null = 'GitHub is having a moment'): void {
+    this.revokeRefusal = reason
+  }
+
+  async revokeInstallation(
+    installationId: number,
+  ): Promise<{ configured: boolean; removed: boolean }> {
+    if (!this.appConfigured) return { configured: false, removed: false }
+    if (this.revokeRefusal) {
+      throw new GitHubError(`GitHub refused to uninstall ${installationId}: ${this.revokeRefusal}`)
+    }
+    this.revoked.push(installationId)
+    const removed = this.installed.delete(installationId)
+    return { configured: true, removed }
+  }
 }

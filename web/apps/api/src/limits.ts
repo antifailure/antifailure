@@ -71,6 +71,26 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 1, burst: 10, key: 'ip',
     reason: 'The same action with the opposite answer, and the same reason for the same number.',
   },
+  // Invitations and the export of a deleted organization.
+  //
+  // All three carry a token in the URL or the body and nothing else, so the
+  // limit is part of what makes the token hard to find rather than a nicety.
+  // The token is 32 random bytes, which no rate makes guessable, but these are
+  // also the three endpoints an unauthenticated caller can reach that touch the
+  // database, so they are bounded like a sign-in rather than like a read.
+  'GET /auth/invitation': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Opening an invitation link is a human action, once, from an email. Ten at once covers a person refreshing a page that looked slow.',
+  },
+  'POST /auth/invitation/accept': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Pressing accept, once, and possibly twice because the first press looked like it did nothing. Same shape as approving a terminal login and the same number.',
+  },
+  'GET /exports/deletion': {
+    rate: 1, burst: 5, key: 'ip',
+    reason: 'Downloading a copy of a deleted organization. The response is the whole export, so this is the most expensive unauthenticated response the server has; five at once covers a browser retrying a large download and nothing about a person needs more.',
+  },
+
   'GET /v1/whoami': {
     rate: 5, burst: 50, key: 'token',
     reason: 'af whoami, and the first call of most CLI sessions. Keyed by token because the caller always has one.',
