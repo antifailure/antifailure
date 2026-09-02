@@ -271,6 +271,45 @@ export interface Pool {
    * class of bug as one returned with a tenant still set on it.
    */
   withSessionSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as an operator, for the administrative portal.
+   *
+   * The only scope in this file that can read across tenants, and the shape is
+   * the same as every other non-tenant scope here: it declares a value the
+   * caller must ALREADY HOLD, and the policies in 0029 are keyed on that value.
+   * What it declares is the hash of the operator's session cookie, so
+   * current_admin_user() resolves to a row only for a connection physically
+   * holding a live, unrevoked, unexpired operator session.
+   *
+   * That is what keeps the widening honest. Permissive policies are OR'd, so
+   * every admin policy widens the SELECT on its table for whoever the predicate
+   * is true for. A predicate that merely read a setting would be true for every
+   * caller, because every caller can set a setting. Requiring the hash to match
+   * a stored row makes it a credential rather than a claim, exactly as
+   * resolve_by_token does for a product session.
+   *
+   * Passing a hash that names no session is not an error and not an escalation:
+   * every policy evaluates false and the transaction sees an empty database.
+   */
+  withPlatformAdmin<T>(sessionHash: Buffer, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn for an operator sign-in attempt, which has no session yet.
+   *
+   * The bootstrapping case, and the same one resolve_by_token solves for
+   * product sessions: the password has to be checked against a row that has to
+   * be found first, on a connection that by definition holds no session. So it
+   * declares the email being asked about, and the policy returns that operator
+   * and no other.
+   *
+   * The row carries a scrypt hash and its salt, which are not credentials:
+   * verifying a password requires the password. What declaring the email buys
+   * is that a connection cannot ENUMERATE the operators, only confirm the one
+   * it already named.
+   *
+   * This scope can also append to the operator audit chain, and nothing else,
+   * because a failed sign-in has no session and is the line most worth having.
+   */
+  withAdminSignin<T>(email: string, fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -709,13 +748,13 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.sweeper': '',
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
-          // Cleared like every other scope clears them. This one arrived from
-          // a different branch than the operator portal did, so neither side
-          // could see that the merge would leave a scope naming neither: the
-          // session sweeper would then have inherited whatever an operator
-          // transaction left on a pooled connection. admin-portal's guard
-          // counts scopes against settings and caught it, which is exactly the
-          // case it was written for.
+          // The two operator settings, cleared here like everywhere else. This
+          // scope arrived from main while the operator boundary was still on a
+          // branch, so it was the one scope in this file that did not name
+          // them, and a pooled connection borrowed straight after an operator
+          // request would have entered the sweeper still carrying a live
+          // session hash. The source check in test/admin.test.ts counts the
+          // scopes and found it.
           'antifailure.admin_session_hash': '',
           'antifailure.admin_email': '',
           // Last, and through set_config for the same reason as everything

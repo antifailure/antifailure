@@ -119,7 +119,15 @@ export interface StartApiOptions {
   stripe?: Billing | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Whether this installation's operator sets plans by hand. Undefined is the
+   *  default the server ships with, and it is the refusing one: `billing.set`
+   *  is off unless somebody says otherwise, so a suite that does not mention
+   *  this is testing the configuration production runs in. */
+  operatorSetsPlan?: boolean
   githubAppInstallUrl?: string
+  /** Where a refused person is sent. Undefined is the self-hosted default and
+   *  means the refusal page offers no link at all. */
+  signupUrl?: string
   /** Acting on a repository as the installation. Undefined means no App, which
    *  is a real way to run this: deliveries still record installations and
    *  nothing is published. */
@@ -202,7 +210,9 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     ...(options.consoleDir ? { consoleBuild: await findConsoleBuild(options.consoleDir) } : {}),
     stripe: options.stripe ?? null,
     hostedRequiredPlan: options.hostedRequiredPlan ?? null,
+    operatorSetsPlan: options.operatorSetsPlan ?? false,
     githubAppInstallUrl: options.githubAppInstallUrl,
+    signupUrl: options.signupUrl,
     githubApi: options.githubApi ?? null,
     ...(options.forgetInstallationToken
       ? { forgetInstallationToken: options.forgetInstallationToken }

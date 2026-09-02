@@ -34,8 +34,13 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
-import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
-import { capsFor, checkCostCap, environmentHoursSince } from '../costs.ts'
+import { DEFAULT_PLAN } from '../limits.ts'
+import {
+  checkCostCapWithEntitlements,
+  checkQuotaWithEntitlements,
+  resolveEntitlements,
+} from '../entitlements.ts'
+import { environmentHoursSince } from '../costs.ts'
 import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
 import { engagedReason } from '../admin/controls.ts'
 
@@ -352,7 +357,28 @@ export const createEnvironment = orgProcedure('environments.create')
         FROM organizations o WHERE o.id = ${c.actor.orgId}`)
       const row = counts[0]
       const plan = row?.plan || DEFAULT_PLAN
-      const quota = checkQuota(plan, 'environments', Number(row?.environments ?? 0))
+
+      // The plan says what this organization gets; an override says what it was
+      // SOLD. Resolved here, inside the transaction that is already open, and
+      // in the same tenant scope, so the read costs one more statement rather
+      // than one more round trip and cannot see another tenant's grants.
+      //
+      // Both scopes that can apply to a creation are passed. The repository is
+      // the `project` scope, because capacity is routinely sold for one
+      // repository rather than for a whole organization, and the acting user is
+      // the `user` scope. Leaving either out would make a grant at that scope a
+      // row that changes nothing, which is the exact failure the catalogue's
+      // `enforcedAt` field exists to prevent.
+      const entitlements = await resolveEntitlements(db, c.clock.now(), {
+        orgId: c.actor.orgId,
+        plan,
+        userId: c.actor.userId,
+        repositoryId: repo.id,
+      })
+
+      const quota = checkQuotaWithEntitlements(
+        entitlements, 'environments', Number(row?.environments ?? 0),
+      )
       if (!quota.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: quota.reason })
       }
@@ -377,8 +403,13 @@ export const createEnvironment = orgProcedure('environments.create')
       // "unknown lifetime" is the most the plan would allow for one: reserving
       // less would let an unstated run slip past the daily cap that a stated
       // one of the same size is refused for.
-      const runHours = input.ttlHours ?? capsFor(plan).perRunHours
-      const cap = checkCostCap(plan, runHours, used)
+      //
+      // Read off the ENTITLEMENT rather than off the plan, because an
+      // organization sold a longer per-run cap must have its unstated runs
+      // reserved at the cap it actually holds. Reserving the plan's smaller
+      // number here would refuse a run that the next line was about to allow.
+      const runHours = input.ttlHours ?? entitlements.number('perRunHours')
+      const cap = checkCostCapWithEntitlements(entitlements, runHours, used)
       if (!cap.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: cap.reason })
       }

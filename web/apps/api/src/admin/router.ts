@@ -31,8 +31,13 @@ import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
-import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import { emergencyRouter, infraRouter } from './infra.ts'
+import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
+import {
+  adminBillingRouter,
+  adminEntitlementsRouter,
+  adminFlagsRouter,
+} from './routers.ts'
 import {
   ADMIN_PERMISSIONS,
   ADMIN_PERMISSION_DESCRIPTIONS,
@@ -98,6 +103,7 @@ const SAFE_COLUMNS = {
  * naming the owner. Do NOT add a second `admin:` key to appRouter.
  */
 export const adminRouter = router({
+
   /**
    * Who the operator is, and what the shell may show them.
    *
@@ -290,10 +296,17 @@ export const adminRouter = router({
     /**
      * Changes the plan, which is what quotas are derived from.
      *
-     * Named setPlan rather than setQuota because there is no per-organization
-     * quota column: limits.ts derives every quota from the plan, and inventing
-     * an override here would create a second source of truth that the quota
-     * check does not read.
+     * Named setPlan rather than setQuota because there is still no
+     * per-organization quota COLUMN: limits.ts derives every quota from the
+     * plan.
+     *
+     * An earlier version of this comment went on to say that an override here
+     * "would create a second source of truth that the quota check does not
+     * read". That was true when written and is no longer: entitlement_overrides
+     * exists and checkQuotaWithEntitlements reads it. Corrected rather than
+     * deleted, because the first clause is still the reason for the name and a
+     * reader who checked the second would have found it false and mistrusted
+     * both. Flagged by admin-money.
      */
     setPlan: adminProcedure('admin.tenants.plan')
       .input(
@@ -803,6 +816,11 @@ export const adminRouter = router({
   // Each exports its sub-routers from its own file and this object names them,
   // so the matrix test in admin-routes.test.ts walks every operator route in one
   // pass. A lane mounted as its own `admin:` key would be invisible to it.
+  // ---------------------------------------------------------------------------
+  // admin-money.
+  billing: adminBillingRouter,
+  entitlements: adminEntitlementsRouter,
+  flags: adminFlagsRouter,
   // ---------------------------------------------------------------------------
 })
 
