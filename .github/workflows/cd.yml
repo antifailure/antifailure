@@ -48,6 +48,13 @@ on:
 # cancelled deploy is a half-applied one. It can be cancelled after the
 # migration and before the traffic shift, which leaves the schema ahead of the
 # running code with nothing left to finish the job.
+#
+# THE GROUP IS KEYED ON THE REF, AND A REF IS NOT A DEPLOYMENT TARGET. Two runs
+# on different refs are in different groups and both deploy to the same app. On
+# 2026-09-02 the v1.0.0 tag and the merge that produced the tagged commit were
+# in flight together and both deployed staging. The per-environment guard that
+# actually serializes a deploy is on the staging and production jobs below;
+# this group keeps a single ref's runs in order.
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
@@ -218,6 +225,26 @@ jobs:
     needs: build
     timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' || inputs.environment == 'staging'
+    # ONE DEPLOY AT A TIME TO THIS APP, WHATEVER REF ASKED FOR IT.
+    #
+    # The workflow group above cannot do this: it is keyed on github.ref, so a
+    # tag run and a branch run are in different groups and deploy together. That
+    # happened. Both created a revision on afcp-app within a minute, and the
+    # first one to finish reaped the other one's live revision out from under it.
+    #
+    # Deliberately not keyed on anything: this is the name of the environment,
+    # and the point is that every run that deploys staging queues on it.
+    #
+    # cancel-in-progress: false, for the reason the workflow group gives. A
+    # cancelled deploy is a half-applied one, and this job migrates before it
+    # moves traffic. The cost of queueing rather than cancelling is that a third
+    # run arriving while one is queued replaces the queued one, so a commit can
+    # be skipped over. That is the right trade for staging: the run that does
+    # deploy carries the skipped commit as an ancestor, and gate has already
+    # refused anything CI did not pass.
+    concurrency:
+      group: cd-deploy-staging
+      cancel-in-progress: false
     environment:
       name: staging
       url: https://app.dev.antifailure.dev
@@ -306,6 +333,12 @@ jobs:
       && (needs.staging.result == 'success' || needs.staging.result == 'skipped')
       && (startsWith(github.ref, 'refs/tags/v')
       || (github.event_name == 'workflow_dispatch' && inputs.environment == 'production'))
+    # The same guard as staging, on its own environment. Production deploys are
+    # rare enough that this has never collided, which is not a reason to leave
+    # the one place it would matter most without it.
+    concurrency:
+      group: cd-deploy-production
+      cancel-in-progress: false
     environment:
       name: production
       url: https://app.antifailure.dev
