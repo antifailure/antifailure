@@ -14,13 +14,45 @@ export default defineConfig({
   vite: { plugins: [tailwindcss()] },
   site: "https://antifailure.dev",
   base: "/docs",
-  trailingSlash: "ignore",
+  // "never", to match the host, rather than Astro's default of "ignore".
+  //
+  // www/public/staticwebapp.config.json sets "trailingSlash": "never" for the
+  // whole site, so Azure answers /docs/reference/cli/ with a 301 to
+  // /docs/reference/cli. Astro under "ignore" wrote the slashed form into
+  // every canonical and every sitemap entry, so all 82 documentation pages
+  // declared a canonical the host does not serve and the sitemap offered 81
+  // URLs that redirect. Documentation is about seventy percent of the site,
+  // so that was the majority of it pointing an engine at an address it then
+  // has to be told again is somewhere else.
+  //
+  // The site's own catalogue names this: seo-geo-catalog.md item 8, "pick one
+  // trailing-slash policy and enforce it; mixed policies split signals". Two
+  // policies were in force, one per build, and nothing compared them.
+  //
+  // build.format stays "directory", the default, so the files on disk do not
+  // move: a page is still <route>/index.html, which is what SWA resolves the
+  // slash-free address to. Only the URLs Astro writes change.
+  trailingSlash: "never",
   integrations: [
     starlight({
       title: "Antifailure",
       description:
         "A disposable copy of your production stack for every pull request: masked Postgres branches, contained third-party APIs, agents that use the app like people, and load shaped like your real traffic.",
       favicon: "/favicon.svg",
+      // This site ships its own 404 at src/pages/404.astro, and Starlight
+      // injects one at the same pattern unless told not to. Both were declared,
+      // Astro warned on every single build that "/404" is defined twice, and
+      // Astro's own message says a collision becomes a hard error in a later
+      // version. Which of the two won was undefined.
+      //
+      // Ours is the one that should win, and not by seniority: somebody who
+      // lands on it arrived from a path printed at the end of an engine error
+      // message, so it names the four pages they were most likely reaching for
+      // and tells them the address in their terminal is the wrong half. The
+      // Starlight default is a generic page with none of that.
+      //
+      // A build that warns every time is a build people stop reading.
+      disable404Route: true,
       customCss: ["./src/styles/antifailure.css"],
       // One theme, not a light/dark pair. The site commits to a single light
       // appearance and the theme toggle is off, so a second code theme would
@@ -155,15 +187,70 @@ export default defineConfig({
       // Groups are ordered the way somebody actually arrives: install it, learn
       // the words, follow a guide for your stack, then look things up. Inside a
       // group the order comes from each page's own `sidebar.order` frontmatter,
-      // which is already declared on all 35 pages.
+      // which `just sidebarcheck` requires to be a unique whole number per
+      // directory, because Starlight breaks a tie on the FILE NAME and that is
+      // invisible to somebody editing a page.
+      //
+      // REFERENCE AND SELF-HOSTING ARE LISTED BY HAND AND THE OTHER SEVEN ARE
+      // NOT, and the difference is not a preference. `autogenerate` turns a
+      // subdirectory into a nested group labelled with the directory name and
+      // offers no way to override it: navigation.ts:334 is `label: dirName`.
+      // So the two groups with subdirectories rendered as `schemas` and
+      // `runbooks`, raw lowercase slugs sitting among nine sentence-case
+      // labels, and one of them contained a page called "Runbooks", which is
+      // the same thing named twice in two casings.
+      //
+      // Renaming the directories is not the way out. The comment at the top of
+      // this file is the reason: a page's URL is its path under
+      // src/content/docs exactly, every engine error links to one, and
+      // tools/errcheck refuses to build if any of those stops resolving. A
+      // directory name also cannot contain a space, so no directory can ever
+      // produce a sentence-case label.
+      //
+      // Listing by hand is what rots, so it is gated: `just sidebarcheck`
+      // fails if a page under either directory is missing from this list or
+      // named here twice. Add a page and the gate tells you to put it here.
       sidebar: [
         { label: "Getting started", items: [{ autogenerate: { directory: "getting-started" } }] },
         { label: "Concepts", items: [{ autogenerate: { directory: "concepts" } }] },
         { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
         { label: "Providers", items: [{ autogenerate: { directory: "providers" } }] },
-        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
+        {
+          label: "Reference",
+          items: [
+            "reference/cli",
+            "reference/manifest",
+            "reference/errors",
+            "reference/transforms",
+            "reference/control-plane",
+            "reference/api",
+            "reference/environment-lifetime",
+            "reference/mcp",
+            {
+              label: "Generated schemas",
+              items: ["reference/schemas/manifest-v1", "reference/schemas/events-v1"],
+            },
+            "reference/stability",
+          ],
+        },
         { label: "Security", items: [{ autogenerate: { directory: "security" } }] },
-        { label: "Self-hosting", items: [{ autogenerate: { directory: "self-hosting" } }] },
+        {
+          label: "Self-hosting",
+          items: [
+            "self-hosting/control-plane",
+            "self-hosting/azure",
+            "self-hosting/production",
+            "self-hosting/operations",
+            "self-hosting/on-call",
+            "self-hosting/releasing",
+            "self-hosting/status-page",
+            "self-hosting/rotating-secrets",
+            {
+              label: "Runbooks",
+              items: [{ autogenerate: { directory: "self-hosting/runbooks" } }],
+            },
+          ],
+        },
         { label: "Enterprise", items: [{ autogenerate: { directory: "enterprise" } }] },
         { label: "Contributing", items: [{ autogenerate: { directory: "contributing" } }] },
       ],

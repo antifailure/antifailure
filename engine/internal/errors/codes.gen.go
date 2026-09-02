@@ -59,6 +59,8 @@ const (
 	AFCP001 Code = "AF-CP-001"
 	// The control plane rejected this engine's token.
 	AFCP002 Code = "AF-CP-002"
+	// The control plane could not complete this request.
+	AFCP003 Code = "AF-CP-003"
 
 	// Control plane
 	// No control plane token is configured.
@@ -109,11 +111,17 @@ const (
 	// The published golden {version} in {store} was made for a different
 	// project.
 	AFDB015 Code = "AF-DB-015"
+	// database.source_url_env names {variable}, and {variable} holds
+	// nothing in this shell.
+	AFDB016 Code = "AF-DB-016"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
 	// {provider} rejected the admin token used to create personas.
 	AFDB021 Code = "AF-DB-021"
+	// No table that looks like a users table was found, so there is
+	// nowhere to create the personas that sign in.
+	AFDB022 Code = "AF-DB-022"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -576,6 +584,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitAuth,
 	},
+	AFCP003: {
+		Code:      AFCP003,
+		Area:      "CP",
+		Message:   "The control plane could not complete this request.",
+		NextStep:  "Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
 	AFCPL001: {
 		Code:      AFCPL001,
 		Area:      "CPL",
@@ -643,7 +660,7 @@ var catalog = map[Code]Entry{
 		Code:      AFDB004,
 		Area:      "DB",
 		Message:   "The golden version {version} no longer exists.",
-		NextStep:  "Run 'af golden list' to see the available versions, then 'af up --golden <version>'.",
+		NextStep:  "Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -747,6 +764,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitProvider,
 	},
+	AFDB016: {
+		Code:      AFDB016,
+		Area:      "DB",
+		Message:   "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
+		NextStep:  "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFDB020: {
 		Code:      AFDB020,
 		Area:      "DB",
@@ -764,6 +790,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/personas",
 		Retryable: false,
 		ExitCode:  ExitAuth,
+	},
+	AFDB022: {
+		Code:      AFDB022,
+		Area:      "DB",
+		Message:   "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
+		NextStep:  "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
+		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB030: {
 		Code:      AFDB030,
@@ -1066,7 +1101,7 @@ var catalog = map[Code]Entry{
 		Code:      AFMAN003,
 		Area:      "MAN",
 		Message:   "The manifest at {path} declares schema version {found}, which this build does not understand.",
-		NextStep:  "Upgrade with 'af version -check' and install the release that supports version {found}.",
+		NextStep:  "Check the build you are running with 'af version' and install the release that supports version {found}.",
 		Docs:      "reference/manifest",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

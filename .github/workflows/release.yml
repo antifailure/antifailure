@@ -23,8 +23,8 @@ jobs:
           - { os: linux,  arch: amd64 }
           - { os: linux,  arch: arm64 }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -46,7 +46,7 @@ jobs:
             "${GITHUB_REF_NAME#v}" "$GITHUB_SHA" "$(git show -s --format=%cI HEAD)" \
             dist stage
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.tar.gz*
@@ -65,11 +65,11 @@ jobs:
       # for a maintainer to be careless with.
       id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: { path: dist, merge-multiple: true }
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -129,7 +129,7 @@ jobs:
         # answers "what we asked for". Those differ whenever a build constraint,
         # a replace, or a pruned dependency changes what the linker kept, and
         # the one a person downloading a release needs is the first.
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: unpacked
           format: spdx-json
@@ -228,8 +228,30 @@ jobs:
           # signing if it is true.
           (cd dist && sha256sum --check --ignore-missing checksums.txt)
 
+      - name: The release notes
+        # Written by hand, and this is also the step that refuses to publish a
+        # release with nothing to say. generate_release_notes was a list of
+        # merged pull requests, which over this release span is a wall and is
+        # the first thing somebody deciding whether to buy this reads.
+        #
+        # The preamble lives inside this command rather than in a `body:` block
+        # below, and that is not tidying. action-gh-release tries `body_path`
+        # first and falls back to `body` only when the path cannot be read, so
+        # the moment a notes file reads successfully the block is dropped,
+        # silently, with this step still green. The verification instructions
+        # would have vanished from every release note and nothing would have
+        # gone red. One emitter, no second copy to lose.
+        run: |
+          go run ./tools/relnotes \
+            -tag "$GITHUB_REF_NAME" \
+            -repo "${{ github.repository }}" \
+            -ref "${{ github.ref }}" \
+            -out release-notes.md .
+          echo "--- notes ---"
+          cat release-notes.md
+
       - name: Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/*.tar.gz
@@ -245,39 +267,7 @@ jobs:
           # Read out of the action's own src/main.ts at the pinned commit, where
           # an unmatched pattern is a console.warn unless this is set.
           fail_on_unmatched_files: true
-          generate_release_notes: true
-          # Prepended above the generated commit list. A signature nobody knows
-          # how to check is decoration, so the instructions ship with the thing
-          # they verify rather than in a documentation page a person would have
-          # to know exists. The longer version, including how to rebuild these
-          # archives yourself, is at antifailure.dev/docs/security/releases.
-          body: |
-            ### Verifying this release
-
-            `checksums.txt` names every archive by hash, and it is signed, so
-            checking the signature once covers all of them.
-
-            ```sh
-            cosign verify-blob \
-              --bundle checksums.txt.sigstore.json \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              checksums.txt
-
-            sha256sum --check --ignore-missing checksums.txt
-            ```
-
-            There is no public key to fetch. The certificate inside the bundle
-            records which workflow, in which repository, at which tag produced
-            these files, and `--certificate-identity` is what makes the check
-            mean something: without it you would be verifying that somebody
-            signed this, rather than that we did.
-
-            `sbom.spdx.json` lists what is inside the binaries, read out of the
-            built artifacts rather than from `go.mod`. It is signed the same
-            way, substituting its own bundle.
-
-            These archives are reproducible. Building this tag again produces
-            the same bytes, so you can check the hash above against one you
-            built yourself rather than taking ours:
-            antifailure.dev/docs/security/releases.
+          # Deliberately off. The generated notes are the merged pull request
+          # list, and the step above produces the notes a person should read.
+          generate_release_notes: false
+          body_path: release-notes.md

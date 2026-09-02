@@ -54,12 +54,12 @@ without telling you which rows has told you to go and do the work yourself.`),
 				e.Out.Println("")
 				// No full stop after the address. A reader's terminal and this
 				// repository's own claimcheck both take the trailing period as
-				// part of the URL, and /docs/guides/invariants/. is a 404 that
+				// part of the URL, and /docs/guides/invariants. is a 404 that
 				// somebody follows at the moment they already needed help.
 				e.Out.Empty(
 					"This manifest declares no invariants. They are the assertions the "+
 						"application cannot make from the outside, and they are described at "+
-						"https://antifailure.dev/docs/guides/invariants/", "", "")
+						"https://antifailure.dev/docs/guides/invariants", "", "")
 				return nil
 			}
 

@@ -399,7 +399,7 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	rec := record{
 		Event: "decision", Method: http.MethodConnect, Host: host, Port: port,
 		TLS: true, Mode: string(d.Mode), Rule: d.RuleHost,
-		Reason: d.Reason(), Allowed: d.Allowed(),
+		Reason: d.Reason(), Allowed: d.Allowed(), Via: "proxy",
 	}
 	// Whether to read inside comes before whether to allow, and the order is
 	// load bearing. Capture, mock, and sandbox all answer from inside the
@@ -410,6 +410,11 @@ func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	// ignored them was captured correctly, so the mode worked or did not
 	// depending on which HTTP library the application happened to use.
 	inspect := p.ca != nil && p.engine.InspectsHost(host, port)
+	// A tunnel nobody reads inside was decided from the host and the port and
+	// nothing else, exactly as the transparent one was, so it is recorded the
+	// same way. The inspected tunnel is not marked, because the requests
+	// inside it are decided on their paths and carry their own records.
+	rec.HostOnly = !inspect
 
 	if !inspect && !d.Allowed() {
 		rec.Status = http.StatusForbidden

@@ -498,7 +498,11 @@ file to write" there and "text or json" on every other command. `af ci -o json`
 wrote the pull request comment to a file called `json`, silently, and the one
 command written for CI had no machine readable output at all. Fixed by renaming
 it to `--report`, which frees `-o` to mean here what it means everywhere; the
-example workflow and the generated reference moved with it.
+generated reference moved with it. **The example workflow did not.** It was
+still running `af ci --output report.md` on `origin/main` until 2026-09-01, when
+extending `just docexamples` to read `examples/*.yml` found it. And the class
+was never closed, only this instance of it: `af oracle` still defines the same
+local `-o`.
 
 **23. Events from a command's second session were written into a closed file.**
 Found by the first real `tools/dogfood` run, which reported that nothing had

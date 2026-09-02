@@ -233,9 +233,29 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
   )
 }
 
-/** Removes expired sessions. Housekeeping, not enforcement. */
+/**
+ * Removes expired sessions. Housekeeping, not enforcement.
+ *
+ * It ran through withoutTenant until 0024 and deleted nothing, on every
+ * instance, for as long as it existed. Every policy on this table keys on the
+ * acting user, on the hash of a presented token, or on the tenant, and a
+ * sweeper has none of the three, so the DELETE matched no row and reported
+ * success. A statement that matches nothing does not raise.
+ *
+ * withSessionSweeper enters a role of its own for the length of this
+ * transaction. The policy admitting that role restricts it to rows already
+ * expired by the DATABASE's clock, and the WHERE below restricts it to rows
+ * expired by the APPLICATION's. A row has to be past both to be deleted, so
+ * the cutoff passed from here can only ever narrow what is removed, never
+ * widen it: this cannot reach a live session even if the clock it is given is
+ * wrong.
+ *
+ * The count comes from RETURNING a constant rather than a column, because the
+ * sweeper is granted SELECT on expires_at and on nothing else. Returning id
+ * would be refused, which is the right refusal in the wrong place.
+ */
 export async function sweepSessions(pool: Pool, clock: Clock): Promise<number> {
-  return pool.withoutTenant(async (db) => {
+  return pool.withSessionSweeper(async (db) => {
     const rows = await db.execute<{ n: string }>(sql`
       WITH gone AS (
         DELETE FROM sessions WHERE expires_at <= ${clock.now().toISOString()} RETURNING 1

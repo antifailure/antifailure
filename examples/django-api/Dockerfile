@@ -1,7 +1,7 @@
 # One stage, unlike the other two examples, because there is nothing to compile
 # and a second stage would copy a virtual environment rather than a binary. The
 # slim base is the whole difference, and it is worth making on purpose.
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Dependencies first, so a change to a view does not reinstall them.
 WORKDIR /app

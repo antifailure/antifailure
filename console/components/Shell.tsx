@@ -8,6 +8,7 @@ import {
   IconAudit,
   IconEnvironments,
   IconKeys,
+  IconLoad,
   IconMasking,
   IconMembers,
   IconNetwork,
@@ -51,6 +52,7 @@ function returnTo(): string | null {
 const NAV = [
   { href: "/environments", label: "Environments", Icon: IconEnvironments },
   { href: "/runs", label: "Runs", Icon: IconRuns },
+  { href: "/load", label: "Load", Icon: IconLoad },
   { href: "/masking", label: "Masking", Icon: IconMasking },
   { href: "/network", label: "Network", Icon: IconNetwork },
   { href: "/audit", label: "Audit", Icon: IconAudit },

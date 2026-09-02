@@ -229,10 +229,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             </div>
             <div className="flex gap-x-3.5">
               <Button href="/signin" theme="outlined" size="xxs">
-                Log in
+                Sign in
               </Button>
               <Button href="/signup" theme="filled" size="xxs">
-                Sign up
+                Request access
               </Button>
             </div>
           </div>
@@ -459,10 +459,10 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             </div>
             <div className="mt-8 flex gap-3">
               <Button href="/signin" theme="outlined" className="flex-1">
-                Log in
+                Sign in
               </Button>
               <Button href="/signup" theme="filled" className="flex-1">
-                Sign up
+                Request access
               </Button>
             </div>
           </div>

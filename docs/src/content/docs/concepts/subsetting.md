@@ -2,7 +2,7 @@
 title: Subsetting
 description: Taking a production shaped slice of a database instead of all of it, and keeping every foreign key resolvable.
 sidebar:
-  order: 13
+  order: 4
 ---
 
 A golden the size of production is a golden nobody refreshes, and a golden
@@ -207,5 +207,5 @@ finished with a key that does not resolve.
 
 The message carries which of those it was.
 
-Related: [goldens](/docs/concepts/goldens/), [masking](/docs/concepts/masking/),
-[providers](/docs/providers/overview/).
+Related: [goldens](/docs/concepts/goldens), [masking](/docs/concepts/masking),
+[providers](/docs/providers/overview).

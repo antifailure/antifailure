@@ -2,7 +2,7 @@
 title: Rotating secrets
 description: Every secret the control plane's Key Vault holds, what breaks while each one is being replaced, and how to prove the replacement took.
 sidebar:
-  order: 5
+  order: 8
 ---
 
 The Terraform in `infra/terraform/modules/control-plane` puts eight secrets in
@@ -230,7 +230,7 @@ are compromised too, and re-sealing them would be protecting values that already
 need replacing. Tell each affected organization to revoke their provider key at
 the provider and store a new one. Storing a key is a normal operation for an
 owner or admin, from the console or from a terminal, and it is described in
-[provider keys](/docs/guides/provider-keys/).
+[provider keys](/docs/guides/provider-keys).
 
 An installation that does not want the feature can run with the secret unset.
 The app then says so in its start-up log and in the console, and refuses a save

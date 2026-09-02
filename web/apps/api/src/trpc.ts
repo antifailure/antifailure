@@ -79,6 +79,11 @@ export interface Context {
   /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
    *  leaving billing reachable while operational procedures are refused. */
   hostedRequiredPlan: HostedRequiredPlan | null
+  /** Whether whoever runs this installation also decides each organization's
+   *  plan. False everywhere it is not said out loud, because the caller who
+   *  reaches the route that writes the plan is an org owner rather than the
+   *  operator. See hosted.ts. */
+  operatorSetsPlan: boolean
   /** Null for an unauthenticated request. */
   actor: Actor | null
   /** Where the request came from, recorded on every audit entry. */

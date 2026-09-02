@@ -548,6 +548,15 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// restored database in each of the ways that matter and asserts the
 		// drill notices.
 		"drill": true,
+		// The live certificate check. Its answer is not a function of the
+		// tree: it asks two hostnames on the public internet what certificate
+		// they are serving right now, so the same commit is green today and
+		// red the morning a managed certificate fails to renew. That is the
+		// case this exemption exists for, and it needs the network, which
+		// `just gate` must not. It runs in deploy.yml after a publish, which
+		// is the moment a lapsed certificate is worth knowing about. Run it by
+		// hand with `just check-tls`.
+		"check-tls": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates

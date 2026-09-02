@@ -2,7 +2,7 @@
 title: Change analysis
 description: What a pull request touches, which checks exercise it, and what reading a diff cannot tell you.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Every check in this product costs something: a branch of a golden, a build, a

@@ -33,7 +33,7 @@ function binding(name) {
   return JSON.parse(fs.readFileSync(file, "utf8")).bindings[0];
 }
 
-test("GET /api answers with the one endpoint this host serves", async () => {
+test("GET /api discovers every public endpoint and machine-readable resource", async () => {
   const answer = await invoke({ path: "" });
   assert.equal(answer.status, 200);
   assert.equal(answer.body.service, "antifailure.dev");
@@ -41,11 +41,20 @@ test("GET /api answers with the one endpoint this host serves", async () => {
     answer.body.endpoints.map((e) => `${e.method} ${e.path}`),
     ["POST /api/waitlist"],
   );
+  // The two documents an agent comes here for are static files the site
+  // publishes, not endpoints this app serves, and they are listed as what they
+  // are. An earlier version proxied the OpenAPI document through this app; see
+  // web/apps/api/scripts/openapi.ts for why that was wrong and what replaced it.
+  assert.deepEqual(
+    answer.body.resources.map((r) => r.path),
+    ["/openapi.json", "/errors.v1.json", "/llms.txt"],
+  );
 });
 
 test("GET /api says where the product's API actually is", async () => {
   const answer = await invoke({ path: "" });
-  assert.equal(answer.body.productApi.openapi, "https://app.antifailure.dev/openapi.json");
+  assert.equal(answer.body.productApi.openapi, "https://antifailure.dev/openapi.json");
+  assert.equal(answer.body.productApi.origin, "https://app.antifailure.dev");
   assert.equal(
     answer.body.productApi.documentation,
     "https://antifailure.dev/docs/reference/api",
@@ -75,7 +84,9 @@ test("an unknown path is a 404 that says so, not a 500 and not an empty body", a
     const answer = await invoke({ path: requested });
     assert.equal(answer.status, 404);
     assert.equal(answer.body.ok, false);
+    assert.equal(answer.body.code, "endpoint_not_found");
     assert.match(answer.body.message, /No such endpoint/);
+    assert.match(answer.body.resolution, /GET \/api/);
     assert.ok(answer.body.productApi.documentation);
   }
 });

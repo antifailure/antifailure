@@ -2,7 +2,7 @@
 title: Django
 description: Running Django's own migrations against a branch, and the three settings that decide whether it works.
 sidebar:
-  order: 13
+  order: 18
 ---
 
 Django needs nothing Antifailure specific either, and the interesting part is
@@ -105,4 +105,4 @@ class Migration(migrations.Migration):
 Make it reversible. A migration nobody dares run twice is a migration nobody
 runs.
 
-Related: [building services](/docs/guides/build/), [masking](/docs/concepts/masking/).
+Related: [building services](/docs/guides/build), [masking](/docs/concepts/masking).

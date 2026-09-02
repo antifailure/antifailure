@@ -2,7 +2,7 @@
 title: Workflows
 description: Writing a description an agent can follow and a verdict can be decided against.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 A workflow is one thing a user does, described well enough that somebody who
@@ -49,7 +49,7 @@ independently, and a workflow with no `expect` can be reported as finished by an
 agent that clicked around and achieved nothing.
 
 Expectations can name things outside the browser. "A welcome message arrives in
-the inbox" is checked against [the inbox](/docs/guides/inbox/), which is why capture
+the inbox" is checked against [the inbox](/docs/guides/inbox), which is why capture
 mode exists.
 
 ## Ordering
@@ -78,4 +78,4 @@ Where to begin. Defaults to `/`. Worth setting for a workflow that starts deep
 in the application, so the agent does not spend its budget navigating to the
 starting line.
 
-Related: [agents](/docs/concepts/agents/), [personas](/docs/guides/personas/).
+Related: [agents](/docs/concepts/agents), [personas](/docs/guides/personas).

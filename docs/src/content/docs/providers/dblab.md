@@ -2,7 +2,7 @@
 title: DBLab
 description: Using a self hosted Database Lab Engine as the database provider, how to stand one up, and what it does with your data.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 A Database Lab Engine holds one full size copy of production on ZFS and hands

@@ -97,3 +97,59 @@ workflows:
       # "email" nor "spent" appears anywhere on a page with no table on it.
       - "Customer Email Orders Spent"
     tags: [smoke]
+
+# Two goals, and the second one is the point.
+#
+# An exploration is a goal with no script, so what it produces is the path it
+# took. The most valuable thing it produces is not the report: it is that a run
+# can be compiled into a declared workflow with `af explore --emit-workflow`,
+# which turns a one time observation into a check that runs on every pull
+# request. This example exists so that path can be walked against a real
+# application rather than a fixture, and both of its branches can: one goal is
+# reachable here and one is not.
+#
+# THE SAME CONSTRAINT AS THE EXPECTATIONS ABOVE, AND IT BITES HARDER HERE.
+# Without a model key the runner reads the accessibility tree and asks whether
+# the goal's own meaningful words appear on the page, and calls the goal met at
+# two thirds of them. A goal is therefore not free text: its words are the
+# whole of the check. That is why the first goal names what the page names,
+# down to "spent" and "email", and it is why "find" and "see" are not doing any
+# work in it. Written for a person and left to chance, a perfectly good goal
+# comes back unreached on an application that answers it.
+#
+# What that cannot reach is a goal about arithmetic or about how something
+# felt. With a model key the agent reads the page and can be asked. Without
+# one, this asks whether the page says what a person came for, and stops there.
+explore:
+  enabled: true
+  goals:
+    # Reached on the first page, because this application is one page and the
+    # answer is on it. That is not a weak exploration, it is an accurate one:
+    # the compiled workflow asserts something this run actually saw.
+    - name: what-each-customer-spent
+      goal: Find what every customer has spent, and what their email address is.
+      persona: visitor
+      start_path: /
+      budget:
+        steps: 10
+
+    # Not reachable here, on purpose, and the manifest says so rather than
+    # leaving somebody to discover it.
+    #
+    # This application is read only: the orders page offers no control and no
+    # field at all. So the agent arrives, finds nothing to press, and reports a
+    # dead end and an unreached goal. Compiling THAT is the case the promotion
+    # path has to get right, because the block it emits carries a workflow
+    # asserting something nobody has seen happen, and the notes beside it have
+    # to say so. A promotion that returned only the workflow would look
+    # finished and would be a check that goes unverified forever.
+    #
+    # It is also a true finding about this example rather than a contrivance. A
+    # page with no way onward is the shape of "nothing broke and I left", which
+    # is the question an exploration exists to ask.
+    - name: correct-a-customer-name
+      goal: Correct a spelling mistake in a customer's name.
+      persona: visitor
+      start_path: /
+      budget:
+        steps: 10

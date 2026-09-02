@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { randomUUID, createHash } from 'node:crypto'
 import {
   ABSOLUTE_LIFETIME_MS, IDLE_TIMEOUT_MS, hashToken, issueSession, resolveSession,
-  sessionCookie, readCookie, csrfTokenFor, csrfMatches,
+  sessionCookie, readCookie, csrfTokenFor, csrfMatches, sweepSessions,
 } from '../src/auth/session.ts'
 import { safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
 import { FakeClock } from '../src/clock.ts'
@@ -808,6 +808,127 @@ describe('sessions', { skip: hasDatabase ? false : 'no Postgres' }, () => {
     } finally {
       await dropOrg(h.admin, other.orgId)
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // The sweeper, and the two clocks it has to satisfy at once.
+  // -------------------------------------------------------------------------
+  //
+  // sweepSessions was called every five minutes from main.ts and deleted
+  // nothing, on every instance, for as long as it existed: it ran through
+  // withoutTenant, and every policy on this table keys on the acting user, on
+  // a presented token hash, or on the tenant. It matched no row and reported
+  // success, because a statement that matches nothing does not raise.
+  //
+  // It now enters antifailure_sweeper for one transaction (0024). The policy
+  // admitting that role restricts it to rows expired by the DATABASE's clock;
+  // the statement restricts it to rows expired by the APPLICATION's. A row has
+  // to be past both, so the four cases below are a table rather than one case,
+  // and two of them isolate one restriction by defeating the other.
+  //
+  // The harness clock starts in the past, so a session that is live by the
+  // application's clock is already expired by the database's. That is not an
+  // accident of the fixture, it is the only way to write the third row of the
+  // table, and it is why these are four tests rather than one.
+
+  it('sweeps a session both clocks call expired', async () => {
+    const member = await signInAs(h, org, 'member', 'sweepable')
+    const stale = createHash('sha256').update(`stale-${randomUUID()}`).digest()
+    await h.admin`
+      INSERT INTO sessions (token_hash, user_id, org_id, expires_at)
+      VALUES (${stale}, ${member.userId}, ${org.orgId},
+              ${new Date(h.clock.now().getTime() - 48 * 60 * 60 * 1000).toISOString()})`
+
+    const removed = await sweepSessions(h.pool, h.clock)
+    assert.ok(removed >= 1, `the sweep removed ${removed} rows`)
+
+    const [gone] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${stale}`
+    assert.equal(gone!.n, 0, 'an expired session survived the sweep')
+  })
+
+  it('leaves a session the application still considers live', async () => {
+    // Expired by the database's clock, because the harness clock is in the
+    // past, so the policy admits this row. What keeps it is the statement's
+    // own cutoff. Asserted through resolveSession rather than a row count:
+    // the property is that the person is still signed in.
+    const member = await signInAs(h, org, 'member', 'stillworking')
+    await sweepSessions(h.pool, h.clock)
+    assert.ok(
+      await resolveSession(h.pool, h.clock, member.token),
+      'the sweep ended a session that had not expired',
+    )
+  })
+
+  it('leaves a session the database still considers live', async () => {
+    const live = createHash('sha256').update(`live-${randomUUID()}`).digest()
+    const member = await signInAs(h, org, 'member', 'dbclocklive')
+    await h.admin`
+      INSERT INTO sessions (token_hash, user_id, org_id, expires_at)
+      VALUES (${live}, ${member.userId}, ${org.orgId}, now() + interval '1 day')`
+
+    await sweepSessions(h.pool, h.clock)
+
+    const [kept] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${live}`
+    assert.equal(kept!.n, 1, 'the sweep removed a session that had not expired')
+  })
+
+  it('cannot reach a live session however wrong the clock it is given', async () => {
+    // The cutoff is the one value a caller controls, so it is the one worth
+    // attacking. A clock seventy years fast makes the statement's WHERE match
+    // every row in the table. The policy's now() is not a parameter, so the
+    // row survives anyway. This is the property a SECURITY DEFINER function
+    // taking a cutoff would not have had.
+    const live = createHash('sha256').update(`hostile-${randomUUID()}`).digest()
+    const member = await signInAs(h, org, 'member', 'hostilecutoff')
+    await h.admin`
+      INSERT INTO sessions (token_hash, user_id, org_id, expires_at)
+      VALUES (${live}, ${member.userId}, ${org.orgId}, now() + interval '1 day')`
+
+    await sweepSessions(h.pool, new FakeClock('2099-01-01T00:00:00.000Z'))
+
+    const [kept] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${live}`
+    assert.equal(
+      kept!.n,
+      1,
+      'a cutoff from a broken clock deleted a session the database still considers live',
+    )
+  })
+
+  it('is housekeeping, so the sweep never changes who is signed in', async () => {
+    // The claim main.ts makes about this: expiry is enforced when a session is
+    // resolved, so a sweeper that is late costs table size and nothing else.
+    // Nothing tested it, and it is the claim that decides whether a sweep
+    // racing a request can log somebody out.
+    //
+    // Both orderings of the two events, on one session, in the only sequence
+    // that can hold them both:
+    const member = await signInAs(h, org, 'member', 'housekeeping')
+    h.clock.advance(ABSOLUTE_LIFETIME_MS + 1000)
+
+    // EXPIRED THEN RESOLVED, with the row still there. Already refused, by the
+    // read rather than by the sweeper.
+    assert.equal(
+      await resolveSession(h.pool, h.clock, member.token),
+      null,
+      'an expired session resolved while its row was still in the table',
+    )
+    const [present] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${hashToken(member.token)}`
+    assert.equal(present!.n, 1, 'the row was gone before the sweep, so this proves nothing')
+
+    // SWEPT THEN RESOLVED. The row goes, and the answer does not move.
+    await sweepSessions(h.pool, h.clock)
+    const [gone] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sessions WHERE token_hash = ${hashToken(member.token)}`
+    assert.equal(gone!.n, 0, 'the sweep left an expired session behind')
+    assert.equal(
+      await resolveSession(h.pool, h.clock, member.token),
+      null,
+      'the answer changed when the row was removed',
+    )
   })
 })
 

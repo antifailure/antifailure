@@ -2,7 +2,7 @@
 title: Transform reference
 description: Every masking transform, what it replaces a value with, and what it keeps.
 sidebar:
-  order: 8
+  order: 4
 ---
 
 Every transform available to a masking rule. The table is generated from the
@@ -115,4 +115,4 @@ golden, which is what makes `link` work and what makes a masked database
 self-consistent. Across goldens the key differs, so the mapping cannot be
 reversed by diffing two refreshes.
 
-Related: [masking](/docs/concepts/masking/), [verification](/docs/concepts/verification/).
+Related: [masking](/docs/concepts/masking), [verification](/docs/concepts/verification).
