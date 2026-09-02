@@ -347,10 +347,10 @@ func copyThroughPipe(ctx context.Context, source, target secrets.Value, opts Cop
 	}
 	if err := dump.Wait(); err != nil {
 		_ = restore.Process.Kill()
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError("pg_dump", dumpErr.String())
 	}
 	if err := restore.Wait(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError("pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -433,7 +433,7 @@ func copyThroughArchive(ctx context.Context, source, target secrets.Value, opts 
 	var dumpErr strings.Builder
 	dump.Stderr = &dumpErr
 	if err := dump.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError("pg_dump", dumpErr.String())
 	}
 
 	list := exec.CommandContext(ctx, restorePath, "--list", archive)
@@ -455,7 +455,7 @@ func copyThroughArchive(ctx context.Context, source, target secrets.Value, opts 
 	var restoreErr strings.Builder
 	restore.Stderr = &restoreErr
 	if err := restore.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError("pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -564,10 +564,10 @@ func CopyTableData(ctx context.Context, source, target secrets.Value, tables []s
 	}
 	if err := dump.Wait(); err != nil {
 		_ = restore.Process.Kill()
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError("pg_dump", dumpErr.String())
 	}
 	if err := restore.Wait(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError("pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -629,7 +629,7 @@ func DumpTo(ctx context.Context, source secrets.Value, w io.Writer) error {
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(stderr.String()))
+		return transcriptError("pg_dump", stderr.String())
 	}
 	return nil
 }
@@ -655,7 +655,7 @@ func RestoreFrom(ctx context.Context, target secrets.Value, r io.Reader) error {
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(stderr.String()))
+		return transcriptError("pg_restore", stderr.String())
 	}
 	return nil
 }
@@ -744,7 +744,7 @@ func ensureRoles(ctx context.Context, source, target secrets.Value) error {
 func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 	db, err := sql.Open("pgx", conn.Reveal())
 	if err != nil {
-		return nil, fmt.Errorf("pgcopy: open a connection to read the source's roles: %w", err)
+		return nil, connectError(err, "the address in database.source_url_env")
 	}
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
@@ -759,7 +759,13 @@ func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 		// A source that cannot be asked is not a source that has no policies.
 		// Saying which is which matters: the first is a connection problem and
 		// the second is a schema that needs nothing done.
-		return nil, fmt.Errorf("pgcopy: read the roles the source's policies name: %w", err)
+		//
+		// This is the first statement any copy sends, so it is where a typo in
+		// the connection string is met. It used to arrive as the driver's own
+		// account of four failed dial attempts under the words "read the roles
+		// the source's policies name", which describes the query rather than
+		// the problem and sends the reader to look at their policies.
+		return nil, connectError(err, "the address in database.source_url_env")
 	}
 	defer func() { _ = rows.Close() }()
 

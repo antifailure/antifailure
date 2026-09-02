@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
 | `10` | Interrupted, or a teardown left resources recorded. Run `af down` again. |
 
-29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+28 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -388,6 +388,18 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits) |
 
+### AF-DB-007
+
+The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.
+
+**What to do.** Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
 ### AF-DB-008
 
 The database provider {provider} at {endpoint} rejected the configured credential.
@@ -484,6 +496,42 @@ database.source_url_env names {variable}, and {variable} holds nothing in this s
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
 
+### AF-DB-017
+
+pg_dump was refused when it read {object} in the source database.
+
+**What to do.** The role in the connection string needs USAGE on every schema being copied and SELECT on every table and sequence in it, in every schema and not only public. Grant all three: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-018
+
+Row level security on {table} stops pg_dump from reading it as this role.
+
+**What to do.** Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-019
+
+{program} stopped while copying the source database: {detail}
+
+**What to do.** Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
 ### AF-DB-020
 
 Personas cannot be provisioned because {provider} creates users only through its own API, and no sandbox tenant is configured.
@@ -519,6 +567,30 @@ No table that looks like a users table was found, so there is nowhere to create 
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/personas](/docs/guides/personas) |
+
+### AF-DB-023
+
+The source database answered and refused the connection: {detail}
+
+**What to do.** Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-024
+
+The value of the variable named by database.source_url_env is not a connection string: {detail}
+
+**What to do.** Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-030
 

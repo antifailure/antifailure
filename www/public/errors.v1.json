@@ -322,6 +322,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-007",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.",
+      "resolution": "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-DB-008",
       "area": "DB",
       "areaName": "Database",
@@ -410,6 +421,39 @@
       "planned": false
     },
     {
+      "code": "AF-DB-017",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "pg_dump was refused when it read {object} in the source database.",
+      "resolution": "The role in the connection string needs USAGE on every schema being copied and SELECT on every table and sequence in it, in every schema and not only public. Grant all three: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-018",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "Row level security on {table} stops pg_dump from reading it as this role.",
+      "resolution": "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-019",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "{program} stopped while copying the source database: {detail}",
+      "resolution": "Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 5,
+      "planned": false
+    },
+    {
       "code": "AF-DB-020",
       "area": "DB",
       "areaName": "Database",
@@ -438,6 +482,28 @@
       "message": "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
       "resolution": "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
       "docs": "https://antifailure.dev/docs/guides/personas",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-023",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The source database answered and refused the connection: {detail}",
+      "resolution": "Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-024",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The value of the variable named by database.source_url_env is not a connection string: {detail}",
+      "resolution": "Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 3,
       "planned": false
