@@ -139,7 +139,20 @@ func checkLicense(root string) []string {
 // reaches, now that LICENSE cannot carry it.
 func checkCarveOut(root string) []string {
 	var problems []string
-	for _, f := range []string{"LICENSING.md", "ee/LICENSE.md", "ee/README.md"} {
+	// README.md is in this list for a reason that is not obvious, and it is
+	// about the RELEASE ARCHIVE rather than the repository.
+	//
+	// tools/release/build.sh copies exactly LICENSE and README.md into the
+	// tarball. It does not copy LICENSING.md, and it should not: the archive
+	// contains no ee/ code, so a document about ee/ inside it would point at a
+	// directory that is not there. That is the dangling reference the old
+	// LICENSE already had, naming ee/LICENSE.md in an archive with no ee/.
+	//
+	// Which leaves README.md as the only file that both states the carve out
+	// AND travels with the release. Somebody rewriting the README could drop
+	// that sentence without ever thinking about the tarball, and the carve out
+	// would silently stop shipping. So it is held here.
+	for _, f := range []string{"LICENSING.md", "README.md", "ee/LICENSE.md", "ee/README.md"} {
 		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
 		if err != nil {
 			problems = append(problems, f+" is missing, and it is one of the places the "+
