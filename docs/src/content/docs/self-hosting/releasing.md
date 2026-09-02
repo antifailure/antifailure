@@ -23,14 +23,28 @@ cutting one.
 
 | Workflow | Triggered by | What it does |
 | --- | --- | --- |
-| `.github/workflows/release.yml` | `push` of a tag matching `v*` | Builds four platforms, packages, signs, and creates the GitHub release |
+| `.github/workflows/release.yml` | `push` of a tag matching `v*` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
 | `.github/workflows/cd.yml` | `push` to `main` **and** `push` of a tag matching `v*` | Waits for CI, builds the control plane image, deploys staging, then waits for a human to approve production |
 
 Two things follow from that table and both have bitten somebody somewhere.
 
-`release.yml` has no gate of its own. It does not wait for CI and it does not
-read `cd.yml`'s verdict. A tag on a red commit publishes binaries. The gate is
-you, before you tag.
+`release.yml` has a gate of its own, and until recently it did not. A `gate`
+job runs before the build, waits for CI's conclusion on the commit the tag
+names, and refuses anything but `success`. So a tag on a red commit now
+publishes nothing. It waits for about 38 minutes before giving up, and giving up
+is a refusal too. The judgement is `tools/cigate`.
+
+That gate refuses a run GitHub reports as `cancelled`, and this is the case
+worth knowing about before you tag. GitHub uses that one word for two unrelated
+things: a job that hit its own time limit, and a run that a newer push
+superseded. `ci.yml` sets `cancel-in-progress`, so a merge to `main` cancels the
+CI run of the commit before it. If the commit you tag was overtaken that way, it
+has no CI verdict and the release refuses it. Re-run CI on that commit, wait for
+green, then re-run the release from the Actions page.
+
+Checking before you tag is still the cheaper order. The gate turns a mistake
+into a refused release rather than a published one, which is not the same as
+turning it into no mistake.
 
 `cd.yml` runs a second time on the tag, on the same commit it already ran on
 when that commit merged to `main`. Its concurrency group is keyed on the ref,
@@ -61,9 +75,9 @@ cancel a push-triggered run of the same workflow on the same commit, which
 leaves a cancelled row that is not a failure. Look at which workflow it belongs
 to and whether another run of that same workflow succeeded on that sha.
 
-`cd.yml`'s first job polls for that same CI conclusion and gives up after
-twenty minutes. If CI has not finished when you tag, the tag's deploy fails on
-a timeout rather than on anything real.
+`cd.yml`'s first job polls for that same CI conclusion, as `release.yml`'s now
+does, and both give up after about 38 minutes. If CI has not finished when you
+tag, the tag's deploy fails on a timeout rather than on anything real.
 
 **1a. `just gate` is not the bar, and cannot be met as written.**
 
