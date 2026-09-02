@@ -41,102 +41,20 @@ service-account*.json
 # build output is a directory and `tools/coverage` is also a command, so a
 # stray binary of that name lands here as a FILE. A directory-only rule ignored
 # the first and not the second.
-/coverage
-*.out
-*.test
-*.prof
-
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
-# `terraform show -json plan.tfplan` writes this, and it is NOT the human
-# readable plan in another format. The JSON carries actual values alongside a
-# separate `after_sensitive` structure that merely MARKS which of them are
-# sensitive, so what the text plan prints as (sensitive value) is present in
-# full here. A create-only plan happens to be safe because the value is not
-# known yet; the moment there is real state to compare against, this file
-# contains the generated database passwords. The cost job in CI reads it from
-# the runner's disk and it never leaves.
-plan.json
-.terraform.lock.hcl.local
-crash.log
-
-# The Azure Functions host reads api/local.settings.json when somebody runs the
-# site's API locally, and the value it needs there is the real connection
-# string for the waitlist table. Ignored before anybody writes one, because a
-# credential is only committed once.
-local.settings.json
-
-# Node
-node_modules/
-.next/
-.turbo/
-out/
-*.tsbuildinfo
-next-env.d.ts
-.astro/
-playwright-report/
-test-results/
-blob-report/
-
-# Editors and operating systems
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.recommended.json
-*.swp
-
-# Logs
-*.log
-npm-debug.log*
-pnpm-debug.log*
-
-# Local artifacts produced by test runs
-engine/**/testdata/tmp/
-runner/artifacts/
-
-# Local gate output. Generated per run, never committed.
-/.gate-reports/
-
-# Compiled binaries built in place.
-#
-# `go build ./tools/claimcheck` writes ./claimcheck into whatever directory you
-# ran it from, and `git add -A` then commits a platform specific executable that
-# is useless to everybody including the person who built it. It has happened
-# twice here: a 10MB engine/af-proxy and a 3.2MB claimcheck, both arm64 Mach-O,
-# in a repository that ships Linux binaries.
-#
-# It has now happened a third time, with a 4.2MB `dogfood`, and the third time
-# is the one that says something about the list rather than about the mistake.
-# The list named the tools that existed when it was written, eleven tools were
-# added since, and nobody thought about this file while adding them. A list
-# that has to be maintained by remembering is a list that is wrong by default.
-#
-# Named rather than globbed, because a glob wide enough to catch every future
-# one would also catch source directories that share a name with their command,
-# and `docs` is exactly that: a tool and a site, so `/docs` here would ignore
-# the whole documentation tree.
-#
-# So the completeness of this list is now checked instead of remembered.
-# tools/gatecheck's TestEveryToolsBinaryNameIsIgnored fails when a tool has no
-# line here and no reason recorded for not having one, and
-# TestNoCompiledBinaryIsTracked remains the backstop for when one lands anyway.
 /azguard
 /changecheck
 /claimcheck
 /classcheck
 /constcheck
 /cost
+/coverage
 /docscheck
 /dogfood
 /errcheck
 /errgen
 /figurecheck
 /gatecheck
+/inputcheck
 /installcheck
 /installsh
 /ldcheck
