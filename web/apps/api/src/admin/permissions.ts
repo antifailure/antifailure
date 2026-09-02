@@ -46,6 +46,20 @@ export const ADMIN_PERMISSIONS = [
   'admin.users.write',
   'admin.sessions.read',
   'admin.sessions.revoke',
+
+  // Money, and the three things that decide what a customer gets.
+  //
+  // Read is separate from write on all three, and on billing that split is the
+  // one that matters: an on-call engineer answering "why was this customer
+  // charged twice" needs the invoices and the charges, and does not need the
+  // refund button. Merging them would make everybody who can answer a question
+  // able to move money, which is how a support rota becomes a financial risk.
+  'admin.billing.read',
+  'admin.billing.write',
+  'admin.entitlements.read',
+  'admin.entitlements.write',
+  'admin.flags.read',
+  'admin.flags.write',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -108,6 +122,21 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.operators.write': 'Create operators, change their role, and suspend them.',
   'admin.audit.read': 'Read the platform audit chain.',
   'admin.audit.export': 'Export the platform audit chain and verify its hashes.',
+  'admin.billing.read':
+    'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
+    'credit balance, and the record of every administrative money action taken on the account.',
+  'admin.billing.write':
+    'Move money: issue a refund, add credit, change or cancel a plan, extend a trial, apply a ' +
+    'discount, retry a payment, and resend an invoice.',
+  'admin.entitlements.read':
+    'See what an organization is entitled to, and which of its limits were granted rather than ' +
+    'set by its plan.',
+  'admin.entitlements.write':
+    'Grant an organization, project or user a limit other than its plan\'s, and revoke one.',
+  'admin.flags.read': 'See feature flags, their rollout and who they are targeted at.',
+  'admin.flags.write':
+    'Turn a feature flag on or off for everybody, target it, roll it out, and kill it during an ' +
+    'incident.',
   'admin.tenants.read': 'See every organization, its plan, its usage and its members.',
   'admin.tenants.suspend':
     'Stop an organization creating new work, and let it start again. Running environments are untouched.',
@@ -167,6 +196,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.portal.access', 'admin.audit.read',
     'admin.tenants.read', 'admin.tenants.suspend',
     'admin.users.read', 'admin.sessions.read',
+    // Flags, both halves. A kill switch is an incident tool before it is a
+    // product one, and the people holding the pager have to be able to reach
+    // it without finding somebody from billing at three in the morning.
+    'admin.flags.read', 'admin.flags.write',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -174,16 +207,29 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.tenants.read', 'admin.tenants.suspend',
     'admin.users.read', 'admin.users.write',
     'admin.sessions.read', 'admin.sessions.revoke',
+    // Read on all three, and write on flags. Security investigates money and
+    // entitlements rather than changing them, and containing an incident by
+    // killing a feature is the one write it needs at speed.
+    'admin.billing.read', 'admin.entitlements.read',
+    'admin.flags.read', 'admin.flags.write',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
     'admin.tenants.read', 'admin.tenants.plan',
     'admin.users.read',
+    // The role the money permissions exist for, and the only one below owner
+    // that holds the write half of all three.
+    'admin.billing.read', 'admin.billing.write',
+    'admin.entitlements.read', 'admin.entitlements.write',
+    'admin.flags.read', 'admin.flags.write',
   ],
   support: [
     'admin.portal.access', 'admin.audit.read',
     'admin.tenants.read',
     'admin.users.read', 'admin.sessions.read',
+    // Support answers "why was I charged this" every day and must never be the
+    // rota that can refund. Read without write is the whole point of the split.
+    'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
   ],
   analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
   read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],

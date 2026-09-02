@@ -1199,6 +1199,101 @@ export const adminAuditEntries = pgTable('admin_audit_entries', {
   entryHash: text('entry_hash').notNull(),
 })
 
+
+/* ---------------------------------------------------------------------------
+ * Entitlements, flags, and the money ledger. See migration 0030_entitlements_flags_and_the_money_ledger.
+ *
+ * Three of the four carry org_id and are in the cross-tenant list below.
+ * `feature_flags` deliberately does not: a flag is the platform's own
+ * configuration and a rollout applies ACROSS tenants, so the row that says
+ * which tenants is feature_flag_targets, not the flag.
+ * ------------------------------------------------------------------------ */
+
+export const entitlementOverrides = pgTable('entitlement_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** global, organization, project or user. */
+  scope: text('scope').notNull(),
+  /** The organization, repository or user this applies to. Null only for
+   *  global, which the migration makes an invariant rather than a habit. */
+  scopeId: uuid('scope_id'),
+  orgId: uuid('org_id'),
+  feature: text('feature').notNull(),
+  /** A JSON scalar: a number for a limit, a boolean for a capability. */
+  value: jsonb('value').notNull(),
+  reason: text('reason').notNull(),
+  ticket: text('ticket'),
+  createdByUserId: uuid('created_by_user_id'),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Null is forever, and is a typed choice rather than an empty field. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedByLabel: text('revoked_by_label'),
+  revokedReason: text('revoked_reason'),
+})
+
+export const featureFlags = pgTable('feature_flags', {
+  key: text('key').primaryKey(),
+  description: text('description').notNull(),
+  /** off, on or targeted. `off` is the kill switch and beats everything. */
+  state: text('state').notNull().default('off'),
+  rolloutPercent: integer('rollout_percent').notNull().default(0),
+  internalOnly: boolean('internal_only').notNull().default(false),
+  /** Recorded apart from an ordinary edit, so an incident timeline can be
+   *  reconstructed from the database rather than from somebody's memory. */
+  killedAt: timestamp('killed_at', { withTimezone: true }),
+  killedByLabel: text('killed_by_label'),
+  killedReason: text('killed_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedByLabel: text('updated_by_label').notNull(),
+})
+
+export const featureFlagTargets = pgTable('feature_flag_targets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  flagKey: text('flag_key').notNull(),
+  kind: text('kind').notNull(),
+  value: text('value').notNull(),
+  /** Deny beats allow, so one tenant can be pulled out of a rollout that is
+   *  working for everybody else. */
+  allow: boolean('allow').notNull().default(true),
+  /** Null for the kinds that name no tenant: plan and environment. */
+  orgId: uuid('org_id'),
+  reason: text('reason').notNull(),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminOperations = pgTable('admin_operations', {
+  /** The idempotency key IS the primary key: the second attempt to claim it is
+   *  a constraint violation rather than a second refund. */
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  action: text('action').notNull(),
+  orgId: uuid('org_id').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The operator, from admin_users. A different id space from users(id). */
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  reason: text('reason').notNull(),
+  request: jsonb('request').notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  state: text('state').notNull().default('in_flight'),
+  beforeState: jsonb('before_state'),
+  afterState: jsonb('after_state'),
+  providerObjectId: text('provider_object_id'),
+  /** Minor units beside their currency, both or neither. */
+  amountMinor: bigint('amount_minor', { mode: 'number' }),
+  currency: text('currency'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  /** Whether the provider ANSWERED. Decides whether a deliberate retry may
+   *  have a key of its own or has to reuse this one. */
+  errorAnswered: boolean('error_answered'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -1217,4 +1312,5 @@ export const tenantScopedTables = [
 
   githubDeliveries, pullRequests, prGenerations, teardownRequests,
   oidcRepositoryBindings,
+  entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const

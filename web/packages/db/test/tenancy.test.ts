@@ -101,6 +101,15 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'the application role holds no grant on it at all, which the test below proves',
       ],
       [
+        'feature_flags',
+        'a flag is the platform\'s own configuration rather than a tenant\'s. It has no org_id ' +
+          'because it belongs to no organization: a rollout applies ACROSS tenants and the row ' +
+          'that says which tenants is feature_flag_targets, which does carry org_id and is in ' +
+          'the loops below. Every tenant may read a flag\'s key and state, which is a small ' +
+          'deliberate disclosure of unreleased feature names, and none may read who else is ' +
+          'targeted',
+      ],
+      [
         'admin_users',
         'an operator is not a tenant. The row is the platform\'s own identity, deliberately ' +
           'unrelated to users, and it is reachable only by declaring the email being signed in ' +
@@ -262,7 +271,47 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   it("reads of another tenant's rows return nothing, for every tenant-scoped table", async () => {
     const tables = await orgScopedTables()
 
+    // Which tables the application role may SELECT at all, asked of the
+    // database rather than written down, exactly as the write test below asks
+    // about UPDATE and DELETE.
+    //
+    // Not every org-scoped table grants it. `admin_operations` is the money
+    // ledger: it carries org_id because an operator action concerns a tenant,
+    // and the application role holds NO privilege on it, because what an
+    // operator did is not the tenant's record. Its customer-visible half is
+    // written into that tenant's own audit_entries instead.
+    //
+    // A loop that assumed SELECT would report that as an error and read like a
+    // broken test rather than like stronger isolation, so this asserts BOTH
+    // outcomes: where SELECT is granted the policy has to return nothing, and
+    // where it is withheld the database has to refuse the statement outright.
+    const readable = new Set(
+      (
+        await h.admin<{ table_name: string }[]>`
+          SELECT table_name FROM information_schema.role_table_grants
+          WHERE grantee = 'antifailure_app' AND table_schema = 'public'
+            AND privilege_type = 'SELECT'`
+      ).map((r) => r.table_name),
+    )
+    assert.ok(
+      tables.some((t) => !readable.has(t)),
+      'every tenant-scoped table grants SELECT, so the withheld half of this test proves nothing',
+    )
+
     for (const table of tables) {
+      if (!readable.has(table)) {
+        const refused = await h.pool
+          .withTenant({ orgId: bob.orgId, userId: bob.userId }, async (db) => {
+            await db.execute(sql`SELECT count(*) FROM ${sql.identifier(table)}`)
+          })
+          .then(() => null, (e: unknown) => pgError(e))
+        assert.equal(
+          refused?.code,
+          '42501',
+          `${table} grants the application no SELECT, so reading it must be refused outright`,
+        )
+        continue
+      }
       // Proves the row is there before proving it is invisible. Without this,
       // a query that returns nothing because the fixture failed to insert
       // would look exactly like isolation working.

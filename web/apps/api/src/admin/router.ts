@@ -33,6 +33,11 @@ import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
+  adminBillingRouter,
+  adminEntitlementsRouter,
+  adminFlagsRouter,
+} from './routers.ts'
+import {
   ADMIN_PERMISSIONS,
   ADMIN_PERMISSION_DESCRIPTIONS,
   ADMIN_ROLES,
@@ -97,6 +102,7 @@ const SAFE_COLUMNS = {
  * naming the owner. Do NOT add a second `admin:` key to appRouter.
  */
 export const adminRouter = router({
+
   /**
    * Who the operator is, and what the shell may show them.
    *
@@ -799,6 +805,11 @@ export const adminRouter = router({
   // Each exports its sub-routers from its own file and this object names them,
   // so the matrix test in admin-routes.test.ts walks every operator route in one
   // pass. A lane mounted as its own `admin:` key would be invisible to it.
+  // ---------------------------------------------------------------------------
+  // admin-money.
+  billing: adminBillingRouter,
+  entitlements: adminEntitlementsRouter,
+  flags: adminFlagsRouter,
   // ---------------------------------------------------------------------------
 })
 
