@@ -102,6 +102,14 @@ manifest or pipeline does.
 - A migration that holds an exclusive lock past `policy.migration_lock.fail_ms`
   now fails the check and names the table. The rehearsal has sampled `pg_locks`
   since phase 3 and none of it reached a pull request before now.
+- The self hosted control plane image runs on Node 26. All three stages of
+  `deploy/docker/control-plane.Dockerfile` move together, the dependency
+  install, the console build and the runtime, so an operator pulling the new
+  tag gets one runtime rather than a mixture of two. The three examples move
+  with it, because an example is the first Dockerfile most people copy. Alpine
+  3.24 carries psql 18 under the unversioned `postgresql-client` package where
+  3.20 carried psql 16, and a client newer than the server is the direction
+  libpq supports, so the migration those examples run behaves as it did.
 - Every route to the hosted control plane says the same thing about it. The
   `/signin` and `/signup` tabs both read "Join the waitlist" and both
   descriptions said there was no hosted control plane, which a crawler, a
