@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { EASE } from "@/lib/easing";
 import { useInViewPlay } from "@/lib/useInViewPlay";
@@ -52,9 +52,19 @@ export function MigrationBento() {
     <div ref={root} className="@container relative w-full min-w-0 overflow-x-hidden">
       <div
         data-ref="panel"
-        className="relative isolate overflow-hidden [--s:calc(100cqw/1024)] max-md:[--s:max(0.8px,calc(100cqw/1024))]"
+        className={[
+          "relative isolate overflow-hidden",
+          // The drawing is laid out at a 1024 unit width and scaled. Below md
+          // only the report is shown, so the unit is a flat 1.15px chosen for
+          // the report's own type rather than derived from a width the drawing
+          // no longer has to fit.
+          "[--s:calc(100cqw/1024)] [--ph:calc(585*var(--s))]",
+          "[--aw:calc(300*var(--s))] [--ah:calc(328*var(--s))] [--ax:calc(16*var(--s))] [--ay:calc(14*var(--s))]",
+          "max-md:[--s:1.15px] max-md:[--ph:calc(400*var(--s))]",
+          "max-md:[--aw:100%] max-md:[--ah:100%] max-md:[--ax:0px] max-md:[--ay:0px]",
+        ].join(" ")}
         style={{
-          height: u(585),
+          height: "var(--ph)",
           background: PAGE,
           borderRadius: u(5),
           boxShadow: `inset 0 0 0 1px ${RULE}`,
@@ -62,7 +72,7 @@ export function MigrationBento() {
       >
         <div className="noise pointer-events-none absolute inset-0 opacity-[0.08] mix-blend-multiply" aria-hidden />
 
-        <div className="relative z-10 flex h-full">
+        <div className="relative z-10 flex h-full max-md:hidden">
           <Sidebar live={live} />
 
           {/* A div, not a <main>. This whole component is a drawing of an
@@ -457,113 +467,59 @@ function AgentWindow({
   plan: Plan;
   onPlan: (plan: Plan) => void;
 }) {
-  const scroller = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [skillsOpen, setSkillsOpen] = useState(false);
   const [active, setActive] = useState("verdict");
-  const [notes, setNotes] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (notes.length === 0) return;
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [notes]);
-
-  function jump(id: string) {
-    setActive(id);
-    setSkillsOpen(false);
-    const node = scroller.current?.querySelector(`[data-finding="${id}"]`);
-    node?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
-
-  function send(event?: FormEvent) {
-    event?.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
-    setNotes((prev) => [...prev, text]);
-    setDraft("");
-  }
 
   const findings = FINDINGS[plan];
   const verdict = VERDICT[plan];
-  const height = collapsed ? 40 : expanded ? 430 : 328;
 
   return (
     <motion.aside
       className="absolute z-20 flex flex-col overflow-hidden"
       style={{
-        width: u(300),
-        height: u(height),
-        right: u(16),
-        bottom: u(14),
+        width: "var(--aw)",
+        height: "var(--ah)",
+        right: "var(--ax)",
+        bottom: "var(--ay)",
         background: CARD,
         borderRadius: u(5),
         boxShadow: `0 12px 28px rgba(16,16,16,0.08), inset 0 0 0 1px ${RULE}`,
       }}
       initial={live ? { opacity: 0, y: 18, scale: 0.98 } : false}
-      animate={{ opacity: 1, y: 0, scale: 1, height: u(height) }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.45, delay: live ? 0.28 : 0, ease: EASE }}
       onWheel={(e) => e.stopPropagation()}
     >
       <div
         className="flex shrink-0 items-center"
-        style={{ height: u(40), paddingInline: u(12), gap: u(8), borderBottom: collapsed ? undefined : `1px solid ${RULE}`, cursor: collapsed ? "pointer" : undefined }}
-        onClick={() => {
-          if (collapsed) setCollapsed(false);
-        }}
+        style={{ height: u(40), paddingInline: u(12), gap: u(8), borderBottom: `1px solid ${RULE}` }}
       >
         <span className="inline-flex shrink-0 items-center justify-center" style={{ width: u(14), height: u(14) }}>
           <LogoMark className="size-full" />
         </span>
         <span style={{ fontSize: u(12.5), fontWeight: 500, color: INK, letterSpacing: "-0.02em" }}>Antifailure</span>
-        <span className="ml-auto flex items-center" style={{ gap: u(8), color: DIM }}>
-          <button
-            type="button"
-            aria-label="Minimize"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed(true);
-            }}
-            style={{ width: u(11), height: u(11) }}
-          >
+        {/* Drawn, not operated. These were three buttons carrying correct
+            aria-labels, which is why nobody looked again: they rendered at
+            6.9px square at 768 and never exceeded 11px at any width, they had
+            no focus ring, and what they did was resize a picture. A control
+            nobody can hit is not a control, so they are the window chrome they
+            were always depicting. */}
+        <span className="ml-auto flex items-center" style={{ gap: u(8), color: DIM }} aria-hidden>
+          <span className="block" style={{ width: u(11), height: u(11) }}>
             <IconMin />
-          </button>
-          <button
-            type="button"
-            aria-label={expanded ? "Restore" : "Expand"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed(false);
-              setExpanded((v) => !v);
-            }}
-            style={{ width: u(11), height: u(11) }}
-          >
+          </span>
+          <span className="block" style={{ width: u(11), height: u(11) }}>
             <IconMax />
-          </button>
-          <button
-            type="button"
-            aria-label="Collapse"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCollapsed(true);
-            }}
-            style={{ width: u(11), height: u(11) }}
-          >
+          </span>
+          <span className="block" style={{ width: u(11), height: u(11) }}>
             <IconX />
-          </button>
+          </span>
         </span>
       </div>
 
-      {!collapsed ? (
-        <>
-          <div
-            ref={scroller}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-            style={{ padding: `${u(10)} ${u(12)}` }}
-          >
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        style={{ padding: `${u(10)} ${u(12)}` }}
+      >
             <div
               style={{
                 padding: u(10),
@@ -604,7 +560,11 @@ function AgentWindow({
                     type="button"
                     aria-pressed={on}
                     onClick={() => onPlan(option)}
-                    className="flex-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
+                    className={[
+                      "relative flex-1",
+                      "after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-['']",
+                      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60",
+                    ].join(" ")}
                     style={{
                       height: u(24),
                       borderRadius: u(4),
@@ -683,98 +643,17 @@ function AgentWindow({
               </p>
               <p style={{ marginTop: u(4), fontSize: u(10.5), lineHeight: 1.45, color: DIM }}>{verdict.note}</p>
             </button>
+      </div>
 
-            {notes.map((note, i) => (
-              <p
-                key={`${note}-${i}`}
-                style={{
-                  marginTop: u(8),
-                  marginLeft: u(24),
-                  padding: u(8),
-                  borderRadius: u(4),
-                  background: "#F0F0EA",
-                  fontSize: u(12.5),
-                  lineHeight: 1.4,
-                  color: INK,
-                }}
-              >
-                {note}
-              </p>
-            ))}
-          </div>
-
-          <form
-            onSubmit={send}
-            className="relative shrink-0"
-            style={{
-              margin: u(10),
-              marginTop: 0,
-              padding: `${u(6)} ${u(8)}`,
-              borderRadius: u(4),
-              boxShadow: `inset 0 0 0 1px ${RULE}`,
-            }}
-          >
-            {skillsOpen ? (
-              <div
-                className="absolute left-0 right-0 overflow-hidden"
-                style={{
-                  bottom: "100%",
-                  marginBottom: u(6),
-                  background: CARD,
-                  borderRadius: u(4),
-                  boxShadow: `0 8px 24px rgba(16,16,16,0.1), inset 0 0 0 1px ${RULE}`,
-                }}
-              >
-                {findings.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => jump(item.id)}
-                    className="flex w-full items-center justify-between text-left"
-                    style={{
-                      height: u(28),
-                      paddingInline: u(10),
-                      fontSize: u(12),
-                      color: INK,
-                    }}
-                  >
-                    <span>{item.label}</span>
-                    <span style={{ color: item.tone === "block" ? DEL : OK, fontSize: u(11) }}>{item.mark}</span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => jump("verdict")}
-                  className="flex w-full items-center justify-between text-left"
-                  style={{ height: u(28), paddingInline: u(10), fontSize: u(12), color: INK }}
-                >
-                  <span>Verdict</span>
-                  <span style={{ color: verdict.tone === "block" ? DEL : OK, fontSize: u(11) }}>{verdict.mark}</span>
-                </button>
-              </div>
-            ) : null}
-            <div className="flex items-center" style={{ gap: u(8) }}>
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="Reply…"
-                className="min-w-0 flex-1 bg-transparent outline-none"
-                style={{ height: u(26), fontSize: u(12), color: INK }}
-              />
-              <button
-                type="button"
-                onClick={() => setSkillsOpen((v) => !v)}
-                style={{ fontSize: u(11), color: DIM, whiteSpace: "nowrap" }}
-              >
-                Skills
-              </button>
-              <button type="submit" aria-label="Send" style={{ width: u(12), height: u(12), color: DIM }}>
-                <IconSend />
-              </button>
-            </div>
-          </form>
-        </>
-      ) : null}
+      {/* The report is taller than the window at every width, so its last row
+          was cut through the middle of a sentence and read as clipped rather
+          than as scrollable. The document behind it already fades the same way
+          for the same reason. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0"
+        style={{ height: u(26), background: `linear-gradient(180deg, rgba(255,255,255,0) 0%, ${CARD} 100%)` }}
+        aria-hidden
+      />
     </motion.aside>
   );
 }
@@ -1081,7 +960,4 @@ function IconPlay() {
       <path d="M6 4.5v7l6-3.5z" />
     </svg>
   );
-}
-function IconSend() {
-  return strokeIcon("M3 8h10M9.5 4.5 13 8l-3.5 3.5");
 }

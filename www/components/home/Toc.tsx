@@ -11,8 +11,16 @@ const SECTIONS = [
   { id: "firewall", title: "Side-Effect Firewall" },
 ];
 
-/** Sticky header (56px below lg) plus the rail itself. */
-const RAIL_OFFSET = 100;
+/**
+ * Sticky header plus the rail pinned under it: 56px and 46px.
+ *
+ * The header steps down to 56px below `xl`, not below `lg`, and this file had
+ * that breakpoint wrong in both places it appears. The comment here said `lg`,
+ * and the rail's own `top` carried the same mistake: it pinned the rail 64px
+ * down against a 56px header, leaving an 8px slot between the two that every
+ * section heading scrolled through, sliced in half, from 1024px to 1279px.
+ */
+const RAIL_OFFSET = 102;
 
 /** Dissolve whichever edge still has a name behind it. */
 function edgeMask({ left, right }: { left: boolean; right: boolean }) {
@@ -145,11 +153,10 @@ function SectionRail({ activeIndex, progress }: { activeIndex: number; progress:
   useEffect(readEdges, [readEdges]);
 
   return (
-    <div
-      className={cn(
-        "sticky top-16 z-30 bg-[#f7f7f5] max-lg:top-14 xl:hidden",
-      )}
-    >
+    // `top-14` with no breakpoint on purpose: the rail is `xl:hidden`, so it
+    // only ever exists where the header is 56px tall. A `top-16` default with a
+    // `max-lg` override was wrong on both halves.
+    <div className="sticky top-14 z-30 bg-[#f7f7f5] xl:hidden">
       <nav
         ref={trackRef}
         aria-label="Sections"

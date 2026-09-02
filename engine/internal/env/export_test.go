@@ -128,3 +128,29 @@ func (o *Orchestrator) InvokeRunnerForTest(
 ) ([]byte, error) {
 	return o.invokeRunner(ctx, runnerPath, jobDocument{Artifacts: artifacts})
 }
+
+// InvokeRunnerCapturingDocument runs the runner and returns the exact bytes
+// that went to its standard input.
+//
+// The document between the engine and the runner is a wire format, and nothing
+// asserted its shape until af explore turned out to have been impossible on
+// every machine: the exploration path never set the workflows field, a nil
+// slice marshals as null, and main.ts read null.length before it looked at the
+// goals. Both halves worked and the document between them was untested.
+//
+// So this hands the caller the real bytes rather than the struct, because the
+// defect was in what json.Marshal produced and not in what the struct held.
+func (o *Orchestrator) InvokeRunnerCapturingDocument(
+	ctx context.Context, runnerPath, artifacts string, goals []schema.Goal,
+) ([]byte, []byte, error) {
+	job := jobDocument{Artifacts: artifacts, Headless: true}
+	for _, g := range goals {
+		job.Goals = append(job.Goals, goalDoc{Name: g.Name, Goal: g.Goal, Seed: g.Seed})
+	}
+	captured, err := o.runnerDocument(job)
+	if err != nil {
+		return nil, nil, err
+	}
+	out, err := o.invokeRunner(ctx, runnerPath, job)
+	return captured, out, err
+}

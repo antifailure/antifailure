@@ -21,8 +21,36 @@ name: status
 
 on:
   schedule:
+    # Five minutes is what this ASKS for and not what it gets. GitHub drops
+    # scheduled runs under load on the shared runners, hard: observed deliveries
+    # on this repository have been three to six hours apart, not five minutes.
+    # The number is left here because a lower cadence request does not buy a
+    # more reliable one, and because asking for five and receiving five hours is
+    # strictly better than asking for an hour and receiving five.
+    #
+    # Nothing downstream believes it. `page.jq` measures the interval from the
+    # readings themselves and prints that, saying in the rendered page that the
+    # figure comes from the data rather than from this line, and the staleness
+    # threshold is three times the OBSERVED interval. So a throttled schedule
+    # makes the page coarser and never makes it wrong. If this page ever needs a
+    # real five minute cadence, it needs a runner that is not GitHub's free
+    # scheduler, and that is a hosting decision rather than a cron edit.
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
+  # The probe never runs on a push. These two triggers exist only for the
+  # `validate` job below, which reads the incident files a person just edited
+  # and says so before they reach main rather than after. A paths filter is
+  # ignored by `schedule`, so it constrains the push and pull_request events
+  # and leaves the probe on its own timetable.
+  pull_request:
+    paths:
+      - 'deploy/status/**'
+      - '.github/workflows/status.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/status/**'
+      - '.github/workflows/status.yml'
 
 permissions:
   contents: read
@@ -32,10 +60,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # An incident note is written by a tired person during an outage, and the
+  # cost of a mistake in it is a section of the status page that silently
+  # renders nothing. render.sh deliberately never fails on a bad incident
+  # file, because a probe must keep publishing whatever else is wrong, so
+  # something else has to be the thing that says no. This is that thing, and
+  # it runs on the pull request rather than on the schedule so the answer
+  # arrives before the file lands.
+  validate:
+    name: the incident files and the renderer
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Every incident file is well formed and names components that exist
+        run: deploy/status/incidents.sh check deploy/status/incidents deploy/status/targets.json
+
+      - name: Every target is uniquely identified
+        # An id collision would silently merge two components' histories into
+        # one, and the merge is not reversible once it has been committed.
+        run: |
+          jq -e '(map(.id) | unique | length) == length' deploy/status/targets.json > /dev/null
+          jq -e 'all(.[]; .id and .name and .group and .description and .url and .check)' deploy/status/targets.json > /dev/null
+          jq -e 'all(.[]; .check == "readyz" or (.check == "http" and (.expect_body | length) > 0))' deploy/status/targets.json > /dev/null
+          echo "$(jq length deploy/status/targets.json) components, all identified and all with something to assert"
+
+      - name: The renderer over the states this page will actually be in
+        run: deploy/status/render_test.sh
+
   probe:
     name: probe and publish
     runs-on: ubuntu-latest
-    if: github.repository == 'antifailure/antifailure'
+    if: github.repository == 'antifailure/antifailure' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     timeout-minutes: 5
     permissions:
       # Only to push status-data, and nothing else this token could touch: no
@@ -71,12 +129,16 @@ jobs:
         run: main/deploy/status/probe.sh main/deploy/status/targets.json > readings.jsonl
 
       - name: Fold the readings into the history and render the page
+        # Two checkouts, and that is the point: the scripts and the incident
+        # notes come from `main`, the record comes from `status-data`, and
+        # render.sh resolves the first from its own path so the two can never
+        # be confused for each other.
         run: main/deploy/status/render.sh data readings.jsonl
 
       - name: Commit and push, only if something actually changed
         working-directory: data
         run: |
-          git add history.json index.html
+          git add history.json daily.json index.html feed.xml
           if git diff --cached --quiet; then
             echo "no change in this probe's readings; nothing to commit"
             exit 0

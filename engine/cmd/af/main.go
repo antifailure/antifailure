@@ -20,11 +20,13 @@ func main() {
 	// The first interrupt cancels the root context so that in flight work
 	// rolls back and teardown runs. The second forces an exit with the journal
 	// intact, because a user pressing control C twice means "stop now", and
-	// the journal is what makes stopping now safe.
-	ctx, _, stop := cli.WithSignals(context.Background())
+	// the journal is what makes stopping now safe. Run is what honours the
+	// second one: it returns the exit code out from under a command that has
+	// not noticed the first.
+	ctx, forced, stop := cli.WithSignals(context.Background())
 	defer stop()
 
 	// Execute returns the code rather than exiting, so that deferred cleanup
 	// runs and every command stays testable without a process.
-	os.Exit(cli.Execute(ctx, os.Args[1:], cli.Options{}))
+	os.Exit(cli.Run(ctx, forced, os.Args[1:], cli.Options{}))
 }
