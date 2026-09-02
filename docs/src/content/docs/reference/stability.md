@@ -78,10 +78,10 @@ the Terraform under `infra/terraform`. Within version 1:
 The reason this is a promise and not a preference is that the values file and
 the tfvars file somebody self hosting writes are their configuration. They are
 written once, kept in that operator's own repository, and applied by that
-operator's own pipeline. A rename does not fail that pipeline loudly, it fails it silently:
-Helm accepts a key no template reads, and Terraform only warns about a variable
-nothing declares. The setting stops being in force and the apply still says it
-succeeded.
+operator's own pipeline. A rename does not fail that pipeline loudly, it fails
+it silently: Helm accepts a key no template reads, and Terraform only warns
+about a variable nothing declares. The setting stops being in force and the
+apply still says it succeeded.
 
 Terraform outputs are on the list by name, because a runbook reads them.
 [Standing up on Azure](/docs/self-hosting/azure) pipes `backend_hcl` into a
