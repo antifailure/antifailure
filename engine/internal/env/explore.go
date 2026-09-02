@@ -186,30 +186,31 @@ func (o *Orchestrator) runnerEnvironment(ctx context.Context) []string {
 // is started, what happens when it writes nothing, or whether its output is
 // redacted. Two copies would have drifted first at the error path, which is
 // the one nobody exercises by hand.
-// marshalJob writes the document the runner reads, with no null where it
-// expects a list.
+// runnerDocument marshals the job the runner reads.
 //
-// A nil Go slice marshals as null, and the runner read workflows without a
-// guard, so `af explore` reached it as {"workflows": null} and died on
-// TypeError: Cannot read properties of null (reading 'length') before the
-// browser opened. Every exploration, on every application, since the command
-// was written. Found by running it against examples/next-app rather than by
-// reading either side: both sides compiled and both sides typechecked.
+// A nil slice marshals as null and an empty one as [], and the difference is
+// fatal in the TypeScript that reads them. Every af explore run sent
+// "workflows": null, because the exploration path never sets that field, and
+// main.ts read doc.workflows.length before it looked at the goals. The command
+// exited AF-AGT-003 with a TypeError every time, on every machine.
 //
-// A function rather than four lines inside invokeRunner, because a test can
-// call this and cannot call that, and a copy of the rule inside a test is a
-// test of the copy.
+// Nothing caught it because nothing anywhere drove main.ts. The runner's own
+// suite tests explore() directly, and the one Go test that reached a real
+// subprocess replaced node with a shell script. Both halves worked and the
+// document between them was never sent by a test.
 //
-// The runner is made tolerant of a null in the same change. Both halves are
-// deliberate and they are not the same statement: strict on the write, so an
-// engine that sends an empty list is saying there are none; tolerant on the
-// read, so a runner still works against an engine that predates this.
-func marshalJob(job jobDocument) ([]byte, error) {
+// Fixed on both sides on purpose. Here, so the shape the engine promises is
+// the shape it sends, and in the runner, which is tolerant on a boundary it
+// does not control.
+func (o *Orchestrator) runnerDocument(job jobDocument) ([]byte, error) {
 	if job.Workflows == nil {
 		job.Workflows = []workflowDoc{}
 	}
 	if job.Personas == nil {
 		job.Personas = []personaDoc{}
+	}
+	if job.Goals == nil {
+		job.Goals = []goalDoc{}
 	}
 	return json.Marshal(job)
 }
@@ -224,7 +225,24 @@ func (o *Orchestrator) invokeRunner(
 	if err := os.MkdirAll(job.Artifacts, 0o755); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFAGT001, "detail", err.Error())
 	}
-	body, err := marshalJob(job)
+
+	// A nil slice marshals as null and an empty one as [], and the runner reads
+	// this document in TypeScript where the difference is fatal rather than
+	// cosmetic. Every af explore run sent "workflows": null, because the
+	// exploration path never sets that field, and main.ts reads
+	// doc.workflows.length before it looks at the goals. So af explore could
+	// not produce a report on any machine: it exited AF-AGT-003 with a
+	// TypeError every time.
+	//
+	// Nothing caught it because nothing anywhere drives main.ts. The runner's
+	// own suite tests explore() directly, and the one Go test that reaches a
+	// subprocess replaces node with a shell script. Both halves work and the
+	// document between them was never sent by a test.
+	//
+	// Fixed on both sides. Here, so the shape the engine promises is the shape
+	// it sends, and in the runner, which is tolerant on a boundary it does not
+	// control.
+	body, err := o.runnerDocument(job)
 	if err != nil {
 		return nil, err
 	}

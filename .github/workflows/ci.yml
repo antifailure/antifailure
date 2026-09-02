@@ -828,8 +828,21 @@ jobs:
         # without its prerequisites. The script is the shared part.
         run: ./tools/release/reproducible.sh
 
-  secrets:
-    name: no credentials in the tree
+  # This job is named for what it checks, not for its most important step.
+  #
+  # It used to be called "no credentials in the tree", and the credential scan
+  # was the LAST of nine steps. A job stops at its first failure, so when an em
+  # dash failed prosecheck at step eight, `scanrepo` never executed and the
+  # check reported FAILED under a name that makes a security claim. Two agents
+  # read that as a credential in the tree and escalated. Neither reading was
+  # possible to check from the summary, because the absence of a step looks
+  # exactly like its failure.
+  #
+  # A false credential alarm is expensive twice: it burns an escalation now,
+  # and it teaches the next reader to discount the one that matters. So the
+  # scan is its own job below, and this one no longer claims to be it.
+  documents:
+    name: the documents and the site tell the truth
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -915,11 +928,72 @@ jobs:
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
 
+  # Alone, and deliberately so.
+  #
+  # This is the only step in this job, which is what makes its result mean what
+  # its name says: green here is "the scanner ran and found nothing", never
+  # "the scanner never ran". It also means a prose failure can no longer stop
+  # the credential scan from happening at all, which is the half of the old
+  # arrangement that actually mattered.
+  credentials:
+    name: no credentials in the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
       - name: Nothing in the repository looks like a live credential
         # Uses the engine's own detector, so the check and the runtime refusal
         # cannot disagree about what a credential looks like. Its own tests
         # assemble fake keys at runtime for exactly this reason.
         run: cd engine && go run ../tools/scanrepo ..
+
+  changelog:
+    name: every change says what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The whole history, because the range this examines starts where the
+      # branch left the base and a shallow checkout has no merge base to find.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Anything a user can see comes with a changelog fragment
+        # CONTRIBUTING.md has said "a missing fragment fails a gate" since the
+        # first week, README.md names the four categories one may open with,
+        # and the pull request template carries a checkbox for it. Nothing
+        # checked any of that. The Developer Certificate of Origin went the
+        # same way in this repository: required by the same document, unread,
+        # and 65 of the first 80 commits had no trailer by the time anybody
+        # counted. Eight of the twenty product changes since the fragment
+        # convention began landed with none either.
+        #
+        # This is deliberately not "a pull request with no new file in
+        # .changes fails". Run that over this history and it fires on a lint
+        # fix, on four double hyphens removed from two components, and on a
+        # check script that ships nothing. A gate whose findings are not all
+        # real gets routed around and then deleted, so this asks whether
+        # anything a user could NOTICE changed, and passes in silence
+        # otherwise. tools/changecheck/classify.go carries the list and the
+        # commit each exemption was learned from.
+        #
+        # Its own job, so that a red here cannot hide the steps after it: a
+        # job stops at its first failure and the ones it skipped read exactly
+        # like the ones that passed.
+        env:
+          AF_CHANGECHECK_BASE: ${{ github.event.pull_request.base.sha }}
+          AF_CHANGECHECK_BEFORE: ${{ github.event.before }}
+        run: go run ./tools/changecheck .
 
   authorship:
     name: commits are attributed to their author

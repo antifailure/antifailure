@@ -29,7 +29,19 @@ import (
 var (
 	// A command line inside a fenced block: a line beginning with af, before
 	// any shell operator that would make the rest something else.
-	afLine = regexp.MustCompile(`(?m)^\s*(?:[a-z_]+=\$\()?af\s+([^\n|>&;#]*)`)
+	//
+	// The optional `run:` is not decoration. Without it this pattern requires
+	// af to be the first word on the line, and a GitHub Actions step that runs
+	// one command writes it as `run: af ci ...` on a single line. Six such
+	// invocations were invisible to both this gate and the workflow one next
+	// door, across examples/github-workflow.yml and three documentation pages,
+	// and one of them was `af ci --output report.md` on the page that teaches
+	// the pull request integration. That is the SAME defect this gate's
+	// neighbour was written to catch, surviving in the one form neither
+	// pattern could see. A `- ` is allowed only in front of `run:`, so a
+	// markdown list item that merely mentions af in prose is still not read as
+	// an invocation.
+	afLine = regexp.MustCompile(`(?m)^\s*(?:(?:-\s+)?run:\s+)?(?:[a-z_]+=\$\()?af\s+([^\n|>&;#]*)`)
 	// A long flag, with or without a value.
 	longFlag = regexp.MustCompile(`--[a-zA-Z][a-zA-Z0-9-]*`)
 )
