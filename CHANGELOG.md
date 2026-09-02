@@ -733,6 +733,18 @@ it.
 
 ### Security
 
+- The release archive had no `af` in it. Both callers of
+  `tools/release/build.sh` pass the output directories relatively and the
+  script builds the binary from `engine/`, in a subshell, so the linker's `-o`
+  resolved against `engine/` rather than against the directory the script had
+  just made. The binary landed outside the staged tree, the archive was
+  assembled without it, and the archive, its checksum and the exit code were
+  all exactly what a working build produces. `tools/relpack` exists to assert
+  what is inside the archive and could not see it, because it passed absolute
+  paths, which is the one shape neither caller uses and the one shape that
+  makes the defect impossible. It builds from inside the tree with a relative
+  path now, and was watched failing on the unfixed script before it was
+  believed.
 - Release archives are reproducible and proven to be. Two builds of one commit
   produced four different archives every time, because `tar` takes each entry's
   timestamp from the filesystem and `gzip` writes another into its own header.
