@@ -192,11 +192,16 @@ export function declaredPermissions(): Map<string, Permission> {
 /**
  * The PLATFORM permission each operator route declares.
  *
- * The mirror of declaredPermissions, reading the other meta field, and it
- * exists so that neither catalog can be checked in a way that quietly excuses
- * the other. The tenant matrix skips a route only when THIS map has it, so a
- * route that declares nothing at all is caught by the tenant test rather than
- * falling between the two.
+ * Read the same way declaredPermissions() reads the tenant one, from metadata
+ * set at construction rather than recorded when a middleware runs, so it is
+ * complete the moment the module loads.
+ *
+ * It exists so the TENANT matrix can tell an operator route from an unguarded
+ * one. Skipping by PATH PREFIX was the obvious alternative and it is wrong: a
+ * route named `admin.something` that declares nothing at all would then be
+ * skipped by the tenant matrix and absent from the platform one, guarded by
+ * neither and visible to no test. Skipping only routes that DECLARE a platform
+ * permission means an undeclared route still fails somewhere.
  */
 export function declaredAdminPermissions(): Map<string, string> {
   const out = new Map<string, string>()

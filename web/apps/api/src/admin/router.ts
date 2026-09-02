@@ -367,6 +367,94 @@ export const adminRouter = router({
           organizations: Number(r.orgs),
         }))
       }),
+
+    /**
+     * Suspends an ACCOUNT, which is not the same as revoking a session.
+     *
+     * Revoking ends one sign-in. Suspending ends every current session AND
+     * every future one, because resolveSession reads users.suspended_at on
+     * every request beside the session's own revoked_at.
+     *
+     * That enforcement is what makes this route mean anything, and it did not
+     * exist until this commit: the column was added by an earlier migration
+     * and read by nothing, so a Suspend would have changed a row, written an
+     * audit entry, and left the person working. The route came second on
+     * purpose.
+     */
+    suspend: adminProcedure('admin.users.write')
+      .input(z.object({ userId: z.string().uuid(), reason: z.string().trim().min(1).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ github_login: string; suspended_at: Date | null }>(sql`
+            SELECT github_login, suspended_at FROM users WHERE id = ${input.userId}::uuid`)
+          const user = found[0]
+          if (!user) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'No account with that id.' })
+          }
+          if (user.suspended_at) {
+            throw new TRPCError({
+              code: 'PRECONDITION_FAILED',
+              message: 'That account is already suspended.',
+            })
+          }
+          // The record first, in the same transaction, so a failed update
+          // takes its entry with it and the update cannot commit without one.
+          await adminAudit(db, c, {
+            action: 'user.suspended',
+            targetType: 'user',
+            targetId: input.userId,
+            severity: 'high',
+            detail: { reason: input.reason, githubLogin: user.github_login },
+          })
+          await db.execute(sql`
+            UPDATE users
+            SET suspended_at = ${c.clock.now().toISOString()},
+                suspended_reason = ${input.reason},
+                suspended_by = ${c.admin.email},
+                updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.userId}::uuid`)
+          return {
+            suspended: true,
+            // Said in the response as well as the console, because this is the
+            // sentence an operator repeats to whoever asked for it. Unlike an
+            // organization suspension, this one DOES lock the person out.
+            effect:
+              'Every session this account holds stops working on its next request, and it cannot sign in again until restored.',
+          }
+        })
+      }),
+
+    restore: adminProcedure('admin.users.write')
+      .input(z.object({ userId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ github_login: string }>(sql`
+            SELECT github_login FROM users WHERE id = ${input.userId}::uuid`)
+          if (!found[0]) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'No account with that id.' })
+          }
+          await adminAudit(db, c, {
+            action: 'user.restored',
+            targetType: 'user',
+            targetId: input.userId,
+            severity: 'high',
+            detail: { githubLogin: found[0].github_login },
+          })
+          await db.execute(sql`
+            UPDATE users
+            SET suspended_at = NULL, suspended_reason = NULL, suspended_by = NULL,
+                updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.userId}::uuid`)
+          // Restoring does NOT bring old sessions back. They were not revoked,
+          // so they resolve again if they have not otherwise expired, which is
+          // the honest behaviour: suspension paused the account rather than
+          // ending its sign-ins, and saying otherwise would be a promise the
+          // sessions table does not keep.
+          return { suspended: false }
+        })
+      }),
   }),
 
   sessions: router({
@@ -486,6 +574,175 @@ export const adminRouter = router({
         provisioned: r.provisioned,
       }))
     }),
+
+    /**
+     * Creates an operator who CANNOT SIGN IN YET.
+     *
+     * No password is accepted here and none is generated. The row lands with a
+     * NULL password_hash, and no password hashes to NULL, so the account
+     * exists and is unusable until somebody provisions a credential out of
+     * band. That is the whole provisioning story: there is no default
+     * credential anywhere in this system, and a route that minted one would be
+     * the single worst thing in the portal.
+     *
+     * The operator list shows `provisioned: false` for these, so an account
+     * that cannot sign in is visibly different from one that can rather than
+     * looking identical until somebody tries.
+     */
+    create: adminProcedure('admin.operators.write')
+      .input(
+        z.object({
+          email: z.string().trim().email().max(320),
+          name: z.string().trim().min(1).max(200),
+          role: z.enum(ADMIN_ROLES),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        const email = input.email.toLowerCase()
+        return c.adminDb(async (db) => {
+          const clash = await db.execute<{ id: string }>(
+            sql`SELECT id FROM admin_users WHERE email = ${email}`,
+          )
+          if (clash[0]) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'An operator with that email already exists.',
+            })
+          }
+          await adminAudit(db, c, {
+            action: 'operator.created',
+            targetType: 'admin_user',
+            targetId: email,
+            severity: 'critical',
+            detail: { email, name: input.name, role: input.role },
+          })
+          const rows = await db.execute<{ id: string }>(sql`
+            INSERT INTO admin_users (email, name, role)
+            VALUES (${email}, ${input.name}, ${input.role})
+            RETURNING id`)
+          return {
+            id: rows[0]!.id,
+            provisioned: false,
+            effect:
+              'The account exists and cannot sign in. Set a password out of band before it is usable.',
+          }
+        })
+      }),
+
+    /**
+     * Changes an operator's role.
+     *
+     * REFUSES TO CHANGE YOUR OWN, and that is the guard that matters here
+     * rather than a nicety. admin.operators.write is held by super_admin as
+     * well as owner, so without this a super_admin could promote themselves to
+     * owner and pick up admin.audit.export and every other owner-only
+     * permission. A privilege model where the privileged can widen their own
+     * privileges is not a privilege model.
+     *
+     * The refusal is on SELF rather than on the target role, deliberately.
+     * Blocking only "promote to owner" would still let somebody grant
+     * themselves anything below it, and it would need updating every time the
+     * role table changes. "Somebody else changes your role" needs no such list.
+     */
+    setRole: adminProcedure('admin.operators.write')
+      .input(z.object({ adminUserId: z.string().uuid(), role: z.enum(ADMIN_ROLES) }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        if (input.adminUserId === c.admin.adminUserId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message:
+              'You cannot change your own operator role. Ask another owner to do it, so that granting privilege is always somebody else deciding.',
+          })
+        }
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ email: string; role: string; is_root: boolean }>(
+            sql`SELECT email, role, is_root FROM admin_users WHERE id = ${input.adminUserId}::uuid`,
+          )
+          const target = found[0]
+          if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No operator with that id.' })
+          if (target.role === input.role) {
+            return { role: input.role, changed: false }
+          }
+          await adminAudit(db, c, {
+            action: 'operator.role_changed',
+            targetType: 'admin_user',
+            targetId: input.adminUserId,
+            severity: 'critical',
+            detail: { email: target.email, from: target.role, to: input.role },
+          })
+          // The root operator's trigger refuses a demotion from owner. Letting
+          // it raise rather than pre-checking here means the database is the
+          // thing enforcing it, and the route cannot drift from the trigger.
+          await db.execute(sql`
+            UPDATE admin_users SET role = ${input.role}, updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.adminUserId}::uuid`)
+          return { role: input.role, changed: true }
+        })
+      }),
+
+    /** Suspends an operator, which stops their live sessions on the next
+     *  request: current_admin_user() joins admin_users and checks it, so the
+     *  cookie dies mid-session rather than at its next sign-in. */
+    suspend: adminProcedure('admin.operators.write')
+      .input(z.object({ adminUserId: z.string().uuid(), reason: z.string().trim().min(1).max(500) }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        if (input.adminUserId === c.admin.adminUserId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You cannot suspend yourself. Ask another owner to do it.',
+          })
+        }
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ email: string }>(
+            sql`SELECT email FROM admin_users WHERE id = ${input.adminUserId}::uuid`,
+          )
+          if (!found[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'No operator with that id.' })
+          await adminAudit(db, c, {
+            action: 'operator.suspended',
+            targetType: 'admin_user',
+            targetId: input.adminUserId,
+            severity: 'critical',
+            detail: { email: found[0].email, reason: input.reason },
+          })
+          await db.execute(sql`
+            UPDATE admin_users
+            SET suspended_at = ${c.clock.now().toISOString()},
+                suspended_reason = ${input.reason},
+                updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.adminUserId}::uuid`)
+          return {
+            suspended: true,
+            effect: 'Their sessions stop working on the next request, and they cannot sign in.',
+          }
+        })
+      }),
+
+    restore: adminProcedure('admin.operators.write')
+      .input(z.object({ adminUserId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        return c.adminDb(async (db) => {
+          const found = await db.execute<{ email: string }>(
+            sql`SELECT email FROM admin_users WHERE id = ${input.adminUserId}::uuid`,
+          )
+          if (!found[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'No operator with that id.' })
+          await adminAudit(db, c, {
+            action: 'operator.restored',
+            targetType: 'admin_user',
+            targetId: input.adminUserId,
+            severity: 'critical',
+            detail: { email: found[0].email },
+          })
+          await db.execute(sql`
+            UPDATE admin_users SET suspended_at = NULL, suspended_reason = NULL,
+                                   updated_at = ${c.clock.now().toISOString()}
+            WHERE id = ${input.adminUserId}::uuid`)
+          return { suspended: false }
+        })
+      }),
   }),
 
   audit: router({

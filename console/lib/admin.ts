@@ -18,7 +18,7 @@
  */
 
 import { createContext, useContext } from "react";
-import { query, rest, useApi, type ApiError } from "@/lib/api";
+import { query, rest, useApi, usePages, type ApiError } from "@/lib/api";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -66,6 +66,28 @@ export interface Tenant {
   environments: number;
 }
 
+export interface Operator {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  /** The permanent root operator, which the database refuses to delete,
+   *  demote or suspend. Shown so nobody wastes an incident trying. */
+  isRoot: boolean;
+  suspended: boolean;
+  lastSignedInAt: string | null;
+  /** Whether a password has ever been set. An operator who CANNOT sign in
+   *  otherwise looks identical to one who can, and on this screen that is the
+   *  difference between an account that is waiting for setup and one that is
+   *  live. */
+  provisioned: boolean;
+}
+
+export interface TenantDetail extends Tenant {
+  members: number;
+  environments: number;
+}
+
 export interface AdminAuditEntry {
   seq: number;
   actor: string;
@@ -87,18 +109,82 @@ export function useAdminMe() {
   return useApi<AdminMe>(() => query("admin.me"), []);
 }
 
+/**
+ * Tenants, paged.
+ *
+ * usePages rather than useApi, and that is a correctness fix rather than a
+ * feature. The route returns 50 rows and a cursor; reading only the first page
+ * showed 50 organizations in a table that looked complete, so an operator
+ * searching for an account that sorted past the cut would be told, confidently,
+ * that it does not exist. See the comment on More: a list that quietly shows a
+ * third of the rows is worse than one that looks broken, because the reader
+ * acts on it.
+ */
 export function useTenants(search: string) {
-  return useApi<AdminPage<Tenant>>(
-    () => query("admin.tenants.list", { limit: 50, query: search || undefined }),
+  return usePages<Tenant>(
+    async (cursor) => {
+      const page = await query<AdminPage<Tenant>>("admin.tenants.list", {
+        limit: 50,
+        ...(search ? { query: search } : {}),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      return { rows: page.rows, next: page.nextCursor };
+    },
     [search],
   );
 }
 
+/** One tenant by slug, for the detail screen. Its own single-page read rather
+ *  than paging the whole list and searching it client side: the list route
+ *  filters server side, so asking for the one is one query rather than many. */
+export function useTenant(slug: string) {
+  return useApi<AdminPage<Tenant>>(
+    () => query("admin.tenants.list", { limit: 50, query: slug }),
+    [slug],
+  );
+}
+
+export function useOperators() {
+  return useApi<Operator[]>(() => query("admin.operators.list"), []);
+}
+
 export function useAdminAudit(severity: string) {
-  return useApi<AdminPage<AdminAuditEntry>>(
-    () => query("admin.audit.list", { limit: 100, severity: severity || undefined }),
+  return usePages<AdminAuditEntry>(
+    async (cursor) => {
+      const page = await query<AdminPage<AdminAuditEntry>>("admin.audit.list", {
+        limit: 100,
+        ...(severity ? { severity } : {}),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      return { rows: page.rows, next: page.nextCursor };
+    },
     [severity],
   );
+}
+
+/**
+ * A tRPC mutation on the operator router.
+ *
+ * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
+ * console sends one because its session cookie is SameSite=Lax, which a
+ * cross-site top-level POST still carries. The operator cookie is
+ * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
+ * and there is nothing for a token to add. If that cookie's SameSite is ever
+ * loosened, this is the line that has to grow a token.
+ */
+export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
+  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+}
+
+export async function suspendTenant(orgId: string, reason: string) {
+  return adminMutate<{ suspended: boolean; effect: string }>("admin.tenants.suspend", {
+    orgId,
+    reason,
+  });
+}
+
+export async function resumeTenant(orgId: string) {
+  return adminMutate<{ suspended: boolean }>("admin.tenants.resume", { orgId });
 }
 
 /**

@@ -36,7 +36,7 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 8,
+    atLeast: 18,
   })
 })
 
@@ -66,6 +66,19 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
     // them, and this is the line that keeps them together.
     const signedIn = await adminSignIn(h.pool, { email, password }, new Date())
     return { token: signedIn.token, caller: await callerWithToken(signedIn.token) }
+  }
+
+  /** A caller plus the id of the operator it is acting as, for the routes
+   *  whose whole point is what an operator may do to THEMSELVES. */
+  async function callerForWithId(role: AdminRole) {
+    const email = `${role}-${randomUUID().slice(0, 8)}@example.test`
+    const { hash, salt } = await hashPassword(password)
+    const [row] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, role, password_hash, password_salt, password_set_at)
+      VALUES (${email}, ${role}, ${role}, ${hash}, ${salt}, now())
+      RETURNING id`
+    const signedIn = await adminSignIn(h.pool, { email, password }, new Date())
+    return { adminUserId: row!.id, caller: await callerWithToken(signedIn.token) }
   }
 
   async function callerWithToken(token: string) {
@@ -296,6 +309,196 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
 
     const after = await resolveSession(h.pool, h.clock, person.token)
     assert.equal(after, null, 'the session still resolved after an operator revoked it')
+  })
+
+  describe('suspending an account actually ends it', () => {
+    // The canonical failure of this project, aimed at the exact column that
+    // had it: users.suspended_at was added by a migration and read by NOTHING,
+    // so a Suspend would have changed a row, written an audit entry, and left
+    // the person working until their session happened to expire.
+    //
+    // So this proves the observable end state rather than the write. It signs
+    // a real customer in, resolves their session to show it works, suspends
+    // the account through the operator route, and resolves the SAME token
+    // again expecting null. Nothing here trusts a return value.
+    test('a live session stops resolving on the next request', async () => {
+      const { signInAs } = await import('./harness.ts')
+      const { resolveSession } = await import('../src/auth/session.ts')
+      const person = await signInAs(h, alice, 'member')
+
+      const before = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(before, 'the customer session did not resolve before suspension')
+
+      const { caller } = await callerFor('security')
+      const result = await caller.admin.users.suspend({
+        userId: before.userId,
+        reason: 'credential stuffing from one address',
+      })
+      assert.equal(result.suspended, true)
+
+      const after = await resolveSession(h.pool, h.clock, person.token)
+      assert.equal(
+        after,
+        null,
+        'the account was suspended and its session still resolved, so Suspend does not suspend',
+      )
+    })
+
+    test('restoring lets the same session resolve again', async () => {
+      const { signInAs } = await import('./harness.ts')
+      const { resolveSession } = await import('../src/auth/session.ts')
+      const person = await signInAs(h, bob, 'member')
+      const live = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(live)
+
+      const { caller } = await callerFor('security')
+      await caller.admin.users.suspend({ userId: live.userId, reason: 'under review' })
+      assert.equal(await resolveSession(h.pool, h.clock, person.token), null)
+
+      await caller.admin.users.restore({ userId: live.userId })
+      const back = await resolveSession(h.pool, h.clock, person.token)
+      assert.ok(back, 'restore did not bring the account back')
+      assert.equal(back.userId, live.userId)
+    })
+
+    test('the suspension is recorded with its reason', async () => {
+      const [entry] = await h.admin<{ detail: { reason: string }; severity: string }[]>`
+        SELECT detail, severity FROM admin_audit_entries
+        WHERE action = 'user.suspended' ORDER BY seq DESC LIMIT 1`
+      assert.equal(entry!.severity, 'high')
+      assert.ok(entry!.detail.reason.length > 0, 'a suspension was recorded with no reason')
+    })
+
+    test('suspending an account that does not exist records nothing', async () => {
+      const { caller } = await callerFor('security')
+      const [before] = await h.admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM admin_audit_entries`
+      await assert.rejects(() =>
+        caller.admin.users.suspend({ userId: randomUUID(), reason: 'nobody' }),
+      )
+      const [after] = await h.admin<{ n: string }[]>`
+        SELECT count(*)::text AS n FROM admin_audit_entries`
+      assert.equal(after!.n, before!.n, 'an audit entry survived a refused suspension')
+    })
+
+    test('support can read accounts and cannot suspend one', async () => {
+      const { caller } = await callerFor('support')
+      await assert.doesNotReject(() => caller.admin.users.list({ limit: 5 }))
+      await assert.rejects(
+        () => caller.admin.users.suspend({ userId: randomUUID(), reason: 'no' }),
+        (err: Error) => /admin\.users\.write/.test(err.message),
+      )
+    })
+  })
+
+  describe('operator administration cannot be turned on itself', () => {
+    // admin.operators.write is held by super_admin as well as owner, so the
+    // dangerous move is not an operator abusing a customer, it is an operator
+    // widening their own privileges. These are the guards for that, and each is
+    // watched failing by removing the SELF check rather than by reasoning.
+
+    test('an operator cannot promote themselves', async () => {
+      // Without this a super_admin grants themselves owner and picks up
+      // admin.audit.export and every other owner-only permission. A privilege
+      // model where the privileged can widen their own privileges is not one.
+      const { caller, adminUserId } = await callerForWithId('super_admin')
+      await assert.rejects(
+        () => caller.admin.operators.setRole({ adminUserId, role: 'owner' }),
+        (err: Error) => /cannot change your own operator role/i.test(err.message),
+        'a super_admin promoted themselves to owner',
+      )
+      const [row] = await h.admin<{ role: string }[]>`
+        SELECT role FROM admin_users WHERE id = ${adminUserId}::uuid`
+      assert.equal(row!.role, 'super_admin', 'the role changed despite the refusal')
+    })
+
+    test('an operator cannot suspend themselves', async () => {
+      const { caller, adminUserId } = await callerForWithId('owner')
+      await assert.rejects(
+        () => caller.admin.operators.suspend({ adminUserId, reason: 'oops' }),
+        (err: Error) => /cannot suspend yourself/i.test(err.message),
+      )
+    })
+
+    test('an operator CAN change somebody else, so the refusal is about self and not about the route', async () => {
+      // The control that makes the two above mean something. Without it they
+      // would pass equally well on a route that refuses everybody.
+      const { caller } = await callerForWithId('owner')
+      const { adminUserId: other } = await callerForWithId('support')
+      const result = await caller.admin.operators.setRole({ adminUserId: other, role: 'analytics' })
+      assert.equal(result.changed, true)
+      const [row] = await h.admin<{ role: string }[]>`
+        SELECT role FROM admin_users WHERE id = ${other}::uuid`
+      assert.equal(row!.role, 'analytics', 'setRole reported success and changed nothing')
+    })
+
+    describe('the root operator is permanent, through the route and not only in the database', () => {
+      // The triggers were proven in the db suite. What these prove is that the
+      // ROUTE cannot get around them, which is the thing an operator can
+      // actually reach.
+      let rootId: string
+
+      before(async () => {
+        const [row] = await h.admin<{ id: string }[]>`
+          INSERT INTO admin_users (email, name, role, is_root)
+          VALUES (${`root-${randomUUID().slice(0, 8)}@example.test`}, 'Root', 'owner', true)
+          RETURNING id`
+        rootId = row!.id
+      })
+
+      after(async () => {
+        await h.admin`ALTER TABLE admin_users DISABLE TRIGGER admin_root_is_permanent_del`
+        await h.admin`DELETE FROM admin_users WHERE id = ${rootId}::uuid`
+        await h.admin`ALTER TABLE admin_users ENABLE TRIGGER admin_root_is_permanent_del`
+      })
+
+      test('cannot be demoted through the route', async () => {
+        const { caller } = await callerForWithId('owner')
+        await assert.rejects(() =>
+          caller.admin.operators.setRole({ adminUserId: rootId, role: 'read_only' }),
+        )
+        const [row] = await h.admin<{ role: string }[]>`
+          SELECT role FROM admin_users WHERE id = ${rootId}::uuid`
+        assert.equal(row!.role, 'owner', 'the root operator was demoted through the route')
+      })
+
+      test('cannot be suspended through the route', async () => {
+        const { caller } = await callerForWithId('owner')
+        await assert.rejects(() =>
+          caller.admin.operators.suspend({ adminUserId: rootId, reason: 'no' }),
+        )
+        const [row] = await h.admin<{ suspended_at: Date | null }[]>`
+          SELECT suspended_at FROM admin_users WHERE id = ${rootId}::uuid`
+        assert.equal(row!.suspended_at, null, 'the root operator was suspended through the route')
+      })
+    })
+
+    test('a created operator cannot sign in, because no password was minted for it', async () => {
+      // The provisioning story, asserted rather than described. A route that
+      // generated a starting password would be the worst thing in the portal.
+      const { caller } = await callerForWithId('owner')
+      const email = `fresh-${randomUUID().slice(0, 8)}@example.test`
+      const made = await caller.admin.operators.create({ email, name: 'Fresh', role: 'support' })
+      assert.equal(made.provisioned, false)
+
+      const [row] = await h.admin<{ password_hash: Buffer | null }[]>`
+        SELECT password_hash FROM admin_users WHERE id = ${made.id}::uuid`
+      assert.equal(row!.password_hash, null, 'creating an operator minted a credential')
+
+      const { adminSignIn, AdminSignInError } = await import('../src/admin/session.ts')
+      await assert.rejects(
+        () => adminSignIn(h.pool, { email, password: '' }, new Date()),
+        AdminSignInError,
+      )
+    })
+
+    test('support cannot administer operators at all', async () => {
+      const { caller } = await callerForWithId('support')
+      await assert.rejects(
+        () => caller.admin.operators.create({ email: 'x@example.test', name: 'X', role: 'owner' }),
+        (err: Error) => /admin\.operators\.write/.test(err.message),
+      )
+    })
   })
 
   test('an operator read is itself recorded, without the route asking', async () => {

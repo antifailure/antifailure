@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Badge,
   Card,
+  CellLink,
   Empty,
   Loaded,
   Page,
@@ -16,6 +17,7 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
+import { More } from "@/components/pagination";
 import { useTenants } from "@/lib/admin";
 
 /**
@@ -50,8 +52,8 @@ export default function AdminTenantsPage() {
     >
       <Card>
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
-          {(page) =>
-            page.rows.length === 0 ? (
+          {(rows) =>
+            rows.length === 0 ? (
               <Empty title={search ? "No tenant matches that" : "No organizations yet"}>
                 {search
                   ? "Nothing on this installation has that name or slug. Clear the search to see every tenant."
@@ -74,12 +76,19 @@ export default function AdminTenantsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {page.rows.map((t) => (
+                    {rows.map((t) => (
                       <Row key={t.id}>
                         {/* No label on this one: it names the row, and leads
-                            the stacked record on a phone by itself. */}
+                            the stacked record on a phone by itself.
+
+                            A link on the NAME rather than a whole clickable
+                            row: a row that navigates on click has no keyboard
+                            equivalent and no address to copy, and CellLink is
+                            already 44px tall under a thumb. */}
                         <Td>
-                          <span className="block truncate font-medium text-ink">{t.name}</span>
+                          <CellLink href={`/admin/tenant?org=${encodeURIComponent(t.slug)}`}>
+                            <span className="block truncate font-medium text-ink">{t.name}</span>
+                          </CellLink>
                           <span className="block truncate font-mono text-[12px] text-muted">
                             {t.slug}
                           </span>
@@ -101,7 +110,11 @@ export default function AdminTenantsPage() {
                             <Badge tone="pass">active</Badge>
                           )}
                           {t.suspendedReason ? (
-                            <span className="mt-1 block max-w-[36ch] text-[12px] text-muted">
+                            // break-words for the same reason as the detail
+                            // card: a reason is whatever an operator pasted,
+                            // and an unbreakable token here widens the whole
+                            // table rather than just this cell.
+                            <span className="mt-1 block max-w-[36ch] break-words text-[12px] text-muted">
                               {t.suspendedReason}
                             </span>
                           ) : null}
@@ -110,6 +123,18 @@ export default function AdminTenantsPage() {
                     ))}
                   </tbody>
                 </Table>
+                {/* Always rendered, in both states. "All 24 organizations." is
+                    the only place this screen ever says the list is complete,
+                    and a footer that hid itself at the end could only ever say
+                    the opposite. */}
+                <More
+                  shown={rows.length}
+                  noun={{ one: "organization", many: "organizations" }}
+                  hasMore={state.hasMore}
+                  busy={state.busy}
+                  error={state.moreError}
+                  onMore={state.more}
+                />
               </TableWrap>
             )
           }
