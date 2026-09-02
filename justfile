@@ -89,6 +89,7 @@ gate: _reports
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
+    run "every script can be executed"   just execcheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -844,6 +845,16 @@ constcheck:
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
+
+# Every script something runs by path is one git records as executable.
+#
+# tools/site/check-tls.sh was committed at mode 100644 and both of its call
+# sites name it as a bare path, so it died with "Permission denied" and status
+# 126 the first time a push to main reached the deploy job. It had never run
+# anywhere, because the only step that runs it fires on a push and not on a
+# pull request.
+execcheck:
+    go run ./tools/execcheck .
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.
