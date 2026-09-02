@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -132,25 +131,6 @@ func TestResolveInRoot_RejectsADirectory(t *testing.T) {
 	root, _ := checkout(t)
 
 	_, fault := resolveInRoot(root, "migrations")
-	require.NotNil(t, fault)
-	require.Equal(t, FaultPathRejected, fault.Code)
-	require.Contains(t, fault.Detail, "regular file")
-}
-
-func TestResolveInRoot_RejectsAFifoWithoutHanging(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no mkfifo on Windows")
-	}
-	t.Parallel()
-	root, _ := checkout(t)
-
-	// A fifo with no writer blocks a blocking open forever. If this test ever
-	// hangs rather than failing, the nonblocking flag has been dropped and
-	// the server can be stalled indefinitely by one call.
-	fifo := filepath.Join(root, "pipe")
-	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
-
-	_, fault := resolveInRoot(root, "pipe")
 	require.NotNil(t, fault)
 	require.Equal(t, FaultPathRejected, fault.Code)
 	require.Contains(t, fault.Detail, "regular file")

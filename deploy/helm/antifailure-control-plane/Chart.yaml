@@ -7,8 +7,8 @@ type: application
 # application image and is what `image.tag` defaults to, so a chart installed
 # without an explicit tag runs the application this chart was written against
 # rather than whatever `latest` happens to be that day.
-version: 0.1.0
-appVersion: "v0.1.1"
+version: 0.1.1
+appVersion: "v1.0.0"
 
 home: https://antifailure.dev
 sources:

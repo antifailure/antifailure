@@ -30,6 +30,7 @@
  */
 
 const crypto = require("crypto");
+const { failure } = require("./errors");
 
 const PARTITION = "waitlist";
 const MAX_EMAIL_LENGTH = 254; // RFC 5321 upper bound on a path
@@ -95,13 +96,7 @@ class RateLimiter {
 
 /** The body every storage failure answers with, so a visitor sees one message. */
 function unavailable() {
-  return {
-    status: 503,
-    body: {
-      ok: false,
-      message: "The waitlist is temporarily unavailable. Please try again later.",
-    },
-  };
+  return failure("waitlist_unavailable");
 }
 
 /**
@@ -118,26 +113,17 @@ async function join({ table, limiter, now, body, ip, log }) {
   // is no reason to parse a body for a caller that is already over its
   // allowance.
   if (limiter.limited(`ip:${ip}`, now)) {
-    return {
-      status: 429,
-      body: { ok: false, message: "Too many attempts. Try again in a minute." },
-    };
+    return failure("rate_limited");
   }
 
   const email = normaliseEmail(body && body.email);
   if (!email) {
-    return {
-      status: 400,
-      body: { ok: false, message: "That does not look like an email address." },
-    };
+    return failure("invalid_email");
   }
 
   const rowKey = keyFor(email);
   if (limiter.limited(`email:${rowKey}`, now)) {
-    return {
-      status: 429,
-      body: { ok: false, message: "Too many attempts. Try again in a minute." },
-    };
+    return failure("rate_limited");
   }
 
   const source =

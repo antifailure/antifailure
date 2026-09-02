@@ -398,21 +398,83 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
    * member of that role or opening a second connection with a password this
    * process is not given.
    *
-   * A correction, recorded here because the migration that carries it has
-   * already been applied and a migration's text cannot change afterwards: that
-   * file's own comment says BYPASSRLS is the only mechanism that reads two
-   * tenants at once. It is not. Policies are OR'd, so a permissive policy
-   * keyed on a credential the caller already holds widens just as effectively
-   * with no role privilege at all, and that alternative was built and shown to
-   * work before this one was chosen over it.
+   * ---------------------------------------------------------------------
+   * WHY THIS IS A ROLE AND NOT A POLICY, and the alternative that was built
+   * and rejected. Recorded here rather than in the migration because that
+   * file has been applied and migrate.ts digests its whole body, so its
+   * prose is frozen: a comment-only edit throws exactly like a DDL edit, on
+   * every database that already ran it. This is the only copy.
+   * ---------------------------------------------------------------------
    *
-   * BYPASSRLS was still the right choice, for two reasons that are not the one
-   * the file gives. A policy per table is a cost that scales with the number of
-   * tables, so it is a boundary somebody eventually forgets to extend, and the
-   * table they forget is silently invisible to the portal rather than loudly
-   * broken. And a role attribute is a credential rather than a privilege: the
-   * application cannot be granted its way into this one, where a policy keyed
-   * on a session hash is reachable by whoever can present that hash.
+   * First, a correction to what that migration says. Its comment claims
+   * BYPASSRLS is the only mechanism that reads two tenants at once. It is
+   * not. Policies are OR'd, so a permissive policy keyed on a credential the
+   * caller already holds widens just as effectively with no role privilege at
+   * all. That is not a hypothetical: the design was BUILT, it was shown to
+   * work on a real cluster with FORCE ROW LEVEL SECURITY on and row_security
+   * untouched, and it was rejected afterwards. The conclusion below survives;
+   * the reason the migration gives for it does not.
+   *
+   * It was rejected on three grounds, and the third is the one that decides.
+   *
+   * COST THAT SCALES. A policy per table is a boundary whose size grows with
+   * the schema, so it is one somebody eventually forgets to extend. That is
+   * not a prediction either. A single review of the rejected design, of a
+   * schema written hours earlier by a careful author, found three separate
+   * omissions: an operator could read the audit log but not append to it, so
+   * the first refund would have raised on the audit write with the money
+   * already moved; five billing tables were missing from the cross-tenant
+   * read set; and four more were not classified at all.
+   *
+   * CREDENTIAL RATHER THAN CLAIM. A role attribute is a credential the
+   * application cannot be granted its way into, because reaching it means
+   * holding a password this process is not given. A policy keyed on a session
+   * hash is reachable by anyone who can present that hash, which is a claim
+   * rather than a credential, and claims travel.
+   *
+   * LOUD RATHER THAN SILENT, which is the deciding one. The two mechanisms
+   * fail in opposite directions. A missing PRIVILEGE raises permission denied
+   * immediately and names itself. A false POLICY predicate matches zero rows
+   * and REPORTS SUCCESS. Dropping one policy from the rejected design was
+   * tried deliberately: the operator read zero organizations and nothing
+   * raised. So the failure mode of a forgotten policy is a portal that shows
+   * an empty page indistinguishable from a tenant that has no data, and the
+   * failure mode of a forgotten grant is a stack trace. Given that somebody
+   * WILL forget one, the mechanism that shouts is the correct one.
+   *
+   * ---------------------------------------------------------------------
+   * THREE THINGS ABOUT THIS ROLE THAT ARE EASY TO GET WRONG
+   * ---------------------------------------------------------------------
+   *
+   * BYPASSRLS grants NO TABLE PRIVILEGES AT ALL. It is about policies, and
+   * policies only. A role holding it and nothing else gets 42501 on every
+   * statement it attempts, which is what happened to the first code written
+   * against this role.
+   *
+   * ALTER DEFAULT PRIVILEGES covers only what it enumerates, and the one in
+   * migration 0023 enumerates SELECT. Future tables are therefore readable
+   * and not writable, and an operator write needs an explicit INSERT or
+   * UPDATE grant naming the table. That is deliberate, and it is why the
+   * write grants in that file are a short enumerated list rather than a
+   * second blanket.
+   *
+   * Role ATTRIBUTES are not inherited through membership; PRIVILEGES are.
+   * That asymmetry is why the assertion below is about SET ROLE rather than
+   * about inheritance, and it produces the silent failure a third time, now
+   * inside the role mechanism itself. Measured on Postgres 17 against two
+   * organizations:
+   *
+   *   a role holding only BYPASSRLS            permission denied (42501)
+   *   a member of it, reading directly         0 rows, and NO error
+   *   that same parent role, reading directly  2 rows
+   *   the member again, after SET ROLE         2 rows
+   *
+   * The second line is the trap. Membership hands over the GRANTS, so the
+   * statement is permitted and nothing raises, and withholds the ATTRIBUTE,
+   * so the policies still apply and it reads nothing. An operator in that
+   * state sees an empty portal and no error to search for. SET ROLE is what
+   * hands over both, because assuming a role assumes its attributes, which is
+   * why that is the statement this test tries.
    *
    * SET ROLE is the specific attack. It needs no password and no new
    * connection, so if antifailure_admin were ever granted to antifailure_app,

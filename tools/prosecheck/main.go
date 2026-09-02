@@ -49,6 +49,12 @@ import (
 //
 // examples is here because an example's README is documentation a user reads
 // before anything else: it is the first prose most people meet.
+// `.changes` is here because a fragment is not a working note: `just changelog`
+// assembles them into the published CHANGELOG.md, so a separator that this gate
+// exists to keep out of the documentation reaches a release note by a route the
+// gate could not see. Measured before it was added rather than after: all 119
+// fragments that existed at the time were already clean, so this closes a hole
+// without changing anybody's file.
 //
 // www and console are here because their Markdown was the one hole left by the
 // split below. This checker reads their TypeScript, so "the site is scanned"
@@ -56,7 +62,7 @@ import (
 // trees did not include them and the source extensions did not include Markdown.
 // Nothing was shipping through it, which is the reason to close it now rather
 // than after something is.
-var documents = []string{"docs/src/content/docs", "examples", ".", "www", "console"}
+var documents = []string{"docs/src/content/docs", "examples", ".changes", ".", "www", "console"}
 
 // sources are the trees whose TypeScript carries copy rather than only code.
 //

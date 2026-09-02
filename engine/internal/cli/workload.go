@@ -146,9 +146,15 @@ promise the run cannot keep.`),
 			// its lease. Nothing else can carry either fact to work that is
 			// already going.
 			work := reporter.Start(cmd.Context(), plan.Kind)
+			// Asked of the running binary, for the same reason af version
+			// asks. This read a package variable that no build ever stamped,
+			// so every result document an enterprise run wrote recorded the
+			// community edition, and the document is the artifact an auditor
+			// keeps after the run is gone.
+			declared, _ := declaredEdition(cmd.Context())
 			res, err := workload.Execute(work, workload.Options{
 				Plan: plan, Runner: o, Clock: e.Clock,
-				Engine:         workload.Engine{Version: Version, Commit: Commit, Edition: Edition},
+				Engine:         workload.Engine{Version: Version, Commit: Commit, Edition: declared.Name},
 				Branch:         o.Branch(),
 				Root:           root,
 				ManifestDigest: manifestDigest(manifestPath),
