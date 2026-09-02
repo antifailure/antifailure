@@ -634,10 +634,14 @@ func siteFixture(t *testing.T, real, name, body string) string {
 		mustWrite(t, filepath.Join(root, filepath.FromSlash(c.premise[0])), string(src))
 	}
 	// AuthScreen is a premise and also a file the real tree exempts, so the
-	// exemption has something to excuse in the fixture too.
+	// exemption has something to excuse in the fixture too. The list is the
+	// exempted files, so a file that stops being exempted leaves it: the
+	// architecture page was here until it folded into the product overview,
+	// and a name kept after the file went fails every test in this package
+	// with a read error rather than a finding.
 	for _, f := range []string{
 		"www/components/AuthScreen.tsx", "www/components/AuthModal.tsx",
-		"www/lib/routes.ts", "www/components/pages/product/Architecture.tsx",
+		"www/lib/routes.ts",
 	} {
 		src, err := os.ReadFile(filepath.Join(real, filepath.FromSlash(f)))
 		if err != nil {

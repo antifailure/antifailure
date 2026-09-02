@@ -220,3 +220,14 @@ examples/*/report.md
 # run by hand when the card should change.
 /www/public/home/*.avif
 /www/public/home/*.webp
+
+# Screenshot and scratch trees a contributor's own verification pass leaves
+# behind. They are the evidence for one review, not the record of the product,
+# and 64MB of them arrived in one pull request before this line existed.
+.verify/
+.verify-shots/
+
+# Per-contributor agent configuration. Which assistant somebody drives, and the
+# standing instructions they give it, are theirs rather than the repository's.
+.agents/
+.cursor/
