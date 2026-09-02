@@ -236,7 +236,7 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
 /**
  * Removes expired sessions. Housekeeping, not enforcement.
  *
- * It ran through withoutTenant until 0029 and deleted nothing, on every
+ * It ran through withoutTenant until 0024 and deleted nothing, on every
  * instance, for as long as it existed. Every policy on this table keys on the
  * acting user, on the hash of a presented token, or on the tenant, and a
  * sweeper has none of the three, so the DELETE matched no row and reported
