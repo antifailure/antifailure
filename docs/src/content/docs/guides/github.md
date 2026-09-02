@@ -228,9 +228,23 @@ carries the permission and event lists, with what each one is for and why the
 rest are refused. It is one list rather than two so that they cannot drift.
 
 The one worth knowing here: the console's controls need **Actions: write**, and
-GitHub answers a dispatch with 404 whether the App lacks that permission, the
-workflow file is missing, or the App was never installed on that repository. A
-missing permission looks exactly like a missing file.
+declaring it on the App is not the same as holding it. Widening an existing
+App's permissions asks every installation to accept the new grant and changes
+nothing until somebody does, so the App's settings page can read Actions: write
+while every installation of it still refuses a dispatch.
+
+GitHub does not name the state it refuses in, so the console works it out and
+says which of these it is:
+
+| What GitHub answers | What it can mean |
+| --- | --- |
+| `403 Resource not accessible by integration` | The installation holds no Actions write, **or** the App was never given that repository. |
+| `404 Not Found` | There is no workflow file of that name on the default branch, **or** no repository of that name this App can see. |
+| `422` | The branch does not exist, the workflow declares no `workflow_dispatch` trigger, or it does not declare the inputs the console sends. |
+
+A missing permission is checked before the workflow file is looked for, so a
+403 hides whether the file is even there: granting the permission can reveal a
+second thing to fix.
 
 ## Starting a run from the console
 
@@ -276,6 +290,12 @@ cost an afternoon if you meet them the hard way: GitHub reads the trigger list
 from the **default branch**, so adding `workflow_dispatch` on a feature branch
 alone changes nothing, and a dispatch to a workflow without it answers 404
 rather than saying what is wrong.
+
+The console checks all of that when you choose a repository, not when you press
+the button, and says what is missing in the form. It does not disable the
+button: the check can be a few seconds out of date by the width of whatever you
+just did on GitHub, and a form that refuses to submit because of a stale read
+is worse than one that tries and tells you.
 
 `agents` resolves to a browser workflow and `load` to an observed load mix. The
 result says which kind a verb resolved to, so nobody has to infer it.

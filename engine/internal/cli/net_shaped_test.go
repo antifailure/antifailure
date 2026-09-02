@@ -36,3 +36,17 @@ func TestTheWaitIsShownWithoutALimitAndWithoutAStatus(t *testing.T) {
 	require.Equal(t, "held 90ms by 1 a second, bursting to 1",
 		outcomeOf(local.Decision{WaitedMs: 90, Limit: "1 a second, bursting to 1"}))
 }
+
+// A sandbox call and a live call have to be distinguishable, in the table and
+// in the JSON. The sidecar has always recorded the swap; nothing showed it, so
+// af net log answered "the request reached Stripe" identically whether or not
+// the credential going out was the real one. That is the one question the
+// sandbox exists to answer.
+func TestASandboxedRequestSaysItsCredentialWasSwapped(t *testing.T) {
+	require.Equal(t, "200, sandbox credential",
+		outcomeOf(local.Decision{Status: 200, Substituted: true}))
+	require.Equal(t, "sandbox credential",
+		outcomeOf(local.Decision{Substituted: true}))
+	require.Equal(t, "200, held 20ms, sandbox credential",
+		outcomeOf(local.Decision{Status: 200, WaitedMs: 20, Substituted: true}))
+}
