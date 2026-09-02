@@ -521,24 +521,6 @@ jobs:
         run: npm run build
         working-directory: www
 
-      - name: No class that never applies
-        # `cn` is a plain join rather than tailwind-merge, so a className passed
-        # to a component lands beside the component's own class and the cascade
-        # picks whichever Tailwind emitted last. The site header marked the
-        # current page with text-black over a text-black/70 default, lost, and
-        # marked nothing at all for as long as the header has existed. It reads
-        # the built HTML, so it runs here, after the build above.
-        run: go run ./tools/classcheck .
-
-      - name: No animation that never stops
-        # If a piece of UI animates on an infinite loop while the user does
-        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
-        # the source, because a rule existing is not an element carrying it:
-        # `.hero-scan` was read in the source twice and called harmless, and
-        # was scanning behind the front page headline the whole time. Runs
-        # here, after the build above.
-        run: go run ./tools/motioncheck .
-
       - name: The crawl surfaces the site claims to have
         # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
         # twins and the skip link. None of these break a build when they go
@@ -597,10 +579,46 @@ jobs:
         # image asserts the directory is not empty. Building it here means a
         # type error in the console fails the pull request rather than the
         # image build twenty minutes later.
+        #
+        # Two render gates now sit BELOW this step rather than above it, and
+        # that order is load bearing. Both read the render rather than the
+        # source, both cover the console, and while they ran above this step
+        # they were reading a directory that did not exist yet. motioncheck
+        # dropped the unbuilt application in silence and reported success over
+        # www alone: 42 files read where the built tree has 64, exit zero. They
+        # refuse an unbuilt application now, so moving them back up fails
+        # loudly rather than quietly.
         run: npm run build
         working-directory: console
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: No class that never applies
+        # `cn` is a plain join rather than tailwind-merge, so a className passed
+        # to a component lands beside the component's own class and the cascade
+        # picks whichever Tailwind emitted last. The site header marked the
+        # current page with text-black over a text-black/70 default, lost, and
+        # marked nothing at all for as long as the header has existed. It reads
+        # the built HTML, so it runs here, after both builds above.
+        #
+        # It reads the console as well as www now. The console does not import
+        # `cn` at all, which made it look exempt; it composes in template
+        # literals instead, and `${inputClass} mt-0` has the same hazard for the
+        # same reason.
+        run: go run ./tools/classcheck .
+
+      - name: No animation that never stops
+        # If a piece of UI animates on an infinite loop while the user does
+        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
+        # the source, because a rule existing is not an element carrying it:
+        # `.hero-scan` was read in the source twice and called harmless, and
+        # was scanning behind the front page headline the whole time. Runs
+        # here, after BOTH builds above.
+        #
+        # It has always claimed to cover the console and until now never read
+        # it once, because it ran before the console was built and skipped an
+        # application it could not find. It refuses one now instead.
+        run: go run ./tools/motioncheck .
 
       - name: The console exported the routes the control plane routes to
         # A static export writes one file per route. If a page stops exporting

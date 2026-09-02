@@ -525,7 +525,8 @@ modecheck:
 # lands beside the component's own class rather than replacing it, and the
 # cascade picks whichever Tailwind emitted last. The site header marked the
 # current page with text-black over a text-black/70 default, lost, and marked
-# nothing at all. Reads the built HTML, so it needs a built www.
+# nothing at all. Reads the built HTML, so it needs a built www AND a built
+# console, and it refuses rather than skipping when either is missing.
 classcheck:
     go run ./tools/classcheck .
 
@@ -535,7 +536,10 @@ classcheck:
 # read globals.css on the same day, both saw the one infinite rule left in it,
 # and both called it harmless because nothing in that file used it. It was
 # rendered on the front page by HeroFilm.tsx. The source says which rules
-# exist; only the render says which land on an element. Needs a built www.
+# exist; only the render says which land on an element. Needs a built www AND
+# a built console, and it refuses rather than skipping when either is missing,
+# because skipping is how the console went unchecked for the whole life of
+# this gate.
 motioncheck:
     go run ./tools/motioncheck .
 
