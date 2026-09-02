@@ -331,7 +331,7 @@ export const engineTokens = pgTable('engine_tokens', {
   // user_id; an engine token is a machine and deliberately has none. See
   // migration 0012. An oidc token is one workflow job, minted by exchanging a
   // GitHub Actions identity token, and it carries the binding that earned it
-  // and an expiry the database insists on. See migration 0028.
+  // and an expiry the database insists on. See migration 0025.
   kind: text('kind').notNull().default('engine'),
   userId: uuid('user_id'),
   scopes: text('scopes').array().notNull().default([]),
@@ -345,7 +345,7 @@ export const engineTokens = pgTable('engine_tokens', {
 // about who that repository belongs to, because anybody can mint one naming
 // their own repository. This is the table that turns the proven name into an
 // organization, and a repository with no live row here is refused rather than
-// resolved. See migration 0028 for why `repositories` cannot play this part.
+// resolved. See migration 0025 for why `repositories` cannot play this part.
 export const oidcRepositoryBindings = pgTable('oidc_repository_bindings', {
   id: uuid('id').primaryKey().defaultRandom(),
   orgId: uuid('org_id').notNull(),

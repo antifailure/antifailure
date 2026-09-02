@@ -202,7 +202,7 @@ export async function exchangeWorkflowIdentity(
   }
 
   // 3. Which organization, if any, has claimed it. On a connection scoped to
-  //    the account out of the verified token, so the policy in 0028 can only
+  //    the account out of the verified token, so the policy in 0025 can only
   //    reach bindings held by organizations with an installation on that
   //    account: a bug here writes nothing into somebody else's tenant.
   const rows = await deps.pool.withGitHubAccount(owner, async (db) => {
@@ -341,7 +341,7 @@ export async function exchangeWorkflowIdentity(
  * sends the customer to the manual claim, where a person decides.
  *
  * The write runs under the tenant rather than under the GitHub account scope,
- * deliberately: migration 0028 gives the account scope SELECT and UPDATE and no
+ * deliberately: migration 0025 gives the account scope SELECT and UPDATE and no
  * INSERT, so a connection holding only a repository owner's name still cannot
  * mint the permission. The organization is read from the verified installation
  * first, and the row is written as that organization.
