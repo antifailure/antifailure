@@ -174,7 +174,14 @@ describe('the verdicts', () => {
   it('a refusal says whether the limit came from the plan or from a grant', () => {
     const plan = checkQuotaWithEntitlements(applyOverrides('free', []), 'environments', 3)
     assert.equal(plan.allowed, false)
-    assert.match(plan.reason, /the plan/)
+    // The PLAN is named, not just "the plan". A refusal that does not say which
+    // plan is refusing you tells you nothing about what upgrading buys, and
+    // that sentence is the whole self-service path out of the refusal.
+    assert.match(plan.reason, /the free plan/)
+    assert.match(
+      checkQuotaWithEntitlements(applyOverrides('team', []), 'environments', 25).reason,
+      /the team plan/,
+    )
 
     const granted = checkQuotaWithEntitlements(
       applyOverrides('free', [row({ value: 5 })]), 'environments', 5,
