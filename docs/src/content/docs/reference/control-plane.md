@@ -120,7 +120,7 @@ guessing upward would hand out administrative rights on a timeout, and that
 applies to the first member of an empty organization as well: GitHub has to say
 `admin` for anybody to become an owner. If the App is permanently broken and
 that leaves an organization with nobody who can act, the way back is
-[break-glass](/docs/self-hosting/operations/#nobody-can-sign-in), which is an
+[break-glass](/docs/self-hosting/operations#nobody-can-sign-in), which is an
 operator holding the database credential rather than a guess made by a web
 request.
 

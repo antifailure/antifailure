@@ -151,6 +151,7 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relpack
 /reltar
 /sbomcheck
 /scanrepo

@@ -421,9 +421,20 @@ func renderDocs(es []entry) []byte {
 
 // docsURL turns a catalog docs field into the address the built site serves.
 //
-// The host canonicalizes documentation paths without a trailing slash. Two
-// codes point at a heading rather than a page, so the fragment is appended
-// only after the canonical path has been built.
+// No trailing slash, because that is the address the host actually serves.
+// www/public/staticwebapp.config.json sets "trailingSlash": "never", so Azure
+// answers /docs/reference/cli/ with a 301 to /docs/reference/cli. This function
+// used to write the slashed form, which put a redirect behind the "More" link
+// of all 131 error codes, on the page a reader reaches at the moment something
+// has already gone wrong for them.
+//
+// The earlier defect this replaces is still worth keeping in mind, because the
+// shape of the string is the same: two codes point at a heading rather than a
+// page, and treating the whole field as a path built
+// /docs/reference/cli#af-init/, whose fragment is "af-init/" and matches no
+// heading. The link resolved, landed at the top of a 900 line page, and looked
+// like it worked. So the field is still split on the fragment first; there is
+// simply no longer a slash to misplace.
 func docsURL(docs string) string {
 	path, fragment, hasFragment := strings.Cut(docs, "#")
 	url := "/docs/" + path

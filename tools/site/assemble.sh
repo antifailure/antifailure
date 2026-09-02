@@ -420,6 +420,114 @@ if problems:
 print(f"host config: {shadowed} redirects shadow a built page, every one a moved-page stub")
 SHADOW
 
+# One trailing-slash policy, enforced across both builds.
+#
+# The host decides this for the whole site: www/public/staticwebapp.config.json
+# sets "trailingSlash", and Azure answers the other spelling with a 301. Each
+# build then has its own idea. www/next.config.ts said `trailingSlash: false`
+# and agreed. docs/astro.config.mjs said "ignore", and Astro's default under
+# "ignore" is the slashed form, so all 82 documentation pages declared a
+# canonical the host does not serve, the documentation sitemap offered 81 URLs
+# that redirect, and the Docs link in the shared header 301'd on every page.
+# Documentation is roughly seventy percent of this site, so the majority of it
+# pointed engines at addresses it then had to be told again were elsewhere.
+#
+# Nothing could have caught it. www/scripts/check-seo.mjs reads www/out and has
+# never opened docs/dist, and neither build can see the other's URLs or the
+# host config that overrules them both. This script is the only step that has
+# all three, which is why the assertion is here.
+#
+# The policy is READ from the config rather than written down again here. A
+# check with its own copy of the answer is a check that passes after somebody
+# changes the real one, and this file already carries that lesson twice.
+#
+# Fragments and query strings are cut before comparing: a browser drops them
+# before it asks for anything, so /docs/reference/cli/#af-init is a request for
+# /docs/reference/cli/ and redirects exactly like its bare form.
+python3 - <<'SLASH' || exit 1
+import glob, json, os, re, sys
+from collections import Counter
+
+with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
+    policy = json.load(f).get("trailingSlash", "auto")
+
+if policy not in ("never", "always"):
+    print(f"host config: trailingSlash is {policy!r}, so no one spelling is enforced")
+    sys.exit(0)
+
+want_slash = policy == "always"
+
+
+def disagrees(path):
+    """Whether this site-relative path is spelled the way the host serves it."""
+    path = path.split("#")[0].split("?")[0]
+    # The root is "/" under either policy, and a file with an extension is a
+    # file rather than a page: /og.png never grows a slash.
+    if path in ("", "/") or os.path.splitext(path)[1]:
+        return False
+    return path.endswith("/") != want_slash
+
+
+def local(url):
+    """A site-relative path, or None for somebody else's host."""
+    if url.startswith(("http://", "https://")):
+        rest = url.split("://", 1)[1]
+        host, _, tail = rest.partition("/")
+        if host != "antifailure.dev":
+            return None
+        return "/" + tail
+    return url if url.startswith("/") else None
+
+
+canonical = []
+links = Counter()
+locs = []
+
+for page in sorted(glob.glob("site/**/*.html", recursive=True)):
+    with open(page, encoding="utf-8", errors="replace") as f:
+        html = f.read()
+    tag = re.search(r'<link rel="canonical" href="([^"]*)"', html)
+    if tag:
+        path = local(tag.group(1))
+        if path and disagrees(path):
+            canonical.append((page, tag.group(1)))
+    for href in re.findall(r'href="([^"]*)"', html):
+        path = local(href)
+        if path and disagrees(path):
+            links[path] += 1
+
+for sitemap in sorted(glob.glob("site/**/sitemap*.xml", recursive=True)):
+    with open(sitemap, encoding="utf-8") as f:
+        for loc in re.findall(r"<loc>([^<]*)</loc>", f.read()):
+            path = local(loc)
+            if path and disagrees(path):
+                locs.append((sitemap, loc))
+
+spelling = "a trailing slash" if want_slash else "no trailing slash"
+if canonical or locs or links:
+    print(f'the host serves every page with {spelling} ("trailingSlash": "{policy}"),')
+    print("and these ask for the other spelling, which it answers with a 301:")
+    for page, url in canonical[:10]:
+        print(f"  canonical  {page} -> {url}")
+    if len(canonical) > 10:
+        print(f"  canonical  ... and {len(canonical) - 10} more pages")
+    for sitemap, url in locs[:10]:
+        print(f"  sitemap    {sitemap} -> {url}")
+    if len(locs) > 10:
+        print(f"  sitemap    ... and {len(locs) - 10} more URLs")
+    for path, count in links.most_common(10):
+        print(f"  link       {path}  ({count} occurrences)")
+    if len(links) > 10:
+        print(f"  link       ... and {len(links) - 10} more addresses")
+    sys.exit(1)
+
+print(
+    f"host config: {spelling} everywhere, across "
+    f"{len(glob.glob('site/**/*.html', recursive=True))} pages, "
+    "their canonicals, their sitemaps and every link between them"
+)
+SLASH
+
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.
 for required in \

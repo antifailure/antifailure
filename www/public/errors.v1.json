@@ -293,7 +293,7 @@
       "area": "DB",
       "areaName": "Database",
       "message": "The golden version {version} no longer exists.",
-      "resolution": "Run 'af golden list' to see the available versions, then 'af up --golden <version>'.",
+      "resolution": "Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.",
       "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 5,
@@ -418,6 +418,17 @@
       "docs": "https://antifailure.dev/docs/guides/personas",
       "retryable": false,
       "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-022",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
+      "resolution": "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
+      "docs": "https://antifailure.dev/docs/guides/personas",
+      "retryable": false,
+      "exitCode": 3,
       "planned": false
     },
     {
@@ -689,7 +700,7 @@
       "area": "MAN",
       "areaName": "Manifest",
       "message": "The manifest at {path} declares schema version {found}, which this build does not understand.",
-      "resolution": "Upgrade with 'af version -check' and install the release that supports version {found}.",
+      "resolution": "Check the build you are running with 'af version' and install the release that supports version {found}.",
       "docs": "https://antifailure.dev/docs/reference/manifest",
       "retryable": false,
       "exitCode": 3,
