@@ -6,6 +6,14 @@ tag with no section here, or with an empty one, does not publish at all.
 Releases before v1.0.0 predate this file and their notes are on the GitHub
 releases page.
 
+Anything between a `<!-- relnotes:omit -->` line and a `<!-- relnotes:end -->`
+one stays in this file and is replaced, in the published notes, by a link to
+the changelog on the site. This file is a reference document people search; a
+release note is the first thing somebody deciding whether to use this reads,
+and the per change entries are what make it a wall. `just relnotes` refuses an
+unbalanced marker, a second region in one section, an empty region, and a
+section that omits all of itself.
+
 ## v1.0.0
 
 The first stable release, and the first since v0.1.1 on 26 August 2026.
@@ -37,10 +45,12 @@ Stable, and breaking any of these costs a major version:
 - **`--output json`.** The documented fields of every command's JSON. Fields may
   be added, so parse for the fields you want rather than refusing unknown ones.
   A documented field will not be removed or change type.
-- **The provider interfaces.** `engine/pkg/provider` and the `engine/pkg/schema`
-  types they carry. A provider is meant to be written outside this repository
-  and each interface ships with a conformance suite, so it is an integration
-  surface and is treated as one.
+- **The provider interfaces.** `engine/pkg/provider`, the `engine/pkg/schema`
+  types they carry, the `engine/pkg/secret` type their signatures name, and
+  `engine/conformance`, the suite that decides whether an implementation is
+  conformant. A provider is meant to be written outside this repository, so all
+  four are stable together: an interface is only as usable as the types its
+  signatures name.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
 - **The lint finding identifiers.** Every migration lint finding carries a
@@ -52,19 +62,61 @@ Explicitly not stable, and free to change in a minor release:
 
 - The Helm chart's values and the Terraform module's variables. The chart is
   versioned separately and is at 0.1.1 for that reason.
-- The control plane's HTTP API, which the console and the engine speak to each
-  other and which is not a published integration surface.
-- Every Go package except the two named above, and everything under
-  `engine/internal`, which is unimportable on purpose.
+- Most of the control plane's HTTP API, which is mostly how the console and the
+  engine speak to each other. The part that is published is named rather than
+  described: every route the router serves is classified in
+  `web/apps/api/src/boundary.ts`, either as part of the published contract,
+  which means it appears in the OpenAPI document, or as deliberately excluded
+  on one of seven recorded grounds. A route that is neither fails the build.
+- Every Go package except the four named above, and everything under
+  `engine/internal`, which is unimportable on purpose. `engine/api/packages.txt`
+  lists every importable package with its classification and the reason for it,
+  and one that is listed nowhere fails the build rather than arriving public by
+  default.
 - Lint rule names, and which findings a release reports. A rule is renamed when
   a clearer name exists, and a release may find something an earlier one passed.
   That is the product working, and it is why the identifier above is what to
   match on.
 - The event stream's set of types. Types are added as features land.
 
+### The boundary is now checked rather than described
+
+Both of those carve-outs were true and neither had anything holding it, and the
+improvement worth stating is that the line is enforced rather than asserted.
+
+`tools/surfacecheck` refuses a Go package that becomes importable and is
+classified nowhere, a change to a stable package that version 1 does not allow,
+and a stable signature naming a type from a package that is not stable.
+`engine/api/v1.0.0.txt` records the exported surface as it stood at this tag,
+so adding an export passes and removing one does not. The half about
+`engine/internal` needs nothing: the toolchain refuses an import of an internal
+path from outside the subtree rooted at its parent, and that was verified from
+the tools module rather than taken on trust.
+
+The third check found a live one. `provider.Database.ConnString` returned a
+type from `engine/internal/secrets`, so the interface these notes call an
+integration surface could not be implemented from outside the repository at
+all. Naming the return type needed the internal import, the toolchain refuses
+that import by path, and there was no third spelling. It compiled here, it read
+as correct, and it would have failed on the first line of the first provider
+anybody wrote, with this tag holding it for the whole of version 1. The type is
+now `engine/pkg/secret.Value`, the old name is an alias so nothing inside the
+module changed, and a provider written outside the module is compiled in CI to
+prove the promise rather than restate it.
+
+On the HTTP side, `route-boundary.test.ts` walks the router's own route table
+and holds it against the published document in both directions: a contract
+route the document does not carry fails, and an excluded route the document
+does carry fails too. The check that existed before compared the published file
+to what the generator declares, which is the file against itself, and it was
+blind to a route the generator never mentioned. Four routes under
+`/v1/oidc/bindings` were exactly that.
+
 ### What moves when this tag is pushed
 
-Pushing `v1.0.0` publishes the control plane image as
+Pushing `v1.0.0` does three things.
+
+It publishes the control plane image as
 `ghcr.io/antifailure/control-plane:v1.0.0` and **moves
 `ghcr.io/antifailure/control-plane:latest` onto it.** `latest` resolves to the
 v0.1.1 digest until then. If you self host and pull `latest`, this tag changes
@@ -72,8 +124,18 @@ what your next pull gets, on your infrastructure, at a time we chose rather than
 one you did. Pin `v1.0.0`, or pin the digest that tag resolves to, if that
 matters to you. A tag can be moved and a digest cannot.
 
-Nothing else moves on its own. No deployment is triggered by this tag, and no
-existing environment is upgraded.
+It builds and publishes this release's archives, their checksums, the bill of
+materials and the signatures over both.
+
+And it deploys **our** hosted control plane, not yours. `cd.yml` runs on a `v*`
+tag as well as on a push to `main`: the staging job's condition excludes only a
+manual dispatch aimed elsewhere, so a tag push deploys staging without asking,
+and the production job's condition is `startsWith(github.ref, 'refs/tags/v')`
+behind the `production` environment, which carries required reviewers, so
+production moves only when a human approves it.
+
+Nothing on your infrastructure is deployed or upgraded by this tag. The only
+thing that reaches you is the image tag above, and only if you pull it.
 
 ### Supply chain
 
@@ -141,9 +203,13 @@ manifest or pipeline does.
   on its output, so a pull request that touches nothing any check exercises no
   longer gets an environment. It checks out with `fetch-depth: 0`, because a one
   commit deep clone has no merge base to diff against.
-- The documentation now runs the control plane image as
-  `ghcr.io/antifailure/control-plane:latest` rather than naming a version. The
-  tag is moved by the push of a `v*` tag and never by a build off `main`.
+- The documentation runs the control plane image as
+  `ghcr.io/antifailure/control-plane:main-b53906a` rather than the version tag it
+  named before. A `main-<sha>` tag names the commit the image was built from, so
+  `tools/claimcheck` can prove offline that the pinned image can complete the
+  procedure the page describes. A version tag cannot, because the only one ever
+  published was built from a different ref than the git tag of the same name,
+  and `latest` cannot either.
 - A run in which no workflow reached a verdict about the application exits `9`
   rather than `0`. A real failure still exits `8`, so a pipeline reading the
   number can tell "your change broke something" from "nothing was tested". Both
@@ -207,16 +273,22 @@ manifest or pipeline does.
   calls on your behalf; the commands a person runs are `af load run`,
   `af load scenario`, `af test` and `af explore`. Its flags are documented under
   Workloads instead.
-- The dispatch workflow template calls `af workload run` rather than assembling
-  flags in a shell case statement, and its `command` input keeps its verbs. `up`,
-  `down`, `agents` and `load` work on an older copy of the file; `scenario` and
-  `explore` need this one. An input the case statement had no flag for used to
-  be dropped without a word and is now refused by name.
+- The dispatch workflow template runs a workload through `af workload run`, and
+  its `command` input keeps its verbs. `up`, `down`, `agents` and `load` work on
+  an older copy of the file; `scenario` and `explore` need this one. A knob
+  `af workload run` has no flag for is refused by name rather than dropped
+  without a word, which is what the case statement it replaced did. That holds
+  for the workload kinds and not yet for two verbs: the template still answers
+  `scenario` and `explore` with steps of their own that call `af load scenario`
+  and `af explore` directly, so a `duration` or a `scale` sent to either is
+  still dropped in silence.
 - An exploration run through `af workload run --kind exploration` no longer
   fails the job when a goal is not reached. `docs/concepts/exploration` has
   always promised that an exploration cannot fail your build, and the promise
   held for `af explore` and broke for the path the console drives. A run that
   measured nothing at all is still blocked and still exits non zero.
+
+<!-- relnotes:omit -->
 
 ### Added
 
@@ -886,6 +958,8 @@ it.
   which assumed those were the same place. Run from a subdirectory it reported
   that no runner source existed while standing inside a checkout that had one,
   and told the reader to install a runner they already had.
+
+<!-- relnotes:end -->
 
 ### Security
 

@@ -68,9 +68,11 @@ gate: _reports
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "lint findings keep their ids"   just lintcheck
+    run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
@@ -90,6 +92,7 @@ gate: _reports
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
+    run "every script can be executed"   just execcheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -456,6 +459,12 @@ errcheck:
 lintcheck:
     go run ./tools/lintcheck .
 
+# The Go packages version 1 promised, and the ones it deliberately did not.
+# Also the leak that makes the difference meaningless: a stable signature
+# naming a type an outside caller has no way to write.
+surfacecheck:
+    go run ./tools/surfacecheck .
+
 # The release stamps version variables that exist, and stamps every one it
 # declares.
 ldcheck:
@@ -501,6 +510,9 @@ docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
+licensecheck:
+    go run ./tools/licensecheck .
+
 prosecheck:
     go run ./tools/prosecheck .
 
@@ -855,6 +867,16 @@ constcheck:
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
+
+# Every script something runs by path is one git records as executable.
+#
+# tools/site/check-tls.sh was committed at mode 100644 and both of its call
+# sites name it as a bare path, so it died with "Permission denied" and status
+# 126 the first time a push to main reached the deploy job. It had never run
+# anywhere, because the only step that runs it fires on a push and not on a
+# pull request.
+execcheck:
+    go run ./tools/execcheck .
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.

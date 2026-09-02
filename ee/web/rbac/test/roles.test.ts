@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 // Custom roles, and the three rules that make them predictable.
 
 import { describe, it } from 'node:test'

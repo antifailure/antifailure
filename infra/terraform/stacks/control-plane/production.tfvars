@@ -176,6 +176,12 @@ monthly_budget_usd = 450
 # can review.
 signin_allowlist = ["virsanghavi", "maksymrajszewski"]
 
+# Where the accounts that list does not name are sent. Without it a refused
+# visitor reads "ask an owner of this installation", which is the right answer
+# for somebody self-hosting and the wrong one for a person who arrived from the
+# marketing site and was one click away from the waitlist.
+signup_url = "https://antifailure.dev/signup"
+
 # EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the

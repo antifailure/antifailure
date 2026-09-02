@@ -54,6 +54,8 @@ export class FakeGitHub implements GitHubClient {
   private readonly invisible = new Set<string>()
   private readonly absentBranches = new Set<string>()
   private actionsWrite = true
+  private readonly revokedAuthorizations: string[] = []
+  private grantRefusal = false
 
   /** How long a code is good for. GitHub's is ten minutes. */
   readonly codeTtlMs = 10 * 60 * 1000
@@ -303,5 +305,32 @@ export class FakeGitHub implements GitHubClient {
     this.revoked.push(installationId)
     const removed = this.installed.delete(installationId)
     return { configured: true, removed }
+  }
+
+  /**
+   * Withdraws a grant, and behaves like the real endpoint: the token stops
+   * working afterwards.
+   *
+   * That last part is what makes this worth faking rather than counting. A
+   * caller that revoked the authorization and then went on to ask GitHub
+   * another question with the same token would pass a test that only recorded
+   * the call, and would fail against the real API.
+   */
+  async revokeAuthorization(accessToken: string): Promise<{ revoked: boolean }> {
+    if (this.grantRefusal) return { revoked: false }
+    const login = this.tokens.get(accessToken)
+    if (login) this.revokedAuthorizations.push(login)
+    this.tokens.delete(accessToken)
+    return { revoked: Boolean(login) }
+  }
+
+  /** Whose authorization has been withdrawn, oldest first. */
+  authorizationsRevoked(): string[] {
+    return [...this.revokedAuthorizations]
+  }
+
+  /** Makes the next withdrawal fail, the way an unreachable GitHub does. */
+  refuseAuthorizationRevocation(refuse = true): void {
+    this.grantRefusal = refuse
   }
 }

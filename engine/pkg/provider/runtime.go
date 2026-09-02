@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // Runtime creates and destroys environments.
@@ -93,7 +93,7 @@ type EnvSpec struct {
 	// DatabaseURL is the connection string services receive. It is a secret
 	// because it is one, and because a runtime that took a plain string would
 	// eventually log it.
-	DatabaseURL secrets.Value
+	DatabaseURL secret.Value
 	// MigrationDatabaseURL is the connection string a service's migrate command
 	// receives, where it differs from the one the service itself gets.
 	//
@@ -103,7 +103,7 @@ type EnvSpec struct {
 	// migrations use, and the failure is a migration that half applies rather
 	// than one that refuses. Zero means use DatabaseURL for both, which is
 	// correct for a provider with no pool.
-	MigrationDatabaseURL secrets.Value
+	MigrationDatabaseURL secret.Value
 	// PublicPorts maps a service name to the host port it will be reachable
 	// on, reserved before anything starts.
 	//
@@ -131,7 +131,7 @@ type EnvSpec struct {
 	ModelEnv []string
 	// SandboxCredentials are the values the sidecar substitutes for a rule in
 	// sandbox mode, keyed by the name the rule refers to.
-	SandboxCredentials map[string]secrets.Value
+	SandboxCredentials map[string]secret.Value
 	// CACertPEM is the environment certificate every service is told to trust.
 	//
 	// Empty when nothing in the policy needs to read inside TLS, in which case
@@ -139,7 +139,7 @@ type EnvSpec struct {
 	// it would not otherwise.
 	CACertPEM string
 	// CAKeyPEM is the matching private key, which goes to the sidecar alone.
-	CAKeyPEM secrets.Value
+	CAKeyPEM secret.Value
 	// Journal records a resource before it is created. A runtime must call it
 	// and must respect an error from it, because a resource created before it
 	// was recorded is a resource teardown cannot find.
@@ -168,7 +168,7 @@ type ServiceSpec struct {
 	HealthTimeout time.Duration
 	// Env are additional variables. Values are secrets because some of them
 	// are, and separating the two at this layer means guessing.
-	Env map[string]secrets.Value
+	Env map[string]secret.Value
 	// DependsOn names services that must be ready first.
 	DependsOn []string
 	// Migrate is a command to run to completion before the service starts.
