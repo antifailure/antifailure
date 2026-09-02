@@ -793,6 +793,35 @@ var siteClaims = []siteClaim{
 			"of a minted one, and a premise that is half true anchors nothing",
 	},
 	{
+		name: "mail this domain cannot send",
+		// The sign-up screen said "you will hear from us" and the client module
+		// it posts to still records the version before that, "We'll email you
+		// when the control plane can connect a repo". Neither could happen. The
+		// endpoint writes one row and sends nothing, the table has no read path,
+		// and antifailure.dev publishes no MX record and an SPF policy of
+		// `v=spf1 -all`, which authorizes no sender at all. Somebody who left an
+		// address and waited was waiting for a message with no route to them.
+		//
+		// Twice now, which is why this is a gate rather than a correction. The
+		// promise is easy to write because it is what a waitlist is supposed to
+		// do, and nothing about the page makes its impossibility visible.
+		//
+		// Deliberately narrow. It bans the MAIL promise and nothing else:
+		// SECURITY.md says "We will tell you which release we expect to" about a
+		// channel that genuinely works, and a rule that refused that sentence
+		// would be a rule somebody turns off.
+		forbidden: regexp.MustCompile(`(?i)we('ll| will) (e-?mail|mail) you|you will hear from us|we('ll| will) be in touch|we('ll| will) let you know`),
+		// The site's own record of the DNS fact. The day antifailure.dev gains a
+		// sending identity that sentence has to go, this rule lapses loudly, and
+		// whoever removed it is told to revisit what the page may promise.
+		premise: [2]string{"www/components/pages/company/Contact.tsx", "no mail exchanger"},
+		reason: "the waitlist stores an address and sends nothing, and the domain " +
+			"authorizes no outbound sender. A page may say what happens to the address " +
+			"and who reads it; it may not say that something will reach the person, " +
+			"because nothing can. If mail starts working, delete this rule; the premise " +
+			"beside it is what tells you the day that happens.",
+	},
+	{
 		name:      "there is no hosted control plane",
 		forbidden: regexp.MustCompile(`(?i)no hosted control plane`),
 		premise:   [2]string{"www/components/AuthScreen.tsx", "invitation only"},
@@ -1010,6 +1039,22 @@ var siteClaimExceptions = []claimException{
 			"unreachable, openAuth had no caller, and it shipped the sentence in the " +
 			"bundle anyway; this is the record of that, and of why the fix was to " +
 			"delete it rather than correct its copy",
+	},
+	{
+		file: "www/components/AuthScreen.tsx",
+		rule: "mail this domain cannot send",
+		line: "It used to say",
+		reason: "the comment recording the promise this screen used to make and why " +
+			"nothing could have kept it, which is the note that stops somebody " +
+			"restoring it",
+	},
+	{
+		file: "www/lib/waitlist.ts",
+		rule: "mail this domain cannot send",
+		line: `that said "We'll email you`,
+		reason: "the header recording the first version of the same promise, made when " +
+			"the address never left the browser at all. It has to quote the sentence " +
+			"to be worth reading",
 	},
 	{
 		file: "www/lib/docs-facts.ts",

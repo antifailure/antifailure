@@ -21,3 +21,11 @@ privacy sheet said passwords entered in the form are not stored, and the form
 has had no password field since the fake one was removed. The legal pages
 listed what a waitlist row holds and omitted the page it was submitted from,
 which is stored.
+
+Twice is enough for a gate, so `claimcheck` has a seventh site rule. A page may
+say what happens to an address and who reads it. It may not say that something
+will reach the person, because nothing can. The rule is premised on the contact
+page's record of the DNS fact, so the day antifailure.dev gains a sending
+identity the premise lapses and whoever removed that sentence is told to
+revisit what the site may promise. It was watched refusing a freshly written
+promise before it was believed.
