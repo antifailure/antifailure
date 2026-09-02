@@ -1455,6 +1455,14 @@ export async function issueWorkflowEngineToken(
  * entirely. Both are real and neither is sufficient alone: GitHub's covers the
  * repository's own secrets, and this covers the credential this control plane
  * would otherwise hand out.
+ *
+ * Neither covers the third thing, and this comment used to read as though there
+ * were only two. Both halves above are about what GitHub hands a job. Neither
+ * says anything about what is already sitting on the machine the job runs on: on
+ * a self hosted runner the Docker daemon, an existing registry login and the
+ * network are ambient, and GitHub withholds none of them from a fork's code. The
+ * engine's own fork gate is what covers that, and it has to, because this control
+ * plane never sees that machine.
  */
 export async function issueCallback(
   deps: LifecycleDeps,
