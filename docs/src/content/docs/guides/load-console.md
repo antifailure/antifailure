@@ -2,7 +2,7 @@
 title: Running a workload from the console
 description: The Load area of the console, the four kinds of workload, and what every number on a result means.
 sidebar:
-  order: 16
+  order: 9
 ---
 
 `af load run` prints a summary and exits. That is the right amount of output
@@ -32,9 +32,9 @@ that replays request for request and a mix that replays only as a shape are not
 equally strong evidence, and that difference matters more when somebody
 disagrees with the result than when they agree with it.
 
-The first two are described in full under [Load](/docs/concepts/load/), the
-third under [Workflows](/docs/guides/workflows/) and the fourth under
-[Exploration](/docs/concepts/exploration/).
+The first two are described in full under [Load](/docs/concepts/load), the
+third under [Workflows](/docs/guides/workflows) and the fourth under
+[Exploration](/docs/concepts/exploration).
 
 ### A workload names things; it does not contain them
 
@@ -120,7 +120,7 @@ the environments that can work.
 `.github/workflows/antifailure.yml` in your own repository, on the
 environment's own branch. That is what keeps your database, your secrets and
 your third-party credentials inside your own cloud. See
-[GitHub](/docs/guides/github/) for the workflow file itself.
+[GitHub](/docs/guides/github) for the workflow file itself.
 
 Two of the four kinds need inputs that the workflow gained when the console
 learned to start runs. Against an older copy GitHub refuses the dispatch, and
