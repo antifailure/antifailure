@@ -575,6 +575,20 @@ jobs:
         run: npm run build
         working-directory: docs
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        # Node 26 from here down, because console/ is not only checked here, it
+        # is BUILT INTO the control plane image, whose console stage is
+        # node:26-alpine. The build step below stands in for that image build,
+        # which is what its own comment says it is for, and a stand in that
+        # compiles on a different major is not standing in for anything.
+        #
+        # A second setup-node rather than raising the job's pin, because this
+        # job also tests api/, and api/ runs on Azure Static Web Apps at
+        # node:22, measured rather than inferred in tools/site/assemble.sh.
+        # Raising the pin would have widened that mismatch to fix this one.
+        with:
+          node-version: '26'
+
       - run: npm ci --no-audit --no-fund
         working-directory: console
 
@@ -724,8 +738,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        # The same Node the runtime stage of control-plane.Dockerfile uses.
+        # web/apps/api is what that image runs, so this typecheck and these
+        # tests are the only thing standing between a type error and a running
+        # server, and they have to run on the version that will run it.
         with:
-          node-version: '24'
+          node-version: '26'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
