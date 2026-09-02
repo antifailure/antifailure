@@ -71,6 +71,31 @@ const SAFE_COLUMNS = {
   admin_users: ['id', 'email', 'name', 'role', 'is_root', 'suspended_at', 'last_signed_in_at', 'created_at'],
 } as const
 
+/**
+ * THE ONE `admin:` KEY, and why the lanes compose here rather than mounting
+ * themselves.
+ *
+ * Four agents own four slices of this portal, and each of them can write a
+ * router. What none of them can do alone is guarantee there is exactly one
+ * `admin:` key in appRouter: a second `admin: theirRouter` does not conflict in
+ * git, does not fail to compile, and silently wins or loses depending on
+ * object key order. That is the duplicate-implementation trap this codebase has
+ * spent the night deleting, wearing an object literal.
+ *
+ * So the mount point is here and it is the only one. A lane exports its
+ * sub-routers, this file spreads them in, and appRouter names `adminRouter`
+ * once. The cost is that adding a lane is an edit to this file, which is the
+ * point: it is a visible edit in a review rather than an invisible collision at
+ * runtime.
+ *
+ * The prefix `admin.` is load bearing beyond tidiness. Maintenance mode exempts
+ * `/trpc/admin.*` so an operator can still reach the switch that releases an
+ * outage, so a route that lands outside this object is a route that goes dark
+ * exactly when it is needed. Every lane's paths therefore read `admin.<lane>.*`.
+ *
+ * To add a lane: import its sub-routers and spread them below with a comment
+ * naming the owner. Do NOT add a second `admin:` key to appRouter.
+ */
 export const adminRouter = router({
   /**
    * Who the operator is, and what the shell may show them.
@@ -506,6 +531,18 @@ export const adminRouter = router({
         }))
       }),
   }),
+
+  // ---------------------------------------------------------------------------
+  // Other lanes spread in here.
+  //
+  // admin-infra:  infra: infraRouter, emergency: emergencyRouter
+  // admin-money:  billing, entitlements, flags
+  // admin-ops:    users detail, projects, impersonation, support, search
+  //
+  // Each exports its sub-routers from its own file and this object names them,
+  // so the matrix test in admin-routes.test.ts walks every operator route in one
+  // pass. A lane mounted as its own `admin:` key would be invisible to it.
+  // ---------------------------------------------------------------------------
 })
 
 /** Reads the organization or refuses, so an audit entry is never written about

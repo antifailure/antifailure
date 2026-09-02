@@ -52,14 +52,11 @@ export default function AdminTenantsPage() {
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(page) =>
             page.rows.length === 0 ? (
-              <Empty
-                title={search ? "No tenant matches that" : "No organizations yet"}
-                body={
-                  search
-                    ? "Nothing on this installation has that name or slug. Clear the search to see every tenant."
-                    : "Nobody has created an organization on this installation. The first sign-in that creates one will show up here."
-                }
-              />
+              <Empty title={search ? "No tenant matches that" : "No organizations yet"}>
+                {search
+                  ? "Nothing on this installation has that name or slug. Clear the search to see every tenant."
+                  : "Nobody has created an organization on this installation. The first sign-in that creates one will show up here."}
+              </Empty>
             ) : (
               <TableWrap>
                 <Table>
@@ -67,11 +64,11 @@ export default function AdminTenantsPage() {
                     <tr>
                       <Th>Organization</Th>
                       <Th>Plan</Th>
-                      {/* Numeric columns are right aligned so the digits line
-                          up down the column and two accounts can be compared
-                          without reading them. */}
-                      <Th align="right">Members</Th>
-                      <Th align="right">Environments</Th>
+                      {/* numeric, which is the console's own right-align plus
+                          tabular figures, so the digits line up down the column
+                          and two accounts can be compared without reading them. */}
+                      <Th numeric>Members</Th>
+                      <Th numeric>Environments</Th>
                       <Th>Created</Th>
                       <Th>State</Th>
                     </tr>
@@ -79,25 +76,25 @@ export default function AdminTenantsPage() {
                   <tbody>
                     {page.rows.map((t) => (
                       <Row key={t.id}>
-                        <Td data-label="Organization">
+                        {/* No label on this one: it names the row, and leads
+                            the stacked record on a phone by itself. */}
+                        <Td>
                           <span className="block truncate font-medium text-ink">{t.name}</span>
                           <span className="block truncate font-mono text-[12px] text-muted">
                             {t.slug}
                           </span>
                         </Td>
-                        <Td data-label="Plan">{t.plan}</Td>
-                        {/* tabular-nums, so the figures are the same width in
-                            every row and the column reads as a column. */}
-                        <Td data-label="Members" align="right">
-                          <span className="tabular-nums">{t.members.toLocaleString()}</span>
+                        <Td label="Plan">{t.plan}</Td>
+                        <Td label="Members" numeric>
+                          {t.members.toLocaleString()}
                         </Td>
-                        <Td data-label="Environments" align="right">
-                          <span className="tabular-nums">{t.environments.toLocaleString()}</span>
+                        <Td label="Environments" numeric>
+                          {t.environments.toLocaleString()}
                         </Td>
-                        <Td data-label="Created">
+                        <Td label="Created">
                           <When value={t.createdAt} />
                         </Td>
-                        <Td data-label="State">
+                        <Td label="State">
                           {t.suspended ? (
                             <Badge tone="fail">suspended</Badge>
                           ) : (
