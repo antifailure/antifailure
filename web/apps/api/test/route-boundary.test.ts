@@ -39,7 +39,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Pool } from '@antifailure/db'
 import { createServer } from '../src/server.ts'
-import { ROUTE_BOUNDARY, boundaryFor, documentPath, type Grounds } from '../src/boundary.ts'
+import { GROUNDS, ROUTE_BOUNDARY, boundaryFor, documentPath } from '../src/boundary.ts'
 import { listProcedures, openApiDocument } from '../src/openapi.ts'
 import type { GitHubClient } from '../src/auth/github.ts'
 
@@ -146,15 +146,7 @@ describe('the route boundary', () => {
   })
 
   it('gives every excluded route a ground and a reason worth reading', () => {
-    const allowed = new Set<Grounds>([
-      'different-credential',
-      'console-transport',
-      'cli-transport',
-      'engine-transport',
-      'foreign-shape',
-      'operator-facing',
-      'not-an-endpoint',
-    ])
+    const allowed = new Set<string>(GROUNDS)
     for (const [route, boundary] of Object.entries(ROUTE_BOUNDARY)) {
       // The reason is what somebody reads before moving a route across the
       // line. A one word reason is the same as none, which is the state this
@@ -169,7 +161,7 @@ describe('the route boundary', () => {
       }
       assert.ok(
         boundary.grounds && allowed.has(boundary.grounds),
-        `${route} is excluded on grounds of ${JSON.stringify(boundary.grounds)}, which is not one of the seven`,
+        `${route} is excluded on grounds of ${JSON.stringify(boundary.grounds)}, which is not one of the ${GROUNDS.length}`,
       )
     }
   })
@@ -279,6 +271,34 @@ describe('the route boundary', () => {
     assert.ok(generated.size >= 60, `the document reported only ${generated.size} operations`)
     assert.ok(generated.has('GET /health'), 'the document scan did not find the liveness route')
     assert.ok(listProcedures().length >= 50, 'the procedure walk found almost nothing')
+  })
+
+  it('is described in prose by the number of grounds there actually are', async () => {
+    // The defect constcheck exists for, in a language it cannot read. It counts
+    // closed sets declared as Go constants and every instance it found ran the
+    // same direction: a set grew, the code took the new member, and the
+    // sentence naming a number never moved. This set is TypeScript, three
+    // documents state its size, and nothing else would notice an eighth.
+    const number = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+    const word = number[GROUNDS.length]
+    assert.ok(word, `there are now ${GROUNDS.length} grounds and this check only spells up to ten`)
+    const pages = [
+      path.join(here, '..', 'src', 'boundary.ts'),
+      path.join(here, '..', '..', '..', '..', 'CHANGELOG.md'),
+      path.join(here, '..', '..', '..', '..', 'docs', 'src', 'content', 'docs', 'reference', 'stability.md'),
+    ]
+    for (const page of pages) {
+      const text = await readFile(page, 'utf8')
+      const claims = [...text.matchAll(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:recorded\s+)?grounds\b/g)]
+      assert.ok(claims.length > 0, `${path.basename(page)} states no number of grounds, so this check reads nothing there`)
+      for (const claim of claims) {
+        assert.equal(
+          claim[1],
+          word,
+          `${path.basename(page)} says "${claim[0]}" and there are ${GROUNDS.length}`,
+        )
+      }
+    }
   })
 
   it('resolves a classification by method as well as by path', () => {

@@ -37,6 +37,38 @@
 // name, in both directions. This is about the machine readable contract
 // specifically: what a generated client can call.
 
+/** Every reason a route may be kept out of the published document, in one
+ *  place so the set can be counted and the count can be checked. */
+export const GROUNDS = [
+  /** The caller needs a credential the document does not describe: a webhook
+   *  HMAC over the raw body, a token that arrived in a mailed link, an
+   *  operator session from a different table. A reader holding a session
+   *  cookie or a bearer token cannot reach it at all. */
+  'different-credential',
+  /** The console's own wire. The console is a static export served by this
+   *  same process, from this same commit, so there is no second client and no
+   *  version skew for a contract to protect against. */
+  'console-transport',
+  /** The wire underneath an `af` command. The command, its flags and its exit
+   *  codes are the stable surface and are promised in the release notes; the
+   *  shape of the request it makes is not, and publishing it would promise
+   *  something the notes say is free to change. */
+  'cli-transport',
+  /** The wire between the engine and the control plane. The engine ships from
+   *  this repository and is versioned with it, so both ends move together. */
+  'engine-transport',
+  /** The request and response shapes are another vendor's API rather than
+   *  ours. Describing them here would publish a copy of somebody else's
+   *  contract, which is wrong the moment they change it. */
+  'foreign-shape',
+  /** Served for whoever runs the deployment rather than for a caller
+   *  integrating with the product: a scrape, or the document itself. */
+  'operator-facing',
+  /** Not an operation a client calls. A mount that other routes hang off, or
+   *  the static file fallback. */
+  'not-an-endpoint',
+] as const
+
 /**
  * Why a route is not in the published document.
  *
@@ -44,35 +76,12 @@
  * not, call the route. None of them is "we have not got round to it": that
  * case belongs in the register in route-boundary.test.ts, which empties itself
  * when the route is documented.
+ *
+ * Derived from the array rather than written twice. Two lists of the same
+ * seven strings is two lists that drift, and the one the test walks would be
+ * the one that stopped matching.
  */
-export type Grounds =
-  /** The caller needs a credential the document does not describe: a webhook
-   *  HMAC over the raw body, a token that arrived in a mailed link, an
-   *  operator session from a different table. A reader holding a session
-   *  cookie or a bearer token cannot reach it at all. */
-  | 'different-credential'
-  /** The console's own wire. The console is a static export served by this
-   *  same process, from this same commit, so there is no second client and no
-   *  version skew for a contract to protect against. */
-  | 'console-transport'
-  /** The wire underneath an `af` command. The command, its flags and its exit
-   *  codes are the stable surface and are promised in the release notes; the
-   *  shape of the request it makes is not, and publishing it would promise
-   *  something the notes say is free to change. */
-  | 'cli-transport'
-  /** The wire between the engine and the control plane. The engine ships from
-   *  this repository and is versioned with it, so both ends move together. */
-  | 'engine-transport'
-  /** The request and response shapes are another vendor's API rather than
-   *  ours. Describing them here would publish a copy of somebody else's
-   *  contract, which is wrong the moment they change it. */
-  | 'foreign-shape'
-  /** Served for whoever runs the deployment rather than for a caller
-   *  integrating with the product: a scrape, or the document itself. */
-  | 'operator-facing'
-  /** Not an operation a client calls. A mount that other routes hang off, or
-   *  the static file fallback. */
-  | 'not-an-endpoint'
+export type Grounds = (typeof GROUNDS)[number]
 
 export interface RouteBoundary {
   /**
