@@ -241,36 +241,48 @@ something else entirely would be a valid credential here. Naming an audience
 makes the token useless anywhere else and makes a token minted elsewhere useless
 here.
 
-### Claim the repository first, once
+### The claim, which usually makes itself
 
-Before any of that works, an owner or admin claims the repository:
+Access to an organization comes from a claim on the repository, not from the
+token. Most customers never make one by hand: when a repository has no claim and
+exactly one organization has the Antifailure GitHub App installed on its owner,
+the claim is created on the first exchange and recorded as having come from the
+installation.
+
+**Why a claim exists at all**, because this is the part that looks like
+friction and is not. A GitHub identity token says, truthfully and with a
+signature nobody can fake, "this job runs in repository R". It says nothing
+about who R belongs to. Anybody with a GitHub account can create a repository,
+put `id-token: write` in a workflow, and mint a genuine, correctly signed token
+naming it. A control plane that read that claim and looked up "the organisation
+for that repository's owner" would have verified a stranger's signature
+perfectly and then let them write into whichever tenant the lookup landed on.
+
+So the claim is what grants and the token only identifies. What the installation
+changes is who makes the claim, not whether one is needed: an installation is
+GitHub telling this control plane you control the account, checked against a
+signature when it was delivered, which is the same evidence a manual claim is
+measured against with one step fewer.
+
+**What is refused** is a repository with no claim AND no installation to stand
+in for one, with `"reason": "no_binding"`. A repository whose owner nobody has
+installed the App on reaches nobody. So does one whose owner two organisations
+have installed on, because choosing between them would decide which tenant your
+events land in by the order rows come back, and that is refused rather than
+guessed at.
+
+One repository can be claimed by one organisation. A second claim is refused
+with `"reason": "already_claimed"`.
+
+**Claiming by hand** is for a repository the App is not installed on, or one you
+want claimed before its first run. An owner or admin does it once:
 
 ```bash
-af token list                   # any terminal already signed in with tokens.manage
 curl -sS -X POST "$AF_CONTROL_PLANE/v1/oidc/bindings" \
   -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"repository": "your-org/your-repo"}'
 ```
-
-**Why there is a step here at all**, because it is the part that looks like
-friction and is not. A GitHub identity token says, truthfully and with a signature nobody
-can fake, "this job runs in repository R". It says nothing about who R belongs
-to. Anybody
-with a GitHub account can create a repository, put `id-token: write` in a
-workflow, and mint a genuine, correctly signed token naming it. A control plane
-that read that claim and looked up "the organisation for that repository's
-owner" would have verified a stranger's signature perfectly and then let them
-write into whichever tenant the lookup landed on.
-
-So the claim is what grants; the token only identifies. A repository nobody has
-claimed is refused, with `"reason": "no_binding"`, and that refusal is the
-feature rather than a gap in it.
-
-You can only claim a repository whose owner your organisation has the
-Antifailure GitHub App installed on, because that installation is GitHub telling
-this control plane you control the account. One repository can be claimed by one
-organisation: a second claim is refused with `"reason": "already_claimed"`.
 
 Revoking a claim stops new exchanges **and kills the credentials that claim
 already issued**, which is what makes it a revocation rather than a note:

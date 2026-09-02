@@ -271,6 +271,7 @@ export function openApiDocument(): Record<string, unknown> {
     },
     '/v1/auth/github-oidc': {
       post: {
+        operationId: 'exchangeWorkflowIdentity',
         summary: 'Exchange a GitHub Actions workflow identity for an engine token',
         description:
           'How a job in a customer\'s CI authenticates with no token, no environment variable ' +
@@ -281,9 +282,16 @@ export function openApiDocument(): Record<string, unknown> {
           'The signature, issuer, audience and expiry are all checked, and none of that is what ' +
           'decides which organization the token belongs to. A signed identity proves which ' +
           'repository a job runs in and nothing about who that repository belongs to, because ' +
-          'anybody can run Actions in a repository they own. So an organization has to have ' +
-          'claimed the repository in advance, through POST /v1/oidc/bindings, and an unclaimed ' +
-          'repository is refused.',
+          'anybody can run Actions in a repository they own. Access comes from a claim on the ' +
+          'repository instead.\n\n' +
+          'Most callers never make that claim themselves. When a repository has no claim and ' +
+          'exactly one organization holds a live GitHub App installation on its owner, the ' +
+          'claim is created on this first exchange and recorded as having come from the ' +
+          'installation. What is refused is a repository with no claim AND no installation to ' +
+          'stand in for one: an owner nobody has installed the App on reaches nobody, and an ' +
+          'owner two organizations have installed on is refused rather than guessed at. ' +
+          'POST /v1/oidc/bindings claims one by hand, for a repository the App is not ' +
+          'installed on.',
         requestBody: {
           required: true,
           content: {
