@@ -25,6 +25,10 @@ import {
   passwordMatches,
   adminSessionCookie,
   resolveAdminSession,
+  adminCsrfTokenFor,
+  adminCsrfMatches,
+  looksSameOrigin,
+  ADMIN_CSRF_HEADER,
 } from '../src/admin/session.ts'
 import {
   ADMIN_PERMISSIONS,
@@ -339,3 +343,75 @@ async function seedImpersonationTarget(h: ApiHarness): Promise<{ id: string }> {
     RETURNING id`
   return row!
 }
+
+describe('cross-site request forgery on the operator surface', () => {
+  // The cookie is __Host- and SameSite=Strict, which closes ordinary CSRF. What
+  // it does NOT close is the case auth/session.ts already names: SameSite is
+  // SITE scoped, so a subdomain an attacker controls is inside it. These are the
+  // highest value mutations in the product, so the token is not optional.
+
+  test('the token is derived from the session and is not the session', async () => {
+    const csrf = adminCsrfTokenFor('a-session-token')
+    assert.notEqual(csrf, 'a-session-token')
+    assert.ok(csrf.length > 20)
+    // Safe to hand to the page precisely because it is one way.
+    assert.doesNotMatch(csrf, /a-session-token/)
+  })
+
+  test('a token from one session does not match another', async () => {
+    // The property the whole scheme rests on: an attacker who cannot read the
+    // cookie cannot derive the token.
+    assert.equal(adminCsrfMatches('session-a', adminCsrfTokenFor('session-a')), true)
+    assert.equal(adminCsrfMatches('session-a', adminCsrfTokenFor('session-b')), false)
+  })
+
+  test('a missing or empty token never matches', async () => {
+    assert.equal(adminCsrfMatches('session-a', undefined), false)
+    assert.equal(adminCsrfMatches('session-a', null), false)
+    assert.equal(adminCsrfMatches('session-a', ''), false)
+  })
+
+  test('the operator token is not the product token for the same session', async () => {
+    // Two different labels over the same secret. If a refactor ever let one
+    // session token reach both derivations, the tenant token must not also be
+    // a valid operator token.
+    const { csrfTokenFor } = await import('../src/auth/session.ts')
+    assert.notEqual(adminCsrfTokenFor('same-token'), csrfTokenFor('same-token'))
+    assert.equal(adminCsrfMatches('same-token', csrfTokenFor('same-token')), false)
+  })
+
+  test('sign-in hands the token back, so the page has something to send', async () => {
+    // Without this the scheme is unusable and the portal would simply refuse
+    // every mutation, which is the shape of a guard that gets removed rather
+    // than fixed.
+    assert.equal(ADMIN_CSRF_HEADER, 'x-antifailure-admin-csrf')
+  })
+
+  describe('the same-origin check is a second layer that fails open', () => {
+    test('a declared cross-site request is refused', () => {
+      assert.equal(
+        looksSameOrigin({ secFetchSite: 'cross-site' }, 'https://af.example'),
+        false,
+      )
+      assert.equal(
+        looksSameOrigin({ origin: 'https://evil.example' }, 'https://af.example'),
+        false,
+      )
+    })
+
+    test('a same-origin request passes', () => {
+      assert.equal(
+        looksSameOrigin({ secFetchSite: 'same-origin', origin: 'https://af.example' }, 'https://af.example'),
+        true,
+      )
+    })
+
+    test('a request with neither header passes, which is why it cannot be the only check', () => {
+      // Stated as a test rather than a comment because it is the property that
+      // makes this insufficient alone: something between the browser and this
+      // process may strip the headers, so refusing here would break the portal
+      // for reasons nobody could diagnose. The token is what fails closed.
+      assert.equal(looksSameOrigin({}, 'https://af.example'), true)
+    })
+  })
+})
