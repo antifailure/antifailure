@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%20except%20ee%2F-101014" alt="MIT licensed, except the ee directory" /></a>
+  <a href="LICENSING.md"><img src="https://img.shields.io/badge/license-MIT%20except%20ee%2F-101014" alt="MIT licensed, except the ee directory" /></a>
 </p>
 
 ---
