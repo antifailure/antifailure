@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -177,4 +178,68 @@ func TestTheRealSourceIsClean(t *testing.T) {
 			t.Errorf("%s is not ours to style", f)
 		}
 	}
+}
+
+// The hole that made "the site is scanned" only two thirds true. This checker
+// reads www and console TypeScript and it read Markdown in the documentation
+// trees, so a `.md` under the site belonged to neither list and no gate in the
+// repository had an opinion about it.
+func TestMarkdownUnderTheSiteAndTheConsoleIsInScope(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docs/src/content/docs/page.md", "Documentation prose.\n")
+	write(t, root, "www/README.md", "Site prose.\n")
+	write(t, root, "console/NOTES.md", "Console prose.\n")
+
+	files, err := markdown(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"docs/src/content/docs/page.md", "www/README.md", "console/NOTES.md"} {
+		if !contains(files, want) {
+			t.Errorf("%s is not in scope; collected %v", want, files)
+		}
+	}
+}
+
+// The exemption has to be exactly as wide as the generator and no wider, or it
+// becomes a way to smuggle prose past the gate by naming a file CLAUDE.md.
+func TestOnlyTheGeneratorsOwnBlockIsExemptFromTheMarkdownScan(t *testing.T) {
+	root := t.TempDir()
+	const marker = "<!-- BEGIN:nextjs-agent-rules -->\n"
+	write(t, root, "www/AGENTS.md", marker+"Written by the tool.\n")
+	write(t, root, "www/CLAUDE.md", "Written by a person.\n")
+	write(t, root, "console/AGENTS.md", "Written by a person too.\n")
+
+	files, err := markdown(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(files, "www/AGENTS.md") {
+		t.Error("the generated block is not ours to style and should be skipped")
+	}
+	for _, want := range []string{"www/CLAUDE.md", "console/AGENTS.md"} {
+		if !contains(files, want) {
+			t.Errorf("%s carries no generator marker and must still be checked; collected %v", want, files)
+		}
+	}
+}
+
+func write(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func contains(files []string, want string) bool {
+	for _, f := range files {
+		if f == want {
+			return true
+		}
+	}
+	return false
 }

@@ -8,153 +8,209 @@
 # deploy on every push. Mixing the two would mean this page's own upkeep
 # redeploys the thing it is watching.
 #
-#   render.sh <out-dir> <new-readings.jsonl>
+#   render.sh <out-dir> <new-readings.jsonl> [scripts-dir]
 #
-# <out-dir>/history.json is read if it exists and created if it does not, so
-# the first run starts empty rather than failing. Both files this writes,
-# history.json and index.html, belong in the same directory: the page is
-# nothing but a rendering of the history sitting next to it.
+# <scripts-dir> defaults to this script's own directory and is the checkout of
+# `main` holding targets.json, page.jq and the incident files. It is a separate
+# argument because the workflow has two checkouts, the scripts at `main/` and
+# the data at `data/`, and the whole point is that they are different trees.
+#
+# Three files are written into <out-dir>, and all three belong together: the
+# page is nothing but a rendering of the record sitting next to it.
+#
+#   history.json  raw readings, recent, bounded by age and by count
+#   daily.json    one rollup per component per UTC day, which is what lets the
+#                 page show ninety days without keeping ninety days of raw
+#   index.html    the page
+#   feed.xml      the Atom feed the page's Subscribe control points at
 
 set -euo pipefail
 
-OUT="${1:?usage: render.sh <out-dir> <new-readings.jsonl>}"
-READINGS="${2:?usage: render.sh <out-dir> <new-readings.jsonl>}"
-HISTORY="$OUT/history.json"
+OUT="${1:?usage: render.sh <out-dir> <new-readings.jsonl> [scripts-dir]}"
+READINGS="${2:?usage: render.sh <out-dir> <new-readings.jsonl> [scripts-dir]}"
+HERE="${3:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
-# How many checks to keep per target. At the workflow's five minute interval
-# this is a little over seven days, which is enough to show a real incident's
-# shape without the file growing without bound.
-KEEP=2016
+HISTORY="$OUT/history.json"
+DAILY="$OUT/daily.json"
+TARGETS="$HERE/targets.json"
+PAGE_JQ="$HERE/page.jq"
+FEED_JQ="$HERE/feed.jq"
+
+# Where this page is served from, used for the absolute links Atom wants.
+# Atom resolves a relative link differently in different readers, so this is
+# one variable rather than a guess repeated in four places. It is the GitHub
+# Pages address for this repository; change it here, and only here, if the
+# page ever moves to a custom domain.
+STATUS_BASE_URL="${STATUS_BASE_URL:-https://antifailure.github.io/antifailure/}"
+INCIDENT_DIR="$HERE/incidents"
+
+# Raw readings are kept for this long and no longer. Everything older survives
+# as a daily rollup, which is what the ninety day strip is drawn from, so the
+# window here is only about how much per-check detail is worth carrying: the
+# latest reading of each component, and enough behind it to answer "what
+# happened in the last day". Two bounds rather than one, because a count alone
+# grows unboundedly in time when the probe is slow and an age alone grows
+# unboundedly in size when it is fast.
+KEEP_READINGS=1000
+KEEP_READING_DAYS=35
+KEEP_DAILY_DAYS=400
+STRIP_DAYS=90
+
+now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+NOW_EPOCH="$(date -u +%s)"
+GENERATED="$(now_iso)"
+
+for tool in jq date; do
+  command -v "$tool" > /dev/null || { echo "render.sh needs $tool" >&2; exit 1; }
+done
+[ -f "$TARGETS" ] || { echo "render.sh: no targets at $TARGETS" >&2; exit 1; }
+[ -f "$PAGE_JQ" ] || { echo "render.sh: no page program at $PAGE_JQ" >&2; exit 1; }
+[ -f "$FEED_JQ" ] || { echo "render.sh: no feed program at $FEED_JQ" >&2; exit 1; }
+
+# Every intermediate below goes through a file rather than a shell variable.
+# `jq --argjson history "$merged"` is the obvious way to write this and it
+# fails in production rather than in a test: the whole record travels on the
+# command line, and seven components at the retention cap is well over a
+# megabyte, which is past ARG_MAX. The symptom is "Argument list too long" and
+# a page that silently stops updating once the history is big enough, which is
+# to say months after anyone would connect the two.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$OUT"
 [ -f "$HISTORY" ] || echo '[]' > "$HISTORY"
+[ -f "$DAILY" ] || echo '{"counted_through":{},"days":[]}' > "$DAILY"
 
-new="$(jq -s '.' "$READINGS")"
-
-merged="$(jq -n --slurpfile old "$HISTORY" --argjson new "$new" --argjson keep "$KEEP" '
-  ($old[0] + $new) as $all
-  | ($all | group_by(.name) | map(.[0].name)) as $names
-  | [ $names[] as $n
-      | ($all | map(select(.name == $n)) | sort_by(.checked_at) | .[-$keep:])
-      | .[]
-    ]
-')"
-echo "$merged" > "$HISTORY"
-
-# One current line per target, most recently checked last-in-wins, for the
-# summary at the top of the page.
-current="$(jq '
-  group_by(.name) | map(sort_by(.checked_at) | .[-1])
-' <<<"$merged")"
-
-badge() {
-  # $1: ready (true/false as text)
-  if [ "$1" = "true" ]; then
-    printf 'ok'
-  else
-    printf 'down'
-  fi
+# A history file that will not parse at all is not recoverable element by
+# element, and the wrong response is to start a fresh one: that silently
+# destroys the record, which is the only thing this branch exists to hold. So
+# it fails loudly and writes nothing. The run goes red, the files stay as they
+# were, and a person decides.
+jq -e 'type == "array"' "$HISTORY" > /dev/null 2>&1 || {
+  echo "::error::$HISTORY is not a JSON array. Refusing to overwrite it; the record is not replaceable." >&2
+  exit 1
+}
+jq -e 'type == "object" and (.days | type) == "array"' "$DAILY" > /dev/null 2>&1 || {
+  echo "::error::$DAILY is not a rollup object. Refusing to overwrite it; the record is not replaceable." >&2
+  exit 1
 }
 
-rows=""
-while IFS= read -r entry; do
-  name="$(jq -r '.name' <<<"$entry")"
-  url="$(jq -r '.url' <<<"$entry")"
-  ready="$(jq -r '.ready' <<<"$entry")"
-  checked_at="$(jq -r '.checked_at' <<<"$entry")"
-  commit="$(jq -r '.commit // ""' <<<"$entry")"
-  state="$(badge "$ready")"
+# One bad line must not cost the whole run's readings. `jq -s` over a .jsonl
+# with one malformed line parses nothing at all, so each line is read as text
+# and parsed on its own, and the ones that do not parse are counted.
+jq -R -s 'split("\n") | map(select(length > 0)) | map(fromjson? // empty)' "$READINGS" > "$TMP/new.json"
+new_lines="$(grep -c '[^[:space:]]' "$READINGS" || true)"
+new_ok="$(jq 'length' "$TMP/new.json")"
+dropped_new=$(( new_lines - new_ok ))
+[ "$dropped_new" -gt 0 ] && echo "::warning::$dropped_new of $new_lines lines in $READINGS did not parse and were skipped" >&2
 
-  # The last KEEP checks for this target, oldest first, as a run of narrow bars.
-  bars=""
-  while IFS= read -r r; do
-    if [ "$r" = "true" ]; then
-      bars="${bars}<span class=\"bar ok\"></span>"
-    else
-      bars="${bars}<span class=\"bar down\"></span>"
-    fi
-  done < <(jq -r --arg n "$name" '[.[] | select(.name == $n)] | sort_by(.checked_at) | .[-288:][] | .ready' <<<"$merged")
+# The same rule one level down: an element inside the history that is not a
+# usable reading is dropped and counted rather than allowed to fail the fold.
+# A reading is usable when it has a timestamp in the shape the probe writes
+# and something to identify a component by. Older readings carry `name` where
+# an id belongs, and both are accepted, because rewriting the record to fit a
+# newer shape is the one thing a record must never do.
+readable='
+  def usable: type == "object"
+    and ((.checked_at? | type) == "string")
+    and (.checked_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    and ((((.id? // .name?) // "") | type) == "string")
+    and ((((.id? // .name?) // "") | length) > 0);
+  map(select(usable))'
 
-  # Built as its own assignment rather than inline in the one below. A
-  # command substitution whose last command is skipped by `&&` short circuit
-  # exits nonzero, and set -e treats the assignment that embeds it as having
-  # failed too, which took a working-looking loop down silently mid-render the
-  # first time this was written, on exactly the entry with no commit yet.
-  commit_note=""
-  if [ -n "$commit" ]; then
-    commit_note=" &middot; commit ${commit:0:12}"
-  fi
+jq -n --slurpfile old "$HISTORY" --slurpfile new "$TMP/new.json" "
+  ((\$old[0] + \$new[0]) | $readable) | sort_by(.checked_at)" > "$TMP/usable.json"
 
-  rows="${rows}
-<section class=\"target\">
-  <h2><span class=\"dot ${state}\"></span> ${name} <span class=\"state\">${state}</span></h2>
-  <p class=\"meta\">${url} &middot; last checked ${checked_at} UTC${commit_note}</p>
-  <div class=\"bars\">${bars}</div>
-  <p class=\"caption\">last 24 hours, oldest to newest, one bar per check</p>
-</section>"
-done < <(jq -c '.[]' <<<"$current")
+jq --argjson keep "$KEEP_READINGS" --argjson days "$KEEP_READING_DAYS" --argjson now "$NOW_EPOCH" '
+  . as $all
+  | ($now - ($days * 86400)) as $floor
+  | [ ($all | group_by(.id // .name))[]
+      | map(select((.checked_at | fromdateiso8601) >= $floor))
+      | sort_by(.checked_at)
+      | .[-$keep:][] ]
+  | sort_by(.checked_at)
+' "$TMP/usable.json" > "$TMP/merged.json"
+dropped_old=$(( $(jq 'length' "$HISTORY") + new_ok - $(jq 'length' "$TMP/usable.json") ))
 
-overall="ok"
-if jq -e 'map(.ready) | any(. == false)' <<<"$current" >/dev/null; then
-  overall="down"
-fi
+# The rollups.
+#
+# These are counted forward from a watermark, not recomputed from the raw
+# history, and the difference is a bug this suite caught rather than a
+# preference. Recomputing looks obviously right and is wrong for one reason:
+# the raw history is pruned, so on any day busier than the cap the recompute
+# reads fewer checks than actually happened and writes that smaller number
+# down as the day's total. The first version of this did exactly that and
+# understated a 1400 check day as 1000.
+#
+# So each run adds only the readings newer than the last one it counted, per
+# component, and moves the watermark. That is idempotent: a re-run of the same
+# probe adds nothing, because none of its readings is newer than the watermark
+# it just set. It also bootstraps correctly, because an absent watermark sorts
+# before every timestamp and the first run therefore counts the whole retained
+# history exactly once.
+#
+# The cost is that a reading arriving out of order, older than the watermark,
+# is not counted. The probe writes one batch per run with a single timestamp
+# and the workflow serialises its own runs, so that does not happen; it is
+# recorded here because it is the assumption that would have to break.
+jq -n --slurpfile old "$DAILY" --slurpfile rows "$TMP/usable.json" \
+  --argjson days "$KEEP_DAILY_DAYS" --argjson now "$NOW_EPOCH" '
+  def ok: if has("ok") and ((.ok | type) == "boolean") then .ok
+          elif has("ready") and ((.ready | type) == "boolean") then .ready
+          else false end;
 
-cat > "$OUT/index.html" <<HTML
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Antifailure control plane status</title>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #ffffff; --fg: #1a1d21; --muted: #5b6470; --border: #e2e5e9;
-    --ok: #157a3d; --ok-bg: #e6f4ea; --down: #a4262c; --down-bg: #fdeceb;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1115; --fg: #e7e9ec; --muted: #9aa4b2; --border: #262b33;
-      --ok: #3fb96c; --ok-bg: #10261a; --down: #e56b6f; --down-bg: #2a1517; }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 2.5rem 1.25rem 4rem; background: var(--bg); color: var(--fg);
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  }
-  main { max-width: 40rem; margin: 0 auto; }
-  h1 { font-size: 1.375rem; margin: 0 0 0.25rem; }
-  .lede { color: var(--muted); margin: 0 0 2rem; font-size: 0.9375rem; }
-  .banner {
-    display: flex; align-items: center; gap: 0.6rem; padding: 0.9rem 1.1rem;
-    border-radius: 0.5rem; margin-bottom: 2rem; font-weight: 600;
-  }
-  .banner.ok { background: var(--ok-bg); color: var(--ok); }
-  .banner.down { background: var(--down-bg); color: var(--down); }
-  .target { padding: 1.25rem 0; border-top: 1px solid var(--border); }
-  .target:first-of-type { border-top: none; }
-  h2 { font-size: 1.0625rem; margin: 0 0 0.35rem; display: flex; align-items: center; gap: 0.5rem; }
-  .state { margin-left: auto; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--muted); font-weight: 600; }
-  .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; flex: none; }
-  .dot.ok { background: var(--ok); }
-  .dot.down { background: var(--down); }
-  .meta { color: var(--muted); font-size: 0.8125rem; margin: 0 0 0.75rem; }
-  .bars { display: flex; gap: 1px; height: 1.75rem; align-items: stretch; }
-  .bar { flex: 1 1 auto; min-width: 2px; border-radius: 1px; background: var(--ok); }
-  .bar.down { background: var(--down); }
-  .caption { color: var(--muted); font-size: 0.75rem; margin: 0.4rem 0 0; }
-  footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.8125rem; }
-  footer a { color: inherit; }
-</style>
-</head>
-<body>
-<main>
-  <h1>Antifailure control plane</h1>
-  <p class="lede">Checked from GitHub Actions, not from the control plane itself, so an outage of the control plane cannot also take down the page that reports it.</p>
-  <div class="banner ${overall}">$( [ "$overall" = "ok" ] && echo "All systems answering" || echo "One or more systems not answering" )</div>
-  ${rows}
-  <footer>Generated $(date -u +%Y-%m-%dT%H:%M:%SZ). Source and history: <a href="https://github.com/antifailure/antifailure/tree/status-data">github.com/antifailure/antifailure</a>, branch <code>status-data</code>.</footer>
-</main>
-</body>
-</html>
-HTML
+  ($rows[0]) as $rows
+  | ($old[0] // {}) as $prev
+  | ($prev.counted_through // {}) as $mark
+  | (($prev.days // []) | map(select(type == "object" and (.id | type) == "string"
+        and (.day | type) == "string" and (.checks | type) == "number"
+        and (.ok | type) == "number"))) as $stored
+
+  | ($rows | map(. + {_id: (.id // .name)})
+           | map(select(.checked_at > ($mark[._id] // "")))) as $fresh
+
+  | ($fresh | group_by([._id, (.checked_at | fromdateiso8601 | strftime("%Y-%m-%d"))])
+            | map({ id: .[0]._id,
+                    day: (.[0].checked_at | fromdateiso8601 | strftime("%Y-%m-%d")),
+                    checks: length,
+                    ok: (map(if ok then 1 else 0 end) | add) })) as $added
+
+  | (($stored + $added) | group_by([.id, .day])
+       | map({ id: .[0].id, day: .[0].day,
+               checks: (map(.checks) | add), ok: (map(.ok) | add) })) as $all
+
+  | (($now - ($days * 86400)) | strftime("%Y-%m-%d")) as $floor
+  | { counted_through: ($mark + ($rows | map(. + {_id: (.id // .name)})
+                                      | group_by(._id)
+                                      | map({key: .[0]._id, value: (map(.checked_at) | max)})
+                                      | from_entries
+                                | with_entries(.value = ([.value, ($mark[.key] // "")] | max)))),
+      days: ($all | map(select(.day >= $floor)) | sort_by([.id, .day])) }
+' > "$TMP/daily.json"
+
+"$HERE/incidents.sh" collect "$INCIDENT_DIR" > "$TMP/incidents.json"
+
+cp "$TMP/merged.json" "$HISTORY"
+cp "$TMP/daily.json" "$DAILY"
+jq -c '.days' "$TMP/daily.json" > "$TMP/days.json"
+
+jq -r -n -f "$PAGE_JQ" \
+  --argjson now "$NOW_EPOCH" \
+  --slurpfile targets "$TARGETS" \
+  --slurpfile history "$TMP/merged.json" \
+  --slurpfile daily "$TMP/days.json" \
+  --slurpfile incidents "$TMP/incidents.json" \
+  --argjson dropped "$(( dropped_new + (dropped_old > 0 ? dropped_old : 0) ))" \
+  --argjson stripDays "$STRIP_DAYS" \
+  --arg generated "$GENERATED" \
+  > "$OUT/index.html"
+
+jq -r -n -f "$FEED_JQ" \
+  --argjson now "$NOW_EPOCH" \
+  --slurpfile targets "$TARGETS" \
+  --slurpfile history "$TMP/merged.json" \
+  --slurpfile incidents "$TMP/incidents.json" \
+  --arg base "$STATUS_BASE_URL" \
+  > "$OUT/feed.xml"
+
+echo "rendered $(jq 'length' "$TMP/merged.json") readings and $(jq '.days | length' "$TMP/daily.json") daily rollups into $OUT/index.html"

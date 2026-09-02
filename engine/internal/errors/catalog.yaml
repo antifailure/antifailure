@@ -367,6 +367,13 @@ errors:
     docs: guides/build
     retryable: false
     exit_code: 1
+  - code: AF-BLD-005
+    area: BLD
+    message: "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository."
+    next_step: "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 1
   - code: AF-BLD-002
     area: BLD
     message: "The Dockerfile for {service} is not valid at line {line}: {detail}"
@@ -646,6 +653,13 @@ errors:
     docs: guides/model-keys
     retryable: true
     exit_code: 5
+  - code: AF-AGT-007
+    area: AGT
+    message: "No workflow reached a verdict about the application: {detail}"
+    next_step: "Read the workflow rows above for what stopped each one. A run that verified nothing is not a passing run, and 'policy.workflows_unverified: warn' records the choice if the project has no workflows yet."
+    docs: concepts/verdicts
+    retryable: false
+    exit_code: 9
   - code: AF-NET-011
     area: NET
     message: "No message matching {match} arrived within {timeout}."
@@ -1005,3 +1019,68 @@ errors:
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4
+
+  # Workloads
+  - code: AF-WLD-001
+    area: WLD
+    message: "There is no workload kind called {kind}."
+    next_step: "Use one of {known}, spelled the way the control plane spells it."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 2
+  - code: AF-WLD-002
+    area: WLD
+    message: "The {kind} kind cannot set {knobs}."
+    next_step: "Remove it from the workload version. The command that kind runs has no flag for it, so honouring it would be a promise the run cannot keep."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 2
+  - code: AF-WLD-003
+    area: WLD
+    message: "The {knob} value {value} is not what this workload's command takes: {detail}"
+    next_step: "Correct the value in the workload version, then run it again."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 2
+  - code: AF-WLD-004
+    area: WLD
+    message: "The {kind} kind must name what it runs: {detail}"
+    next_step: "List the scenarios or goals the workload selects, by the names the manifest declares."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 2
+  - code: AF-WLD-010
+    area: WLD
+    message: "The exploration {exploration} cannot be promoted: {detail}"
+    next_step: "Promote an exploration that reached its goal. One that was blocked has no journey to compile."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 3
+  - code: AF-WLD-011
+    area: WLD
+    message: "These two workload results cannot be compared: {detail}"
+    next_step: "Compare two runs of the same workload kind. A mix and a browser workflow measure different things and a difference between them would be arithmetic on unlike numbers."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 2
+  - code: AF-WLD-012
+    area: WLD
+    message: "The workload found a failure: {detail}"
+    next_step: "The result document above names what failed. Reproduce it with the command it carries."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 8
+  - code: AF-WLD-013
+    area: WLD
+    message: "The workload proved nothing: {detail}"
+    next_step: "A run that measured nothing is not a run that found nothing. The result says which routes were refused or which selection matched no declared name."
+    docs: concepts/workloads
+    retryable: false
+    exit_code: 7
+  - code: AF-WLD-014
+    area: WLD
+    message: "The workload did not finish: {detail}"
+    next_step: "The environment was torn down where the run asked for it. Run it again, or raise the deadline."
+    docs: concepts/workloads
+    retryable: true
+    exit_code: 9

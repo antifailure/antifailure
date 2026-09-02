@@ -5,7 +5,11 @@ export function Logo({ className }: { className?: string }) {
   return (
     <Link
       href="/"
-      className={cn("flex h-8 shrink-0 items-center gap-2.5", className)}
+      // `h-11` rather than the 32px the mark and wordmark happen to occupy:
+      // this is the only link in the phone header besides the menu button, and
+      // that button is already `size-11`. The contents are centred, so the
+      // extra height is hit area and nothing moves.
+      className={cn("flex h-11 shrink-0 items-center gap-2.5", className)}
       aria-label="Antifailure"
     >
       <svg viewBox="0 0 18 18" className="h-6 w-6 shrink-0" fill="none" aria-hidden>

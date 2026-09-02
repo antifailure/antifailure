@@ -3,9 +3,10 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ago, when } from "@/lib/format";
-import { mutate, query, useApi } from "@/lib/api";
+import { mutate, query, useApi, usePages } from "@/lib/api";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
+import { More } from "@/components/pagination";
 import {
   Badge,
   Button,
@@ -158,6 +159,39 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
 }
 
 
+/** What the control plane found out about a repository before anybody asked
+ *  it for anything. `unknown` is GitHub not having answered, and renders as
+ *  nothing: a warning nobody can act on is worse than silence. */
+type Readiness =
+  | { status: "ready" }
+  | { status: "blocked"; cause: string; message: string }
+  | { status: "unknown" };
+
+/**
+ * What would stop this repository, said before the button is pressed.
+ *
+ * The failure it replaces was found at the worst possible moment: fill in the
+ * form, press the button, and only then learn that the App holds no permission
+ * to start a workflow. Nothing it reports is caused by anything in the form and
+ * every one of them was already true when the page loaded.
+ *
+ * It does not disable the button. The check can be out of date by the width of
+ * whatever the person just did on GitHub, and a form that refuses to submit
+ * because of a stale read is worse than one that tries and reports.
+ */
+function Blocked({ repository }: { repository: string }) {
+  const state = useApi<Readiness>(
+    () => query("environments.readiness", { repository }),
+    [repository],
+  );
+  if (state.status !== "ready" || state.data.status !== "blocked") return null;
+  return (
+    <p role="status" className="mt-2.5 text-[12px] leading-5 text-warn">
+      {state.data.message}
+    </p>
+  );
+}
+
 /**
  * Asking for an environment.
  *
@@ -251,9 +285,12 @@ function Create({ onRequested }: { onRequested: () => void }) {
                   {error}
                 </p>
               ) : (
-                <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
-                  {asked ?? "Empty uses the repository's default branch. The environment appears below when the engine reports it."}
-                </p>
+                <>
+                  <p role={asked ? "status" : undefined} className="mt-2.5 text-[12px] leading-5 text-dim">
+                    {asked ?? "Empty uses the repository's default branch. The environment appears below when the engine reports it."}
+                  </p>
+                  <Blocked repository={repository || repos[0]!.full_name} />
+                </>
               )}
             </form>
           )
@@ -379,10 +416,12 @@ function Runtimes() {
                   {rows.map((r) => (
                     <Row key={`${r.name}-${r.registered}`}>
                       <Td mono>{r.name}</Td>
-                      <Td>{r.provider ?? "not reported"}</Td>
-                      <Td>{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
-                      <Td numeric>{Number(r.environments).toLocaleString()}</Td>
-                      <Td>
+                      <Td label="Provider">{r.provider ?? "not reported"}</Td>
+                      <Td label="Labels">{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
+                      <Td label="Environments" numeric>
+                        {Number(r.environments).toLocaleString()}
+                      </Td>
+                      <Td label="State">
                         {r.registered ? (
                           <Badge tone="pass">registered</Badge>
                         ) : (
@@ -390,7 +429,7 @@ function Runtimes() {
                         )}
                       </Td>
                       {mayManage ? (
-                        <Td>
+                        <Td label="Registration">
                           {r.registered ? (
                             <Button
                               variant="danger"
@@ -438,8 +477,14 @@ function Environments() {
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("env");
-  const state = useApi<{ environments: Environment[]; nextCursor: string | null }>(
-    () => query("environments.list", { limit: 50 }),
+  const state = usePages<Environment>(
+    async (cursor) => {
+      const page = await query<{ environments: Environment[]; nextCursor: string | null }>(
+        "environments.list",
+        { limit: 50, ...(cursor === null ? {} : { cursor }) },
+      );
+      return { rows: page.environments, next: page.nextCursor };
+    },
     [],
   );
 
@@ -463,12 +508,13 @@ function Environments() {
       <Card title="All environments">
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>
-            data.environments.length === 0 ? (
+            data.length === 0 ? (
               <Empty title="No environments yet">
                 An environment appears here when the engine reports one, which
                 happens the first time a run starts on a connected repository.
               </Empty>
             ) : (
+              <>
               <TableWrap>
                 <Table>
                   <thead>
@@ -481,7 +527,7 @@ function Environments() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.environments.map((env) => (
+                    {data.map((env) => (
                       <Row
                         key={env.id}
                         onClick={() => router.push(`/environments?env=${encodeURIComponent(env.env_id)}`)}
@@ -509,6 +555,15 @@ function Environments() {
                   </tbody>
                 </Table>
               </TableWrap>
+              <More
+                shown={data.length}
+                noun={{ one: "environment", many: "environments" }}
+                hasMore={state.hasMore}
+                busy={state.busy}
+                error={state.moreError}
+                onMore={state.more}
+              />
+              </>
             )
           }
         </Loaded>

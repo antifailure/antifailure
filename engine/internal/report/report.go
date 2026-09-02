@@ -295,6 +295,28 @@ func (r Run) Verdict() string {
 	}
 }
 
+// NothingVerified reports that no workflow reached a verdict about the
+// application.
+//
+// Pass, fail and flaky are verdicts about the application: the run drove it and
+// the screen said something. Blocked and unverified are statements about us,
+// and a run made only of those has not tested anything, whatever its exit code
+// said. A manifest declaring no workflows lands here too, because "nothing was
+// tested" is the same fact whether the workflows were missing or unreachable.
+//
+// Deliberately separate from Verdict. Verdict already resolves to blocked or
+// unverified in exactly these cases and is right to; what was missing is
+// anybody treating that as a result rather than as an absence of one.
+func (r Run) NothingVerified() bool {
+	for _, w := range r.Workflows {
+		switch read(w.Verdict) {
+		case VerdictPass, VerdictFail, VerdictFlaky:
+			return false
+		}
+	}
+	return true
+}
+
 // Headline is the first line, which is the only line most people read.
 func (r Run) Headline() string {
 	counts := map[string]int{}
@@ -581,8 +603,13 @@ func (r Run) Markdown() string {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}
 		if len(l.Refused) > 0 {
-			fmt.Fprintf(&b, "%s were not sent, because nothing in the manifest named them safe: %s\n",
-				plural(len(l.Refused), "route", "routes"), strings.Join(l.Refused, ", "))
+			// The verb travels with the noun, because the singular case
+			// rendered "1 route were not sent". Only the plural case had a
+			// test, and 500 requests at one route is exactly the run this line
+			// exists to describe, so the ungrammatical half is the half a
+			// reader is most likely to meet.
+			fmt.Fprintf(&b, "%s not sent, because nothing in the manifest named them safe: %s\n",
+				plural(len(l.Refused), "route was", "routes were"), strings.Join(l.Refused, ", "))
 		}
 		b.WriteString("\n")
 	}
