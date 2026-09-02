@@ -24,10 +24,11 @@
  * shadow it and swallow a signup.
  */
 
+const { failure, published } = require("../shared/errors");
+
 const INDEX = {
   service: "antifailure.dev",
-  description:
-    "The API behind the marketing site. It has one endpoint, which is the waitlist form.",
+  description: "The public API and machine-readable resources behind the Antifailure website.",
   endpoints: [
     {
       method: "POST",
@@ -36,10 +37,30 @@ const INDEX = {
         "Adds one email address to the design partner waitlist. Idempotent on the address. There is no endpoint that reads the list back.",
     },
   ],
+  // Static files the site publishes rather than endpoints this app serves.
+  // Listed here because the question somebody typing /api is asking is what
+  // this host offers a machine, and the answer is mostly these two.
+  resources: [
+    {
+      path: "/openapi.json",
+      description:
+        "The control-plane OpenAPI 3.1 document, generated from the router and validated before it is published.",
+    },
+    {
+      path: "/errors.v1.json",
+      description: "The versioned Antifailure error and recovery catalog.",
+    },
+    { path: "/llms.txt", description: "What this product is, and where its machine-readable surfaces are." },
+  ],
+  // Every code this app can return, so a caller can resolve one it receives
+  // from the same host that sent it. Product errors are a different namespace
+  // and live in /errors.v1.json.
+  errors: published(),
   productApi: {
     description:
       "This is not the product's API. The control plane serves that, on its own host, and it needs a session or an engine token.",
-    openapi: "https://app.antifailure.dev/openapi.json",
+    openapi: "https://antifailure.dev/openapi.json",
+    origin: "https://app.antifailure.dev",
     documentation: "https://antifailure.dev/docs/reference/api",
   },
 };
@@ -69,14 +90,11 @@ module.exports = async function (context, req) {
     return;
   }
 
-  respond(context, 404, {
-    ok: false,
-    // The requested path is deliberately not echoed. Reflecting a caller's
-    // string into a response body is how a JSON endpoint becomes somebody's
-    // content injection demonstration, and it adds nothing here.
-    message: "No such endpoint. GET /api lists what this host serves.",
-    productApi: INDEX.productApi,
-  });
+  // The requested path is deliberately not echoed. Reflecting a caller's
+  // string into a response body is how a JSON endpoint becomes somebody's
+  // content injection demonstration, and it adds nothing here.
+  const answer = failure("endpoint_not_found", { productApi: INDEX.productApi });
+  respond(context, answer.status, answer.body);
 };
 
 // Exported so the tests can assert the pointer stays a real address rather

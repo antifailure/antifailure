@@ -107,4 +107,4 @@ type PolicyHook interface {
 Register it with the engine's extension registry. The community build registers
 nothing, so the check iterates an empty slice and returns nil.
 
-Related: [licensing](/docs/enterprise/licensing/), [egress](/docs/concepts/egress/).
+Related: [licensing](/docs/enterprise/licensing), [egress](/docs/concepts/egress).
