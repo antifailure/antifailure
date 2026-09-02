@@ -295,10 +295,17 @@ export const adminRouter = router({
     /**
      * Changes the plan, which is what quotas are derived from.
      *
-     * Named setPlan rather than setQuota because there is no per-organization
-     * quota column: limits.ts derives every quota from the plan, and inventing
-     * an override here would create a second source of truth that the quota
-     * check does not read.
+     * Named setPlan rather than setQuota because there is still no
+     * per-organization quota COLUMN: limits.ts derives every quota from the
+     * plan.
+     *
+     * An earlier version of this comment went on to say that an override here
+     * "would create a second source of truth that the quota check does not
+     * read". That was true when written and is no longer: entitlement_overrides
+     * exists and checkQuotaWithEntitlements reads it. Corrected rather than
+     * deleted, because the first clause is still the reason for the name and a
+     * reader who checked the second would have found it false and mistrusted
+     * both. Flagged by admin-money.
      */
     setPlan: adminProcedure('admin.tenants.plan')
       .input(
