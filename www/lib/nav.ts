@@ -183,6 +183,8 @@ export const FOOTER_MENUS = [
       { text: "Fintech", href: "/solutions/fintech" },
       { text: "Marketplaces", href: "/solutions/marketplaces" },
       { text: "Developer tools", href: "/solutions/devtools" },
+      { text: "About", href: "/about" },
+      { text: "Contact", href: "/contact" },
       { text: "Request access", href: "/signup" },
     ],
   },

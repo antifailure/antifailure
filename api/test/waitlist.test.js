@@ -63,6 +63,13 @@ test("normaliseEmail accepts an address and lowercases it", () => {
   assert.equal(normaliseEmail("  Person@Example.COM "), "person@example.com");
 });
 
+function assertStructuredFailure(answer, code) {
+  assert.equal(answer.body.ok, false);
+  assert.equal(answer.body.code, code);
+  assert.ok(answer.body.message);
+  assert.ok(answer.body.resolution);
+}
+
 test("normaliseEmail rejects what is certainly not an address", () => {
   for (const value of [
     undefined,
@@ -190,7 +197,7 @@ test("junk is refused with 400 and never reaches storage", async () => {
     const table = fakeTable();
     const answer = await call({ table, body });
     assert.equal(answer.status, 400, `expected 400 for ${JSON.stringify(body)}`);
-    assert.equal(answer.body.ok, false);
+    assertStructuredFailure(answer, "invalid_email");
     assert.equal(table.writes.length, 0);
     assert.equal(table.gets.length, 0);
   }
@@ -210,6 +217,7 @@ test("the sixth signup from one address in a minute is refused", async () => {
 
   const answer = await call({ table, limiter, body, ip: "198.51.100.99", now: 1_000 });
   assert.equal(answer.status, 429);
+  assertStructuredFailure(answer, "rate_limited");
   assert.equal(table.writes.length, RATE_LIMIT_MAX, "the refused attempt writes nothing");
 });
 
@@ -226,6 +234,7 @@ test("the sixth request from one IP in a minute is refused before the body is re
   // first and a loop cannot make the endpoint work for free.
   const answer = await call({ table, limiter, body: { email: "nope" }, now: 1_000 });
   assert.equal(answer.status, 429);
+  assertStructuredFailure(answer, "rate_limited");
 });
 
 test("a lookup that fails for a reason other than a missing row does not write", async () => {
@@ -238,7 +247,7 @@ test("a lookup that fails for a reason other than a missing row does not write",
   });
 
   assert.equal(answer.status, 503);
-  assert.equal(answer.body.ok, false);
+  assertStructuredFailure(answer, "waitlist_unavailable");
   assert.equal(table.writes.length, 0);
   assert.deepEqual(logged, ["waitlist lookup failed"]);
 });
@@ -253,7 +262,7 @@ test("a failed write is reported as unavailable rather than as success", async (
   });
 
   assert.equal(answer.status, 503);
-  assert.equal(answer.body.ok, false);
+  assertStructuredFailure(answer, "waitlist_unavailable");
   assert.deepEqual(logged, ["waitlist write failed"]);
 });
 

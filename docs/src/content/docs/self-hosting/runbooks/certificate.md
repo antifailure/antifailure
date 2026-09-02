@@ -26,7 +26,7 @@ somebody at three in the morning as an outage.
 
 **This alert also fires when the test could not complete at all.** If the
 service is down, this fires alongside `unreachable`. Deal with
-[unreachable](/docs/self-hosting/runbooks/availability/) first and come back;
+[unreachable](/docs/self-hosting/runbooks/availability) first and come back;
 this one is about the certificate only when the site is otherwise fine.
 
 ## What to check

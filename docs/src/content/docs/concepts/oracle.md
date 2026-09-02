@@ -17,7 +17,7 @@ ended up in the database.
 ```
 af oracle
 af oracle --baseline v2.4.0
-af oracle --keep -o oracle.md
+af oracle --keep --report oracle.md
 ```
 
 ## What is compared, and what is not
