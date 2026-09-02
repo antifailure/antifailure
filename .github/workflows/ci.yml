@@ -163,6 +163,22 @@ jobs:
         # supposed to prevent.
         run: go run ./tools/gatecheck .
 
+      - name: Every script this repository runs by path can be executed
+        # tools/site/check-tls.sh was committed at mode 100644. Both of the
+        # places that run it name it as a bare relative path, the certificate
+        # step in deploy.yml and the `check-tls` recipe, so the kernel refused
+        # to exec it and the step died with "Permission denied" and status 126.
+        # It had never run anywhere: the only job that calls it fires on a push
+        # to main and not on a pull request, so the first push that reached the
+        # deploy job was also the first time anybody learned that the
+        # certificate check had never checked a certificate.
+        #
+        # The mode is read from the git index rather than from the disk, which
+        # is what makes this a gate rather than a check on whoever ran it: a
+        # `chmod +x` without a `git update-index --chmod=+x` leaves a working
+        # tree that runs the script and a commit that does not.
+        run: go run ./tools/execcheck .
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
