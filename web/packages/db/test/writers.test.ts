@@ -144,8 +144,7 @@ function isCustomerFacingReader(file: string): boolean {
   return (
     p.startsWith('web/apps/api/src/') ||
     p.startsWith('console/') ||
-    p.startsWith('ee/engine/compliance/') ||
-    p.startsWith('ee/web/')
+    p.startsWith('ee/engine/compliance/')
   )
 }
 
@@ -170,22 +169,6 @@ const UNWIRED: Record<string, string> = {
     'from no engine event at all. The console\'s artifacts table is therefore empty for every',
     'customer. Projecting the local paths would be worse than the blank: it would list files',
     'nobody can fetch. This needs the uploader, not a projector.',
-  ].join(' '),
-  sso_connections: [
-    'Nothing creates an SSO connection. ee/web/sso/src/enforce.ts UPDATEs the row to set',
-    'enforced, and ee/web/sso/src/store.ts reads it on every login, so enforcement is live code',
-    'over a table only the harness fills. The administration path that would create one does',
-    'not exist.',
-  ].join(' '),
-  sso_connection_secrets: 'The secret belongs to a connection nothing creates. See sso_connections.',
-  sso_domains: [
-    'The domains an SSO connection claims, read by provision.ts to decide whether a',
-    'just-in-time account may be made. Nothing writes them, so that check has nothing to',
-    'consult. See sso_connections.',
-  ].join(' '),
-  scim_tokens: [
-    'ee/web/scim/src/store.ts authenticates every SCIM request against this table and updates',
-    'last_used_at on a hit. Nothing issues a token, so no SCIM request can ever authenticate.',
   ].join(' '),
 }
 
