@@ -392,6 +392,66 @@ export function openApiDocument(): Record<string, unknown> {
     },
   }
 
+  // Studio, for an engine. Described here because an engine that is not this
+  // repository's `af` has no other way to learn the shape, and because the
+  // claim endpoint is the only place a workload version's body crosses a wire.
+  const engineOnly = {
+    security: [{ engineToken: [] }],
+    responses: {
+      '200': { description: 'The answer.' },
+      '400': { description: 'The body is not JSON, or is missing a field.' },
+      '401': { description: 'The token is not valid.' },
+      '403': { description: 'The organization is suspended.' },
+      '404': { description: 'No such environment in this organization.' },
+      '409': { description: 'This token does not hold the lease.' },
+    },
+  }
+  paths['/v1/workloads/claim'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'claimWorkloadRun',
+      summary: 'Take the workload run waiting for an environment',
+      description:
+        'Moves the oldest requested run for the environment to accepted and returns its ' +
+        'compiled version, with a lease. Answers 200 and a null run when nothing is waiting, ' +
+        'so a poller can tell that apart from a failure. The engine pulls rather than being ' +
+        'told because a workflow_dispatch carries only the inputs the workflow declares.',
+    },
+  }
+  paths['/v1/workloads/runs/{runId}/heartbeat'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'heartbeatWorkloadRun',
+      summary: 'Say the run is still going',
+      description:
+        'Extends the lease and the deadline. A run whose deadline passes with nothing said ' +
+        'about it ends as abandoned, which is the control plane admitting it never heard ' +
+        'rather than a claim that the work failed.',
+    },
+  }
+  paths['/v1/commands/claim'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'claimRuntimeCommands',
+      summary: 'Take the runtime commands waiting for this organization',
+      description:
+        'Teardowns and cancellations, with a lease. Reachable while the organization is ' +
+        'suspended, deliberately: a suspension stops new work, and stopping what is running ' +
+        'is the opposite of new work.',
+    },
+  }
+  paths['/v1/commands/{id}/ack'] = {
+    post: {
+      ...engineOnly,
+      operationId: 'ackRuntimeCommand',
+      summary: 'Say what happened to a command',
+      description:
+        'Only the holder of the lease may acknowledge, and an acknowledgement that matches no ' +
+        'row answers 409 rather than 200: an acknowledgement nobody applied is the silent ' +
+        'nothing the durable command exists to end.',
+    },
+  }
+
   // The tRPC procedures. They are described rather than fully typed, because
   // tRPC's own client carries the types and this document exists for callers
   // that are not that client.

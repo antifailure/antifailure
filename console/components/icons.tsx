@@ -38,6 +38,7 @@ function stroke(d: string) {
 
 export const IconEnvironments = stroke("M3.5 5.2 8 3l4.5 2.2v5.6L8 13l-4.5-2.2zM3.5 5.2 8 7.4l4.5-2.2M8 7.4V13");
 export const IconRuns = stroke("M2.5 8h3l1.6-3.4 2.4 6.8L11.2 8h2.3");
+export const IconLoad = stroke("M2.6 4.6h4.4M2.6 11.4h3.4M2.6 8h6.8M9.4 6.2 11.2 8 9.4 9.8M13.6 4.4v7.2");
 export const IconMasking = stroke("M8 2.6 13 4.5v4c0 2.6-2.1 4.2-5 4.9-2.9-.7-5-2.3-5-4.9v-4z");
 export const IconNetwork = stroke("M8 2.4v11.2M2.4 8h11.2M8 2.4a7.4 7.4 0 0 1 0 11.2M8 2.4a7.4 7.4 0 0 0 0 11.2");
 export const IconAudit = stroke("M4 2.6h8v10.8H4zM6.2 5.6h3.6M6.2 8h3.6M6.2 10.4h2.2");
