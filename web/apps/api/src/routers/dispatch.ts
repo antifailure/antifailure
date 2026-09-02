@@ -36,7 +36,7 @@ import type { Db } from '@antifailure/db'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { capsFor, checkCostCap, environmentHoursSince } from '../costs.ts'
-import { GitHubError } from '../auth/github.ts'
+import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
 import { engagedReason } from '../admin/controls.ts'
 
 /**
@@ -225,6 +225,72 @@ async function targetFor(db: Db, envId: string): Promise<Target> {
   }
   return { repository: env.repository, ref: env.branch, envId: env.env_id }
 }
+
+// ---------------------------------------------------------------------------
+// environments.readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a dispatch would work, asked before anybody fills in the form.
+ *
+ * Three states and not two. `blocked` is something GitHub said, `ready` is
+ * nothing GitHub said would stop it, and `unknown` is this control plane not
+ * having been able to ask. Collapsing `unknown` into either of the others is
+ * the mistake worth avoiding: reported as blocked it is a false alarm on a
+ * page's primary action, and reported as ready it is a promise made on no
+ * evidence. It renders as nothing at all.
+ */
+type Readiness =
+  | { status: 'ready' }
+  | { status: 'blocked'; cause: DispatchCause; message: string }
+  | { status: 'unknown' }
+
+/**
+ * Guarded by `environments.create` rather than by a permission of its own.
+ *
+ * The question this answers is "would the button work", so the people who
+ * should be told are exactly the people who have the button. A new permission
+ * here would guard one query, which is how this repository ends up with
+ * permissions that no route reads.
+ *
+ * It refuses nothing and writes nothing, so a wrong answer costs a sentence on
+ * a screen. That is what lets it report a missing installation as a state
+ * instead of throwing the way `environments.create` does: a query that throws
+ * on a supported state makes a page look broken, and an organization that has
+ * not installed the App yet is the most ordinary state this product has.
+ */
+export const environmentReadiness = orgProcedure('environments.create')
+  .input(z.object({ repository: z.string(), workflow: workflowFile }))
+  .query(async ({ ctx, input }): Promise<Readiness> => {
+    const c = ctx as OrgContext
+    const installation = await c.pool.withTenant(c.tenant, async (db) => {
+      const rows = await db.execute<Installation>(sql`
+        SELECT installation_id, account_login FROM github_installations
+        WHERE suspended_at IS NULL ORDER BY created_at ASC LIMIT 1`)
+      return rows[0] ?? null
+    })
+    if (!installation) {
+      return {
+        status: 'blocked',
+        ...blockerFor('app-not-installed', {
+          repository: input.repository,
+          workflow: input.workflow,
+        }),
+      }
+    }
+    try {
+      const blocker = await c.github.dispatchBlocker(
+        Number(installation.installation_id),
+        input.repository,
+        input.workflow,
+      )
+      return blocker ? { status: 'blocked', ...blocker } : { status: 'ready' }
+    } catch {
+      // GitHub being unreachable is not evidence about the customer's setup.
+      // Saying so is the only honest answer, and the screen shows nothing.
+      return { status: 'unknown' }
+    }
+  })
 
 // ---------------------------------------------------------------------------
 // environments.create
