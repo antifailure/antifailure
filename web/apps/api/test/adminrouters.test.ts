@@ -23,6 +23,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import postgres from 'postgres'
 import { sql } from '@antifailure/db'
 import { adminRouter } from '../src/admin/router.ts'
+import { declaredAdminPermissions } from '../src/trpc.ts'
+import { ADMIN_PERMISSIONS } from '../src/admin/permissions.ts'
 import { hashPassword } from '../src/admin/session.ts'
 import type { AdminContext } from '../src/admin/trpc.ts'
 import type { AdminRole } from '../src/admin/permissions.ts'
@@ -269,28 +271,34 @@ describe('the operator money routes', { skip: hasDatabase ? false : 'no database
 
   it('a deny target is recorded at a higher severity than an allow', async () => {
     const admin = callerAs('billing')
+    // A key unique to this run. The assertion below reads audit entries by
+    // target_id, and audit entries are append only by design, so a fixed key
+    // makes the second run in the same database read the first run's rows and
+    // fail on a list that is correct twice over. The suite must not depend on
+    // the database being empty when it starts.
+    const flag = `routes.rollout-${randomUUID().slice(0, 6)}`
     await admin.flags.set({
-      key: 'routes.rollout', description: 'A flag to target.',
+      key: flag, description: 'A flag to target.',
       state: 'targeted', rolloutPercent: 10, internalOnly: false,
     })
     await admin.flags.target({
-      flagKey: 'routes.rollout', kind: 'organization', value: org.orgId,
+      flagKey: flag, kind: 'organization', value: org.orgId,
       allow: true, orgId: org.orgId, reason: 'Design partner for the beta',
     })
     await admin.flags.target({
-      flagKey: 'routes.rollout', kind: 'organization', value: org.orgId,
+      flagKey: flag, kind: 'organization', value: org.orgId,
       allow: false, orgId: org.orgId, reason: 'Pulled out after a support escalation',
     })
     const rows = await h.admin<{ action: string; severity: string }[]>`
       SELECT action, severity FROM admin_audit_entries
-      WHERE target_id = 'routes.rollout' ORDER BY seq ASC`
+      WHERE target_id = ${flag} ORDER BY seq ASC`
     assert.deepEqual(
       rows.map((r) => `${r.action}:${r.severity}`),
       ['flag.set:notice', 'flag.targeted:notice', 'flag.denied:high'],
     )
     // Upserted rather than duplicated, so one subject has one answer.
     const targets = await h.admin<{ n: string }[]>`
-      SELECT count(*) AS n FROM feature_flag_targets WHERE flag_key = 'routes.rollout'`
+      SELECT count(*) AS n FROM feature_flag_targets WHERE flag_key = ${flag}`
     assert.equal(Number(targets[0]!.n), 1)
   })
 
@@ -313,5 +321,78 @@ describe('the operator money routes', { skip: hasDatabase ? false : 'no database
       }),
       /no Stripe configuration/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// This lane's routes, in the tree that is actually served
+// ---------------------------------------------------------------------------
+
+describe('every money route is guarded, and none of them has quietly left the tree', () => {
+  // admin-routes.test.ts already walks the whole operator tree and asserts no
+  // route is unguarded. This is the part that walk cannot do for me: its
+  // non-vacuity number is `atLeast: 18`, which is satisfied by admin-portal's
+  // own routes alone. If all seventeen of mine were composed out of the tree
+  // tomorrow, that assertion would still pass and my routes would be gone with
+  // nothing red.
+  //
+  // So this counts MINE. The number is exact rather than a floor, because a
+  // route appearing here that I did not add is as much worth knowing about as
+  // one disappearing.
+  const MINE = /^admin\.(billing|entitlements|flags)\./
+
+  it('all seventeen are mounted, guarded, and under this lane\'s prefixes', () => {
+    const operator = declaredAdminPermissions()
+    const paths = [...operator.keys()].filter((p) => MINE.test(p)).sort()
+
+    assert.equal(
+      paths.length,
+      17,
+      `expected seventeen money routes in the served tree, found ${paths.length}: ${paths.join(', ')}`,
+    )
+
+    for (const path of paths) {
+      const permission = operator.get(path)!
+      // In the catalog, not merely a plausible string. A permission no role
+      // holds refuses everybody, which reads as a broken page rather than as a
+      // typo, and is the failure a matrix exists to catch.
+      assert.ok(
+        (ADMIN_PERMISSIONS as readonly string[]).includes(permission),
+        `${path} declares ${permission}, which is not in ADMIN_PERMISSIONS`,
+      )
+      assert.ok(
+        permission.startsWith('admin.billing.') ||
+          permission.startsWith('admin.entitlements.') ||
+          permission.startsWith('admin.flags.'),
+        `${path} declares ${permission}, which belongs to another lane`,
+      )
+    }
+  })
+
+  it('the write half is separate from the read half on all three surfaces', () => {
+    // The split that lets an on-call engineer read a customer's billing without
+    // holding the refund button. Asserted structurally rather than trusted,
+    // because a route added later with the read permission by mistake is
+    // exactly how that split quietly stops existing.
+    const operator = declaredAdminPermissions()
+    const writes = [...operator.entries()].filter(
+      ([p, perm]) => MINE.test(p) && perm.endsWith('.write'),
+    )
+    const reads = [...operator.entries()].filter(
+      ([p, perm]) => MINE.test(p) && perm.endsWith('.read'),
+    )
+    assert.ok(writes.length >= 9, `expected at least the nine money writes, found ${writes.length}`)
+    assert.ok(reads.length >= 3, `expected a read on each surface, found ${reads.length}`)
+
+    // Every route that MOVES MONEY holds the billing write permission and no
+    // weaker one.
+    for (const name of ['refund', 'credit', 'changePlan', 'extendTrial', 'cancel',
+                        'reactivate', 'discount', 'retryPayment', 'resendInvoice']) {
+      assert.equal(
+        operator.get(`admin.billing.${name}`),
+        'admin.billing.write',
+        `admin.billing.${name} does not require admin.billing.write`,
+      )
+    }
   })
 })
