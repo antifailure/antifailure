@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,6 +93,21 @@ func TestEveryTopLevelPathIsClassified(t *testing.T) {
 		if isSurfaceRoot(name) {
 			continue
 		}
+		// A path git ignores is not in the repository, so it cannot be the new
+		// product area this test exists to catch, and classifying it is not
+		// possible either: the reverse check below requires every name in
+		// notASurface to exist, and build output does not exist in a clean
+		// checkout.
+		//
+		// Without this, `just gate` could not pass. Its first recipe creates
+		// .gate-reports/ in the root, `just links` and `just seo` assemble
+		// site/ there, and `just test-tools` runs afterwards and reported both
+		// as unclassified. So the gate failed on output the gate itself had
+		// just written, on every machine, every time, and only after the run
+		// was far enough along to have produced it.
+		if ignoredByGit(t, root, name) {
+			continue
+		}
 		t.Errorf("%s is in the repository root and changecheck has no opinion about it.\n"+
 			"Add it to surfaces in classify.go if a change there is something a user "+
 			"can see, or to notASurface with the reason it is not.", name)
@@ -110,6 +126,21 @@ func TestEveryTopLevelPathIsClassified(t *testing.T) {
 			t.Errorf("surfaces names %s and there is no such path any more", s.prefix)
 		}
 	}
+}
+
+// ignoredByGit says whether the working tree ignores this root entry.
+//
+// git rather than a list of names, because the list would be a second copy of
+// .gitignore that nothing keeps in step, and the day it drifted this test
+// would either fail on a new build directory or stop seeing a real one.
+//
+// A git that cannot answer is treated as not ignoring, so a checkout without
+// git fails loudly on an unclassified path rather than passing over one.
+func ignoredByGit(t *testing.T, root, name string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "check-ignore", "--quiet", "--", name)
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 
 func isSurfaceRoot(name string) bool {

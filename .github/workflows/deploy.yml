@@ -20,7 +20,26 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue, do not cancel. Every other workflow here cancels a superseded run
+  # because a stale answer to "is this commit good" is worth nothing. This one
+  # is not answering a question, it is uploading to production, and the steps
+  # after the upload are the ones that check the upload worked.
+  #
+  # Cancelling caught a publish in flight. Run 33598095533, head 8fd7fedf:
+  # "Assemble one site" and "Check the assembled site before publishing it"
+  # both succeeded, "Publish" was CANCELLED part way through, and the four
+  # steps after it were skipped. So a partial upload reached the live site and
+  # nothing checked the result. "The API answers" and "The machine-readable
+  # surfaces answer, and describe this revision" are exactly the checks that
+  # exist because a publish is not a working endpoint, and they are the first
+  # things cancellation takes away.
+  #
+  # The step named "Say so when it was not published" is skipped too, so this
+  # failure is silent by construction: the alarm is inside the blast radius.
+  #
+  # Queueing costs a few minutes of latency when merges land back to back. That
+  # is the correct trade against a half-uploaded site nobody was told about.
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -46,7 +65,7 @@ jobs:
     if: ${{ github.repository == 'antifailure/antifailure' }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # www/lib/lastmod.ts asks git when the files behind each route last
           # changed, and writes that into the sitemap. The default shallow
@@ -55,7 +74,7 @@ jobs:
           # freshness signal into noise.
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm

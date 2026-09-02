@@ -73,7 +73,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Every incident file is well formed and names components that exist
         run: deploy/status/incidents.sh check deploy/status/incidents deploy/status/targets.json
@@ -101,12 +101,12 @@ jobs:
       contents: write
     steps:
       - name: Check out the scripts, from the commit this workflow runs at
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: main
 
       - name: Check out the data branch, into the same working copy origin remembers
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: data
           fetch-depth: 0
