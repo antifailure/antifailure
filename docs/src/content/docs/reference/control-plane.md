@@ -35,6 +35,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
 | `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
 | `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
+| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action instead of a dead-end empty state. Any other origin or path stops the process at startup. |
 | `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
 | `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
 | `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
@@ -43,6 +44,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_STRIPE_PRICE_TEAM` | unset | The Stripe price the `team` plan is sold at. A subscription for a price that is not named here is recorded and does **not** change the plan: somebody who bought through a link nobody configured has paid, and entitling them to the free plan would take away capacity they just bought. |
 | `AF_STRIPE_PRICE_ENTERPRISE` | unset | The Stripe price the `enterprise` plan is sold at. |
 | `AF_STRIPE_API_BASE` | `https://api.stripe.com` | Where the Stripe API lives. For tests, which point it at the engine's own Stripe mock pack, and for nothing else. |
+| `AF_HOSTED_REQUIRED_PLAN` | unset | Set to `enterprise` on a hosted control plane that is sold only to enterprise organizations. Authentication, sign-out and the exits remain reachable; browser procedures, CLI provider operations, model proxy requests and engine ingestion are refused until Stripe grants the enterprise plan. The exits are billing, exporting the organization's data, deleting the organization, closing an account, and listing and revoking sessions: a plan gate may restrict what the product does for a customer and may never restrict their ability to leave, to retrieve what is theirs, or to secure their account. Any other value stops the process. Setting this while billing is off also stops the process, because otherwise no customer could satisfy the gate. Leave it unset when self-hosting. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
 
 ## Set on the engine, not here
@@ -73,6 +75,21 @@ to any account added to the allowlist before it is invited anywhere.
 
 Both are needed. The allowlist is a closed door; the installation check is what
 makes an open one safe.
+
+When sign-ups are open and `AF_GITHUB_APP_INSTALL_URL` is set, a new customer
+can complete the whole path without an operator: sign in with GitHub, install
+the App on an organization, then choose **Check my GitHub membership**. The
+second OAuth exchange reads the installation GitHub just created and grants the
+membership. The first GitHub administrator to claim an empty organization
+becomes its owner under the rule below.
+
+On an enterprise-only hosted deployment that owner lands on Plan. Checkout is
+the only path that can grant the required plan; `billing.set` is refused, so an
+owner cannot turn a free organization into an enterprise one without Stripe.
+The signed subscription webhook changes the plan. **Refresh from Stripe** asks
+Stripe for every subscription belonging to that customer and repairs the same
+state when a webhook never arrives, including the case where no local
+subscription row exists yet.
 
 ## What role somebody gets
 
@@ -114,6 +131,121 @@ role until it runs, because a person who has been removed has no reason to come
 back and sign in. It needs `members.manage`, it refuses an empty member list
 from GitHub rather than removing every owner, and it records what it changed in
 the audit log.
+
+## Running the organization
+
+Everything on this page is reachable by whoever the role table says can reach
+it. The console hides what a role cannot do; the server refuses it, and the
+refusal is what the permission matrix tests, one route against each of the four
+roles.
+
+### Inviting somebody who is not in your GitHub organization
+
+Membership follows the GitHub App installation, which is right for engineers and
+useless for the two cases every company has: a finance person who needs the
+billing page and no repository access, and a contractor who is not in the GitHub
+organization at all. **Invitations** on the Members page sends a link.
+
+The link carries a token that exists only in the link. What is stored is its
+hash, the same way a session is stored, so a leaked backup is a list of hashes
+rather than a list of ways into your organization. Two consequences worth
+knowing before you use it:
+
+- **The link is shown to you as well as sent.** A control plane with no
+  `AF_MAIL_FROM` cannot send anything, and an invitation that only existed as an
+  email would silently do nothing there. Copy it and send it however you like.
+- **Sending it again produces a NEW link and the old one stops working.** The
+  original cannot be resent because it is not stored. That is also the better
+  behaviour: an invitation forwarded to the wrong person is invalidated by
+  asking for a fresh one.
+
+A link expires after fourteen days. An invitation stays good after the person
+who sent it has left, because it was authorised when it was sent, and the record
+keeps their name as it was at the time. Accepting adds the account that is
+signed in, which is not necessarily the address the invitation was sent to: the
+token is the proof and the address is a label.
+
+### Signing people out
+
+**Signed in now**, under Settings, lists every live session in the organization
+with who it belongs to, where it came from and when it was last used, and marks
+the one you are reading it in. It never shows a token or a hash of one.
+
+Signing a session out takes effect on that session's next request. Removing
+somebody from the organization signs them out in the same transaction, so there
+is no window in which a person who is no longer a member still has a working
+session. Both need `sessions.manage`; removal needs `members.manage`.
+
+A session that is not used for twelve hours stops working, and no session lives
+longer than thirty days however active. The list shows when each one expires so
+that a session which is about to go on its own can be left alone.
+
+### Taking a copy
+
+**Download a copy**, under Settings, produces one JSON file holding people,
+invitations, repositories, masking rules, egress policy, environments, runs,
+verdicts, runtimes, credentials by name, billing history and the audit log. It
+needs `data.export`.
+
+Every reference in it is the name you already use: a repository is `owner/name`,
+a person is their login, an environment is its env id. There is not one internal
+identifier in the file. Inside it, `files` holds text keyed by path, and those
+are the parts you can put straight back: `masking.yaml` is a masking file the
+engine reads as it is, and `egress.yaml` is the `egress:` block from
+`antifailure.yaml`.
+
+What it deliberately does not contain is listed in the file itself, under
+`notIncluded`, with the reason for each. Engine token values and provider key
+material are the important two: an export carrying either would be a way into
+your CI.
+
+### Deleting an organization
+
+`organization.delete` is held by an owner and nobody else. It is not a delete
+statement, and the order is the point:
+
+| Step | What happens |
+| --- | --- |
+| Stop what is running | Every environment is marked torn down, every queued or running run is cancelled, and the organization is suspended so nothing new can be started. |
+| End the subscription | Cancelled at Stripe at the end of the period you have paid for. Nothing is refunded and nothing is taken away early. |
+| Wait | Nothing else happens until that period ends. Everything still reads, and the deletion can still be called off. |
+| Revoke credentials | Engine tokens, provider keys, sessions, and the GitHub App installation, which is removed at GitHub rather than only marked here. |
+| Produce the export | The same document as **Download a copy**, taken before anything is removed, because afterwards there is nothing left to build one from. |
+| Delete | The organization and every row belonging to it, including the audit log. |
+
+Two things follow from that order and both matter.
+
+**A deletion that is interrupted picks up where it stopped.** Each step records
+that it happened in the same transaction as the change it describes, so a
+process that dies between two steps leaves a record saying exactly which
+happened. The control plane retries on its own, and **Continue now** does the
+next step immediately.
+
+**The download link is shown once, when you ask for the deletion.** After the
+organization is gone there is no membership left to authorise a download, so the
+link is the authorisation. Keep it. It works for seven days, and **Destroy the
+copy** removes the held document early if you would rather we did not keep one.
+
+Your database is not touched by any of this, because none of it is here: no
+snapshot, no masked branch and no captured request body ever reaches this
+control plane.
+
+### Closing your own account
+
+Every role can close their own account, including `viewer`. It erases your name,
+address, GitHub identity and avatar, removes your memberships, and signs you out
+everywhere. Signing in again afterwards creates a new account.
+
+It is called closing rather than deleting because the row is not removed. The
+audit log references it, and that reference is deliberately one the database
+refuses to break: an audit log whose subject can erase themselves from it is not
+an audit log. The entries keep the name you had at the time, because the log is
+a hash chain and rewriting an entry breaks it, and they go when the organization
+does.
+
+The only refusal is the last owner of an organization. An organization with no
+owner cannot grant anybody the permission to become one, so make somebody else
+an owner first, or delete the organization.
 
 ## Health
 

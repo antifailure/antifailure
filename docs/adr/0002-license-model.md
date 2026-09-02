@@ -30,12 +30,15 @@ The community edition is complete. Masking, verification, every database
 provider, the whole egress and mocking layer, the agent runner, insights, load,
 and the control plane are MIT and stay MIT.
 
-The boundary is enforced mechanically, not by convention: a depguard rule
-forbids importing `ee/` from outside it, the `ee` build tag gates compilation,
-the release pipeline inspects shipped symbols and bundles, and CI publishes
-`antifailure/antifailure-foss`, a generated mirror with `ee/` deleted, from
-which the community artifacts are built. A community build that does not
-compile from the mirror is a broken boundary and fails the gate.
+The boundary is enforced mechanically, not by convention: `ee/engine` is a
+separate Go module kept out of the root `go.work` and `ee/web` a separate npm
+workspace, so an import from outside does not resolve and does not compile; a
+grep in CI and in `just edition` catches what a module boundary cannot; the
+`edition boundary` job deletes `ee` and builds and tests the engine from what
+is left; and the same job inspects the built binary for enterprise package
+paths, with `.dockerignore` keeping `ee` out of the image build context. A
+community build that does not compile without `ee/` is a broken boundary and
+fails the gate.
 
 Contributions are under the Developer Certificate of Origin, with no CLA.
 
@@ -43,8 +46,16 @@ Contributions are under the Developer Certificate of Origin, with no CLA.
 
 Easier: a self hoster gets everything they need under MIT, permanently, with no
 key and no phone home. A company that needs SSO has a clear thing to buy. The
-boundary cannot rot, because the community build is produced from a tree where
-`ee/` does not exist.
+boundary cannot rot, because the gate builds and tests from a tree where `ee/`
+does not exist.
+
+**Correction, 2026-09-01.** The paragraph above named four mechanisms and three
+of them did not exist: there is no depguard rule, no `ee` build tag anywhere in
+the tree, and no generated mirror repository. The decision this ADR records did
+not change and the boundary was real throughout; the mechanisms have been
+rewritten to the ones the repository actually runs, each naming the file that
+runs it. The failure worth recording is that an accurate conclusion resting on
+an invented mechanism reads exactly like a true one.
 
 Harder: every enterprise feature must attach through an extension point that
 the community code declares, with a no-op default, because it cannot be reached

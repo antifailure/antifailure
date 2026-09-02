@@ -266,6 +266,9 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 	if spec.RulesHash != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelRules+`=`+spec.RulesHash)
 	}
+	if spec.Provenance != "" {
+		changes = append(changes, `LABEL `+dockerutil.LabelProvenance+`=`+spec.Provenance)
+	}
 	if attestation != "" {
 		changes = append(changes, `LABEL `+dockerutil.LabelAttestation+`=`+
 			base64.StdEncoding.EncodeToString([]byte(attestation)))
@@ -280,7 +283,8 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 
 	gv := provider.GoldenVersion{
 		ID: version, CreatedAt: p.clock.Now().UTC(), RulesHash: spec.RulesHash,
-		Verified: spec.Verify != nil, Attestation: attestation, ProviderRef: tag,
+		Provenance: spec.Provenance,
+		Verified:   spec.Verify != nil, Attestation: attestation, ProviderRef: tag,
 	}
 	if info, err := p.cli.ImageInspect(ctx, tag); err == nil {
 		gv.SizeBytes = info.Size
@@ -348,8 +352,9 @@ func (p *Provider) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, e
 				SizeBytes: img.Size, ProviderRef: tag,
 				// A committed image only exists because verification passed;
 				// the commit is the last step of a refresh.
-				Verified:  true,
-				RulesHash: img.Labels[dockerutil.LabelRules],
+				Verified:   true,
+				RulesHash:  img.Labels[dockerutil.LabelRules],
+				Provenance: img.Labels[dockerutil.LabelProvenance],
 			}
 			if raw := img.Labels[dockerutil.LabelAttestation]; raw != "" {
 				if decoded, decErr := base64.StdEncoding.DecodeString(raw); decErr == nil {

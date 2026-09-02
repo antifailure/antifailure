@@ -64,6 +64,10 @@ export const users = pgTable('users', {
   identitySource: text('identity_source').notNull().default('github'),
   name: text('name'),
   avatarUrl: text('avatar_url'),
+  // Set when somebody closes their own account. The row survives because
+  // audit_entries points at it with NO ACTION; see migrations/0022 for why a
+  // delete is refused and what is erased instead.
+  closedAt: timestamp('closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('users_github_id_key').on(t.githubId), index('users_email_idx').on(t.email)])
@@ -644,6 +648,196 @@ export const billingEvents = pgTable('billing_events', {
   payload: jsonb('payload').notNull().default({}),
 })
 
+// ---------------------------------------------------------------------------
+// Running the organization
+//
+// See migrations/0022 for the isolation, which is the part that cannot be
+// expressed here: three of these four tables are reached by somebody who is not
+// an ordinary member of the organization the row belongs to.
+// ---------------------------------------------------------------------------
+
+// An invitation for somebody who is not in the GitHub organization, or does not
+// have an account at all. The token is stored as a hash, the same as a session:
+// the value exists in the link and nowhere else.
+export const invitations = pgTable('invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  email: text('email').notNull(),
+  role: memberRole('role').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  invitedBy: uuid('invited_by'),
+  // A copy of how the inviter was named at the time, so an invitation accepted
+  // after they have left still says who sent it.
+  invitedByLabel: text('invited_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  acceptedUserId: uuid('accepted_user_id'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedByLabel: text('revoked_by_label'),
+}, (t) => [
+  uniqueIndex('invitations_open_key').on(t.orgId, t.email),
+  index('invitations_org_created_idx').on(t.orgId, t.createdAt),
+])
+
+// Where the invoices go. Not derived from the members table: a billing address
+// and a sign-in address are different things and finance departments insist on
+// the difference.
+export const billingContacts = pgTable('billing_contacts', {
+  orgId: uuid('org_id').primaryKey(),
+  email: text('email').notNull(),
+  name: text('name'),
+  updatedByLabel: text('updated_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// The deletion state machine. Deliberately has no foreign key to organizations:
+// it is the record that has to outlive the row it is deleting.
+export const organizationDeletions = pgTable('organization_deletions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  orgSlug: text('org_slug').notNull(),
+  orgName: text('org_name').notNull(),
+  requestedBy: uuid('requested_by'),
+  requestedByLabel: text('requested_by_label').notNull(),
+  reason: text('reason'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  workStoppedAt: timestamp('work_stopped_at', { withTimezone: true }),
+  environmentsStopped: integer('environments_stopped'),
+  runsCancelled: integer('runs_cancelled'),
+  subscriptionCancelledAt: timestamp('subscription_cancelled_at', { withTimezone: true }),
+  subscriptionId: text('subscription_id'),
+  entitlementEndsAt: timestamp('entitlement_ends_at', { withTimezone: true }),
+  credentialsRevokedAt: timestamp('credentials_revoked_at', { withTimezone: true }),
+  engineTokensRevoked: integer('engine_tokens_revoked'),
+  providerKeysRevoked: integer('provider_keys_revoked'),
+  sessionsRevoked: integer('sessions_revoked'),
+  installationsRevoked: integer('installations_revoked'),
+  exportedAt: timestamp('exported_at', { withTimezone: true }),
+  purgedAt: timestamp('purged_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  cancelledByLabel: text('cancelled_by_label'),
+  lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+  lastErrorStep: text('last_error_step'),
+  lastErrorMessage: text('last_error_message'),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('organization_deletions_live_key').on(t.orgId),
+  index('organization_deletions_org_idx').on(t.orgId, t.requestedAt),
+])
+
+// The export the customer is owed, held apart from the state machine because it
+// is the only part carrying customer data and because its lifetime is shorter.
+export const organizationDeletionExports = pgTable('organization_deletion_exports', {
+  deletionId: uuid('deletion_id').primaryKey(),
+  orgId: uuid('org_id').notNull(),
+  tokenHash: bytea('token_hash').notNull(),
+  document: jsonb('document').notNull(),
+  entryCount: integer('entry_count').notNull(),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  downloadedAt: timestamp('downloaded_at', { withTimezone: true }),
+  downloadCount: integer('download_count').notNull().default(0),
+  destroyedAt: timestamp('destroyed_at', { withTimezone: true }),
+}, (t) => [index('organization_deletion_exports_expiry_idx').on(t.expiresAt)])
+// The pull request lifecycle. See migrations/0021.
+// ---------------------------------------------------------------------------
+
+/** The seven states one attempt against one head commit can be in. blocked and
+ *  unverified are not passes, here or anywhere downstream of here. */
+export const prGenerationState = pgEnum('pr_generation_state', [
+  'queued', 'running', 'passed', 'failed', 'blocked', 'unverified', 'cancelled',
+])
+
+export const githubDeliveries = pgTable('github_deliveries', {
+  deliveryId: text('delivery_id').primaryKey(),
+  orgId: uuid('org_id'),
+  accountLogin: text('account_login'),
+  event: text('event').notNull(),
+  action: text('action'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  handledAt: timestamp('handled_at', { withTimezone: true }),
+  outcome: text('outcome'),
+}, (t) => [index('github_deliveries_org_idx').on(t.orgId, t.receivedAt)])
+
+export const pullRequests = pgTable('pull_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  repositoryId: uuid('repository_id').notNull(),
+  number: integer('number').notNull(),
+  title: text('title'),
+  headSha: text('head_sha').notNull(),
+  headRef: text('head_ref').notNull(),
+  baseRef: text('base_ref').notNull(),
+  headRepository: text('head_repository').notNull(),
+  fromFork: boolean('from_fork').notNull().default(false),
+  draft: boolean('draft').notNull().default(false),
+  state: text('state').notNull().default('open'),
+  approvedSha: text('approved_sha'),
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  commentId: bigint('comment_id', { mode: 'number' }),
+  commentSha: text('comment_sha'),
+  commentUpdatedAt: timestamp('comment_updated_at', { withTimezone: true }),
+  openedAt: timestamp('opened_at', { withTimezone: true }),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('pull_requests_repository_id_number_key').on(t.repositoryId, t.number),
+  index('pull_requests_org_idx').on(t.orgId, t.updatedAt),
+])
+
+export const prGenerations = pgTable('pr_generations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  pullRequestId: uuid('pull_request_id').notNull(),
+  headSha: text('head_sha').notNull(),
+  attempt: integer('attempt').notNull().default(1),
+  state: prGenerationState('state').notNull().default('queued'),
+  detail: text('detail'),
+  checkRunId: bigint('check_run_id', { mode: 'number' }),
+  workflowRunId: bigint('workflow_run_id', { mode: 'number' }),
+  callbackHash: bytea('callback_hash'),
+  callbackExpiresAt: timestamp('callback_expires_at', { withTimezone: true }),
+  reportedBy: text('reported_by'),
+  envId: text('env_id'),
+  verdict: jsonb('verdict'),
+  supersededBy: uuid('superseded_by'),
+  queuedAt: timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('pr_generations_pull_request_id_head_sha_key').on(t.pullRequestId, t.headSha),
+  index('pr_generations_org_idx').on(t.orgId, t.queuedAt),
+])
+
+export const teardownRequests = pgTable('teardown_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  environmentId: uuid('environment_id'),
+  envId: text('env_id'),
+  repositoryId: uuid('repository_id'),
+  workflowRunId: bigint('workflow_run_id', { mode: 'number' }),
+  generationId: uuid('generation_id'),
+  reason: text('reason').notNull(),
+  requestedBy: uuid('requested_by'),
+  state: text('state').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leasedUntil: timestamp('leased_until', { withTimezone: true }),
+  lastError: text('last_error'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -655,4 +849,6 @@ export const tenantScopedTables = [
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
   billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
+  invitations, billingContacts, organizationDeletions, organizationDeletionExports,
+  githubDeliveries, pullRequests, prGenerations, teardownRequests,
 ] as const

@@ -81,7 +81,11 @@ func TestEveryCommandInTheDocsExists(t *testing.T) {
 				continue
 			}
 			checked++
-			if problem := checkInvocation(root, line); problem != "" {
+			problem := checkInvocation(root, line)
+			if problem == "" {
+				problem = checkFlagValues(line)
+			}
+			if problem != "" {
 				problems = append(problems, fmt.Sprintf("%s: af %s\n    %s", rel, line, problem))
 			}
 		}

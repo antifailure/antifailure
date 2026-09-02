@@ -115,7 +115,9 @@ af ci [flags]
 ```
 # What CI runs: up, migrate, test, load, gate, report, down.
 af ci
-af ci --report report.json --keep
+# --report is Markdown for a person, --report-json is the same run
+# for a program.
+af ci --report report.md --report-json report.json --keep
 ```
 
 | Flag | Default | What it does |
@@ -126,6 +128,7 @@ af ci --report report.json --keep
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
 | `--load` | `false` | Generate load as well as running the workflows. |
 | `--report` | - | Write the report here as well as to the terminal. |
+| `--report-json` | - | Write the same report here as JSON, for a program to read. |
 | `--runner` | - | Path to the runner's entry point. |
 | `--save-baseline` | - | Save this run's queries and plans, to compare a later branch against. |
 | `--timeout` | `30m0s` | Give up after this long. |
@@ -680,6 +683,15 @@ comes from the source that identifies an application best, a package manifest
 ahead of a compose key ahead of a Procfile process ahead of the directory.
 Where one source declares two services in a directory, which is what a compose
 file with a web and an admin container on one build context is, they stay two.
+
+A Dockerfile in a subdirectory is built either from that directory, which is
+what 'docker build <dir>' does, or from the repository root, which is what a
+monorepo image reaching a lockfile at the top of the tree needs. Its COPY lines
+say which: a path that exists beside the Dockerfile and not at the root means
+the directory, and one that exists only at the root means the root. Where they
+do not settle it, this is a question rather than a default, because building
+from the wrong one either fails on a missing path or, with COPY . ., succeeds
+and produces an image assembled from the wrong directory.
 
 --answer settles a question, and also overrides a value detection read with
 confidence, which is how you separate two services a repository really does

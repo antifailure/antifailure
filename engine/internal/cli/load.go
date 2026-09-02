@@ -71,19 +71,27 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Load is sent AT an environment rather than creating one, so this
+			// is defence in depth rather than the gate that matters. It is
+			// here because an environment left up from before the policy
+			// existed, or from a run on the base branch, is still an
+			// environment a fork's pull request can point traffic at.
+			if fork := forkGate(e); fork.Refused {
+				return refuseFork(fork)
+			}
 			o, err := orchestrator(e, branch, false)
 			if err != nil {
 				return err
 			}
 			e.Out.Section("Generating load")
 
-			res, refused, err := o.Load(cmd.Context(), env.LoadOptions{
-				Duration: duration, Scale: scale, Seed: seed,
-				Progress: func(p load.Progress) {
-					e.Out.Printf("  %s  %d sent, %d errors, p95 %.0fms, %d in flight\n",
-						p.Elapsed, p.Sent, p.Errors, p.P95Ms, p.Inflight)
-				},
-			})
+			opts := loadRate(cmd, duration, scale, defaultDuration, defaultScale, smoke)
+			opts.Seed = seed
+			opts.Progress = func(p load.Progress) {
+				e.Out.Printf("  %s  %d sent, %d errors, p95 %.0fms, %d in flight\n",
+					p.Elapsed, p.Sent, p.Errors, p.P95Ms, p.Inflight)
+			}
+			res, refused, err := o.Load(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
@@ -182,6 +190,40 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 	cmd.Flags().Int64Var(&seed, "seed", 1, "Makes two runs send the same sequence")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to send at, defaulting to the checked out one")
 	return cmd
+}
+
+// loadRate reads what the user actually typed, rather than what cobra left in
+// the variable.
+//
+// A flag holds its default whether or not anybody set it, so reading the
+// variable alone cannot tell a default from a choice. Passing the default down
+// as if it were a choice is what made the manifest's load.scale and
+// load.duration unreachable from this command: every run arrived at the engine
+// carrying 60s and scale 1.0, which are not zero, so the fallback that would
+// have read the manifest never fired. A repository that wrote `scale: 0.05`
+// because it was aiming this at something fragile, and read the five percent
+// back correctly out of `af explain`, got production's full arrival rate.
+// Changed() is the only thing in cobra that knows the difference.
+//
+// The defaults travel on as defaults, so a manifest that says nothing still
+// gets the command's own numbers and nothing about an unconfigured project
+// changes.
+func loadRate(
+	cmd *cobra.Command,
+	duration time.Duration, scale float64,
+	defaultDuration time.Duration, defaultScale float64,
+	ceiling bool,
+) env.LoadOptions {
+	opts := env.LoadOptions{
+		DefaultDuration: defaultDuration, DefaultScale: defaultScale, Ceiling: ceiling,
+	}
+	if cmd.Flags().Changed("duration") {
+		opts.Duration = duration
+	}
+	if cmd.Flags().Changed("scale") {
+		opts.Scale = scale
+	}
+	return opts
 }
 
 // loadExit is the verdict a load run exits with.

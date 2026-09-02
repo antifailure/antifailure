@@ -22,20 +22,47 @@ managers, billing and metering, and support tooling.
 
 ## How the boundary is enforced
 
-It is not a convention. It is checked four ways on every pull request:
+It is not a convention. It is checked four ways on every pull request, and
+each of them names the file that does the checking so you can read it rather
+than take this paragraph's word for it.
 
-1. **Import direction.** Code under `ee/` may import anything. Nothing outside
-   `ee/` may import `ee/`. Enforced by `depguard` in Go and an import
-   restriction in Biome for TypeScript.
-2. **Build tags.** Enterprise Go packages compile only with the `ee` build
-   tag. The community binary is built without it.
-3. **Symbol inspection.** The release pipeline inspects the shipped community
-   binary and the shipped bundles and fails if a single symbol or module from
-   `ee/` appears.
-4. **The FOSS mirror.** CI publishes `antifailure/antifailure-foss`, a
-   generated copy of this repository with `ee/` deleted. If the community
-   build does not compile and pass its full test suite from that mirror, the
-   boundary is broken and the gate fails.
+1. **Separate modules, so a stray import does not compile.** `ee/engine` is
+   its own Go module and is deliberately kept out of the root `go.work`, so
+   there is no import path from the community engine that resolves; the
+   comment at the top of `ee/engine/go.mod` says why. `ee/web` is its own npm
+   workspace root under the scope `@antifailure-ee`, separate from `web/`, so
+   the community workspace cannot resolve an enterprise package either. This
+   is stronger than a lint rule: a mistaken import is a compile error on the
+   machine that made it.
+2. **A grep, for the case a module boundary cannot catch.** The `edition
+   boundary` job in `.github/workflows/ci.yml` fails if any Go file under
+   `engine` or `tools` names `antifailure/antifailure/ee`, and `just edition`
+   fails if anything under `web/apps` or `web/packages` names
+   `antifailure-ee` or `ee/web`.
+3. **Deleting `ee` and building what is left.** The same job runs `rm -rf ee`,
+   then `go build ./...` and the engine's unit suites from the tree that
+   remains. That is the community build passing green with the enterprise code
+   gone, which is the claim the paragraph below used to make about a mirror.
+4. **Symbol inspection of the artifact that ships.** The job builds
+   `cmd/af` and fails if `strings` finds any `antifailure/.../ee/` package
+   path in the binary. `.dockerignore` excludes `ee` from the image build
+   context, so the published control plane image is built from a context that
+   does not contain it.
+
+WHAT THIS SECTION USED TO SAY, and why it is written down rather than quietly
+replaced. It claimed `depguard` in Go and an import restriction in Biome; this
+repository has neither, and `.golangci.yml` enables ten linters, none of them
+`depguard`. It claimed enterprise Go packages compile only with an `ee` build
+tag; there is no `//go:build ee` anywhere in the tree, and `ee/engine/go.mod`
+opens by saying it is deliberately *not* a build tag. It claimed CI publishes a
+generated mirror repository named antifailure-foss; no workflow generates,
+pushes to, or builds from any mirror.
+
+Three of the four stated mechanisms were fiction. The boundary itself was
+real the whole time, which is exactly what makes this worth recording: an
+accurate claim resting on an invented mechanism reads identically to a true
+one until somebody goes looking, and the person who goes looking is usually
+the customer.
 
 Enterprise features attach through extension points that the community code
 declares as interfaces with no-op defaults: authentication providers, route

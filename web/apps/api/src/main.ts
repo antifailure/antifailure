@@ -18,12 +18,16 @@ import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
+import { RealRepositoryApi } from './github/api.ts'
+import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
+import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -76,6 +80,17 @@ console.log(
     ? `GitHub App ${appConfig.appId} is configured: webhook deliveries are verified and membership can be synced`
     : 'no GitHub App: webhook deliveries are refused and membership cannot be synced (AF_GITHUB_APP_ID is not set)',
 )
+
+// Acting on a repository as the installation: check runs, the pull request
+// comment, cancelling a run. Absent when there is no App, and the lifecycle
+// then records what deliveries tell it and publishes nothing, which is what a
+// self-hosted control plane with no App should do rather than refuse to start.
+const githubApi = installationTokens
+  ? new RealRepositoryApi({
+      tokens: installationTokens,
+      ...(process.env.AF_GITHUB_API_BASE ? { apiBase: process.env.AF_GITHUB_API_BASE } : {}),
+    })
+  : null
 
 const github = new RealGitHubClient({
   clientId: required('AF_GITHUB_CLIENT_ID'),
@@ -160,12 +175,41 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+let hostedRequiredPlan
+let githubAppInstallUrl
+try {
+  hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
+  githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(2)
+}
+if (hostedRequiredPlan && !stripe.config) {
+  console.error(
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+console.log(
+  hostedRequiredPlan
+    ? `hosted access requires the ${hostedRequiredPlan} plan`
+    : 'no hosted plan gate: this installation serves every plan',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
 // Dockerfile is not, and the two are indistinguishable without this line.
 const consoleBuild = await findConsoleBuild()
 console.log(consoleBuild.summary)
+
+// Built once rather than at each call site. The deletion resumer needs the same
+// client the routes use: a second one would be a second place for a key to be
+// wrong, and a deletion that cancelled a subscription through a different
+// client from the one the console used is a difference nobody would find.
+const billing = stripe.config
+  ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
+  : null
 
 const { app, ingestLimiter, authLimiter } = createServer({
   pool,
@@ -176,11 +220,19 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signInAllowlist,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
-  stripe: stripe.config
-    ? { config: stripe.config, client: new RealStripeClient(stripe.config) }
-    : null,
+  // The webhook's way of invalidating a cached token. Bound to the same
+  // InstallationTokens the GitHub client mints from, because dropping a token
+  // out of a different cache from the one that holds it is the shape of fix
+  // that reads correct in a diff and changes nothing at runtime.
+  ...(installationTokens
+    ? { forgetInstallationToken: (id: number) => installationTokens.forget(id) }
+    : {}),
+  stripe: billing,
+  hostedRequiredPlan,
+  githubAppInstallUrl,
   modelPrices,
   consoleBuild,
+  githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
 
@@ -223,12 +275,67 @@ const housekeeping = setInterval(
     void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
       console.error('device authorization sweep', err),
     )
+
+    // Not housekeeping. This one finishes work a customer asked for and is the
+    // only thing that gets a deletion past the paid period it is waiting out,
+    // which can be a month: nobody is coming back to press a button, and a
+    // deletion that stops halfway is exactly the state somebody asked us not to
+    // leave them in. It runs unconditionally, on the application pool, rather
+    // than beside the partition maintenance, which only runs when an
+    // administrative connection string happens to be configured.
+    void resumeDeletions({
+      pool,
+      clock: systemClock,
+      github,
+      stripe: billing,
+      log: (line, err) => console.error(line, err),
+    }).catch((err) => console.error('organization deletion sweep', err))
+
     ingestLimiter.sweep()
     authLimiter.sweep()
   },
   5 * 60 * 1000,
 )
 housekeeping.unref()
+
+// The pull request lifecycle's own housekeeping, and it is not the same shape
+// as the sweeps above.
+//
+// Those are about table size: expiry is checked on every read, so being late
+// costs nothing but rows. These two are about correctness. A check that never
+// concludes holds a merge forever with no explanation, and a teardown that is
+// never confirmed is somebody's containers still running on a machine they are
+// paying for. Both had to be started HERE and not merely written, which is the
+// failure this repository has shipped more than once: a sweeper with a comment
+// saying what it keeps under control, and no caller.
+if (githubApi) {
+  const lifecycle: LifecycleDeps = {
+    pool,
+    clock: systemClock,
+    api: githubApi,
+    consoleBase: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL ?? null,
+    // Names this replica in a lease, so a request stuck under one says which
+    // process has it rather than only that somebody does.
+    holder: process.env.HOSTNAME ?? 'control-plane',
+  }
+  // A minute. The teardown lease is a minute, so a slower interval would mean
+  // a request whose holder died waits for the sweep rather than for the lease,
+  // and the lease would be decorative.
+  const lifecycleSweep = setInterval(
+    () => {
+      void sweepGenerations(lifecycle).catch((err) => console.error('generation sweep', err))
+      void sweepTeardowns(lifecycle).catch((err) => console.error('teardown sweep', err))
+    },
+    60 * 1000,
+  )
+  lifecycleSweep.unref()
+  console.log('the pull request lifecycle is running: checks, one comment per pull request, teardown')
+} else {
+  console.log(
+    'no GitHub App: pull request checks and comments are not published, and no teardown ' +
+      'request can reach a workflow run',
+  )
+}
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`control plane listening on :${info.port}`)

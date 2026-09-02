@@ -50,6 +50,15 @@ ahead of a compose key ahead of a Procfile process ahead of the directory.
 Where one source declares two services in a directory, which is what a compose
 file with a web and an admin container on one build context is, they stay two.
 
+A Dockerfile in a subdirectory is built either from that directory, which is
+what 'docker build <dir>' does, or from the repository root, which is what a
+monorepo image reaching a lockfile at the top of the tree needs. Its COPY lines
+say which: a path that exists beside the Dockerfile and not at the root means
+the directory, and one that exists only at the root means the root. Where they
+do not settle it, this is a question rather than a default, because building
+from the wrong one either fails on a missing path or, with COPY . ., succeeds
+and produces an image assembled from the wrong directory.
+
 --answer settles a question, and also overrides a value detection read with
 confidence, which is how you separate two services a repository really does
 have on one port. An id naming nothing is refused with the ids that would have
@@ -332,6 +341,25 @@ func applyAnswer(m *schema.Manifest, id, answer string) bool {
 			}
 		}
 		return applied
+	case strings.HasPrefix(id, "service.") && strings.HasSuffix(id, ".context"):
+		name := strings.TrimSuffix(strings.TrimPrefix(id, "service."), ".context")
+		applied := false
+		for i := range m.Services {
+			if m.Services[i].Name != name || m.Services[i].Build == nil {
+				continue
+			}
+			// "." is the repository root, which is what an unset context
+			// already means. Writing it would put a value in the manifest
+			// that changes nothing, and a reader would reasonably expect it
+			// to mean something.
+			if answer == "." {
+				m.Services[i].Build.Context = ""
+			} else {
+				m.Services[i].Build.Context = answer
+			}
+			applied = true
+		}
+		return applied
 	case id == "database.present":
 		if strings.EqualFold(answer, "no") {
 			m.Database = &schema.Database{Provider: schema.DBDocker, Version: 17}
@@ -347,6 +375,9 @@ func answerIDs(m *schema.Manifest) []string {
 	ids := []string{"database.present"}
 	for _, s := range m.Services {
 		ids = append(ids, "service."+s.Name+".port", "service."+s.Name+".command")
+		if s.Build != nil && s.Build.Strategy == schema.BuildDockerfile {
+			ids = append(ids, "service."+s.Name+".context")
+		}
 	}
 	return ids
 }
@@ -438,8 +469,10 @@ func renderManifest(m *schema.Manifest) ([]byte, error) {
 		b.WriteString("\n")
 		b.WriteString(strings.TrimSpace(`
 # Detection found no production database to build a golden from, so branches
-# will start empty. To copy production instead, add the name of the variable
-# holding its read only connection string:
+# start from an empty database this project makes for itself. A golden another
+# project on this machine made is never branched into an environment here,
+# whatever the two have in common. To copy production instead, add the name of
+# the variable holding its read only connection string:
 #
 #   database:
 #     source_url_env: PRODUCTION_DATABASE_URL

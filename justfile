@@ -70,6 +70,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "prose reads like a person"      just prosecheck
@@ -97,6 +98,7 @@ gate: _reports
     run "the other platforms lint"       just lint-platforms
     run "control plane"                  just test-web
     run "the site API"                   just test-site-api
+    run "the console"                    just test-console
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -104,6 +106,7 @@ gate: _reports
     run "license parser fuzz"            just fuzz-license
     run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
+    run "every change says what changed" just changecheck
 
     echo
     if [ ${#failed[@]} -eq 0 ]; then
@@ -381,6 +384,22 @@ test-runner:
 test-site-api:
     npm --prefix api ci --no-audit --no-fund
     npm --prefix api test
+
+# The console's own unit tests.
+#
+# console/ is a separate npm project with its own lockfile, not one of web/'s
+# workspaces, so `npm test --workspaces` never reaches it and a test file added
+# there would be decoration. This recipe is what makes it a gate.
+#
+# It exists because gatecheck refused the ci.yml step that introduced it, which
+# is this file's promise working: a gate is the command AND the directory it
+# runs in, so CI running `npm test` in console while nothing here did was the
+# drift the comment at the top of this file says cannot happen. Before the
+# build, as in CI, because it is seconds against minutes and a failure here is
+# about the code rather than about Next.
+test-console:
+    go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
+    npm --prefix console test
 
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming
@@ -724,6 +743,16 @@ forbidden:
 claimcheck:
     go run ./tools/claimcheck .
 
+# STATUS.md keeps the rule it states about itself.
+#
+# That file opens by saying every component carries one of a fixed set of
+# states and nothing else, and four rows carried a word outside the set, in
+# three different spellings. It is the page this project points at when
+# somebody asks whether a thing works yet, so a word in it that nobody defined
+# is an answer nobody can check, and nothing read it before this.
+statuscheck:
+    go run ./tools/statuscheck .
+
 # The built documentation carries its head, and its entity graph resolves.
 #
 # check-seo.mjs reads www/out and never opens docs/dist, so the documentation,
@@ -1041,6 +1070,18 @@ authorship:
       exit 1
     fi
     echo "attributed and signed off"
+
+# Anything a user can see says what changed, and the fragments still parse.
+#
+# CONTRIBUTING.md has promised this gate since the first week and there was
+# none. The sign-off rule went the same way: required by the same document,
+# unchecked, and 65 of the first 80 commits had no trailer. Eight of the twenty
+# product changes since the fragment convention began landed without one.
+#
+# Runs the same range CI does, so a contributor finds out here rather than
+# twenty minutes later. Locally that range is where this branch left main.
+changecheck:
+    go run ./tools/changecheck .
 
 # Nothing this repository created is still running.
 leaks:

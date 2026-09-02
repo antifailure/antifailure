@@ -126,6 +126,7 @@ runner/artifacts/
 # line here and no reason recorded for not having one, and
 # TestNoCompiledBinaryIsTracked remains the backstop for when one lands anyway.
 /azguard
+/changecheck
 /claimcheck
 /classcheck
 /constcheck
@@ -152,10 +153,11 @@ runner/artifacts/
 /releasecheck
 /relnotes
 /reltar
-/schemadoc
 /sbomcheck
 /scanrepo
+/schemadoc
 /site
+/statuscheck
 /tagsync
 /vulncheck
 /walkthrough
@@ -221,3 +223,20 @@ examples/*/report.md
 # run by hand when the card should change.
 /www/public/home/*.avif
 /www/public/home/*.webp
+
+# Written by `next dev`, which appends its own block to both files every time it
+# starts: see node_modules/next/dist/server/lib/generate-agent-files.js. Nothing
+# ignored them, so any `git add -A` in a worktree where somebody had run the dev
+# server would have committed them, which is how the constcheck binary above got
+# in. Next's own note in the file says to commit it; that is Next's opinion about
+# Next's repository, and these are agent instruction files, so what they say to
+# every agent working here should be a decision somebody made rather than a side
+# effect of starting a dev server.
+#
+# The two exact paths rather than bare AGENTS.md and CLAUDE.md. A broad pattern
+# would silently swallow a real one somebody writes for the engine, the console
+# or the repository root, and the failure mode is the quiet one: `git add` says
+# nothing and the file never ships. `git add -f` still works for these two if
+# adopting Next's block is ever a deliberate choice.
+/www/AGENTS.md
+/www/CLAUDE.md

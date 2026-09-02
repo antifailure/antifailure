@@ -175,12 +175,21 @@ jobs:
             --report "$GITHUB_WORKSPACE/dogfood-report.md" \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
 
-      - name: What the database noticed about this change
-        # Separate from the run above because it reads the branch after the
-        # workflows have driven it, and because a migration that changes a plan
-        # is worth reporting even when every workflow passed.
-        if: always()
-        run: ./bin/af -C . insights || true
+      # There was a step here called "What the database noticed about this
+      # change", running `af insights || true`. It was removed rather than
+      # repaired, for two reasons that both had to be true.
+      #
+      # It could not work. It read the branch after `af ci` had already torn
+      # the branch down, so every run of it printed
+      # "AF-DB-014 No database branch exists" and exited non zero, and the
+      # `|| true` turned that into a green step named after something it had
+      # never once examined.
+      #
+      # And it was not needed. `af ci` runs the same rehearsal and the same
+      # insights inside the environment while it is still up, and writes them
+      # into the report this job uploads, which is where the last run's
+      # migration lint findings and its pg_stat_statements note actually came
+      # from.
 
       - name: Nothing was left behind
         # The claim this product makes about itself. Asserted here as well as
@@ -204,8 +213,16 @@ jobs:
           path: |
             dogfood-report.md
             dogfood-record.json
-            .antifailure/events
+            .antifailure/logs
           retention-days: 30
+          # Two reasons the event log was never in this artifact, and fixing
+          # either alone would have left it empty. The path said
+          # .antifailure/events and the engine writes .antifailure/logs, and
+          # the action skips dotted paths unless told otherwise. What made it
+          # invisible is if-no-files-found: warn, which is right for the report
+          # on a run that died early and is also why "2 files uploaded" against
+          # three paths never read as a problem.
+          include-hidden-files: true
           if-no-files-found: warn
 
   comment:
@@ -289,8 +306,27 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Every example in examples/ that carries a manifest, and nothing that
+      # does not. The list said examples/orders-api and examples/rails-shop
+      # until the first scheduled run: neither directory has ever existed,
+      # examples/django-api and examples/next-app were missing, and the one
+      # real name here was reachable only because the directory is called
+      # go-api while the manifest inside it is named orders-api.
+      #
+      # '.' is the repository's own manifest and it is FIRST on purpose. Before
+      # the matrix was read at all, every leg ran './antifailure.yaml' because
+      # the guard and the -C both named the root, so the one thing this job was
+      # really covering was the control plane dogfooding itself, three times in
+      # parallel under three example names. Reading the matrix correctly and
+      # nothing else would have deleted that coverage while turning the job
+      # green, which is a worse outcome than the red it replaces. So the root
+      # stays, named rather than accidental.
+      #
+      # Kept honest by TestTheNightlyCorpusIsEveryExample in tools/dogfood,
+      # which fails on a name here with no manifest behind it, on an example on
+      # disk that this list leaves out, and on the root going missing.
       matrix:
-        manifest: [examples/orders-api, examples/go-api, examples/rails-shop]
+        manifest: ['.', examples/django-api, examples/go-api, examples/next-app]
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -338,23 +374,45 @@ jobs:
           npx playwright install --with-deps chromium
         working-directory: runner
 
-      - name: Skip a manifest that is not there yet
-        id: present
+      - name: The manifest this leg is named after is there
+        # A hard failure, not a skip. The skip this replaces read the repository
+        # root instead of the matrix value, so every leg checked the same file,
+        # found the control plane's own manifest, and ran the control plane
+        # three times under three example names. Had it read the matrix value it
+        # would have been worse: two of the three names were directories that do
+        # not exist, so two legs would have skipped and gone green having run
+        # nothing, under a job title claiming they had run an example.
+        #
+        # A name in the corpus with no manifest behind it is a defect in the
+        # corpus. Saying so out loud is the only version of this step that
+        # cannot report success over a subject it never looked at.
+        env:
+          MANIFEST: ${{ matrix.manifest }}
         run: |
-          if [ -f "./antifailure.yaml" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::. has no manifest, nothing to run"
+          set -euo pipefail
+          if [ ! -f "$MANIFEST/antifailure.yaml" ]; then
+            echo "::error::$MANIFEST/antifailure.yaml does not exist, so this leg has nothing to run"
+            exit 1
           fi
 
       - name: The pipeline, with load
-        if: steps.present.outputs.present == 'true'
+        # --refresh-golden, because there is no golden here to find otherwise.
+        # The control plane job above refreshes one in its own step and this
+        # one never did, so the first scheduled run reached `af ci` and got
+        # AF-DB-012, correctly. The flag has existed since the harness was
+        # written, described as "as the nightly does", with no caller anywhere.
+        #
+        # It goes through the harness rather than a separate `af golden
+        # refresh` step so the refresh is timed against its budget and lands in
+        # the run record with everything else.
+        env:
+          MANIFEST: ${{ matrix.manifest }}
         run: |
           go run ./tools/dogfood \
-            -C . \
+            -C "$MANIFEST" \
             --af "$GITHUB_WORKSPACE/bin/af" \
             --mode nightly \
+            --refresh-golden \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
 
       - name: Nothing was left behind
@@ -371,8 +429,15 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # By index rather than by manifest: an artifact name cannot hold a
-          # slash, and examples/orders-api has one.
+          # slash, and every entry in the matrix but the root has one. The
+          # index is the matrix order, so leg 0 is the repository itself and
+          # the rest follow the list above.
           name: nightly-${{ strategy.job-index }}
-          path: dogfood-record.json
+          path: |
+            dogfood-record.json
+            ${{ matrix.manifest }}/.antifailure/logs
           retention-days: 30
+          # Same reason as the control plane job above: without this the log is
+          # a dotted path and the action skips it silently.
+          include-hidden-files: true
           if-no-files-found: warn

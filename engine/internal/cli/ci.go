@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/insights"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 )
@@ -36,7 +37,7 @@ import (
 // pass.
 
 func newCICommand(e *Env) *cobra.Command {
-	var branch, output, docsBase, runner, baseline, saveBaseline string
+	var branch, output, jsonOutput, docsBase, runner, baseline, saveBaseline string
 	var skipTeardown, withLoad bool
 	var timeout time.Duration
 	cmd := &cobra.Command{
@@ -67,10 +68,26 @@ change.`),
 				defer cancel()
 			}
 
+			// Before the orchestrator, which is before anything at all.
+			// A pull request from a fork the policy does not allow gets a
+			// report saying nothing ran and no environment, and the order
+			// is the security property: an orchestrator resolves providers
+			// and names an environment, so refusing after building one is
+			// refusing after doing part of what was refused.
+			if fork := forkGate(e); fork.Refused {
+				announceComment(e)
+				return skippedRun(e, forkRun(e, branch, docsBase, fork), output, jsonOutput)
+			}
+
 			o, m, err := orchestratorWithManifest(e, branch)
 			if err != nil {
 				return err
 			}
+			// github.comment, which nothing read until now. Resolved once
+			// here rather than at each of the three places a report is
+			// written, so the two exits from this command cannot disagree
+			// about whether there is a comment.
+			announceComment(e)
 			gate := report.Configure(m.Policy)
 			run := report.Run{
 				Environment: o.EnvID(), Branch: branchName(e, branch),
@@ -120,6 +137,7 @@ change.`),
 				// what we failed to clean up.
 				run.Findings = append(run.Findings, migration...)
 				for _, f := range []*report.Finding{
+					workflowsUnverifiedFinding(run, gate),
 					egressFinding(run.Egress, gate),
 					maskingFinding(run.Verification, gate),
 					loadFinding(run.Load, gate),
@@ -130,7 +148,7 @@ change.`),
 					}
 				}
 				run.Duration = e.Clock.Since(started).Round(time.Second).String()
-				writeReport(e, run, output)
+				writeReport(e, run, output, jsonOutput)
 			}
 
 			e.Out.Section("Bringing up " + o.EnvID())
@@ -164,6 +182,12 @@ change.`),
 						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
 					})
 				}
+				// What the run noticed that belongs to no single workflow.
+				// A synthesized response nobody's window claimed is the case
+				// this exists for, and dropping it here would put the run
+				// back where it started: the fact reaching the engine and
+				// stopping there.
+				run.Notes = append(run.Notes, test.Notes...)
 				for _, i := range test.Invariants {
 					run.Invariants = append(run.Invariants, report.Invariant{
 						Name: i.Name, Description: i.Description, Held: i.Held,
@@ -183,16 +207,22 @@ change.`),
 
 			if withLoad {
 				e.Out.Section("Generating load")
-				if res, _, lErr := o.Load(ctx, env.LoadOptions{Duration: 30 * time.Second}); lErr == nil {
-					l := &report.Load{
-						Sent: res.Sent, Rate: res.Rate,
-						ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
-					}
-					p95, _ := o.Thresholds()
-					for _, b := range res.Breaches(p95, 0) {
-						l.Regressed = append(l.Regressed, b.What)
-					}
-					run.Load = l
+				// DefaultDuration rather than Duration, so the manifest's own
+				// load.duration still decides. The hardcoded 30s used to sit
+				// in the slot that overrides it.
+				res, refused, lErr := o.Load(ctx, env.LoadOptions{
+					DefaultDuration: 30 * time.Second, DefaultScale: 1,
+				})
+				switch {
+				case lErr != nil:
+					// The header with nothing under it is how this read
+					// before: a load run that failed outright produced the
+					// section and no finding, and silence is read as success.
+					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
+					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
+				default:
+					p95, errorRate := o.Thresholds()
+					run.Load = loadReport(res, refused, p95, errorRate, &run)
 				}
 			}
 
@@ -209,6 +239,17 @@ change.`),
 	// which is notable for the one command written for CI. Renaming it frees
 	// -o to mean here what it means everywhere.
 	cmd.Flags().StringVar(&output, "report", "", "Write the report here as well as to the terminal")
+	// The same report, as JSON, for something that has to read it rather than
+	// display it. Not -o json, which is the whole terminal's format: a step
+	// that prints progress and captures a machine readable result cannot use
+	// one switch for both, and redirecting stdout to a file gives up the
+	// progress a person watching the job is there for.
+	//
+	// It exists because the hosted control plane's pull request check needs
+	// the counts and the environment name, and reading them back out of the
+	// Markdown would be a parser for prose.
+	cmd.Flags().StringVar(&jsonOutput, "report-json", "",
+		"Write the same report here as JSON, for a program to read")
 	cmd.Flags().BoolVar(&skipTeardown, "keep", false, "Leave the environment up, for debugging a failure")
 	cmd.Flags().BoolVar(&withLoad, "load", false, "Generate load as well as running the workflows")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Give up after this long")
@@ -420,11 +461,23 @@ func summariseInsights(r insights.Report) *report.Insights {
 }
 
 // writeReport prints the comment and writes it where a workflow can post it.
-func writeReport(e *Env, run report.Run, output string) {
+func writeReport(e *Env, run report.Run, output, jsonOutput string) {
 	body := run.Comment()
 	if output != "" {
 		if err := os.WriteFile(output, []byte(body), 0o644); err != nil {
 			e.Out.Printf("  could not write the report to %s: %v\n", output, err)
+		}
+	}
+	if jsonOutput != "" {
+		// Marshalled and then written, rather than encoded into the file. A
+		// failed marshal that had already truncated the file would leave
+		// whatever reads this looking at half a report, which is worse than
+		// looking at none: half a report decodes, and the counts it carries
+		// are wrong rather than absent.
+		if encoded, err := json.MarshalIndent(run, "", "  "); err != nil {
+			e.Out.Printf("  could not encode the report as JSON: %v\n", err)
+		} else if err := os.WriteFile(jsonOutput, append(encoded, '\n'), 0o644); err != nil {
+			e.Out.Printf("  could not write the report to %s: %v\n", jsonOutput, err)
 		}
 	}
 	// Also appended to the job summary when there is one, so a run shows its
@@ -534,4 +587,66 @@ func reportTeardown(e *Env, td *env.Teardown, err error) {
 	for _, p := range td.Pending {
 		e.Out.Printf("    %s/%s: %s\n", p.Kind, p.ID, p.Reason)
 	}
+}
+
+// loadReport turns a load result into the report's section, against BOTH
+// thresholds the manifest sets.
+//
+// The error rate threshold used to be thrown away here. The call was
+// `p95, _ := o.Thresholds()` and then `res.Breaches(p95, 0)`, and Breaches
+// short circuits on `errorRate > 0`, so a zero limit builds no error rate
+// breach at all. A change that failed every request under load produced an
+// empty Regressed list, never reached policy.load_regression, and merged
+// green, while `af load run` on the same manifest and the same result exited
+// non zero. Two commands, one manifest, opposite answers.
+//
+// It was invisible for a specific reason worth recording. `p95_increase` is
+// refused under the `access_log` and `none` sources, so those projects passed
+// (0, 0) and got nil back from a function that had nothing to compare. This
+// repository's OWN manifest is `source: none` with `error_rate: 0.02`, so the
+// dogfooding that would have caught it could not.
+//
+// The inert case is reported rather than passed over, which is the same
+// argument `af load run` already makes: a threshold that was in force and
+// measured nothing is not a threshold that held, and a report that omits it
+// reads exactly like one that checked.
+// The `refused` return was the third defect in that block and it was DISCARDED
+// at the call site, so `af ci --load` said the same thing whether the safe list
+// let through every route or one out of forty. `af load run` has always
+// reported it. Found by `loadgolden`, which had the other half of this block.
+func loadReport(
+	res *load.Result, refused []load.Route, p95Increase, errorRate float64, run *report.Run,
+) *report.Load {
+	l := &report.Load{
+		Sent: res.Sent, Rate: res.Rate,
+		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
+		Refused: refusedRoutes(refused),
+	}
+	for _, b := range res.Breaches(p95Increase, errorRate) {
+		l.Regressed = append(l.Regressed, b.What)
+	}
+	if res.InertP95(p95Increase) {
+		run.Notes = append(run.Notes,
+			"load.thresholds sets p95_increase and no route had a baseline to compare against, "+
+				"so nothing was measured against it")
+	}
+	return l
+}
+
+// refusedRoutes names the routes the generator would not send.
+//
+// nil for an empty list rather than an empty slice, so the report's line drops
+// out entirely instead of printing a heading over nothing. A section saying
+// "0 routes were not sent" is a line the reader pays for and learns nothing
+// from.
+func refusedRoutes(refused []load.Route) []string {
+	if len(refused) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refused))
+	for _, r := range refused {
+		out = append(out, r.String())
+	}
+	sort.Strings(out)
+	return out
 }
