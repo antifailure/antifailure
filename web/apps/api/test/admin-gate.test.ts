@@ -67,7 +67,8 @@ async function seedOperator(
     RETURNING id`
   return {
     adminUserId: row!.id,
-    label: email,
+    label: 'An Operator',
+    email,
     role: 'support',
     sessionId: crypto.randomUUID(),
     impersonating: false,

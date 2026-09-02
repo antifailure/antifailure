@@ -99,7 +99,8 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',
-
+      ],
+      [
         'admin_users',
         'an operator is not a tenant. The row is the platform\'s own identity, deliberately ' +
           'unrelated to users, and it is reachable only by declaring the email being signed in ' +
