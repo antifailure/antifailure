@@ -6,11 +6,14 @@ carry.
 
 Both decide what to look at from `information_schema.columns.data_type` and both
 accept the same six values. A column outside that list is not emptied by the
-fail-closed default, is not read by the verification scan, and is not listed
-among the unclassified columns the plan asks about, because the flag that lists
-it is set inside the branch that has already passed the type test. It is copied,
-and nothing says so. `citext`, which is the ordinary Postgres type for an email
-address or a username, reports as `USER-DEFINED` and is outside the list.
+fail-closed default and is not read by the verification scan. It is copied.
+`citext`, which is the ordinary Postgres type for an email address or a
+username, reports as `USER-DEFINED` and is outside the list.
+
+Since #148 the plan does at least name such a column, and says that nothing
+decided what happens to it and that the scan does not read its type. The page
+says that too, because a gap that announces itself is a different thing from a
+silent one, and neither is a gap that has been closed.
 
 That compounds with the one path on which records already crossed the boundary.
 An invariant that does not hold carries up to five rows into the check comment,

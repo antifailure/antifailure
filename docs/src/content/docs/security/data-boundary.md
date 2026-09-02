@@ -372,10 +372,19 @@ text  character varying  character  json  jsonb  xml
 and the query in `engine/internal/verify/scan.go` is the other. A column whose
 type is outside it is not emptied by the default and is not read by the scan.
 
-The silent part is the third consequence. `Assign` sets `Unmatched` only inside
-the branch that has already passed the type test, so such a column is not
-emptied, not scanned, and not listed among the unclassified columns that
-`af mask plan` asks you about. It is copied, and nothing says so.
+The third consequence used to be a silent one and is not any more. `Assign` set
+`Unmatched` only inside the branch that had already passed the type test, so
+such a column was not emptied, not scanned, and not listed among the
+unclassified columns that `af mask plan` asks you about. It was copied and
+nothing said so. #148 moved that flag above the type test and gave the column a
+reason: the plan now names it and says that nothing decided what happens to it,
+that it is copied unchanged, and that the verification scan does not read its
+type either.
+
+So the gap is announced rather than hidden, and it is still a gap. The plan
+telling you a column is copied is not the same as the fail-closed default
+emptying it, and reading a plan is a thing somebody does once while a default
+runs every time. What follows is what the plan is telling you about.
 
 A rule that matches on a column's name still fires, and most of them say
 nothing about type, so a column called `email` is masked whatever it is declared
