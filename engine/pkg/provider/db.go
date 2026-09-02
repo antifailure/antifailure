@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // GoldenVersion identifies one masked, verified copy of a database.
@@ -143,7 +143,7 @@ func (c Caps) Supports(major int) bool {
 type GoldenSpec struct {
 	// SourceURL is the read only connection string of the source database. It
 	// is read once, during the refresh, and never stored.
-	SourceURL secrets.Value
+	SourceURL secret.Value
 	// Version is the Postgres major version to create.
 	Version int
 	// RulesHash identifies the masking rules being applied.
@@ -169,7 +169,7 @@ type GoldenSpec struct {
 	//
 	// A provider that cannot produce an empty candidate declares
 	// Caps.Subsetting false and will never be given this.
-	Load func(ctx context.Context, sourceURL, candidateURL secrets.Value) error
+	Load func(ctx context.Context, sourceURL, candidateURL secret.Value) error
 	// Mask applies the masking rules to a candidate, and is called by the
 	// provider once the candidate holds data.
 	//
@@ -177,10 +177,10 @@ type GoldenSpec struct {
 	// masking runs. Neon masks during its own anonymized branch creation;
 	// Docker masks a container it just restored into. Both call this, so the
 	// rules have exactly one implementation.
-	Mask func(ctx context.Context, candidateURL secrets.Value) error
+	Mask func(ctx context.Context, candidateURL secret.Value) error
 	// Verify scans a candidate and returns a signed attestation. A provider
 	// must call it and must not publish a version if it returns an error.
-	Verify func(ctx context.Context, candidateURL secrets.Value) (string, error)
+	Verify func(ctx context.Context, candidateURL secret.Value) (string, error)
 }
 
 // Resource is one thing a provider created, as the leak detector sees it.
@@ -251,9 +251,9 @@ type Database interface {
 
 	// ConnString returns a connection string for a branch.
 	//
-	// The result is a secrets.Value, so it renders as [redacted] everywhere
+	// The result is a secret.Value, so it renders as [redacted] everywhere
 	// text is produced and cannot reach a log by accident.
-	ConnString(ctx context.Context, b Branch, mode ConnMode) (secrets.Value, error)
+	ConnString(ctx context.Context, b Branch, mode ConnMode) (secret.Value, error)
 
 	// Inventory lists everything this provider currently holds, which the leak
 	// detector compares against the journal. A provider that cannot enumerate
@@ -284,7 +284,7 @@ type Config struct {
 	// Secret resolves a named credential. Providers never read the process
 	// environment directly, so that every credential a provider uses is
 	// declared and auditable.
-	Secret func(name string) (secrets.Value, bool)
+	Secret func(name string) (secret.Value, bool)
 	// Settings carries provider specific values from the manifest.
 	Settings map[string]string
 }
