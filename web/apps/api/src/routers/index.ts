@@ -24,6 +24,7 @@ import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
 import { syncMembership, SignInError } from '../auth/signin.ts'
 import { GitHubError } from '../auth/github.ts'
 import { createEnvironment, agentsRouter, loadRouter } from './dispatch.ts'
+import { adminInfraRouter } from '../admin/infra.ts'
 import { runtimesRouter } from './runtimes.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
@@ -1113,6 +1114,13 @@ export const appRouter = router({
   exports: exportsRouter,
   deletion: deletionRouter,
   account: accountRouter,
+
+  // The operator portal, under `admin.` because that prefix is a hard
+  // interface rather than a convention: the maintenance-mode middleware in
+  // server.ts exempts /trpc/admin., so an admin procedure mounted anywhere
+  // else is refused during maintenance and the operator who engaged it cannot
+  // reach the switch that releases it.
+  admin: adminInfraRouter,
 })
 
 export type AppRouter = typeof appRouter

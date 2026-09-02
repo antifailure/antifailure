@@ -16,6 +16,8 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { listProcedures } from '../src/openapi.ts'
+import { declaredAdminPermissions } from '../src/trpc.ts'
+import { ADMIN_PERMISSIONS } from '../src/admin/permissions.ts'
 import { declaredPermissions } from '../src/trpc.ts'
 import {
   PERMISSIONS, ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role,
@@ -175,23 +177,63 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
 
   it('every route declares a permission or is deliberately public', () => {
     const declared = declaredPermissions()
+    // An operator route is guarded by the PLATFORM catalog, not this one, and
+    // it is excused here only because it declares a permission THERE. Excusing
+    // by path prefix instead would let a route called admin.something with no
+    // guard at all fall between the two tests, which is the exact gap this
+    // assertion exists to close. The next test proves the platform side.
+    const admin = declaredAdminPermissions()
     const undeclared = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !declared.has(path) && !PUBLIC_ROUTES.has(path))
+      .filter((path) => !declared.has(path) && !admin.has(path) && !PUBLIC_ROUTES.has(path))
 
     assert.deepEqual(
       undeclared,
       [],
       `these routes are reachable with no permission check:\n  ${undeclared.join('\n  ')}\n` +
-        'Build them with orgProcedure(permission), or add them to PUBLIC_ROUTES with the reason.',
+        'Build them with orgProcedure(permission) or adminProcedure(adminPermission), ' +
+        'or add them to PUBLIC_ROUTES with the reason.',
+    )
+  })
+
+  it('every operator route declares a real platform permission', () => {
+    // The other half. A route could declare `adminPermission` as any string
+    // and satisfy the skip above; this requires the string to be one the
+    // platform catalog actually knows, so a typo is a failure rather than a
+    // silently unguarded operator route.
+    const known = new Set<string>(ADMIN_PERMISSIONS)
+    const bogus = [...declaredAdminPermissions().entries()].filter(
+      ([, permission]) => !known.has(permission),
+    )
+    assert.deepEqual(
+      bogus.map(([path, permission]) => `${path} declares ${permission}`),
+      [],
+      'these operator routes declare a permission the platform catalog does not contain',
+    )
+    // And every operator route must be under the admin. prefix, because the
+    // maintenance-mode middleware in server.ts exempts /trpc/admin. so the
+    // switches stay reachable while the installation is paused. One mounted
+    // elsewhere is refused during maintenance, which locks the operator away
+    // from the control that releases it.
+    const misplaced = [...declaredAdminPermissions().keys()].filter(
+      (path) => !path.startsWith('admin.'),
+    )
+    assert.deepEqual(
+      misplaced,
+      [],
+      'these operator routes are not under the admin. prefix, so maintenance mode refuses them',
     )
   })
 
   it('every route has a sample input, so none drops out of the matrix', () => {
     const inputs = inputsFor(org)
+    const admin = declaredAdminPermissions()
+    // Operator routes are deliberately outside the tenant matrix: it drives
+    // every route with a tenant session and asserts which roles are refused,
+    // and an operator route has no tenant role to assert about.
     const missing = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !(path in inputs))
+      .filter((path) => !(path in inputs) && !admin.has(path))
     assert.deepEqual(missing, [], `no sample input for: ${missing.join(', ')}`)
   })
 
@@ -238,7 +280,9 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   // says which cell broke.
   for (const role of ROLES) {
     describe(`as ${role}`, () => {
+      const adminPaths = declaredAdminPermissions()
       for (const { path, type } of listProcedures()) {
+        if (adminPaths.has(path)) continue
         if (PUBLIC_ROUTES.has(path)) continue
 
         it(`${type} ${path}`, async () => {

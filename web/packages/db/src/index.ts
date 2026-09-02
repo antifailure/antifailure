@@ -21,6 +21,19 @@ export {
 export { migrate, migrationsDir, type MigrateResult } from './migrate.ts'
 export { appendAudit, verifyAuditChain, auditEntryHash, type AuditInput, type ChainReport } from './audit.ts'
 export {
+  createAdminPool,
+  type AdminPool,
+  type AdminPoolOptions,
+  type AdminOperator,
+} from './admin-pool.ts'
+export {
+  appendAdminAudit,
+  verifyAdminAuditChain,
+  type AdminAuditInput,
+  type AdminAuditSeverity,
+  type AdminChainReport,
+} from './admin-audit.ts'
+export {
   apply as applyPartitions,
   plan as planPartitions,
   currentPartitions,
