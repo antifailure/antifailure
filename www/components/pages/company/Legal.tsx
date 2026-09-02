@@ -141,7 +141,7 @@ export function PrivacyPage() {
               ],
               [
                 "This site",
-                "One waitlist address per person, stored on a server so that the sentence next to the form is true, with the time it was first and last submitted. There is no way to read the list back through the site.",
+                "One waitlist address per person, stored on a server so that the sentence next to the form is true, with the page it was submitted from and the times it was first and last submitted. There is no way to read the list back through the site, and nothing sends mail to it.",
               ],
             ]}
           />

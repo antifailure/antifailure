@@ -32,7 +32,7 @@ const CONTACT_DETAILS = {
     action: "Start a discussion",
   },
   waitlist: {
-    body: "There is no generally available hosted control plane. The existing waitlist is the verified route for teams that want to hear when there is a hosted environment to connect to a repository.",
+    body: "There is no generally available hosted control plane. Leaving an address stores it on a server, where a person reads it when there is a hosted environment to connect a repository to. Nothing mails you on a schedule and there is no date, so book a call above if you need an answer sooner.",
     href: "/docs/getting-started/quickstart",
     link: "Use the engine today",
     action: "Join the waitlist",
@@ -79,7 +79,7 @@ export function ContactPage() {
         path="/contact"
         eyebrow="Contact"
         title="Use the route that matches the question."
-        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page, and hosted-product interest goes through the existing waitlist. The project does not currently publish a working email channel."
+        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page, and it is the only route here that reaches a person on a known day. Hosted-product interest goes on a stored list instead, because the project does not publish a working email channel in either direction."
         actions={
           <>
             <Button href="#book" theme="filled">

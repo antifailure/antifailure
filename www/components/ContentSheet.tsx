@@ -65,7 +65,7 @@ const SHEETS: Record<
     points: [
       "A waitlist address is sent to a server and stored, so that the sentence next to the form is true. Your browser keeps a copy as a convenience, which clearing site data removes.",
       "When a control plane exists, production-derived state is processed inside the customer boundary by default.",
-      "Passwords entered in this mock form are not stored.",
+      "Nothing on this site asks for a password, and nothing mails the address back. The sign-up screen offers GitHub for an invited account and a stored list for everybody else.",
     ],
   },
   terms: {

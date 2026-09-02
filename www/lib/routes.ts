@@ -385,7 +385,7 @@ export const ROUTES: readonly Route[] = [
     path: "/signup",
     title: pageTitle("Request access"),
     description:
-      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if you have been invited, or leave an address and we will tell you when it opens. The engine is open source and runs on your own machine today.",
+      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if you have been invited, or leave an address for the list a person reads before the next environment opens. The engine is open source and runs on your own machine today.",
     summary: "Ask for access to the hosted control plane. The engine needs none of it.",
     section: "utility",
     indexable: false,

@@ -128,8 +128,8 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               <p className="mt-4 text-[14px] leading-6 text-black/55">
                 The hosted control plane is invitation only while it is in
                 development. If your account has been invited, sign in with
-                GitHub. If it has not, leave an address below and we will tell
-                you when it opens.
+                GitHub. If it has not, joining the list puts you in front of a
+                person before the next environment opens.
               </p>
 
               <a
@@ -149,30 +149,61 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               </div>
 
               {done ? (
+                /* A confirmation that says what happens to the address, who
+                   touches it, and what it cannot do.
+                 *
+                 * It used to say "you will hear from us", which is a promise
+                 * nothing here can keep. The address is written to a table
+                 * with no read path, so it is reachable only by somebody
+                 * querying the store by hand, and antifailure.dev has no mail
+                 * exchanger and an SPF policy of `v=spf1 -all`, so the domain
+                 * authorizes no sender at all. Somebody who leaves an address
+                 * and waits is waiting for something that cannot arrive on its
+                 * own, and telling them that is cheaper than letting them find
+                 * out by not hearing anything.
+                 *
+                 * So it says the true thing and then offers the two routes
+                 * that resolve today rather than at some unnamed date: the
+                 * quickstart, which needs none of this, and a call, which is a
+                 * real calendar with real openings. */
                 <div role="status">
                   <p className="mt-6 text-[14px] leading-6 text-black/55">
                     {already ? "We already had " : "Added "}
-                    {done}. You will hear from us when there is an environment
-                    you can connect a repository to, and not before. No
-                    newsletter.
+                    {done}. It is stored with the page it came from and the
+                    times it was first and last submitted. Nothing else.
                   </p>
                   <p className="mt-4 text-[14px] leading-6 text-black/55">
-                    In the meantime the engine is open source and runs entirely
-                    on your own machine. The{" "}
+                    What happens next: a person reads the list when there is a
+                    hosted environment you could connect a repository to. There
+                    is no date for that, and nothing here will mail you on a
+                    schedule. The antifailure.dev domain has no mail exchanger
+                    and its policy authorizes no outbound senders, so any first
+                    message is a person deciding to write one.
+                  </p>
+                  <p className="mt-4 text-[14px] leading-6 text-black/55">
+                    Two things resolve sooner. The{" "}
                     <a
                       className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
                       href="/docs/getting-started/quickstart"
                     >
                       quickstart
                     </a>{" "}
-                    goes from nothing to a working environment without an
-                    account.
+                    goes from nothing to a working environment on your own
+                    machine, without an account, today. And{" "}
+                    <a
+                      className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                      href="/contact#book"
+                    >
+                      booking a call
+                    </a>{" "}
+                    reaches a person this week rather than whenever the hosted
+                    product exists.
                   </p>
                   <a
-                    href="/docs"
+                    href="/docs/getting-started/quickstart"
                     className="mt-7 flex h-12 w-full items-center justify-center rounded-full border border-black/15 bg-white text-[15px] font-medium text-black hover:border-black/35"
                   >
-                    Read the documentation
+                    Start the quickstart
                   </a>
                 </div>
               ) : (
@@ -223,8 +254,9 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
                 </button>
 
                 <p className="mt-5 text-[12px] leading-5 text-black/60">
-                  We store the address and nothing else. It is used to tell you
-                  when the hosted product exists. See the{" "}
+                  We store the address, the page it came from, and when it was
+                  first and last submitted. It is read by a person, never sold,
+                  and never used for a newsletter. See the{" "}
                   <button
                     type="button"
                     className="text-black/70 underline decoration-black/20"
