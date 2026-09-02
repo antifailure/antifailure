@@ -398,6 +398,22 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
    * member of that role or opening a second connection with a password this
    * process is not given.
    *
+   * A correction, recorded here because the migration that carries it has
+   * already been applied and a migration's text cannot change afterwards: that
+   * file's own comment says BYPASSRLS is the only mechanism that reads two
+   * tenants at once. It is not. Policies are OR'd, so a permissive policy
+   * keyed on a credential the caller already holds widens just as effectively
+   * with no role privilege at all, and that alternative was built and shown to
+   * work before this one was chosen over it.
+   *
+   * BYPASSRLS was still the right choice, for two reasons that are not the one
+   * the file gives. A policy per table is a cost that scales with the number of
+   * tables, so it is a boundary somebody eventually forgets to extend, and the
+   * table they forget is silently invisible to the portal rather than loudly
+   * broken. And a role attribute is a credential rather than a privilege: the
+   * application cannot be granted its way into this one, where a policy keyed
+   * on a session hash is reachable by whoever can present that hash.
+   *
    * SET ROLE is the specific attack. It needs no password and no new
    * connection, so if antifailure_admin were ever granted to antifailure_app,
    * which is one careless GRANT away and would look tidy in a migration, then
