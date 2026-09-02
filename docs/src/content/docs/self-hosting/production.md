@@ -9,7 +9,7 @@ The production control plane is one `terraform apply` and eight things a person
 has to do in a browser or a shell, and the order matters because several of them
 fail if done early.
 
-Read [Azure](/docs/self-hosting/azure/) first. Everything on that page about
+Read [Azure](/docs/self-hosting/azure) first. Everything on that page about
 policy, regions, the Key Vault name and the revision mode trap applies here and
 is not repeated.
 
@@ -213,7 +213,7 @@ Repository permissions, and what each one is actually for:
 | Metadata | Read-only | Mandatory for every App. |
 | Contents | Read-only | Reading the manifest and the workflow file. |
 | Pull requests | Read and write | The one comment per pull request, and the pull request a masking rule change becomes. |
-| Actions | Read and write | The console's **Create environment**, **Run agents** and **Run load**, and cancelling the run that holds an environment when a pull request closes. |
+| Actions | Read and write | The console's **Create environment**, **Run agents**, **Run load** and **Tear down**, and cancelling the run that holds an environment when a pull request closes. |
 | Checks | Read and write | The one check run per commit that a branch protection rule can require. |
 
 Organization permissions:
@@ -227,7 +227,8 @@ use yet.** It is the one on this list where waiting is worse than granting:
 widening an existing App's permissions makes GitHub ask every installation to
 accept the new grant, so adding it later interrupts every customer, and until
 somebody accepts, the App declares a permission that no installation holds.
-Those three controls dispatch a `workflow_dispatch` run of the customer's own
+Every one of those controls, including starting a workload and tearing an
+environment down, dispatches a `workflow_dispatch` run of the customer's own
 workflow through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and
 without the permission GitHub refuses with
 `403 Resource not accessible by integration`.
@@ -381,6 +382,6 @@ it refuses cleanly if any of the above was skipped.
   0 and it fires on two failed probe locations.
 - Run the backup drill and write down the number it prints. That number is your
   recovery time objective and nothing else is. The
-  [operations page](/docs/self-hosting/operations/) has the command.
-- The [runbooks](/docs/self-hosting/runbooks/) are the pages the alerts link to.
+  [operations page](/docs/self-hosting/operations) has the command.
+- The [runbooks](/docs/self-hosting/runbooks) are the pages the alerts link to.
   Read the index once now, while nothing is broken.

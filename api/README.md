@@ -1,15 +1,30 @@
 # The site API
 
-The backend for one form. `antifailure.dev/api` is a Static Web Apps managed
-function app with two functions in it, and it is a helper for the marketing
-site rather than a product. The product's API is the control plane's, on its
-own host; `docs/src/content/docs/reference/api.md` says which is which and is
-the page a reader lands on.
+The small public backend for `antifailure.dev`. It is a Static Web Apps managed
+function app and a discovery layer, not the product API. The product API is the
+control plane's, on its own host; `docs/src/content/docs/reference/api.md` says
+which is which.
 
 | Function | Route | What it is |
 | --- | --- | --- |
 | `waitlist` | `POST /api/waitlist` | Stores one address. Idempotent on the address, and there is no read path. |
 | `index` | `GET /api/{*path}` | The index at `/api`, and a `404` that says so for anything else. |
+
+Every refusal is JSON with a stable `code`, a human `message`, and a
+`resolution`, built from `shared/errors.js`. That table is published by
+`GET /api`, so a caller can resolve a code it received from the host that sent
+it, and `test/errors.test.js` reads this directory's source and fails on a code
+with no entry.
+
+These codes are not in the product's `AF-<AREA>-<NNN>` namespace and should not
+be. This is the marketing site's form backend; the product's catalog is at
+`/errors.v1.json`, and none of these situations is one the engine can recover
+from by looking a product error up.
+
+`antifailure.dev/openapi.json` and `antifailure.dev/errors.v1.json` are static
+files this app does not serve. They are generated at build time and published
+with the site: see `web/apps/api/scripts/openapi.ts` for why the OpenAPI
+document is a committed artifact rather than a proxy of the live control plane.
 
 ## Where a signup goes
 

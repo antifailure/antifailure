@@ -12,8 +12,10 @@
 //
 // /auth/* is the sign-in exchange, which by definition has no session yet.
 
+import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import type { ApiEnv } from './env.ts'
 import {
   mintEngineToken,
   listEngineTokens,
@@ -37,6 +39,10 @@ import {
   type IncomingEvent,
 } from './ingest.ts'
 import type { GitHubClient } from './auth/github.ts'
+import { claimRun, heartbeat, resolveOverdueRuns } from './workloads/store.ts'
+import {
+  acknowledgeCommand, claimCommands, expireOverdueCommands,
+} from './workloads/commands.ts'
 import {
   beginSignIn,
   completeSignIn,
@@ -95,7 +101,9 @@ import {
   handleLifecycleDelivery,
   hashCallback,
   issueCallback,
+  issueWorkflowEngineToken,
   recordReport,
+  WORKFLOW_ENGINE_TTL_MS,
   type LifecycleDeps,
 } from './github/lifecycle.ts'
 import type { RepositoryApi } from './github/api.ts'
@@ -106,6 +114,7 @@ import {
   TokenRefused,
   verifyWorkflowIdentity,
 } from './github/oidc.ts'
+import { registerWorkflowIdentityRoutes, repositoryLimiter } from './github/exchange.ts'
 import {
   handleStripeDelivery,
   parseStripeEvent,
@@ -189,6 +198,10 @@ export interface ServerOptions {
   /** Null for self-hosting. The hosted service requires this plan everywhere
    *  except authentication, billing, health, and sign-out. */
   hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Whether the plan may be written by hand through `billing.set`. False by
+   *  default, deliberately: the safe answer is the one an operator who has not
+   *  thought about billing gets without doing anything. See hosted.ts. */
+  operatorSetsPlan?: boolean
   /** Public GitHub App installation address shown to a signed-in user who has
    *  no organization yet. */
   githubAppInstallUrl?: string
@@ -244,15 +257,99 @@ export const GRANTABLE_SCOPES: readonly string[] = [
 ]
 
 
+/**
+ * The code the unexpected path returns.
+ *
+ * A literal from `engine/internal/errors/catalog.yaml`, and written out rather
+ * than imported because the catalog is Go. `tools/errcheck` reads this file for
+ * quoted codes, so an entry that stops being returned here, or a code returned
+ * here with no entry, is a build failure in both directions.
+ *
+ * The value matters to a caller: it is the key into
+ * https://antifailure.dev/errors.v1.json, which carries the same message,
+ * resolution and retryability an engine-side failure would.
+ *
+ * Named for what it is rather than for the code it holds, and the obvious name
+ * was the code with its hyphens turned into underscores.
+ * `test/config-docs.test.ts` refused that: it reads this directory for anything
+ * shaped like an AF prefixed screaming-case identifier and requires it on the
+ * configuration reference page, because an environment variable the process
+ * reads and nobody documents is an operator's afternoon. An identifier that
+ * reads like a variable and is not one puts a setting on that page that does
+ * nothing. Writing the rejected name into this comment fails the same test, for
+ * the same reason, which is worth knowing before trying it.
+ */
+const CONTROL_PLANE_FAILURE = 'AF-CP-003'
+
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
+  const operatorSetsPlan = options.operatorSetsPlan ?? false
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
-  const app = new Hono()
+  const app = new Hono<ApiEnv>()
+
+  // One identifier per request, on the response and on the log line.
+  //
+  // Without it the 500 below told a caller to go and find their request in the
+  // logs and gave them nothing to find it with: no id in the body, no id on the
+  // header, and deliberately no query, no parameters and no payload in the log,
+  // so there was nothing on either side to match. That is a resolution step
+  // nobody can carry out, which is worse than no resolution step, because it
+  // reads like one.
+  //
+  // A caller-supplied x-request-id is honoured so a trace crossing a proxy
+  // stays one identifier, and it is bounded and filtered first: it is echoed
+  // into a response header and written to a log, and an unbounded caller string
+  // in either is how a header injection or a forged log line happens.
+  app.use('*', async (c, next) => {
+    const supplied = c.req.header('x-request-id')
+    const id =
+      supplied && /^[A-Za-z0-9._-]{1,64}$/.test(supplied) ? supplied : randomUUID()
+    c.set('requestId', id)
+    await next()
+    c.header('x-request-id', id)
+  })
+
+  // Hono's default unhandled-error response is plain text. Every expected
+  // refusal below is JSON already, and the unexpected path has to keep that
+  // contract too: an agent should not need an HTML or text parser only when
+  // the service is least healthy.
+  //
+  // What reaches the log is the class of the error, the driver's own code, the
+  // method and the route, and the id. NOT the error object and NOT its message:
+  // Drizzle writes a query failure as "Failed query: <the whole statement>"
+  // with the parameters after it, so its message can carry event payloads and
+  // anything else a caller sent. This is the same reason the tRPC formatter
+  // withholds the stack, applied to the member beside it.
+  app.onError((err, c) => {
+    const cause = (err as { cause?: { code?: unknown } }).cause
+    const requestId = c.get('requestId') ?? 'unassigned'
+    console.error('unhandled request error', {
+      requestId,
+      method: c.req.method,
+      route: c.req.routePath,
+      type: err instanceof Error ? err.name : typeof err,
+      providerCode: typeof cause?.code === 'string' ? cause.code : undefined,
+    })
+    c.header('x-request-id', requestId)
+    return c.json(
+      {
+        error: {
+          code: CONTROL_PLANE_FAILURE,
+          message: 'The control plane could not complete this request.',
+          resolution:
+            'Retry once. If it fails again, quote the requestId below: it is the only thing ' +
+            'that ties this answer to a log line.',
+        },
+        requestId,
+      },
+      500,
+    )
+  })
 
   // Two limiters with different shapes. Ingestion is high volume from few
   // callers, so the burst is large. Authentication is low volume from many
@@ -1442,6 +1539,22 @@ export function createServer(options: ServerOptions) {
   const consoleBase = options.appBaseUrl ? options.appBaseUrl.replace(/\/+$/, '') : null
   const githubApi = options.githubApi ?? null
 
+  // The other way to get an engine token, and the one a customer in CI should
+  // use: no token, no environment variable, no repository secret. A job posts
+  // the workflow identity GitHub minted for it and gets back a credential that
+  // expires within the quarter hour. Registered as one call because the
+  // exchange and the claims that authorize it must not be added apart: an
+  // exchange with no way to claim a repository refuses every request, and
+  // claims with no exchange are rows nothing reads. See src/github/exchange.ts
+  // for why the `repository` claim is an identity and never a permission.
+  registerWorkflowIdentityRoutes(app, {
+    pool: options.pool,
+    clock,
+    actionsKeys,
+    limiter: repositoryLimiter(clock),
+    cliCaller,
+  })
+
   function lifecycleDeps(): LifecycleDeps | null {
     if (!githubApi) return null
     return { pool: options.pool, clock, api: githubApi, consoleBase }
@@ -1682,6 +1795,60 @@ export function createServer(options: ServerOptions) {
     })
   })
 
+  // The engine's own exchange.
+  //
+  // Same proof as the callback exchange above and deliberately the same code
+  // path for it: one JWKS cache, one verifier, one audience. What differs is
+  // what comes back. The callback credential publishes a result for one commit;
+  // this one lets the engine report its event stream while the run is still
+  // happening, which is not about a commit and cannot be bound to one.
+  //
+  // This route is why a workflow needs no AF_CONTROL_PLANE_TOKEN. Before it
+  // existed the engine's control plane sink read that variable, found nothing,
+  // and attached no sink at all, so a CI run reported its events nowhere.
+  app.post('/v1/engine/token', async (c) => {
+    const lifecycle = lifecycleDeps()
+    if (!lifecycle) {
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+    const presented = bearer(c.req.header('authorization'))
+    if (!presented) {
+      return c.json(
+        {
+          error:
+            'Present the workflow identity token as a bearer token. In a workflow with ' +
+            `id-token: write, ask for it with the audience ${CALLBACK_AUDIENCE}.`,
+        },
+        401,
+      )
+    }
+
+    let identity
+    try {
+      const keys = await actionsKeys.current(kidOf(presented))
+      identity = verifyWorkflowIdentity(presented, { keys, clock })
+    } catch (err) {
+      if (err instanceof TokenRefused) {
+        return c.json({ error: err.message, reason: err.reason }, 401)
+      }
+      throw err
+    }
+
+    const owner = identity.repository.split('/')[0] ?? ''
+    const issued = await issueWorkflowEngineToken(lifecycle, owner, {
+      repository: identity.repository,
+      workflowRunId: identity.runId,
+    })
+    if ('refused' in issued) {
+      return c.json({ error: issued.refused }, 409)
+    }
+    return c.json({
+      token: issued.token,
+      expires_in: Math.floor(WORKFLOW_ENGINE_TTL_MS / 1000),
+      repository: identity.repository,
+    })
+  })
+
   app.post('/v1/pr/report', async (c) => {
     const lifecycle = lifecycleDeps()
     if (!lifecycle) {
@@ -1775,6 +1942,21 @@ export function createServer(options: ServerOptions) {
   // -------------------------------------------------------------------------
   // Ingestion
   // -------------------------------------------------------------------------
+
+  /** The body as an object, or null when it is not JSON or is not one. Every
+ *  engine endpoint reads its body the same way, so a caller sending an array or
+ *  a bare string gets the same answer everywhere rather than a type error from
+ *  whichever property was touched first. */
+  async function readJson(c: Context): Promise<Record<string, unknown> | null> {
+    try {
+      const parsed: unknown = await c.req.json()
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null
+    } catch {
+      return null
+    }
+  }
 
   async function engineFrom(header: string | undefined) {
     const auth = header ?? ''
@@ -1884,6 +2066,167 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // Studio, for an engine
+  //
+  // An engine on a CI runner has no browser, no cookie and no way to obtain
+  // one, so everything it needs is here behind its bearer token rather than
+  // behind the session the console uses.
+  //
+  // WHY THE ENGINE PULLS RATHER THAN BEING TOLD. A workload run is dispatched
+  // as a workflow run in the customer's own repository, and a workflow_dispatch
+  // carries only the inputs the workflow declares. Passing the run identifier
+  // through one would mean an input the engine's CLI has no flag for, which is
+  // the dead socket routers/dispatch.ts exists to refuse. So the dispatch says
+  // what to run and this says which recorded request it belongs to: the engine
+  // asks what is waiting for the environment it is working on, and takes it.
+  //
+  // That also makes the correlation robust to the dispatch failing. A run whose
+  // dispatch was refused is still claimable by an engine somebody starts by
+  // hand, and a run nobody ever claims ends as `abandoned` at its deadline
+  // rather than as a row that reads like it is still going.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/workloads/claim', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const suspended = await suspensionReason(options.pool, engine.orgId)
+    if (suspended !== null) {
+      // The same answer /v1/events gives, and for the same reason: a suspension
+      // stops new work, and handing out a run to start is new work.
+      return c.json({ error: `This organization is suspended: ${suspended}` }, 403)
+    }
+
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const envId = typeof body.envId === 'string' ? body.envId.trim() : ''
+    if (!envId) return c.json({ error: 'The body needs an envId.' }, 400)
+
+    const claimed = await options.pool.withTenant({ orgId: engine.orgId }, async (db) => {
+      // Overdue runs are resolved first, so a stuck run of the same workload
+      // does not hold the live-run index against the one being claimed now.
+      await resolveOverdueRuns(db, clock.now())
+      const environments = await db.execute<{ id: string }>(rawSql`
+        SELECT id FROM environments WHERE env_id = ${envId}`)
+      const environmentId = environments[0]?.id
+      if (!environmentId) return { unknown: true as const }
+
+      const run = await claimRun(db, {
+        environmentId,
+        holder: engine.tokenId,
+        now: clock.now(),
+      })
+      if (!run) return { run: null }
+
+      const rows = await db.execute<Record<string, unknown>>(rawSql`
+        SELECT wr.id AS "runId", w.slug AS workload, w.kind::text AS kind,
+               v.version, v.body, wr.attempt,
+               to_char(wr.deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "deadlineAt",
+               to_char(wr.lease_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS "leaseExpiresAt"
+        FROM workload_runs wr
+        JOIN workloads w ON w.id = wr.workload_id
+        JOIN workload_versions v ON v.id = wr.workload_version_id
+        WHERE wr.id = ${run.runId}`)
+      return { run: rows[0] ?? null }
+    })
+
+    if ('unknown' in claimed) {
+      // The same answer whether the environment belongs to another organization
+      // or does not exist, for the reason /v1/environments/:envId gives.
+      return c.json({ error: `No environment named ${envId} in this organization.` }, 404)
+    }
+    // 200 with a null run rather than 204, because a poller that reads a status
+    // code and not a body is a poller that cannot tell "nothing waiting" from
+    // "something went wrong with the shape".
+    return c.json({ run: claimed.run })
+  })
+
+  app.post('/v1/workloads/runs/:runId/heartbeat', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const runId = c.req.param('runId')
+    const beat = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
+      heartbeat(db, { runId, holder: engine.tokenId, now: clock.now() }),
+    )
+    if (!beat.held) {
+      // Named rather than answered with a bare 404. An engine that has lost its
+      // lease is about to have its run claimed by somebody else, and it needs
+      // to know that rather than to keep working and report at the end.
+      return c.json(
+        {
+          error:
+            `Run ${runId} is not held by this token. It may have finished, been cancelled, ` +
+            `or had its lease taken after it expired. Stop and claim again.`,
+        },
+        409,
+      )
+    }
+    // cancelRequested rides the beat, so an engine learns about a cancel on a
+    // request it was making anyway rather than by polling for a command.
+    return c.json({ held: true, cancelRequested: beat.cancelRequested })
+  })
+
+  app.post('/v1/commands/claim', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    // Deliberately reachable while suspended. A suspension stops new work; a
+    // teardown is the opposite of new work, and refusing it would leave a
+    // suspended organization unable to stop paying for what is running.
+
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const envId = typeof body.envId === 'string' && body.envId.trim() !== '' ? body.envId.trim() : null
+    const limit = Number.isInteger(body.limit) ? Math.min(Math.max(Number(body.limit), 1), 50) : 10
+
+    const commands = await options.pool.withTenant({ orgId: engine.orgId }, async (db) => {
+      await expireOverdueCommands(db, { now: clock.now() })
+      return claimCommands(db, {
+        orgId: engine.orgId,
+        envId,
+        holder: engine.tokenId,
+        limit,
+        now: clock.now(),
+      })
+    })
+    return c.json({ commands })
+  })
+
+  app.post('/v1/commands/:id/ack', async (c) => {
+    const engine = await engineFrom(c.req.header('authorization'))
+    if (!engine) return c.json({ error: 'This token is not valid.' }, 401)
+    const body = await readJson(c)
+    if (body === null) return c.json({ error: 'The body is not JSON.' }, 400)
+    const outcome = body.outcome === 'failed' ? 'failed' : body.outcome === 'done' ? 'done' : null
+    if (outcome === null) {
+      return c.json({ error: 'The body needs an outcome of "done" or "failed".' }, 400)
+    }
+    const detail = typeof body.detail === 'string' ? body.detail.slice(0, 2000) : null
+
+    const acknowledged = await options.pool.withTenant({ orgId: engine.orgId }, (db) =>
+      acknowledgeCommand(db, {
+        commandId: c.req.param('id'),
+        holder: engine.tokenId,
+        outcome,
+        detail,
+        now: clock.now(),
+      }),
+    )
+    if (!acknowledged) {
+      // A 409 and a sentence rather than a 200. An acknowledgement that matched
+      // no row is exactly the silent nothing the durable command exists to end,
+      // and answering it with a 200 would put the old defect back one level up.
+      return c.json(
+        {
+          error:
+            'That command is not claimed by this token. It may have expired, been superseded, ' +
+            'or had its lease taken after it ran out.',
+        },
+        409,
+      )
+    }
+    return c.json({ acknowledged: true })
+  })
+
+  // -------------------------------------------------------------------------
   // The application API
   // -------------------------------------------------------------------------
 
@@ -1961,6 +2304,7 @@ export function createServer(options: ServerOptions) {
           mailer: options.emailSignIn?.mailer ?? null,
           productName: options.emailSignIn?.productName ?? 'Antifailure',
           hostedRequiredPlan,
+          operatorSetsPlan,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,

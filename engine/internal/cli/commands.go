@@ -67,8 +67,15 @@ func newVersionCommand(env *Env) *cobra.Command {
 		Short: "Print the version, commit, and edition",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Asked of the running binary rather than read out of a package
+			// variable. The variable was never stamped by any build, so the
+			// enterprise binary printed "community edition" here while its own
+			// af license status printed "enterprise", and the same command that
+			// tells an auditor what they are running was the one that lied.
+			declared, _ := declaredEdition(cmd.Context())
 			info := VersionInfo{
-				Version: Version, Commit: Commit, BuildDate: BuildDate, Edition: Edition,
+				Version: Version, Commit: Commit, BuildDate: BuildDate,
+				Edition:  declared.Name,
 				Go:       runtime.Version(),
 				Platform: runtime.GOOS + "/" + runtime.GOARCH,
 			}

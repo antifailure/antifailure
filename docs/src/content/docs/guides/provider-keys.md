@@ -2,7 +2,7 @@
 title: Your own provider keys
 description: Store an Anthropic or OpenAI key, cap what it may spend, and rotate it, from the console or a terminal.
 sidebar:
-  order: 15
+  order: 21
 ---
 
 Runs use your Anthropic and OpenAI keys, not ours. You store one, you cap what
@@ -11,7 +11,7 @@ both places you can do that: the console, and `af provider`.
 
 This is the hosted arrangement, and it needs a control plane. To keep a key on
 your own machine instead, with no account and no hosted anything, see
-[your own model key](/docs/guides/model-keys/). That is the free and
+[your own model key](/docs/guides/model-keys). That is the free and
 self-hosted path and it has no monthly cap, which is the trade: a cap is only a
 cap when something you control checks it before the money is spent.
 
@@ -69,17 +69,23 @@ af login --scope providers.write
 ```
 
 The scope appears on the screen where you approve the login, so nobody grants
-this without seeing the words. See [Signing in from a terminal](/docs/guides/signing-in/).
+this without seeing the words. See [Signing in from a terminal](/docs/guides/signing-in).
 
 ### What is set
 
 ```
 $ af provider list
 
-  Provider   Key           Monthly cap                    Spent
-  anthropic  ••••••••7777  50.00 USD                      12.50 USD
-  openai     not set       none, so nothing may be spent  —
+  PROVIDER   KEY                             MONTHLY CAP        SPENT
+  anthropic  ********7777                      50.00 USD    12.50 USD
+  openai     not set       none, so nothing may be spent  not tracked
 ```
+
+The key is masked with plain asterisks rather than bullet characters, because
+this output is read in CI logs and pasted into pull request comments as often
+as it is read on a terminal, and neither of those is guaranteed to have the
+character. A provider with no cap says so in words for the same kind of reason:
+a dash in that column reads as unlimited and it means the opposite.
 
 ### Storing a key
 

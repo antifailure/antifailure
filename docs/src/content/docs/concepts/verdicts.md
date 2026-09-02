@@ -2,7 +2,7 @@
 title: Verdicts
 description: The six answers a run can give, which of them fail the check, and how to change that.
 sidebar:
-  order: 13
+  order: 17
 ---
 
 Every run ends in one word. Six are possible, and only one of them fails the
@@ -127,7 +127,7 @@ workflow reached a verdict. When it does exit non zero, the code names why:
 | `9` | No workflow reached a verdict, so nothing about the application was tested. |
 | `10` | Teardown left resources behind. The journal remembers them; `af down` finishes the job. |
 
-The full list of exit codes is in the [error reference](/docs/reference/errors/).
+The full list of exit codes is in the [error reference](/docs/reference/errors).
 
 ## Verdicts on one workflow
 

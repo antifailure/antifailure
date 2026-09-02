@@ -58,12 +58,17 @@ type RunnerCheckItemJSON struct {
 }
 
 // RunnerInstallJSON is the machine readable result.
+//
+// Dependencies says how they were resolved rather than only that they were,
+// because "installed" is true of both a pinned tree and one npm resolved from
+// the ^ ranges this morning, and those are different trees.
 type RunnerInstallJSON struct {
-	Path     string `json:"path"`
-	Files    int    `json:"files"`
-	Node     string `json:"node"`
-	Browser  string `json:"browser"`
-	Complete bool   `json:"complete"`
+	Path         string `json:"path"`
+	Files        int    `json:"files"`
+	Node         string `json:"node"`
+	Browser      string `json:"browser"`
+	Dependencies string `json:"dependencies"` // locked or unlocked
+	Complete     bool   `json:"complete"`
 }
 
 func newRunnerCommand(e *Env) *cobra.Command {
@@ -110,11 +115,10 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 			// on the first run, because the first run is somebody's pull
 			// request check and a two minute download inside it looks like a
 			// hang.
-			if err := runIn(cmd.Context(), target, "npm", "install", "--no-audit", "--no-fund"); err != nil {
-				return aferrors.Wrap(err, aferrors.AFAGT004,
-					"detail", "npm install failed: "+err.Error())
+			locked, err := installDependencies(cmd.Context(), e, target)
+			if err != nil {
+				return err
 			}
-			e.Out.Println("  dependencies installed")
 
 			browser := "skipped"
 			if !skipBrowser {
@@ -135,7 +139,8 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(RunnerInstallJSON{
 					Path: target, Files: copied, Node: node,
-					Browser: browser, Complete: browser == "chromium",
+					Browser: browser, Dependencies: lockState(locked),
+					Complete: browser == "chromium",
 				})
 			}
 			e.Out.Printf("\n  Ready. %s will find it without a flag.\n", e.Out.S(StyleBold, "af test"))
@@ -145,6 +150,52 @@ func newRunnerInstallCommand(e *Env) *cobra.Command {
 	cmd.Flags().StringVar(&from, "from", "", "Copy from this directory rather than the one beside the engine")
 	cmd.Flags().BoolVar(&skipBrowser, "skip-browser", false, "Do not download the browser")
 	return cmd
+}
+
+// installDependencies resolves the runner's dependencies, and reports whether
+// the tree it produced is the one the release was tested with.
+//
+// `npm install` was what this ran, and it resolves the ^ ranges in package.json
+// afresh every time. playwright ^1.49.0 was 1.49.0 when the runner was written
+// and is whatever npm serves today, so two people installing one release of
+// Antifailure got two different browsers driving their tests, and a failure one
+// of them saw was not reproducible by the other. `npm ci` installs exactly what
+// package-lock.json names and refuses if the lockfile and the manifest
+// disagree, which is the whole point of shipping the lockfile.
+//
+// The fallback is deliberately loud rather than silent. A source tree with no
+// lockfile still installs, because refusing would strand somebody pointing
+// --from at a checkout they are editing, but it says the tree is not pinned
+// instead of printing the same "dependencies installed" line for both. A
+// message that reads the same whether or not the guarantee holds is how nobody
+// finds out it stopped holding.
+func installDependencies(ctx context.Context, e *Env, target string) (locked bool, err error) {
+	lockfile := filepath.Join(target, "package-lock.json")
+	if _, statErr := os.Stat(lockfile); statErr == nil {
+		if runErr := runIn(ctx, target, "npm", "ci", "--no-audit", "--no-fund"); runErr != nil {
+			return false, aferrors.Wrap(runErr, aferrors.AFAGT004,
+				"detail", "npm ci failed: "+runErr.Error())
+		}
+		e.Out.Println("  dependencies installed, pinned by package-lock.json")
+		return true, nil
+	}
+	if runErr := runIn(ctx, target, "npm", "install", "--no-audit", "--no-fund"); runErr != nil {
+		return false, aferrors.Wrap(runErr, aferrors.AFAGT004,
+			"detail", "npm install failed: "+runErr.Error())
+	}
+	e.Out.Printf("  %s dependencies installed, and NOT pinned: %s has no package-lock.json,\n"+
+		"    so npm resolved the version ranges in package.json as they are today. Another\n"+
+		"    machine installing the same release can get a different tree.\n",
+		e.Out.S(StyleWarn, SymbolWarn), target)
+	return false, nil
+}
+
+// lockState is the JSON spelling of the same fact.
+func lockState(locked bool) string {
+	if locked {
+		return "locked"
+	}
+	return "unlocked"
 }
 
 // runnerCheck is one question this command can answer about the runner, and
@@ -267,9 +318,23 @@ func dependencyCheck(target string, m runnerManifest) runnerCheck {
 			blocker: true,
 		}
 	}
+	// Present is not the same as pinned, and this command exists because
+	// "present" was being reported as readiness once already. A tree installed
+	// from a release archive that shipped no lockfile has every dependency and
+	// no idea which versions they are, so it says so rather than reporting the
+	// same ok as a pinned one. A warning rather than a failure: the runner does
+	// run, it just runs something nobody chose.
+	if _, err := os.Stat(filepath.Join(target, "package-lock.json")); err != nil {
+		return runnerCheck{
+			label: "dependencies", symbol: SymbolWarn,
+			detail: fmt.Sprintf("%d declared, all present, and not pinned: no package-lock.json",
+				len(m.Dependencies)),
+			remedy: "Reinstall from a release that ships the lockfile: af runner install",
+		}
+	}
 	return runnerCheck{
 		label: "dependencies", symbol: SymbolOK,
-		detail: fmt.Sprintf("%d declared, all present", len(m.Dependencies)),
+		detail: fmt.Sprintf("%d declared, all present, pinned by package-lock.json", len(m.Dependencies)),
 	}
 }
 
@@ -462,13 +527,33 @@ later inside af test as a node error about a module it could not resolve.`),
 				}
 			}
 			if !ready {
-				e.Out.Println("")
-				e.Out.Hint("Install it with", "af runner install")
+				// The trailing hint used to print unconditionally, and the
+				// commonest failure of all is a machine with no runner, whose
+				// only remedy is that same sentence. So the first command a
+				// new install runs answered with "Install it with: af runner
+				// install" twice, one line apart. It is printed now only when
+				// nothing above already said it, which is the case where a
+				// blocker carries no remedy of its own.
+				if !namesRunnerInstall(remedies) {
+					e.Out.Println("")
+					e.Out.Hint("Install it with", "af runner install")
+				}
 				return &silentError{code: aferrors.ExitConfiguration}
 			}
 			return nil
 		},
 	}
+}
+
+// namesRunnerInstall reports whether a remedy already told the reader to run
+// the command the closing hint would.
+func namesRunnerInstall(remedies []string) bool {
+	for _, r := range remedies {
+		if strings.Contains(r, "af runner install") {
+			return true
+		}
+	}
+	return false
 }
 
 func checksJSON(results []runnerCheck) []RunnerCheckItemJSON {
@@ -486,10 +571,8 @@ func runnerSource(e *Env, from string) (string, error) {
 	candidates := []string{from}
 	if from == "" {
 		candidates = nil
-		// Beside the working directory, for a checkout.
-		candidates = append(candidates,
-			filepath.Join(e.WorkDir, "runner"),
-			filepath.Join(e.WorkDir, "..", "runner"))
+		// At and above the working directory, for a checkout.
+		candidates = append(candidates, checkoutRunners(e.WorkDir)...)
 		// Beside the binary, for an installed release, which ships the runner
 		// next to it rather than fetching it.
 		if self, err := os.Executable(); err == nil {
@@ -509,6 +592,50 @@ func runnerSource(e *Env, from string) (string, error) {
 	}
 	return "", aferrors.Coded(aferrors.AFAGT004,
 		"detail", "no runner source was found; looked in "+strings.Join(candidates, ", "))
+}
+
+// checkoutRunners lists the runner directories at and above dir, stopping at
+// the checkout dir sits in.
+//
+// This ascends because the working directory is not reliably the root of the
+// checkout, and looking exactly one level up quietly assumed it was. Running
+// `af runner install` from examples/go-api searched examples/go-api/runner and
+// examples/runner, then reported that no runner source existed, while the
+// runner it wanted sat at the top of the very checkout it was running inside.
+// Anyone who keeps a project in a subdirectory met the same wall, and the
+// error told them to install a runner they already had.
+//
+// The ascent stops at the directory holding .git rather than walking to the
+// filesystem root. A walk to the root would eventually find an unrelated
+// ~/runner belonging to something else and copy that, which is a worse failure
+// than the one this fixes: it succeeds, and the wrong runner is only visible
+// later as a test that will not run.
+//
+// Outside any checkout there is no root to stop at, so only the two nearest
+// directories are offered. That is exactly the pair this searched before, so
+// the case that already worked still works, and the error message does not
+// list every directory up to / and bury the two that matter.
+func checkoutRunners(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	var found []string
+	for d := abs; ; {
+		found = append(found, filepath.Join(d, "runner"))
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return found
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	if len(found) > 2 {
+		found = found[:2]
+	}
+	return found
 }
 
 // copyTree copies the runner's source, and nothing it can rebuild.

@@ -694,3 +694,61 @@ func TestSend_ScrubsThePayloadOnItsWayToTheWire(t *testing.T) {
 		t.Fatalf("the caller's nested payload was modified: %v", inner["url"])
 	}
 }
+
+// The renewal floor, proved at the client rather than end to end.
+//
+// The end to end test cannot show this: one flush makes one request, so a
+// bounded renewal and an unbounded one both exchange once and the assertion
+// passes either way. Two sends inside the same minute is the smallest thing
+// that tells them apart, and this test fails when RenewFloor is set to zero,
+// which is how it was checked.
+func TestARefusedBatchRenewsAtMostOncePerFloor(t *testing.T) {
+	var mu sync.Mutex
+	renewals := 0
+
+	// Refuses everything, which is a control plane that renewing cannot help:
+	// a revoked organization, or a repository that was disconnected mid run.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	fake := clock.NewFake(time.Unix(1700000000, 0).UTC())
+	client, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: "the-first-credential", Clock: fake, Redactor: redact.New(),
+		Renew: func(context.Context) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			renewals++
+			return fmt.Sprintf("credential-%d", renewals), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("building the client: %v", err)
+	}
+
+	batch := []controlplane.Event{{
+		ID: "ev-1", Type: "environment.ready", EnvID: "env-1", Sequence: 1,
+		OccurredAt: time.Unix(1700000000, 0).UTC(),
+	}}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return renewals
+	}
+
+	// Two refused batches inside one minute.
+	_, _ = client.Send(context.Background(), batch)
+	_, _ = client.Send(context.Background(), batch)
+	if got := count(); got != 1 {
+		t.Fatalf("two refusals inside the floor caused %d exchanges, want 1", got)
+	}
+
+	// Past the floor it is willing to try again, because an expiry that happens
+	// during a long run has to be recoverable rather than permanent.
+	fake.Advance(controlplane.RenewFloor + time.Second)
+	_, _ = client.Send(context.Background(), batch)
+	if got := count(); got != 2 {
+		t.Fatalf("a refusal past the floor caused %d exchanges in total, want 2", got)
+	}
+}

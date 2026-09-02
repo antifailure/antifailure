@@ -572,30 +572,24 @@ var typeMap = map[string]string{
 // locally and simply never put on the bus.
 //
 // TestEveryMappedTypeHasSomethingInTheEngineThatEmitsIt is the gate for that
-// second question, and it names all five. They are not all the same kind of
-// gap, and a reader needs to know which kind, because "reserved" and
-// "abandoned" call for opposite decisions:
+// second question. It named five and now names one, and the four that left the
+// list were connected rather than deleted:
 //
-// env.sleeping is reserved for something never built. There is nothing to
-// abandon: no code sleeps an environment, and runtime.idle_sleep is inert.
+// agent.started, agent.finished and agent.verdict are emitted by
+// Orchestrator.Test, through the reporting session in env/reporting.go. There
+// was no half-built wire to read intent from because there was no bus at all:
+// af test runs in its own process and opened no session.
 //
-// egress.decision is not reserved and not abandoned, it is disconnected. The
-// decisions are made, recorded, returned by Orchestrator.Decisions and rendered
-// by af net and af ci, and a consumer exists here too: internal/hud classifies
-// egress.decision as a noisy type to suppress, with a comment about an egress
-// denial being the line somebody will grep for. So the producer and the
-// consumer were both built and the wire between them was not. That is the most
-// finishable of the five and it is the one to do first if anybody does one.
+// egress.decision is emitted by Orchestrator.ReportDecisions, once per
+// environment, from Down. It was never reserved and never abandoned, it was
+// disconnected: the decisions were made, returned by Orchestrator.Decisions,
+// rendered by af net and af ci, and suppressed as noisy by internal/hud, so
+// producer and consumer both existed and the wire between them did not.
 //
-// The three agent types, agent.started, agent.finished and agent.verdict, are
-// the one set where honestly nobody can tell from the code which it is. Agent
-// runs happen, and nothing anywhere consumes these types either, so there is no
-// half-built wire to point at as evidence of intent. Whether they were reserved
-// for a reporting path or drafted and dropped is not recoverable from what is
-// committed, and it is better to say so here than to pick and be wrong. The
-// next person to touch the agent runner should settle it.
-//
-// None of the five is emitted today, and the gate holds that line either way.
+// env.sleeping is the one still reserved, and there is nothing to abandon: no
+// code sleeps an environment, and runtime.idle_sleep is defaulted by manifest
+// normalization, checked by validation, printed by af explain, and read by
+// nothing that acts on it.
 func KnownTypes() []string {
 	out := make([]string, 0, len(typeMap))
 	for k := range typeMap {

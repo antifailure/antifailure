@@ -36,10 +36,10 @@ dig +short app.antifailure.dev
 `af-web` resource group, not in the control plane's, so a change there is the
 first thing to look at.
 
-**A TLS error.** Go to [the certificate](/docs/self-hosting/runbooks/certificate/).
+**A TLS error.** Go to [the certificate](/docs/self-hosting/runbooks/certificate).
 
 **503 with a reason.** The database. Go to [the database is not
-answering](/docs/self-hosting/runbooks/database-unreachable/).
+answering](/docs/self-hosting/runbooks/database-unreachable).
 
 **404 or an Azure error page.** The custom domain binding, or traffic is on a
 revision that is not serving. Check what is actually serving:
@@ -74,5 +74,5 @@ certificate, a DNS record and a database, none of which a deploy touches.
 **Environments are not down.** Customers running `af up` in their own
 continuous integration are unaffected, and their engines buffer events to disk
 until this comes back. The
-[operations page](/docs/self-hosting/operations/) explains what that recovery
+[operations page](/docs/self-hosting/operations) explains what that recovery
 looks like, and it needs nothing from you.

@@ -151,12 +151,17 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relnotes
+/relpack
 /reltar
 /sbomcheck
 /scanrepo
 /schemadoc
+/sidebarcheck
 /site
 /statuscheck
+/tagsync
+/varcheck
 /vulncheck
 /walkthrough
 engine/af-proxy
@@ -249,3 +254,16 @@ examples/*/report.md
 # adopting Next's block is ever a deliberate choice.
 /www/AGENTS.md
 /www/CLAUDE.md
+
+# tools/relpack builds a real release archive to assert what is inside it, and
+# it has to do that from a directory inside the tree passed relatively, because
+# that is how `just build-release` and release.yml call the script and a path
+# outside the tree hides the bug the test exists for. TestMain removes it; this
+# line is for the run that is interrupted before it can.
+#
+# Unanchored, because the whole point of the test is that a broken script puts
+# the binary somewhere other than where it was told to. Anchored at the root
+# this missed engine/relpack-*/, which is exactly where the defect it watches
+# for lands a 60MB static binary, and the first `git add -A` after a run of the
+# negative control staged it.
+relpack-*

@@ -44,6 +44,10 @@ interface PlanState {
   holding: { environments: number; goldens: number };
   takesPayment: boolean;
   hostedRequiredPlan: string | null;
+  /** Whether billing.set would do anything. False unless whoever runs this
+   *  control plane has said they set plans by hand, so the change control below
+   *  is drawn only where pressing it works. */
+  operatorSetsPlan: boolean;
 }
 
 interface SubscriptionState {
@@ -314,7 +318,11 @@ function Billing() {
 
           <Card
             title="What each plan allows"
-            note="A plan that is already over its limit refuses the next environment and removes nothing that exists."
+            note={
+              data.billing.configured || data.quota.operatorSetsPlan
+                ? "A plan that is already over its limit refuses the next environment and removes nothing that exists."
+                : "A plan that is already over its limit refuses the next environment and removes nothing that exists. This control plane takes no payment and does not grant plans by hand, so the plan is whatever its operator set."
+            }
           >
             <TableWrap>
               <Table>
@@ -360,10 +368,12 @@ function Billing() {
                           <span className="text-dim">
                             {data.billing.plans.includes(p.name) ? "Use checkout" : "Not offered here"}
                           </span>
-                        ) : (
+                        ) : data.quota.operatorSetsPlan ? (
                           <Button busy={busy === `choose-${p.name}`} onClick={() => choose(p.name)}>
                             {busy === `choose-${p.name}` ? "Changing" : `Move to ${p.name}`}
                           </Button>
+                        ) : (
+                          <span className="text-dim">Ask the operator</span>
                         )}
                       </Td>
                     </Row>

@@ -66,6 +66,9 @@ var notAPath = map[string]string{
 	".gate-reports/": "created by `just gate` when it runs and gitignored, so it is a place output goes rather than something the repository contains",
 
 	"THIRD_PARTY_NOTICES.md": "generated at release time from what is actually linked, so it is deliberately absent from the tree",
+
+	"checksums.txt.sigstore.json": "a release asset on the GitHub releases page, produced by the signing step, and the whole point of naming it is that a reader checks the release rather than this tree",
+	"sbom.spdx.json":              "the same, the bill of materials asset, and it is named so a reader can tell a release that ran the signing steps from one that predates them",
 }
 
 // claim is one backticked token that looks like a path into this repository.
@@ -205,6 +208,14 @@ func checkDocsLinks(root string, tracked map[string]bool, out io.Writer) error {
 					continue
 				}
 				page := strings.Trim(strings.TrimPrefix(target, docsBase), "/")
+				// /docs/<page>.md is the Markdown behind the rendered page,
+				// emitted by docs/src/pages/[...slug].md.ts from the same
+				// content collection this checks against. So it resolves
+				// exactly when the page does, and checking the page is
+				// checking the twin. Without this the gate calls a working
+				// address a 404, which is the false finding that gets a gate
+				// weakened rather than fixed.
+				page = strings.TrimSuffix(page, ".md")
 				if page != "" && !docPageExists(tracked, page) {
 					dead = append(dead, where+" -> "+target)
 				}
@@ -768,12 +779,18 @@ var siteClaims = []siteClaim{
 		// also says the engine does not use it.
 		requires: regexp.MustCompile(`(?i)not a client certificate|rather than mutual TLS|never used mutual TLS`),
 		premise: [2]string{"engine/internal/controlplane/client.go",
-			`req.Header.Set("authorization", "Bearer "+c.token)`},
-		reason: "the engine authenticates with a bearer token, not a client certificate, " +
-			"and the token is good for ninety days (CLI_TOKEN_TTL_MS). The architecture " +
-			"page claimed short-lived mTLS four times and both halves were false. If " +
-			"client certificates are ever really used, delete this rule; the premise " +
-			"beside it is what tells you the day that happens",
+			`req.Header.Set("authorization", "Bearer "+c.bearer())`},
+		reason: "the engine authenticates with a bearer token, not a client certificate. " +
+			"The architecture page claimed short-lived mTLS four times and both halves " +
+			"were false. If client certificates are ever really used, delete this rule; " +
+			"the premise beside it is what tells you the day that happens. " +
+			"The premise anchored on `c.token` until the credential became mutable: it " +
+			"is now read through c.bearer() under a mutex, because a token minted from a " +
+			"workflow identity is short lived and is replaced in place when the control " +
+			"plane refuses a batch. The header is the fact worth anchoring and it is " +
+			"unchanged; only the accessor moved. The half of the old reason about ninety " +
+			"days is gone with it, because it is now true of a pasted CLI token and false " +
+			"of a minted one, and a premise that is half true anchors nothing",
 	},
 	{
 		name:      "there is no hosted control plane",
@@ -781,9 +798,9 @@ var siteClaims = []siteClaim{
 		premise:   [2]string{"www/components/AuthScreen.tsx", "invitation only"},
 		reason: "the hosted control plane is deployed and invitation only, and " +
 			"AuthScreen says so while offering sign-in with GitHub. The sentence " +
-			"survived as the meta description of /signin and /signup and inside the " +
-			"modal the header's Log in button opens, so an invited customer pressing " +
-			"Log in was told the thing they were invited to does not exist",
+			"survived as the meta description of /signin and /signup, which is what " +
+			"a crawler and a link preview read, so an invited customer following the " +
+			"header was told the thing they were invited to does not exist",
 	},
 	{
 		name:      "the build runs inside the sandbox",
@@ -986,11 +1003,13 @@ var siteClaimExceptions = []claimException{
 			"changed, which is the note that stops somebody restoring it",
 	},
 	{
-		file: "www/components/AuthModal.tsx",
+		file: "www/components/Chrome.tsx",
 		rule: "there is no hosted control plane",
-		line: "This said",
-		reason: "the same retraction on the modal, which is the surface the header's " +
-			"Log in button opens and where the claim did the most damage",
+		line: "it still shipped saying",
+		reason: "the note recording what the deleted AuthModal said. The modal was " +
+			"unreachable, openAuth had no caller, and it shipped the sentence in the " +
+			"bundle anyway; this is the record of that, and of why the fix was to " +
+			"delete it rather than correct its copy",
 	},
 	{
 		file: "www/lib/docs-facts.ts",
@@ -998,13 +1017,6 @@ var siteClaimExceptions = []claimException{
 		line: "offered \"all 41 documentation pages",
 		reason: "the header recording the number this file exists to stop anybody " +
 			"typing again, which has to quote it to be worth reading",
-	},
-	{
-		file: "www/lib/routes.ts",
-		rule: "there is no hosted control plane",
-		line: "Both descriptions used to say",
-		reason: "the note recording that these two meta descriptions carried the claim " +
-			"while the visible page said the opposite",
 	},
 }
 

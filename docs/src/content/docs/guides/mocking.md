@@ -2,7 +2,7 @@
 title: Mocking
 description: Answering an API from fixtures when it has no sandbox worth using.
 sidebar:
-  order: 12
+  order: 14
 ---
 
 Some third party APIs have no sandbox, or one that does not resemble the real
@@ -38,7 +38,7 @@ The request is refused rather than answered with something invented, because a
 plausible wrong answer is worse than a refusal: it produces a green run that
 proves nothing.
 
-Three ways forward: record the fixture, use [`synth`](/docs/guides/synth/) if the
+Three ways forward: record the fixture, use [`synth`](/docs/guides/synth) if the
 shape matters more than the content, or set the host to `block` and check what
 your application does when the service is unavailable.
 
@@ -55,4 +55,4 @@ success shape. `mock` answers with content from a fixture. Use `capture` when
 you only need the call to succeed, such as sending mail, and `mock` when your
 application reads the response and does something with it.
 
-Related: [egress](/docs/concepts/egress/), [synth](/docs/guides/synth/).
+Related: [egress](/docs/concepts/egress), [synth](/docs/guides/synth).

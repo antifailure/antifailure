@@ -2,7 +2,7 @@
 title: Watching a run
 description: The live dashboard, what each pane means, and what you get where there is no terminal.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 `af up` prints a handful of lines and then a summary. That is the right amount
@@ -99,9 +99,9 @@ what you asked for.
 ## The stream underneath
 
 The dashboard is a subscriber, not a special case. Everything it draws is on
-the event bus, which is the same stream the NDJSON sink writes and the same one
-`af events` reads. Nothing is computed for the display that is not also
-available to a script.
+the event bus, which is the same stream the NDJSON sink writes to
+`.antifailure/logs/<environment>.ndjson`. Nothing is computed for the display
+that is not also available to a script reading that file.
 
 That also means the dashboard is honest about gaps. A pane that stays empty is
 a pane whose events nothing is emitting yet, not a pane that is broken.

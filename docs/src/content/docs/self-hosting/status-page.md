@@ -2,7 +2,7 @@
 title: Status page
 description: The cheapest honest way to tell customers something is wrong, and why the signal has to come from outside the thing it reports on.
 sidebar:
-  order: 3.5
+  order: 7
 ---
 
 Customers of an availability product ask for a status page before they ask for
@@ -19,7 +19,7 @@ control plane's own `/metrics`, cannot report a total outage of the control
 plane. The process that would say "I am down" is the process that is down.
 This is not a hypothetical. `/health` answered `200` for thirteen minutes with
 no database schema behind it, once, already, in this project. That is
-described on the [operations page](/docs/self-hosting/operations/). A status
+described on the [operations page](/docs/self-hosting/operations). A status
 page built the same way would repeat that failure in front of customers,
 instead of in a log nobody reads yet.
 
@@ -83,7 +83,7 @@ happened to exactly one of them.
 
 The control plane checks read `/readyz`, the same endpoint and the same
 reasoning as
-[`deploy/cd/health-gate.sh`](/docs/self-hosting/azure/#upgrade-and-rollback-the-manual-path).
+[`deploy/cd/health-gate.sh`](/docs/self-hosting/azure#upgrade-and-rollback-the-manual-path).
 `/health` is a static literal that answers even when the database cannot. A
 status page built on it would report an outage as healthy, the same way a
 liveness probe would. A `200` carrying `"ready": false` is a failure here,
@@ -301,7 +301,7 @@ take both down together. That is the exact failure this whole design avoids.
 ## What this is not
 
 **It is not the pager.** The alerting stack behind
-[the alert rules](/docs/self-hosting/operations/#what-the-alerts-mean) is what
+[the alert rules](/docs/self-hosting/operations#what-the-alerts-mean) is what
 wakes a person. This page is what a customer reads. They watch the same
 system from different distances, and neither substitutes for the other. A
 fast burn alert can page someone before a single failed check has accumulated

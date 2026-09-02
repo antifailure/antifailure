@@ -165,6 +165,26 @@ type SoftAuroraProps = {
   className?: string;
 };
 
+/**
+ * Whether this machine can render WebGL on its GPU rather than on its CPU.
+ *
+ * Asked on a throwaway context that is discarded immediately, because the
+ * answer decides whether to build the real one at all.
+ */
+function hasAcceleratedWebGL(): boolean {
+  try {
+    const probe = document.createElement("canvas");
+    const gl =
+      probe.getContext("webgl2", { failIfMajorPerformanceCaveat: true }) ??
+      probe.getContext("webgl", { failIfMajorPerformanceCaveat: true });
+    if (!gl) return false;
+    (gl as WebGLRenderingContext).getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function SoftAurora({
   speed = 0.6,
   scale = 1.5,
@@ -200,9 +220,31 @@ export default function SoftAurora({
     // unguarded `new Renderer` turned the entire marketing page into Next's
     // stock "a client-side exception has occurred" for those visitors. This
     // is decoration behind a headline. It degrades to nothing.
+    //
+    // The guard above is binary, and the machines this decoration actually
+    // hurts are in neither of its two cases. When a GPU driver is blocklisted,
+    // which is the normal state of a cheap or out-of-support Chromebook, the
+    // browser does not refuse a context: it grants one backed by SwiftShader
+    // and renders this full-bleed fragment shader on the CPU, every frame,
+    // forever. `new Renderer` succeeds, nothing throws, and one core sits at
+    // 100% behind a headline until the tab is killed.
+    //
+    // failIfMajorPerformanceCaveat is the flag that turns that case back into
+    // the refusal this component already handles. ogl builds its own attribute
+    // object and does not forward the flag, so the question has to be asked
+    // separately, on a throwaway canvas, before the real context is created.
+    // A machine with a working GPU answers yes and loses nothing.
+    if (!hasAcceleratedWebGL()) return;
+
     let renderer: Renderer;
     try {
-      renderer = new Renderer({ alpha: true, premultipliedAlpha: false });
+      renderer = new Renderer({
+        alpha: true,
+        premultipliedAlpha: false,
+        // Forwarded to getContext by ogl. On a laptop with two GPUs this keeps
+        // decoration off the discrete one.
+        powerPreference: "low-power",
+      });
     } catch {
       return;
     }
@@ -292,19 +334,56 @@ export default function SoftAurora({
       renderer.render({ scene: mesh });
     }
 
+    // Nothing above ever stopped this loop. A visitor who scrolled past the
+    // hero and read the rest of the page kept paying for a full-bleed shader
+    // running behind them for the whole visit, and rAF throttling does not
+    // cover it: the browser throttles a hidden TAB, not an element that has
+    // scrolled out of a visible one. Both conditions are cheap to observe, so
+    // the loop now runs only while the canvas is actually on screen in a tab
+    // somebody is looking at.
+    const update = (time: number) => {
+      animationFrameId = requestAnimationFrame(update);
+      frame(time);
+    };
+
+    let onScreen = true;
+    function running() {
+      return onScreen && document.visibilityState === "visible";
+    }
+    function sync() {
+      if (reduced) return;
+      if (running() && animationFrameId === 0) {
+        animationFrameId = requestAnimationFrame(update);
+      } else if (!running() && animationFrameId !== 0) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = 0;
+      }
+    }
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        onScreen = entry.isIntersecting;
+        sync();
+      },
+      // A little margin so it is already running by the time it scrolls back in
+      // rather than starting visibly stopped.
+      { rootMargin: "200px" },
+    );
+    io.observe(root);
+    document.addEventListener("visibilitychange", sync);
+
     if (reduced) {
+      // One frame, so the art is present and still.
       frame(0);
     } else {
-      const update = (time: number) => {
-        animationFrameId = requestAnimationFrame(update);
-        frame(time);
-      };
-      animationFrameId = requestAnimationFrame(update);
+      sync();
     }
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", sync);
+      io.disconnect();
       ro.disconnect();
       if (enableMouseInteraction && !reduced) {
         host.removeEventListener("mousemove", handleMouseMove);

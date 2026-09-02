@@ -47,8 +47,12 @@ var commandExamples = map[string]string{
 		"# configured to run it there.\n" +
 		"af mcp",
 	"af doctor": "af doctor\naf doctor -o json",
-	"af down":   "af down\naf down --branch feature/checkout",
-	"af env":    "af env list",
+	"af start": "" +
+		"# Where you are on the first run, and the one command that moves you on.\n" +
+		"af start\n" +
+		"af start -o json",
+	"af down": "af down\naf down --branch feature/checkout",
+	"af env":  "af env list",
 	"af env list": "" +
 		"af env list\n" +
 		"af env list -o json",
@@ -185,7 +189,7 @@ var commandExamples = map[string]string{
 	"af support bundle": "" +
 		"# Redacted on the way in, with a list of what it included.\n" +
 		"af support bundle\n" +
-		"af support bundle --output af-support.zip",
+		"af support bundle --archive af-support.zip",
 	"af test": "" +
 		"af test\n" +
 		"af test --only checkout --headed",

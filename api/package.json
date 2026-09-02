@@ -1,8 +1,8 @@
 {
   "name": "@antifailure/site-api",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "The waitlist endpoint behind antifailure.dev, run as a Static Web Apps managed function.",
+  "description": "The managed functions behind antifailure.dev.",
   "scripts": {
     "test": "node --test"
   },
