@@ -207,9 +207,16 @@ of them goes red.
 3. Tag and push:
 
    ```sh
-   git tag -s v1.0.0 -m "v1.0.0"
+   git tag -a v1.0.0 -m "v1.0.0"
    git push origin v1.0.0
    ```
+
+   The tag is annotated and carries no signature. What is signed is
+   `checksums.txt` and the bill of materials, by the publish job, which is what
+   the verification steps above check. `git verify-tag` on a release tag of
+   ours answers "no signature found", and that is the honest answer rather than
+   a broken one. [Signing the tags too](#signing-the-tags-too) is what to set
+   up if you want it to answer differently.
 
 4. Watch `.github/workflows/release.yml`. It builds four platforms, packages
    each with `tools/release/build.sh`, unpacks them so the bill of materials can
@@ -245,6 +252,42 @@ Pushing the tag also publishes `ghcr.io/antifailure/control-plane:<tag>` and
 The workflow fails rather than publishing when any of those checks fail. That
 ordering is the point: every previous version of this pipeline signed and
 published first and verified never.
+
+### Signing the tags too
+
+Optional, and nobody has done it. A signed tag would say which maintainer cut
+the release. The artifact signature says something different and stronger: that
+this workflow, in this repository, at this tag produced the files. So a tag
+signature adds a second smaller claim, and its absence takes nothing away from
+the one you can already check.
+
+Setting it up is the account owner's work rather than the release pipeline's,
+because it means holding a private key. Four steps, once:
+
+1. Have a key. An SSH key you already use is enough, or make a GPG key with
+   `gpg --full-generate-key`.
+2. Tell git which key signs, and in which format:
+
+   ```sh
+   git config --global gpg.format ssh
+   git config --global user.signingkey ~/.ssh/id_ed25519.pub
+   ```
+
+   With GPG instead, leave `gpg.format` unset and give `user.signingkey` the
+   key id.
+3. Add the public half to your GitHub account as a signing key, under Settings,
+   SSH and GPG keys. Skip this and the signature is still good, and GitHub
+   still shows the tag as unverified, because it has nothing to check against.
+4. Turn it on for every tag, so a forgotten flag cannot quietly produce an
+   unsigned one:
+
+   ```sh
+   git config --global tag.gpgsign true
+   ```
+
+Step 3 of the runbook then becomes `git tag -s`, and `git verify-tag v1.0.0`
+starts answering. Until somebody does that, this page describes what the
+repository does rather than what it could do.
 
 ### If a release goes out wrong
 
