@@ -346,8 +346,12 @@ function EntryRow({ entry }: { entry: Entry }) {
 
       <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-x-8 max-lg:grid-cols-1 max-lg:gap-x-0">
         <div className="col-start-2 min-w-0 max-lg:col-start-1">
+          {/* Keyed by position, not by category. `migration-findings-in-the-check`
+              opens two `# added` sections and one `# fixed`, so keying on the
+              word gave two siblings the same key: React warns, and it is free
+              to reuse the wrong one of them when the list changes. */}
           {entry.sections.map((section, sectionIndex) => (
-            <div key={section.category} className={sectionIndex === 0 ? "" : "mt-7"}>
+            <div key={sectionIndex} className={sectionIndex === 0 ? "" : "mt-7"}>
               {/* One category, one label, and the group heading above already
                   carries it. An entry that declares two gets them over their
                   own paragraphs, where they say which half of the entry they
