@@ -2,7 +2,7 @@
 title: Status page
 description: The cheapest honest way to tell customers something is wrong, and why the signal has to come from outside the thing it reports on.
 sidebar:
-  order: 3.5
+  order: 7
 ---
 
 Customers of an availability product ask for a status page before they ask for

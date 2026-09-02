@@ -2,7 +2,7 @@
 title: Detection
 description: How af init reads a repository, and what it does when it is not sure.
 sidebar:
-  order: 7
+  order: 9
 ---
 
 `af init` reads what is already in the repository and writes a manifest from it.
