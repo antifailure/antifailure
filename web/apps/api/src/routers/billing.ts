@@ -6,6 +6,13 @@
 // administrative act by somebody who already holds `billing.manage`, and it is
 // audited as one.
 //
+// It is also OFF unless an operator turns it on, and that is not a detail. The
+// person holding `billing.manage` is the org owner, which the first person into
+// any organization becomes, and on a plane serving anybody but its operator
+// that person setting their own plan is a stranger writing their own
+// entitlement. `AF_OPERATOR_SETS_PLAN` is the operator saying the two are the
+// same person here. See `hosted.ts`.
+//
 // The reason it is worth building on its own is that the enforcement already
 // exists and had nothing to point at. `PLAN_QUOTAS` defines free, team and
 // enterprise, `checkQuota` refuses over the limit, and `organizations.plan`
@@ -23,6 +30,8 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
 import { checkQuota, DEFAULT_PLAN, PLAN_QUOTAS } from '../limits.ts'
+import { ENTITLEMENTS, resolveEntitlements } from '../entitlements.ts'
+import { planSetRefusal } from '../hosted.ts'
 
 const PLANS = Object.keys(PLAN_QUOTAS) as [string, ...string[]]
 
@@ -48,6 +57,18 @@ async function plans(c: OrgContext) {
       })
     }
     const plan = row.plan || DEFAULT_PLAN
+
+    // What this organization is ACTUALLY entitled to, which is the plan unless
+    // somebody sold them something else. Resolved here so that the screen a
+    // customer reads and the check that refuses them agree; before this they
+    // could not, because the screen read PLAN_QUOTAS and dispatch reads the
+    // override.
+    const entitlements = await resolveEntitlements(db, c.clock.now(), {
+      orgId: c.actor.orgId,
+      plan,
+      userId: c.actor.userId,
+    })
+
     return {
       plan,
       // Every plan, with its limits and what this organization is holding
@@ -58,14 +79,52 @@ async function plans(c: OrgContext) {
         name,
         current: name === plan,
         quota,
+        // The OTHER plans are shown at their own published numbers, deliberately.
+        // An override applies to this organization on the plan it is on; saying
+        // what a different plan would give has to be the price list, or the
+        // comparison somebody makes before upgrading is against a number nobody
+        // else gets.
         environments: checkQuota(name, 'environments', Number(row.environments)),
         goldens: checkQuota(name, 'goldens', Number(row.goldens)),
       })),
       holding: { environments: Number(row.environments), goldens: Number(row.goldens) },
+      /**
+       * Every entitlement as it actually applies, with the plan's own value
+       * beside it and the grant that moved it.
+       *
+       * The console renders an override as an override. That is the whole
+       * requirement: a one-off grant that looks like the plan's normal
+       * behaviour is a number nobody can explain six months later, and the
+       * first person to ask is the customer's finance department wondering why
+       * their limit is not the one on the pricing page.
+       */
+      entitlements: entitlements.all().map((e) => ({
+        key: e.key,
+        value: e.value,
+        planValue: e.planValue,
+        unit: ENTITLEMENTS[e.key]?.unit ?? null,
+        description: ENTITLEMENTS[e.key]?.description ?? '',
+        // Null when the plan decided, which is what the screen keys on.
+        override:
+          e.override === null
+            ? null
+            : {
+                scope: e.override.scope,
+                reason: e.override.reason,
+                ticket: e.override.ticket,
+                grantedBy: e.override.grantedBy,
+                grantedAt: e.override.grantedAt.toISOString(),
+                expiresAt: e.override.expiresAt?.toISOString() ?? null,
+              },
+      })),
       // Said in the payload rather than only in a comment, because the console
       // renders it and somebody reading the API has to know too.
       takesPayment: c.stripe !== null,
       hostedRequiredPlan: c.hostedRequiredPlan,
+      // Whether `set` below would do anything, so the console can leave the
+      // control out rather than drawing one that always refuses. A button that
+      // is always refused reads as broken rather than as not offered.
+      operatorSetsPlan: c.operatorSetsPlan,
     }
   })
 }
@@ -84,11 +143,27 @@ export const billingRouter = router({
     .input(z.object({ plan: z.enum(PLANS), reason: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
-      if (c.stripe || c.hostedRequiredPlan) {
+      // DEFAULT DENY, and the inversion is the whole fix.
+      //
+      // This used to refuse only `if (c.stripe || c.hostedRequiredPlan)`, which
+      // is a guard that reads correctly and protects nobody: it asks whether
+      // billing was configured, and the dangerous plane is precisely the one
+      // where it was not. A hosted control plane whose operator has not reached
+      // Stripe yet configures neither, so both were null, so an org owner could
+      // call this with `enterprise` and grant themselves five hundred
+      // environments. The first person into any organization is its owner, and
+      // an owner holds `billing.manage`, so that was every signed-in tenant.
+      //
+      // Now the question is the one that actually decides it: has whoever runs
+      // this installation SAID they set plans by hand? Unset means no, so a
+      // plane nobody has configured refuses, and the operator who legitimately
+      // wants the route sets AF_OPERATOR_SETS_PLAN=1 once. main.ts refuses to
+      // start if that is combined with Stripe or the hosted gate, so reaching
+      // this line with the flag on means this process takes no money at all.
+      if (!c.operatorSetsPlan) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
-          message:
-            'This installation derives paid plans from Stripe. Use checkout or the billing portal; the plan cannot be set directly.',
+          message: planSetRefusal(c.stripe !== null || c.hostedRequiredPlan !== null),
         })
       }
       const changed = await c.pool.withTenant(c.tenant, async (db) => {

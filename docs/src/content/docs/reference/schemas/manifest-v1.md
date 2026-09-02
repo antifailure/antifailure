@@ -113,7 +113,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
-| `version` | `14`, `15`, `16`, `17` | no | Postgres major version. Must match the source, because a dump does not restore across majors. Defaults to `17`. |
+| `version` | `14`, `15`, `16`, `17`, `18` | no | Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not. Defaults to `17`. |
 
 ## Egress
 
@@ -336,6 +336,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
 | `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to `warn`. |
 | `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
+| `workflows_unverified` | `ignore`, `warn`, `fail` | no | A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it. Defaults to `fail`. |
 
 ## Probe
 

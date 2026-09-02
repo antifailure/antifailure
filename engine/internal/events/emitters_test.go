@@ -72,23 +72,17 @@ var unemitted = map[events.Type]string{
 	events.ServiceLog: "deliberate, and the one entry here that is not a gap. Runtime " +
 		"progress lines are engine.progress: the non-TTY fallback folds service.log away as " +
 		"noise, correctly, and folding these away restored exactly the silence it exists to end.",
-	events.ServiceRestart: "the local runtime does not restart a service that exits.",
-	events.CronFired:      "a cron service is started and its invocations are not reported.",
-	events.EgressDecision: "the proxy records decisions where af ci reads them with " +
-		"Orchestrator.Decisions. They never reach the bus, so the dashboard's network pane " +
-		"and the control plane's network.decision are both fed nothing by a real run.",
+	events.ServiceRestart:   "the local runtime does not restart a service that exits.",
+	events.CronFired:        "a cron service is started and its invocations are not reported.",
 	events.EgressTripwire:   "no tripwire exists.",
 	events.CaptureMessage:   "captured messages reach the inbox and not the stream.",
 	events.WebhookQueued:    "internal/webhook names providers and events; nothing delivers one.",
 	events.WebhookDelivered: "same.",
 	events.WebhookFailed:    "same.",
-	events.AgentStarted: "the runner reports over its own JSON boundary and the " +
-		"orchestrator turns the result into a report. Nothing bridges it to the bus, so the " +
-		"control plane's run.started, run.finished and verdict.recorded are all mapped from " +
-		"engine events that no run produces.",
-	events.AgentStep:     "same.",
-	events.AgentVerdict:  "same.",
-	events.AgentFinished: "same.",
+	events.AgentStep: "the runner reports each step over its own JSON boundary, inside the " +
+		"workflow result, and nothing turns those into events. The run, its verdicts and its " +
+		"outcome do reach the bus now, through Orchestrator.reportRunStarted, reportVerdicts " +
+		"and reportRunFinished; the individual steps do not.",
 	events.InsightFinding: "insights are returned to the caller and rendered; they are " +
 		"not put on the stream.",
 	events.LoadSample:   "load results are returned to the caller in the same way.",
@@ -314,6 +308,8 @@ var typeIdentifiers = []struct {
 	{"AgentVerdict", "agent.verdict"}, {"AgentFinished", "agent.finished"},
 	{"InsightFinding", "insight.finding"},
 	{"LoadSample", "load.sample"}, {"LoadFinished", "load.finished"},
+	{"WorkloadStarted", "workload.started"}, {"WorkloadFinished", "workload.finished"},
+	{"WorkloadCancelled", "workload.cancelled"},
 	{"Progress", "engine.progress"}, {"Warning", "engine.warning"},
 	{"Error", "engine.error"}, {"Retry", "engine.retry"},
 	{"SinkDropped", "engine.sink_dropped"},

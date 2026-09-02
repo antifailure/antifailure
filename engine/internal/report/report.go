@@ -108,6 +108,25 @@ type Egress struct {
 	// Surprises are refused hosts nothing in the manifest mentions, which is
 	// usually a dependency somebody added without noticing.
 	Surprises []string
+	// Sandbox is how many requests a sandbox rule decided.
+	Sandbox int
+	// Substituted is how many of those had their credential replaced on the
+	// way out, which is the whole difference between a sandbox rule and a
+	// request that merely says sandbox in the log.
+	Substituted int
+	// Unsubstituted is how many a sandbox rule let out WITHOUT replacing the
+	// credential, so the application's own credential reached the provider.
+	//
+	// The sidecar substitutes only when a value was configured for the rule's
+	// credential name. When none was, it forwards whatever the application
+	// sent, and in every other column that request is identical to a working
+	// sandbox call: allowed, mode sandbox, the rule named, a normal status.
+	// The only evidence is this number, and until it was here nothing counted
+	// it, so the report said "4 allowed" and could not say whether those four
+	// carried a sandbox credential or a live one.
+	Unsubstituted int
+	// UnsubstitutedHosts names where those went, so the line is actionable.
+	UnsubstitutedHosts []string
 }
 
 // Verification is the environment's own branch read back.
@@ -293,6 +312,28 @@ func (r Run) Verdict() string {
 	default:
 		return VerdictPass
 	}
+}
+
+// NothingVerified reports that no workflow reached a verdict about the
+// application.
+//
+// Pass, fail and flaky are verdicts about the application: the run drove it and
+// the screen said something. Blocked and unverified are statements about us,
+// and a run made only of those has not tested anything, whatever its exit code
+// said. A manifest declaring no workflows lands here too, because "nothing was
+// tested" is the same fact whether the workflows were missing or unreachable.
+//
+// Deliberately separate from Verdict. Verdict already resolves to blocked or
+// unverified in exactly these cases and is right to; what was missing is
+// anybody treating that as a result rather than as an absence of one.
+func (r Run) NothingVerified() bool {
+	for _, w := range r.Workflows {
+		switch read(w.Verdict) {
+		case VerdictPass, VerdictFail, VerdictFlaky:
+			return false
+		}
+	}
+	return true
 }
 
 // Headline is the first line, which is the only line most people read.
@@ -566,6 +607,22 @@ func (r Run) Markdown() string {
 	if e := r.Egress; e != nil {
 		fmt.Fprintf(&b, "Outbound: %d allowed, %d refused, %d captured, %d mocked.\n",
 			e.Allowed, e.Refused, e.Captured, e.Mocked)
+		if e.Sandbox > 0 {
+			// Stated either way. "All 4 sandbox calls had the credential
+			// replaced" is worth a line precisely because its absence is the
+			// thing that matters, and a reader who only ever sees the line
+			// when something is wrong learns nothing from its absence.
+			fmt.Fprintf(&b, "Sandbox: %d of %d calls had the credential replaced on the way out.\n",
+				e.Substituted, e.Sandbox)
+		}
+		if e.Unsubstituted > 0 {
+			fmt.Fprintf(&b,
+				"%s left under a sandbox rule WITHOUT the credential being replaced, so the "+
+					"application's own credential reached %s. Set the sandbox credential the "+
+					"rule names.\n",
+				plural(e.Unsubstituted, "1 request", fmt.Sprintf("%d requests", e.Unsubstituted)),
+				strings.Join(e.UnsubstitutedHosts, ", "))
+		}
 		if len(e.Surprises) > 0 {
 			fmt.Fprintf(&b,
 				"Refused hosts nothing in the manifest mentions: %s. If this change means to reach one, add a rule.\n",
@@ -581,8 +638,13 @@ func (r Run) Markdown() string {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}
 		if len(l.Refused) > 0 {
-			fmt.Fprintf(&b, "%s were not sent, because nothing in the manifest named them safe: %s\n",
-				plural(len(l.Refused), "route", "routes"), strings.Join(l.Refused, ", "))
+			// The verb travels with the noun, because the singular case
+			// rendered "1 route were not sent". Only the plural case had a
+			// test, and 500 requests at one route is exactly the run this line
+			// exists to describe, so the ungrammatical half is the half a
+			// reader is most likely to meet.
+			fmt.Fprintf(&b, "%s not sent, because nothing in the manifest named them safe: %s\n",
+				plural(len(l.Refused), "route was", "routes were"), strings.Join(l.Refused, ", "))
 		}
 		b.WriteString("\n")
 	}

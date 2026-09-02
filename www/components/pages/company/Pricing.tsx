@@ -48,7 +48,7 @@ const PLANS: Plan[] = [
     period: "per month · one application",
     tagline: "Hosted control plane, included run credits, usage beyond the floor.",
     featured: true,
-    cta: { href: "/signup", label: "Start a design partnership", theme: "green" },
+    cta: { href: "/contact#book", label: "Start a design partnership", theme: "green" },
     includes: [
       "Base platform fee per organization",
       "Included run credits for deployment twins",
@@ -68,7 +68,7 @@ const PLANS: Plan[] = [
       hint: "annually · scale, governance, residency, fleet",
     },
     tagline: "More repositories, organization policy, and the controls enterprises buy.",
-    cta: { href: "/signup", label: "Talk to us", theme: "outlined" },
+    cta: { href: "/contact#book", label: "Talk to us", theme: "outlined" },
     includes: [
       "More repositories, volume, and peak workload",
       "Organization-wide release policy",
@@ -145,7 +145,7 @@ export function PricingPage() {
         lead="Community is the local engine and it works today. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative, not a quote."
         actions={
           <>
-            <Button href="/signup">Join the waitlist</Button>
+            <Button href="/signup">Request access</Button>
             <Button href="/docs" theme="outlined">
               Read the docs
             </Button>
@@ -155,9 +155,9 @@ export function PricingPage() {
       <PageSection className="pt-0">
         <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
           The hosted control plane is deployed and invitation only while it is in development.
-          Today the engine runs in your own continuous integration, on your own compute, and every
-          button on this page leads to a waitlist unless you have been invited. Team and Enterprise
-          are open for design partners.
+          Today the engine runs in your own continuous integration, on your own compute, and the
+          access button leads to a waitlist unless you have been invited. Team and Enterprise are
+          open for design partners, and those two buttons book a call rather than take an address.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (

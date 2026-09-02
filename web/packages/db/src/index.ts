@@ -19,7 +19,31 @@ export {
   type GitHubDeliveryOptions,
 } from './client.ts'
 export { migrate, migrationsDir, type MigrateResult } from './migrate.ts'
-export { appendAudit, verifyAuditChain, auditEntryHash, type AuditInput, type ChainReport } from './audit.ts'
+export {
+  appendAudit,
+  verifyAuditChain,
+  auditEntryHash,
+  // Exported because the administrative ledger fingerprints a request with it.
+  // A second canonicaliser would eventually disagree with this one about key
+  // order, and the two things it would then disagree about are an audit hash
+  // and whether a refund has already happened.
+  canonicalJson,
+  type AuditInput,
+  type ChainReport,
+} from './audit.ts'
+export {
+  createAdminPool,
+  type AdminPool,
+  type AdminPoolOptions,
+  type AdminOperator,
+} from './admin-pool.ts'
+export {
+  appendAdminAudit,
+  verifyAdminAuditChain,
+  type AdminAuditInput,
+  type AdminAuditSeverity,
+  type AdminChainReport,
+} from './admin-audit.ts'
 export {
   apply as applyPartitions,
   plan as planPartitions,

@@ -6,7 +6,7 @@ sidebar:
 ---
 
 The first two pages need no server. `af up` builds an environment on the
-machine it runs on, [`af ci`](/docs/getting-started/pull-requests/) does the
+machine it runs on, [`af ci`](/docs/getting-started/pull-requests) does the
 same inside a workflow, and nothing calls home.
 
 A control plane is what a team adds when one person's laptop stops being the
@@ -44,7 +44,7 @@ docker run \
   -e AF_DATABASE_URL=postgres://af_app:...@db:5432/antifailure \
   -e AF_GITHUB_CLIENT_ID=... \
   -e AF_GITHUB_CLIENT_SECRET=... \
-  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/callback \
+  -e AF_GITHUB_REDIRECT_URI=https://cp.example.com/auth/github/callback \
   -p 8080:8080 ghcr.io/antifailure/control-plane:main-b53906a
 ```
 
@@ -54,7 +54,7 @@ as a Job before the Deployment rolls.
 The tag names the commit the image was built from, and every push to `main`
 publishes one. Do not run `:latest` or `:v0.1.1`: they are the same image and it
 predates this page. [Which tag to
-run](/docs/self-hosting/control-plane/#which-tag-to-run) has the details and the
+run](/docs/self-hosting/control-plane#which-tag-to-run) has the details and the
 command that lists what is published.
 
 ## Do not skip step 1, and do not trust a 200
@@ -128,6 +128,6 @@ A repository the GitHub App has never mentioned is created from the name the
 engine reports rather than refused, so an engine running against a repository
 nobody has connected still shows up.
 
-Related: [the full control plane guide](/docs/self-hosting/control-plane/),
-[every variable it reads](/docs/reference/control-plane/),
-[running it on Azure](/docs/self-hosting/azure/).
+Related: [the full control plane guide](/docs/self-hosting/control-plane),
+[every variable it reads](/docs/reference/control-plane),
+[running it on Azure](/docs/self-hosting/azure).

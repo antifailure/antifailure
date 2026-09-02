@@ -2,7 +2,7 @@
 title: Load
 description: Traffic shaped like production, replayed against a branch.
 sidebar:
-  order: 10
+  order: 12
 ---
 
 A preview environment with one person clicking through it does not resemble
@@ -18,8 +18,8 @@ load:
     path: traffic/production.otlp.json
   scale: 0.05
   duration: 5m
-  safe_routes: ["GET /*", "POST /api/search"]
-  unsafe_routes: ["POST /api/payments/*", "DELETE /*"]
+  safe_routes: ["GET /**", "POST /api/search"]
+  unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -101,6 +101,15 @@ is a mess to read even when no money moves.
 
 `safe_routes` is the allowlist when you would rather state what may be called
 than what may not.
+
+`*` covers exactly one path segment and `**` covers the rest, and for these two
+lists the difference matters more than it looks. `DELETE /*` blocks
+`DELETE /orders` and does not block `DELETE /orders/42`, and a delete almost
+always carries an id, so the entry written to stop deletes would send the
+realistic ones and say nothing. Write `**` unless you mean one segment
+exactly. The asymmetry is worth knowing in both directions: getting it wrong in
+`safe_routes` is loud, because the run refuses everything and tells you, and
+getting it wrong in `unsafe_routes` is silent.
 
 ## Scenarios
 
@@ -185,7 +194,7 @@ production's own traffic is production's own traffic; a 404 inside a declared
 journey means the journey is broken.
 
 Assertions about a database row belong to
-[invariants](/docs/reference/manifest/), which run against the branch after the
+[invariants](/docs/guides/invariants), which run against the branch after the
 workflows and can see the data. Assertions about what a page shows belong to
 workflows. A scenario measures the requests it sent.
 
@@ -266,4 +275,4 @@ Load runs against environments Antifailure made, and refuses anything else.
 This is a load generator with a production traffic shape pointed at it; the one
 thing it must never do is point at production.
 
-Related: [insights](/docs/concepts/insights/), [scheduling](/docs/concepts/scheduling/).
+Related: [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).

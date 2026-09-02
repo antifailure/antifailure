@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 // Approval policies, tested against the ways they are defeated in practice.
 
 import { describe, it } from 'node:test'

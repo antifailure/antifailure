@@ -2,7 +2,7 @@
 title: Exploration
 description: Agents that pursue a goal with no declared workflow, and report where an application costs somebody effort without failing.
 sidebar:
-  order: 9
+  order: 11
 ---
 
 A workflow says what to do and what proves it happened. An exploration says
@@ -170,5 +170,5 @@ exists to have.
 
 ## See also
 
-- [Agents](/docs/concepts/agents/), for declared workflows and the verdicts
-- [Workflows](/docs/guides/workflows/), for writing the block an exploration compiles into
+- [Agents](/docs/concepts/agents), for declared workflows and the verdicts
+- [Workflows](/docs/guides/workflows), for writing the block an exploration compiles into

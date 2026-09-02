@@ -1,3 +1,7 @@
+// The public surface of the custom roles package.
+//
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 export {
   SCOPE_KINDS,
   validate,

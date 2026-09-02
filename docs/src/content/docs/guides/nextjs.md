@@ -2,7 +2,7 @@
 title: Next.js
 description: What a Next.js service needs in an environment, and the four things that go wrong.
 sidebar:
-  order: 12
+  order: 16
 ---
 
 A Next.js application needs nothing Antifailure specific. It reads
@@ -115,5 +115,5 @@ The engine waits for `health_path` before it calls the service ready, so this
 is what makes `ready` mean the page will render. A health check that only
 proves a process is listening reports ready and then serves a stack trace.
 
-Related: [building services](/docs/guides/build/), [the local
-runtime](/docs/guides/local-runtime/).
+Related: [building services](/docs/guides/build), [the local
+runtime](/docs/guides/local-runtime).

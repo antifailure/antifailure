@@ -11,7 +11,8 @@
 // in two places is a rule that survives one of them being refactored away.
 
 import { initTRPC, TRPCError } from '@trpc/server'
-import type { Pool, Tenant } from '@antifailure/db'
+import type { Pool, Tenant, AdminPool } from '@antifailure/db'
+import type { AdminActor } from './admin/trpc.ts'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
 import { permits } from './permissions.ts'
@@ -79,8 +80,31 @@ export interface Context {
   /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
    *  leaving billing reachable while operational procedures are refused. */
   hostedRequiredPlan: HostedRequiredPlan | null
+  /** Whether whoever runs this installation also decides each organization's
+   *  plan. False everywhere it is not said out loud, because the caller who
+   *  reaches the route that writes the plan is an org owner rather than the
+   *  operator. See hosted.ts. */
+  operatorSetsPlan: boolean
   /** Null for an unauthenticated request. */
   actor: Actor | null
+  /**
+   * The operator making this request, when an operator session cookie resolved.
+   *
+   * Separate from `actor` and never merged into it. They are different id
+   * spaces, different session tables and different permission catalogs, and one
+   * nullable field holding either would make "is this person allowed" a
+   * question with two meanings.
+   */
+  admin: AdminActor | null
+  /**
+   * The operator database credential, when this installation has one.
+   *
+   * Null is a supported state: a self-hosted control plane that never set
+   * AF_ADMIN_DATABASE_URL has no operator portal, and adminProcedure answers
+   * PRECONDITION_FAILED naming the variable rather than the process refusing to
+   * start over a feature nobody wants.
+   */
+  adminPool: AdminPool | null
   /** Where the request came from, recorded on every audit entry. */
   origin: 'web' | 'api' | 'engine' | 'github' | 'system'
   ip?: string
@@ -91,6 +115,17 @@ export interface Context {
  *  OpenAPI generator without a request having to be made. */
 export interface Meta {
   permission?: Permission
+  /**
+   * The PLATFORM permission an operator route declares, kept separate from
+   * `permission` rather than sharing the field.
+   *
+   * One field holding either kind would let a tenant route accidentally
+   * declare an operator permission and pass the tenant matrix test by being
+   * absent from the tenant catalog, which is the exact hole a shared field
+   * creates. Two fields means each matrix test sees only its own routes and a
+   * route carrying neither is unguarded in both.
+   */
+  adminPermission?: string
 }
 
 /** What the client is told when the control plane broke rather than refused.
@@ -154,6 +189,33 @@ export function declaredPermissions(): Map<string, Permission> {
   >
   for (const [path, procedure] of Object.entries(procedures)) {
     const permission = procedure._def.meta?.permission
+    if (permission) out.set(path, permission)
+  }
+  return out
+}
+
+/**
+ * The PLATFORM permission each operator route declares.
+ *
+ * Read the same way declaredPermissions() reads the tenant one, from metadata
+ * set at construction rather than recorded when a middleware runs, so it is
+ * complete the moment the module loads.
+ *
+ * It exists so the TENANT matrix can tell an operator route from an unguarded
+ * one. Skipping by PATH PREFIX was the obvious alternative and it is wrong: a
+ * route named `admin.something` that declares nothing at all would then be
+ * skipped by the tenant matrix and absent from the platform one, guarded by
+ * neither and visible to no test. Skipping only routes that DECLARE a platform
+ * permission means an undeclared route still fails somewhere.
+ */
+export function declaredAdminPermissions(): Map<string, string> {
+  const out = new Map<string, string>()
+  const procedures = (routerRef?._def.procedures ?? {}) as Record<
+    string,
+    { _def: { meta?: Meta } }
+  >
+  for (const [path, procedure] of Object.entries(procedures)) {
+    const permission = procedure._def.meta?.adminPermission
     if (permission) out.set(path, permission)
   }
   return out

@@ -27,8 +27,18 @@ const exec = promisify(execFile);
 interface JobDocument {
   readonly base_url: string;
   readonly artifacts: string;
-  readonly workflows: readonly Workflow[];
-  readonly personas: readonly Persona[];
+  /** workflows and personas are optional on the way in even though the engine
+   *  always sends both now.
+   *
+   *  A nil Go slice marshals as null, and `af explore` builds a document with
+   *  no workflows in it, so every exploration ever run reached here as
+   *  {"workflows": null} and died on `doc.workflows.length` before the browser
+   *  opened. The engine sends [] as of the same change that added this, which
+   *  is the strict half; this is the tolerant half, and it is what keeps a
+   *  runner working against an engine that predates the fix. One malformed
+   *  field must not take a whole run with it. */
+  readonly workflows?: readonly Workflow[] | null;
+  readonly personas?: readonly Persona[] | null;
   /** goals are exploratory runs. Present for 'af explore', absent for
    *  'af test'. One entry point rather than two binaries, because the browser,
    *  the sign in and the evidence capture are the same in both and a second
@@ -99,11 +109,17 @@ async function main(): Promise<number> {
     );
   }
 
+  // Normalised once, here, rather than at each of the four places these are
+  // read. Three of the four were already safe and the fourth was not, which is
+  // what a per-site guard buys: three correct lines and one outage.
+  const workflows = doc.workflows ?? [];
+  const personas = doc.personas ?? [];
+
   const job: Job = {
     baseURL: doc.base_url,
     artifacts: doc.artifacts,
-    workflows: doc.workflows,
-    personas: doc.personas,
+    workflows,
+    personas,
     ...(doc.attempts === undefined ? {} : { attempts: doc.attempts }),
     // Read from this process's environment rather than sent in the job, so a
     // key never passes through a file the engine wrote or a document anybody
@@ -124,13 +140,19 @@ async function main(): Promise<number> {
       : {}),
   };
 
-  const results = doc.workflows.length > 0 ? await run(job) : [];
+  // Tolerant about both lists, because this is a boundary and one bad or
+  // absent field must not take out the whole run. It used to read
+  // doc.workflows.length directly, and the engine sends null for that field on
+  // every exploration, so af explore died here with a TypeError before it
+  // reached the goals it was given. A caller that sends no workflows means no
+  // workflows, which is a legal document and not a fault.
+  const results = workflows.length > 0 ? await run(job) : [];
   const explorations = doc.goals?.length
     ? await explore({
         baseURL: doc.base_url,
         artifacts: doc.artifacts,
         goals: doc.goals,
-        personas: doc.personas,
+        personas,
         ...(job.inbox ? { inbox: job.inbox } : {}),
         ...(doc.headless === undefined ? {} : { headless: doc.headless }),
       })

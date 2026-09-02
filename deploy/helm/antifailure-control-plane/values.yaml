@@ -71,6 +71,15 @@ config:
   # Only for local development over plain HTTP. Leaving this on behind a real
   # ingress sends session cookies without the Secure attribute.
   insecureCookies: false
+  # Whether whoever runs this control plane also decides each organization's
+  # plan, which is what the Plan page's change control writes.
+  #
+  # Leave it false on any installation where the people signing in are not you.
+  # The first person into an organization becomes its owner, an owner holds
+  # billing.manage, and with this on and no Stripe configured that is a
+  # signed-in stranger granting themselves the largest plan. Turning it on
+  # alongside Stripe stops the process at startup.
+  operatorSetsPlan: false
 # Keeping event partitions ahead of the writes. A range-partitioned table with
 # no partition for an incoming row does not slow down, it fails, so this is not
 # optional housekeeping.

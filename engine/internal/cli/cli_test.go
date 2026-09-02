@@ -16,6 +16,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/cli"
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/edition"
 )
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
@@ -70,6 +71,33 @@ func TestVersion_RendersInBothFormats(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(js.stdout), &info))
 	require.Equal(t, "community", info.Edition)
 	require.NotEmpty(t, info.Platform)
+}
+
+// The edition af version reports comes from the running binary, not from a
+// build time string.
+//
+// This is the community module, so the only way to reach the other branch is to
+// attach what the enterprise binary attaches at startup. Worth doing here as
+// well as in the enterprise binary's own test: the wiring lives in this package
+// and a test in another module cannot fail in this one's CI job.
+func TestVersion_ReportsTheEditionTheBinaryDeclared(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	ctx := edition.With(context.Background(), edition.Status{Name: "enterprise", State: "active"})
+	code := cli.Execute(ctx, []string{"version", "-o", "json"}, cli.Options{
+		Stdout:  &out,
+		Stderr:  &bytes.Buffer{},
+		Stdin:   strings.NewReader(""),
+		Getenv:  func(string) string { return "" },
+		Clock:   clock.NewFake(epoch),
+		WorkDir: t.TempDir(),
+	})
+	require.Zero(t, code)
+
+	var info cli.VersionInfo
+	require.NoError(t, json.Unmarshal(out.Bytes(), &info))
+	require.Equal(t, "enterprise", info.Edition)
 }
 
 // Output must be stable for the same input. A timestamp or a duration in the
@@ -617,6 +645,53 @@ func TestInit_AnAnswerThatNamesNothingIsRefusedWithTheOnesThatDo(t *testing.T) {
 	require.Contains(t, got.stderr, "service.acme-web.port",
 		"the refusal has to name the id that would have worked")
 	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+}
+
+// COPY . . reads the context but says nothing about which directory it is, so
+// af init asks. The default is what 'docker build dashboard' does. Overriding
+// it has to reach the manifest, or the question is decorative.
+func TestInit_TheContextQuestionCanBeAnsweredEitherWay(t *testing.T) {
+	t.Parallel()
+	build := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "dashboard"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "package.json"),
+			[]byte(`{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "Dockerfile"),
+			[]byte("FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 3100\nCMD [\"npm\", \"start\"]\n"), 0o600))
+		return dir
+	}
+
+	t.Run("the default is the Dockerfile's own directory", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.Contains(t, string(body), "context: dashboard")
+	})
+
+	t.Run("and the repository root can be chosen instead", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.dash.context=.")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.NotContains(t, string(body), "context:",
+			"the root is what an unset context already means, so writing it would say nothing")
+	})
+
+	t.Run("and it is offered by the refusal that lists the ids", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.typo.context=x")
+		require.NotZero(t, got.code)
+		require.Contains(t, prose(got.stderr), "AF-DET-006")
+		require.Contains(t, prose(got.stderr), "service.dash.context")
+	})
 }
 
 func TestInit_AnswerFlagAvoidsAPrompt(t *testing.T) {

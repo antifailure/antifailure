@@ -2,7 +2,7 @@
 title: On-call
 description: What the rotation is, what an acknowledgement means, and what to do first for each class of page, even for a team of one.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 A rotation of one person is still a rotation. Writing it down changes what
@@ -33,7 +33,7 @@ at it after this meeting" and it is not "I saw the notification go by."
 
 Concretely, an acknowledgement means, within the next few minutes:
 
-- Read [the first thirty seconds](/docs/self-hosting/operations/#the-first-thirty-seconds)
+- Read [the first thirty seconds](/docs/self-hosting/operations#the-first-thirty-seconds)
   of the operations page and answer its three questions.
 - Say, somewhere a second person could read it, what you found. A one-line
   status is enough: "`/readyz` is failing, looks like the database, digging in."
@@ -69,14 +69,14 @@ event rejected treats it as delivered and never sends it again, so every
 rejected event is gone for good and the environment it described may never
 advance in the dashboard again. There is no fail-open behind this one.
 
-Everything else on [the alerts page](/docs/self-hosting/operations/#what-the-alerts-mean)
+Everything else on [the alerts page](/docs/self-hosting/operations#what-the-alerts-mean)
 carries its own judgment call in its own section; read the alert's own
 runbook before deciding it can wait, rather than guessing from the name.
 
 ## What to do first, by class of page
 
 **The control plane will not answer at all.**
-Read [The control plane is down](/docs/self-hosting/operations/#the-control-plane-is-down)
+Read [The control plane is down](/docs/self-hosting/operations#the-control-plane-is-down)
 before doing anything else. The single most important fact on that page: `af
 up`, `af down`, and every environment already running keep working with no
 control plane at all, so this is not the five-alarm fire it feels like at
@@ -88,21 +88,21 @@ Check whether the automatic rollback already fired: a failed post-promotion
 health gate moves traffic back within the same CD run and the run's summary
 says so. If it did not, and the run finished green, the failure showed up after
 the gate stopped watching. Follow
-[Upgrade and rollback, the manual path](/docs/self-hosting/azure/#upgrade-and-rollback-the-manual-path),
+[Upgrade and rollback, the manual path](/docs/self-hosting/azure#upgrade-and-rollback-the-manual-path),
 in order, including the migration compatibility check in its fourth step. Do
 not skip to "just roll the code back" before reading that step: a migration
 that is not backward compatible makes a code rollback the wrong fix, not the
 safe default.
 
 **A specific alert fired.**
-Its entry under [What the alerts mean](/docs/self-hosting/operations/#what-the-alerts-mean)
+Its entry under [What the alerts mean](/docs/self-hosting/operations#what-the-alerts-mean)
 is the runbook. Read that section's specific guidance before touching
 anything; several of them exist precisely to stop a reasonable-sounding first
 instinct that turns out to be wrong for that failure.
 
 **Something feels wrong and no alert has fired.**
 Trust it, and start from
-[the first thirty seconds](/docs/self-hosting/operations/#the-first-thirty-seconds)
+[the first thirty seconds](/docs/self-hosting/operations#the-first-thirty-seconds)
 anyway. An alert is a threshold somebody guessed in advance; a person noticing
 something first is not a false alarm just because nothing crossed the line yet.
 
@@ -110,6 +110,6 @@ something first is not a false alarm just because nothing crossed the line yet.
 
 `af support bundle` for one environment, and for the control plane itself, the
 steps under
-[Collecting evidence before you change anything](/docs/self-hosting/operations/#collecting-evidence-before-you-change-anything).
+[Collecting evidence before you change anything](/docs/self-hosting/operations#collecting-evidence-before-you-change-anything).
 The state that explains an incident is usually the first thing a fix destroys,
 so gather it before you start changing things, not after.

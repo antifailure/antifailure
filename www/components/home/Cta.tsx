@@ -42,14 +42,18 @@ export function Cta() {
               it sits quietly beneath rather than competing with the buttons for
               the remaining width. Sized to its content: the shared white
               variant is a fixed percentage of the viewport, which truncated a
-              fifty character command down to "curl -fsS…". */}
+              fifty character command down to eleven.
+
+              The filled action is the quickstart rather than the invitation
+              wall. The quickstart is the one a visitor can finish today, and
+              the install line beneath it is its first command. */}
           <div className="flex shrink-0 flex-col items-end gap-y-4 max-lg:w-full max-lg:items-stretch">
             <div className="flex items-center gap-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
-              <Button href="/signup" theme="white">
-                Get started
+              <Button href="/docs/getting-started/quickstart" theme="white">
+                Start the quickstart
               </Button>
-              <Button href="/docs" theme="outlined-inverse">
-                Read the docs
+              <Button href="/signup" theme="outlined-inverse">
+                Request hosted access
               </Button>
             </div>
             <CopyCodeButton variant="terminal" className="max-lg:w-full" />

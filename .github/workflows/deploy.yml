@@ -20,7 +20,26 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue, do not cancel. Every other workflow here cancels a superseded run
+  # because a stale answer to "is this commit good" is worth nothing. This one
+  # is not answering a question, it is uploading to production, and the steps
+  # after the upload are the ones that check the upload worked.
+  #
+  # Cancelling caught a publish in flight. Run 33598095533, head 8fd7fedf:
+  # "Assemble one site" and "Check the assembled site before publishing it"
+  # both succeeded, "Publish" was CANCELLED part way through, and the four
+  # steps after it were skipped. So a partial upload reached the live site and
+  # nothing checked the result. "The API answers" and "The machine-readable
+  # surfaces answer, and describe this revision" are exactly the checks that
+  # exist because a publish is not a working endpoint, and they are the first
+  # things cancellation takes away.
+  #
+  # The step named "Say so when it was not published" is skipped too, so this
+  # failure is silent by construction: the alarm is inside the blast radius.
+  #
+  # Queueing costs a few minutes of latency when merges land back to back. That
+  # is the correct trade against a half-uploaded site nobody was told about.
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -46,7 +65,7 @@ jobs:
     if: ${{ github.repository == 'antifailure/antifailure' }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # www/lib/lastmod.ts asks git when the files behind each route last
           # changed, and writes that into the sitemap. The default shallow
@@ -55,7 +74,7 @@ jobs:
           # freshness signal into noise.
           fetch-depth: 0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -194,6 +213,141 @@ jobs:
           fi
 
           echo "GET /api is 200 and lists the waitlist; POST /api/waitlist rejects junk with 400"
+
+      - name: Every hostname presents a valid certificate
+        # A publish is not a reachable site, and this is the part of the site
+        # that can be perfectly deployed and still be unreachable for a reader.
+        #
+        # antifailure.dev and www.antifailure.dev are two custom domains on this
+        # one Static Web App, and Azure provisions and renews a separate managed
+        # certificate for each. The apex certificate carries SAN
+        # DNS:antifailure.dev alone and the www certificate carries SAN
+        # DNS:www.antifailure.dev alone, so they are two independent renewal
+        # lifecycles and nothing here noticed if one of them lapsed. Anyone who
+        # typed the apex would see a completely healthy site while www failed.
+        #
+        # It is a hard failure rather than a warning because .dev is an HSTS
+        # preloaded top level domain: the rule is compiled into the browser, it
+        # applies on a cold profile, and a certificate fault on either name is
+        # an ERR_SSL_PROTOCOL_ERROR with no "proceed anyway" to click.
+        #
+        # The limit of the check, stated because it would otherwise be read as
+        # a stronger claim than it is: one handshake from one runner proves one
+        # edge node answered one client. It catches a lapsed certificate within
+        # a deploy cycle. It cannot see a fault that only some clients hit.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: tools/site/check-tls.sh
+
+      - name: The machine-readable surfaces answer, and describe this revision
+        # The other half of "a publish is not a working endpoint", for the two
+        # documents an agent fetches instead of reading the site.
+        #
+        # Both are generated at build time and committed, so the question is not
+        # whether they are valid, CI already refused the push otherwise. It is
+        # whether the CDN is serving THESE bytes rather than the previous
+        # revision's, which a 200 alone cannot tell you: a stale document is a
+        # perfectly healthy 200 that describes an API this revision does not
+        # serve.
+        #
+        # The drift check afterwards is the honest part of the design decision
+        # in web/apps/api/scripts/openapi.ts. The site deploys on every push to
+        # main; the production control plane moves on a release promotion. So
+        # this document can be ahead of what app.antifailure.dev serves. That is
+        # tolerable while the API VERSION agrees, because the paths are additive
+        # and a caller reading an operation that is not there yet gets a 404.
+        # It stops being tolerable the moment the versions differ, and that is
+        # the one case this fails on.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+          control=https://app.antifailure.dev
+
+          for name in openapi.json errors.v1.json; do
+            for attempt in $(seq 1 15); do
+              code=$(curl -sS -m 20 -o "/tmp/$name" -w '%{http_code}' "$site/$name" || echo 000)
+              [ "$code" = "200" ] && break
+              echo "attempt $attempt: GET /$name returned $code"
+              sleep 10
+            done
+            if [ "$code" != "200" ]; then
+              echo "::error::GET $site/$name returned $code after 15 attempts."
+              head -c 400 "/tmp/$name" || true
+              exit 1
+            fi
+            # Byte for byte against what this run built. Nothing else proves the
+            # CDN moved: the previous revision's document is also valid JSON,
+            # also 200, and also parses.
+            if ! cmp -s "/tmp/$name" "site/$name"; then
+              echo "::error::$site/$name is not the document this revision built."
+              echo "  served  $(shasum -a 256 < "/tmp/$name" | cut -c1-16)"
+              echo "  built   $(shasum -a 256 < "site/$name" | cut -c1-16)"
+              exit 1
+            fi
+            echo "$site/$name is 200 and matches this revision"
+          done
+
+          node -e '
+            const fs = require("fs");
+            const doc = JSON.parse(fs.readFileSync("/tmp/openapi.json", "utf8"));
+            if (doc.openapi !== "3.1.0") throw new Error(`openapi is ${doc.openapi}`);
+            const paths = Object.keys(doc.paths ?? {});
+            if (paths.length === 0) throw new Error("the published document has no paths");
+            const ids = Object.values(doc.paths).flatMap((item) =>
+              Object.values(item).map((op) => op.operationId));
+            if (ids.some((id) => !id)) throw new Error("an operation has no operationId");
+            console.log(`the published document has ${paths.length} paths and ${ids.length} operation ids`);
+          '
+
+          catalog=$(node -e '
+            const c = JSON.parse(require("fs").readFileSync("/tmp/errors.v1.json", "utf8"));
+            if (c.schemaVersion !== 1) throw new Error(`schemaVersion ${c.schemaVersion}`);
+            if (!c.errors.some((e) => e.code === "AF-CP-003"))
+              throw new Error("the code the control plane 500 returns is not in the published catalog");
+            console.log(c.errors.length);
+          ')
+          echo "the published error catalog resolves $catalog codes"
+
+          # Drift, fatal only when the two API versions actually disagree.
+          #
+          # An unreachable control plane is NOT a disagreement, and failing on it
+          # would redden a site deploy over somebody else's blip, which is how a
+          # check gets ignored. Retried a few times first, then reported and
+          # skipped: an unknown is an unknown.
+          published=$(node -pe 'JSON.parse(require("fs").readFileSync("/tmp/openapi.json","utf8")).info.version')
+          served=unknown
+          for attempt in $(seq 1 5); do
+            served=$(curl -sS -m 20 "$control/openapi.json" \
+              | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).info.version' 2>/dev/null || echo unknown)
+            [ "$served" != "unknown" ] && break
+            sleep 5
+          done
+          if [ "$served" = "unknown" ]; then
+            echo "::warning::$control did not serve a readable OpenAPI document, so the API"
+            echo "version the apex publishes ($published) could not be compared against it."
+          elif [ "$served" != "$published" ]; then
+            echo "::error::the apex publishes API version $published and $control serves $served."
+            echo "Promote the control plane, or hold this document back. A caller reading one"
+            echo "version of the contract and calling the other is the failure this catches."
+            exit 1
+          else
+            echo "apex and control plane agree on API version $published"
+          fi
+
+          # Live, not documented. A path in the document that the host does not
+          # answer is the drift that actually costs a caller something, and the
+          # two unauthenticated ones can be asked directly.
+          for route in /health /readyz; do
+            code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$control$route" || echo 000)
+            case "$code" in
+              200|503) echo "$control$route answers $code" ;;
+              *) echo "::error::$control$route is published in the document and answered $code"; exit 1 ;;
+            esac
+          done
 
       - name: Tell Bing what changed
         # Only after a real publish, because IndexNow is a claim that a URL is

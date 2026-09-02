@@ -2,7 +2,7 @@
 title: Single sign-on
 description: SAML 2.0 and OIDC per organisation, with enforcement and a way back in.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 Members sign in through your identity provider instead of through GitHub. SAML

@@ -241,11 +241,14 @@ tells two of them apart, and it is what af token rm accepts.`),
 				}
 				rows = append(rows, []string{t.Name, t.Prefix, state, used})
 			}
-			// The name is the flex column because it is the only one a person
-			// chose the length of. A prefix, a state and a date are all short
-			// and fixed, and are the columns a reader scans down.
+			// PREFIX is deliberately not flexible. It is exactly what
+			// 'af token rm' takes as an argument, so a shortened one would
+			// print something that does not work when it is pasted back.
+			// NAME is the only unbounded column, a label somebody types, and
+			// STATE can lose its revocation date without losing the word that
+			// matters, so those two give up width to each other first.
 			e.Out.Table([]Column{
-				Flex("NAME"), Col("PREFIX"), Col("STATE"), Col("LAST USED"),
+				Flex("NAME"), Col("PREFIX"), Flex("STATE"), Col("LAST USED"),
 			}, rows)
 			return nil
 		},

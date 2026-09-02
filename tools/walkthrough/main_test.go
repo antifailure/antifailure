@@ -100,3 +100,45 @@ func TestWalkingSomethingThatIsNotAnExampleIsAnError(t *testing.T) {
 		t.Errorf("the error does not name what was missing: %v", err)
 	}
 }
+
+// af test can answer with a report or with an error document, and telling the
+// walkthrough which it got is the difference between "the product refused" and
+// "this tool cannot read the answer". The first version reported the engine
+// refusing to provision a persona as "af test returned no flaky count", which
+// described the instrument and buried the engine's own message.
+func TestAnErrorDocumentIsReportedAsARefusalRatherThanAMissingField(t *testing.T) {
+	_, err := verdictCounts(`{"code":"AF-GEN-000","message":"no users table could be found",` +
+		`"exit_code":1}`)
+	if err == nil {
+		t.Fatal("an error document was read as a report")
+	}
+	if !strings.Contains(err.Error(), "refused before it reached a workflow") {
+		t.Errorf("the error is %q, which does not say af test refused", err)
+	}
+	if !strings.Contains(err.Error(), "no users table could be found") {
+		t.Errorf("the error is %q, which drops the engine's own message", err)
+	}
+}
+
+// And a report that really is missing a count still says so, because a zero
+// read out of an absent field is indistinguishable from a run that examined
+// nothing.
+func TestAReportMissingACountIsStillRefused(t *testing.T) {
+	_, err := verdictCounts(`{"passed":1,"failed":0,"blocked":0,"unverified":0}`)
+	if err == nil {
+		t.Fatal("a report with no flaky count was accepted")
+	}
+	if !strings.Contains(err.Error(), `no "flaky" count`) {
+		t.Errorf("the error is %q, which does not name the missing count", err)
+	}
+}
+
+func TestAWholeReportReadsBack(t *testing.T) {
+	counts, err := verdictCounts(`{"passed":6,"failed":0,"flaky":0,"blocked":0,"unverified":0}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["passed"] != 6 {
+		t.Errorf("passed read back as %d, want 6", counts["passed"])
+	}
+}

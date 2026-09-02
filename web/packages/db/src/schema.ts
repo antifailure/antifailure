@@ -22,6 +22,7 @@ import {
   text,
   timestamp,
   customType,
+  doublePrecision,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
@@ -52,6 +53,26 @@ export const verdictValue = pgEnum('verdict_value', [
   'pass', 'fail', 'flaky', 'blocked', 'unverified',
 ])
 
+// Load definitions and runs. See migrations/0026_load_definitions_and_runs.sql for why these four
+// kinds stay four kinds, and why a run's state and its verdict are two columns.
+export const workloadKind = pgEnum('workload_kind', [
+  'observed_load', 'http_scenario', 'browser_workflow', 'exploration',
+])
+export const workloadRunState = pgEnum('workload_run_state', [
+  'requested', 'accepted', 'running',
+  'succeeded', 'failed', 'cancelled', 'timed_out', 'abandoned',
+])
+export const workloadVersionSource = pgEnum('workload_version_source', ['authored', 'promoted'])
+export const runtimeCommandKind = pgEnum('runtime_command_kind', [
+  'workload.cancel',
+])
+export const runtimeCommandState = pgEnum('runtime_command_state', [
+  'pending', 'claimed', 'acknowledged', 'failed', 'expired', 'superseded',
+])
+export const workloadEvidenceAvailability = pgEnum('workload_evidence_availability', [
+  'uploaded', 'runner_local', 'not_retained',
+])
+
 // githubId and githubLogin are optional because GitHub is no longer the only
 // way an account can exist: a member provisioned by SCIM or created
 // just-in-time from an assertion has neither. See migrations/0012. The unique
@@ -68,6 +89,16 @@ export const users = pgTable('users', {
   // audit_entries points at it with NO ACTION; see migrations/0022 for why a
   // delete is refused and what is erased instead.
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  // Set by an operator to stop this person signing in anywhere, without
+  // destroying the memberships an investigation needs. The same three columns
+  // organizations has carried since 0001, deliberately: two vocabularies for
+  // one idea is how a check ends up reading the wrong one.
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: text('suspended_by'),
+  // Null on every account that predates the column. A DEFAULT here would be a
+  // claim that they were all verified, which is a lie told by a schema.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('users_github_id_key').on(t.githubId), index('users_email_idx').on(t.email)])
@@ -108,6 +139,21 @@ export const sessions = pgTable('sessions', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  // Impersonation travels on the session row rather than in a side table.
+  // resolveSession reads this row on every request, and a marker it cannot
+  // reach in one query is a marker some code path will forget to consult: an
+  // impersonated session that looks ordinary to the gate is the whole failure
+  // this is built to prevent.
+  impersonatedBy: uuid('impersonated_by'),
+  /** Who the operator was, kept as text so the banner still names them after
+   *  their own account is closed. */
+  impersonatorLabel: text('impersonator_label'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised this session. The database refuses a row
+   *  that sets impersonatedBy without it, which is what makes "the record was
+   *  written before the session existed" a property rather than an intention.
+   *  See migrations/0026. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
 }, (t) => [index('sessions_user_idx').on(t.userId), index('sessions_expiry_idx').on(t.expiresAt)])
 
 export const oauthStates = pgTable('oauth_states', {
@@ -302,13 +348,35 @@ export const engineTokens = pgTable('engine_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  // 'engine' or 'cli'. A cli token acts as a person and carries user_id; an
-  // engine token is a machine and deliberately has none. See migration 0012.
+  // 'engine', 'cli' or 'oidc'. A cli token acts as a person and carries
+  // user_id; an engine token is a machine and deliberately has none. See
+  // migration 0012. An oidc token is one workflow job, minted by exchanging a
+  // GitHub Actions identity token, and it carries the binding that earned it
+  // and an expiry the database insists on. See migration 0025.
   kind: text('kind').notNull().default('engine'),
   userId: uuid('user_id'),
   scopes: text('scopes').array().notNull().default([]),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+  bindingId: uuid('binding_id'),
 }, (t) => [index('engine_tokens_org_idx').on(t.orgId)])
+
+// Which organization a GitHub repository may report as.
+//
+// A workflow identity token proves which repository a job runs in and nothing
+// about who that repository belongs to, because anybody can mint one naming
+// their own repository. This is the table that turns the proven name into an
+// organization, and a repository with no live row here is refused rather than
+// resolved. See migration 0025 for why `repositories` cannot play this part.
+export const oidcRepositoryBindings = pgTable('oidc_repository_bindings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  /** owner/name, lower-cased, because GitHub compares both halves that way. */
+  repository: text('repository').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (t) => [index('oidc_repository_bindings_org_idx').on(t.orgId)])
 
 // A terminal signing in. It has no tenant until somebody approves it, which is
 // why it is not in tenantScopedTables and is classified separately in the
@@ -744,6 +812,204 @@ export const organizationDeletionExports = pgTable('organization_deletion_export
   downloadCount: integer('download_count').notNull().default(0),
   destroyedAt: timestamp('destroyed_at', { withTimezone: true }),
 }, (t) => [index('organization_deletion_exports_expiry_idx').on(t.expiresAt)])
+// Load definitions and runs
+// ---------------------------------------------------------------------------
+
+/** A named, versioned thing to run against an environment. See
+ *  migrations/0026_load_definitions_and_runs.sql: the kind is on the definition because
+ *  the four kinds measure materially different things, and there is no common
+ *  intermediate representation behind them. */
+export const workloads = pgTable('workloads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  repositoryId: uuid('repository_id').notNull(),
+  slug: text('slug').notNull(),
+  name: text('name').notNull(),
+  kind: workloadKind('kind').notNull(),
+  description: text('description'),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+})
+
+/** One immutable definition. The application role holds INSERT and SELECT and
+ *  nothing else, so "a version cannot be edited after a run has used it" is a
+ *  privilege rather than a promise about the routes. */
+export const workloadVersions = pgTable('workload_versions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadId: uuid('workload_id').notNull(),
+  version: integer('version').notNull(),
+  body: jsonb('body').notNull(),
+  bodyDigest: text('body_digest').notNull(),
+  notes: text('notes'),
+  source: workloadVersionSource('source').notNull().default('authored'),
+  promotedFromRunId: uuid('promoted_from_run_id'),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const workloadRuns = pgTable('workload_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadId: uuid('workload_id').notNull(),
+  workloadVersionId: uuid('workload_version_id').notNull(),
+  environmentId: uuid('environment_id').notNull(),
+  state: workloadRunState('state').notNull().default('requested'),
+  requestedBy: uuid('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  requestKey: text('request_key').notNull(),
+  repository: text('repository').notNull(),
+  gitRef: text('git_ref').notNull(),
+  workflowFile: text('workflow_file'),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+  lastSequence: bigint('last_sequence', { mode: 'number' }).notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  // What happened to the lease, so an abandoned run can say which kind of
+  // silence it was. A run taken over by a second engine and a run whose only
+  // engine died both go quiet and both end as `abandoned`, and only this side
+  // holds the facts that separate them. See migration 0027.
+  leaseTakeovers: integer('lease_takeovers').notNull().default(0),
+  leaseLostAt: timestamp('lease_lost_at', { withTimezone: true }),
+  unheldReports: integer('unheld_reports').notNull().default(0),
+  unheldReportAt: timestamp('unheld_report_at', { withTimezone: true }),
+  cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+  cancelRequestedBy: uuid('cancel_requested_by'),
+  cancelReason: text('cancel_reason'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  attempt: integer('attempt').notNull().default(1),
+  retryOf: uuid('retry_of'),
+  supersededBy: uuid('superseded_by'),
+  verdict: verdictValue('verdict'),
+  failureCode: text('failure_code'),
+  detail: text('detail'),
+  reproduceCommand: text('reproduce_command'),
+  manifestDigest: text('manifest_digest'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** The aggregate, one row per run. Which columns carry a number depends on the
+ *  kind, and a CHECK in the migration refuses a row shaped like another kind. */
+export const workloadRunResults = pgTable('workload_run_results', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  kind: workloadKind('kind').notNull(),
+  requests: integer('requests'),
+  failures: integer('failures'),
+  errorRate: doublePrecision('error_rate'),
+  targetRate: doublePrecision('target_rate'),
+  achievedRate: doublePrecision('achieved_rate'),
+  p50Ms: doublePrecision('p50_ms'),
+  p90Ms: doublePrecision('p90_ms'),
+  p95Ms: doublePrecision('p95_ms'),
+  p99Ms: doublePrecision('p99_ms'),
+  maxMs: doublePrecision('max_ms'),
+  sessions: integer('sessions'),
+  iterations: integer('iterations'),
+  scheduledMs: doublePrecision('scheduled_ms'),
+  workflows: integer('workflows'),
+  workflowsPassed: integer('workflows_passed'),
+  workflowsFailed: integer('workflows_failed'),
+  workflowsFlaky: integer('workflows_flaky'),
+  workflowsBlocked: integer('workflows_blocked'),
+  workflowsUnverified: integer('workflows_unverified'),
+  steps: integer('steps'),
+  findings: integer('findings'),
+  goals: integer('goals'),
+  goalsReached: integer('goals_reached'),
+  durationMs: doublePrecision('duration_ms'),
+  source: text('source'),
+  errorReasons: jsonb('error_reasons').notNull().default({}),
+  refusedRoutes: textArray('refused_routes').notNull().default([]),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const workloadRouteMetrics = pgTable('workload_route_metrics', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  /** Which scenario sent it, and null for a mix. Two scenarios in one run
+   *  routinely share a route and their percentiles cannot be merged. */
+  scenario: text('scenario'),
+  route: text('route').notNull(),
+  sent: integer('sent').notNull(),
+  errors: integer('errors').notNull().default(0),
+  p50Ms: doublePrecision('p50_ms'),
+  p90Ms: doublePrecision('p90_ms'),
+  p95Ms: doublePrecision('p95_ms'),
+  p99Ms: doublePrecision('p99_ms'),
+  maxMs: doublePrecision('max_ms'),
+  /** Null when there is nothing to compare with, which is not the same answer
+   *  as no change. A CHECK keeps this and p95Increase null together. */
+  baselineP95Ms: doublePrecision('baseline_p95_ms'),
+  p95Increase: doublePrecision('p95_increase'),
+  position: integer('position').notNull().default(0),
+})
+
+export const workloadThresholdVerdicts = pgTable('workload_threshold_verdicts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  scenario: text('scenario'),
+  name: text('name').notNull(),
+  scope: text('scope'),
+  measure: text('measure').notNull(),
+  threshold: doublePrecision('threshold'),
+  observed: doublePrecision('observed'),
+  value: verdictValue('value').notNull(),
+  detail: text('detail'),
+  position: integer('position').notNull().default(0),
+})
+
+/** Where a screenshot, a trace or a report actually is, and whether it can be
+ *  fetched at all. `runner_local` is the honest answer for a path on a machine
+ *  that no longer exists, which this product's reports have carried. */
+export const workloadEvidence = pgTable('workload_evidence', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  workloadRunId: uuid('workload_run_id').notNull(),
+  kind: text('kind').notNull(),
+  label: text('label'),
+  availability: workloadEvidenceAvailability('availability').notNull(),
+  locator: text('locator').notNull(),
+  sha256: text('sha256'),
+  sizeBytes: bigint('size_bytes', { mode: 'number' }),
+  recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** What the control plane is asking a runtime to do, durably, with a lease and
+ *  an acknowledgement. A teardown that is only a column update is a teardown
+ *  that never happens; see migrations/0026_load_definitions_and_runs.sql. */
+export const runtimeCommands = pgTable('runtime_commands', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  kind: runtimeCommandKind('kind').notNull(),
+  environmentId: uuid('environment_id'),
+  workloadRunId: uuid('workload_run_id'),
+  payload: jsonb('payload').notNull().default({}),
+  state: runtimeCommandState('state').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+  outcome: text('outcome'),
+  detail: text('detail'),
+  requestedBy: uuid('requested_by'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 // The pull request lifecycle. See migrations/0021.
 // ---------------------------------------------------------------------------
 
@@ -838,6 +1104,196 @@ export const teardownRequests = pgTable('teardown_requests', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
 
+/**
+ * What an operator wrote down about an account.
+ *
+ * Deliberately NOT tenant scoped, and deliberately not reachable by the
+ * application role at all. These are the operator's words about a customer
+ * rather than the customer's own data, so a note must not turn up in that
+ * organization's export, in its audit log, or on any page it can open. The
+ * grant that would make that possible is the one migrations/0026 withholds.
+ *
+ * subjectType and subjectId rather than three nullable foreign keys. The cost
+ * is a reference the database cannot enforce; the benefit is that a note about
+ * an account that has since been deleted survives, and a note about the
+ * deleted account is exactly the note an investigation comes looking for.
+ */
+export const adminNotes = pgTable('admin_notes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  subjectType: text('subject_type').notNull(),
+  subjectId: uuid('subject_id').notNull(),
+  body: text('body').notNull(),
+  authorUserId: uuid('author_user_id'),
+  /** Kept as text so the note still says who wrote it once that operator's own
+   *  account is gone, the same reason auditEntries carries actorLabel. */
+  authorLabel: text('author_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Soft deleted: a note somebody retracted is still a thing an operator
+   *  wrote about a customer, and the retraction is worth being able to see. */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
+
+/* ---------------------------------------------------------------------------
+ * The operator portal (0029)
+ *
+ * Deliberately absent from tenantScopedTables below. None of these three has an
+ * org_id and none of them should: an operator is not a tenant, and the audit
+ * row records what an operator did rather than something an organization owns.
+ * ------------------------------------------------------------------------ */
+
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  role: text('role').notNull(),
+  /** Null until provisioned, and a null hash cannot be signed in against. */
+  passwordHash: bytea('password_hash'),
+  passwordSalt: bytea('password_salt'),
+  passwordSetAt: timestamp('password_set_at', { withTimezone: true }),
+  isRoot: boolean('is_root').notNull().default(false),
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  lastSignedInAt: timestamp('last_signed_in_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminSessions = pgTable('admin_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: bytea('token_hash').notNull(),
+  adminUserId: uuid('admin_user_id').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  /** Set when this operator has stepped into a customer's account. The marker
+   *  lives on the OPERATOR's session because the fact to enforce is "this
+   *  operator cannot take operator actions right now". */
+  impersonatedUserId: uuid('impersonated_user_id'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised it, NOT NULL when impersonating, so the
+   *  record has to exist before the session that relies on it. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
+})
+
+export const adminAuditEntries = pgTable('admin_audit_entries', {
+  seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  action: text('action').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The tenant an action concerned, when it concerned one. Not org_id: the
+   *  row belongs to the platform, not to that tenant. */
+  subjectOrgId: uuid('subject_org_id'),
+  subjectOrgLabel: text('subject_org_label'),
+  origin: text('origin').notNull(),
+  ip: inet('ip'),
+  severity: text('severity').notNull().default('info'),
+  detail: jsonb('detail').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  prevHash: text('prev_hash'),
+  entryHash: text('entry_hash').notNull(),
+})
+
+
+/* ---------------------------------------------------------------------------
+ * Entitlements, flags, and the money ledger. See migration 0030_entitlements_flags_and_the_money_ledger.
+ *
+ * Three of the four carry org_id and are in the cross-tenant list below.
+ * `feature_flags` deliberately does not: a flag is the platform's own
+ * configuration and a rollout applies ACROSS tenants, so the row that says
+ * which tenants is feature_flag_targets, not the flag.
+ * ------------------------------------------------------------------------ */
+
+export const entitlementOverrides = pgTable('entitlement_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** global, organization, project or user. */
+  scope: text('scope').notNull(),
+  /** The organization, repository or user this applies to. Null only for
+   *  global, which the migration makes an invariant rather than a habit. */
+  scopeId: uuid('scope_id'),
+  orgId: uuid('org_id'),
+  feature: text('feature').notNull(),
+  /** A JSON scalar: a number for a limit, a boolean for a capability. */
+  value: jsonb('value').notNull(),
+  reason: text('reason').notNull(),
+  ticket: text('ticket'),
+  createdByUserId: uuid('created_by_user_id'),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Null is forever, and is a typed choice rather than an empty field. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedByLabel: text('revoked_by_label'),
+  revokedReason: text('revoked_reason'),
+})
+
+export const featureFlags = pgTable('feature_flags', {
+  key: text('key').primaryKey(),
+  description: text('description').notNull(),
+  /** off, on or targeted. `off` is the kill switch and beats everything. */
+  state: text('state').notNull().default('off'),
+  rolloutPercent: integer('rollout_percent').notNull().default(0),
+  internalOnly: boolean('internal_only').notNull().default(false),
+  /** Recorded apart from an ordinary edit, so an incident timeline can be
+   *  reconstructed from the database rather than from somebody's memory. */
+  killedAt: timestamp('killed_at', { withTimezone: true }),
+  killedByLabel: text('killed_by_label'),
+  killedReason: text('killed_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedByLabel: text('updated_by_label').notNull(),
+})
+
+export const featureFlagTargets = pgTable('feature_flag_targets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  flagKey: text('flag_key').notNull(),
+  kind: text('kind').notNull(),
+  value: text('value').notNull(),
+  /** Deny beats allow, so one tenant can be pulled out of a rollout that is
+   *  working for everybody else. */
+  allow: boolean('allow').notNull().default(true),
+  /** Null for the kinds that name no tenant: plan and environment. */
+  orgId: uuid('org_id'),
+  reason: text('reason').notNull(),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminOperations = pgTable('admin_operations', {
+  /** The idempotency key IS the primary key: the second attempt to claim it is
+   *  a constraint violation rather than a second refund. */
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  action: text('action').notNull(),
+  orgId: uuid('org_id').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The operator, from admin_users. A different id space from users(id). */
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  reason: text('reason').notNull(),
+  request: jsonb('request').notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  state: text('state').notNull().default('in_flight'),
+  beforeState: jsonb('before_state'),
+  afterState: jsonb('after_state'),
+  providerObjectId: text('provider_object_id'),
+  /** Minor units beside their currency, both or neither. */
+  amountMinor: bigint('amount_minor', { mode: 'number' }),
+  currency: text('currency'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  /** Whether the provider ANSWERED. Decides whether a deliberate retry may
+   *  have a key of its own or has to reuse this one. */
+  errorAnswered: boolean('error_answered'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
@@ -850,5 +1306,11 @@ export const tenantScopedTables = [
   scimTokens, scimResources, scimGroups, scimGroupMembers,
   billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
   invitations, billingContacts, organizationDeletions, organizationDeletionExports,
+  workloads, workloadVersions, workloadRuns, workloadRunResults,
+  workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,
+  runtimeCommands,
+
   githubDeliveries, pullRequests, prGenerations, teardownRequests,
+  oidcRepositoryBindings,
+  entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const

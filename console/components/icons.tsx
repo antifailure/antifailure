@@ -38,6 +38,7 @@ function stroke(d: string) {
 
 export const IconEnvironments = stroke("M3.5 5.2 8 3l4.5 2.2v5.6L8 13l-4.5-2.2zM3.5 5.2 8 7.4l4.5-2.2M8 7.4V13");
 export const IconRuns = stroke("M2.5 8h3l1.6-3.4 2.4 6.8L11.2 8h2.3");
+export const IconLoad = stroke("M2.6 4.6h4.4M2.6 11.4h3.4M2.6 8h6.8M9.4 6.2 11.2 8 9.4 9.8M13.6 4.4v7.2");
 export const IconMasking = stroke("M8 2.6 13 4.5v4c0 2.6-2.1 4.2-5 4.9-2.9-.7-5-2.3-5-4.9v-4z");
 export const IconNetwork = stroke("M8 2.4v11.2M2.4 8h11.2M8 2.4a7.4 7.4 0 0 1 0 11.2M8 2.4a7.4 7.4 0 0 0 0 11.2");
 export const IconAudit = stroke("M4 2.6h8v10.8H4zM6.2 5.6h3.6M6.2 8h3.6M6.2 10.4h2.2");
@@ -50,3 +51,26 @@ export const IconPlan = stroke("M2.6 12.6V7.4M6.2 12.6V3.4M9.8 12.6V9M13.4 12.6V
 // this rail.
 export const IconSettings = stroke("M2.8 5.4h10.4M2.8 10.6h10.4M6.2 3.9v3M10 9.1v3");
 export const IconSignOut = stroke("M6.4 3.2H3.2v9.6h3.2M9.6 10.4 12.8 8 9.6 5.6M12.8 8H6.4");
+
+/* -------------------------------------------------------------------------
+ * The operator portal
+ *
+ * Its own icons rather than borrowed ones. Reusing IconMembers for tenants and
+ * IconSettings for operators would have shipped faster and read wrong: the
+ * navigation is the one place where an icon is the only thing distinguishing
+ * two entries at a glance, and "a person" meaning both a customer's member and
+ * a member of staff is exactly the confusion this portal cannot afford.
+ *
+ * Same stroke() helper, so they inherit the one grid, one width and one size
+ * the rest of the navigation uses.
+ * ---------------------------------------------------------------------- */
+
+/** Organizations: two buildings, because a tenant is a company and not a person. */
+export const IconTenants = stroke(
+  "M2.6 13.4V5.2l4-1.8v10M6.6 13.4V7l6.8-2.2v8.6M2 13.4h12M8.6 8.6v1M8.6 10.8v1M11 8v1M11 10.2v1",
+);
+
+/** Operators: a person with a key, which is what an operator account is. */
+export const IconOperators = stroke(
+  "M6 7.4a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM2.4 13c0-2 1.5-3.3 3.6-3.3M12.2 6.4a1.5 1.5 0 1 1-1.4 2l-2.2 2.2v1.2h1.2v-1h1v-1h1l.9-.9",
+);

@@ -166,7 +166,9 @@ export const FOOTER_MENUS = [
       { text: "Fintech", href: "/solutions/fintech" },
       { text: "Marketplaces", href: "/solutions/marketplaces" },
       { text: "Developer tools", href: "/solutions/devtools" },
-      { text: "Sign up", href: "/signup" },
+      { text: "About", href: "/about" },
+      { text: "Contact", href: "/contact" },
+      { text: "Request access", href: "/signup" },
     ],
   },
   {
@@ -175,6 +177,7 @@ export const FOOTER_MENUS = [
       { text: "Documentation", href: "/docs" },
       { text: "Quickstart", href: "/docs/getting-started/quickstart" },
       { text: "Writing", href: "/blog" },
+      { text: "Changelog", href: "/changelog" },
       { text: "Manifest", href: "/docs/reference/manifest" },
       { text: "Error reference", href: "/docs/reference/errors" },
       { text: "Enterprise", href: "/docs/enterprise/licensing" },
@@ -184,8 +187,8 @@ export const FOOTER_MENUS = [
     heading: "Connect",
     items: [
       { text: "GitHub", href: GITHUB_URL },
-      { text: "Log in", href: "/signin" },
-      { text: "Join the waitlist", href: "/signup" },
+      { text: "Sign in", href: "/signin" },
+      { text: "Request access", href: "/signup" },
     ],
   },
 ];

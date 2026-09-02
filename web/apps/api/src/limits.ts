@@ -51,6 +51,36 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   // eight characters from a 28 character alphabet, and the arithmetic that makes
   // guessing it hopeless assumes these limits exist. They are not a nicety here,
   // they are the third of the three things holding that code up.
+  // The operator portal's front door, and the tightest limit in this table.
+  //
+  // A password endpoint is guessable in a way none of the token endpoints are,
+  // and what is behind this one is not one tenant's data, it is EVERY tenant's.
+  // So this is deliberately below what a person would notice and far below what
+  // an attacker needs: one attempt per two seconds sustained, five at once for
+  // somebody who genuinely fat-fingered it twice and then pasted from a manager.
+  //
+  // Keyed by ip, which is the only key available: the whole point of this
+  // endpoint is that the caller has no session yet, and keying on the submitted
+  // email would let an attacker spread attempts across addresses to raise the
+  // ceiling, while also letting them lock out a known operator by exhausting
+  // that operator's bucket.
+  //
+  // This bounds ONLINE guessing only. What bounds offline guessing is scrypt at
+  // N = 2^15 over a per-row salt, and what bounds the damage of a success is the
+  // audit entry every failure writes, which is the line that shows somebody
+  // being targeted before they succeed.
+  'POST /v1/admin/signin': {
+    rate: 0.5, burst: 5, key: 'ip',
+    reason: 'Signing in to the operator portal is a human action a few times a day, and what is behind it is every tenant on the instance. One attempt per two seconds is far above honest use and far below useful guessing.',
+  },
+  'GET /v1/admin/session': {
+    rate: 10, burst: 60, key: 'ip',
+    reason: 'The operator portal asks on load and after a focus change, the same shape as GET /auth/session, and for the same reason: it carries the CSRF token every operator mutation needs, so refusing it does not merely blank a page, it makes the portal unable to act.',
+  },
+  'POST /v1/admin/signout': {
+    rate: 2, burst: 10, key: 'ip',
+    reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',
+  },
   'POST /auth/device/code': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Starting a terminal login is a human action. Ten at once covers somebody retrying in three shells; a sustained one per second does not.',
@@ -134,6 +164,38 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'DELETE /v1/tokens/:token': {
     rate: 1, burst: 10, key: 'token',
     reason: 'Revoking a token, usually because it leaked. Same shape as removing a provider key and deliberately not tighter, for the same reason: this is the call somebody makes in a hurry.',
+  },
+
+  // ---------------------------------------------------------------------------
+  // Exchanging a GitHub Actions workflow identity for an engine token, and the
+  // claims that decide which organization one may be exchanged for.
+  // ---------------------------------------------------------------------------
+  'POST /v1/auth/github-oidc': {
+    rate: 10, burst: 100, key: 'ip',
+    reason:
+      'The one endpoint here a caller reaches with no credential of ours at all, so the address ' +
+      'is the only key available and it is a weak one: every GitHub-hosted runner egresses from ' +
+      'a shared pool of Azure addresses, so a real customer and somebody probing arrive from the ' +
+      'same neighbourhood. Sized to stop a flood rather than to be the real bound. The real ' +
+      'bound is per repository and lives in src/github/exchange.ts, applied after the signature ' +
+      'check, because a limiter keyed on an unverified claim is one an attacker fills on ' +
+      "somebody else's behalf.",
+  },
+  'POST /v1/oidc/bindings': {
+    rate: 1, burst: 5, key: 'token',
+    reason: 'Claiming a repository, which is what lets its workflows mint credentials. The same number as minting an engine token because it grants the same thing standing, and a person does it once per repository.',
+  },
+  'GET /v1/oidc/bindings': {
+    rate: 5, burst: 50, key: 'token',
+    reason: 'Listing the claims an organization holds. One query, and the read somebody runs before deciding which claim to revoke, so it is as generous as the other reads.',
+  },
+  'DELETE /v1/oidc/bindings/:binding': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'Withdrawing a claim by its id, which also kills the credentials it issued. Same shape as revoking a token and deliberately not tighter: this is the call somebody makes in a hurry.',
+  },
+  'DELETE /v1/oidc/bindings/:owner/:name': {
+    rate: 1, burst: 10, key: 'token',
+    reason: 'The same withdrawal, named by the repository rather than by a uuid. Two segments because a repository is owner/name and a slash is a path separator, so one parameter could never match it, and the number is the same because it is the same call.',
   },
 
   // ---------------------------------------------------------------------------
@@ -261,6 +323,17 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 2, burst: 60, key: 'ip',
     reason: 'One report per job. Refusing this loses the result of a run somebody has already paid for, so it is as generous as the exchange that precedes it.',
   },
+  // The engine's own exchange, keyed by address for the same reason as the
+  // callback one: the call that gets a token cannot be keyed on a token.
+  //
+  // Held to one per job. Unlike the callback exchange this one writes a row
+  // every time it succeeds, so a loop here grows a table rather than merely
+  // costing a signature check, and the burst is what twenty pull requests
+  // starting at once behind one NAT actually need.
+  'POST /v1/engine/token': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'One exchange per job, before the engine has any credential to be keyed on. A workflow identity is verified against a cached key set before a row is written, so an unsigned flood is refused cheaply.',
+  },
   'POST /v1/events': {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',
@@ -268,6 +341,25 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'GET /v1/environments/:envId': {
     rate: 10, burst: 60, key: 'token',
     reason: 'Polled by af env pull and by a CI step, not by a loop.',
+  },
+
+  // Studio, for an engine. All four are polls, so the numbers are about how
+  // often a poll is reasonable rather than about how expensive the query is.
+  'POST /v1/workloads/claim': {
+    rate: 2, burst: 20, key: 'token',
+    reason: 'An engine asks what is waiting for the environment it is on, once when it starts and again between commands. Two a second is far above that; the burst covers several environments starting together at the top of a CI queue.',
+  },
+  'POST /v1/workloads/runs/:runId/heartbeat': {
+    rate: 2, burst: 30, key: 'token',
+    reason: 'Extends a lease that lasts fifteen minutes, so a healthy engine sends one every minute or two. The burst covers several runs on one token heartbeating together, and refusing one would strand a run that is going perfectly well.',
+  },
+  'POST /v1/commands/claim': {
+    rate: 2, burst: 20, key: 'token',
+    reason: 'The same poll shape as claiming a run, on the same cadence. A teardown that waits an extra poll is late by seconds; a refused poll on a tight limit is a teardown that waits for the next job.',
+  },
+  'POST /v1/commands/:id/ack': {
+    rate: 2, burst: 30, key: 'token',
+    reason: 'One per command carried out, in bursts when an engine claimed several. Deliberately not tighter than the claim: an acknowledgement that is refused turns a completed teardown into one that looks unconfirmed.',
   },
 
   // The application API. One limit for the whole surface rather than per

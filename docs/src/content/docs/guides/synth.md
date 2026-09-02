@@ -2,7 +2,7 @@
 title: Synthesis
 description: Answering an API with a model, when a fixture would have to be invented anyway.
 sidebar:
-  order: 13
+  order: 15
 ---
 
 `synth` answers a request with a model, given the API's shape and the request
@@ -31,7 +31,7 @@ your application will use later. A synthesised charge id is a charge id that
 does not exist, and the failure arrives one step further along where it is
 harder to read.
 
-Use [`mock`](/docs/guides/mocking/) for those, or a real sandbox.
+Use [`mock`](/docs/guides/mocking) for those, or a real sandbox.
 
 ## Determinism
 
@@ -61,4 +61,4 @@ chain as every other secret.
 Synthesis is off unless a rule asks for it. An environment that quietly called
 a model for every unmatched request would be a surprising bill.
 
-Related: [egress](/docs/concepts/egress/), [mocking](/docs/guides/mocking/).
+Related: [egress](/docs/concepts/egress), [mocking](/docs/guides/mocking).

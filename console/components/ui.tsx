@@ -359,6 +359,7 @@ export function Button({
   variant = "secondary",
   disabled = false,
   busy = false,
+  full = false,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -366,6 +367,12 @@ export function Button({
   variant?: "primary" | "secondary" | "danger";
   disabled?: boolean;
   busy?: boolean;
+  /** Fills its container. `LinkButton` has had this since it was written and
+   *  `Button` did not, which is why a sign-in form's submit rendered as a
+   *  narrow box in the middle of a full-width field. The two components are
+   *  the same box and a person cannot see which is an anchor, so they take
+   *  the same props. */
+  full?: boolean;
 }) {
   // whitespace-nowrap, because a two word label breaking across two lines is
   // the shape a control has when it is in trouble, and it happened as soon as
@@ -385,7 +392,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
-      className={`${base} ${variants[variant]}`}
+      className={`${base} ${variants[variant]} ${full ? "w-full" : ""}`}
     >
       {children}
     </button>
@@ -693,6 +700,9 @@ export function Loaded<T>({
     status: "loading" | "ready" | "error";
     data: T | null;
     error: ApiError | null;
+    /** Set when a reload over data already on screen failed. Optional so a
+     *  caller holding its own state can still use this. */
+    refreshError?: ApiError | null;
     reload: () => void;
   };
   skeleton?: ReactNode;
@@ -719,5 +729,36 @@ export function Loaded<T>({
   if (state.status === "loading" || state.data === null || state.data === undefined) {
     return <>{skeleton ?? <TableSkeleton />}</>;
   }
-  return <>{children(state.data)}</>;
+  // A reload that failed over data already on screen. It is NOT `state.error`,
+  // because that branch replaces the page, and replacing a correct table with
+  // a full page failure loses what the reader had. The rows stay, this says
+  // they are the older answer, and Try again is the same reload.
+  //
+  // Announced with role="status" rather than role="alert": the reader did not
+  // lose anything and is not being interrupted, and an assertive announcement
+  // over a table somebody is reading is its own defect.
+  const stale = state.refreshError ? (
+    <div
+      role="status"
+      // A surface of its own, with the page's own radius and rule, rather than
+      // a bleed strip above the first card: `children` is a different shape on
+      // every screen, so anything that tries to attach to what follows attaches
+      // correctly on one page and floats on the rest.
+      //
+      // The warn tint is Badge's, by value, rather than a second one.
+      className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-[rgba(138,90,0,0.12)] px-4 py-3"
+    >
+      <p className="text-[12.5px] leading-5 text-ink">
+        Could not refresh. Showing the last answer. {state.refreshError.message}
+      </p>
+      <Button onClick={state.reload}>Try again</Button>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {stale}
+      {children(state.data)}
+    </>
+  );
 }

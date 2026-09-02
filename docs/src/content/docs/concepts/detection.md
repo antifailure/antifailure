@@ -2,7 +2,7 @@
 title: Detection
 description: How af init reads a repository, and what it does when it is not sure.
 sidebar:
-  order: 7
+  order: 9
 ---
 
 `af init` reads what is already in the repository and writes a manifest from it.
@@ -64,4 +64,4 @@ repository that already has one tells you it is there rather than replacing it.
 If the repository has changed enough to want a fresh look, delete the manifest
 and run it again, or read the new one against the old with `git diff`.
 
-Related: [the manifest reference](/docs/reference/manifest/), [building](/docs/guides/build/).
+Related: [the manifest reference](/docs/reference/manifest), [building](/docs/guides/build).

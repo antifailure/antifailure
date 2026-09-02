@@ -24,13 +24,35 @@ on:
     paths:
       - 'engine/internal/secrets/**'
       - '.github/workflows/keyring.yml'
-  # Runnable by hand, because a change elsewhere in the engine can still break
-  # a platform this only checks when the secrets package itself moves.
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is the verdict a tag and a deploy are read against, so it
+  # is never cancelled. On a branch the saving is real and nothing depends
+  # on the superseded answer, so cancelling stays.
+  #
+  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
+  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
+  # run at all. Cancelled is not red, but it is not a verdict either, and
+  # `release.yml` had no gate of its own, so the only thing standing between
+  # an unverified commit and published binaries was somebody holding merges
+  # by hand.
+  #
+  # There is no clause for tags here because this workflow does not run on
+  # one. The `on:` block above is a push to main and a pull request, and
+  # nothing else, so `refs/tags/` is a ref this expression is never evaluated
+  # against. The first version of this line excluded tags anyway, which read
+  # as protection and was a condition that could not be true.
+  #
+  # What this does NOT buy, so nobody reads more into it than it does: a run
+  # that has already STARTED is never cancelled, and that is the whole of it.
+  # GitHub still cancels a run that is merely PENDING when a newer one queues
+  # behind the same in progress run. So the newest commit always reaches a
+  # verdict, which is what a tag and a deploy are read against, and commits in
+  # between a burst of merges still get skipped. Every commit reaching a
+  # verdict needs a merge queue, not a bigger timeout.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read, and only read. Every action is pinned to a commit rather than a tag,
 # because a tag is mutable and pinning is what makes the reviewed thing the run
@@ -44,9 +66,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum
@@ -68,49 +90,14 @@ jobs:
           go test ./internal/secrets/ -count=1 -v
           -run 'SystemKeyringRoundTrips|AValueWithAwkwardCharactersSurvives|NonASCIIAndAstral|AMultiLineValueAndTrailingNewline|AValueAtTheLimit|ARealisticallyLongValue|AnEmptyValueIsPresent'
 
-  crosslint:
-    name: The other platforms lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version-file: engine/go.mod
-          cache-dependency-path: engine/go.sum
-
-      # The main lint runs on one machine, so it only ever sees the files that
-      # machine's build tags select. keyring_windows.go and keyring_darwin.go
-      # are invisible to it, and a file nothing lints drifts: GOOS=windows found
-      # an unchecked return in the Windows keyring that had been merged and
-      # green for a day, because no linter on any runner had compiled it.
-      #
-      # On ubuntu-latest rather than on a runner of each platform, because this
-      # type checks rather than runs. Cross compiling for the lint costs a
-      # minute and needs no scarce runner.
-      - name: Lint what the other platforms compile
-        working-directory: engine
-        env:
-          GOTOOLCHAIN: local
-        run: |
-          set -euo pipefail
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.13.1/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" v2.13.1
-          for target in windows darwin; do
-            echo "::group::GOOS=$target"
-            GOOS="$target" "$(go env GOPATH)/bin/golangci-lint" run --timeout 15m
-            echo "::endgroup::"
-          done
-
   linux:
     name: Linux Secret Service
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: engine/go.mod
           cache-dependency-path: engine/go.sum

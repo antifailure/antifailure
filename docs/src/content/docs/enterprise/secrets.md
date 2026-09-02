@@ -2,7 +2,7 @@
 title: Enterprise secret stores
 description: Vault, AWS, Azure and Google in the lookup chain, and what each one says when it cannot answer.
 sidebar:
-  order: 4
+  order: 6
 ---
 
 *Requires an enterprise license with the `enterprise_secrets` feature, and the
