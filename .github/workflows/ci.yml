@@ -907,6 +907,23 @@ jobs:
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
 
+      - name: The sidebar order is a decision rather than an accident
+        # Starlight breaks a tie in sidebar.order on file name, which the
+        # person editing a page cannot see and nothing else reports. 27 of the
+        # 78 ordered pages shared a number with a sibling, so a third of the
+        # sidebar was alphabetised by slug: "Watching a run" split the two
+        # runtime guides, "Provider limits" split the three provider pages,
+        # and On-call came before Standing up production.
+        run: go run ./tools/sidebarcheck .
+
+      - name: Every variable the product names at a user is documented
+        # af license install tells a paying customer to set AF_LICENSE_KEY and
+        # AF_ORG, then points them at the licensing page, and that page named
+        # neither, so the correct instructions did not exist anywhere. af doctor
+        # had the same shape with AF_PORT_RANGE_START. The control plane has had
+        # this check since config-docs.test.ts; the engine never did.
+        run: go run ./tools/varcheck .
+
       - name: STATUS.md keeps the rule it states about itself
         # STATUS.md is the answer this project gives to "does it do X yet", and
         # it opens by naming the states a row may carry. Four rows carried a

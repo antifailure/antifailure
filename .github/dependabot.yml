@@ -1,0 +1,113 @@
+# Dependency updates, so the next advisory arrives as a pull request rather
+# than as a line in a push message nobody is going to act on.
+#
+# The repository had eight open advisories, four of them high, and no
+# configuration here at all. Security alerts were on, which is why the count
+# was visible, but alerts only tell you a version is vulnerable. Nothing was
+# opening the pull request that fixes it, so the count only ever went up.
+#
+# Grouped on purpose. This repository has twelve npm manifests and four Go
+# modules, and one pull request per bumped dependency per ecosystem is how a
+# dependency bot gets muted inside a week. Grouped updates make it one pull
+# request per ecosystem per week, which is a thing a person will actually read.
+# Security updates are deliberately left ungrouped by GitHub and arrive on
+# their own schedule regardless of the interval below.
+#
+# The manifests with no lockfile of their own are npm workspace members:
+# ee/web/{audit,rbac,scim,sso} belong to ee/web, and web/apps/* and
+# web/packages/* belong to web. Dependabot resolves a workspace from its root,
+# so listing the members separately would produce duplicate pull requests that
+# fight each other over the same lockfile.
+
+version: 2
+
+updates:
+  # The product's own JavaScript, weekly, one pull request per directory.
+  - package-ecosystem: npm
+    directories:
+      - /api
+      - /console
+      - /docs
+      - /ee/web
+      - /runner
+      - /web
+      - /www
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+        update-types: [minor, patch]
+      development:
+        dependency-type: development
+        update-types: [minor, patch]
+    # A major is a decision rather than an upgrade, so it comes on its own and
+    # says so, instead of riding in a group of twenty patches.
+    ignore:
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: gomod
+    directories:
+      - /engine
+      - /ee/engine
+      - /tools
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-modules:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # The actions are pinned to commit shas rather than tags, deliberately: a tag
+  # is mutable, so `@v4` is a promise the publisher can change after review.
+  # Dependabot understands that pinning and bumps the sha while keeping the
+  # trailing version comment accurate, which is the only maintainable way to
+  # stay pinned.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The examples are shipped as documentation, so a reader copying them should
+  # not be copying a vulnerable base image. Monthly, because they are samples
+  # rather than the product and weekly noise here would drown the rest.
+  - package-ecosystem: npm
+    directory: /examples/next-app
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      example:
+        patterns: ['*']
+
+  - package-ecosystem: gomod
+    directory: /examples/go-api
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      example:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directories:
+      - /deploy/docker
+      - /examples/go-api
+      - /examples/next-app
+      - /examples/django-api
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      images:
+        patterns: ['*']
