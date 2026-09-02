@@ -172,7 +172,7 @@ func Attach(ctx context.Context, bus *events.Bus, opts Options) (*Telemetry, err
 		}
 	}
 
-	if err := t.attachControlPlane(bus, opts, c, getenv); err != nil {
+	if err := t.attachControlPlane(ctx, bus, opts, c, getenv); err != nil {
 		warn(err.Error())
 	}
 
@@ -192,23 +192,68 @@ func Attach(ctx context.Context, bus *events.Bus, opts Options) (*Telemetry, err
 //
 // No token is not a failure. Most runs are on a laptop with no control plane at
 // all, and the engine is designed so that everything works without one.
+//
+// Where the token comes from is the whole reason this function has two sources.
+// The environment is first, because a user who has set one has said what they
+// want and a self hosted installation has no runner to ask. Failing that, a job
+// running in GitHub Actions can prove what it is and trade that proof for a
+// short lived credential, which is what makes a hosted control plane work with
+// no secret in the repository at all. Before that existed this function reached
+// the empty token on every CI run in the world, returned here, and built no
+// sink: forty event types went to the local log and nowhere else.
 func (t *Telemetry) attachControlPlane(
-	bus *events.Bus, opts Options, c clock.Clock, getenv func(string) string,
+	ctx context.Context, bus *events.Bus, opts Options, c clock.Clock, getenv func(string) string,
 ) error {
-	token := controlplane.TokenFromEnvironment(func(k string) (string, bool) {
+	lookup := func(k string) (string, bool) {
 		v := getenv(k)
 		return v, v != ""
-	})
-	if token == "" {
-		return nil
 	}
 
 	baseURL := opts.ControlPlaneURL
 	if baseURL == "" {
 		baseURL = getenv("AF_CONTROL_PLANE_URL")
 	}
+
+	// mint is how a credential is obtained from this job's identity, and it is
+	// held rather than called once because the credential is short lived and a
+	// run outlives it. The client calls it again when the control plane refuses
+	// a batch, which is the only notice an expiry ever gives.
+	mint := func(ctx context.Context) (string, error) {
+		return controlplane.TokenFromWorkflowIdentity(ctx, controlplane.WorkflowIdentityOptions{
+			Lookup: lookup, BaseURL: baseURL,
+		})
+	}
+	// renew stays nil for a token that came from the environment. That one does
+	// not expire, and re-minting over the top of a credential the user chose
+	// would quietly ignore their choice on the first 401.
+	var renew func(context.Context) (string, error)
+
+	token := controlplane.TokenFromEnvironment(lookup)
+	// An address is what says this repository uses a control plane at all.
+	//
+	// Only for the minted path, and the asymmetry is the point. Setting a token
+	// is itself an explicit choice, so that path may fall back to the hosted
+	// address. Nobody chooses anything by running in GitHub Actions, and
+	// "without a control plane" is a first class way to use this tool: without
+	// this condition every such run would trade an identity against the hosted
+	// instance, be refused because the repository is not connected to it, and
+	// print a warning about a service the user has never heard of.
+	if token == "" && baseURL != "" && controlplane.WorkflowIdentityAvailable(lookup) {
+		minted, err := mint(ctx)
+		if err != nil {
+			// Reported and survived, like everything else here. The commonest
+			// reason to land on this line is a pull request from a fork, where
+			// GitHub declines to mint an identity on purpose.
+			return fmt.Errorf("this run is not reported to the control plane: %w", err)
+		}
+		token = minted
+		renew = mint
+	}
+	if token == "" {
+		return nil
+	}
 	client, err := controlplane.New(controlplane.Options{
-		BaseURL: baseURL, Token: token, Clock: c, Redactor: opts.Redactor,
+		BaseURL: baseURL, Token: token, Renew: renew, Clock: c, Redactor: opts.Redactor,
 	})
 	if err != nil {
 		if errors.Is(err, controlplane.ErrNotConfigured) {
