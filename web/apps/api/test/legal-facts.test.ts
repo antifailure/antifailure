@@ -449,3 +449,60 @@ describe('the subprocessor page describes the code that exists', () => {
     )
   })
 })
+
+describe('the site does not publish a mailbox that cannot receive mail', () => {
+  // The instance: the legal pages said "Security reports go to
+  // security@antifailure.dev today" and "security@antifailure.dev reaches a
+  // person who can act on it", while the CONTACT PAGE OF THE SAME SITE carried
+  // a callout titled "Email is not a contact route" saying the domain has no
+  // mail exchanger and its SPF policy authorises no senders. Both were live on
+  // antifailure.dev at once, and the contact page is the one telling the truth:
+  //
+  //   $ dig +short MX antifailure.dev     (empty)
+  //   $ dig +short TXT antifailure.dev    "v=spf1 -all"
+  //
+  // The class: a published address is a promise that somebody is on the other
+  // end of it. Publishing one at a domain that cannot receive mail sends a
+  // security researcher, a person asking for their data to be deleted, and a
+  // customer with a problem all into the same silence, and none of them can
+  // tell. It is worse than saying nothing, because saying nothing at least
+  // makes them look for another route.
+  //
+  // This asserts the property rather than the two sentences that were wrong,
+  // because a list of known-bad sentences is what let the third one through
+  // further up this file.
+  const PAGES = [
+    'www/components/pages/company/Legal.tsx',
+    'www/components/pages/company/Contact.tsx',
+  ]
+
+  for (const page of PAGES) {
+    it(`publishes no address at antifailure.dev in ${path.basename(page)}`, async () => {
+      const text = await read(page)
+      const found = [...text.matchAll(/[A-Za-z0-9._%+-]+@antifailure\.dev/g)].map((m) => m[0])
+      assert.deepEqual(
+        [...new Set(found)],
+        [],
+        `${page} publishes an address at a domain with no mail exchanger. Mail sent there is ` +
+          `delivered nowhere, and the site's own contact page says so. Name the route that ` +
+          `works, which today is GitHub private vulnerability reporting, or add an MX record ` +
+          `and a mailbox first.`,
+      )
+    })
+  }
+
+  it('is reading pages that mention the domain at all, so an empty result means something', async () => {
+    // The negative control on the parse. A renamed or moved file reads as an
+    // empty string here and every assertion above passes over nothing, which is
+    // exactly the failure mode this file warns about at the top.
+    for (const page of PAGES) {
+      const text = await read(page)
+      assert.match(
+        text,
+        /antifailure\.dev/,
+        `${page} no longer mentions the domain at all, so the check above is reasoning about ` +
+          `nothing. Either the file moved or the pattern stopped matching.`,
+      )
+    }
+  })
+})
