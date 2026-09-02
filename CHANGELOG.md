@@ -43,6 +43,10 @@ Stable, and breaking any of these costs a major version:
   surface and is treated as one.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
+- **The lint finding identifiers.** Every migration lint finding carries a
+  `LINT-NNN` identifier, listed in the lint findings reference. It is assigned
+  once, keeps its meaning, and is never reused, not even after the rule that
+  earned it is deleted. Match on it rather than on the rule name.
 
 Explicitly not stable, and free to change in a minor release:
 
@@ -52,8 +56,10 @@ Explicitly not stable, and free to change in a minor release:
   other and which is not a published integration surface.
 - Every Go package except the two named above, and everything under
   `engine/internal`, which is unimportable on purpose.
-- Lint rule names and their findings, which move as the rules improve. The
-  stable identifier for a finding is its rule name within a release.
+- Lint rule names, and which findings a release reports. A rule is renamed when
+  a clearer name exists, and a release may find something an earlier one passed.
+  That is the product working, and it is why the identifier above is what to
+  match on.
 - The event stream's set of types. Types are added as features land.
 
 ### What moves when this tag is pushed

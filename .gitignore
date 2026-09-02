@@ -141,6 +141,8 @@ runner/artifacts/
 /installsh
 /ldcheck
 /licensegen
+/lintcheck
+/lintgen
 /manifestcheck
 /modecheck
 /motioncheck

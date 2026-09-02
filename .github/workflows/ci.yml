@@ -94,6 +94,7 @@ jobs:
         # can see that half of it, because it never reads the committed copy.
         run: |
           go run ./tools/errgen
+          go run ./tools/lintgen
           go run ./tools/proxysrc
           go run ./tools/schemadoc .
           go run ./tools/notices -out THIRD_PARTY_NOTICES.md
@@ -246,6 +247,14 @@ jobs:
         # while before anything enforced it, which is how a claim in
         # documentation quietly stops being true.
         run: go run ./tools/errcheck .
+
+      - name: The lint findings keep their identifiers
+        # A finding's rule name is free to change, so something matching on one
+        # needs a thing that does not. Each finding carries a LINT number, and
+        # this refuses a rule with no number, a number for a rule that is gone,
+        # and above all a number that was handed out once and has since left the
+        # catalogue, which is the promise itself breaking.
+        run: go run ./tools/lintcheck .
 
       - name: Vet
         run: cd engine && go vet ./...
