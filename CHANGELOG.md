@@ -58,7 +58,9 @@ Explicitly not stable, and free to change in a minor release:
 
 ### What moves when this tag is pushed
 
-Pushing `v1.0.0` publishes the control plane image as
+Pushing `v1.0.0` does three things.
+
+It publishes the control plane image as
 `ghcr.io/antifailure/control-plane:v1.0.0` and **moves
 `ghcr.io/antifailure/control-plane:latest` onto it.** `latest` resolves to the
 v0.1.1 digest until then. If you self host and pull `latest`, this tag changes
@@ -66,8 +68,18 @@ what your next pull gets, on your infrastructure, at a time we chose rather than
 one you did. Pin `v1.0.0`, or pin the digest that tag resolves to, if that
 matters to you. A tag can be moved and a digest cannot.
 
-Nothing else moves on its own. No deployment is triggered by this tag, and no
-existing environment is upgraded.
+It builds and publishes this release's archives, their checksums, the bill of
+materials and the signatures over both.
+
+And it deploys **our** hosted control plane, not yours. `cd.yml` runs on a `v*`
+tag as well as on a push to `main`: the staging job's condition excludes only a
+manual dispatch aimed elsewhere, so a tag push deploys staging without asking,
+and the production job's condition is `startsWith(github.ref, 'refs/tags/v')`
+behind the `production` environment, which carries required reviewers, so
+production moves only when a human approves it.
+
+Nothing on your infrastructure is deployed or upgraded by this tag. The only
+thing that reaches you is the image tag above, and only if you pull it.
 
 ### Supply chain
 
