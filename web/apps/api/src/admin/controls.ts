@@ -35,8 +35,15 @@ export interface ControlDefinition {
   /** Exactly what stops working. Read aloud by the operator before confirming,
    *  so it says what is refused AND what keeps working. */
   effect: string
-  /** The function that refuses. Named so that a reader can grep for it and a
-   *  test can assert it exists rather than trusting this string. */
+  /**
+   * Where the refusal is, as `path/from/src:symbol`.
+   *
+   * The file as well as the symbol, because a bare function name proves only
+   * that SOME file declares one, and the enforcement moving to a module
+   * nothing calls would still satisfy that. A test opens this exact file and
+   * greps it for this exact symbol, so a control cannot claim an enforcement
+   * it does not have and a rename fails rather than going quiet.
+   */
   enforcedBy: string
   /** How to undo it, in one sentence, shown next to the control at all times. */
   release: string
@@ -57,7 +64,7 @@ export const CONTROLS: Record<ControlName, ControlDefinition> = {
       'Every request that changes something is refused with 503 for every organization on this ' +
       'installation. Reads keep working, engines can still send events so nothing is lost, and ' +
       'the admin portal keeps working so this can be turned off again.',
-    enforcedBy: 'refuseDuringMaintenance',
+    enforcedBy: 'server.ts:refuseDuringMaintenance',
     release: 'Release maintenance from this same page. Nothing else has to be restarted.',
   },
   signups: {
@@ -66,7 +73,7 @@ export const CONTROLS: Record<ControlName, ControlDefinition> = {
     effect:
       'Nobody new can create an account. Everybody who already has one signs in and works ' +
       'normally, and invitations to existing organizations are unaffected.',
-    enforcedBy: 'refuseNewAccounts',
+    enforcedBy: 'auth/signin.ts:refuseNewAccounts',
     release: 'Allow sign-ups again from this page. It takes effect on the next attempt.',
   },
   new_runs: {
@@ -75,7 +82,7 @@ export const CONTROLS: Record<ControlName, ControlDefinition> = {
     effect:
       'No organization can bring up an environment or start an agent or load run. Environments ' +
       'that are already running keep running and stay readable, and nothing is torn down.',
-    enforcedBy: 'refuseWhileFrozen',
+    enforcedBy: 'routers/dispatch.ts:refuseWhileFrozen',
     release: 'Allow runs again from this page. Queued work is not lost; nothing was queued.',
   },
 }
@@ -140,11 +147,16 @@ export async function engagedReason(db: Db, name: ControlName): Promise<string |
 /**
  * Engages or releases one control.
  *
- * Needs a connection from `pool.withPlatformAdmin`. On any other connection
- * the policy in migration 0029 matches nothing, the statement writes no rows,
- * and this throws rather than reporting success: an UPDATE that matches
- * nothing reports success, and a switch that silently did not engage is the
- * worst outcome this file can produce.
+ * Needs the operator connection, which is `ctx.adminDb` on an admin route and
+ * connects as `antifailure_admin`. The application role is granted SELECT on
+ * this table and nothing else, so on any other connection the INSERT raises
+ * `permission denied` rather than writing.
+ *
+ * The empty-RETURNING guard below is kept anyway, and it is not redundant. A
+ * missing privilege raises, but a statement that matches no rows does not: it
+ * reports success. A switch that silently did not engage is the worst outcome
+ * this file can produce, so the one case that could ever be quiet is made
+ * loud.
  */
 export async function setControl(
   db: Db,
@@ -180,9 +192,10 @@ export async function setControl(
   const row = rows[0]
   if (!row) {
     throw new Error(
-      `${name} was not changed. This connection may not write platform_controls: the write ` +
-        `policy needs pool.withPlatformAdmin, and on any other connection the statement matches ` +
-        `no policy and reports success without writing.`,
+      `${name} was not changed. The statement matched no row and wrote nothing, which reports ` +
+        `success rather than raising. Run this on the operator connection, ctx.adminDb, which ` +
+        `connects as antifailure_admin; the application role is granted SELECT here and nothing ` +
+        `else.`,
     )
   }
   return {

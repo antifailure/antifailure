@@ -255,6 +255,33 @@ export const GRANTABLE_SCOPES: readonly string[] = [
  * deliberately admits: every request has to be able to learn that the
  * installation is paused, including requests that have no organization yet.
  */
+
+/**
+ * The paths maintenance mode does not refuse.
+ *
+ * Exported, and read by a test that walks the routes the server actually
+ * serves, because the failure this list guards against is not a wrong entry.
+ * It is a route somebody adds later, outside every prefix here, that turns out
+ * to be the one an operator needs in order to turn maintenance off. That
+ * failure is invisible in code review and total in production.
+ */
+export const maintenanceExemptions = [
+  // Signing in. Refusing this means the operator who engaged maintenance
+  // cannot authenticate to release it, and the only way back is a deploy or a
+  // psql session. That is the canonical way a maintenance mode becomes the
+  // incident it was meant to contain.
+  '/auth/',
+  // Operator sign-in, wherever the admin portal ends up putting it. See the
+  // comment at the middleware for why this prefix is not optional.
+  '/admin/',
+  // Engines keep reporting. Refusing ingestion does not pause anything, it
+  // loses the record of work that ran anyway.
+  '/v1/events',
+  // The surface that owns the switch. admin-portal has committed to this
+  // prefix as a hard interface for exactly this reason.
+  '/trpc/admin.',
+] as const
+
 export async function refuseDuringMaintenance(pool: Pool): Promise<string | null> {
   return pool.withoutTenant((db) => engagedReason(db, 'maintenance'))
 }
@@ -411,7 +438,16 @@ export function createServer(options: ServerOptions) {
   // this guards against is a route somebody adds later and does not think
   // about, which is the same reason ENDPOINT_LIMITS is a list rather than a
   // decorator.
-  const MAINTENANCE_EXEMPT_PREFIXES = ['/auth/', '/v1/events', '/trpc/admin.']
+  //
+  //   Anything under /admin. Operator sign-in runs BEFORE an operator session
+  //   exists, so it cannot be a procedure behind the admin session guard, and
+  //   if it lands at /admin/auth/... rather than under the tRPC prefix then
+  //   exempting only /trpc/admin. locks the operator away from the switch that
+  //   releases maintenance. This prefix is the one that costs nothing to add
+  //   and is a lockout to omit. `maintenanceExemptions` is exported so a test
+  //   can walk the server's REAL route table against it rather than against
+  //   somebody's recollection of it.
+  const MAINTENANCE_EXEMPT_PREFIXES = maintenanceExemptions
   app.use('*', async (c, next) => {
     const method = c.req.method.toUpperCase()
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next()
