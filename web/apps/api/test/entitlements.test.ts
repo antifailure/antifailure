@@ -177,7 +177,13 @@ describe('the verdicts', () => {
     // The PLAN is named, not just "the plan". A refusal that does not say which
     // plan is refusing you tells you nothing about what upgrading buys, and
     // that sentence is the whole self-service path out of the refusal.
-    assert.match(plan.reason, /the free plan/)
+    // checkQuota's own sentence, unchanged, because it is the one this product
+    // has always said and the one a support macro would quote.
+    assert.equal(
+      plan.reason,
+      'This organization is holding 3 of 3 environments on the free plan. Tear one down, or ' +
+        'change the plan. Nothing that already exists was removed.',
+    )
     assert.match(
       checkQuotaWithEntitlements(applyOverrides('team', []), 'environments', 25).reason,
       /the team plan/,
@@ -187,7 +193,9 @@ describe('the verdicts', () => {
       applyOverrides('free', [row({ value: 5 })]), 'environments', 5,
     )
     assert.equal(granted.allowed, false)
-    assert.match(granted.reason, /organization override/)
+    // The case that did not exist before gets its own shape, because "on an
+    // organization override" does not read as English.
+    assert.match(granted.reason, /holding 5 of 5 environments, and 5 is what an organization override allows/)
   })
 
   it('a refusal names an expiry when the grant has one', () => {
@@ -212,11 +220,31 @@ describe('the verdicts', () => {
     assert.equal(checkCostCapWithEntitlements(e, 10, 65).allowed, true)
   })
 
+  it('the daily refusal is word for word the one the reference documents', () => {
+    // docs/src/content/docs/reference/environment-lifetime.md quotes this
+    // paragraph. Rewriting it once already left the documentation describing a
+    // message the product no longer produced, so the shape is pinned here.
+    const refused = checkCostCapWithEntitlements(applyOverrides('free', []), 24, 71.5)
+    assert.equal(refused.allowed, false)
+    assert.equal(
+      refused.reason,
+      'This organization has used 71.5 hours of environment time in the last 24 hours, and ' +
+        'the free plan allows 72 hours. This run would need another 24 hours. Tear down an ' +
+        'environment you are finished with, wait for the window to move, or ask an owner of ' +
+        'this organization to change the plan. Nothing was created and nothing was removed.',
+    )
+    // `current` is what has been USED, not the projection. The projection is in
+    // the sentence; a caller totalling this field would be counting a run that
+    // never happened.
+    assert.equal(refused.current, 71.5)
+  })
+
   it('seats count open invitations, and the message says so', () => {
     const e = applyOverrides('free', [])
     assert.equal(seatVerdict(e, 5, 0).allowed, false)
     assert.equal(seatVerdict(e, 4, 1).allowed, false)
     assert.match(seatVerdict(e, 4, 1).reason, /one of them an invitation/)
+    assert.match(seatVerdict(e, 5, 0).reason, /5 is what the free plan allows/)
     assert.equal(seatVerdict(e, 4, 0).allowed, true)
   })
 })
