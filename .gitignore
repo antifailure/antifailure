@@ -160,6 +160,7 @@ runner/artifacts/
 /sidebarcheck
 /site
 /statuscheck
+/surfacecheck
 /tagsync
 /varcheck
 /vulncheck

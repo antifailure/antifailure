@@ -67,6 +67,7 @@ gate: _reports
     run "release notes exist for the tag" just relnotes
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
+    run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
@@ -444,6 +445,12 @@ fmt-check:
 # Every error code is documented and every documented code is reachable.
 errcheck:
     go run ./tools/errcheck .
+
+# The Go packages version 1 promised, and the ones it deliberately did not.
+# Also the leak that makes the difference meaningless: a stable signature
+# naming a type an outside caller has no way to write.
+surfacecheck:
+    go run ./tools/surfacecheck .
 
 # The release stamps version variables that exist, and stamps every one it
 # declares.
