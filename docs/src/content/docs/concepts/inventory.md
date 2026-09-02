@@ -56,7 +56,7 @@ the ones that were.
 
 An `unmeasured` component is excluded from the score and named with the reason.
 It is never quietly counted as either answer. This is the same discipline the
-[insights](/docs/concepts/insights/) report applies when it says what it could
+[insights](/docs/concepts/insights) report applies when it says what it could
 not read, and for the same reason: a report that silently omits a check reads
 exactly like a check that found nothing.
 

@@ -2,7 +2,7 @@
 title: The certificate
 description: The certificate on the custom domain has fewer than three weeks left, or the check could not complete.
 sidebar:
-  order: 17
+  order: 18
 ---
 
 **Alert:** `certificate-expiring`. **Severity 3.** Working hours.
@@ -26,7 +26,7 @@ somebody at three in the morning as an outage.
 
 **This alert also fires when the test could not complete at all.** If the
 service is down, this fires alongside `unreachable`. Deal with
-[unreachable](/docs/self-hosting/runbooks/availability/) first and come back;
+[unreachable](/docs/self-hosting/runbooks/availability) first and come back;
 this one is about the certificate only when the site is otherwise fine.
 
 ## What to check

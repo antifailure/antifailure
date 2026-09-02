@@ -23,7 +23,7 @@ af model show            # what is configured, and where it came from
 They are different arrangements and the right one depends on whether you have a
 control plane.
 
-| | `af model` | [`af provider`](/docs/guides/provider-keys/) |
+| | `af model` | [`af provider`](/docs/guides/provider-keys) |
 | --- | --- | --- |
 | Where the key lives | this machine | the control plane, sealed |
 | Who calls the provider | this machine | the control plane |
@@ -364,7 +364,7 @@ export the variable, which is the first source in the chain:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-`af model set --from-env` is there for a runner that has the key in a variable
+`af model set anthropic --from-env ANTHROPIC_API_KEY` is there for a runner that has the key in a variable
 and wants it in the store as well. With neither a terminal nor `--stdin` the
 command refuses rather than reading. A read from a stdin nobody is typing into
 either blocks forever or returns nothing at once, and both look like a network

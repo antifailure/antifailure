@@ -12,6 +12,20 @@
 // one against the source: the package has to exist, the variable has to be in
 // it, and it has to be a string. Anything else fails, with the symbol named.
 //
+// And then the other direction, which this command did not check for a year and
+// which cost a wrong answer in a shipped binary. Validating only the flags it is
+// handed means a variable nobody stamps is invisible: it is not in the list, so
+// there is nothing to look up, so the check passes. cli.Edition sat in the same
+// var group as Version, Commit and BuildDate, no build ever wrote it, and every
+// binary reported the compiled default. Four platforms of that is precisely the
+// bug this command exists for, and it went straight past.
+//
+// So a variable declared alongside a stamped one must be stamped too. The group
+// is the declaration: writing `var (Version; Commit; BuildDate)` says these are
+// the release's variables, and adding a fourth line to it says the same thing
+// about the fourth. A variable that is genuinely not a release stamp belongs in
+// its own declaration, which is a one line change and says what it means.
+//
 // Every place, plural, because there is more than one. The workflow builds the
 // release and tools/release/build.sh is the script it calls, and `just
 // build-release` calls the same script so that the shipping build exists once
@@ -30,6 +44,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -80,6 +95,9 @@ func main() {
 	}
 
 	var problems []string
+	// Which names are stamped, per package directory, so the inverse check
+	// below can ask what was declared beside them and left alone.
+	stamped := map[string]map[string]bool{}
 	for _, match := range symbols {
 		symbol := match[1]
 		dot := strings.LastIndex(symbol, ".")
@@ -98,7 +116,29 @@ func main() {
 			problems = append(problems, fmt.Sprintf("%s: %v", symbol, err))
 			continue
 		}
+		if stamped[dir] == nil {
+			stamped[dir] = map[string]bool{}
+		}
+		stamped[dir][name] = true
 		fmt.Printf("ok  %s\n", symbol)
+	}
+
+	dirs := make([]string, 0, len(stamped))
+	for dir := range stamped {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	var gaps []string
+	for _, dir := range dirs {
+		found, err := unstamped(dir, stamped[dir])
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", dir, err))
+			continue
+		}
+		for _, name := range found {
+			gaps = append(gaps, fmt.Sprintf("%s, declared beside %s in %s",
+				name, strings.Join(sorted(stamped[dir]), ", "), dir))
+		}
 	}
 
 	if len(problems) > 0 {
@@ -109,9 +149,25 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "\nThe linker accepts -X for a symbol it cannot find and says nothing, "+
 			"so this would ship a binary that does not know its own version.\n")
+	}
+	if len(gaps) > 0 {
+		// Reported apart from the flags above, because it is the opposite
+		// failure and the fix is different. A flag naming nothing is a typo in
+		// the build; a variable nothing names is a value the build forgot,
+		// which is how af version told an auditor the wrong edition.
+		fmt.Fprintln(os.Stderr, "\nldcheck: nothing stamps these release variables.")
+		for _, g := range gaps {
+			fmt.Fprintf(os.Stderr, "  %s\n", g)
+		}
+		fmt.Fprintf(os.Stderr, "\nA variable in the group the release stamps and no flag for it ships "+
+			"the compiled default on every platform, silently. Either stamp it in %s, or move it "+
+			"into its own declaration if it is not a release stamp.\n", strings.Join(carriers, " and "))
+	}
+	if len(problems) > 0 || len(gaps) > 0 {
 		os.Exit(1)
 	}
-	fmt.Printf("ldcheck: %d symbols in %s, every one present and a string\n",
+	fmt.Printf("ldcheck: %d symbols in %s, every one present and a string, "+
+		"and nothing declared beside them is left unstamped\n",
 		len(symbols), strings.Join(carriers, " and "))
 }
 
@@ -203,6 +259,87 @@ func isStringVar(value *ast.ValueSpec) bool {
 		}
 	}
 	return false
+}
+
+// unstamped reports package level string variables declared in the same var
+// group as a stamped one and not stamped themselves.
+//
+// The group rather than the file or the package, because the group is what
+// carries the intent. A package may hold any number of unrelated package level
+// strings, and demanding a -X for each would be a gate that fires on things
+// nobody meant as a release stamp, which is how a gate stops being read.
+//
+// A constant in the group is not reported. The linker cannot write to one, so a
+// constant beside these variables is a deliberate statement that this value is
+// fixed at compile time, and demanding a flag for it would ask for the one thing
+// that silently does nothing.
+func unstamped(dir string, stamped map[string]bool) ([]string, error) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", dir, err)
+	}
+
+	var found []string
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.VAR {
+					continue
+				}
+				names, strings := groupNames(gen)
+				if !anyStamped(names, stamped) {
+					continue
+				}
+				for _, name := range strings {
+					if !stamped[name] {
+						found = append(found, name)
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(found)
+	return found, nil
+}
+
+// groupNames returns every name declared in one var group, and the subset of
+// those that are strings.
+func groupNames(gen *ast.GenDecl) (all, strs []string) {
+	for _, spec := range gen.Specs {
+		value, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for _, ident := range value.Names {
+			all = append(all, ident.Name)
+			if isStringVar(value) {
+				strs = append(strs, ident.Name)
+			}
+		}
+	}
+	return all, strs
+}
+
+func anyStamped(names []string, stamped map[string]bool) bool {
+	for _, name := range names {
+		if stamped[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func sorted(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for name := range set {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func fail(format string, args ...any) {

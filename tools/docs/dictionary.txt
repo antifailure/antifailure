@@ -21,6 +21,7 @@ dblab
 dedupe
 depguard
 eastus
+Fulcio
 gitleaks
 golangci
 goldens
@@ -47,6 +48,7 @@ subsetted
 subsetter
 subsetting
 supabase
+syft
 testcontainers
 tripwire
 tripwires

@@ -1155,6 +1155,40 @@ af mask verify
 | --- | --- | --- |
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 
+### `af mcp`
+
+Serve the rehearsal tools to a model over the Model Context Protocol.
+
+Serve this repository's rehearsal tools to an MCP client on standard input and
+output.
+
+The agent on the other end chooses what to rehearse. It does not choose how
+safely the rehearsal runs: there is no argument on any tool that can disable
+sanitization, widen the egress policy, lower a threshold or name a database.
+Thresholds come from this project's manifest, and the verdict is decided by the
+same evaluator af ci uses, so a tool call and a pull request check cannot
+disagree about the same change.
+
+The server serves exactly this checkout. A tool call may state which project it
+believes it is talking to, and a call naming a different one is refused rather
+than followed.
+
+Standard output carries the protocol and nothing else. Progress, warnings and
+errors go to standard error, where the client's log will show them.
+
+```
+af mcp
+```
+
+```
+# Started by an MCP client, not typed. It speaks the protocol on
+# standard input and output, so running it in a terminal looks idle.
+af mcp
+# It serves exactly the checkout it starts in, so the client is
+# configured to run it there.
+af mcp
+```
+
 ### `af model`
 
 The model key the agents use on this machine.
@@ -1441,7 +1475,7 @@ af oracle --baseline origin/main --fail-on any
 | `--branch` | - | Branch to compare, defaulting to the checked out one. |
 | `--fail-on` | - | Lowest severity that fails the command: none, minor, major, or critical. |
 | `--keep` | `false` | Leave the baseline environment up, for looking at a difference. |
-| `-o`, `--output` | - | Write the report here as well as to the terminal. |
+| `--report` | - | Write the report here as well as to the terminal. |
 
 ### `af provider`
 
@@ -1732,6 +1766,38 @@ af secret set STRIPE_SECRET_KEY --stdin
 | --- | --- | --- |
 | `--stdin` | `false` | Read the value from stdin rather than prompting. |
 
+### `af start`
+
+Say where you are on the first run, and what to run next.
+
+The first run is a sequence, and a sequence can be interrupted. This reports
+each step of it as observed on this machine right now, and names the one command
+that moves you forward.
+
+It runs nothing and writes nothing. Every answer comes from the machine rather
+than from a record of what this command last did, so closing the laptop,
+switching branches, or tearing an environment down by hand all move the answer
+with you.
+
+A step that cannot be answered without side effects is reported as not checked,
+with the reason and the command that does answer them. That is the point rather
+than a gap: a step reported as fine because nothing looked at it is how a green
+run over nothing happens.
+
+Exit 0 means every step is either done or simply not reached yet, which is the
+normal state of a first run in progress. Exit 3 means a step is broken and the
+next command cannot work until it is fixed.
+
+```
+af start
+```
+
+```
+# Where you are on the first run, and the one command that moves you on.
+af start
+af start -o json
+```
+
 ### `af status`
 
 Show what is running for this branch.
@@ -1783,13 +1849,13 @@ af support bundle [flags]
 ```
 # Redacted on the way in, with a list of what it included.
 af support bundle
-af support bundle --output af-support.zip
+af support bundle --archive af-support.zip
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
+| `--archive` | - | Where to write the bundle. |
 | `--branch` | - | Branch to collect, defaulting to the checked out one. |
-| `-o`, `--output` | - | Where to write the bundle. |
 
 ### `af test`
 

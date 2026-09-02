@@ -194,7 +194,7 @@ production's own traffic is production's own traffic; a 404 inside a declared
 journey means the journey is broken.
 
 Assertions about a database row belong to
-[invariants](/docs/guides/invariants/), which run against the branch after the
+[invariants](/docs/guides/invariants), which run against the branch after the
 workflows and can see the data. Assertions about what a page shows belong to
 workflows. A scenario measures the requests it sent.
 
@@ -275,4 +275,4 @@ Load runs against environments Antifailure made, and refuses anything else.
 This is a load generator with a production traffic shape pointed at it; the one
 thing it must never do is point at production.
 
-Related: [insights](/docs/concepts/insights/), [scheduling](/docs/concepts/scheduling/).
+Related: [insights](/docs/concepts/insights), [scheduling](/docs/concepts/scheduling).

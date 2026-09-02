@@ -100,7 +100,21 @@ up. The baseline is torn down unless --keep says otherwise.`),
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to compare, defaulting to the checked out one")
 	cmd.Flags().StringVar(&baseRef, "baseline", "", "Revision to compare against, overriding oracle.base_ref")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Write the report here as well as to the terminal")
+	// --report rather than --output, and no shorthand.
+	//
+	// This was --output with -o, which are the name and the letter the root's
+	// persistent "text or json" flag owns. A local flag silently wins, so
+	// `af oracle -o json` wrote the comparison to a file called `json` and
+	// `af oracle` had no machine readable form at all, on the one command whose
+	// output is meant to be read by something other than a person. The JSON was
+	// not missing: oracle.Result is fully tagged and the FormatJSON branch above
+	// has always been there. It was unreachable, which is the same defect as an
+	// unwired feature and harder to see because the code for it is right there.
+	//
+	// Renamed rather than un-shorthanded, because dropping -o alone would leave
+	// `af oracle --output json` still writing a file. The precedent is af ci,
+	// which carried the identical flag and became --report.
+	cmd.Flags().StringVar(&output, "report", "", "Write the report here as well as to the terminal")
 	cmd.Flags().StringVar(&failOn, "fail-on", "",
 		"Lowest severity that fails the command: none, minor, major, or critical")
 	cmd.Flags().BoolVar(&keep, "keep", false, "Leave the baseline environment up, for looking at a difference")

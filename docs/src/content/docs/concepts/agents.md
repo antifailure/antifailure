@@ -101,7 +101,7 @@ includes that check.
 
 A model reads the page and decides what a person would do next. The key is
 yours and it stays on your machine. See
-[your own model key](/docs/guides/model-keys/) for storing one, proving it
+[your own model key](/docs/guides/model-keys) for storing one, proving it
 works, pointing it at a local model, and what does and does not leave the
 machine when it is used.
 
@@ -159,5 +159,5 @@ By default workflows share an environment and run in order, because a sign-up
 usually has to happen before a subscription. `independent: true` says this one
 does not depend on the others, which lets it run in parallel.
 
-Related: [workflows](/docs/guides/workflows/), [personas](/docs/guides/personas/),
-[invariants](/docs/guides/invariants/).
+Related: [workflows](/docs/guides/workflows), [personas](/docs/guides/personas),
+[invariants](/docs/guides/invariants).

@@ -117,7 +117,7 @@ The policy governs traffic *through* the sidecar. Services sit on a network
 with no route out and every name they resolve points at the sidecar, so their
 packets have nowhere else to go. Neither model caller is on that network. The
 runner is a subprocess of `af` on your own machine, outside the environment
-entirely, and a [synth](/docs/guides/synth/) rule's model call originates in
+entirely, and a [synth](/docs/guides/synth) rule's model call originates in
 the sidecar itself, which is the container that has the route out.
 
 What this *does* govern is your **application** calling a model. If your own
@@ -129,7 +129,7 @@ planner is broken. `af model test` answers the other half: it reports whether
 this machine can reach the endpoint at all, and says in as many words that the
 manifest is not what is stopping it.
 
-See [your own model key](/docs/guides/model-keys/).
+See [your own model key](/docs/guides/model-keys).
 
 ## A live credential on the way out
 
@@ -213,5 +213,5 @@ The refusal is per address rather than per name, so a host that resolves to
 both families is still reached over IPv4 with IPv6 off, and a host with only an
 IPv6 address is refused with that as the reason.
 
-Related: [mocking](/docs/guides/mocking/), [sandbox credentials](/docs/guides/sandbox/),
-[the inbox](/docs/guides/inbox/), [webhooks](/docs/guides/webhooks/).
+Related: [mocking](/docs/guides/mocking), [sandbox credentials](/docs/guides/sandbox),
+[the inbox](/docs/guides/inbox), [webhooks](/docs/guides/webhooks).

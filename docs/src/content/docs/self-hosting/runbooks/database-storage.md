@@ -2,7 +2,7 @@
 title: Database storage
 description: The flexible server is above 80 percent of its provisioned disk.
 sidebar:
-  order: 13
+  order: 14
 ---
 
 **Alert:** `database-storage`. **Severity 2.** Hours, not minutes.
@@ -27,7 +27,7 @@ There are only three plausible answers on this schema.
 **The `events` table.** It is partitioned by month and production keeps 24
 months. The maintenance job drops partitions past that window, so this table
 growing past its retention means the maintenance job has not been running. Check
-[a job failed](/docs/self-hosting/runbooks/job-failed/).
+[a job failed](/docs/self-hosting/runbooks/job-failed).
 
 **Write ahead log.** `txlogs_storage_used` is a separate metric. A replication
 slot that nobody is reading holds the log forever, and that is the failure that

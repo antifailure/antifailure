@@ -2,7 +2,7 @@
 title: The vulnerability scan stopped protecting the repository
 description: The daily Security workflow failed, or it stopped running and nobody noticed.
 sidebar:
-  order: 18
+  order: 19
 ---
 
 **Not an Azure alert.** This one arrives as a red check on `main` and a GitHub

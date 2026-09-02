@@ -102,7 +102,7 @@ credential once per declared variable turns a configuration mistake into a rate
 limit on a store everybody else is also using.
 
 This comes from the enterprise secret stores, which are the sources that
-authenticate. See [enterprise secret stores](/docs/enterprise/secrets/).
+authenticate. See [enterprise secret stores](/docs/enterprise/secrets).
 
 ## A live key where a sandbox key belongs
 
@@ -111,7 +111,7 @@ AF-SEC-003 The value supplied for STRIPE_SECRET_KEY carries a live credential
 prefix, and STRIPE_SECRET_KEY is configured for sandbox use.
 ```
 
-See [sandbox credentials](/docs/guides/sandbox/). Checked before anything starts.
+See [sandbox credentials](/docs/guides/sandbox). Checked before anything starts.
 
 ## Values never reach a log
 
@@ -138,6 +138,6 @@ An organisation that keeps its credentials in HashiCorp Vault, AWS Secrets
 Manager, Azure Key Vault or Google Secret Manager can add them to the end of
 this chain with the enterprise edition. They are asked after every local source,
 for the same reason the keyring is asked after `.env`. See
-[enterprise secret stores](/docs/enterprise/secrets/).
+[enterprise secret stores](/docs/enterprise/secrets).
 
-Related: [sandbox credentials](/docs/guides/sandbox/), [egress](/docs/concepts/egress/).
+Related: [sandbox credentials](/docs/guides/sandbox), [egress](/docs/concepts/egress).

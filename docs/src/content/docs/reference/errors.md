@@ -42,7 +42,7 @@ The agent runner could not be started: {detail}
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/agents](/docs/concepts/agents/) |
+| More | [concepts/agents](/docs/concepts/agents) |
 
 ### AF-AGT-002
 
@@ -54,7 +54,7 @@ Workflow {workflow} exhausted its budget of {budget} before completing.
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/workflows](/docs/guides/workflows/) |
+| More | [guides/workflows](/docs/guides/workflows) |
 
 ### AF-AGT-003
 
@@ -66,7 +66,7 @@ The agent runner produced no readable output: {detail}
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/agents](/docs/concepts/agents/) |
+| More | [concepts/agents](/docs/concepts/agents) |
 
 ### AF-AGT-004
 
@@ -78,7 +78,7 @@ The agent runner could not be found: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/agents](/docs/concepts/agents/) |
+| More | [concepts/agents](/docs/concepts/agents) |
 
 ### AF-AGT-005
 
@@ -90,7 +90,7 @@ The {provider} key was not accepted: {detail}
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/model-keys](/docs/guides/model-keys/) |
+| More | [guides/model-keys](/docs/guides/model-keys) |
 
 ### AF-AGT-006
 
@@ -102,7 +102,7 @@ The {provider} endpoint could not be reached: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/model-keys](/docs/guides/model-keys/) |
+| More | [guides/model-keys](/docs/guides/model-keys) |
 
 ### AF-AGT-007
 
@@ -114,7 +114,7 @@ No workflow reached a verdict about the application: {detail}
 | --- | --- |
 | Exit code | `9` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+| More | [concepts/verdicts](/docs/concepts/verdicts) |
 
 ### AF-AGT-010
 
@@ -126,7 +126,7 @@ Invariant {invariant} did not finish within {timeout}.
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/invariants](/docs/guides/invariants/) |
+| More | [guides/invariants](/docs/guides/invariants) |
 
 ### AF-AGT-011
 
@@ -138,7 +138,7 @@ Invariant {invariant} is not read only.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/invariants](/docs/guides/invariants/) |
+| More | [guides/invariants](/docs/guides/invariants) |
 
 ### AF-AGT-012
 
@@ -150,7 +150,7 @@ Invariant {invariant} does not hold: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/invariants](/docs/guides/invariants/) |
+| More | [guides/invariants](/docs/guides/invariants) |
 
 ### AF-AGT-020
 
@@ -162,7 +162,7 @@ There is nothing to explore: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/exploration](/docs/concepts/exploration/) |
+| More | [concepts/exploration](/docs/concepts/exploration) |
 
 ### AF-AGT-021
 
@@ -174,7 +174,7 @@ No goal named {goal} is declared under explore.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/exploration](/docs/concepts/exploration/) |
+| More | [concepts/exploration](/docs/concepts/exploration) |
 
 ## Build
 
@@ -188,7 +188,7 @@ The build for service {service} failed after {duration}.
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-002
 
@@ -200,7 +200,7 @@ The Dockerfile for {service} is not valid at line {line}: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-003
 
@@ -212,7 +212,7 @@ The build context for {service} is {size}, above the {limit} limit.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-004
 
@@ -224,7 +224,7 @@ The build context for {service} holds more than {count} files; {path} is where t
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-005
 
@@ -236,7 +236,7 @@ The build for service {service} failed after {duration}, and its Dockerfile is {
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-BLD-010
 
@@ -248,7 +248,7 @@ No build strategy could be detected for {service}.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-011
 
@@ -260,7 +260,7 @@ The Dockerfile {dockerfile} for {service} is excluded from the build context by 
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
 
 ### AF-BLD-012
 
@@ -272,7 +272,21 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/build](/docs/guides/build/) |
+| More | [guides/build](/docs/guides/build) |
+
+## Control plane
+
+### AF-CP-003
+
+The control plane could not complete this request.
+
+**What to do.** Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
 ## Control plane
 
@@ -286,7 +300,7 @@ No control plane token is configured.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
 ### AF-CPL-002
 
@@ -298,7 +312,7 @@ The control plane has no environment called {env}.
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
 ### AF-CPL-004
 
@@ -310,7 +324,7 @@ This machine is not signed in to {origin}.
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [self-hosting/control-plane](/docs/self-hosting/control-plane/) |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
 ## Database
 
@@ -324,7 +338,7 @@ The source database at {host} could not be reached.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/overview](/docs/providers/overview/) |
+| More | [providers/overview](/docs/providers/overview) |
 
 ### AF-DB-003
 
@@ -336,19 +350,19 @@ The source database is Postgres {found}, and this provider supports {supported}.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview/) |
+| More | [providers/overview](/docs/providers/overview) |
 
 ### AF-DB-004
 
 The golden version {version} no longer exists.
 
-**What to do.** Run 'af golden list' to see the available versions, then 'af up --golden <version>'.
+**What to do.** Run 'af golden list' to see what exists, or 'af golden refresh' to make one. 'af up' chooses a version itself.
 
 | | |
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-005
 
@@ -360,7 +374,7 @@ The golden version {version} is still referenced by {count} environments and can
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-006
 
@@ -372,7 +386,7 @@ The provider's concurrent branch limit ({limit}) is reached.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/limits](/docs/providers/limits/) |
+| More | [providers/limits](/docs/providers/limits) |
 
 ### AF-DB-008
 
@@ -384,7 +398,7 @@ The database provider {provider} at {endpoint} rejected the configured credentia
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview/) |
+| More | [providers/overview](/docs/providers/overview) |
 
 ### AF-DB-009
 
@@ -396,7 +410,7 @@ The Database Lab Engine at {endpoint} has no snapshot to build a golden from: {d
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/dblab](/docs/providers/dblab/) |
+| More | [providers/dblab](/docs/providers/dblab) |
 
 ### AF-DB-011
 
@@ -408,7 +422,7 @@ The subset could not be taken: {detail}
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/subsetting](/docs/concepts/subsetting/) |
+| More | [concepts/subsetting](/docs/concepts/subsetting) |
 
 ### AF-DB-012
 
@@ -420,7 +434,7 @@ No golden here was made for this project, and {count} were made for something el
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-013
 
@@ -432,7 +446,7 @@ The database seed command failed: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-014
 
@@ -444,7 +458,7 @@ No database branch exists for {env}.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-015
 
@@ -456,7 +470,7 @@ The published golden {version} in {store} was made for a different project.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/goldens](/docs/concepts/goldens/) |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-020
 
@@ -468,7 +482,7 @@ Personas cannot be provisioned because {provider} creates users only through its
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/personas](/docs/guides/personas/) |
+| More | [guides/personas](/docs/guides/personas) |
 
 ### AF-DB-021
 
@@ -480,7 +494,19 @@ Personas cannot be provisioned because {provider} creates users only through its
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/personas](/docs/guides/personas/) |
+| More | [guides/personas](/docs/guides/personas) |
+
+### AF-DB-022
+
+No table that looks like a users table was found, so there is nowhere to create the personas that sign in.
+
+**What to do.** Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/personas](/docs/guides/personas) |
 
 ### AF-DB-030
 
@@ -492,7 +518,7 @@ Migrations failed on the branch: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/insights](/docs/concepts/insights/) |
+| More | [concepts/insights](/docs/concepts/insights) |
 
 ### AF-DB-031
 
@@ -504,7 +530,7 @@ The migration finding {rule} fails this project's policy: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+| More | [concepts/verdicts](/docs/concepts/verdicts) |
 
 ### AF-DB-032
 
@@ -516,7 +542,7 @@ The previous release does not survive this migration: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/insights](/docs/concepts/insights/) |
+| More | [concepts/insights](/docs/concepts/insights) |
 
 ## Detection
 
@@ -530,7 +556,7 @@ No application could be detected in {path}.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/detection](/docs/concepts/detection/) |
+| More | [concepts/detection](/docs/concepts/detection) |
 
 ### AF-DET-004
 
@@ -542,7 +568,7 @@ Detection could not decide {question}, and there is no default to fall back on.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/detection](/docs/concepts/detection/) |
+| More | [concepts/detection](/docs/concepts/detection) |
 
 ### AF-DET-005
 
@@ -554,7 +580,7 @@ Detection produced a draft that is not a valid manifest, so nothing was written 
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/detection](/docs/concepts/detection/) |
+| More | [concepts/detection](/docs/concepts/detection) |
 
 ### AF-DET-006
 
@@ -566,7 +592,7 @@ Detection produced a draft that is not a valid manifest, so nothing was written 
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/detection](/docs/concepts/detection/) |
+| More | [concepts/detection](/docs/concepts/detection) |
 
 ### AF-DET-010
 
@@ -578,7 +604,7 @@ The changed files between {base} and {head} could not be read: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis) |
 
 ### AF-DET-011
 
@@ -590,7 +616,7 @@ The diff at {path} could not be read: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/change-analysis](/docs/concepts/change-analysis/) |
+| More | [concepts/change-analysis](/docs/concepts/change-analysis) |
 
 ## Enterprise
 
@@ -604,7 +630,7 @@ The license covers {seats} seats and they are all in use.
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/licensing](/docs/enterprise/licensing/) |
+| More | [enterprise/licensing](/docs/enterprise/licensing) |
 
 ### AF-EE-010
 
@@ -616,7 +642,7 @@ Organization policy {policy} refuses this environment: {detail}
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/policy](/docs/enterprise/policy/) |
+| More | [enterprise/policy](/docs/enterprise/policy) |
 
 ## Fidelity
 
@@ -630,7 +656,7 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/inventory](/docs/concepts/inventory/) |
+| More | [concepts/inventory](/docs/concepts/inventory) |
 
 ### AF-FID-002
 
@@ -642,7 +668,7 @@ The environment does not reproduce {dimension}, which the manifest requires: {de
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/inventory](/docs/concepts/inventory/) |
+| More | [concepts/inventory](/docs/concepts/inventory) |
 
 ## GitHub
 
@@ -656,7 +682,7 @@ Nothing ran, because of the fork policy on the base branch. {detail}
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [getting-started/pull-requests](/docs/getting-started/pull-requests/) |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests) |
 
 ## Infrastructure
 
@@ -670,7 +696,7 @@ The provider rate limited this operation and asked to wait {retry_after}.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/limits](/docs/providers/limits/) |
+| More | [providers/limits](/docs/providers/limits) |
 
 ## Load
 
@@ -684,7 +710,7 @@ Load could not be generated: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-011
 
@@ -696,7 +722,7 @@ Load exceeded {count} thresholds the manifest sets.
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-012
 
@@ -708,7 +734,7 @@ There is no load source called {source}.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-013
 
@@ -720,7 +746,7 @@ The scenario at {path} could not be read: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-014
 
@@ -732,7 +758,7 @@ The scenario at {path} could not be read: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-015
 
@@ -744,7 +770,7 @@ The scenario {scenario} proved nothing: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ### AF-LOD-016
 
@@ -756,7 +782,7 @@ The p95_increase threshold proved nothing: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/load](/docs/concepts/load/) |
+| More | [concepts/load](/docs/concepts/load) |
 
 ## Manifest
 
@@ -770,7 +796,7 @@ No antifailure.yaml was found in {path} or any parent directory.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-MAN-002
 
@@ -782,19 +808,19 @@ The manifest at {path} is not valid: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-MAN-003
 
 The manifest at {path} declares schema version {found}, which this build does not understand.
 
-**What to do.** Upgrade with 'af version -check' and install the release that supports version {found}.
+**What to do.** Check the build you are running with 'af version' and install the release that supports version {found}.
 
 | | |
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-MAN-004
 
@@ -806,7 +832,7 @@ The manifest at {path} declares schema version {found}, which this build does no
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli#af-init](/docs/reference/cli/#af-init) |
+| More | [reference/cli#af-init](/docs/reference/cli#af-init) |
 
 ### AF-MAN-005
 
@@ -818,7 +844,7 @@ The manifest at {path} is larger than the {limit} limit.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ## Masking and verification
 
@@ -832,7 +858,7 @@ The golden {version} has no valid verification attestation and cannot be branche
 | --- | --- |
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verification](/docs/concepts/verification/) |
+| More | [concepts/verification](/docs/concepts/verification) |
 
 ### AF-MSK-002
 
@@ -844,7 +870,7 @@ Verification found data matching {detector} in {table}.{column}.
 | --- | --- |
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verification](/docs/concepts/verification/) |
+| More | [concepts/verification](/docs/concepts/verification) |
 
 ### AF-MSK-010
 
@@ -856,7 +882,7 @@ Masking could not run: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking/) |
+| More | [concepts/masking](/docs/concepts/masking) |
 
 ## Egress
 
@@ -870,7 +896,7 @@ The request to {host} was blocked by rule {rule}.
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/egress](/docs/concepts/egress/) |
+| More | [concepts/egress](/docs/concepts/egress) |
 
 ### AF-NET-002
 
@@ -882,7 +908,7 @@ The request to {host} was blocked by rule {rule}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli#af-net-explain](/docs/reference/cli/#af-net-explain) |
+| More | [reference/cli#af-net-explain](/docs/reference/cli#af-net-explain) |
 
 ### AF-NET-010
 
@@ -894,7 +920,7 @@ No mock matched {method} {path} on {host}.
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/mocking](/docs/guides/mocking/) |
+| More | [guides/mocking](/docs/guides/mocking) |
 
 ### AF-NET-011
 
@@ -906,7 +932,7 @@ No message matching {match} arrived within {timeout}.
 | --- | --- |
 | Exit code | `8` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/inbox](/docs/guides/inbox/) |
+| More | [guides/inbox](/docs/guides/inbox) |
 
 ### AF-NET-012
 
@@ -918,7 +944,7 @@ The webhook could not be delivered to {service}: {detail}
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/webhooks](/docs/guides/webhooks/) |
+| More | [guides/webhooks](/docs/guides/webhooks) |
 
 ### AF-NET-013
 
@@ -930,7 +956,7 @@ The environment tried to reach {hosts}, which nothing in the manifest mentions.
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/verdicts](/docs/concepts/verdicts/) |
+| More | [concepts/verdicts](/docs/concepts/verdicts) |
 
 ## Differential oracle
 
@@ -944,7 +970,7 @@ The manifest declares no oracle block, so there is nothing to compare.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-002
 
@@ -956,7 +982,7 @@ The oracle is on and declares no requests to send.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-003
 
@@ -968,7 +994,7 @@ The baseline revision could not be resolved: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-004
 
@@ -980,7 +1006,7 @@ The baseline and the candidate are both {commit}, so there is nothing to compare
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-005
 
@@ -992,7 +1018,7 @@ The baseline revision {commit} could not be checked out: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-006
 
@@ -1004,7 +1030,7 @@ There is no web service to send requests to in the {side} environment.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-007
 
@@ -1016,7 +1042,7 @@ The baseline environment did not come up: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-008
 
@@ -1028,7 +1054,7 @@ The {side} branch could not be read for comparison: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-009
 
@@ -1040,7 +1066,7 @@ The golden version {version} the comparison pinned is no longer present or no lo
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ### AF-ORC-010
 
@@ -1052,7 +1078,7 @@ The candidate behaves differently from the baseline: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/oracle](/docs/concepts/oracle/) |
+| More | [concepts/oracle](/docs/concepts/oracle) |
 
 ## Runtime
 
@@ -1066,7 +1092,7 @@ The command '{command}' is not available in this version.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli](/docs/reference/cli/) |
+| More | [reference/cli](/docs/reference/cli) |
 
 ### AF-RUN-002
 
@@ -1078,7 +1104,7 @@ The Docker daemon at {endpoint} could not be reached.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-003
 
@@ -1090,7 +1116,7 @@ Another Antifailure process holds the lock for this branch (process {pid}, since
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/journal](/docs/concepts/journal/) |
+| More | [concepts/journal](/docs/concepts/journal) |
 
 ### AF-RUN-004
 
@@ -1102,7 +1128,7 @@ Service {service} did not become ready within {timeout}.
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-005
 
@@ -1114,7 +1140,7 @@ Service {service} exited with code {code} during startup.
 | --- | --- |
 | Exit code | `1` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-009
 
@@ -1126,7 +1152,7 @@ No free port was found in the range {range} to publish the environment on.
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-010
 
@@ -1138,7 +1164,7 @@ Writing to {path} failed because the disk is full; {needed} is required.
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-020
 
@@ -1150,7 +1176,7 @@ Docker has no room left for the environment: {detail}
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-030
 
@@ -1162,7 +1188,7 @@ The environment could not be torn down completely; {count} resources are still r
 | --- | --- |
 | Exit code | `10` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/journal](/docs/concepts/journal/) |
+| More | [concepts/journal](/docs/concepts/journal) |
 
 ### AF-RUN-040
 
@@ -1174,7 +1200,7 @@ The environment could not be placed: {detail}
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ### AF-RUN-041
 
@@ -1186,7 +1212,7 @@ The services depend on each other in a cycle: {cycle}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-RUN-042
 
@@ -1198,7 +1224,7 @@ Service {service} depends on {missing}, which the manifest does not declare.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/manifest](/docs/reference/manifest/) |
+| More | [reference/manifest](/docs/reference/manifest) |
 
 ### AF-RUN-043
 
@@ -1210,7 +1236,7 @@ This cluster is not containing the environment: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime) |
 
 ### AF-RUN-044
 
@@ -1222,7 +1248,7 @@ This runtime cannot do that: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime) |
 
 ### AF-RUN-045
 
@@ -1234,7 +1260,7 @@ This runtime cannot do that: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime/) |
+| More | [guides/kubernetes-runtime](/docs/guides/kubernetes-runtime) |
 
 ### AF-RUN-046
 
@@ -1246,7 +1272,7 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/local-runtime](/docs/guides/local-runtime/) |
+| More | [guides/local-runtime](/docs/guides/local-runtime) |
 
 ## Secrets
 
@@ -1260,7 +1286,7 @@ The variables {names} are declared in the manifest but were not found in any con
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
+| More | [guides/secrets](/docs/guides/secrets) |
 
 ### AF-SEC-002
 
@@ -1272,7 +1298,7 @@ The credential for {source} was rejected after one refresh: {detail}
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
+| More | [guides/secrets](/docs/guides/secrets) |
 
 ### AF-SEC-003
 
@@ -1284,7 +1310,7 @@ The value supplied for {name} carries a live credential prefix, and {name} is co
 | --- | --- |
 | Exit code | `6` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
+| More | [guides/secrets](/docs/guides/secrets) |
 
 ### AF-SEC-004
 
@@ -1296,7 +1322,7 @@ The encrypted local store has no passphrase: no system keyring answered and AF_S
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/secrets](/docs/guides/secrets/) |
+| More | [guides/secrets](/docs/guides/secrets) |
 
 ### AF-SEC-010
 
@@ -1308,7 +1334,7 @@ The environment certificate could not be created: {detail}
 | --- | --- |
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/egress](/docs/concepts/egress/) |
+| More | [concepts/egress](/docs/concepts/egress) |
 
 ## Workloads
 
@@ -1322,7 +1348,7 @@ There is no workload kind called {kind}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-002
 
@@ -1334,7 +1360,7 @@ The {kind} kind cannot set {knobs}.
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-003
 
@@ -1346,7 +1372,7 @@ The {knob} value {value} is not what this workload's command takes: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-004
 
@@ -1358,7 +1384,7 @@ The {kind} kind must name what it runs: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-010
 
@@ -1370,7 +1396,7 @@ The exploration {exploration} cannot be promoted: {detail}
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-011
 
@@ -1382,7 +1408,7 @@ These two workload results cannot be compared: {detail}
 | --- | --- |
 | Exit code | `2` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-012
 
@@ -1394,7 +1420,7 @@ The workload found a failure: {detail}
 | --- | --- |
 | Exit code | `8` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-013
 
@@ -1406,7 +1432,7 @@ The workload proved nothing: {detail}
 | --- | --- |
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 
 ### AF-WLD-014
 
@@ -1418,5 +1444,5 @@ The workload did not finish: {detail}
 | --- | --- |
 | Exit code | `9` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [concepts/workloads](/docs/concepts/workloads/) |
+| More | [concepts/workloads](/docs/concepts/workloads) |
 

@@ -170,5 +170,5 @@ exists to have.
 
 ## See also
 
-- [Agents](/docs/concepts/agents/), for declared workflows and the verdicts
-- [Workflows](/docs/guides/workflows/), for writing the block an exploration compiles into
+- [Agents](/docs/concepts/agents), for declared workflows and the verdicts
+- [Workflows](/docs/guides/workflows), for writing the block an exploration compiles into

@@ -2,7 +2,7 @@
 title: A job failed
 description: The bootstrap job or the maintenance job reported a failed execution.
 sidebar:
-  order: 16
+  order: 17
 ---
 
 **Alerts:** `bootstrap-job-failed` and `maintenance-job-failed`. **Severity 1.**

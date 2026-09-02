@@ -72,14 +72,14 @@ reading the words.
 
 `providers.write` lets a terminal store, rotate, remove and cap a key. There is
 no scope that reads one back, and there is no route that would serve it. See
-[Your own provider keys](/docs/guides/provider-keys/).
+[Your own provider keys](/docs/guides/provider-keys).
 
 `tokens.manage` lets a terminal mint, list and revoke the engine tokens a CI job
 presents. It is what running your own control plane needs, and it is the reason the two lists
 differ: a token from a plain `af login` cannot make another credential, and
 neither can an engine token, so only a person who is an owner or an admin right
 now can mint one. See [Connecting an
-engine](/docs/self-hosting/control-plane/#connecting-an-engine).
+engine](/docs/self-hosting/control-plane#connecting-an-engine).
 
 Scope is decided by the control plane from a closed list and is recorded when
 the login starts, so approving cannot widen it and asking for something that

@@ -210,5 +210,5 @@ for a reason nobody can see.
 Use them to reach states that are otherwise hard to arrange. A persona that has
 never onboarded is one line here and twenty minutes of clicking otherwise.
 
-Related: [workflows](/docs/guides/workflows/), [the inbox](/docs/guides/inbox/),
-[agents](/docs/concepts/agents/).
+Related: [workflows](/docs/guides/workflows), [the inbox](/docs/guides/inbox),
+[agents](/docs/concepts/agents).

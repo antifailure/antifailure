@@ -2,7 +2,7 @@
 title: Database CPU
 description: The server has averaged more than 80 percent CPU for half an hour.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 **Alert:** `database-cpu`. **Severity 3.** This is a morning problem.

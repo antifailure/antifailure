@@ -151,6 +151,8 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relnotes
+/relpack
 /reltar
 /sbomcheck
 /scanrepo
@@ -158,6 +160,7 @@ runner/artifacts/
 /sidebarcheck
 /site
 /statuscheck
+/tagsync
 /varcheck
 /vulncheck
 /walkthrough

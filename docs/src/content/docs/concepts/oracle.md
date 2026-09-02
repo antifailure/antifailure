@@ -2,7 +2,7 @@
 title: The differential oracle
 description: Run a change beside the version it replaces, on the same data, and report what the two did differently.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 A test says whether the application does what you told it to. The oracle says
@@ -17,7 +17,7 @@ ended up in the database.
 ```
 af oracle
 af oracle --baseline v2.4.0
-af oracle --keep -o oracle.md
+af oracle --keep --report oracle.md
 ```
 
 ## What is compared, and what is not

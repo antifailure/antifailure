@@ -121,4 +121,4 @@ Each is named in the license, so a license permits exactly what was bought.
 Contributions are under the DCO, not a CLA. You keep your copyright. See
 `CONTRIBUTING.md`.
 
-Related: [policy](/docs/enterprise/policy/), [runtimes](/docs/enterprise/runtimes/).
+Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes).

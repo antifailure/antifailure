@@ -63,7 +63,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 // `/docs`, not `/docs/`. www/lib/nav.ts writes the slashless form and the host
 // redirects the other one, so the trailing slash made the site's own Docs link
 // the only navigation on antifailure.dev that costs a round trip.
-const docsHome = base || "/";
+const docsHome = base || "/docs";
 
 // Docs is the current SECTION on all 82 pages and the current PAGE on exactly
 // one of them. `aria-current="page"` was hardcoded true, so a screen reader
@@ -73,6 +73,12 @@ const here = Astro.url.pathname.replace(/\/$/, "") || "/";
 const nav = [
   { text: "Product", href: "/product" },
   { text: "Solutions", href: "/solutions" },
+  // Two fixes on one line. `base`, not `${base}/`: the host sets
+  // "trailingSlash": "never", so the slashed form 301s, and this is the Docs
+  // link in the header of all 82 documentation pages, which made it the
+  // most-served redirect on the site. And `current` is computed rather than
+  // hardcoded true, so the one page that IS the Docs home says "page" and the
+  // other 81, for which Docs is the section and not the page, say "true".
   { text: "Docs", href: docsHome, current: here === docsHome ? "page" : "true" },
   { text: "Writing", href: "/blog" },
   { text: "Pricing", href: "/pricing" },

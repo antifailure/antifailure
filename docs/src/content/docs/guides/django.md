@@ -105,4 +105,4 @@ class Migration(migrations.Migration):
 Make it reversible. A migration nobody dares run twice is a migration nobody
 runs.
 
-Related: [building services](/docs/guides/build/), [masking](/docs/concepts/masking/).
+Related: [building services](/docs/guides/build), [masking](/docs/concepts/masking).

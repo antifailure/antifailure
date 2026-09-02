@@ -51,6 +51,18 @@
       }
     },
     {
+      "route": "/openapi.json",
+      "headers": {
+        "cache-control": "public, max-age=3600"
+      }
+    },
+    {
+      "route": "/errors.v1.json",
+      "headers": {
+        "cache-control": "public, max-age=3600"
+      }
+    },
+    {
       "route": "/robots.txt",
       "headers": {
         "cache-control": "public, max-age=3600"
