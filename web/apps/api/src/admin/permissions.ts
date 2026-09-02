@@ -76,6 +76,26 @@ export const ADMIN_PERMISSIONS = [
   // none of them should be able to pause it.
   'admin.emergency.read',
   'admin.emergency.engage',
+
+  // The standing security posture: which credentials can currently act against
+  // this installation, how people sign in to it, and who holds an operator
+  // account. One read rather than a read per mechanism, because engine tokens,
+  // provider keys, OIDC bindings and SSO are four tables answering one
+  // question, and an operator who can see three of them and not the fourth
+  // cannot answer it.
+  'admin.security.read',
+
+  // What the company holds about a named person, and the erasure requests it
+  // has been asked for. SEPARATE FROM admin.security.read on purpose: seeing
+  // that a credential exists and seeing what data is held about an individual
+  // customer are different jobs, and the second is the one a data protection
+  // request is answered from.
+  'admin.governance.read',
+  // Producing the file. Reading a subject's data map answers a question in the
+  // room; exporting it makes a document about a named individual that leaves
+  // the system, which is the same reasoning that keeps admin.audit.export off
+  // every role but two.
+  'admin.governance.export',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -108,7 +128,12 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.webhooks': 'infra',
   'admin.keys': 'infra',
   'admin.logs': 'infra',
-  'admin.security': 'infra',
+  // Claimed by the security lane rather than infra, which reserved the string
+  // and did not use it: origin/w-admin-infra's four permissions are all under
+  // admin.infra and admin.emergency. The Security Center page is the natural
+  // owner of the prefix and its routes are mounted at admin.security.
+  'admin.security': 'security',
+  'admin.governance': 'security',
   'admin.emergency': 'infra',
 }
 
@@ -138,6 +163,16 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.operators.write': 'Create operators, change their role, and suspend them.',
   'admin.audit.read': 'Read the platform audit chain.',
   'admin.audit.export': 'Export the platform audit chain and verify its hashes.',
+  'admin.security.read':
+    'See every standing credential on this installation, how each organization signs in, which ' +
+    'operator accounts exist, and which operator sessions are currently acting as a customer.',
+  'admin.governance.read':
+    'See what personal data this installation holds about a named person and where it lives, ' +
+    'every organization erasure that has been asked for, and the masking rules customers have ' +
+    'declared over their own data.',
+  'admin.governance.export':
+    'Produce a file describing what is held about a named person. A document about an ' +
+    'individual that leaves the system.',
   'admin.infra.read':
     'See system health, every environment running on this installation, the teardown ledger, ' +
     'and the egress rules across every organization.',
@@ -216,6 +251,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.tenants.read', 'admin.tenants.suspend', 'admin.tenants.plan',
     'admin.users.read', 'admin.users.write',
     'admin.sessions.read', 'admin.sessions.revoke',
+    // Sees the credential inventory and the data map. Not the export: a
+    // document about a named individual leaving the system is held by the two
+    // roles that answer for what happened, the same split audit.export makes.
+    'admin.security.read', 'admin.governance.read',
     'admin.infra.read', 'admin.infra.teardown',
     // The only role besides owner that may stop the installation. Gated on the
     // permission rather than on rank: ordering roles and comparing ranks is how
@@ -230,6 +269,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // product one, and the people holding the pager have to be able to reach
     // it without finding somebody from billing at three in the morning.
     'admin.flags.read', 'admin.flags.write',
+    // The credential inventory, because expiring an engine token and finding
+    // the one nobody has used are infrastructure work. Not governance: what is
+    // held about a named person is not a question this role answers.
+    'admin.security.read',
     'admin.infra.read', 'admin.infra.teardown',
     // Sees the switches, cannot throw them. An infrastructure operator
     // debugging "their runs will not start" must be able to discover that runs
@@ -248,6 +291,12 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
     'admin.infra.read', 'admin.emergency.read',
+    // The lane this role is named for. Both halves of governance, including
+    // the export, for the same reason it holds admin.audit.export: a security
+    // team that can read an incident's trail and cannot produce it for an
+    // investigation or for counsel is not much use, and answering a data
+    // protection request is exactly that job on a deadline.
+    'admin.security.read', 'admin.governance.read', 'admin.governance.export',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -266,6 +315,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // Support answers "why was I charged this" every day and must never be the
     // rota that can refund. Read without write is the whole point of the split.
     'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
+    // "I asked to be deleted three weeks ago and I am still being billed" is a
+    // support ticket before it is anything else, and answering it means seeing
+    // which step the erasure is stuck on. Read only, and no export.
+    'admin.governance.read',
   ],
   analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
   read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],

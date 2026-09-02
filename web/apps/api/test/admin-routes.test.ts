@@ -36,7 +36,13 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 18,
+    // Raised from 18 by admin-security, which adds nine routes under
+    // admin.security and two under admin.audit. This is the count this branch
+    // actually serves, not a round number: a floor that lags what is mounted
+    // stops being a floor, and the failure it guards against is a lane whose
+    // routes silently stopped being walked by the matrix. Every lane that adds
+    // routes raises it, so a merge takes the higher of two numbers.
+    atLeast: 53,
   })
 })
 

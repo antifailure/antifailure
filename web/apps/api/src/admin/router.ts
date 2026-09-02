@@ -38,6 +38,12 @@ import { operationsRouter } from './operations.ts'
 import { platformRouter } from './platform.ts'
 import { productRouter } from './product.ts'
 import { securityRouter } from './security.ts'
+// A second import line from the same module, deliberately. admin-namespaces
+// .test.ts matches `import { securityRouter } from './security.ts'` exactly, so
+// that a lane's mount and the file that owns it cannot be made to disagree by a
+// copy and paste. Widening that line to carry a second name would defeat the
+// check, so the audit chain routes come in on their own.
+import { auditChainRoutes } from './security.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
   adminBillingRouter,
@@ -807,6 +813,14 @@ export const adminRouter = router({
           occurredAt: iso(r.occurred_at),
         }))
       }),
+
+    // admin-security. Spread rather than mounted under a key of their own,
+    // because these two belong to admin.audit: the permission they declare is
+    // admin.audit.export, the console reaches them beside admin.audit.list, and
+    // a new key would file the chain's export somewhere other than the chain.
+    // They live in security.ts so that lane owns its own file, and the spread
+    // is a visible one line edit here rather than an invisible second mount.
+    ...auditChainRoutes,
   }),
 
   // ---------------------------------------------------------------------------
