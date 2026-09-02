@@ -113,7 +113,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
-| `version` | `14`, `15`, `16`, `17` | no | Postgres major version. Must match the source, because a dump does not restore across majors. Defaults to `17`. |
+| `version` | `14`, `15`, `16`, `17`, `18` | no | Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not. Defaults to `17`. |
 
 ## Egress
 

@@ -226,6 +226,20 @@ variable "signin_allowlist" {
   description = "GitHub logins that may sign in. Empty means nobody. There is no value that means everybody."
 }
 
+# Where a refused person is sent instead.
+#
+# The allowlist decides who gets in. This decides what the ones it turns away
+# see, and it is the difference between a closed door and a closed door with a
+# note on it. Empty is the right answer for any installation that does not run
+# a waitlist: the refusal page then names who to ask rather than inventing a
+# link. Our own instances point at the request page on the marketing site,
+# which is the list the visitor was standing one click away from.
+variable "signup_url" {
+  type        = string
+  default     = ""
+  description = "Where somebody the allowlist refuses is sent to ask for access. Empty means the refusal page offers no link."
+}
+
 # The secret that seals customers' provider keys, 32 bytes.
 #
 # Not a variable anybody types. Terraform generates it, Key Vault holds it, and
