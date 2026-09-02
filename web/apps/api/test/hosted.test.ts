@@ -62,6 +62,26 @@ describe('the hosted plan configuration', () => {
     assert.throws(() => githubAppInstallUrlFrom('javascript:alert(1)'), /must be an https/)
     assert.throws(() => githubAppInstallUrlFrom('https://example.com/install'), /must be an https/)
   })
+
+  it('is off when unset, because a plane with no App of its own is not misconfigured', () => {
+    assert.equal(githubAppInstallUrlFrom(undefined), undefined)
+    assert.equal(githubAppInstallUrlFrom(null), undefined)
+    assert.equal(githubAppInstallUrlFrom(''), undefined)
+    assert.equal(githubAppInstallUrlFrom('   '), undefined)
+  })
+
+  it('names the variable and the shape when the value is not a URL at all', () => {
+    // The bare `new URL` throw is `Invalid URL`, which names neither. An
+    // operator meeting that in a start-up crash loop has to read the source to
+    // learn which of a dozen variables was wrong.
+    for (const bad of ['github.com/apps/af/installations/new', 'not a url', '/apps/af']) {
+      assert.throws(
+        () => githubAppInstallUrlFrom(bad),
+        /AF_GITHUB_APP_INSTALL_URL must be an https/,
+        `expected the shape message for ${JSON.stringify(bad)}`,
+      )
+    }
+  })
 })
 
 describe('starting up with the gate set', {

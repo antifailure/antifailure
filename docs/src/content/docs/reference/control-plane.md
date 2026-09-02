@@ -37,7 +37,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
 | `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
 | `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
-| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action instead of a dead-end empty state. Any other origin or path stops the process at startup. |
+| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action. When it is unset they are told the address has not been configured and are still offered **Check my GitHub membership**, which never depended on it. Either way the startup log says which. Any other origin or path, or a value that is not a URL, stops the process at startup. |
 | `AF_SIGNUP_URL` | unset | Where somebody `AF_SIGNIN_ALLOWLIST` refuses is sent instead. A refused sign-in renders a page rather than a JSON body, and when this is set that page carries one link to it. Unset is the self-hosted default and means the page offers no link: an operator running an allowlist has their own way of being asked, and pointing their users at somebody else's waitlist would be wrong. Must be an absolute `http` or `https` address, or the process stops at startup. |
 | `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
 | `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
@@ -93,6 +93,33 @@ the App on an organization, then choose **Check my GitHub membership**. The
 second OAuth exchange reads the installation GitHub just created and grants the
 membership. The first GitHub administrator to claim an empty organization
 becomes its owner under the rule below.
+
+When it is **unset**, that path still exists but nobody can start it from the
+console. The screen says the address has not been configured and offers **Check
+my GitHub membership** on its own, which is the right action for somebody who
+already belongs to a connected organization and the wrong one for somebody who
+does not. Unset is a supported state rather than a half configuration, because
+a self-hosted control plane may grant membership its own way and have no App to
+point at. It is not the right state for a plane with open sign-ups, and the
+startup log names it either way so an operator can tell which they have.
+
+### Getting the address
+
+It is the App's public installation page, and only a human with owner access to
+the GitHub organization that owns the App can produce it.
+
+1. Open the App's settings under the owning organization, at **Settings**, then
+   **Developer settings**, then **GitHub Apps**.
+2. If no App exists yet, create one. It needs the same App ID, private key and
+   webhook secret that `AF_GITHUB_APP_ID`, `AF_GITHUB_APP_PRIVATE_KEY` and
+   `AF_GITHUB_APP_WEBHOOK_SECRET` already document, so create it once and take
+   all four values in the same sitting.
+3. Set the App to **Any account** under Install App, not just the owning
+   account. An App only its owner can install is an App no customer can install.
+4. Read the slug out of the App's public page URL, `https://github.com/apps/<slug>`.
+   It is derived from the App name and is not always what you would guess.
+5. The value is that address with `/installations/new` on the end, and nothing
+   else. No query string and no fragment: both are refused at startup.
 
 On an enterprise-only hosted deployment that owner lands on Plan. Checkout is
 the only path that can grant the required plan; `billing.set` is refused, so an
