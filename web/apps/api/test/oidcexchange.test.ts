@@ -494,17 +494,72 @@ describe(
     // THE ONE THAT MATTERS
     // -----------------------------------------------------------------------
 
-    test('a genuine identity for an unclaimed repository is refused', async () => {
-      // Signed by the same key as every accepted token in this file, with a
-      // true `repository` claim, the right audience, the right issuer and a
-      // live expiry. Everything about it is valid. Nobody has claimed the
-      // repository, so it grants nothing.
-      const attackers = `${owner}/nobody-claimed-this`
-      const refused = await exchange(identityToken({ repository: attackers }, api.clock.now()))
+    test('an unclaimed repository under an installed owner is claimed for that org', async () => {
+      // The synthesis. Nobody typed a claim for this repository, and it gets
+      // one, because GitHub already said who controls the account: the
+      // installation row is written only by an HMAC-verified delivery, which is
+      // the same evidence a manual claim is checked against and one step fewer.
+      const fresh = `${owner}/nobody-claimed-this`
+      const issued = await exchange(identityToken({ repository: fresh }, api.clock.now()))
+      assert.equal(issued.status, 200, JSON.stringify(issued.json))
+      assert.equal(issued.json.org_id, org.orgId, 'the synthesized claim landed in the wrong org')
+
+      // A real row, in the right tenant, audited as installation-derived rather
+      // than as somebody's decision, because a year from now the question is on
+      // what evidence this repository was allowed to report.
+      const rows = await api.admin<{ org_id: string }[]>`
+        SELECT org_id FROM oidc_repository_bindings
+        WHERE repository = ${fresh} AND revoked_at IS NULL`
+      assert.equal(rows.length, 1)
+      assert.equal(rows[0]!.org_id, org.orgId)
+      const audited = await api.admin<{ detail: Record<string, unknown> }[]>`
+        SELECT detail FROM audit_entries
+        WHERE org_id = ${org.orgId} AND action = 'oidc_binding.created'`
+      assert.equal(audited.length, 1)
+      assert.equal(audited[0]!.detail.source, 'installation')
+    })
+
+    test('an owner two organizations have installed on is refused, not guessed at', async () => {
+      // `github_installations.account_login` carries no unique constraint, so
+      // two organizations CAN hold installations on one account. Picking one
+      // would be a tenancy decision made by row order, which is precisely the
+      // defect this table replaced. Ambiguity refuses and sends the customer to
+      // the manual claim, where a person decides.
+      await api.admin`
+        INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+        VALUES (${other.orgId}, ${installationId()}, ${owner}, 'Organization')`
+      try {
+        const contested = `${owner}/two-installations-claim-me`
+        const refused = await exchange(identityToken({ repository: contested }, api.clock.now()))
+        assert.equal(refused.status, 403, JSON.stringify(refused.json))
+        assert.equal(refused.json.reason, 'no_binding')
+        assert.equal(await liveExchangedTokens(), 0)
+        const rows = await api.admin<{ n: string }[]>`
+          SELECT count(*) AS n FROM oidc_repository_bindings WHERE repository = ${contested}`
+        assert.equal(Number(rows[0]!.n), 0, 'an ambiguous owner still minted a claim')
+      } finally {
+        await api.admin`
+          DELETE FROM github_installations
+          WHERE org_id = ${other.orgId} AND lower(account_login) = ${owner}`
+      }
+    })
+
+    test('synthesis never takes a repository another organization already claims', async () => {
+      // The claim is held by `other`, and `org` holds the installation on the
+      // owner. The installation must not be able to overrule a live claim, or
+      // an organization could take a repository simply by installing the App.
+      const contested = `${owner}/already-spoken-for`
+      await api.admin`
+        INSERT INTO oidc_repository_bindings (org_id, repository)
+        VALUES (${other.orgId}, ${contested})`
+      const refused = await exchange(identityToken({ repository: contested }, api.clock.now()))
       assert.equal(refused.status, 403, JSON.stringify(refused.json))
       assert.equal(refused.json.reason, 'no_binding')
-      assert.equal(refused.json.token, undefined, 'a refusal returned a credential')
-      assert.equal(await liveExchangedTokens(), 0, 'a refusal minted a credential anyway')
+      const rows = await api.admin<{ org_id: string }[]>`
+        SELECT org_id FROM oidc_repository_bindings
+        WHERE repository = ${contested} AND revoked_at IS NULL`
+      assert.equal(rows.length, 1)
+      assert.equal(rows[0]!.org_id, other.orgId, 'the claim was taken from the org that held it')
     })
 
     test("a repository owned by a stranger cannot reach anybody's organization", async () => {
@@ -530,10 +585,21 @@ describe(
       // repository next door.
       assert.equal((await claim(repository)).status, 201)
       const sibling = `${owner}/a-repository-nobody-claimed`
-      const refused = await exchange(identityToken({ repository: sibling }, api.clock.now()))
-      assert.equal(refused.status, 403, JSON.stringify(refused.json))
-      assert.equal(refused.json.reason, 'no_binding')
-      assert.equal(await liveExchangedTokens(), 0)
+      const issued = await exchange(identityToken({ repository: sibling }, api.clock.now()))
+      assert.equal(issued.status, 200, JSON.stringify(issued.json))
+
+      // The sibling gets in, because the same installation covers it, and that
+      // is the approved behaviour. What must NOT happen is one claim covering
+      // both: each repository gets its own row, so revoking one leaves the
+      // other alone and the audit says which was allowed when.
+      const rows = await api.admin<{ repository: string }[]>`
+        SELECT repository FROM oidc_repository_bindings
+        WHERE org_id = ${org.orgId} AND revoked_at IS NULL ORDER BY repository`
+      assert.deepEqual(
+        rows.map((r) => r.repository).sort(),
+        [sibling, repository].sort(),
+        'a claim on one repository covered its neighbour instead of each having its own',
+      )
     })
 
     test("one organization's claim does not let another organization's repository in", async () => {
@@ -541,11 +607,16 @@ describe(
       // valid identity for it must not resolve to A merely because A holds a
       // claim on something.
       assert.equal((await claim(repository)).status, 201)
-      const refused = await exchange(
+      const issued = await exchange(
         identityToken({ repository: `${otherOwner}/app` }, api.clock.now()),
       )
-      assert.equal(refused.status, 403)
-      assert.equal(refused.json.reason, 'no_binding')
+      // It resolves, because the OTHER organization has the installation on
+      // that owner. The property under test is where it lands, not whether it
+      // is refused: holding a claim on something must never widen an
+      // organization's reach to a repository it does not control.
+      assert.equal(issued.status, 200, JSON.stringify(issued.json))
+      assert.equal(issued.json.org_id, other.orgId)
+      assert.notEqual(issued.json.org_id, org.orgId, 'a repository resolved into the wrong tenant')
     })
 
     test('a claim resolves to the organization that made it and to no other', async () => {

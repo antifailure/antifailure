@@ -201,7 +201,7 @@ export async function exchangeWorkflowIdentity(
   }
 
   // 3. Which organization, if any, has claimed it. On a connection scoped to
-  //    the account out of the verified token, so the policy in 0023 can only
+  //    the account out of the verified token, so the policy in 0027 can only
   //    reach bindings held by organizations with an installation on that
   //    account: a bug here writes nothing into somebody else's tenant.
   const rows = await deps.pool.withGitHubAccount(owner, async (db) => {
@@ -212,13 +212,17 @@ export async function exchangeWorkflowIdentity(
     }>(sql`
       SELECT id, org_id, revoked_at FROM oidc_repository_bindings
       WHERE repository = ${repository}`)
-    const live = await db.execute<{ n: string }>(sql`
-      SELECT count(*) AS n FROM github_installations
+    // The organizations GitHub says control this account. Distinct org ids
+    // rather than a count, because how MANY there are decides whether a
+    // binding can be synthesized below, and one is the only answer that lets
+    // it happen.
+    const live = await db.execute<{ org_id: string }>(sql`
+      SELECT DISTINCT org_id FROM github_installations
       WHERE lower(account_login) = ${owner} AND suspended_at IS NULL`)
-    return { bindings, installed: Number(live[0]?.n ?? 0) > 0 }
+    return { bindings, installedOrgs: live.map((r) => r.org_id) }
   })
 
-  const binding = rows.bindings.find((b) => !b.revoked_at)
+  let binding = rows.bindings.find((b) => !b.revoked_at)
   if (!binding) {
     if (rows.bindings.length > 0) {
       // A claim that existed and was withdrawn. Named separately because the
@@ -230,19 +234,28 @@ export async function exchangeWorkflowIdentity(
           'control plane. An owner or admin of the organization can claim it again.',
       )
     }
+    // Nothing has claimed it. Before refusing, see whether GitHub has already
+    // said who controls it: an installation is HMAC-verified evidence of
+    // exactly the thing a manual claim asserts, so making the customer retype
+    // it is a step that proves nothing new.
+    binding = (await synthesizeBinding(deps, repository, owner, rows.installedOrgs)) ?? undefined
+  }
+  if (!binding) {
     // Both "nobody claimed it" and "the organization that did no longer has the
     // App on this account" land here, because the second one is invisible to
     // this connection by design. The sentence covers both rather than guessing.
     throw new ExchangeRefused(
       'no_binding',
       403,
-      `No organization has claimed ${repository}, or the organization that did no longer has ` +
-        `the Antifailure GitHub App installed on ${owner}. An owner or admin claims a ` +
-        'repository once, and until then a workflow identity for it is refused: a signed ' +
-        'token proves which repository a job runs in and not who that repository belongs to.',
+      `No organization has claimed ${repository}, and this control plane could not work out ` +
+        `who should own it. That happens when no organization has the Antifailure GitHub App ` +
+        `installed on ${owner}, when more than one has, or when another organization already ` +
+        `holds the claim. An owner or admin can claim it directly. A signed token proves which ` +
+        'repository a job runs in and not who that repository belongs to, so the claim is what ' +
+        'grants access rather than the signature.',
     )
   }
-  if (!rows.installed) {
+  if (rows.installedOrgs.length === 0) {
     throw new ExchangeRefused(
       'installation_suspended',
       403,
@@ -295,6 +308,85 @@ export async function exchangeWorkflowIdentity(
   })
 
   return { token, expiresAt, orgId: binding.org_id, repository }
+}
+
+/**
+ * Creates the claim GitHub has already implied, or returns null.
+ *
+ * WHY THIS IS NOT A HOLE IN THE THING THE BINDING EXISTS FOR. The binding
+ * answers "may this repository report as this organization", and the answer has
+ * to come from evidence rather than from the token. An installation IS that
+ * evidence, and it is stronger than the manual claim it replaces: a
+ * `github_installations` row is written only by a delivery whose HMAC has been
+ * checked, so it is GitHub asserting the organization controls that account,
+ * where the manual claim is a person typing a name and being checked against
+ * the same installation afterwards. Same evidence, one fewer step.
+ *
+ * WHY ON THE EXCHANGE AND NOT ON THE DELIVERY. Installing the App commonly
+ * means every repository in the organization, so minting a binding per
+ * `installation_repositories` delivery would hand the first broad installer a
+ * live claim on hundreds of names it will never run. Each of those holds the
+ * GLOBAL unique index, so a different organization that legitimately runs one
+ * later is refused with `already_claimed` and cannot fix it without the first
+ * organization revoking. That is a land grab performed by an installation,
+ * which is close to the thing this table exists to prevent. Synthesizing here
+ * is strictly narrower: a claim exists only for a repository that actually ran
+ * a workflow and asked for a credential.
+ *
+ * EXACTLY ONE ORGANIZATION, or nothing. `github_installations.account_login`
+ * carries no unique constraint, so two organizations CAN hold installations on
+ * one account. Choosing between them would be a tenancy decision made by row
+ * order, which is the defect this whole design replaced. Ambiguity refuses and
+ * sends the customer to the manual claim, where a person decides.
+ *
+ * The write runs under the tenant rather than under the GitHub account scope,
+ * deliberately: migration 0027 gives the account scope SELECT and UPDATE and no
+ * INSERT, so a connection holding only a repository owner's name still cannot
+ * mint the permission. The organization is read from the verified installation
+ * first, and the row is written as that organization.
+ */
+async function synthesizeBinding(
+  deps: ExchangeDeps,
+  repository: string,
+  owner: string,
+  installedOrgs: readonly string[],
+): Promise<{ id: string; org_id: string; revoked_at: null } | null> {
+  if (installedOrgs.length !== 1) return null
+  const orgId = installedOrgs[0]!
+  const now = deps.clock.now()
+
+  return deps.pool.withTenant({ orgId }, async (db) => {
+    const created = await db.execute<{ id: string }>(sql`
+      INSERT INTO oidc_repository_bindings (org_id, repository, created_at)
+      VALUES (${orgId}::uuid, ${repository}, ${now.toISOString()})
+      ON CONFLICT (repository) WHERE revoked_at IS NULL DO NOTHING
+      RETURNING id`)
+
+    if (!created[0]) {
+      // Lost a race with a concurrent exchange for the same repository, or
+      // another organization holds the claim. The tenant policy tells the two
+      // apart for free: a row this transaction can see is ours.
+      const mine = await db.execute<{ id: string }>(sql`
+        SELECT id FROM oidc_repository_bindings
+        WHERE repository = ${repository} AND revoked_at IS NULL`)
+      return mine[0] ? { id: mine[0].id, org_id: orgId, revoked_at: null } : null
+    }
+
+    // Audited as installation-derived, because a year from now the question is
+    // who allowed this repository to report and on what evidence, and "nobody
+    // typed it, GitHub said so" is a different answer from a person claiming it.
+    await appendAudit(db, {
+      orgId,
+      actorLabel: `github installation on ${owner}`,
+      action: 'oidc_binding.created',
+      targetType: 'oidc_repository_binding',
+      targetId: created[0].id,
+      origin: 'github',
+      detail: { repository, source: 'installation', owner },
+      occurredAt: now,
+    })
+    return { id: created[0].id, org_id: orgId, revoked_at: null }
+  })
 }
 
 // ---------------------------------------------------------------------------
