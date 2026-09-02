@@ -186,6 +186,7 @@ terraform:modules/control-plane	variable	postgres_version	string	optional
 terraform:modules/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:modules/control-plane	variable	resource_group_name	string	required
 terraform:modules/control-plane	variable	signin_allowlist	list(string)	required
+terraform:modules/control-plane	variable	signup_url	string	optional
 terraform:modules/control-plane	variable	tags	map(string)	optional
 terraform:modules/control-plane	variable	vnet_cidr	string	optional
 terraform:modules/foundation	output	location	-	-
@@ -250,6 +251,7 @@ terraform:stacks/control-plane	variable	pool_max	number	optional
 terraform:stacks/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:stacks/control-plane	variable	resource_group_name	string	optional
 terraform:stacks/control-plane	variable	signin_allowlist	list(string)	required
+terraform:stacks/control-plane	variable	signup_url	string	optional
 terraform:stacks/control-plane	variable	subscription_id	string	required
 terraform:stacks/tfstate	output	backend_hcl	-	-
 terraform:stacks/tfstate	variable	ci_principal_id	string	optional

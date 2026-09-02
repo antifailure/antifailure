@@ -450,6 +450,63 @@ describe('the subprocessor page describes the code that exists', () => {
   })
 })
 
+describe('the site does not publish a mailbox that cannot receive mail', () => {
+  // The instance: the legal pages said "Security reports go to
+  // security@antifailure.dev today" and "security@antifailure.dev reaches a
+  // person who can act on it", while the CONTACT PAGE OF THE SAME SITE carried
+  // a callout titled "Email is not a contact route" saying the domain has no
+  // mail exchanger and its SPF policy authorises no senders. Both were live on
+  // antifailure.dev at once, and the contact page is the one telling the truth:
+  //
+  //   $ dig +short MX antifailure.dev     (empty)
+  //   $ dig +short TXT antifailure.dev    "v=spf1 -all"
+  //
+  // The class: a published address is a promise that somebody is on the other
+  // end of it. Publishing one at a domain that cannot receive mail sends a
+  // security researcher, a person asking for their data to be deleted, and a
+  // customer with a problem all into the same silence, and none of them can
+  // tell. It is worse than saying nothing, because saying nothing at least
+  // makes them look for another route.
+  //
+  // This asserts the property rather than the two sentences that were wrong,
+  // because a list of known-bad sentences is what let the third one through
+  // further up this file.
+  const PAGES = [
+    'www/components/pages/company/Legal.tsx',
+    'www/components/pages/company/Contact.tsx',
+  ]
+
+  for (const page of PAGES) {
+    it(`publishes no address at antifailure.dev in ${path.basename(page)}`, async () => {
+      const text = await read(page)
+      const found = [...text.matchAll(/[A-Za-z0-9._%+-]+@antifailure\.dev/g)].map((m) => m[0])
+      assert.deepEqual(
+        [...new Set(found)],
+        [],
+        `${page} publishes an address at a domain with no mail exchanger. Mail sent there is ` +
+          `delivered nowhere, and the site's own contact page says so. Name the route that ` +
+          `works, which today is GitHub private vulnerability reporting, or add an MX record ` +
+          `and a mailbox first.`,
+      )
+    })
+  }
+
+  it('is reading pages that mention the domain at all, so an empty result means something', async () => {
+    // The negative control on the parse. A renamed or moved file reads as an
+    // empty string here and every assertion above passes over nothing, which is
+    // exactly the failure mode this file warns about at the top.
+    for (const page of PAGES) {
+      const text = await read(page)
+      assert.match(
+        text,
+        /antifailure\.dev/,
+        `${page} no longer mentions the domain at all, so the check above is reasoning about ` +
+          `nothing. Either the file moved or the pattern stopped matching.`,
+      )
+    }
+  })
+})
+
 describe('the terms describe guards that are really in the engine', () => {
   /**
    * The terms page now makes four claims about what the software can touch,
@@ -646,6 +703,89 @@ describe('the acceptable use and developer policy pages describe real mechanisms
       access(path.join(repoRoot, 'engine/internal/mcp/engine.go')),
       'the developer policy devotes a section to the engine Model Context Protocol ' +
         'surface, and engine/internal/mcp is gone',
+    )
+  })
+})
+
+describe('the legal pages do not deny a control plane the webhook creates tenants in', () => {
+  /**
+   * THE CLAIM THAT WAS FALSE, and how it got there.
+   *
+   * /terms said "Sign-in is for the waitlist. There is no public production
+   * control plane yet", and /privacy said "Sign-in today is for the waitlist".
+   * Both were true when written and both stopped being true when the GitHub
+   * App started creating organizations.
+   *
+   * `rememberInstallation` in github/webhook.ts inserts into `organizations`
+   * on an installation delivery, and its own comment says why: an installation
+   * IS the moment a tenant begins. It consults no allowlist. The row lands on
+   * the plan the schema defaults to, which is a real plan with real quotas.
+   *
+   * The nuance the corrected wording carries, and the reason it is not simply
+   * "there is a public control plane": nothing can be SPENT in that
+   * organization until somebody signs in, because createEnvironment is an
+   * orgProcedure and orgProcedure runs requireActor. Sign-in is where the
+   * allowlist bites. So an organization can exist for an account nobody let
+   * in, and it can do nothing.
+   *
+   * This gate is keyed on the MECHANISM rather than on the sentence. It fails
+   * if a page denies a public control plane while the webhook still creates
+   * organizations, which is the combination that was published.
+   */
+  it('reads the webhook it is reasoning about, so an empty parse cannot pass', async () => {
+    const webhook = await read('web/apps/api/src/github/webhook.ts')
+    assert.ok(webhook.length > 500, 'github/webhook.ts did not load')
+    assert.match(
+      webhook,
+      /INSERT INTO organizations/,
+      'the webhook no longer creates organizations, so this gate is reasoning about a ' +
+        'mechanism that is gone and the pages it constrains may need rereading',
+    )
+  })
+
+  it('does not deny a control plane while an installation still creates a tenant', async () => {
+    const webhook = await read('web/apps/api/src/github/webhook.ts')
+    const createsTenants = /INSERT INTO organizations/.test(webhook)
+    if (!createsTenants) return
+
+    const pages = await read('www/components/pages/company/Legal.tsx')
+    const denials: [RegExp, string][] = [
+      [
+        /no public production control plane yet/i,
+        'installing the GitHub App creates an organization, so there is one',
+      ],
+      [
+        /[Ss]ign-in (?:today )?is for the waitlist/,
+        'signing in grants membership of an organization the App created, not a place on a list',
+      ],
+    ]
+    for (const [pattern, why] of denials) {
+      assert.ok(
+        !pattern.test(pages),
+        `a legal page denies something the code does: ${why}. rememberInstallation in ` +
+          `github/webhook.ts inserts into organizations on an installation delivery and ` +
+          `consults no allowlist.`,
+      )
+    }
+  })
+
+  it('keeps the spending guard the corrected wording relies on', async () => {
+    // The page says nothing can be run until somebody signs in. That is only
+    // true while creating an environment requires an actor, so the sentence
+    // and the middleware have to move together.
+    const dispatch = await read('web/apps/api/src/routers/dispatch.ts')
+    const trpc = await read('web/apps/api/src/trpc.ts')
+    assert.match(
+      dispatch,
+      /export const createEnvironment = orgProcedure\(/,
+      'createEnvironment is no longer an orgProcedure, so the claim on /terms that nothing ' +
+        'can be run in an organization until somebody signs in may no longer hold',
+    )
+    assert.match(
+      trpc,
+      /export function orgProcedure[\s\S]{0,200}requireActor/,
+      'orgProcedure no longer requires an actor, so an organization created by an ' +
+        'installation could act with nobody signed in, and /terms says it cannot',
     )
   })
 })

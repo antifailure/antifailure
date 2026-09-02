@@ -703,16 +703,52 @@ func (o *Orchestrator) verifyDatabase(
 				events.F("detector", f.Detector),
 				events.F("table", f.Schema+"."+f.Table), events.F("column", f.Column))
 		}
-		first := report.Findings[0]
-		return report, string(body), aferrors.Coded(aferrors.AFMSK002,
-			"detector", first.Detector, "table", first.Schema+"."+first.Table,
-			"column", first.Column)
+		// A skip with no findings reaches here now, and it did not before, so
+		// this index was safe and is not. Clean() used to ignore Skipped, which
+		// meant every path into this branch had at least one finding;
+		// report.Findings[0] on a report whose only problem is an unreadable
+		// column is an index out of range, and the fix for a silent pass would
+		// have been a panic. Findings first, because a column the scan READ and
+		// disliked is the more specific answer.
+		if len(report.Findings) > 0 {
+			first := report.Findings[0]
+			return report, string(body), aferrors.Coded(aferrors.AFMSK002,
+				"detector", first.Detector, "table", first.Schema+"."+first.Table,
+				"column", first.Column)
+		}
+		for _, skipped := range report.Skipped {
+			o.eventErr(s, events.MaskFinding,
+				"verification could not read "+skipped,
+				events.F("skipped", skipped))
+		}
+		// Safe because !Clean() with no findings means Skipped is non empty,
+		// which is Clean()'s definition and not an assumption about the caller.
+		table, column, detail := describeSkip(report.Skipped[0])
+		return report, string(body), aferrors.Coded(aferrors.AFMSK011,
+			"table", table, "column", column, "detail", detail)
 	}
 	o.event(s, events.MaskVerified,
 		fmt.Sprintf("verified %d columns across %d tables", report.Columns, report.Tables),
 		events.F("tables", report.Tables), events.F("columns", report.Columns),
 		events.F("rows_sampled", report.RowsSampled), events.F("verified", true))
 	return report, string(body), nil
+}
+
+// describeSkip splits one of verify.Scan's skipped lines into the fields the
+// error catalogue names.
+//
+// The line is "schema.table.column: reason", so the column is what follows the
+// LAST dot rather than the first: a schema qualified name has two, and cutting
+// on the first turns public.customers.notes into table "public" and column
+// "customers.notes". Written as its own function because that off by one is
+// invisible in an error nobody has triggered yet.
+func describeSkip(line string) (table, column, detail string) {
+	where, detail, _ := strings.Cut(line, ": ")
+	table, column = where, ""
+	if i := strings.LastIndex(where, "."); i >= 0 {
+		table, column = where[:i], where[i+1:]
+	}
+	return table, column, detail
 }
 
 // PlanResult is what af mask plan produced.

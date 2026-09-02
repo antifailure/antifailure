@@ -118,6 +118,7 @@ module "control_plane" {
   github_redirect_uri  = var.github_redirect_uri
 
   signin_allowlist            = var.signin_allowlist
+  signup_url                  = var.signup_url
   provider_key_secret_enabled = var.provider_key_secret_enabled
   github_app_id               = var.github_app_id
 

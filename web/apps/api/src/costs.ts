@@ -146,7 +146,12 @@ export function checkCostCap(
 }
 
 /** Two decimal places, so a refusal does not print sixteen. */
-function round(n: number): number {
+/** Two decimal places, so a verdict's numbers and its sentence agree.
+ *
+ *  Exported because the entitlement-aware verdicts report the same fields and a
+ *  second rounding helper beside this one is how two code paths start
+ *  disagreeing about the same number by a hundredth. */
+export function round(n: number): number {
   return Math.round(n * 100) / 100
 }
 
