@@ -5,7 +5,6 @@ import {
   Card,
   Empty,
   Loaded,
-  Page,
   Row,
   Table,
   TableSkeleton,
@@ -14,6 +13,7 @@ import {
   Th,
   When,
 } from "@/components/ui";
+import { AdminPage } from "@/components/admin/primitives";
 import { useOperators } from "@/lib/admin";
 
 /**
@@ -32,8 +32,8 @@ export default function AdminOperatorsPage() {
   const state = useOperators();
 
   return (
-    <Page
-      title="Operators"
+    <AdminPage
+      href="/admin/administration/admins"
       lede="Everybody who can sign in to this portal. An operator account can read every tenant, so this list is the blast radius of the platform's own credentials."
     >
       <Card>
@@ -107,6 +107,6 @@ export default function AdminOperatorsPage() {
           }
         </Loaded>
       </Card>
-    </Page>
+    </AdminPage>
   );
 }

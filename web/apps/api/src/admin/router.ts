@@ -32,6 +32,12 @@ import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
 import { emergencyRouter, infraRouter } from './infra.ts'
+import { administrationRouter } from './administration.ts'
+import { customersRouter } from './customers.ts'
+import { operationsRouter } from './operations.ts'
+import { platformRouter } from './platform.ts'
+import { productRouter } from './product.ts'
+import { securityRouter } from './security.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
   adminBillingRouter,
@@ -822,6 +828,32 @@ export const adminRouter = router({
   entitlements: adminEntitlementsRouter,
   flags: adminFlagsRouter,
   // ---------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // The six navigation groups, one module each, mounted here and nowhere else.
+  //
+  // The portal's twenty two sections are built by six people at once, and this
+  // is the arrangement that lets them: a group owns one module under this
+  // directory and one directory under console/app/admin, so two of them cannot
+  // land in the same file. Every one of these is empty today and every one is
+  // mounted anyway, because a namespace that is reserved and NOT mounted is a
+  // namespace two lanes will claim.
+  //
+  // admin-namespaces.test.ts asserts all six are here, exactly once, and that
+  // each is the module that names it. That test is what makes this list a
+  // guarantee rather than a comment: the failure this file exists to prevent is
+  // a second `admin:` key that git does not report, and a mount that nothing
+  // enumerates has the same shape.
+  //
+  // The tenant, user, session, operator and audit routes above are NOT moved
+  // into them. Every path up there is one the console already calls, and
+  // renaming them for filing would break the portal to tidy a directory.
+  customers: customersRouter,
+  product: productRouter,
+  platform: platformRouter,
+  operations: operationsRouter,
+  security: securityRouter,
+  administration: administrationRouter,
 })
 
 /** Reads the organization or refuses, so an audit entry is never written about

@@ -6,7 +6,6 @@ import {
   Card,
   Empty,
   Loaded,
-  Page,
   Row,
   Table,
   TableSkeleton,
@@ -17,6 +16,7 @@ import {
   selectClass,
   type Tone,
 } from "@/components/ui";
+import { AdminPage } from "@/components/admin/primitives";
 import { More } from "@/components/pagination";
 import { useAdminAudit, type AdminAuditEntry } from "@/lib/admin";
 
@@ -57,8 +57,8 @@ export default function AdminAuditPage() {
   const state = useAdminAudit(severity);
 
   return (
-    <Page
-      title="Operator log"
+    <AdminPage
+      href="/admin/security/audit"
       lede="Every action taken from this portal, newest first. Where an action concerned one organization, that customer has the same entry in their own audit log."
       actions={
         <label className="flex min-w-0 items-center gap-2">
@@ -160,6 +160,6 @@ export default function AdminAuditPage() {
           }
         </Loaded>
       </Card>
-    </Page>
+    </AdminPage>
   );
 }
