@@ -68,22 +68,43 @@ func main() {
 	if len(os.Args) > 1 {
 		root = os.Args[1]
 	}
-	problems := check(root)
+	problems, checkedEE := check(root)
 	for _, p := range problems {
 		fmt.Fprintln(os.Stderr, "licensecheck:", p)
 	}
 	if len(problems) > 0 {
 		os.Exit(1)
 	}
-	fmt.Println("licensecheck: LICENSE is detectable MIT and the ee carve out is stated")
+	// What was actually checked, not what this usually checks. Saying "and the
+	// ee carve out is stated" on a tree where it was skipped would be a gate
+	// reporting on itself rather than on the repository, which is the failure
+	// the whole file is about.
+	if checkedEE {
+		fmt.Println("licensecheck: LICENSE is detectable MIT and the ee carve out is stated")
+		return
+	}
+	fmt.Println("licensecheck: LICENSE is detectable MIT; there is no ee/ in this tree to carve out")
 }
 
-func check(root string) []string {
-	var problems []string
+// check returns the problems found, and whether the ee/ half ran at all.
+func check(root string) (problems []string, checkedEE bool) {
 	problems = append(problems, checkLicense(root)...)
+
+	// A tree with no ee/ is a community build, which the edition boundary job
+	// makes by deleting the directory and building from what is left. There is
+	// no carve out to state when there is nothing carved out, and failing there
+	// would be a gate complaining that a deliberate tree is not the other one.
+	//
+	// Skipped LOUDLY rather than silently. A skip that prints nothing reads
+	// exactly like a pass, and the whole reason this gate exists is that
+	// nobody noticed a license going undetected for months.
+	if _, err := os.Stat(filepath.Join(root, "ee")); os.IsNotExist(err) {
+		return problems, false
+	}
+
 	problems = append(problems, checkCarveOut(root)...)
 	problems = append(problems, checkEEHeaders(root)...)
-	return problems
+	return problems, true
 }
 
 // checkLicense holds LICENSE to the MIT text with nothing appended.
