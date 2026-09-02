@@ -308,6 +308,8 @@ var typeIdentifiers = []struct {
 	{"AgentVerdict", "agent.verdict"}, {"AgentFinished", "agent.finished"},
 	{"InsightFinding", "insight.finding"},
 	{"LoadSample", "load.sample"}, {"LoadFinished", "load.finished"},
+	{"WorkloadStarted", "workload.started"}, {"WorkloadFinished", "workload.finished"},
+	{"WorkloadCancelled", "workload.cancelled"},
 	{"Progress", "engine.progress"}, {"Warning", "engine.warning"},
 	{"Error", "engine.error"}, {"Retry", "engine.retry"},
 	{"SinkDropped", "engine.sink_dropped"},

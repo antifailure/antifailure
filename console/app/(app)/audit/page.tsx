@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { mutate, query, useApi } from "@/lib/api";
+import { mutate, query, useApi, usePages } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
+import { More } from "@/components/pagination";
 import {
   Badge,
   Bar,
@@ -40,6 +41,12 @@ interface Chain {
 }
 
 const MAY_EXPORT = new Set(["owner", "admin"]);
+
+/** One page of the log. The route allows 500 and this asks for a fifth of
+ *  that, because the page it fills is read top down and the cost of being
+ *  wrong about how many somebody wants is now one button rather than a list
+ *  that stops without saying so. */
+const AUDIT_PAGE = 100;
 
 /**
  * The chain check.
@@ -127,8 +134,23 @@ function Exporter() {
 function Audit() {
   const session = useSessionContext();
   const [action, setAction] = useState("");
-  const state = useApi<Entry[]>(
-    () => query("audit.list", { limit: 100, ...(action ? { action } : {}) }),
+  // `audit.list` is the odd one of the three: it pages by `seq` under the name
+  // `before`, wants a number where the row hands back a string, and returns a
+  // bare array. So a full page is the only signal that there is another, which
+  // is why the cursor is dropped when a page comes back short.
+  const state = usePages<Entry>(
+    async (cursor) => {
+      const rows = await query<Entry[]>("audit.list", {
+        limit: AUDIT_PAGE,
+        ...(action ? { action } : {}),
+        ...(cursor === null ? {} : { before: Number(cursor) }),
+      });
+      const last = rows[rows.length - 1];
+      return {
+        rows,
+        next: rows.length === AUDIT_PAGE && last ? String(last.seq) : null,
+      };
+    },
     [action],
   );
   const mayExport = MAY_EXPORT.has(session.data?.role ?? "");
@@ -163,6 +185,7 @@ function Audit() {
                   : "The log fills as people and machines act on this organization."}
               </Empty>
             ) : (
+              <>
               <TableWrap>
                 <Table>
                   <thead>
@@ -198,6 +221,15 @@ function Audit() {
                   </tbody>
                 </Table>
               </TableWrap>
+              <More
+                shown={rows.length}
+                noun={{ one: "entry", many: "entries" }}
+                hasMore={state.hasMore}
+                busy={state.busy}
+                error={state.moreError}
+                onMore={state.more}
+              />
+              </>
             )
           }
         </Loaded>

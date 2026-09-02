@@ -303,22 +303,27 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 	if err != nil {
 		return nil, err
 	}
+	prov, err := o.provenanceOf()
+	if err != nil {
+		return nil, err
+	}
 
 	result := &GoldenResult{}
 	started := o.opts.Clock.Now()
 	source := o.sourceURL()
 
 	spec := provider.GoldenSpec{
-		Version:   databaseVersion(o.opts.Manifest),
-		RulesHash: hash,
-		SourceURL: source,
+		Version:    databaseVersion(o.opts.Manifest),
+		RulesHash:  hash,
+		Provenance: prov.digest(),
+		SourceURL:  source,
 		Mask: func(ctx context.Context, url secrets.Value) error {
 			rows, tables, maskErr := o.maskDatabase(ctx, s, url, key, rules, hash)
 			result.Rows, result.Tables = rows, tables
 			return maskErr
 		},
 		Verify: func(ctx context.Context, url secrets.Value) (string, error) {
-			report, att, verifyErr := o.verifyDatabase(ctx, s, url, hash)
+			report, att, verifyErr := o.verifyDatabase(ctx, s, url, hash, prov.digest())
 			result.Report = report
 			result.Attestation = att
 			if verifyErr != nil {
@@ -621,8 +626,14 @@ func (o *Orchestrator) maskDatabase(
 }
 
 // verifyDatabase reads a database back and signs what it found.
+//
+// The provenance is signed alongside the report rather than only stamped on
+// the provider's own copy, because a published golden is read by a machine
+// that has only the store: an annotation on a Docker image never leaves the
+// daemon that holds it, and a claim about whose data a dump is has to be one
+// the puller can check.
 func (o *Orchestrator) verifyDatabase(
-	ctx context.Context, s *session, url secrets.Value, hash string,
+	ctx context.Context, s *session, url secrets.Value, hash, prov string,
 ) (verify.Report, string, error) {
 	conn, err := pgx.Connect(ctx, url.Reveal())
 	if err != nil {
@@ -646,7 +657,7 @@ func (o *Orchestrator) verifyDatabase(
 	if err != nil {
 		return report, "", err
 	}
-	att, err := verify.Sign(report, "", hash, priv)
+	att, err := verify.Sign(report, "", hash, prov, priv)
 	if err != nil {
 		return report, "", err
 	}

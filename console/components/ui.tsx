@@ -1,6 +1,14 @@
 "use client";
 
-import { cloneElement, isValidElement, useId, type ReactNode } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import { ago, when } from "@/lib/format";
@@ -359,8 +367,13 @@ export function Button({
   disabled?: boolean;
   busy?: boolean;
 }) {
+  // whitespace-nowrap, because a two word label breaking across two lines is
+  // the shape a control has when it is in trouble, and it happened as soon as
+  // a table put a button in a narrow column at a tablet width. A button that is
+  // too wide for its column pushes the table into its own horizontal scroll,
+  // which TableWrap already provides and which is the better failure.
   const base =
-    "inline-flex h-11 items-center justify-center gap-2 rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55 sm:h-9";
+    "inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-3.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55 sm:h-9";
   const variants = {
     primary: "bg-ink text-white hover:bg-[#2b2b2b]",
     secondary: "border border-rule bg-card text-ink hover:border-rule-strong",
@@ -542,6 +555,130 @@ export function ErrorState({ error, retry }: { error: ApiError; retry?: () => vo
   );
 }
 
+/* -------------------------------------------------------------------------
+ * Confirming something that does not come back
+ * ---------------------------------------------------------------------- */
+
+/**
+ * A confirmation that names what will be destroyed and makes you type it.
+ *
+ * The native `dialog` element, deliberately, rather than a div with a
+ * backdrop. `showModal` gives focus containment, Escape, the inert background
+ * and `aria-modal` for nothing, and every hand-rolled version of those in
+ * every console gets at least one of them wrong. What is added on top is the
+ * part a dialog cannot know: the exact word that has to be typed.
+ *
+ * `phrase` is the name of the thing, not the word "delete". Typing "delete"
+ * proves you can read a label; typing the organization's own slug proves you
+ * know which one you are looking at, which is the mistake that actually
+ * happens.
+ */
+export function Confirm({
+  open,
+  title,
+  phrase,
+  confirmLabel,
+  busy = false,
+  error,
+  onConfirm,
+  onCancel,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  /** The exact string that has to be typed. Omit for a confirmation that is
+   *  serious but reversible, which gets a button and no field. */
+  phrase?: string;
+  confirmLabel: string;
+  busy?: boolean;
+  error?: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [typed, setTyped] = useState("");
+  const id = useId();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (open && !el.open) {
+      setTyped("");
+      el.showModal();
+    }
+    if (!open && el.open) el.close();
+  }, [open]);
+
+  const ready = phrase === undefined || typed.trim() === phrase;
+
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby={`${id}-title`}
+      // Escape fires cancel rather than closing behind the component's back,
+      // so the parent's state and the element's state cannot disagree about
+      // whether the dialog is open.
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onCancel();
+      }}
+      // m-auto is not decoration. A modal dialog is centred by the user agent
+      // with `margin: auto` on a box that fills the viewport, and Tailwind's
+      // preflight sets `margin: 0` on everything, so without this the dialog
+      // opens hard against the top left corner. It looked like a rendering bug
+      // and it is a reset doing exactly what it says.
+      className="m-auto max-h-[min(90dvh,640px)] w-[min(100vw-2rem,460px)] overflow-y-auto rounded-lg border border-rule bg-card p-0 text-ink backdrop:bg-[rgba(16,16,16,0.5)]"
+    >
+      <form
+        method="dialog"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready && !busy) onConfirm();
+        }}
+      >
+        <div className="border-b border-rule px-5 py-3.5">
+          <h2 id={`${id}-title`} className="text-[14px] font-semibold tracking-extra-tight">
+            {title}
+          </h2>
+        </div>
+        <div className="space-y-4 px-5 py-4 text-[13px] leading-6 text-muted">
+          {children}
+          {phrase !== undefined ? (
+            <Field label={`Type ${phrase} to confirm`}>
+              <input
+                autoFocus
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                className={inputClass}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-[12px] leading-5 text-fail">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-rule px-5 py-3.5">
+          <Button onClick={onCancel} disabled={busy}>
+            Keep it
+          </Button>
+          <Button type="submit" variant="danger" disabled={!ready} busy={busy}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * The three states a screen is usually missing (continued)
+ * ---------------------------------------------------------------------- */
+
 /**
  * The three branches in one place, so no screen renders a blank on an error
  * it forgot to handle.
@@ -556,6 +693,9 @@ export function Loaded<T>({
     status: "loading" | "ready" | "error";
     data: T | null;
     error: ApiError | null;
+    /** Set when a reload over data already on screen failed. Optional so a
+     *  caller holding its own state can still use this. */
+    refreshError?: ApiError | null;
     reload: () => void;
   };
   skeleton?: ReactNode;
@@ -582,5 +722,36 @@ export function Loaded<T>({
   if (state.status === "loading" || state.data === null || state.data === undefined) {
     return <>{skeleton ?? <TableSkeleton />}</>;
   }
-  return <>{children(state.data)}</>;
+  // A reload that failed over data already on screen. It is NOT `state.error`,
+  // because that branch replaces the page, and replacing a correct table with
+  // a full page failure loses what the reader had. The rows stay, this says
+  // they are the older answer, and Try again is the same reload.
+  //
+  // Announced with role="status" rather than role="alert": the reader did not
+  // lose anything and is not being interrupted, and an assertive announcement
+  // over a table somebody is reading is its own defect.
+  const stale = state.refreshError ? (
+    <div
+      role="status"
+      // A surface of its own, with the page's own radius and rule, rather than
+      // a bleed strip above the first card: `children` is a different shape on
+      // every screen, so anything that tries to attach to what follows attaches
+      // correctly on one page and floats on the rest.
+      //
+      // The warn tint is Badge's, by value, rather than a second one.
+      className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-[rgba(138,90,0,0.12)] px-4 py-3"
+    >
+      <p className="text-[12.5px] leading-5 text-ink">
+        Could not refresh. Showing the last answer. {state.refreshError.message}
+      </p>
+      <Button onClick={state.reload}>Try again</Button>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {stale}
+      {children(state.data)}
+    </>
+  );
 }

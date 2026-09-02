@@ -10,6 +10,14 @@ import { sql } from 'drizzle-orm'
 import { verifyAuditChain, type Db } from '@antifailure/db'
 import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifailure/policy'
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
+import {
+  accountRouter,
+  deletionRouter,
+  exportsRouter,
+  invitationsRouter,
+  organizationSettings,
+  sessionsRouter,
+} from './enterprise.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
@@ -884,6 +892,68 @@ const membersRouter = router({
         return { changed: true }
       })
     }),
+
+  /**
+   * Takes somebody out of the organization.
+   *
+   * `members.sync` already removes people, and only the ones GitHub has removed
+   * from the GitHub organization. That is right for the case it was built for
+   * and useless for the two an enterprise actually has: somebody invited by
+   * email who is in no GitHub organization at all, and somebody who has to lose
+   * access now rather than after their GitHub membership is changed by
+   * somebody else.
+   *
+   * Their sessions go with them, in the same transaction. Removing a membership
+   * and leaving a live session is a person who is no longer a member and can
+   * still read every page until the session happens to expire, which is up to
+   * twelve hours: the role is re-read on every request, so the session resolves
+   * to no role, but a removal that depends on that is a removal that depends on
+   * a detail somewhere else.
+   */
+  remove: orgProcedure('members.manage')
+    .input(z.object({ githubLogin: z.string().min(1).max(120) }))
+    .mutation(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const found = await db.execute<{ user_id: string; role: string }>(sql`
+          SELECT m.user_id, m.role::text AS role FROM members m JOIN users u ON u.id = m.user_id
+          WHERE u.github_login = ${input.githubLogin}`)
+        const member = found[0]
+        if (!member) throw notFound('member', input.githubLogin)
+
+        // Refused before the write rather than repaired after it, the same as
+        // setRole. An organization with no owner cannot grant anybody the
+        // permission to become one.
+        if (member.role === 'owner') {
+          const owners = await db.execute<{ n: string }>(sql`
+            SELECT count(*) AS n FROM members WHERE role = 'owner'`)
+          if (Number(owners[0]?.n ?? 0) <= 1) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'This is the only owner. Make somebody else an owner first, or the organization ' +
+                'is left with nobody who can manage members or billing.',
+            })
+          }
+        }
+
+        await db.execute(sql`
+          DELETE FROM members WHERE user_id = ${member.user_id}::uuid`)
+        const sessions = await db.execute<{ id: string }>(sql`
+          UPDATE sessions SET revoked_at = ${c.clock.now().toISOString()}
+          WHERE user_id = ${member.user_id}::uuid AND org_id = ${c.actor.orgId}::uuid
+            AND revoked_at IS NULL
+          RETURNING id`)
+
+        await audit(db, c, {
+          action: 'member.removed',
+          targetType: 'member',
+          targetId: input.githubLogin,
+          detail: { role: member.role, sessionsRevoked: sessions.length },
+        })
+        return { removed: true, sessionsRevoked: sessions.length }
+      })
+    }),
 })
 
 // ---------------------------------------------------------------------------
@@ -969,6 +1039,13 @@ const orgRouter = router({
       return { suspended: false }
     })
   }),
+
+  // Settings, the display name, and the billing contact. Defined in
+  // routers/enterprise.ts and spread in here rather than given a router of
+  // their own, because two routers named after the same noun is how a console
+  // ends up asking org.status on one screen and organization.get on the next
+  // for facts about the same row.
+  ...organizationSettings,
 })
 
 const tokensRouter = router({
@@ -1031,6 +1108,11 @@ export const appRouter = router({
   tokens: tokensRouter,
   org: orgRouter,
   subscriptions: subscriptionsRouter,
+  invitations: invitationsRouter,
+  sessions: sessionsRouter,
+  exports: exportsRouter,
+  deletion: deletionRouter,
+  account: accountRouter,
 })
 
 export type AppRouter = typeof appRouter
