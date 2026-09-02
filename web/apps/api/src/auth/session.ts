@@ -110,6 +110,7 @@ export interface ResolvedSession {
   orgSlug: string | null
   label: string
   role: Role | null
+  plan: string | null
   /** What a mutating request must present, derived from the token the caller
    *  already holds. */
   csrfToken: string
@@ -197,7 +198,7 @@ export async function resolveSession(
   )
 
   if (!base) return null
-  if (!base.orgId) return { ...base, orgSlug: null, role: null }
+  if (!base.orgId) return { ...base, orgSlug: null, role: null, plan: null }
 
   // Read on every request rather than carried in the session. Removing
   // somebody from an organization has to take effect on their next request,
@@ -207,15 +208,19 @@ export async function resolveSession(
   // read on every single request and a second query for a label is a second
   // query on every page of the application.
   const scoped = await pool.withTenant({ orgId: base.orgId, userId: base.userId }, async (db) => {
-    const rows = await db.execute<{ role: Role | null; slug: string | null }>(sql`
-      SELECT m.role, o.slug
+    const rows = await db.execute<{ role: Role | null; slug: string | null; plan: string }>(sql`
+      SELECT m.role, o.slug, o.plan
       FROM organizations o
       LEFT JOIN members m ON m.org_id = o.id AND m.user_id = ${base.userId}
       WHERE o.id = ${base.orgId}`)
-    return { role: rows[0]?.role ?? null, slug: rows[0]?.slug ?? null }
+    return {
+      role: rows[0]?.role ?? null,
+      slug: rows[0]?.slug ?? null,
+      plan: rows[0]?.plan ?? null,
+    }
   })
 
-  return { ...base, role: scoped.role, orgSlug: scoped.slug }
+  return { ...base, role: scoped.role, orgSlug: scoped.slug, plan: scoped.plan }
 }
 
 export async function revokeSession(pool: Pool, token: string): Promise<void> {

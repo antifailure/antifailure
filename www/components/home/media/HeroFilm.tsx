@@ -44,16 +44,43 @@ export function HeroFilm() {
           enableMouseInteraction
         />
         <div className="pointer-events-none absolute inset-0 opacity-30 mix-blend-overlay noise" />
+        {/*
+          The frame's height is a pixel constant per breakpoint while the hero's
+          height moves continuously with how the headline wraps, so the two only
+          agree at the widths the art was tuned at. From 1100px to 1279px the
+          headline drops from three lines to two, the service row rises 68px,
+          and the frame's bottom edge landed 47px inside those paragraphs as a
+          torn horizontal seam with body text lying across it.
+
+          The hero's own bottom gradient cannot cover this: it is anchored to
+          the section's bottom, and at these widths the frame ends where that
+          gradient is still all but transparent. Anchoring a second fade to the
+          frame's own bottom edge means the band dissolves into the page ground
+          wherever the edge falls, at any width, rather than at the widths
+          somebody remembered to check.
+        */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-[linear-gradient(0deg,#f7f7f5_0%,rgba(247,247,245,0)_100%)] max-lg:h-44" />
       </div>
-      <Picture
-        className="relative left-1/2 hidden w-[min(752px,180%)] max-w-none -translate-x-1/2 max-sm:block"
-        src="/home/hero-aurora.png"
-        width={752}
-        height={326}
-        alt=""
-        priority
-        sizes={AURORA_SIZES}
-      />
+      {/*
+        The phone copy has the same problem as the frame above and needed the
+        same answer. Its height is the image's aspect ratio times the viewport
+        width, so where it ends has nothing to do with the headline in front of
+        it: at 375px it stopped at 349px, which is between the second and third
+        lines of a four line H1. The fade is on a wrapper rather than the image
+        because the image's own box is what has to be tracked.
+      */}
+      <div className="relative hidden leading-none max-sm:block">
+        <Picture
+          className="relative left-1/2 block w-[min(752px,180%)] max-w-none -translate-x-1/2"
+          src="/home/hero-aurora.png"
+          width={752}
+          height={326}
+          alt=""
+          priority
+          sizes={AURORA_SIZES}
+        />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-[linear-gradient(0deg,#f7f7f5_0%,rgba(247,247,245,0)_100%)]" />
+      </div>
     </>
   );
 }

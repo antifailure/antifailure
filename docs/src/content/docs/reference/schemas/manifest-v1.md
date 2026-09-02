@@ -177,10 +177,10 @@ How Antifailure appears on a pull request: what runs it, whether it comments, wh
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `comment` | boolean | no | Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Defaults to `true`. |
-| `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Defaults to `label`. |
+| `comment` | boolean | no | Whether to maintain a single comment on the pull request. It is updated in place rather than appended, so a busy pull request does not accumulate twenty bot comments. Set false and af change and af ci write comment=false to GITHUB_OUTPUT for the workflow to gate its comment step on. The report files are still written, because the report is also the job summary and the payload a control plane is sent. Defaults to `true`. |
+| `fork_policy` | `never`, `label`, `always` | no | What to do with a pull request from a fork. label requires a maintainer to add antifailure:allow first, which is the only safe default: a fork's code would otherwise run with the environment's credentials. Enforced by af ci, af up, af test and af load run before an environment is created, on pull_request and pull_request_target, and read from the base branch rather than from the pull request, because the pull request's copy of this file belongs to the contributor. Defaults to `label`. |
 | `mode` | `actions`, `app`, `off` | no | actions runs everything inside a workflow with no server. app uses the GitHub App and the control plane. Defaults to `actions`. |
-| `teardown_on` | list of string | no | Events that tear the environment down. Defaults to `[close merge ttl]`. Max items 5. |
+| `teardown_on` | list of string | no | Accepted and read by nothing. Teardown is unconditional: af ci tears down whatever the outcome, and the control plane asks for teardown on close, merge, supersession and timeout without reading your manifest. The lifetime ceiling is runtime.max_ttl. Defaults to `[close merge ttl]`. Max items 5. |
 
 ## Goal
 
@@ -336,6 +336,7 @@ What each class of finding does to the pull request check. A finding at 'fail' f
 | `migration_rewrite` | `ignore`, `warn`, `fail` | no | A statement Postgres reported as rewriting a table, which copies every row under a lock nothing can read through. Defaults to `warn`. |
 | `plan_regression` | `ignore`, `warn`, `fail` | no | A query plan that got worse in one of three plan regressions: a table is now read end to end, an index is no longer used, or the planner's estimate grew. Defaults to `warn`. |
 | `query_regression` | `ignore`, `warn`, `fail` | no | A statement that runs more often, or slower, than the saved baseline did. Needs a baseline to compare against. Defaults to `warn`. |
+| `workflows_unverified` | `ignore`, `warn`, `fail` | no | A run in which no workflow reached a verdict about the application, because every one was blocked or unverified or because none was declared. Distinct from a single blocked workflow, which is never counted against the application: one gap in the tooling is not evidence, and a run where every workflow was a gap has tested nothing at all, so reporting it as a pass says the application was checked when it was not. Set it to warn if the project has no workflows yet and you would rather record that choice than be told about it. Defaults to `fail`. |
 
 ## Probe
 

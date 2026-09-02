@@ -10,6 +10,14 @@ import { sql } from 'drizzle-orm'
 import { verifyAuditChain, type Db } from '@antifailure/db'
 import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifailure/policy'
 import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
+import {
+  accountRouter,
+  deletionRouter,
+  exportsRouter,
+  invitationsRouter,
+  organizationSettings,
+  sessionsRouter,
+} from './enterprise.ts'
 import { PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLES, ROLE_PERMISSIONS, rolesWith } from '../permissions.ts'
 import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
 import { capsFor, costAttribution, environmentHoursSince } from '../costs.ts'
@@ -133,29 +141,95 @@ const environmentsRouter = router({
       })
     }),
 
+  /**
+   * Asks for an environment to be removed, and records the asking.
+   *
+   * IT NO LONGER MARKS THE ROW TORN DOWN. That is the whole change and it is
+   * the difference between a button that works and one that looks like it
+   * does. This used to set `state = 'torn_down'` and return, with a comment
+   * saying the engine holding the containers reads this and does the removing.
+   * Nothing read it. Not the engine, not a sweeper, not anything: the containers
+   * kept running and the console said they were gone, which is worse than the
+   * button not existing, because somebody who saw "torn down" stopped looking.
+   *
+   * So it writes a request, and `sweepTeardowns` works through them. The
+   * environments row moves only on an ACKNOWLEDGEMENT: the workflow run holding
+   * it reached a terminal state at GitHub, or the engine reported the teardown
+   * over /v1/events. Where there is no route to the runtime at all, the request
+   * is given up on after its attempts and says so in as many words, naming
+   * `af down`, rather than reporting a cleanup that never happened.
+   */
   teardown: orgProcedure('environments.teardown')
     .input(z.object({ envId: z.string(), reason: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       return c.pool.withTenant(c.tenant, async (db) => {
-        const rows = await db.execute<{ id: string; state: string }>(sql`
-          UPDATE environments
-          SET state = 'torn_down', torn_down_at = ${c.clock.now().toISOString()},
-              updated_at = ${c.clock.now().toISOString()}
-          WHERE env_id = ${input.envId} AND state <> 'torn_down'
-          RETURNING id, state::text AS state`)
-        if (rows.length === 0) throw notFound('environment', input.envId)
+        const rows = await db.execute<{
+          id: string
+          state: string
+          repository_id: string
+        }>(sql`
+          SELECT id, state::text AS state, repository_id FROM environments
+          WHERE env_id = ${input.envId}`)
+        const environment = rows[0]
+        if (!environment) throw notFound('environment', input.envId)
+        if (environment.state === 'torn_down') {
+          return { requested: false, envId: input.envId, teardown: 'acknowledged' as const }
+        }
+
+        // The workflow run that built it, when this environment came from a
+        // pull request. It is the only route this control plane has into the
+        // machine holding the containers, so the request carries it: without
+        // one the sweeper has nothing to reach and says so instead of pretending.
+        const runs = await db.execute<{ workflow_run_id: string | null; generation_id: string }>(sql`
+          SELECT g.workflow_run_id::text AS workflow_run_id, g.id AS generation_id
+          FROM pr_generations g
+          WHERE g.env_id = ${input.envId}
+          ORDER BY g.queued_at DESC LIMIT 1`)
+        const run = runs[0] ?? null
+
+        const requested = await db.execute<{ id: string }>(sql`
+          INSERT INTO teardown_requests (
+            org_id, environment_id, env_id, repository_id, workflow_run_id, generation_id,
+            reason, requested_by, requested_at, updated_at)
+          SELECT ${c.actor.orgId}::uuid, ${environment.id}::uuid, ${input.envId},
+                 ${environment.repository_id}::uuid, ${run?.workflow_run_id ?? null}::bigint,
+                 ${run?.generation_id ?? null}::uuid,
+                 ${input.reason ?? 'asked for in the console'}, ${c.actor.userId}::uuid,
+                 ${c.clock.now().toISOString()}::timestamptz, ${c.clock.now().toISOString()}::timestamptz
+          -- One live request per environment. Pressing the button twice is a
+          -- person wondering whether the first press worked, not a second
+          -- instruction, and two rows would be two cancels and one confusing
+          -- history.
+          WHERE NOT EXISTS (
+            SELECT 1 FROM teardown_requests t
+            WHERE t.env_id = ${input.envId} AND t.state IN ('pending', 'leased'))
+          RETURNING id`)
 
         await audit(db, c, {
-          action: 'environment.torn_down',
+          action: 'environment.teardown_requested',
           targetType: 'environment',
           targetId: input.envId,
-          detail: { reason: input.reason ?? null },
+          detail: {
+            reason: input.reason ?? null,
+            // Said in the audit entry as well as in the response, because the
+            // question a reader of the log asks first is whether there was
+            // anything to reach.
+            route: run?.workflow_run_id ? 'the workflow run that built it' : 'none',
+          },
         })
-        // The row is marked here; the engine that holds the containers reads
-        // this and does the removing. The control plane has no route into a
-        // developer's machine and must never pretend otherwise.
-        return { requested: true, envId: input.envId }
+        return {
+          requested: true,
+          envId: input.envId,
+          teardown: 'pending' as const,
+          // Said out loud, because "requested" and "removed" are different
+          // things and this endpoint used to report the second while doing the
+          // first. `already` covers the second press.
+          pending:
+            requested.length === 0
+              ? 'A teardown was already asked for and has not been confirmed yet.'
+              : 'The environment disappears here when the runtime confirms it is gone.',
+        }
       })
     }),
 })
@@ -818,6 +892,68 @@ const membersRouter = router({
         return { changed: true }
       })
     }),
+
+  /**
+   * Takes somebody out of the organization.
+   *
+   * `members.sync` already removes people, and only the ones GitHub has removed
+   * from the GitHub organization. That is right for the case it was built for
+   * and useless for the two an enterprise actually has: somebody invited by
+   * email who is in no GitHub organization at all, and somebody who has to lose
+   * access now rather than after their GitHub membership is changed by
+   * somebody else.
+   *
+   * Their sessions go with them, in the same transaction. Removing a membership
+   * and leaving a live session is a person who is no longer a member and can
+   * still read every page until the session happens to expire, which is up to
+   * twelve hours: the role is re-read on every request, so the session resolves
+   * to no role, but a removal that depends on that is a removal that depends on
+   * a detail somewhere else.
+   */
+  remove: orgProcedure('members.manage')
+    .input(z.object({ githubLogin: z.string().min(1).max(120) }))
+    .mutation(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const found = await db.execute<{ user_id: string; role: string }>(sql`
+          SELECT m.user_id, m.role::text AS role FROM members m JOIN users u ON u.id = m.user_id
+          WHERE u.github_login = ${input.githubLogin}`)
+        const member = found[0]
+        if (!member) throw notFound('member', input.githubLogin)
+
+        // Refused before the write rather than repaired after it, the same as
+        // setRole. An organization with no owner cannot grant anybody the
+        // permission to become one.
+        if (member.role === 'owner') {
+          const owners = await db.execute<{ n: string }>(sql`
+            SELECT count(*) AS n FROM members WHERE role = 'owner'`)
+          if (Number(owners[0]?.n ?? 0) <= 1) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'This is the only owner. Make somebody else an owner first, or the organization ' +
+                'is left with nobody who can manage members or billing.',
+            })
+          }
+        }
+
+        await db.execute(sql`
+          DELETE FROM members WHERE user_id = ${member.user_id}::uuid`)
+        const sessions = await db.execute<{ id: string }>(sql`
+          UPDATE sessions SET revoked_at = ${c.clock.now().toISOString()}
+          WHERE user_id = ${member.user_id}::uuid AND org_id = ${c.actor.orgId}::uuid
+            AND revoked_at IS NULL
+          RETURNING id`)
+
+        await audit(db, c, {
+          action: 'member.removed',
+          targetType: 'member',
+          targetId: input.githubLogin,
+          detail: { role: member.role, sessionsRevoked: sessions.length },
+        })
+        return { removed: true, sessionsRevoked: sessions.length }
+      })
+    }),
 })
 
 // ---------------------------------------------------------------------------
@@ -903,6 +1039,13 @@ const orgRouter = router({
       return { suspended: false }
     })
   }),
+
+  // Settings, the display name, and the billing contact. Defined in
+  // routers/enterprise.ts and spread in here rather than given a router of
+  // their own, because two routers named after the same noun is how a console
+  // ends up asking org.status on one screen and organization.get on the next
+  // for facts about the same row.
+  ...organizationSettings,
 })
 
 const tokensRouter = router({
@@ -965,6 +1108,11 @@ export const appRouter = router({
   tokens: tokensRouter,
   org: orgRouter,
   subscriptions: subscriptionsRouter,
+  invitations: invitationsRouter,
+  sessions: sessionsRouter,
+  exports: exportsRouter,
+  deletion: deletionRouter,
+  account: accountRouter,
 })
 
 export type AppRouter = typeof appRouter

@@ -65,43 +65,51 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $name"
 fetch "$base/$name.tar.gz" "$tmp/$name.tar.gz" || die "could not download $base/$name.tar.gz"
 
-# The checksum is checked rather than assumed, and a check that cannot be done
-# refuses rather than passing.
+# The checksum is checked rather than assumed, and there is no path through
+# this block that installs an unverified archive.
 #
-# This block used to fail open four separate ways, every one of them ending in
-# an installed binary: a checksums.txt that did not download printed a warning
-# and carried on, an archive not named inside one printed NOTHING at all and
-# carried on, a machine with no sha256 tool printed a warning and carried on,
-# and a mismatch was the only case that stopped. Three of those four are the
-# same defect wearing different clothes, and it is the worst kind to have here:
-# the step whose entire job is to establish trust reporting success having
-# established nothing, at the exact moment the reader is deciding whether to run
-# unreviewed code. The README says the download is checked. It has to be true
-# every time, or it is worth less than not saying it.
+# IT USED TO FAIL OPEN THREE WAYS, and README told people it did not. A missing
+# checksums.txt printed a warning and installed; a machine with neither shasum
+# nor sha256sum printed a warning and installed; a checksums.txt with no line
+# for this archive skipped the comparison in silence. Only a positive mismatch
+# stopped anything. Every one of those is the case an attacker arranges: the
+# whole point of tampering with a download is that you also control what else
+# the same server hands out, so "the checksum file was not there" is not the
+# benign case, it is the interesting one.
 #
-# Refusing costs almost nobody: every release publishes checksums.txt as a
-# gated asset, macOS has shasum, coreutils and busybox both have sha256sum, and
-# openssl is on nearly everything else. There is deliberately no variable that
-# turns this off, because an escape hatch is how a fail open comes back.
-fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
-  || die "the checksums for $VERSION could not be downloaded from $base/checksums.txt, so this download cannot be verified; refusing to install"
-
-expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
-[ -n "$expected" ] \
-  || die "$name.tar.gz is not named in $base/checksums.txt, so this download cannot be verified; refusing to install"
-
+# A warning inside `curl | sh` is worth nothing anyway. It scrolls past on a
+# machine that is already executing the thing being warned about.
+#
+# The cost of closing it is real and it is small: an installer that stops on a
+# release with no checksums.txt. Both published releases have one, the release
+# workflow builds it from the per-artifact .sha256 files and signs it with
+# sigstore, and it verifies the archives against it before publishing. So this
+# refuses nothing that exists today, and it refuses everything that should be
+# refused tomorrow.
 # Three tools rather than two. openssl reports either "SHA256(f)= hash" or
 # "SHA2-256(f)= hash" depending on its major version, so the hash is taken as
 # the last field rather than by matching the label.
-if command -v shasum >/dev/null 2>&1; then
-  actual=$(shasum -a 256 "$tmp/$name.tar.gz" | awk '{print $1}')
-elif command -v sha256sum >/dev/null 2>&1; then
-  actual=$(sha256sum "$tmp/$name.tar.gz" | awk '{print $1}')
-elif command -v openssl >/dev/null 2>&1; then
-  actual=$(openssl dgst -sha256 "$tmp/$name.tar.gz" | awk '{print $NF}')
-else
-  die "no sha256 tool was found, so this download cannot be verified; install one of shasum, sha256sum or openssl and run this again"
-fi
+need_sum() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$1" | awk '{print $NF}'
+  else
+    return 1
+  fi
+}
+
+fetch "$base/checksums.txt" "$tmp/checksums.txt" 2>/dev/null \
+  || die "no checksums.txt was published for $VERSION, so the download cannot be verified; refusing to install"
+
+expected=$(grep " $name.tar.gz\$" "$tmp/checksums.txt" | awk '{print $1}' | head -1)
+[ -n "$expected" ] \
+  || die "checksums.txt for $VERSION names no $name.tar.gz, so the download cannot be verified; refusing to install"
+
+actual=$(need_sum "$tmp/$name.tar.gz") \
+  || die "no sha256 tool was found, so the download cannot be verified; install one of shasum, sha256sum or openssl and run this again"
 
 [ -n "$actual" ] \
   || die "the sha256 tool on this machine produced no hash, so this download cannot be verified; refusing to install"

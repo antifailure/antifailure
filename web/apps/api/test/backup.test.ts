@@ -9,7 +9,7 @@ import { sql } from 'drizzle-orm'
 import { createPool } from '@antifailure/db'
 import { migrate } from '@antifailure/db'
 import { seedOrg } from './harness.ts'
-import { URL as DR_URL, dropDatabasesNamed, start as startPostgres } from './pgcontainer.ts'
+import { URL as DR_URL, RUN, dropDatabasesNamed, start as startPostgres } from './pgcontainer.ts'
 import {
   APP_ROLE,
   backup,
@@ -62,7 +62,7 @@ before(async () => {
 
 after(async () => {
   if (!h) return
-  await dropDatabasesNamed('af_dr_')
+  await dropDatabasesNamed(`af_dr_${RUN}_`)
   if (workDir) await rm(workDir, { recursive: true, force: true })
   await h.end({ timeout: 5 })
 })
@@ -77,8 +77,9 @@ function skipWithoutDatabase(t: { skip: (reason: string) => void }): boolean {
   return false
 }
 
+/** Named for this run, so the sweep in `after` cannot reach another one's. */
 function targetName(): string {
-  return `af_dr_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `af_dr_${RUN}_${randomUUID().replace(/-/g, '').slice(0, 12)}`
 }
 
 function adminUrlOf(): string {
@@ -622,7 +623,7 @@ test('a drill over its recovery time budget reports it, and not as a broken back
 // that examined nothing.
 test('a scratch database comes out with two tenants that own rows', { timeout: 600_000 }, async (t) => {
   if (skipWithoutDatabase(t)) return
-  const name = `af_dr_scratch_${randomUUID().replace(/-/g, '').slice(0, 8)}`
+  const name = `af_dr_${RUN}_scratch_${randomUUID().replace(/-/g, '').slice(0, 8)}`
   const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
   t.after(async () => {
     await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch(() => {})

@@ -619,6 +619,53 @@ func TestInit_AnAnswerThatNamesNothingIsRefusedWithTheOnesThatDo(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
+// COPY . . reads the context but says nothing about which directory it is, so
+// af init asks. The default is what 'docker build dashboard' does. Overriding
+// it has to reach the manifest, or the question is decorative.
+func TestInit_TheContextQuestionCanBeAnsweredEitherWay(t *testing.T) {
+	t.Parallel()
+	build := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "dashboard"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "package.json"),
+			[]byte(`{"name":"dash","scripts":{"start":"next start"},"dependencies":{"next":"16.0.0"}}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "dashboard", "Dockerfile"),
+			[]byte("FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 3100\nCMD [\"npm\", \"start\"]\n"), 0o600))
+		return dir
+	}
+
+	t.Run("the default is the Dockerfile's own directory", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.Contains(t, string(body), "context: dashboard")
+	})
+
+	t.Run("and the repository root can be chosen instead", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.dash.context=.")
+		require.Zero(t, got.code, got.stderr)
+		body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+		require.NoError(t, err)
+		require.NotContains(t, string(body), "context:",
+			"the root is what an unset context already means, so writing it would say nothing")
+	})
+
+	t.Run("and it is offered by the refusal that lists the ids", func(t *testing.T) {
+		t.Parallel()
+		dir := build(t)
+		got := runCLI(t, dir, nil, "init", "--non-interactive", "--answer", "service.typo.context=x")
+		require.NotZero(t, got.code)
+		require.Contains(t, prose(got.stderr), "AF-DET-006")
+		require.Contains(t, prose(got.stderr), "service.dash.context")
+	})
+}
+
 func TestInit_AnswerFlagAvoidsAPrompt(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

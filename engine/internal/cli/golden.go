@@ -26,6 +26,12 @@ type GoldenJSON struct {
 	CreatedAt string `json:"created_at"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
 	RulesHash string `json:"rules_hash,omitempty"`
+	// Provenance is the project the version was made for, and Mine says
+	// whether that is this one. Both, because a caller scripting against this
+	// wants the answer without having to know how the identity is built, and
+	// an operator reading it wants to see that two rows differ.
+	Provenance string `json:"provenance,omitempty"`
+	Mine       bool   `json:"mine"`
 }
 
 // RefreshJSON is the result of a refresh.
@@ -143,6 +149,15 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// What this project may branch, so the listing can say which rows
+			// are available here. A golden pool is shared: on Docker it is
+			// every project on the machine, and a listing that shows all of
+			// them without saying whose they are is what made an unbranchable
+			// golden look like a usable one.
+			mine, err := o.GoldenIdentity()
+			if err != nil {
+				return err
+			}
 			if env.Out.Format == FormatJSON {
 				docs := make([]GoldenJSON, 0, len(goldens))
 				for _, g := range goldens {
@@ -150,6 +165,7 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 						Version: g.ID, Verified: g.Verified,
 						CreatedAt: g.CreatedAt.UTC().Format(time.RFC3339),
 						SizeBytes: g.SizeBytes, RulesHash: g.RulesHash,
+						Provenance: g.Provenance, Mine: g.Provenance == mine,
 					})
 				}
 				return env.Out.JSON(docs)
@@ -174,13 +190,25 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				if rules == "" {
 					rules = "not recorded"
 				}
+				// Whose golden this is, said on every row. The pool is
+				// shared, so a listing that does not say this presents a
+				// machine's worth of other projects' goldens as though `af up`
+				// could use any of them, and for a long time it could.
+				owner := env.Out.S(StyleWarn, "another project")
+				switch g.Provenance {
+				case mine:
+					owner = env.Out.S(StyleGood, "this project")
+				case "":
+					owner = env.Out.S(StyleWarn, "not recorded")
+				}
 				rows = append(rows, []string{
 					g.ID, state, g.CreatedAt.Local().Format("2006-01-02 15:04"),
-					humanBytes(uint64(g.SizeBytes)), rules,
+					humanBytes(uint64(g.SizeBytes)), rules, owner,
 				})
 			}
 			env.Out.Table([]Column{
-				Col("VERSION"), Col("STATE"), Col("CREATED"), Num("SIZE"), Flex("RULES"),
+				Col("VERSION"), Col("STATE"), Col("CREATED"), Num("SIZE"),
+				Flex("RULES"), Flex("FOR"),
 			}, rows)
 
 			// What this project publishes, and when it refreshes next. Both
@@ -257,8 +285,25 @@ bring an environment up at all, which is worse than the disk it saved.`),
 			if err != nil {
 				return err
 			}
+			mine, err := o.GoldenIdentity()
+			if err != nil {
+				return err
+			}
+			// Only this project's, which is a correctness rule and not a
+			// courtesy. The Docker provider keeps goldens as images on a
+			// machine wide daemon, so this used to sweep every project on the
+			// laptop: running `af golden gc` in one repository destroyed
+			// another repository's goldens, and the retention count it
+			// enforced was a count across all of them. The same shared pool
+			// that let `af up` branch somebody else's golden let this delete
+			// it. Left alone is counted so the outcome is not silent.
+			skipped := 0
 			versions := make([]golden.Version, 0, len(goldens))
 			for _, g := range goldens {
+				if g.Provenance != mine {
+					skipped++
+					continue
+				}
 				versions = append(versions, golden.Version{
 					ID: g.ID, CreatedAt: g.CreatedAt, Verified: g.Verified,
 				})
@@ -286,10 +331,15 @@ bring an environment up at all, which is worse than the disk it saved.`),
 				return env.Out.JSON(map[string]any{
 					"removed": removed, "kept": kept, "keep": effective,
 					"keep_from": source, "refused": refused,
+					"other_projects": skipped,
 				})
 			}
 			env.Out.Printf("Removed %d, kept %d, keeping %d from %s.\n",
 				removed, kept, effective, source)
+			if skipped > 0 {
+				env.Out.Printf("  %d belong to other projects on this machine and were left alone.\n",
+					skipped)
+			}
 			for _, d := range decisions {
 				if !d.Remove {
 					env.Out.Printf("  %s %s: %s\n",

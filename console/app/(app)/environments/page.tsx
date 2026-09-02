@@ -3,9 +3,10 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ago, when } from "@/lib/format";
-import { mutate, query, useApi } from "@/lib/api";
+import { mutate, query, useApi, usePages } from "@/lib/api";
 import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
+import { More } from "@/components/pagination";
 import {
   Badge,
   Button,
@@ -379,10 +380,12 @@ function Runtimes() {
                   {rows.map((r) => (
                     <Row key={`${r.name}-${r.registered}`}>
                       <Td mono>{r.name}</Td>
-                      <Td>{r.provider ?? "not reported"}</Td>
-                      <Td>{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
-                      <Td numeric>{Number(r.environments).toLocaleString()}</Td>
-                      <Td>
+                      <Td label="Provider">{r.provider ?? "not reported"}</Td>
+                      <Td label="Labels">{r.labels?.length ? r.labels.join(", ") : "--"}</Td>
+                      <Td label="Environments" numeric>
+                        {Number(r.environments).toLocaleString()}
+                      </Td>
+                      <Td label="State">
                         {r.registered ? (
                           <Badge tone="pass">registered</Badge>
                         ) : (
@@ -390,7 +393,7 @@ function Runtimes() {
                         )}
                       </Td>
                       {mayManage ? (
-                        <Td>
+                        <Td label="Registration">
                           {r.registered ? (
                             <Button
                               variant="danger"
@@ -438,8 +441,14 @@ function Environments() {
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("env");
-  const state = useApi<{ environments: Environment[]; nextCursor: string | null }>(
-    () => query("environments.list", { limit: 50 }),
+  const state = usePages<Environment>(
+    async (cursor) => {
+      const page = await query<{ environments: Environment[]; nextCursor: string | null }>(
+        "environments.list",
+        { limit: 50, ...(cursor === null ? {} : { cursor }) },
+      );
+      return { rows: page.environments, next: page.nextCursor };
+    },
     [],
   );
 
@@ -463,12 +472,13 @@ function Environments() {
       <Card title="All environments">
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>
-            data.environments.length === 0 ? (
+            data.length === 0 ? (
               <Empty title="No environments yet">
                 An environment appears here when the engine reports one, which
                 happens the first time a run starts on a connected repository.
               </Empty>
             ) : (
+              <>
               <TableWrap>
                 <Table>
                   <thead>
@@ -481,7 +491,7 @@ function Environments() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.environments.map((env) => (
+                    {data.map((env) => (
                       <Row
                         key={env.id}
                         onClick={() => router.push(`/environments?env=${encodeURIComponent(env.env_id)}`)}
@@ -509,6 +519,15 @@ function Environments() {
                   </tbody>
                 </Table>
               </TableWrap>
+              <More
+                shown={data.length}
+                noun={{ one: "environment", many: "environments" }}
+                hasMore={state.hasMore}
+                busy={state.busy}
+                error={state.moreError}
+                onMore={state.more}
+              />
+              </>
             )
           }
         </Loaded>

@@ -43,6 +43,7 @@ const (
 	AnnVersion     = "antifailure-version" // the golden version identifier
 	AnnFrom        = "antifailure-from"    // the golden a branch came from
 	AnnRulesHash   = "antifailure-rules"   // the masking rules that produced a golden
+	AnnProvenance  = "antifailure-project" // the project a golden was made for, and out of what
 	AnnVerified    = "antifailure-verified"
 	AnnAttestation = "antifailure-attestation"
 	AnnCreatedAt   = "antifailure-created"

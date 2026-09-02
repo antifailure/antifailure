@@ -132,10 +132,24 @@ export function AuthModal({
             <div id="waitlist-title" className="text-[15px] font-medium text-black">
               Join the waitlist
             </div>
+            {/* This said "There is no hosted control plane to sign in to yet".
+                It was true when it was written and had become false: the
+                control plane is deployed and invitation only, AuthScreen on
+                /signin says so and offers sign-in with GitHub above it, and
+                this modal is what the header's Log in button opens. So an
+                invited customer pressing Log in was told the thing they had
+                been invited to does not exist, and had no door from here. */}
             <p className="mt-2 text-[13px] leading-5 text-gray-new-40">
-              There is no hosted control plane to sign in to yet. Leave an
-              address and we will tell you when there is. We store the address
-              and nothing else.
+              The hosted control plane is invitation only while it is in private
+              beta. Leave an address and we will tell you when it opens. We store
+              the address and nothing else.
+            </p>
+            <p className="mt-2 text-[13px] leading-5 text-gray-new-40">
+              Already invited?{" "}
+              <a href="/signin" className="underline underline-offset-2 hover:text-black">
+                Sign in with GitHub
+              </a>
+              .
             </p>
             <label className="mt-5 block text-[12px] text-gray-new-40" htmlFor="waitlist-email">
               Email

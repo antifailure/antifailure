@@ -145,6 +145,18 @@ A failed browser download is not fatal. The runner is usable the moment a
 browser arrives, and until then a workflow that needs a page read comes back
 `unverified` rather than guessed at.
 
+Then finish the agent runner, which is the third step the installer prints:
+
+```bash
+af runner install
+```
+
+The runner drives a real browser, so it needs Node and a copy of Chromium that
+the install script deliberately does not download for you. It reports what it
+copied and what it fetched, and once it says it is ready, `af test` finds it
+without a flag. Everything up to `af up` works without it; only `af test` needs
+it.
+
 ## Describe the repository
 
 ```bash

@@ -51,3 +51,22 @@ func TestWhetherAMissingUsersTableStopsTheRun(t *testing.T) {
 		})
 	}
 }
+
+// Every strategy that is not `none` needs an account.
+//
+// Over the list rather than over the three somebody thought of, so a strategy
+// added later is covered on the day it is added rather than on the day
+// somebody remembers to come back here.
+func TestEveryLoginStrategyExceptNoneNeedsAnAccount(t *testing.T) {
+	t.Parallel()
+	for _, strategy := range []schema.LoginStrategy{
+		schema.LoginPassword, schema.LoginMagicLink, schema.LoginEmailCode,
+		schema.LoginSMSCode, schema.LoginTOTP, schema.LoginSession,
+	} {
+		list := []schema.Persona{{Name: "p", Login: strategy}}
+		require.False(t, personas.NoAccountNeeded(personas.ErrNoUsersTable, list),
+			"%s signs in, so a missing users table has to stop the run", strategy)
+	}
+	require.True(t, personas.NoAccountNeeded(
+		personas.ErrNoUsersTable, []schema.Persona{{Name: "p", Login: schema.LoginNone}}))
+}

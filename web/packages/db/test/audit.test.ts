@@ -216,6 +216,100 @@ describe('audit log', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATA
   })
 })
 
+describe(
+  'what deleting a person would do to the log',
+  { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' },
+  () => {
+    /**
+     * The evidence under a published claim, kept where it will be re-run.
+     *
+     * The retention page says the account row is kept BY CHOICE rather than
+     * because the database refuses, and gives the reason. The claim it replaced
+     * said the database refuses the delete, and that came from a misread of
+     * `pg_constraint.confdeltype`: `n` is SET NULL and `a` is NO ACTION. A
+     * legal sentence resting on a one-letter misreading is worth a test.
+     *
+     * Both halves are asserted, because either one alone supports the wrong
+     * conclusion. The delete SUCCEEDS, so "the database refuses" is false. And
+     * the chain then fails its own verification, so declining to delete is the
+     * stronger choice rather than the lazier one.
+     */
+    let h: Harness
+    let tenant: Fixture
+
+    before(async () => {
+      h = await setup()
+      tenant = await seedTenant(h.admin, 'deletion-evidence')
+    })
+
+    after(async () => {
+      await dropTenant(h.admin, tenant.orgId)
+      await h.close()
+    })
+
+    it('succeeds, and leaves the audit log reporting itself as altered', async () => {
+      // seedTenant writes one entry with a literal string where the hash goes,
+      // because its job is to give the cross-tenant suite a row to attack
+      // rather than a valid chain. That entry alone makes verification fail, so
+      // the "before" assertion below would fail for a reason that has nothing
+      // to do with deleting anybody. Caught by that assertion rather than by
+      // reading the fixture, which is what it is there for.
+      await h.admin`DELETE FROM audit_entries WHERE org_id = ${tenant.orgId}`
+
+      await h.pool.withTenant({ orgId: tenant.orgId, userId: tenant.userId }, async (db) => {
+        for (const action of ['environment.created', 'masking.rule_proposed', 'token.created']) {
+          await appendAudit(db, {
+            orgId: tenant.orgId,
+            actorUserId: tenant.userId,
+            actorLabel: 'somebody who asked to be removed',
+            action,
+            targetType: 'environment',
+            targetId: 'e1',
+            origin: 'web',
+            detail: {},
+            occurredAt: new Date(),
+          })
+        }
+      })
+
+      const before = await h.pool.withTenant({ orgId: tenant.orgId }, (db) =>
+        verifyAuditChain(db, tenant.orgId),
+      )
+      assert.equal(before.ok, true, 'the chain was already broken, so this proves nothing')
+
+      // Through the owner connection, which is what a person with database
+      // access carrying out a removal request by hand actually holds.
+      await h.admin`DELETE FROM users WHERE id = ${tenant.userId}`
+      const left = await h.admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM users WHERE id = ${tenant.userId}`
+      assert.equal(
+        left[0]!.n,
+        0,
+        'the delete was refused, so the page may say the database refuses it after all',
+      )
+
+      const nulled = await h.admin<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM audit_entries
+        WHERE org_id = ${tenant.orgId} AND actor_user_id IS NULL`
+      assert.ok(nulled[0]!.n >= 3, 'the delete did not null the actor on the entries')
+
+      const after = await h.pool.withTenant({ orgId: tenant.orgId }, (db) =>
+        verifyAuditChain(db, tenant.orgId),
+      )
+      assert.equal(
+        after.ok,
+        false,
+        'deleting the person left the chain verifying, so the reason the page gives for ' +
+          'keeping the row is not the real one',
+      )
+      assert.ok(
+        after.problems.some((p) => p.kind === 'altered'),
+        'the chain broke for some reason other than the hashed actor column',
+      )
+    })
+  },
+)
+
 describe('the canonical form an entry is hashed in', () => {
   it('does not depend on the order keys were written in', () => {
     assert.equal(
