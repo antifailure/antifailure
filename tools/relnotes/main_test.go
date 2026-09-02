@@ -29,13 +29,13 @@ An older one.
 	if len(got) != 2 {
 		t.Fatalf("found %d sections, want 2: %v", len(got), keys(got))
 	}
-	if !strings.Contains(got["v1.0.0"], "first stable release") {
-		t.Errorf("v1.0.0 body is %q", got["v1.0.0"])
+	if !strings.Contains(got["v1.0.0"].published, "first stable release") {
+		t.Errorf("v1.0.0 body is %q", got["v1.0.0"].published)
 	}
-	if strings.Contains(got["v1.0.0"], "An older one") {
+	if strings.Contains(got["v1.0.0"].published, "An older one") {
 		t.Error("the v1.0.0 section swallowed the section below it")
 	}
-	if strings.Contains(got["v0.9.0"], "Preamble") {
+	if strings.Contains(got["v0.9.0"].published, "Preamble") {
 		t.Error("text above the first heading was attributed to a release")
 	}
 }
@@ -58,8 +58,8 @@ An older one.
 	if _, ok := got["v1.0.0"]; !ok {
 		t.Fatal("the empty section was not parsed at all, so nothing would report it")
 	}
-	if strings.TrimSpace(got["v1.0.0"]) != "" {
-		t.Fatalf("v1.0.0 is %q, want empty", got["v1.0.0"])
+	if strings.TrimSpace(got["v1.0.0"].published) != "" {
+		t.Fatalf("v1.0.0 is %q, want empty", got["v1.0.0"].published)
 	}
 }
 
@@ -69,8 +69,8 @@ func TestASectionOfWhitespaceCountsAsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(got["v1.0.0"]) != "" {
-		t.Fatalf("v1.0.0 is %q, want empty after trimming", got["v1.0.0"])
+	if strings.TrimSpace(got["v1.0.0"].published) != "" {
+		t.Fatalf("v1.0.0 is %q, want empty after trimming", got["v1.0.0"].published)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestAHeadingInsideAFenceIsNotASection(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("found %d sections, want 1: %v", len(got), keys(got))
 	}
-	if !strings.Contains(got["v1.0.0"], "And that is all") {
+	if !strings.Contains(got["v1.0.0"].published, "And that is all") {
 		t.Error("the section was cut short at a heading inside a code fence")
 	}
 }
@@ -164,17 +164,180 @@ func TestTheRealChangelogParsesAndHasNoEmptySection(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatal("no sections were found in the real changelog")
 	}
-	for tag, body := range got {
-		if strings.TrimSpace(body) == "" {
-			t.Errorf("%s has a heading and nothing under it", tag)
+	for tag, release := range got {
+		if strings.TrimSpace(release.published) == "" {
+			t.Errorf("%s would publish a heading and nothing under it", tag)
 		}
 	}
 }
 
-func keys(m map[string]string) []string {
+func keys(m map[string]section) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The detail markers, and what has to stay true about them.
+//
+// Everything below exists because the omitted region is the one thing on this
+// path that can quietly remove content from a published release. The gate has
+// to fail on every shape of that, not only on the shape somebody remembered.
+
+// The pointer stands where the detail stood, not at the end. A release whose
+// omitted region sits between two published parts would otherwise print its
+// link under whatever heading happened to come last.
+func TestTheOmittedRegionIsReplacedInPlace(t *testing.T) {
+	got, err := parse("## v1.0.0\n\nWhat it means.\n\n<!-- relnotes:omit -->\n### Added\n\nA thing.\n<!-- relnotes:end -->\n\n### Security\n\nA fix.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := got["v1.0.0"]
+	if !release.omitted {
+		t.Fatal("the section is not marked as having omitted anything")
+	}
+	if strings.Contains(release.notes, "A thing") {
+		t.Error("the omitted detail is still in the published notes")
+	}
+	for _, want := range []string{"What it means", "https://antifailure.dev/changelog", "A fix"} {
+		if !strings.Contains(release.notes, want) {
+			t.Errorf("the notes do not carry %q", want)
+		}
+	}
+	if strings.Index(release.notes, "antifailure.dev/changelog") > strings.Index(release.notes, "A fix") {
+		t.Error("the pointer was appended at the end rather than left where the detail was")
+	}
+	if strings.Contains(release.published, "antifailure.dev/changelog") {
+		t.Error("the emptiness check would count the pointer as published content")
+	}
+}
+
+// A section with no markers publishes every byte of itself, which is what
+// every section in this file did before the markers existed.
+func TestASectionWithNoMarkersIsUnchanged(t *testing.T) {
+	got, err := parse("## v1.0.0\n\nAll of it.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["v1.0.0"].omitted {
+		t.Error("a section with no markers claims to have omitted something")
+	}
+	if got["v1.0.0"].notes != got["v1.0.0"].published {
+		t.Errorf("notes %q and published %q differ with no markers in the section",
+			got["v1.0.0"].notes, got["v1.0.0"].published)
+	}
+}
+
+// Unclosed is the dangerous one: it silently drops the rest of the section,
+// including a Security heading, and the release still publishes.
+func TestRefusesAnUnclosedRegion(t *testing.T) {
+	_, err := parse("## v1.0.0\n\nKept.\n\n<!-- relnotes:omit -->\n### Added\n\nA thing.\n")
+	if err == nil {
+		t.Fatal("an unclosed region was accepted")
+	}
+	if !strings.Contains(err.Error(), "never closed") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+}
+
+func TestRefusesACloseWithNothingOpen(t *testing.T) {
+	_, err := parse("## v1.0.0\n\nKept.\n\n<!-- relnotes:end -->\n")
+	if err == nil {
+		t.Fatal("a close with nothing open was accepted")
+	}
+}
+
+// Two regions would print the same link twice, under two headings, which reads
+// as a page that could not decide where it went.
+func TestRefusesASecondRegion(t *testing.T) {
+	_, err := parse("## v1.0.0\n\nKept.\n\n<!-- relnotes:omit -->\nOne.\n<!-- relnotes:end -->\n\nAlso kept.\n\n<!-- relnotes:omit -->\nTwo.\n<!-- relnotes:end -->\n")
+	if err == nil {
+		t.Fatal("a second region was accepted")
+	}
+	if !strings.Contains(err.Error(), "second") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+}
+
+// A pair with nothing between them publishes a link to detail that is not
+// there, which is a promise the changelog cannot keep.
+func TestRefusesAnEmptyRegion(t *testing.T) {
+	_, err := parse("## v1.0.0\n\nKept.\n\n<!-- relnotes:omit -->\n\n<!-- relnotes:end -->\n")
+	if err == nil {
+		t.Fatal("an empty region was accepted")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("the error does not say what is wrong: %v", err)
+	}
+}
+
+// The marker is content inside a fence, exactly as a heading is. Documenting
+// the convention in the changelog must not change what the changelog publishes.
+func TestAMarkerInsideAFenceIsNotAMarker(t *testing.T) {
+	got, err := parse("## v1.0.0\n\nKept.\n\n```md\n<!-- relnotes:omit -->\n```\n\nAlso kept.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["v1.0.0"].omitted {
+		t.Error("a marker inside a code fence opened a region")
+	}
+	if !strings.Contains(got["v1.0.0"].published, "Also kept") {
+		t.Error("the section was cut short at a marker inside a code fence")
+	}
+}
+
+// The whole point of reading `published` rather than the body. A section that
+// omits all of itself is not empty and would publish a heading and a link.
+func TestASectionThatOmitsEverythingPublishesNothing(t *testing.T) {
+	got, err := parse("## v1.0.0\n\n<!-- relnotes:omit -->\nAll of it.\n<!-- relnotes:end -->\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(got["v1.0.0"].published) != "" {
+		t.Fatalf("published is %q, want empty so the gate refuses it", got["v1.0.0"].published)
+	}
+	if !strings.Contains(got["v1.0.0"].notes, "antifailure.dev/changelog") {
+		t.Error("the notes carry no pointer, so this test is not describing the case it names")
+	}
+}
+
+// The release this repository is about to cut, measured rather than asserted
+// about. A section that has stopped omitting anything is a section that has
+// gone back to publishing its whole catalogue, and nothing else would say so.
+func TestTheRealV100SectionPointsAtTheChangelogAndStaysUnderTheLimit(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("../..", "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parse(string(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, ok := got["v1.0.0"]
+	if !ok {
+		t.Skip("no v1.0.0 section in this tree")
+	}
+	if !release.omitted {
+		t.Error("the v1.0.0 section publishes its whole catalogue again")
+	}
+	notes := preamble("antifailure/antifailure", "refs/tags/v1.0.0") + "\n" +
+		strings.TrimSpace(release.notes) + "\n"
+	// GitHub refuses a release body over 125000 characters. This is nowhere
+	// near it and the number is here so that a section growing back towards it
+	// is visible as a number rather than as a wall somebody notices later.
+	if len(notes) > 30000 {
+		t.Errorf("the v1.0.0 release body is %d bytes, which is back to being a wall", len(notes))
+	}
+	for _, want := range []string{
+		"cosign verify-blob",
+		"### What 1.0 means",
+		"### Behaviour you may depend on that changed",
+		"### Security",
+		"https://antifailure.dev/changelog",
+	} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("the release body does not carry %q", want)
+		}
+	}
 }

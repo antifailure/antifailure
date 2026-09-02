@@ -32,11 +32,27 @@ const DIR = path.join(REPO, ".changes");
 export type Category = "added" | "fixed" | "changed" | "security";
 const CATEGORIES: Category[] = ["added", "fixed", "changed", "security"];
 
+/**
+ * The order the categories are read in, which is not the order they are
+ * validated in. New capability, then behaviour that moved under you, then what
+ * was broken, then what was insecure. It runs from the entry you read because
+ * you are curious to the entry you read because you have to.
+ */
+export const CATEGORY_ORDER: Category[] = ["added", "changed", "fixed", "security"];
+
 export type Span =
   | { kind: "text"; text: string }
   | { kind: "code"; text: string }
-  | { kind: "strong"; text: string }
+  | { kind: "strong"; spans: Span[] }
+  | { kind: "em"; spans: Span[] }
   | { kind: "link"; text: string; href: string };
+
+/** A span's words with its markup taken off, for measuring and for cutting. */
+function plain(span: Span): string {
+  return span.kind === "strong" || span.kind === "em"
+    ? span.spans.map(plain).join("")
+    : span.text;
+}
 
 export type Block = { kind: "p"; spans: Span[] } | { kind: "ul"; items: Span[][] };
 
@@ -46,6 +62,29 @@ export type Section = { category: Category; blocks: Block[] };
 export type Entry = {
   /** The fragment's file name without its extension, and the anchor on the page. */
   slug: string;
+  /**
+   * The entry's opening sentence, lifted out of its first paragraph.
+   *
+   * This is the line somebody scans, and it is the author's own sentence
+   * rather than a title derived from the file name. The file names are the
+   * other candidate and they are not reliably readable: `loadcp`,
+   * `installcheck` and `billing-stripe` say nothing, while their opening
+   * sentences say "the control plane can take money". Measured over every
+   * public fragment: all of them open with a paragraph, all of them have a
+   * sentence boundary in it, the median lead is 90 characters and the longest
+   * is 315, which the page clamps rather than cuts.
+   *
+   * It is removed from the body, so an open entry reads as a lede and the
+   * paragraphs under it, with nothing said twice.
+   */
+  headline: Span[];
+  /**
+   * Every category this entry declares, in the order it declares them. Twelve
+   * of the public fragments declare two. The first one files the entry under a
+   * heading; all of them are shown on its row and all of them match a filter,
+   * because an entry that both adds and fixes is not found under one word.
+   */
+  categories: Category[];
   sections: Section[];
   /**
    * ISO date of the commit that landed this entry on main, or null when git
@@ -56,15 +95,31 @@ export type Entry = {
   landed: string | null;
 };
 
-export type Day = { date: string | null; entries: Entry[] };
+/** One category's entries within a release. Empty groups are not built. */
+export type Group = { category: Category; entries: Entry[] };
 
 export type Release = {
   /** A tag name, or null for the entries no tag contains yet. */
   tag: string | null;
   /** ISO date the tag was cut. Null for unreleased. */
   date: string | null;
-  /** Entries in this release, newest day first. */
-  days: Day[];
+  /**
+   * Entries grouped by category, in CATEGORY_ORDER, newest first within a
+   * group.
+   *
+   * This page grouped by day first, and the day is the right axis for a
+   * project with a release every fortnight. It is the wrong one for a release
+   * that carries 190 entries landed over one week: it produced seven headings
+   * with twenty-seven entries under each, which is the same wall with dates
+   * on it. The question a reader of a release actually asks is what kind of
+   * change it is, and whether there is a security entry in it. Every row still
+   * carries the day it landed, so the chronology is not lost, only demoted.
+   */
+  groups: Group[];
+  /** The first and last day anything in this release landed. Null when nothing is dated. */
+  span: { from: string; to: string } | null;
+  /** How many entries this build could not date. Rendered, never hidden. */
+  undated: number;
   /**
    * Why a release has no public entries, when it has none. Two different
    * things look identical on the page and are not: a release cut before
@@ -79,17 +134,29 @@ export type Release = {
  * Parsing
  * ---------------------------------------------------------------------- */
 
-const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
+const INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)]+\))/g;
 
 /**
- * Inline markup, and only the three shapes the fragments actually contain.
+ * Inline markup, and only the shapes the fragments actually contain.
  *
- * Measured rather than assumed: 783 spans of inline code, two of bold, no
- * fenced blocks, no heading below the first level, and one file using
- * bullets. Writing a general markdown parser for that would be several
- * hundred lines guarding against constructs nothing has ever written. Links
- * are the one shape not present today and supported anyway, because the cost
- * of not supporting them is a raw `[text](url)` shipped to a reader.
+ * Measured rather than assumed, across the 190 public fragments: 1349 spans of
+ * inline code, 12 of bold, two of italic, one link, no fenced blocks, no
+ * heading below the first level, and one file using bullets. Writing a general
+ * markdown parser for that would be several hundred lines guarding against
+ * constructs nothing has ever written.
+ *
+ * Bold and italic hold spans rather than text, because they are the two that
+ * can contain something else and did. `**`af runner install`, the second
+ * command the installer prints, could not succeed**` shipped its backticks to
+ * the reader as backticks, and `*abandoned*` shipped its asterisks, on a page
+ * a prospective customer reads. Both are two characters of raw markup on a
+ * marketing site, which is the kind of defect nothing fails on and everybody
+ * sees.
+ *
+ * The alternation is ordered, and that ordering is what keeps a lone asterisk
+ * from eating a bold run: at the position of a `**` the bold branch is tried
+ * first and wins. A `*` inside a code span is never reached at all, because
+ * the backtick branch matches from the backtick, which comes first.
  */
 function spans(text: string): Span[] {
   const out: Span[] = [];
@@ -101,7 +168,9 @@ function spans(text: string): Span[] {
     if (token.startsWith("`")) {
       out.push({ kind: "code", text: token.slice(1, -1) });
     } else if (token.startsWith("**")) {
-      out.push({ kind: "strong", text: token.slice(2, -2) });
+      out.push({ kind: "strong", spans: spans(token.slice(2, -2)) });
+    } else if (token.startsWith("*")) {
+      out.push({ kind: "em", spans: spans(token.slice(1, -1)) });
     } else {
       const cut = token.indexOf("](");
       out.push({
@@ -114,6 +183,53 @@ function spans(text: string): Span[] {
   }
   if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
   return out;
+}
+
+/**
+ * The opening sentence, and everything after it.
+ *
+ * The cut is made on the plain text the spans carry and then applied to the
+ * spans themselves, so a headline never ends in the middle of a code span or
+ * half a link. A boundary is a full stop, question mark or exclamation mark
+ * followed by whitespace or by the end of the paragraph, which is what leaves
+ * `Version 1.0.` and `Next 15.5.23` intact: the full stop inside a version
+ * number is followed by a digit.
+ *
+ * A cut landing inside anything but a plain text span moves to that span's end
+ * rather than splitting it. Nothing in the corpus does that today; the
+ * alternative is a broken `<code>` shipped to a reader on the day one does.
+ */
+function splitLead(input: Span[]): { headline: Span[]; rest: Span[] } {
+  const flat = input.map(plain).join("");
+  const boundary = flat.match(/[.!?](?=\s|$)/);
+  if (!boundary || boundary.index === undefined) return { headline: input, rest: [] };
+  const cut = boundary.index + 1;
+
+  const headline: Span[] = [];
+  const rest: Span[] = [];
+  let at = 0;
+  for (const span of input) {
+    const end = at + plain(span).length;
+    if (end <= cut) {
+      headline.push(span);
+    } else if (at >= cut) {
+      rest.push(span);
+    } else if (span.kind === "text") {
+      headline.push({ kind: "text", text: span.text.slice(0, cut - at) });
+      rest.push({ kind: "text", text: span.text.slice(cut - at) });
+    } else {
+      headline.push(span);
+    }
+    at = end;
+  }
+
+  // The space that separated the two sentences belongs to neither.
+  if (rest.length > 0 && rest[0].kind === "text") {
+    const trimmed = rest[0].text.replace(/^\s+/, "");
+    if (trimmed === "") rest.shift();
+    else rest[0] = { kind: "text", text: trimmed };
+  }
+  return { headline, rest };
 }
 
 /**
@@ -322,14 +438,38 @@ function isPublic(file: string): boolean {
   return file.endsWith(".md") && !file.endsWith(".internal.md");
 }
 
+/**
+ * The lede, taken off the front of the entry.
+ *
+ * Every public fragment opens its first section with a paragraph, so the
+ * fallback below has never run. It is here because a fragment opening with a
+ * bullet list is valid to `tools/changecheck` and would otherwise render a row
+ * with no line on it at all, which is worse than a row headed by its own file
+ * name.
+ */
+function lede(slug: string, sections: Section[]): Span[] {
+  const first = sections[0]?.blocks[0];
+  if (!first || first.kind !== "p") {
+    const words = slug.replace(/-/g, " ");
+    return [{ kind: "text", text: words.charAt(0).toUpperCase() + words.slice(1) }];
+  }
+  const { headline, rest } = splitLead(first.spans);
+  if (rest.length > 0) first.spans = rest;
+  else sections[0].blocks.shift();
+  return headline;
+}
+
 function readEntries(dates: Map<string, string>): Entry[] {
   const entries: Entry[] = [];
   for (const file of readdirSync(DIR).sort()) {
     if (!isPublic(file)) continue;
     const sections = parse(readFileSync(path.join(DIR, file), "utf8"));
     if (sections.length === 0) continue;
+    const slug = file.replace(/\.md$/, "");
     entries.push({
-      slug: file.replace(/\.md$/, ""),
+      slug,
+      headline: lede(slug, sections),
+      categories: [...new Set(sections.map((section) => section.category))],
       sections,
       landed: dates.get(`.changes/${file}`) ?? null,
     });
@@ -337,37 +477,44 @@ function readEntries(dates: Map<string, string>): Entry[] {
   return entries;
 }
 
-function groupByDay(entries: Entry[]): Day[] {
-  const byDay = new Map<string, Entry[]>();
-  const undated: Entry[] = [];
-  for (const entry of entries) {
-    if (!entry.landed) {
-      undated.push(entry);
-      continue;
-    }
-    const key = entry.landed.slice(0, 10);
-    const list = byDay.get(key);
-    if (list) list.push(entry);
-    else byDay.set(key, [entry]);
+/**
+ * Newest landing first, then by slug.
+ *
+ * The slug tiebreak is what holds two entries that landed in the same commit
+ * in the same order across builds. An entry this build could not date sorts
+ * last rather than first: it is an admitted gap, not the newest news.
+ */
+function byRecency(a: Entry, b: Entry): number {
+  if (a.landed === b.landed) return a.slug.localeCompare(b.slug);
+  if (!a.landed) return 1;
+  if (!b.landed) return -1;
+  return a.landed < b.landed ? 1 : -1;
+}
+
+/**
+ * An entry is filed under the first category it declares and shows all of
+ * them, so it appears exactly once on the page and under one heading. Filing
+ * it under both would give two elements one id, and an anchor pointing at a
+ * duplicate is a link that lands in a different place depending on the
+ * browser.
+ */
+function groupByCategory(entries: Entry[]): Group[] {
+  const groups: Group[] = [];
+  for (const category of CATEGORY_ORDER) {
+    const mine = entries.filter((entry) => entry.categories[0] === category).sort(byRecency);
+    if (mine.length > 0) groups.push({ category, entries: mine });
   }
-  const days: Day[] = [...byDay.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .map(([date, list]) => ({
-      date,
-      // Newest landing first within a day, then by slug, so two entries that
-      // landed in the same commit hold a stable order across builds.
-      entries: list.sort((a, b) =>
-        a.landed === b.landed
-          ? a.slug.localeCompare(b.slug)
-          : (a.landed as string) < (b.landed as string)
-            ? 1
-            : -1,
-      ),
-    }));
-  if (undated.length > 0) {
-    days.push({ date: null, entries: undated.sort((a, b) => a.slug.localeCompare(b.slug)) });
-  }
-  return days;
+  return groups;
+}
+
+function landedSpan(entries: Entry[]): { from: string; to: string } | null {
+  const days = entries
+    .map((entry) => entry.landed)
+    .filter((landed): landed is string => landed !== null)
+    .map((landed) => landed.slice(0, 10))
+    .sort();
+  if (days.length === 0) return null;
+  return { from: days[0], to: days[days.length - 1] };
 }
 
 /**
@@ -397,17 +544,22 @@ export function releases(): Release[] {
     out.push({
       tag: tag.name,
       date: tag.date,
-      days: groupByDay(mine),
+      groups: groupByCategory(mine),
+      span: landedSpan(mine),
+      undated: mine.filter((entry) => !entry.landed).length,
       emptyBecause:
         mine.length > 0 ? null : tag.hasDir ? "every entry was internal" : "predates the convention",
     });
   }
   out.reverse();
 
+  const unreleased = entries.filter((entry) => !claimed.has(entry.slug));
   out.unshift({
     tag: null,
     date: null,
-    days: groupByDay(entries.filter((entry) => !claimed.has(entry.slug))),
+    groups: groupByCategory(unreleased),
+    span: landedSpan(unreleased),
+    undated: unreleased.filter((entry) => !entry.landed).length,
     emptyBecause: null,
   });
   return out;
@@ -415,7 +567,19 @@ export function releases(): Release[] {
 
 /** How many public entries a release carries, for the count beside its name. */
 export function entryCount(release: Release): number {
-  return release.days.reduce((total, day) => total + day.entries.length, 0);
+  return release.groups.reduce((total, group) => total + group.entries.length, 0);
+}
+
+/**
+ * The id a category heading answers to, as `v1-0-0-security`.
+ *
+ * A tag carries dots, which are legal in an id and are an attribute selector
+ * away from being a class in every stylesheet and a mistake in every
+ * `querySelector` that forgets to escape them. The page reaches these from
+ * JavaScript, so they are spelled without.
+ */
+export function groupAnchor(release: Release, category: Category): string {
+  return `${(release.tag ?? "unreleased").replace(/[^a-zA-Z0-9]+/g, "-")}-${category}`;
 }
 
 /**
@@ -431,6 +595,45 @@ export function formatDay(date: string): string {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+/**
+ * The same day, short, for the column beside an entry.
+ *
+ * "2 Sep 2026" rather than "2 September 2026", because the long form is 16
+ * monospace capitals with 0.12em between them, which is 140px in a 132px
+ * column. The `datetime` attribute beside it carries the unabbreviated date
+ * for anything reading the page rather than looking at it.
+ */
+export function formatShortDay(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * The days a release's work landed between, written the way a person says it.
+ *
+ * The repeated half of the two dates comes off: "26 to 29 August 2026" rather
+ * than "26 August 2026 to 29 August 2026", which is the same fact with eleven
+ * words in it. Both dates are still in the markup, on the entries themselves.
+ */
+export function formatSpan(from: string, to: string): string {
+  if (from === to) return formatDay(from);
+  const [fromYear, fromMonth] = from.split("-");
+  const [toYear, toMonth] = to.split("-");
+  const day = (date: string) => String(Number(date.slice(8, 10)));
+  if (fromYear === toYear && fromMonth === toMonth) {
+    return `${day(from)} to ${formatDay(to)}`;
+  }
+  if (fromYear === toYear) {
+    const head = formatDay(from).replace(new RegExp(` ${fromYear}$`), "");
+    return `${head} to ${formatDay(to)}`;
+  }
+  return `${formatDay(from)} to ${formatDay(to)}`;
 }
 
 /** The most recent day anything landed, for the sitemap's lastmod. */

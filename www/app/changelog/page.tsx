@@ -4,28 +4,47 @@ import { PageHero, PageShell } from "@/components/pages/kit";
 import {
   type Block,
   type Category,
+  type Entry,
+  type Group,
   type Release,
   type Span,
   entryCount,
   formatDay,
+  formatShortDay,
+  formatSpan,
+  groupAnchor,
   releases,
 } from "@/lib/changelog";
 import { pageMetadata } from "@/lib/seo";
+import { ChangelogControls } from "./Controls";
 
 export const metadata = pageMetadata("/changelog");
 
 /**
  * The changelog.
  *
- * Read by somebody asking one question, "what changed since I last looked", so
- * the date is the loudest thing on the page and everything else is quiet
- * around it. On a wide screen the date holds its own column and stays put
- * while its entries scroll past, because the day a batch of work landed is the
- * context you lose first in a long list and the one you need most.
+ * Two readers, and they want opposite things. One wants to know what a release
+ * means and will read a few hundred words; the other is looking for one change
+ * and wants it in seconds. The page used to serve neither. Every entry was open
+ * on one list, so v1.0.0 rendered as a hundred and ninety paragraphs in a column
+ * 127,000 pixels tall on a desktop and 203,000 on a phone, with one entry above
+ * the fold and no way to see the shape of the release at all.
+ *
+ * So: a release states its size and its dates and links to its categories,
+ * every entry is one scannable line headed by its author's own opening
+ * sentence, and opening one is a `details` element. The first reader gets a
+ * release they can take in without scrolling; the second gets a hundred and
+ * ninety headlines to run an eye down, four category jumps, and a search that
+ * reads the entries the page is not showing.
+ *
+ * Collapsed is not hidden. The prose is in the HTML, which is what a crawler,
+ * an answer engine and the markdown twin all read, and what the search here
+ * reads too. A reader with no JavaScript gets the same page minus the search
+ * box, because `details` needs no script to open.
  *
  * No cards. A changelog is a list of paragraphs with labels, and a border
- * around each one would add ninety-one boxes and no information. Separation is
- * a hairline and space.
+ * around each one would add a hundred and ninety boxes and no information.
+ * Separation is a hairline and space.
  */
 export default function ChangelogPage() {
   const all = releases();
@@ -47,35 +66,68 @@ export default function ChangelogPage() {
           and the stylesheet's own order decides which one wins. */}
       <section className="safe-paddings pb-28 max-xl:pb-20 max-md:pb-14">
         <Container size="1600">
-          {/* Where the dates and the grouping come from. A changelog that does
-              not say this leaves a reader to assume the dates were typed, and
-              these were not. */}
-          <div className="max-w-[720px] border-t border-black/12 pt-8 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:pt-6">
-            <p>
-              A date here is the day the entry landed on the main branch, read from the commit that
-              brought it there. Nothing on this page is typed by hand or backfilled.
-            </p>
-            <p className="mt-4">
-              Changes with nothing a user of Antifailure could observe are recorded in the
-              repository and left off this page: a lockfile drift, a test that was measuring
-              nothing, a build artifact that needed ignoring. Every change to anything you can see
-              is here, and CI refuses one that arrives without an entry.
-            </p>
-          </div>
-
           {total === 0 ? (
-            <p className="mt-14 max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+            <p className="max-w-[720px] border-t border-black/12 pt-8 text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
               Nothing has been recorded yet. The first entry appears here when the first change
               lands.
             </p>
           ) : (
-            all.map((release) => (
-              <ReleaseSection key={release.tag ?? "unreleased"} release={release} />
-            ))
+            <>
+              {/* The search comes before the releases and the provenance note
+                  comes after all of them. Both were the other way round, which
+                  put two paragraphs about how the page is built between a
+                  reader and the release they came for, and left nothing but
+                  preamble on the first screen. How the dates are read is worth
+                  saying and it is not what anybody opened this page to find
+                  out. */}
+              {/* The space the search takes is reserved here rather than
+                  claimed when it mounts. The control renders nothing until it
+                  has, so without this the whole page moved down by its own
+                  height on hydration. The hairline belongs to the control
+                  rather than to this, because two rules 69px apart with
+                  nothing between them is what a reader with JavaScript off
+                  would otherwise be looking at, and empty space is not. */}
+              <div className="min-h-[69px] max-md:min-h-[124px]">
+                <ChangelogControls total={total} />
+              </div>
+              {all.map((release) => (
+                <ReleaseSection key={release.tag ?? "unreleased"} release={release} />
+              ))}
+              <Provenance />
+            </>
           )}
         </Container>
       </section>
     </PageShell>
+  );
+}
+
+/**
+ * Where the dates and the grouping come from.
+ *
+ * A changelog that does not say this leaves a reader to assume the dates were
+ * typed, and these were not. It sits at the foot of the page because it
+ * answers a question asked after reading rather than before it.
+ */
+function Provenance() {
+  return (
+    <section className="mt-20 border-t border-black/12 pt-8 max-md:mt-14 max-md:pt-6">
+      <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-gray-new-20">
+        How this page is made
+      </h2>
+      <div className="mt-5 max-w-[720px] text-[16px] leading-7 tracking-extra-tight text-gray-new-40">
+        <p>
+          A date here is the day the entry landed on the main branch, read from the commit that
+          brought it there. Nothing on this page is typed by hand or backfilled.
+        </p>
+        <p className="mt-4">
+          Changes with nothing a user of Antifailure could observe are recorded in the repository
+          and left off this page: a lockfile drift, a test that was measuring nothing, a build
+          artifact that needed ignoring. Every change to anything you can see is here, and CI
+          refuses one that arrives without an entry.
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -84,7 +136,10 @@ function ReleaseSection({ release }: { release: Release }) {
   const name = release.tag ?? "Unreleased";
 
   return (
-    <section className="mt-20 border-t border-black/12 pt-10 first-of-type:mt-16 max-md:mt-14 max-md:pt-8">
+    <section
+      data-release
+      className="mt-20 border-t border-black/12 pt-10 first-of-type:mt-14 max-md:mt-14 max-md:pt-8"
+    >
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
         <h2 className="text-[36px] leading-dense tracking-tighter text-black max-lg:text-[30px] max-md:text-[26px]">
           {name}
@@ -97,7 +152,13 @@ function ReleaseSection({ release }: { release: Release }) {
           ) : (
             "Not released yet"
           )}
-          {count > 0 ? ` · ${count} ${count === 1 ? "entry" : "entries"}` : null}
+          {count > 0 ? (
+            <>
+              {" · "}
+              <span data-release-count>{count}</span> entries
+            </>
+          ) : null}
+          {release.span ? ` · landed ${formatSpan(release.span.from, release.span.to)}` : null}
         </p>
       </div>
 
@@ -109,105 +170,211 @@ function ReleaseSection({ release }: { release: Release }) {
         </p>
       ) : null}
 
-      {release.days.map((day) => (
-        <div
-          key={day.date ?? "undated"}
-          className="mt-12 grid grid-cols-[180px_minmax(0,1fr)] gap-x-16 border-t border-black/12 pt-8 max-xl:grid-cols-[150px_minmax(0,1fr)] max-xl:gap-x-10 max-lg:grid-cols-1 max-lg:gap-x-0 max-md:mt-8 max-md:pt-6"
-        >
-          <div className="self-start lg:sticky lg:top-24">
-            {day.date ? (
-              <time
-                dateTime={day.date}
-                className="block text-[20px] leading-snug tracking-extra-tight text-black max-lg:text-[18px]"
-              >
-                {formatDay(day.date)}
-              </time>
-            ) : (
-              <span className="block text-[20px] leading-snug tracking-extra-tight text-black max-lg:text-[18px]">
-                Undated
+      {release.undated > 0 ? (
+        <p className="mt-6 max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 max-md:text-[16px]">
+          {release.undated === 1 ? "One entry here carries" : `${release.undated} entries here carry`}{" "}
+          no date. This build could not read the commit that landed them, so the day is left blank
+          rather than guessed.
+        </p>
+      ) : null}
+
+      {/* The shape of the release, before any of it. Four numbers say whether
+          this was a release of new work or of repairs, and whether there is a
+          security entry in it, which is the one question a reader who is not
+          upgrading yet still wants answered. They are links rather than
+          filters: an index that scrolls needs no JavaScript, and the search
+          above is the control that does something an index cannot. */}
+      {release.groups.length > 0 ? (
+        <nav aria-label={`${name} by category`} className="mt-8 flex flex-wrap gap-2">
+          {release.groups.map((group) => (
+            <a
+              key={group.category}
+              href={`#${groupAnchor(release, group.category)}`}
+              data-chip={groupAnchor(release, group.category)}
+              // [&[hidden]]:hidden, because `hidden` is an attribute selector
+              // in the browser's own stylesheet and inline-flex is a class in
+              // this one, so the class wins and a chip hidden from script goes
+              // on showing. The entries and the sections carry no display
+              // class, which is why only this element needs it said.
+              className="inline-flex min-h-11 items-center gap-x-2.5 rounded-full border border-black/15 bg-white px-4 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-gray-new-20 transition-colors [&[hidden]]:hidden hover:border-black/40 hover:text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
+            >
+              <span className={group.category === "security" ? "text-[#C43D3D]" : undefined}>
+                {group.category}
               </span>
-            )}
-            <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.12em] text-gray-new-40">
-              {day.entries.length} {day.entries.length === 1 ? "entry" : "entries"}
-            </p>
-            {day.date ? null : (
-              <p className="mt-3 max-w-[280px] text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
-                This build could not read the commit that landed these, so their date is left blank
-                rather than guessed.
-              </p>
-            )}
-          </div>
+              <span className="text-gray-new-50" data-chip-count>
+                {group.entries.length}
+              </span>
+            </a>
+          ))}
+        </nav>
+      ) : null}
 
-          <ol className="min-w-0 max-lg:mt-8">
-            {day.entries.map((entry, index) => (
-              <li
-                key={entry.slug}
-                className={index === 0 ? "" : "mt-10 border-t border-black/12 pt-10 max-md:mt-8 max-md:pt-8"}
-              >
-                <article id={entry.slug} className="scroll-mt-24 max-xl:scroll-mt-20">
-                  <div className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-1">
-                    {/* One category, one label. An entry that carries two
-                        gets them above their own paragraphs instead, where
-                        they say which half of the entry they belong to;
-                        repeating them here as well would print the word
-                        "fixed" twice in eight inches and mean nothing extra. */}
-                    {entry.sections.length === 1 ? (
-                      <CategoryLabel category={entry.sections[0].category} />
-                    ) : null}
-                    <a
-                      href={`#${entry.slug}`}
-                      // inline-block with vertical padding, cancelled by an
-                      // equal negative margin: the anchor's own hit area is
-                      // 45px on a phone without the row growing. The row's
-                      // min-h-11 does not help, because a 17px anchor inside a
-                      // 44px row is still a 17px target.
-                      className="-my-3.5 inline-block min-w-0 py-3.5 font-mono text-[11px] tracking-snug text-gray-new-40 underline decoration-black/25 underline-offset-4 [overflow-wrap:anywhere] hover:text-black hover:decoration-black"
-                    >
-                      {entry.slug}
-                    </a>
-                  </div>
-
-                  {entry.sections.map((section, sectionIndex) => (
-                    <div key={section.category} className={sectionIndex === 0 ? "mt-3" : "mt-7"}>
-                      {entry.sections.length > 1 ? (
-                        <p className="mb-3">
-                          <CategoryLabel category={section.category} />
-                        </p>
-                      ) : null}
-                      {section.blocks.map((block, blockIndex) => (
-                        <Prose key={blockIndex} block={block} first={blockIndex === 0} />
-                      ))}
-                    </div>
-                  ))}
-                </article>
-              </li>
-            ))}
-          </ol>
-        </div>
+      {release.groups.map((group) => (
+        <CategoryGroup key={group.category} release={release} group={group} />
       ))}
     </section>
   );
 }
 
-/**
- * The category, as a word.
- *
- * Security is the one that carries a colour, in the red this site already uses
- * for a blocked request, because it is the entry somebody scanning the page
- * needs to find without reading. The word is there either way: colour is never
- * the only thing saying what this is.
- */
-function CategoryLabel({ category }: { category: Category }) {
+function CategoryGroup({ release, group }: { release: Release; group: Group }) {
+  const anchor = groupAnchor(release, group.category);
+
   return (
-    <span
-      className={
-        category === "security"
-          ? "font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#C43D3D]"
-          : "font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-gray-new-20"
-      }
+    <section data-group className="mt-16 max-md:mt-12">
+      {/* The heading holds its own column on a wide screen and stays there
+          while its entries scroll past, for the reason the day used to: the
+          label you lose first in a long list is the one you need most. */}
+      <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-x-16 border-t border-black/12 pt-8 max-xl:grid-cols-[150px_minmax(0,1fr)] max-xl:gap-x-10 max-lg:grid-cols-1 max-lg:gap-x-0 max-md:pt-6">
+        <div className="self-start lg:sticky lg:top-24">
+          <h3
+            id={anchor}
+            className="scroll-mt-24 text-[20px] leading-snug tracking-extra-tight text-black capitalize max-xl:scroll-mt-20 max-lg:text-[18px]"
+          >
+            {group.category}
+          </h3>
+          <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.12em] text-gray-new-40">
+            <span data-group-count>{group.entries.length}</span> entries
+          </p>
+          <p className="mt-3 max-w-[280px] text-[14px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:hidden">
+            {BLURBS[group.category]}
+          </p>
+        </div>
+
+        {/* Not an `ol`. scripts/markdown-twins.mjs takes headings, paragraphs
+            and list items out of the built HTML, and a list item is taken
+            whole: wrapping each entry in an `li` collapsed all of its
+            paragraphs into one bullet, so the twin an answer engine reads was
+            a hundred and ninety unbroken lines with the headings inside them.
+            As sibling `details` the same content comes out as a heading and
+            its paragraphs, which is what the file is for. */}
+        <div className="min-w-0 max-w-[1040px] max-lg:mt-6">
+          {group.entries.map((entry) => (
+            <EntryRow key={entry.slug} entry={entry} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * What a category means here, said once beside the heading rather than in a
+ * label on every entry under it. Dropped below 1024, where the heading stops
+ * holding a column of its own and the line would sit between the reader and
+ * the entries instead of beside them.
+ */
+const BLURBS: Record<Category, string> = {
+  added: "Something the product could not do before.",
+  changed: "Behaviour that already existed and now works differently.",
+  fixed: "Something that claimed to work and did not.",
+  security: "A defect with a consequence for the safety of your data or your build.",
+};
+
+/**
+ * One entry, closed.
+ *
+ * `summary` is the whole row rather than a wrapper inside it, because its
+ * content model is phrasing and heading content: a `div` in there is invalid
+ * and a heading is not. Making the summary the grid itself keeps the markup
+ * legal and takes the browser's own disclosure triangle away, which
+ * `display: grid` does on its own. The marker below is drawn instead, so it
+ * looks the same in every browser rather than like a Safari triangle here and
+ * a Chrome one there.
+ *
+ * The headline is an `h4` and not a styled span. It is the level under the
+ * category `h3`, so the page has a real outline for anything reading it as a
+ * document, and scripts/markdown-twins.mjs takes headings and paragraphs,
+ * which means a span here would have dropped every entry's opening line out of
+ * the twin that answer engines read.
+ */
+function EntryRow({ entry }: { entry: Entry }) {
+  return (
+    <details
+      id={entry.slug}
+      data-entry
+      className="group scroll-mt-24 border-b border-black/12 max-xl:scroll-mt-20 [&[open]]:pb-8"
     >
-      {category}
-    </span>
+      <summary className="grid cursor-pointer grid-cols-[132px_minmax(0,1fr)_16px] items-start gap-x-8 py-5 marker:content-none hover:bg-black/[0.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60 max-lg:grid-cols-[minmax(0,1fr)_16px] max-lg:gap-x-4 max-lg:py-4">
+        <span className="col-start-1 row-start-1 block pt-0.5 font-mono text-[11px] uppercase tracking-[0.12em] text-gray-new-40">
+          {entry.landed ? (
+            <time dateTime={entry.landed.slice(0, 10)}>
+              {formatShortDay(entry.landed.slice(0, 10))}
+            </time>
+          ) : (
+            "Undated"
+          )}
+          {entry.categories.length > 1 ? (
+            <span className="mt-1.5 block">
+              {entry.categories.map((category, index) => (
+                <span key={category}>
+                  {index === 0 ? null : <span className="text-gray-new-60"> · </span>}
+                  <span
+                    className={
+                      category === "security" ? "font-medium text-[#C43D3D]" : "text-gray-new-20"
+                    }
+                  >
+                    {category}
+                  </span>
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </span>
+
+        {/* Clamped to two lines closed and released when open. The opening
+            sentences run from 12 to 315 characters, so a fixed height would
+            either clip the ordinary ones or leave a hole under them. */}
+        <h4 className="col-start-2 row-start-1 min-w-0 text-[17px] leading-7 tracking-extra-tight text-black [overflow-wrap:anywhere] group-open:line-clamp-none max-lg:col-start-1 max-lg:row-start-2 max-lg:mt-2 max-lg:text-[16px] max-md:leading-6 line-clamp-2">
+          {entry.headline.map(renderSpan)}
+        </h4>
+
+        <span
+          aria-hidden="true"
+          className="col-start-3 row-start-1 mt-2 block size-2 -rotate-45 border-r border-b border-black/40 transition-transform duration-200 group-open:rotate-45 max-lg:col-start-2 max-lg:row-span-2"
+        />
+      </summary>
+
+      <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-x-8 max-lg:grid-cols-1 max-lg:gap-x-0">
+        <div className="col-start-2 min-w-0 max-lg:col-start-1">
+          {entry.sections.map((section, sectionIndex) => (
+            <div key={section.category} className={sectionIndex === 0 ? "" : "mt-7"}>
+              {/* One category, one label, and the group heading above already
+                  carries it. An entry that declares two gets them over their
+                  own paragraphs, where they say which half of the entry they
+                  belong to. */}
+              {entry.sections.length > 1 ? (
+                <p className="mb-3">
+                  <span
+                    className={
+                      section.category === "security"
+                        ? "font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#C43D3D]"
+                        : "font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-gray-new-20"
+                    }
+                  >
+                    {section.category}
+                  </span>
+                </p>
+              ) : null}
+              {section.blocks.map((block, blockIndex) => (
+                <Prose key={blockIndex} block={block} first={blockIndex === 0} />
+              ))}
+            </div>
+          ))}
+
+          <p className="mt-6">
+            {/* inline-block with vertical padding, cancelled by an equal
+                negative margin: the anchor's own hit area is 45px on a phone
+                without the row growing. */}
+            <a
+              href={`#${entry.slug}`}
+              className="-my-3.5 inline-block max-w-full py-3.5 font-mono text-[11px] tracking-snug text-gray-new-40 underline decoration-black/25 underline-offset-4 [overflow-wrap:anywhere] hover:text-black hover:decoration-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black/60"
+            >
+              {entry.slug}
+            </a>
+          </p>
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -255,8 +422,14 @@ function renderSpan(span: Span, index: number): ReactNode {
     case "strong":
       return (
         <strong key={index} className="font-medium text-black">
-          {span.text}
+          {span.spans.map(renderSpan)}
         </strong>
+      );
+    case "em":
+      return (
+        <em key={index} className="italic">
+          {span.spans.map(renderSpan)}
+        </em>
       );
     case "link":
       return (
