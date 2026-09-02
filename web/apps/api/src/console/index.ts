@@ -22,6 +22,7 @@
 // did by hand is now done by React by construction.
 
 import type { Context, Hono } from 'hono'
+import type { ApiEnv } from '../env.ts'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import {
@@ -88,7 +89,7 @@ interface Viewer {
   role: string | null
 }
 
-export function mountConsole(app: Hono, options: ConsoleOptions): void {
+export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
   const { pool, clock, build } = options
 
   async function viewerFor(c: Context): Promise<Viewer | null> {

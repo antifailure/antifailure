@@ -64,6 +64,94 @@ else
   mkdir -p site/docs && cp -R docs/dist/. site/docs/
 fi
 
+# The documentation's sitemap, canonical, OpenGraph URL and TechArticle used
+# to agree on a trailing slash that the live host immediately removed with a
+# 301. Parse the assembled output and require one identity that is also the URL
+# the sitemap publishes. Presence-only checks cannot see that mismatch.
+python3 - <<'DOCIDENTITY' || exit 1
+import glob, json, os, sys
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+
+
+class Head(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.canonical = None
+        self.og_url = None
+        self.in_json = False
+        self.json_text = []
+        self.json_blocks = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "link" and attrs.get("rel") == "canonical":
+            self.canonical = attrs.get("href")
+        if tag == "meta" and attrs.get("property") == "og:url":
+            self.og_url = attrs.get("content")
+        if tag == "script" and attrs.get("type") == "application/ld+json":
+            self.in_json = True
+            self.json_text = []
+
+    def handle_data(self, data):
+        if self.in_json:
+            self.json_text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self.in_json:
+            self.in_json = False
+            self.json_blocks.append("".join(self.json_text))
+
+
+problems = []
+canonicals = set()
+for filename in glob.glob("site/docs/**/*.html", recursive=True):
+    if filename.endswith("/404.html"):
+        continue
+    parser = Head()
+    with open(filename, encoding="utf-8") as f:
+        parser.feed(f.read())
+    if not parser.canonical:
+        problems.append(f"{filename}: no canonical")
+        continue
+    canonicals.add(parser.canonical)
+    if parser.canonical.endswith("/"):
+        problems.append(f"{filename}: canonical redirects at the live host: {parser.canonical}")
+    if parser.og_url != parser.canonical:
+        problems.append(f"{filename}: og:url {parser.og_url!r} != canonical {parser.canonical!r}")
+    articles = []
+    for raw in parser.json_blocks:
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as err:
+            problems.append(f"{filename}: JSON-LD does not parse: {err}")
+            continue
+        nodes = value.get("@graph", []) if isinstance(value, dict) else []
+        nodes = nodes if nodes else [value]
+        articles.extend(node for node in nodes if isinstance(node, dict) and node.get("@type") == "TechArticle")
+    if not any(
+        article.get("url") == parser.canonical
+        and article.get("@id") == parser.canonical + "#techarticle"
+        for article in articles
+    ):
+        problems.append(f"{filename}: no TechArticle matching {parser.canonical}")
+
+sitemap = ET.parse("site/docs/sitemap-0.xml")
+published = {node.text for node in sitemap.iter() if node.tag.endswith("loc")}
+if canonicals != published:
+    problems.append(
+        "documentation sitemap and page canonicals differ: "
+        f"not published={sorted(canonicals - published)}, no page={sorted(published - canonicals)}"
+    )
+
+if problems:
+    print("documentation identity is inconsistent:")
+    for problem in problems:
+        print("  " + problem)
+    sys.exit(1)
+print(f"documentation identity: {len(canonicals)} pages match their sitemap and TechArticle")
+DOCIDENTITY
+
 # The addresses that live outside both builds.
 cp install.sh site/install.sh
 mkdir -p site/schemas && cp schemas/*.json site/schemas/
@@ -331,6 +419,114 @@ if problems:
 
 print(f"host config: {shadowed} redirects shadow a built page, every one a moved-page stub")
 SHADOW
+
+# One trailing-slash policy, enforced across both builds.
+#
+# The host decides this for the whole site: www/public/staticwebapp.config.json
+# sets "trailingSlash", and Azure answers the other spelling with a 301. Each
+# build then has its own idea. www/next.config.ts said `trailingSlash: false`
+# and agreed. docs/astro.config.mjs said "ignore", and Astro's default under
+# "ignore" is the slashed form, so all 82 documentation pages declared a
+# canonical the host does not serve, the documentation sitemap offered 81 URLs
+# that redirect, and the Docs link in the shared header 301'd on every page.
+# Documentation is roughly seventy percent of this site, so the majority of it
+# pointed engines at addresses it then had to be told again were elsewhere.
+#
+# Nothing could have caught it. www/scripts/check-seo.mjs reads www/out and has
+# never opened docs/dist, and neither build can see the other's URLs or the
+# host config that overrules them both. This script is the only step that has
+# all three, which is why the assertion is here.
+#
+# The policy is READ from the config rather than written down again here. A
+# check with its own copy of the answer is a check that passes after somebody
+# changes the real one, and this file already carries that lesson twice.
+#
+# Fragments and query strings are cut before comparing: a browser drops them
+# before it asks for anything, so /docs/reference/cli/#af-init is a request for
+# /docs/reference/cli/ and redirects exactly like its bare form.
+python3 - <<'SLASH' || exit 1
+import glob, json, os, re, sys
+from collections import Counter
+
+with open("www/public/staticwebapp.config.json", encoding="utf-8") as f:
+    policy = json.load(f).get("trailingSlash", "auto")
+
+if policy not in ("never", "always"):
+    print(f"host config: trailingSlash is {policy!r}, so no one spelling is enforced")
+    sys.exit(0)
+
+want_slash = policy == "always"
+
+
+def disagrees(path):
+    """Whether this site-relative path is spelled the way the host serves it."""
+    path = path.split("#")[0].split("?")[0]
+    # The root is "/" under either policy, and a file with an extension is a
+    # file rather than a page: /og.png never grows a slash.
+    if path in ("", "/") or os.path.splitext(path)[1]:
+        return False
+    return path.endswith("/") != want_slash
+
+
+def local(url):
+    """A site-relative path, or None for somebody else's host."""
+    if url.startswith(("http://", "https://")):
+        rest = url.split("://", 1)[1]
+        host, _, tail = rest.partition("/")
+        if host != "antifailure.dev":
+            return None
+        return "/" + tail
+    return url if url.startswith("/") else None
+
+
+canonical = []
+links = Counter()
+locs = []
+
+for page in sorted(glob.glob("site/**/*.html", recursive=True)):
+    with open(page, encoding="utf-8", errors="replace") as f:
+        html = f.read()
+    tag = re.search(r'<link rel="canonical" href="([^"]*)"', html)
+    if tag:
+        path = local(tag.group(1))
+        if path and disagrees(path):
+            canonical.append((page, tag.group(1)))
+    for href in re.findall(r'href="([^"]*)"', html):
+        path = local(href)
+        if path and disagrees(path):
+            links[path] += 1
+
+for sitemap in sorted(glob.glob("site/**/sitemap*.xml", recursive=True)):
+    with open(sitemap, encoding="utf-8") as f:
+        for loc in re.findall(r"<loc>([^<]*)</loc>", f.read()):
+            path = local(loc)
+            if path and disagrees(path):
+                locs.append((sitemap, loc))
+
+spelling = "a trailing slash" if want_slash else "no trailing slash"
+if canonical or locs or links:
+    print(f'the host serves every page with {spelling} ("trailingSlash": "{policy}"),')
+    print("and these ask for the other spelling, which it answers with a 301:")
+    for page, url in canonical[:10]:
+        print(f"  canonical  {page} -> {url}")
+    if len(canonical) > 10:
+        print(f"  canonical  ... and {len(canonical) - 10} more pages")
+    for sitemap, url in locs[:10]:
+        print(f"  sitemap    {sitemap} -> {url}")
+    if len(locs) > 10:
+        print(f"  sitemap    ... and {len(locs) - 10} more URLs")
+    for path, count in links.most_common(10):
+        print(f"  link       {path}  ({count} occurrences)")
+    if len(links) > 10:
+        print(f"  link       ... and {len(links) - 10} more addresses")
+    sys.exit(1)
+
+print(
+    f"host config: {spelling} everywhere, across "
+    f"{len(glob.glob('site/**/*.html', recursive=True))} pages, "
+    "their canonicals, their sitemaps and every link between them"
+)
+SLASH
 
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.

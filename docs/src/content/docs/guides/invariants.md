@@ -120,4 +120,4 @@ Write one the first time a bug of that shape reaches production. It is the
 cheapest possible regression test, and the intent is that it runs against every
 branch afterwards.
 
-Related: [agents](/docs/concepts/agents/), [insights](/docs/concepts/insights/).
+Related: [agents](/docs/concepts/agents), [insights](/docs/concepts/insights).

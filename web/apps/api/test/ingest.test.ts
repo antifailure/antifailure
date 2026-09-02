@@ -351,6 +351,42 @@ describe('event ingestion', { skip: hasDatabase ? false : 'no Postgres at AF_TES
     assert.equal(res.body.accepted, 1)
   })
 
+  it('returns structured JSON when an unexpected database failure escapes', async () => {
+    await h.admin`ALTER TABLE events ADD CONSTRAINT ingest_forced_failure CHECK (false) NOT VALID`
+    try {
+      const response = await h.fetch('/v1/events', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ events: [event({ sequence: 123456 })] }),
+      })
+      assert.equal(response.status, 500)
+      assert.match(response.headers.get('content-type') ?? '', /^application\/json/)
+      const body = await response.json() as {
+        error: { code: string; message: string; resolution: string; stack?: string }
+        requestId: string
+      }
+      // A code from the published catalog rather than a name invented here, so
+      // https://antifailure.dev/errors.v1.json resolves it to the same message
+      // and resolution an engine-side failure would carry.
+      assert.equal(body.error.code, 'AF-CP-003')
+      assert.ok(body.error.message)
+      assert.match(body.error.resolution, /Retry/)
+      assert.equal(body.error.stack, undefined)
+      // The resolution says to quote the id, so there has to be one, and it has
+      // to be the same one the header carries.
+      assert.equal(response.headers.get('x-request-id'), body.requestId)
+      assert.match(body.requestId, /^[0-9a-f-]{36}$/)
+      // The statement and its parameters do not reach the caller. This is a
+      // real Postgres constraint violation, so the message on the other side of
+      // this boundary is the Drizzle one.
+      const raw = JSON.stringify(body)
+      assert.ok(!raw.includes('INSERT'), 'the failed statement reached the caller')
+      assert.ok(!raw.includes('ingest_forced_failure'), 'the constraint name reached the caller')
+    } finally {
+      await h.admin`ALTER TABLE events DROP CONSTRAINT ingest_forced_failure`
+    }
+  })
+
   it('one organization’s token cannot write into another organization', async () => {
     const other = await seedOrg(h.admin, 'neighbour')
     try {
