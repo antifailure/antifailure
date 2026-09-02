@@ -22,6 +22,18 @@
 -- ordinary tenant route therefore cannot disable signups, which is a
 -- meaningfully different guarantee from "the route checks a permission".
 --
+-- A NOTE FOR WHOEVER MERGES THIS WITH THE ADMIN PORTAL'S OWN MIGRATION.
+-- The gate below is a claim, not a credential: the predicate is true for any
+-- connection that sets the setting, and what contains it is that exactly one
+-- function in client.ts sets it. That is weaker than the portal's admin scope,
+-- which requires the declared hash to MATCH A STORED SESSION ROW and is
+-- therefore false even for a caller that can set settings freely. Once
+-- current_admin_user() exists on the same branch, these two policies should be
+-- rewritten to require it, which turns this from "a connection that says it is
+-- an operator" into "a connection physically holding an operator's session".
+-- It is written this way here only because the two migrations were built on
+-- separate branches and this one cannot reference a function it does not have.
+--
 -- Reading is deliberately open to the application role. Every request has to
 -- be able to ask whether maintenance is engaged, and a check that needs a
 -- privileged connection is a check somebody will skip on the hot path.

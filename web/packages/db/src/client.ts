@@ -509,6 +509,13 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
+          // Cleared like every other scope clears it. This connection is for
+          // changing the installation's switches; it is not an operator
+          // session and must not be able to act as one. admin-portal's suite
+          // reads this file and proves every scope names this setting, so a
+          // scope added later that forgets it fails rather than looking right.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
           'antifailure.platform_admin': 'on',
         },
         fn,
