@@ -18,7 +18,7 @@
  */
 
 import { createContext, useContext } from "react";
-import { query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { query, rest, useApi, usePages, ApiError } from "@/lib/api";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -163,17 +163,97 @@ export function useAdminAudit(severity: string) {
 }
 
 /**
+ * The header the control plane wants on every operator mutation.
+ *
+ * NOT the tenant one. `rest` and `mutate` in api.ts send
+ * `x-antifailure-csrf`, which the operator guard does not look at, so a route
+ * that goes through those is refused exactly as if it sent nothing. Written
+ * here as its own constant for that reason: the two names differ by five
+ * characters and the failure they produce is identical.
+ */
+const ADMIN_CSRF_HEADER = "x-antifailure-admin-csrf";
+
+/**
+ * The operator CSRF token, fetched once and kept.
+ *
+ * WHY THIS EXISTS AT ALL. The comment that used to stand here argued that no
+ * token was needed, because the operator cookie is SameSite=Strict and a
+ * browser sends it on no cross-site request of any kind. That reasoning is
+ * sound and it does not matter: server.ts refuses every non-GET `/trpc/*`
+ * request carrying a valid operator cookie unless it presents a matching
+ * `x-antifailure-admin-csrf`, and admincsrf.test.ts pins that three ways. So
+ * every operator mutation in this console was answered with 403. The buttons
+ * were there, the routes were there, the audit rows would have been written,
+ * and the request never reached any of it.
+ *
+ * That is the exact failure this product exists to catch: a capability that is
+ * defined, wired to a button, and not effective. It survived because both
+ * halves are individually correct and nobody ran the pair.
+ *
+ * The server's own comment says why the reasoning was wrong: SameSite is SITE
+ * scoped, so a subdomain an attacker controls is inside it.
+ *
+ * WHY IT IS FETCHED RATHER THAN REMEMBERED FROM SIGN-IN. The cookie is
+ * HttpOnly and the token is derived from it, so a page cannot compute it and a
+ * reload loses whatever the sign-in response carried. A console that held only
+ * that could mutate exactly once per sign-in, which is a guard that looks like
+ * it works and fails on the first refresh.
+ *
+ * The PROMISE is cached rather than the value, so two mutations fired together
+ * make one request instead of two.
+ */
+let csrfPromise: Promise<string | null> | null = null;
+
+async function adminCsrfToken(): Promise<string | null> {
+  csrfPromise ??= rest<{ signedIn: boolean; csrfToken?: string }>("/v1/admin/session")
+    .then((s) => s.csrfToken ?? null)
+    .catch(() => {
+      // Not cached as a failure. A network blip while fetching the token would
+      // otherwise poison every mutation for the life of the page.
+      csrfPromise = null;
+      return null;
+    });
+  return csrfPromise;
+}
+
+/**
+ * Forgets the token, because the session it was derived from is gone.
+ *
+ * Called on sign-in and sign-out. Without it, signing out and back in inside
+ * one page leaves the old token cached against a new session, and every
+ * mutation after that is refused with a message about a header that is present
+ * and simply belongs to somebody else.
+ */
+function forgetAdminCsrf(): void {
+  csrfPromise = null;
+}
+
+/**
  * A tRPC mutation on the operator router.
  *
- * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
- * console sends one because its session cookie is SameSite=Lax, which a
- * cross-site top-level POST still carries. The operator cookie is
- * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
- * and there is nothing for a token to add. If that cookie's SameSite is ever
- * loosened, this is the line that has to grow a token.
+ * Retries ONCE on a refusal, after forgetting the token. The token is derived
+ * from the session, so the one case that matters is a session that was
+ * replaced under a page that is still open: the first attempt is refused, the
+ * second fetches the current token and succeeds. It retries once and not in a
+ * loop, because a refusal that survives a fresh token is a real refusal and
+ * hiding it behind retries would turn a 403 into a hang.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+  const send = async () => {
+    const csrf = await adminCsrfToken();
+    return rest<T>(`/trpc/${path}`, {
+      method: "POST",
+      body: input,
+      headers: csrf ? { [ADMIN_CSRF_HEADER]: csrf } : undefined,
+    });
+  };
+  try {
+    return await send();
+  } catch (err) {
+    if ((err as ApiError).status !== 403) throw err;
+    forgetAdminCsrf();
+    return send();
+  }
 }
 
 export async function suspendTenant(orgId: string, reason: string) {
@@ -196,10 +276,15 @@ export async function resumeTenant(orgId: string) {
  */
 export async function adminSignIn(email: string, password: string): Promise<void> {
   await rest("/v1/admin/signin", { method: "POST", body: { email, password } });
+  // The new session has a new token, and the old one is now wrong rather than
+  // merely stale: it would be sent, refused, and the refusal would name a
+  // header that is right there in the request.
+  forgetAdminCsrf();
 }
 
 export async function adminSignOut(): Promise<void> {
   await rest("/v1/admin/signout", { method: "POST" });
+  forgetAdminCsrf();
 }
 
 /** The operator, shared by the chrome and every page under it, so a navigation
