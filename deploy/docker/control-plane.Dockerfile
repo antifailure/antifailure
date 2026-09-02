@@ -12,7 +12,7 @@
 # ---------------------------------------------------------------------------
 # Dependencies. Separated so that a source-only change does not reinstall.
 # ---------------------------------------------------------------------------
-FROM node:24-alpine AS deps
+FROM node:26-alpine AS deps
 
 WORKDIR /app
 
@@ -60,7 +60,7 @@ RUN test ! -d node_modules/next \
 # Next; the control plane must not, and putting it in the web/ workspace would
 # have put both into `npm ci --omit=dev` and into the runtime image.
 # ---------------------------------------------------------------------------
-FROM node:24-alpine AS console
+FROM node:26-alpine AS console
 
 # Off, in the image and in CI. A build step that reports anonymous usage to a
 # third party from a machine holding this repository is not a trade anybody
@@ -78,7 +78,7 @@ RUN npm run build && test -f out/index.html
 # ---------------------------------------------------------------------------
 # Runtime.
 # ---------------------------------------------------------------------------
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 # Stamped by the build workflow from the git tag and commit. Declared here so
 # that `docker inspect` on a running container answers "which build is this"
