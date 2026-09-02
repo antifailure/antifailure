@@ -137,9 +137,21 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
  * rationed, and a role that can see what everyone did without being able to do
  * anything is the role an auditor should be given.
  *
- * Nobody except owner holds admin.audit.export. Reading is oversight; exporting
- * produces a file of every operator action that leaves the system. Same split
- * as the tenant catalog makes for the same reason.
+ * owner and security hold admin.audit.export; nobody else does. Reading is
+ * oversight and every role has it; exporting produces a file of every operator
+ * action that leaves the system, so it is held by the two roles whose job is
+ * answering for what happened.
+ *
+ * security is not an exception grudgingly made, it is the point: a security
+ * team that can read an incident's audit trail and cannot produce it for an
+ * investigation or for counsel is not much use, and they are the role most
+ * likely to need it at the worst moment.
+ *
+ * An earlier version of this comment said "nobody except owner", which
+ * contradicted the table three lines below it AND misdescribed the tenant
+ * catalog it claimed to mirror: there, audit.export is held by owner and
+ * admin, and what the split actually withholds is a VIEWER exporting. Found by
+ * admin-money reading the comment against the grant.
  */
 export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[]> = {
   owner: [...ADMIN_PERMISSIONS],
@@ -201,7 +213,7 @@ export const ADMIN_ROLE_ORDER: readonly AdminRole[] = [...ADMIN_ROLES]
 /**
  * The root operator's role, which the database also enforces.
  *
- * A trigger in 0029 refuses to let the root row be demoted from owner, so this
+ * A trigger in 0030 refuses to let the root row be demoted from owner, so this
  * constant and that trigger have to agree. They are checked against each other
  * by a test rather than by anybody remembering.
  */

@@ -77,15 +77,21 @@ describe('the operator permission catalog', () => {
     assert.deepEqual(writes, [], `read_only holds write permissions: ${writes}`)
   })
 
-  test('only owner can export the audit chain', () => {
-    // Reading is oversight; exporting produces a file of every operator action
-    // that leaves the system.
+  test('only owner and security can export the audit chain', () => {
+    // Reading is oversight and every role has it; exporting produces a file of
+    // every operator action that leaves the system.
+    //
+    // The NAME of this test used to say "only owner" while its assertion said
+    // owner and security. It passed, because the assertion matched the table.
+    // A test whose name contradicts its assertion is worse than no test: a
+    // reader scanning names believes the name, and the name was the thing
+    // being trusted.
     const exporters = ADMIN_ROLES.filter((r) => adminRoleHas(r, 'admin.audit.export'))
     assert.deepEqual(exporters, ['owner', 'security'])
   })
 
   test('the root role matches what the database trigger enforces', () => {
-    // 0029 refuses to let the root row be demoted from owner. This constant and
+    // 0030 refuses to let the root row be demoted from owner. This constant and
     // that trigger have to agree, and this is the test that makes them.
     assert.equal(ROOT_ADMIN_ROLE, 'owner')
   })
