@@ -276,6 +276,20 @@ The Dockerfile {dockerfile} for {service} is outside the build context {context}
 
 ## Control plane
 
+### AF-CP-003
+
+The control plane could not complete this request.
+
+**What to do.** Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
+
+## Control plane
+
 ### AF-CPL-001
 
 No control plane token is configured.
@@ -492,7 +506,7 @@ No table that looks like a users table was found, so there is nowhere to create 
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [guides/personas](/docs/guides/personas/) |
+| More | [guides/personas](/docs/guides/personas) |
 
 ### AF-DB-030
 

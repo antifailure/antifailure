@@ -21,6 +21,7 @@
 
 const { TableClient } = require("@azure/data-tables");
 const { PARTITION, RateLimiter, join } = require("../shared/waitlist");
+const { failure } = require("../shared/errors");
 
 // A single client and a single limiter per cold start. Creating a client per
 // request would open a new connection pool on every signup, and a limiter per
@@ -69,10 +70,8 @@ module.exports = async function (context, req) {
     // told the truth about whose fault it is rather than that their address
     // was wrong.
     context.log.error("waitlist storage is not configured", error);
-    respond(context, 503, {
-      ok: false,
-      message: "The waitlist is temporarily unavailable. Please try again later.",
-    });
+    const answer = failure("waitlist_unavailable");
+    respond(context, answer.status, answer.body);
     return;
   }
 
@@ -88,9 +87,7 @@ module.exports = async function (context, req) {
     respond(context, answer.status, answer.body);
   } catch (error) {
     context.log.error("waitlist request failed", error);
-    respond(context, 503, {
-      ok: false,
-      message: "The waitlist is temporarily unavailable. Please try again later.",
-    });
+    const answer = failure("waitlist_unavailable");
+    respond(context, answer.status, answer.body);
   }
 };

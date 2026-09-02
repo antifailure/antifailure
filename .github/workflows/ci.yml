@@ -646,6 +646,19 @@ jobs:
         run: npm test --workspaces --if-present
         working-directory: web
 
+      - name: The published OpenAPI document is the one this router serves
+        # www/public/openapi.json is what antifailure.dev/openapi.json serves,
+        # and it is generated from the router in this job's workspace rather
+        # than proxied from production at request time. The reason is in
+        # web/apps/api/scripts/openapi.ts; the consequence is that it can go
+        # stale against the router silently, exactly like any other generated
+        # file, and the site would publish a contract this revision does not
+        # serve. This is the step that stops that, and it validates the
+        # document before comparing, so a malformed one cannot be committed
+        # either.
+        run: npm run openapi:check --workspace apps/api
+        working-directory: web
+
   edition-boundary:
     name: edition boundary
     runs-on: ubuntu-latest

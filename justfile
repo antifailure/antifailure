@@ -949,8 +949,16 @@ _generated:
     (cd engine && go test ./internal/events -update-schema)
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
+    # The OpenAPI artifact is generated too, and its generator is TypeScript
+    # rather than Go. Its own --check mode is the comparison, so it is run in
+    # the same form and the same directory CI runs it in: a gate is the command
+    # AND the directory, and two spellings of it are what tools/gatecheck
+    # exists to catch.
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    npm --prefix web run openapi:check --workspace apps/api
     git diff --exit-code -- \
       THIRD_PARTY_NOTICES.md \
+      www/public/errors.v1.json \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
       engine/internal/proxyimage/sources.gen.go \
@@ -967,6 +975,8 @@ _generated:
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md

@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"go/format"
@@ -69,20 +70,21 @@ var areaNames = map[string]string{
 
 func main() {
 	var (
-		in     = flag.String("catalog", "engine/internal/errors/catalog.yaml", "path to the catalog")
-		goOut  = flag.String("go", "engine/internal/errors/codes.gen.go", "path for the generated Go file")
-		docOut = flag.String("docs", "docs/src/content/docs/reference/errors.md", "path for the generated reference page")
-		check  = flag.Bool("check", false, "fail if regenerating would change anything")
+		in      = flag.String("catalog", "engine/internal/errors/catalog.yaml", "path to the catalog")
+		goOut   = flag.String("go", "engine/internal/errors/codes.gen.go", "path for the generated Go file")
+		docOut  = flag.String("docs", "docs/src/content/docs/reference/errors.md", "path for the generated reference page")
+		jsonOut = flag.String("json", "www/public/errors.v1.json", "path for the public machine-readable catalog")
+		check   = flag.Bool("check", false, "fail if regenerating would change anything")
 	)
 	flag.Parse()
 
-	if err := run(*in, *goOut, *docOut, *check); err != nil {
+	if err := run(*in, *goOut, *docOut, *jsonOut, *check); err != nil {
 		fmt.Fprintln(os.Stderr, "errgen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(in, goOut, docOut string, check bool) error {
+func run(in, goOut, docOut, jsonOut string, check bool) error {
 	raw, err := os.ReadFile(in)
 	if err != nil {
 		return err
@@ -103,11 +105,15 @@ func run(in, goOut, docOut string, check bool) error {
 		return err
 	}
 	docSrc := renderDocs(c.Errors)
+	jsonSrc, err := renderJSON(c.Errors)
+	if err != nil {
+		return err
+	}
 
 	for _, f := range []struct {
 		path string
 		data []byte
-	}{{goOut, goSrc}, {docOut, docSrc}} {
+	}{{goOut, goSrc}, {docOut, docSrc}, {jsonOut, jsonSrc}} {
 		if check {
 			old, err := os.ReadFile(f.path)
 			if err != nil {
@@ -129,6 +135,55 @@ func run(in, goOut, docOut string, check bool) error {
 		fmt.Printf("errgen: %d codes across %d areas\n", len(c.Errors), countAreas(c.Errors))
 	}
 	return nil
+}
+
+type publicEntry struct {
+	Code       string `json:"code"`
+	Area       string `json:"area"`
+	AreaName   string `json:"areaName"`
+	Message    string `json:"message"`
+	Resolution string `json:"resolution"`
+	Docs       string `json:"docs"`
+	Retryable  bool   `json:"retryable"`
+	ExitCode   int    `json:"exitCode"`
+	Planned    bool   `json:"planned"`
+}
+
+func renderJSON(es []entry) ([]byte, error) {
+	public := struct {
+		SchemaVersion int           `json:"schemaVersion"`
+		Product       string        `json:"product"`
+		Errors        []publicEntry `json:"errors"`
+	}{SchemaVersion: 1, Product: "Antifailure", Errors: make([]publicEntry, 0, len(es))}
+
+	for _, e := range es {
+		// Planned codes are reserved for source compatibility and deliberately
+		// absent from the human reference. Publishing them here would tell an
+		// agent how to recover from an error this version cannot return.
+		if e.Planned {
+			continue
+		}
+		public.Errors = append(public.Errors, publicEntry{
+			Code:       e.Code,
+			Area:       e.Area,
+			AreaName:   areaNames[e.Area],
+			Message:    e.Message,
+			Resolution: e.NextStep,
+			Docs:       "https://antifailure.dev" + docsURL(e.Docs),
+			Retryable:  e.Retryable,
+			ExitCode:   e.ExitCode,
+			Planned:    e.Planned,
+		})
+	}
+
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(public); err != nil {
+		return nil, fmt.Errorf("render public error catalog: %w", err)
+	}
+	return b.Bytes(), nil
 }
 
 func countAreas(es []entry) int {
