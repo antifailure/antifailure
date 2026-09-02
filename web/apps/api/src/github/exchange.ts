@@ -42,6 +42,7 @@ import type { Context, Hono } from 'hono'
 import type { ApiEnv } from '../env.ts'
 import { appendAudit, type Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import { suspensionReason } from '../ingest.ts'
 import { RateLimiter } from '../ratelimit.ts'
 import {
   ActionsKeys,
@@ -265,7 +266,29 @@ export async function exchangeWorkflowIdentity(
     )
   }
 
-  // 4. Mint. One transaction, so a token that exists has stamped its binding
+  // 4. The organization itself, which is a different question from the
+  //    installation checked above. That one asks whether GitHub still says this
+  //    account is ours; this asks whether we have stopped the customer. A
+  //    suspended organization used to be handed a working credential here and
+  //    refused later at /v1/events, which points the customer at the reporting
+  //    path when the answer is their billing state.
+  //
+  //    Read under the tenant, through the same function /v1/events calls, so
+  //    the mint and the ingest cannot drift on what counts as suspended. The
+  //    binding is what makes this possible: it names the organization before
+  //    anything is written, so there is no ordering here where a token exists
+  //    before this has been asked.
+  const suspended = await suspensionReason(deps.pool, binding.org_id)
+  if (suspended !== null) {
+    throw new ExchangeRefused(
+      'organization_suspended',
+      403,
+      `The organization that claimed ${repository} is suspended, so no credential is issued: ` +
+        `${suspended}. Work that is already running is untouched.`,
+    )
+  }
+
+  // 5. Mint. One transaction, so a token that exists has stamped its binding
   //    and written its audit entry, and one that failed to do either does not
   //    exist.
   const token = `aft_${randomBytes(32).toString('base64url')}`
