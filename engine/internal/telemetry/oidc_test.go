@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -93,6 +94,11 @@ type hosted struct {
 	acceptOnly string
 	// refuse, when set, is the status the exchange answers with instead.
 	refuse int
+	// refuseFrom, when non zero, is the exchange number from which the control
+	// plane starts refusing. 2 means the first exchange succeeds and every
+	// renewal after it fails, which is what a credential outliving its binding
+	// looks like.
+	refuseFrom int
 	// retryAfter, when set, is the Retry-After the refusal carries, in seconds.
 	retryAfter int
 
@@ -109,6 +115,13 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		h.exchanges++
 		h.identities = append(h.identities, req.Header.Get("authorization"))
 		issued, refuse, retryAfter := h.issued, h.refuse, h.retryAfter
+		if h.refuseFrom > 0 {
+			if h.exchanges >= h.refuseFrom {
+				refuse = http.StatusForbidden
+			} else {
+				refuse = 0
+			}
+		}
 		if len(h.mintSeq) > 0 {
 			issued = h.mintSeq[min(h.exchanges-1, len(h.mintSeq)-1)]
 		}
@@ -188,6 +201,9 @@ type mintingRun struct {
 	warned []string
 	log    []events.Event
 	dir    string
+	// spooled is how many batches were still owed to the control plane when the
+	// command ended, read before Close tears the spool down.
+	spooled int
 }
 
 // runOne attaches telemetry with the given environment, emits one event, and
@@ -249,6 +265,15 @@ func runWith(t *testing.T, r *runner, h *hosted, env map[string]string, addresse
 
 	bus.Info("shop-main-a1b2", events.EnvReady, "the environment is ready")
 	require.NoError(t, tel.Close(t.Context()))
+
+	// Read the way the NEXT command reads it: a fresh spool over the same
+	// directory. What is still owed after this command ended is exactly what a
+	// later one would pick up and send.
+	if later, err := NewSpool(SpoolOptions{
+		Dir: filepath.Join(dir, SpoolDir), Redactor: redact.New(),
+	}); err == nil {
+		out.spooled = later.Pending()
+	}
 
 	out.log = readLog(t, dir)
 	return out
@@ -419,6 +444,45 @@ func TestAnExpiredCredentialIsRenewedAndTheEventStillArrives(t *testing.T) {
 		[]string{"Bearer first-credential", "Bearer second-credential"},
 		run.plane.bearers(),
 		"the retry has to present the new credential, not the dead one")
+}
+
+// The second ordering of the renewal, and the one that would lose events.
+//
+// A credential dies, the batch carrying that discovery is refused, and then the
+// re-exchange ITSELF fails: the binding was revoked, GitHub's key set could not
+// be fetched, or the exchange is rate limited. Two of those three are
+// transient, so the batch must survive to be sent by a later command rather
+// than being dropped on the floor.
+//
+// It is worth its own test because it is quiet. Renewal that replays the batch
+// on success and drops it on failure loses exactly one batch per credential
+// lifetime, which at fifteen minutes reads as sporadic event loss rather than
+// as a retry bug, and only on long runs.
+func TestWhenTheReExchangeItselfFailsTheBatchIsKeptNotDropped(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{
+		issued: "the-first-credential",
+		// The first exchange works, so a sink exists and events flow. Every
+		// renewal after it is refused.
+		refuseFrom: 2,
+		// And the credential is dead by the time anything is sent, so the
+		// renewal is actually reached.
+		acceptOnly: "a-credential-this-control-plane-will-never-issue",
+	}
+
+	run := runOne(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Equal(t, 2, run.plane.exchangeCount(),
+		"the refusal should have prompted exactly one renewal attempt")
+	require.Empty(t, run.plane.ingested(), "nothing could have been accepted")
+	// The point of the test. The events are on disk waiting for the next
+	// command, not gone.
+	require.NotZero(t, run.spooled,
+		"the batch was dropped when the re-exchange failed, rather than kept for a later command")
+	require.Len(t, run.log, 1, "and the run itself is unaffected")
 }
 
 // A refusal renewing cannot fix costs the run nothing.
