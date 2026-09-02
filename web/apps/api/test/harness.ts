@@ -106,6 +106,9 @@ export interface StartApiOptions {
    *  this is testing the configuration production runs in. */
   operatorSetsPlan?: boolean
   githubAppInstallUrl?: string
+  /** Where a refused person is sent. Undefined is the self-hosted default and
+   *  means the refusal page offers no link at all. */
+  signupUrl?: string
   /** Acting on a repository as the installation. Undefined means no App, which
    *  is a real way to run this: deliveries still record installations and
    *  nothing is published. */
@@ -165,6 +168,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     hostedRequiredPlan: options.hostedRequiredPlan ?? null,
     operatorSetsPlan: options.operatorSetsPlan ?? false,
     githubAppInstallUrl: options.githubAppInstallUrl,
+    signupUrl: options.signupUrl,
     githubApi: options.githubApi ?? null,
     ...(options.forgetInstallationToken
       ? { forgetInstallationToken: options.forgetInstallationToken }

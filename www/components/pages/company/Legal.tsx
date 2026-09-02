@@ -674,7 +674,7 @@ export function DpaPage() {
               ],
               [
                 "Contact for data protection",
-                "Security reports go to security@antifailure.dev today. A separate privacy address will be published with the signed copy.",
+                "No address at antifailure.dev can receive mail: the domain publishes no mail exchanger. Security reports go through GitHub private vulnerability reporting, and the contact page lists the routes that resolve today. A privacy address will be published with the signed copy.",
               ],
             ]}
           />
@@ -1218,7 +1218,7 @@ export function DataRetentionPage() {
             rows={[
               [
                 "How to ask",
-                "Write to the privacy contact once it is published. Until then, security@antifailure.dev reaches a person who can act on it.",
+                "Write to the privacy contact once it is published. Until then, open a GitHub private vulnerability report, which reaches a person who can act on it without posting anything publicly. Mail is not a route: the domain publishes no mail exchanger, so a request sent to any address at antifailure.dev is delivered nowhere.",
               ],
               [
                 "What happens",

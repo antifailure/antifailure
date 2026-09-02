@@ -810,6 +810,39 @@ describe(
       }
     })
 
+    test('a suspended organization is refused the credential rather than the ingest', async () => {
+      // A DIFFERENT QUESTION FROM THE ONE ABOVE. The installation check asks
+      // whether GitHub still says this account is ours. This asks whether we
+      // have stopped the customer, and until this ran only /v1/events asked it.
+      // A stopped organization was handed a working credential and refused
+      // fifteen minutes later on another route, which sends somebody to the
+      // reporting path when the answer is their billing state.
+      await claim(repository)
+      await api.admin`
+        UPDATE organizations SET suspended_at = now(), suspended_reason = 'unpaid invoice'
+        WHERE id = ${org.orgId}`
+      try {
+        const refused = await exchange(identityToken({ repository }, api.clock.now()))
+        assert.equal(refused.status, 403, JSON.stringify(refused.json))
+        assert.equal(refused.json.reason, 'organization_suspended')
+        // The reason travels. "403 organization_suspended" tells somebody the
+        // shape of their problem; the recorded reason tells them which one.
+        assert.match(String(refused.json.error), /unpaid invoice/)
+        // Refused BEFORE the write, not beside it. A row carrying a hash is a
+        // credential that exists, whatever the response body said.
+        assert.equal(await liveExchangedTokens(), 0)
+      } finally {
+        await api.admin`
+          UPDATE organizations SET suspended_at = NULL, suspended_reason = NULL
+          WHERE id = ${org.orgId}`
+      }
+
+      // And the same exchange succeeds once the suspension lifts, which is what
+      // separates a check that reads the column from one that refuses everybody.
+      const issued = await exchange(identityToken({ repository }, api.clock.now()))
+      assert.equal(issued.status, 200, JSON.stringify(issued.json))
+    })
+
     // -----------------------------------------------------------------------
     // Who may claim a repository
     // -----------------------------------------------------------------------
