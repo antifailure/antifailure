@@ -798,9 +798,9 @@ var siteClaims = []siteClaim{
 		premise:   [2]string{"www/components/AuthScreen.tsx", "invitation only"},
 		reason: "the hosted control plane is deployed and invitation only, and " +
 			"AuthScreen says so while offering sign-in with GitHub. The sentence " +
-			"survived as the meta description of /signin and /signup and inside the " +
-			"modal the header's Log in button opens, so an invited customer pressing " +
-			"Log in was told the thing they were invited to does not exist",
+			"survived as the meta description of /signin and /signup, which is what " +
+			"a crawler and a link preview read, so an invited customer following the " +
+			"header was told the thing they were invited to does not exist",
 	},
 	{
 		name:      "the build runs inside the sandbox",
@@ -1003,11 +1003,13 @@ var siteClaimExceptions = []claimException{
 			"changed, which is the note that stops somebody restoring it",
 	},
 	{
-		file: "www/components/AuthModal.tsx",
+		file: "www/components/Chrome.tsx",
 		rule: "there is no hosted control plane",
-		line: "This said",
-		reason: "the same retraction on the modal, which is the surface the header's " +
-			"Log in button opens and where the claim did the most damage",
+		line: "it still shipped saying",
+		reason: "the note recording what the deleted AuthModal said. The modal was " +
+			"unreachable, openAuth had no caller, and it shipped the sentence in the " +
+			"bundle anyway; this is the record of that, and of why the fix was to " +
+			"delete it rather than correct its copy",
 	},
 	{
 		file: "www/lib/docs-facts.ts",
@@ -1015,13 +1017,6 @@ var siteClaimExceptions = []claimException{
 		line: "offered \"all 41 documentation pages",
 		reason: "the header recording the number this file exists to stop anybody " +
 			"typing again, which has to quote it to be worth reading",
-	},
-	{
-		file: "www/lib/routes.ts",
-		rule: "there is no hosted control plane",
-		line: "Both descriptions used to say",
-		reason: "the note recording that these two meta descriptions carried the claim " +
-			"while the visible page said the opposite",
 	},
 }
 
