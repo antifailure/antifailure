@@ -94,6 +94,8 @@ export function ChangelogControls({ total }: { total: number }) {
         chip.hidden = count === 0;
         const chipCount = chip.querySelector("[data-chip-count]");
         if (chipCount) chipCount.textContent = String(count);
+        const named = chip.getAttribute("aria-label");
+        if (named) chip.setAttribute("aria-label", named.replace(/, \d+ entries$/, `, ${count} entries`));
       }
     }
 

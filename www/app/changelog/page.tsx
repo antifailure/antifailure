@@ -191,6 +191,12 @@ function ReleaseSection({ release }: { release: Release }) {
               key={group.category}
               href={`#${groupAnchor(release, group.category)}`}
               data-chip={groupAnchor(release, group.category)}
+              // Named, because the two spans inside concatenate with no space
+              // when a screen reader computes a name from them, and "added49"
+              // is not a thing anybody says. Controls.tsx rewrites this along
+              // with the number beside it, so a search narrowing the page
+              // narrows what this announces too.
+              aria-label={`${group.category}, ${group.entries.length} entries`}
               // [&[hidden]]:hidden, because `hidden` is an attribute selector
               // in the browser's own stylesheet and inline-flex is a class in
               // this one, so the class wins and a chip hidden from script goes
@@ -319,7 +325,11 @@ function EntryRow({ entry }: { entry: Entry }) {
               ))}
             </span>
           ) : null}
-        </span>
+        </span>{" "}
+        {/* A space, and it is not decoration: a whitespace only text node
+            makes no grid item and changes nothing on screen, and without it
+            the name a screen reader computes for this row runs the date
+            into the sentence as "1 Sept 2026af start says where you are". */}
 
         {/* Clamped to two lines closed and released when open. The opening
             sentences run from 12 to 315 characters, so a fixed height would
