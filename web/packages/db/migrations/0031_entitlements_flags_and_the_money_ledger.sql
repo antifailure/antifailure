@@ -446,35 +446,21 @@ REVOKE DELETE, TRUNCATE ON
   entitlement_overrides, feature_flags, feature_flag_targets, admin_operations
 FROM antifailure_admin;
 
--- The billing tables an operator has to READ, for the same reason: the policy
--- half is moot under BYPASSRLS and the privilege half is not there yet.
+-- No SELECT grants here, and the absence is the point.
 --
--- 0030 grants the operator `admin_users`, `admin_sessions`,
--- `admin_audit_entries` and `audit_entries` and stops. These six are the tables
--- this lane reads, so this file grants them, and the extension is visible in
--- the diff of the feature that needed it rather than buried in the boundary.
+-- An earlier draft of this file granted the operator SELECT on the six billing
+-- tables and on `organizations`, because 0030 grants it only the admin tables
+-- and the first statement of every route in this lane was 42501. That was true
+-- and it is no longer: 0023 grants `SELECT ON ALL TABLES IN SCHEMA public` and
+-- sets `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES`, so every table in
+-- the schema is covered, including the four created above and any a later
+-- migration adds.
 --
--- SELECT only, and that is not a formality. Moving a plan goes through Stripe
--- and comes back as a webhook; an operator with UPDATE on `subscriptions` could
--- make this database disagree with the provider about what somebody is paying
--- for, and the provider would be right.
-GRANT SELECT ON billing_customers, subscriptions, invoices, payment_methods,
-  billing_events, golden_versions,
-  -- `organizations` too, and it is not a billing table.
-  --
-  -- Every operator route in this lane opens by reading the tenant's slug and
-  -- plan: the slug because `subject_org_label` is what still names the customer
-  -- once the row is gone, and the plan because an entitlement means nothing
-  -- without the plan it is an override of. Without this grant the first
-  -- statement of every one of them is 42501.
-  --
-  -- Only this one, and only SELECT. The rest of the tenant tables an operator
-  -- portal needs, users and members and repositories and the rest, belong to
-  -- the lanes whose screens read them; granting them here would put the
-  -- privilege list in the file least likely to be read when somebody asks what
-  -- an operator can see.
-  organizations
-TO antifailure_admin;
+-- Withdrawing them is not tidying. Two files granting the same privilege reads
+-- as deliberate to the next person, and the one that is redundant is the one
+-- they will reason from when they ask what an operator can see. The blanket
+-- grant is read only, so the INSERT and UPDATE above stay: those are the ones
+-- 0023 does not give and this lane genuinely needs.
 
 -- ---------------------------------------------------------------------------
 -- Isolation

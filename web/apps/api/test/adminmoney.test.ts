@@ -317,16 +317,6 @@ describe('money moves once', async () => {
 
   after(async () => {
     await h.admin`DELETE FROM admin_operations WHERE org_id = ${org.orgId}`
-    // The operator chain too, and BEFORE the organization goes.
-    //
-    // Not tidiness. `admin_audit_entries.subject_org_id` has ON DELETE SET
-    // NULL and the column is inside the entry hash, so deleting an
-    // organization rewrites every operator entry about it and the whole chain
-    // then verifies as ALTERED. Leaving these behind makes admin-audit.test.ts
-    // fail in whichever suite runs after this one, for a reason that has
-    // nothing to do with that suite. The underlying defect is reported
-    // separately; this stops this file from being the one that triggers it.
-    await h.admin`DELETE FROM admin_audit_entries WHERE subject_org_id = ${org.orgId}`
     await dropOrg(h.admin, org.orgId)
     await h.close()
   })
