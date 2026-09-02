@@ -331,6 +331,33 @@ branches moves the answer with you, and it runs nothing and writes nothing,
 which is the only way it can be honest. Each step reports one of four states and
 never collapses one into another: done, not yet, blocked, and not checked.
 
+**A run in GitHub Actions reports itself.** The engine's control plane sink took
+its credential from `AF_CONTROL_PLANE_TOKEN` and nothing in any workflow this
+project ships has ever set it, so on a runner the sink was never built at all:
+the events saying an environment is coming up, is ready, or has been torn down
+went to the local log and no further, and the dashboard stayed empty for every
+run anybody had. A job now proves what it is with the identity GitHub signs for
+it and trades that for a short lived credential, so a workflow needs
+`permissions: id-token: write` and no repository secret.
+`AF_CONTROL_PLANE_TOKEN` still works and still wins when it is set, because a
+developer's machine and a self hosted engine have no runner to vouch for them.
+The credential is short lived, so the engine renews it when a batch is refused
+and re-sends that batch rather than losing it, and events wait on disk rather
+than being dropped. Three things that used to read as authentication failures
+now say what to do: GitHub declining to mint an identity for a fork's pull
+request, a control plane too old to offer the exchange, and a repository the
+control plane has not been told about.
+
+**Two more gates over what the documentation claims.** `reference/api.md` is
+checked against the routes the server registers, in both directions: every
+documentation URL on one of this product's own hosts has to match a route the
+server registers or a page the console serves, and every route the server
+serves has to be covered by a pattern the page names. It was the only reference
+page with no machine coverage and it is the one that drifted. Separately, every
+environment variable the engine names at a user is now checked against the
+documentation, which is what `af license install` needed: it tells a paying
+customer to set two variables and points them at a page that named neither.
+
 **`af ci --report-json`.** The same run written as JSON, for something that has
 to act on the report rather than display it. `--report` stays Markdown for a
 person, and `-o json` is not that flag: it is the whole terminal's format, so a
@@ -564,8 +591,11 @@ it.
   now and `tools/walkthrough` walks it.
 - `examples/github-workflow.yml`, the file the documentation tells you to copy,
   ran `af ci --output report.md` after that flag had been renamed to `--report`,
-  so the copied workflow stopped before `af ci` did any work and nothing brought
-  an environment up. It also never set `AF_CONTROL_PLANE_TOKEN`, so a repository
+  so the copied workflow exited 2 on "the output format is not recognised"
+  before `af ci` did any work and nothing brought an environment up. The
+  generated command reference moved with the rename and the example did not, so
+  the two descriptions of one command disagreed and only the one nobody copies
+  was right. It also never set `AF_CONTROL_PLANE_TOKEN`, so a repository
   following it sent no engine events at all and the console's environment list
   was fed by nothing. The gate that checks documented commands reads the
   workflow files under `examples/` and `.github/workflows/` now, and parses each
@@ -726,6 +756,83 @@ it.
   the privacy and subprocessor pages said there is no billing and that nothing
   can send mail, which stopped being true when the billing and sign in link work
   landed.
+- The runs list, the verdicts view, the goldens quota, the masking attestation
+  table and the compliance pack's masking control were blank for every real
+  customer. All five read `golden_versions`, `runs` and `verdicts`, and the only
+  writers of those three tables anywhere in the repository were the test harness
+  and the staging seeder, which fills all of them, so every one of these looked
+  correct in development and had nothing to show in production. The compliance
+  pack was the worst of it, reporting that the check ran and found nothing for an
+  organization producing a signed attestation every night. The engine emitted the
+  events, the sink mapped them and ingest accepted the types, so nothing anywhere
+  reported a problem; the projections were simply never written.
+- Four documents told a self hoster to point GitHub at a URL this product does
+  not serve. `AF_GITHUB_REDIRECT_URI` was documented as `/auth/callback` in the
+  getting started path, the self hosting page, the Azure page and the README, and
+  the route is `/auth/github/callback`, which is what the product's own Terraform
+  configures. The value goes straight to GitHub and nothing validates its path at
+  startup, so the failure landed at the end of the first sign in, after the
+  operator had registered an OAuth App carrying the same wrong URL.
+- Four places where the documentation described a command the product does not
+  have, including the operations runbook telling an on call engineer in bold not
+  to run `af down --all`, which is not a flag, and a nine line `af provider list`
+  session whose every line was wrong.
+- The enterprise licensing page told a customer to install a license with a
+  command that stores nothing. Neither binary installs anything: the enterprise
+  entry point reads `AF_LICENSE_KEY` and `AF_ORG` from the environment and that
+  is the whole mechanism, and neither variable appeared on any published page.
+- The API reference named eight routes fewer than the server serves. Three whole
+  families were absent: both webhook endpoints, the two model proxy endpoints,
+  and the four console provider routes. The model proxy is the mechanism two
+  guides describe in full, so the page listing the surface omitted the thing
+  those pages tell you to point your client library at. It also claimed
+  everything below was authenticated apart from a counted number of exceptions,
+  which the webhooks break in a way counting cannot fix: they accept a signature
+  rather than a credential.
+- The documentation home was the only page in the documentation with no way to
+  see what else exists. It carried Starlight's marketing template, which turns
+  the sidebar off, and below 800px it had no menu button either, so on a phone
+  the page a new reader lands on had no navigation at all.
+- A third of the documentation sidebar was ordered by file name rather than by
+  anybody's decision. Starlight breaks a tie on `sidebar.order` with the slug,
+  and 27 of the 78 ordered pages shared a number with a sibling, so "Watching a
+  run" split the pair of runtime pages, "Provider limits" split the three
+  provider pages, and "On call" came before "Standing up production".
+- Two sidebar groups were labelled with a raw lowercase directory name among
+  nine sentence case labels, and one of them contained a page whose own title was
+  the same word in a different casing.
+- The documentation offered no way to sign up on a tablet. Between 800px and
+  1023px no page carried a Log in link, a Sign up button or a link to the
+  repository: the header hid all three at one breakpoint and the mobile menu
+  holding their only other copies exists only below another, so for 224 pixels
+  of viewport width they were hidden with nowhere to go. iPad portrait is 810 to
+  834 pixels.
+- The documentation build warned on every run that `/404` was declared twice,
+  because Starlight injects one at the same pattern as the site's own. Astro's
+  message says a route collision becomes a hard error in a later version. The
+  site's own page wins, and it earns it: somebody who lands there arrived from a
+  path printed at the end of an engine error message rather than from a link, so
+  it names the references they were most likely reaching for.
+- The hero shader on the marketing site ran on the CPU on any machine whose GPU
+  driver is blocklisted. The guard was binary, and a blocklisted driver is
+  neither case: the browser grants a context backed by a software rasteriser
+  instead of refusing one, so nothing threw and a full bleed fragment shader
+  animated on the CPU for as long as the page was open. That is the normal state
+  of a cheap or out of support Chromebook, and it was reported as the site
+  crashing them.
+- `af net log` left `via` blank on tunnelled CONNECT, which is most of the
+  traffic. Three of the proxy's four recording paths said how the request
+  reached it and the tunnel every HTTPS request opens said nothing, so the field
+  was empty on the majority of records while being populated on the minority. An
+  empty field that looks like a value is worse than a missing one, because it
+  reads as data rather than as an omission.
+- An organization deletion claimed its step after doing the step's work, so a
+  second caller did all of it before being told it had lost. Every step's write
+  was supposed to carry a `WHERE <its timestamp> IS NULL` so two callers arriving
+  at once do not both act, and that was true of the bookkeeping row and false of
+  the three statements that do the work. It was not reachable as data loss,
+  because each statement locks what it touches and re-evaluates after the winner
+  commits, and the ordering is now what the comment above it always claimed.
 - The cross platform lint could not typecheck one test file on Windows. It
   carried a `runtime.GOOS` skip, which reads as though the platform had been
   handled and cannot help, because the skip runs at run time and the missing
@@ -789,7 +896,11 @@ it.
   for the name the rule refers to, and when none did the sidecar forwarded
   whatever the application sent, indistinguishable in every other column from a
   working sandbox call. `inspect_egress_firewall` reports it as
-  `sandbox_credential_not_substituted` and it always fails the check. There is
+  `sandbox_credential_not_substituted` and it always fails the check, and the run
+  report states the substituted count either way and names the hosts a request
+  reached carrying the application's own credential. Stating it either way is
+  deliberate: a line that appears only when something is wrong teaches a reader
+  nothing by its absence. There is
   deliberately no way to turn it down: a threshold expresses how much of
   something a project will tolerate, and there is no tolerable quantity of a
   live credential leaving an environment that is running unreviewed code against
