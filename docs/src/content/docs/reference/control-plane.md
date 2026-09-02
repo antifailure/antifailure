@@ -57,7 +57,7 @@ A job in GitHub Actions should set none of that. It asks GitHub for a workflow
 identity and exchanges it at `/v1/auth/github-oidc` for a token that expires in
 fifteen minutes, so there is no secret to paste and none to rotate. The
 repository has to be claimed once first, and
-[the GitHub guide](/docs/guides/github/#sending-events-with-no-token-at-all)
+[the GitHub guide](/docs/guides/github#sending-events-with-no-token-at-all)
 says why that step is what grants access rather than the signature.
 
 Everything above this section is read by the control plane process itself.
