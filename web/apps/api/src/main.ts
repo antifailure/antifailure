@@ -15,6 +15,7 @@ import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
+import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -187,6 +188,15 @@ const emailSignIn = emailSignInFromEnv()
 const signInAllowlist = parseAllowlist(process.env.AF_SIGNIN_ALLOWLIST)
 console.log(describeAllowlist(signInAllowlist))
 
+// The other half of the same sentence, said in the same place and for the same
+// reason. The allowlist decides who gets through the door; this decides whether
+// there is a room on the other side of it. An installation where sign-in is
+// open and self serve signup is off is one where every new person reaches an
+// empty state, which looks like a broken product rather than a configured one,
+// and the only way to find that out used to be to watch somebody do it.
+const selfServeSignup = selfServeSignupFrom(process.env.AF_SELF_SERVE_SIGNUP)
+console.log(describeSelfServeSignup(selfServeSignup))
+
 // Read at start-up rather than on first use, so a secret of the wrong length
 // stops the process here instead of on the one request the feature exists for.
 const sealingKey = sealingKeyFrom(process.env.AF_PROVIDER_KEY_SECRET)
@@ -309,6 +319,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
+  selfServeSignup,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
   // The webhook's way of invalidating a cached token. Bound to the same

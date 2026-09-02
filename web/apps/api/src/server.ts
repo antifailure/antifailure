@@ -194,6 +194,10 @@ export interface ServerOptions {
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
   signInAllowlist?: SignInAllowlist
+  /** Whether somebody who signs in with no organization is given one, on the
+   *  free plan, owned by them. Default false; see auth/provision.ts for why
+   *  that direction and not the other. */
+  selfServeSignup?: boolean
   /** Set false to serve the API alone, without the console. */
   console?: boolean
   /** The exported console, located at start-up. Absent means the API is served
@@ -973,7 +977,11 @@ export function createServer(options: ServerOptions) {
         clock,
         options.github,
         { code, state },
-        options.signInAllowlist ?? null,
+        {
+          allowlist: options.signInAllowlist ?? null,
+          selfServeSignup: options.selfServeSignup === true,
+          log: (message, error) => console.error(message, error),
+        },
       )
 
       // Another edition may have an opinion about this sign-in: an
@@ -1193,6 +1201,13 @@ export function createServer(options: ServerOptions) {
     const publicSignIn = {
       methods: signInMethods,
       signupsOpen: options.signInAllowlist == null,
+      // Whether signing in ENDS somewhere, which is a different question from
+      // whether it is allowed to start. The console renders one of two empty
+      // states from this: with self serve on, arriving in no organization is a
+      // failure worth reporting; with it off, it is the ordinary state of
+      // somebody waiting for an installation or an invitation, and telling
+      // them to fix it would be telling them to do something they cannot.
+      selfServeSignup: options.selfServeSignup === true,
       githubAppInstallUrl: options.githubAppInstallUrl,
     }
     if (!token) return c.json({ signedIn: false, ...publicSignIn }, 200)
@@ -1209,6 +1224,7 @@ export function createServer(options: ServerOptions) {
       hostedAccess: hasHostedAccess(session.plan, hostedRequiredPlan),
       githubAppInstallUrl: options.githubAppInstallUrl,
       signupsOpen: options.signInAllowlist == null,
+      selfServeSignup: options.selfServeSignup === true,
       // Handed to the page so it can send it back on mutations. Safe to expose:
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,

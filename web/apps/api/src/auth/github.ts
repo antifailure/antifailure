@@ -370,18 +370,44 @@ export class RealGitHubClient implements GitHubClient {
       name: string | null
       avatar_url: string | null
     }
-    let email = profile.email
-    if (!email) {
-      const emails = (await this.get(accessToken, '/user/emails')) as {
-        email: string
-        primary: boolean
-        verified: boolean
-      }[]
-      // An unverified address must never identify an account: anyone can add
-      // somebody else's address to their own GitHub account, and matching on it
-      // would let them claim that person's membership.
-      email = emails.find((e) => e.primary && e.verified)?.email ?? null
-    }
+    // /user/emails is read ALWAYS, and that is a change worth its extra round
+    // trip.
+    //
+    // It used to be a fallback, consulted only when `/user` reported no public
+    // address. The comment beside it already stated the rule, that an
+    // unverified address must never identify an account because anyone can add
+    // somebody else's address to their own GitHub account, and the branch that
+    // skipped the check was the one that ran for most people. `/user` reports whatever
+    // is on the public profile and says nothing about whether it is verified,
+    // so the rule was enforced on the minority path and asserted on the
+    // majority one.
+    //
+    // It was survivable while the only way in was an allowlist of two names.
+    // It is not survivable with self serve signup: the address is what an
+    // invitation is matched against, what the email sign-in path looks up, and
+    // what a person is identified by everywhere they are not a GitHub id. This
+    // control plane now takes GitHub's verification as the whole of its email
+    // verification, so it has to actually ask for it.
+    const emails = (await this.get(accessToken, '/user/emails')) as {
+      email: string
+      primary: boolean
+      verified: boolean
+    }[]
+    const verified = Array.isArray(emails) ? emails.filter((e) => e && e.verified) : []
+
+    // The profile address first, but only if the list says it is verified, so
+    // that somebody who has chosen a public address keeps being identified by
+    // it. Then the verified primary, then any verified address at all: an
+    // account whose primary is unverified still has a verified address in
+    // practice, and refusing it would turn somebody away for a GitHub setting
+    // they have no reason to connect to this.
+    const onProfile = profile.email?.toLowerCase() ?? null
+    const email =
+      (onProfile && verified.some((e) => e.email.toLowerCase() === onProfile) ? onProfile : null) ??
+      verified.find((e) => e.primary)?.email ??
+      verified[0]?.email ??
+      null
+
     if (!email) {
       throw new GitHubError(
         'GitHub returned no verified email address for this account, so there is nothing to identify it by.',

@@ -104,6 +104,10 @@ export interface StartApiOptions {
   secureCookies?: boolean
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
+  /** Whether a sign-in with no organization creates one. Undefined is off,
+   *  which is the server's default, so every suite written before self serve
+   *  signup existed keeps testing the behaviour it was written against. */
+  selfServeSignup?: boolean
   /** The secret that seals provider keys. Undefined means none is configured,
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
@@ -255,6 +259,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     secureCookies: options.secureCookies ?? false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
+    selfServeSignup: options.selfServeSignup ?? false,
     sealingKey: options.sealingKey ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
