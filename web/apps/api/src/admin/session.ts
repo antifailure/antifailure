@@ -25,6 +25,7 @@ import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
 import { appendAdminAudit } from '@antifailure/db'
 import type { AdminRole } from './permissions.ts'
+import { readCookie } from '../auth/session.ts'
 
 const scrypt = promisify(scryptCb) as (
   password: string,
@@ -269,6 +270,31 @@ export function adminSessionCookie(token: string, expiresAt: Date, secure: boole
   ]
   if (secure) parts.push('Secure')
   return parts.join('; ')
+}
+
+/**
+ * Reads the operator cookie back, under whichever name it was written.
+ *
+ * THIS EXISTS BECAUSE THE TWO NAMES ARE NOT THE SAME STRING. adminSessionCookie
+ * writes `__Host-af_admin_session` when secure and the bare name when not, so a
+ * reader that only knows the bare name works in local development and NEVER
+ * resolves in production. The failure has no error in it: the operator signs
+ * in, gets a 200 and a Set-Cookie, and is returned to the sign-in screen
+ * forever, because the next request carries a cookie nobody looks for.
+ *
+ * It lives beside the two writers rather than at the call site so the three
+ * stay in step. A reader in another file is a reader that does not move when
+ * the prefix rule changes.
+ *
+ * Prefixed first, because that is the name a correctly configured deployment
+ * writes, and the bare name is accepted as well rather than instead: a cookie
+ * issued before somebody turned Secure on is still a live session, and
+ * refusing it would sign every operator out on deploy.
+ */
+export function readAdminSessionCookie(header: string | null | undefined): string | null {
+  return (
+    readCookie(header, `__Host-${ADMIN_SESSION_COOKIE}`) ?? readCookie(header, ADMIN_SESSION_COOKIE)
+  )
 }
 
 export function clearedAdminCookie(secure: boolean): string {

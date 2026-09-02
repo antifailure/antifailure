@@ -78,6 +78,17 @@ export interface ApiHarness {
 }
 
 export interface StartApiOptions {
+  /**
+   * Serve cookies the way production does. Defaults false, because the test
+   * client speaks plain HTTP.
+   *
+   * Worth setting for anything that depends on the cookie NAME rather than on
+   * its transport: the operator cookie takes the __Host- prefix only when
+   * Secure, so a suite that never turns this on cannot see a reader that knows
+   * the bare name and not the prefixed one. Tests that forward Set-Cookie by
+   * hand are unaffected by Secure, since they are their own cookie jar.
+   */
+  secureCookies?: boolean
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
   /** The secret that seals provider keys. Undefined means none is configured,
@@ -148,7 +159,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
-    secureCookies: false,
+    secureCookies: options.secureCookies ?? false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     sealingKey: options.sealingKey ?? null,

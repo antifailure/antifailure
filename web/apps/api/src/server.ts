@@ -24,7 +24,15 @@ import {
 import { sql as rawSql } from 'drizzle-orm'
 import { trpcServer } from '@hono/trpc-server'
 import type { Pool, AdminPool } from '@antifailure/db'
-import { ADMIN_SESSION_COOKIE, resolveAdminSession } from './admin/session.ts'
+import {
+  AdminSignInError,
+  adminSessionCookie,
+  adminSignIn,
+  adminSignOut,
+  clearedAdminCookie,
+  readAdminSessionCookie,
+  resolveAdminSession,
+} from './admin/session.ts'
 import { actorOf } from './admin/trpc.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
@@ -534,6 +542,66 @@ export function createServer(options: ServerOptions) {
       if (err instanceof SignInError) return c.json({ error: err.message }, 400)
       return c.json({ error: 'GitHub refused the sign in. Try again.' }, 400)
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // The operator portal's own sign-in
+  //
+  // SEPARATE ROUTES FROM /auth/*, and that is the whole design rather than
+  // tidiness. The product's sessions table is populated by GitHub OAuth, so if
+  // operator power were a flag on a product session then compromising somebody's
+  // GitHub account would be compromising the platform. Two credentials that fail
+  // independently is the point, and these routes never touch `sessions`.
+  //
+  // These exist because without them the operator portal cannot be signed into
+  // AT ALL: adminSignIn, adminSessionCookie and their siblings had no caller
+  // outside tests, so ctx.admin was null on every request and all twelve
+  // procedures in the admin router answered UNAUTHORIZED. The functions were
+  // correct and unreachable, which is the failure mode that looks most like
+  // working software.
+  //
+  // Rate limited on the same bucket as the product's sign-in, because this is a
+  // password endpoint and the operator credential is the one that reads every
+  // customer's data.
+  // -------------------------------------------------------------------------
+
+  app.post('/v1/admin/signin', async (c) => {
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    const body = await c.req.json().catch(() => null)
+    const email = typeof body?.email === 'string' ? body.email : ''
+    const password = typeof body?.password === 'string' ? body.password : ''
+
+    try {
+      const result = await adminSignIn(
+        options.pool,
+        { email, password, ip: c.req.header('x-forwarded-for'), userAgent: c.req.header('user-agent') },
+        clock.now(),
+      )
+      c.header('set-cookie', adminSessionCookie(result.token, result.expiresAt, secure))
+      return c.json({ signedIn: true })
+    } catch (err) {
+      // ONE MESSAGE FOR EVERY REFUSAL, and the same one adminSignIn composes:
+      // a wrong password, an unknown address, an operator with no password set
+      // and a suspended operator must be indistinguishable from outside, or
+      // this endpoint answers "which of your guesses was closer".
+      //
+      // 401 rather than 400: the credential was refused, not malformed.
+      if (err instanceof AdminSignInError) return c.json({ error: err.message }, 401)
+      throw err
+    }
+  })
+
+  app.post('/v1/admin/signout', async (c) => {
+    const token = readAdminSessionCookie(c.req.header('cookie'))
+    if (token) await adminSignOut(options.pool, token, clock.now())
+    // Cleared whether or not there was a session, so a stale or unparseable
+    // cookie can still be got rid of by pressing the button.
+    c.header('set-cookie', clearedAdminCookie(secure))
+    return c.json({ signedOut: true })
   })
 
   app.post('/auth/signout', async (c) => {
@@ -1963,7 +2031,10 @@ export function createServer(options: ServerOptions) {
         // instead of it. A request can legitimately carry both: an operator
         // signed in to the product as themselves is still an operator, and the
         // two sessions are independent credentials in independent tables.
-        const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+        // readAdminSessionCookie, not readCookie: the cookie is written under
+        // the __Host- prefix when Secure, so the bare name resolves in local
+        // development and never in production. See its comment.
+        const adminToken = readAdminSessionCookie(c.req.header('cookie'))
         const adminSession = adminToken
           ? await resolveAdminSession(options.pool, adminToken, clock.now())
           : null
