@@ -50,6 +50,7 @@ import {
   safeRedirect,
   type SignInAllowlist,
 } from './auth/signin.ts'
+import { problem, type Problem, type ProblemAction } from './errorpage.ts'
 import {
   beginEmailSignIn,
   redeemEmailSignIn,
@@ -205,6 +206,11 @@ export interface ServerOptions {
   /** Public GitHub App installation address shown to a signed-in user who has
    *  no organization yet. */
   githubAppInstallUrl?: string
+  /** Where somebody this installation will not admit is sent instead, which on
+   *  the hosted planes is the marketing site's request page. Undefined is the
+   *  self-hosted default and means the refusal page offers no link, because
+   *  pointing an operator's users at the vendor's waitlist would be wrong. */
+  signupUrl?: string
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
   /** Where the providers live. Overridden in tests so nothing reaches a real
@@ -552,9 +558,124 @@ export function createServer(options: ServerOptions) {
   // Sign in
   // -------------------------------------------------------------------------
 
+  /**
+   * Where a refused person is offered to go, and nothing when there is
+   * nowhere.
+   *
+   * One place, so the sentence and the link cannot disagree between the two
+   * routes that refuse.
+   */
+  function wayOut(): { actions: ProblemAction[]; sentence: string } {
+    if (options.signupUrl) {
+      return {
+        actions: [{ href: options.signupUrl, label: 'Join the waitlist' }],
+        sentence:
+          'Leave an address on the waitlist and we will tell you when it opens. The engine ' +
+          'itself is open source, runs on your own machine, and needs no account at all.',
+      }
+    }
+    return {
+      actions: [],
+      sentence:
+        'Ask an owner of this installation to add your GitHub account to its sign-in ' +
+        'allowlist.',
+    }
+  }
+
+  /** The page somebody sees when this installation will not let them in. */
+  function notInvited(refusal: SignInError): Problem {
+    const out = wayOut()
+    return {
+      status: 403,
+      // The sentence the refusal itself carries, not a second copy of it. Every
+      // existing client reads this field and a literal here is one rewording
+      // away from the API and the page saying different things.
+      error: refusal.message,
+      title: 'You have not been invited yet',
+      body: [
+        'This control plane is invitation only, and the GitHub account you just signed in ' +
+          'with is not on the list of accounts it admits.',
+        refusal.authorizationRevoked
+          ? 'Nothing was created here, and the authorization you granted on GitHub a moment ' +
+            'ago has already been withdrawn, so nothing of yours is left connected to it.'
+          : 'Nothing was created here. You can withdraw the access you granted under ' +
+            'Applications in your GitHub settings.',
+        out.sentence,
+      ],
+      actions: out.actions,
+    }
+  }
+
+  /** The same, for a link that arrived by email. The way back is different:
+   *  the form that sends one is on the sign-in screen, not at /auth/github. */
+  function staleEmailLink(): Problem {
+    return {
+      status: 400,
+      error: 'This sign-in link is no longer valid. Ask for another one.',
+      title: 'This sign-in link is no longer valid',
+      body: [
+        'A link signs you in once, and it expires. This one has been used already or it has ' +
+          'run out of time.',
+        'Nothing is wrong with your account. Ask for another link and it will work.',
+      ],
+      actions: [{ href: options.appBaseUrl ?? '/', label: 'Ask for another link' }],
+    }
+  }
+
+  /** The one message for a state that was never issued, already used, or has
+   *  expired. They are deliberately indistinguishable: telling them apart tells
+   *  somebody probing state values which of their guesses was once real. */
+  function staleSignIn(): Problem {
+    return {
+      status: 400,
+      error: 'This sign-in link is no longer valid. Start again.',
+      title: 'This sign-in link is no longer valid',
+      body: [
+        'A sign-in can only be completed once, and it has a few minutes to finish. This one ' +
+          'has been used already or it has run out of time.',
+        'Nothing is wrong with your account. Start again and the next one will work.',
+      ],
+      actions: [{ href: '/auth/github', label: 'Start again' }],
+    }
+  }
+
   app.get('/auth/github', async (c) => {
     const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')))
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    // Refused here, before the redirect, when the answer cannot depend on who
+    // is asking.
+    //
+    // An allowlist that names nobody closes this installation to every GitHub
+    // account there is, which is a property of the deployment and not of the
+    // visitor. Sending them to GitHub, having them authorise an application,
+    // and refusing them on the way back would be asking for something in order
+    // to give an answer already known before they left.
+    //
+    // A list that names SOMEBODY cannot be resolved this early and this says
+    // so rather than pretending. The list is keyed on the GitHub login, the
+    // login arrives with the code exchange, and there is nothing in the
+    // request that carries it: no cookie, no session, and no identity in the
+    // OAuth protocol before the callback. So a non-empty list is still decided
+    // at the callback, and what is done about the grant by then is in
+    // completeSignIn.
+    if (options.signInAllowlist?.size === 0) {
+      const out = wayOut()
+      return problem(c, {
+        status: 403,
+        error:
+          'This installation is not open for sign-ups. Ask an owner to add your GitHub ' +
+          'account to the allowlist.',
+        title: 'This control plane is not open for sign-ups',
+        body: [
+          'Sign-in is closed on this installation. No GitHub account can sign in while it ' +
+            'stays that way, so you have not been sent to GitHub and nothing has been asked ' +
+            'of your account.',
+          out.sentence,
+        ],
+        actions: out.actions,
+      })
+    }
 
     const { url } = await beginSignIn(
       options.pool,
@@ -571,9 +692,7 @@ export function createServer(options: ServerOptions) {
 
     const code = c.req.query('code')
     const state = c.req.query('state')
-    if (!code || !state) {
-      return c.json({ error: 'This sign-in link is no longer valid. Start again.' }, 400)
-    }
+    if (!code || !state) return problem(c, staleSignIn())
 
     try {
       const result = await completeSignIn(
@@ -616,8 +735,33 @@ export function createServer(options: ServerOptions) {
       if (decision.note) landing.searchParams.set('note', decision.note)
       return c.redirect(landing.toString(), 302)
     } catch (err) {
-      if (err instanceof SignInError) return c.json({ error: err.message }, 400)
-      return c.json({ error: 'GitHub refused the sign in. Try again.' }, 400)
+      if (err instanceof SignInError) {
+        if (err.refusal === 'not-invited') return problem(c, notInvited(err))
+        if (err.refusal === 'link-expired') return problem(c, staleSignIn())
+        // Something else refused, and it is not a link that ran out. The
+        // sentence it carries is the only thing that knows what, so the page
+        // shows that rather than a guess: syncMembership refusing to apply an
+        // empty member list reaches here, and telling that person their link
+        // expired would send them to press the same button forever.
+        return problem(c, {
+          status: 400,
+          error: err.message,
+          title: 'The sign-in could not be completed',
+          body: [err.message, 'Nothing was created here.'],
+          actions: [{ href: '/auth/github', label: 'Try again' }],
+        })
+      }
+      return problem(c, {
+        status: 400,
+        error: 'GitHub refused the sign in. Try again.',
+        title: 'GitHub did not finish the sign-in',
+        body: [
+          'GitHub would not complete the exchange. That usually means the link was already ' +
+            'used, or that too long passed between pressing the button and coming back.',
+          'Nothing was created here. Starting again is the whole of the fix.',
+        ],
+        actions: [{ href: '/auth/github', label: 'Start again' }],
+      })
     }
   })
 
@@ -721,9 +865,7 @@ export function createServer(options: ServerOptions) {
       if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
       const token = c.req.query('token')
-      if (!token) {
-        return c.json({ error: 'This sign-in link is no longer valid. Ask for another one.' }, 400)
-      }
+      if (!token) return problem(c, staleEmailLink())
 
       try {
         const result = await redeemEmailSignIn(options.pool, clock, token)
@@ -742,7 +884,9 @@ export function createServer(options: ServerOptions) {
         const target = result.redirectTo ?? '/'
         return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
       } catch (err) {
-        if (err instanceof EmailSignInError) return c.json({ error: err.message }, 400)
+        if (err instanceof EmailSignInError) {
+          return problem(c, { ...staleEmailLink(), error: err.message })
+        }
         throw err
       }
     })
@@ -1013,7 +1157,18 @@ export function createServer(options: ServerOptions) {
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
     const token = c.req.query('token') ?? ''
-    if (!token) return c.json({ error: 'That link is missing its token.' }, 400)
+    if (!token) {
+      return problem(c, {
+        status: 400,
+        error: 'That link is missing its token.',
+        title: 'This export link is incomplete',
+        body: [
+          'The address has no token on it, so there is nothing to look up. It was probably ' +
+            'cut short somewhere between the message it arrived in and the address bar.',
+          'Open the original link again, in full.',
+        ],
+      })
+    }
 
     // `describe` answers the page that the link opens, which has to say whether
     // the export is still there BEFORE it offers a download. Without it the
@@ -1030,10 +1185,26 @@ export function createServer(options: ServerOptions) {
       // 404 for a link that names nothing, 409 for one that names an export
       // which is not ready yet. The second is a real link and the caller should
       // come back rather than go looking for another one.
-      return c.json(
-        { error: held.reason, state: held.state },
-        held.state === 'not_ready' ? 409 : 404,
-      )
+      //
+      // This link is handed to a person and opened in a browser, so a refusal
+      // that answered only JSON put the sentence explaining what happened into
+      // an unstyled body. The `state` field stays in the JSON, because the
+      // console's export page reads it.
+      const notReady = held.state === 'not_ready'
+      return problem(c, {
+        status: notReady ? 409 : 404,
+        error: held.reason,
+        json: { state: held.state },
+        title: notReady ? 'This export is not ready yet' : 'This export link is not valid',
+        body: [
+          held.reason,
+          notReady
+            ? 'The link itself is good. Come back to this same address rather than looking ' +
+              'for another one.'
+            : 'An export is held for a limited time after an organization is deleted, and ' +
+              'then it is destroyed. There is nothing to recover from this address.',
+        ],
+      })
     }
     if (describe) {
       return c.json({
@@ -2487,9 +2658,26 @@ function countIngestion(
   }
 }
 
-function tooMany(c: { header: (k: string, v: string) => void; json: (b: unknown, s: 429) => Response }, seconds: number) {
+/**
+ * The rate limiter's answer, on the routes a person opens directly.
+ *
+ * Negotiated for the same reason the refusals above are: every caller of this
+ * helper is a GET a browser navigates to, so a bare JSON body here is a line
+ * of quoting on a white page at the moment somebody is already stuck.
+ */
+function tooMany(c: Parameters<typeof problem>[0], seconds: number) {
   c.header('retry-after', String(seconds))
-  return c.json({ error: 'Too many attempts. Try again shortly.', retryAfterSeconds: seconds }, 429)
+  return problem(c, {
+    status: 429,
+    error: 'Too many attempts. Try again shortly.',
+    json: { retryAfterSeconds: seconds },
+    title: 'Too many attempts',
+    body: [
+      `This address has been asked for too many times at once. Wait about ${seconds} ` +
+        'seconds and try again.',
+      'Nothing is wrong with your account, and nothing has been locked.',
+    ],
+  })
 }
 
 // Re-exported so that an edition built on top of this can import the permission
