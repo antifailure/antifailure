@@ -672,6 +672,23 @@ jobs:
         working-directory: web
 
       - name: The published OpenAPI document is the one this router serves
+        # Runs even when Test failed, which is the whole point of the line
+        # below. This step is sequenced immediately after Test, and Test is red
+        # on every branch in a migration chain because the numbering gate reads
+        # a gap until the branches ahead land. A skipped step renders exactly
+        # like one that had nothing to do, so for the length of a queue this
+        # control was dark and its darkness was invisible: the job already said
+        # failure for the reason you expected.
+        #
+        # That is not hypothetical. Mounting the operator router put eighteen
+        # admin routes into the published document described as `security: []`
+        # and "Requires no permission", and this step did not run on the change
+        # that introduced them, or on the change that fixed it. It was found by
+        # running the check by hand.
+        #
+        # A gate whose subject is a published document should not be silenced
+        # by an unrelated failure in the same job.
+        if: always()
         # www/public/openapi.json is what antifailure.dev/openapi.json serves,
         # and it is generated from the router in this job's workspace rather
         # than proxied from production at request time. The reason is in
