@@ -459,7 +459,21 @@ FROM antifailure_admin;
 -- make this database disagree with the provider about what somebody is paying
 -- for, and the provider would be right.
 GRANT SELECT ON billing_customers, subscriptions, invoices, payment_methods,
-  billing_events, golden_versions
+  billing_events, golden_versions,
+  -- `organizations` too, and it is not a billing table.
+  --
+  -- Every operator route in this lane opens by reading the tenant's slug and
+  -- plan: the slug because `subject_org_label` is what still names the customer
+  -- once the row is gone, and the plan because an entitlement means nothing
+  -- without the plan it is an override of. Without this grant the first
+  -- statement of every one of them is 42501.
+  --
+  -- Only this one, and only SELECT. The rest of the tenant tables an operator
+  -- portal needs, users and members and repositories and the rest, belong to
+  -- the lanes whose screens read them; granting them here would put the
+  -- privilege list in the file least likely to be read when somebody asks what
+  -- an operator can see.
+  organizations
 TO antifailure_admin;
 
 -- ---------------------------------------------------------------------------
