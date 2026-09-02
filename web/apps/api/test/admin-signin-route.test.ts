@@ -38,6 +38,54 @@ function cookieFrom(res: Response): string | null {
   return header.split(';')[0]!
 }
 
+
+/**
+ * Move the server's clock to real time before signing anybody in.
+ *
+ * THIS IS NOT TEST HOUSEKEEPING, it is a real coupling worth knowing about. An
+ * operator session's lifetime is enforced in TWO places by TWO clocks: the
+ * application computes expires_at from its own clock, and the RLS predicate
+ * behind current_admin_user() compares that column against the DATABASE's
+ * now(). The harness's FakeClock starts at 2026-01-01, so a session it issues
+ * is born already expired from the database's point of view, current_admin_user()
+ * resolves to nothing, and the sign-in audit append is refused by row-level
+ * security.
+ *
+ * The failure names none of that. It surfaces as
+ * `new row violates row-level security policy for table "admin_audit_entries"`
+ * on the SUCCESS path, while every wrong-password test still passes, because
+ * those never get far enough to write a session. It cost an hour here and the
+ * same shape would cost a night in production, where the two clocks are the app
+ * server's and the database's and skew between them is ordinary.
+ *
+ * admin-boundary.test.ts does not hit this because it calls adminSignIn with
+ * `new Date()` directly rather than through the server's injected clock.
+ */
+/**
+ * Headers that put each caller in its own rate-limit bucket.
+ *
+ * The sign-in route is limited on clientKey(x-forwarded-for, user-agent), and
+ * every request from this suite arrives with neither, so without this the whole
+ * FILE shares one token bucket: the four parallel attempts in the refusal test
+ * drain it and a later test gets 429, which reads exactly like an
+ * authentication failure and sent me looking at the gate instead of the
+ * limiter. Distinct callers is also the honest shape, since these are meant to
+ * be different people signing in.
+ *
+ * x-forwarded-for rather than user-agent: `new Request()` drops a user-agent
+ * set through init.headers, so keying on that silently changed nothing and the
+ * bucket stayed shared. Measured by the 429 not moving.
+ */
+let caller = 0
+function asNewCaller(): Record<string, string> {
+  caller += 1
+  return { 'content-type': 'application/json', 'x-forwarded-for': `203.0.113.${caller % 250}` }
+}
+
+function useRealTime(h: ApiHarness): void {
+  h.clock.advance(Date.now() - h.clock.now().getTime())
+}
+
 async function seedOperator(
   h: ApiHarness,
   password: string,
@@ -63,6 +111,7 @@ describe(
 
     before(async () => {
       h = await startApi()
+      useRealTime(h)
     })
 
     after(async () => {
@@ -74,7 +123,7 @@ describe(
 
       const res = await h.fetch('/v1/admin/signin', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: asNewCaller(),
         body: JSON.stringify({ email, password }),
       })
       assert.equal(res.status, 200, await res.text())
@@ -87,8 +136,13 @@ describe(
       // whole chain resolved: cookie read under the right name, session found,
       // actor built, permission checked.
       const me = await h.fetch('/trpc/admin.me', { headers: { cookie: cookie! } })
-      assert.equal(me.status, 200, `admin.me refused a freshly signed-in operator: ${await me.text()}`)
-      const body = (await me.json()) as { result: { data: { email: string } } }
+      // Read the body ONCE. A template literal in the assert message is
+      // evaluated whether or not the assertion fails, so `${await me.text()}`
+      // there consumes the stream and the next me.json() throws "Body is
+      // unusable" on the PASSING path.
+      const raw = await me.text()
+      assert.equal(me.status, 200, `admin.me refused a freshly signed-in operator: ${raw}`)
+      const body = JSON.parse(raw) as { result: { data: { email: string } } }
       assert.equal(body.result.data.email, email)
     })
 
@@ -117,7 +171,7 @@ describe(
         ].map(async (creds) => {
           const res = await h.fetch('/v1/admin/signin', {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: asNewCaller(),
             body: JSON.stringify(creds),
           })
           return { status: res.status, body: (await res.json()) as { error: string } }
@@ -138,12 +192,21 @@ describe(
       const email = await seedOperator(h, password)
       const signin = await h.fetch('/v1/admin/signin', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: asNewCaller(),
         body: JSON.stringify({ email, password }),
       })
+      // Checked before it is used. Without this, a sign-in that was refused
+      // yields a null cookie, the next request is simply anonymous, and the
+      // failure reads as "the gate rejected a valid session" when the truth is
+      // that no session was ever issued.
+      assert.equal(signin.status, 200, await signin.text())
       const cookie = cookieFrom(signin)!
 
-      assert.equal((await h.fetch('/trpc/admin.me', { headers: { cookie } })).status, 200)
+      assert.equal(
+        (await h.fetch('/trpc/admin.me', { headers: { cookie } })).status,
+        200,
+        'a freshly signed-in operator must reach an admin route',
+      )
       const out = await h.fetch('/v1/admin/signout', { method: 'POST', headers: { cookie } })
       assert.equal(out.status, 200)
       assert.equal(
@@ -167,6 +230,7 @@ describe(
       // `__Host-af_admin_session`, and a reader that only knows the bare name
       // finds nothing.
       h = await startApi({ secureCookies: true })
+      useRealTime(h)
     })
 
     after(async () => {
@@ -177,10 +241,10 @@ describe(
       const email = await seedOperator(h, password)
       const res = await h.fetch('/v1/admin/signin', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: asNewCaller(),
         body: JSON.stringify({ email, password }),
       })
-      assert.equal(res.status, 200)
+      assert.equal(res.status, 200, await res.text())
 
       const header = res.headers.get('set-cookie') ?? ''
       assert.match(
