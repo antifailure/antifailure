@@ -66,6 +66,28 @@ export interface Tenant {
   environments: number;
 }
 
+export interface Operator {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  /** The permanent root operator, which the database refuses to delete,
+   *  demote or suspend. Shown so nobody wastes an incident trying. */
+  isRoot: boolean;
+  suspended: boolean;
+  lastSignedInAt: string | null;
+  /** Whether a password has ever been set. An operator who CANNOT sign in
+   *  otherwise looks identical to one who can, and on this screen that is the
+   *  difference between an account that is waiting for setup and one that is
+   *  live. */
+  provisioned: boolean;
+}
+
+export interface TenantDetail extends Tenant {
+  members: number;
+  environments: number;
+}
+
 export interface AdminAuditEntry {
   seq: number;
   actor: string;
@@ -94,11 +116,40 @@ export function useTenants(search: string) {
   );
 }
 
+export function useOperators() {
+  return useApi<Operator[]>(() => query("admin.operators.list"), []);
+}
+
 export function useAdminAudit(severity: string) {
   return useApi<AdminPage<AdminAuditEntry>>(
     () => query("admin.audit.list", { limit: 100, severity: severity || undefined }),
     [severity],
   );
+}
+
+/**
+ * A tRPC mutation on the operator router.
+ *
+ * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
+ * console sends one because its session cookie is SameSite=Lax, which a
+ * cross-site top-level POST still carries. The operator cookie is
+ * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
+ * and there is nothing for a token to add. If that cookie's SameSite is ever
+ * loosened, this is the line that has to grow a token.
+ */
+export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
+  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+}
+
+export async function suspendTenant(orgId: string, reason: string) {
+  return adminMutate<{ suspended: boolean; effect: string }>("admin.tenants.suspend", {
+    orgId,
+    reason,
+  });
+}
+
+export async function resumeTenant(orgId: string) {
+  return adminMutate<{ suspended: boolean }>("admin.tenants.resume", { orgId });
 }
 
 /**
