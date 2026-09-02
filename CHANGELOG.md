@@ -527,8 +527,8 @@ it.
   There is no `af down --all`; the command that removes every environment on the
   machine is `af env prune --older-than 0`. The test that existed for exactly
   this class was green over all three, because its pattern only matched a
-  command at the start of a line and every one of the 127 remedies on the
-  generated errors reference sits in a sentence. It reads inline code spans now,
+  command at the start of a line and every remedy on the generated errors
+  reference sits in a sentence. It reads inline code spans now,
   and a third sweep parses the engine's own string constants through
   `go/parser`.
 - `ListGoldens` reported every golden as verified, including the ones that were
@@ -590,8 +590,8 @@ it.
   of two reloads in flight the older answer cannot overwrite the newer.
 - Every loading skeleton in the console was zero pixels wide on a phone. A
   percentage width inside a shrink to fit box has no basis to resolve against,
-  so all 22 bars in `TableSkeleton`, on seven pages, rendered as a stack of
-  empty boxes at 390px while measuring 54.8 to 168.2px at 1280px.
+  so every bar in `TableSkeleton`, on every page that uses it, rendered as a
+  stack of empty boxes at 390px while measuring 54.8 to 168.2px at 1280px.
 - Every route in the console had the same document title. All ten rendered
   `Antifailure` while their headings read Environments, Runs, Audit and the
   rest, so every tab, every history entry and every tab search result was the
@@ -665,15 +665,15 @@ it.
   the screen where somebody approves an egress rule.
 - Every documentation address the product prints or publishes names the URL the
   site actually serves rather than a spelling it answers with a 301. That
-  affected the `More` link under all 131 error codes, which is the address the
-  engine prints when something has already gone wrong for you, the 82
-  documentation pages' own canonical tags, and the 81 URLs in the sitemap.
-- The copy button on all 116 terminal code blocks in the documentation sat
-  outside the block, hanging off the bottom right corner over the paragraph
-  beneath and taking its tooltip with it. The install command on the quickstart
+  affected the `More` link under every error code, which is the address the
+  engine prints when something has already gone wrong for you, the documentation
+  pages' own canonical tags, and every URL in the sitemap.
+- The copy button on every terminal code block in the documentation sat outside
+  the block, hanging off the bottom right corner over the paragraph beneath and
+  taking its tooltip with it. The install command on the quickstart
   was the first one anybody saw.
 - Every h2 in the documentation pushed its anchor link onto a line of its own,
-  67px below the heading, on all 81 pages. Cascade layers are why the override
+  67px below the heading, on every page. Cascade layers are why the override
   that caused it was silent: Starlight ships its CSS in a layer and this site's
   stylesheet is unlayered, so a plain selector beats a layered rule whatever its
   specificity and reading the diff gives the wrong answer.
@@ -689,7 +689,7 @@ it.
   the art behind the headline ended in a torn horizontal edge lying across body
   text, and every section heading was sliced in half by a rail pinned at the
   wrong offset. No page on the site scrolls horizontally at any width now,
-  checked across all 35 exported routes at ten widths against the static export
+  checked across every exported route at ten widths against the static export
   rather than against the development server, which serves none of the hero art
   and would have measured a torn edge as clean.
 - The assistant panel on the home page was a drawing of an application that a
@@ -698,8 +698,8 @@ it.
   7px. The parts that only depicted an assistant are drawn rather than operated
   now, and what stays interactive is the part that is a real demonstration.
 - Every interactive target in the footer measures at least 44 by 44 at every
-  width, and on a desktop the footer renders as it did before. The twenty eight
-  navigation links could not take the treatment the other targets took, because
+  width, and on a desktop the footer renders as it did before. Its navigation
+  links could not take the treatment the other targets took, because
   they sit flush and each 44px box would have overlapped its neighbour by 15px
   with the later sibling painting on top, which a screenshot would not show and
   a measurement would have called a pass. The rhythm grows under a coarse
