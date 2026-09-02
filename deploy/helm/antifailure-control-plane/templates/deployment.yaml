@@ -72,6 +72,10 @@ spec:
             - name: AF_INSECURE_COOKIES
               value: "1"
             {{- end }}
+            {{- if .Values.config.operatorSetsPlan }}
+            - name: AF_OPERATOR_SETS_PLAN
+              value: "1"
+            {{- end }}
             {{- if .Values.config.eventRetentionMonths }}
             - name: AF_EVENT_RETENTION_MONTHS
               value: {{ .Values.config.eventRetentionMonths | quote }}

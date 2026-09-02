@@ -562,7 +562,11 @@ describe('the control plane acts', { skip: hasDatabase ? false : 'no Postgres at
   }
 
   before(async () => {
-    h = await startApi()
+    // Self-hosted, with the operator declaring that they set plans by hand.
+    // Without it `billing.set` is refused, which is the shipped default and is
+    // proved in hosted.test.ts; this suite is about what the route does once an
+    // operator has turned it on.
+    h = await startApi({ operatorSetsPlan: true })
     org = await seedOrg(h.admin, 'verbs')
     owner = await signInAs(h, org, 'owner')
     admin = await signInAs(h, org, 'admin')
