@@ -6,9 +6,16 @@ suspicion than miss a real problem.
 
 ## Reporting a vulnerability
 
-Email **security@antifailure.dev**. Please do not open a public issue for a
-security problem. Blank issues are disabled and the issue chooser offers a
-security link that points here instead of a form.
+Open a **[private vulnerability
+report](https://github.com/antifailure/antifailure/security/advisories/new)**.
+It goes to the maintainers and is not a public issue. Please do not open a
+public issue for a security problem. Blank issues are disabled and the issue
+chooser offers a security link that points here instead of a form.
+
+There is no security mailbox, and that is stated rather than left to be
+discovered. The antifailure.dev domain publishes no mail exchanger and its SPF
+policy authorises no sender, so an address printed here would be a report
+nobody receives.
 
 Include, as far as you can:
 
@@ -18,8 +25,8 @@ Include, as far as you can:
 * a reproduction, ideally a failing test or a short script
 * whether the finding is already public
 
-If you would like to encrypt the report, ask for a key in a first message with
-no details and we will reply with one.
+A private vulnerability report is already confidential between you and the
+maintainers, so there is no key to exchange and nothing to encrypt.
 
 ## What we commit to
 
@@ -34,7 +41,7 @@ We will keep you updated at least weekly while a report is open, credit you in
 the advisory unless you prefer otherwise, and tell you before we publish.
 
 These are the numbers a small team can hold, and it is worth being exact about
-what that means. Nobody here is on call for this mailbox. The 72 hours is a
+what that means. Nobody here is on call for these reports. The 72 hours is a
 working commitment and not a pager, so a report sent on a Friday evening is
 most likely read on Monday. Business days are Monday to Friday, London time.
 
@@ -43,10 +50,9 @@ assessment, and no fix deadline. We will tell you which release we expect to
 carry the fix, and tell you again if that changes.
 
 **If we miss a target.** Reply on the same thread and say so. If a week passes
-with no answer at all, open a public issue saying only that you sent a security
-report on a date and have had no reply. Do not put the finding in it. A silent
-mailbox is a failure of ours and you should not have to sit on a finding because
-of it.
+with no answer at all, open a public issue saying only that you filed a private
+report on a date and have had no reply. Do not put the finding in it. Silence is
+a failure of ours and you should not have to sit on a finding because of it.
 
 **If you want to publish.** Our default is 90 days from your first message,
 whether or not a fix has shipped, and we would rather agree a date with you than
