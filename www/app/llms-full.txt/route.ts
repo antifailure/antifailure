@@ -4,8 +4,8 @@ import { SITE_DESCRIPTION_LONG, SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/s
 /**
  * /llms-full.txt
  *
- * The companion to llms.txt: the same pages, but with their content inline so
- * an assistant can answer from one fetch instead of thirty-one.
+ * The placeholder written by Next's route export. markdown-twins.mjs replaces
+ * it after the HTML exists, using the rendered text of every indexable page.
  *
  * This is generated from the route registry and the page copy, which means it
  * cannot describe a page that does not exist and cannot go stale against a

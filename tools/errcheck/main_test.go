@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -94,23 +95,23 @@ func TestATypeScriptSourceCodeCountsAndATestOrACommentDoesNot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !used["AFEE004"] {
+	if _, ok := used["AFEE004"]; !ok {
 		t.Error("a code thrown from a source file was not counted, which is how AF-EE-004 " +
 			"shipped marked as a feature this version does not have")
 	}
-	if used["AFEE999"] {
+	if _, ok := used["AFEE999"]; ok {
 		t.Error("a code named in a comment was counted as returned; the pattern is supposed " +
 			"to require the quotes")
 	}
-	if used["AFDB001"] {
+	if _, ok := used["AFDB001"]; ok {
 		t.Error("a code invented by a test fixture was counted. metrics-endpoint.test.ts posts " +
 			"AF-DB-001 to prove the control plane groups by whatever code arrives, and the " +
 			"control plane cannot raise it")
 	}
-	if used["AFCP002"] {
+	if _, ok := used["AFCP002"]; ok {
 		t.Error("a .test.ts file beside the source was counted")
 	}
-	if used["AFRUN001"] {
+	if _, ok := used["AFRUN001"]; ok {
 		t.Error("node_modules was walked")
 	}
 }
@@ -122,5 +123,50 @@ func write(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The direction that did not exist until a control-plane 500 shipped a code
+// nothing defined.
+//
+// Go cannot reach a code except through a generated constant, so an undefined
+// one does not compile. A TypeScript or JavaScript string is text: it compiles,
+// it ships, and the caller receives an identifier that resolves to nothing.
+func TestACodeReturnedFromTypeScriptWithNoCatalogEntryIsReported(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "engine", "internal", "errors", "codes.gen.go"),
+		"package errors\n\nconst (\n\tAFCP001 Code = \"AF-CP-001\"\n)\n")
+	write(t, filepath.Join(root, "engine", "internal", "errors", "catalog.yaml"),
+		"errors:\n  - code: AF-CP-001\n    docs: self-hosting/control-plane\n")
+	write(t, filepath.Join(root, "docs", "src", "content", "docs", "self-hosting", "control-plane.md"), "page\n")
+	write(t, filepath.Join(root, "engine", "internal", "cli", "use.go"),
+		"package cli\n\nimport \"antifailure/internal/errors\"\n\nvar _ = errors.AFCP001\n")
+	write(t, filepath.Join(root, "web", "apps", "api", "src", "server.ts"),
+		"const code = 'AF-CP-042'\n")
+
+	problems, _, err := run(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range problems {
+		if strings.Contains(p, "AF-CP-042") && strings.Contains(p, "server.ts") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("an undefined code returned from TypeScript was not reported; problems were %v", problems)
+	}
+}
+
+func TestWireForRebuildsTheReadableCode(t *testing.T) {
+	for constant, want := range map[string]string{
+		"AFCP003":  "AF-CP-003",
+		"AFRUN001": "AF-RUN-001",
+		"AFEE004":  "AF-EE-004",
+	} {
+		if got := wireFor(constant); got != want {
+			t.Errorf("wireFor(%s) = %q, want %q", constant, got, want)
+		}
 	}
 }

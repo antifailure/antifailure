@@ -108,8 +108,35 @@ func run(root string) ([]string, int, error) {
 
 	var problems []string
 
-	// A code used and not defined does not compile, so that direction needs no
-	// check here. What can happen is a catalog entry nothing reaches.
+	// A code the Go side uses and the catalog does not define fails to compile,
+	// because the Go side reaches a code through a generated constant. Nothing
+	// enforced that on the other side: a JavaScript or TypeScript string is just
+	// text, so `code: 'AF-CP-042'` shipped, answered a real caller, and had no
+	// entry, no message, no resolution and no row in the published catalog. The
+	// caller got an identifier that looks internal and resolves to nothing,
+	// which is exactly the failure the Go direction exists to prevent.
+	//
+	// Sorted so the message is stable, and reported before the dead-entry pass
+	// because an undefined code is live and a dead entry is only untidy.
+	var undefined []string
+	for code, where := range fromTS {
+		if _, ok := catalog[code]; !ok {
+			undefined = append(undefined, fmt.Sprintf("%s (%s)", wireFor(code), where))
+		}
+	}
+	sort.Strings(undefined)
+	for _, item := range undefined {
+		problems = append(problems, fmt.Sprintf(
+			"%s is returned to a caller and the catalog does not define it. Add it to "+
+				"engine/internal/errors/catalog.yaml so it has a message, a next step, a "+
+				"documentation page and a row in the published catalog at "+
+				"https://antifailure.dev/errors.v1.json. A code that resolves to nothing is "+
+				"worse than no code: it reads like an internal identifier that leaked.", item))
+	}
+
+	// A code used and not defined does not compile on the Go side, so that
+	// direction needs no further check here. What can happen is a catalog entry
+	// nothing reaches.
 	var dead, stale []string
 	for code, wire := range catalog {
 		switch {
@@ -340,8 +367,8 @@ func constantFor(wire string) string { return strings.ReplaceAll(wire, "-", "") 
 // carrying AF-DB-001 to prove the control plane groups metrics by whatever code
 // arrives, and the control plane neither produces that code nor could. Counting
 // that as a use would clear a marker on an error only the engine can raise.
-func usedInTypeScript(root string) (map[string]bool, error) {
-	used := map[string]bool{}
+func usedInTypeScript(root string) (map[string]string, error) {
+	used := map[string]string{}
 	for _, dir := range []string{"web", "console", "runner", "ee"} {
 		base := filepath.Join(root, dir)
 		if _, err := os.Stat(base); err != nil {
@@ -370,7 +397,10 @@ func usedInTypeScript(root string) (map[string]bool, error) {
 				return fmt.Errorf("%s: %w", path, readErr)
 			}
 			for _, m := range wireInSource.FindAllSubmatch(b, -1) {
-				used[constantFor(string(m[1]))] = true
+				constant := constantFor(string(m[1]))
+				if _, seen := used[constant]; !seen {
+					used[constant] = path
+				}
 			}
 			return nil
 		})
@@ -379,6 +409,23 @@ func usedInTypeScript(root string) (map[string]bool, error) {
 		}
 	}
 	return used, nil
+}
+
+// wireFor turns AFCP003 back into AF-CP-003, which is the form a user reads and
+// the form the catalog is keyed on.
+//
+// Derived rather than carried alongside, because the only reason this function
+// is needed is to report a code the catalog does NOT contain, so there is no
+// entry to read the wire form off.
+func wireFor(constant string) string {
+	digits := len(constant)
+	for digits > 0 && constant[digits-1] >= '0' && constant[digits-1] <= '9' {
+		digits--
+	}
+	if digits <= 2 || digits == len(constant) {
+		return constant
+	}
+	return constant[:2] + "-" + constant[2:digits] + "-" + constant[digits:]
 }
 
 // usedCodes finds every code the engine actually refers to.

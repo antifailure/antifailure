@@ -125,11 +125,41 @@ function extract(html) {
 
   const out = [];
   const seen = new Set();
-  const re = /<(h1|h2|h3|h4|p|li|blockquote|code|figcaption)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  // tr, dt and dd are here because the pages that carry the most specific
+  // claims on this site carry them in exactly those elements, and the twin
+  // dropped every one.
+  //
+  // /product/safe-state's masking table is the whole point of the page, and its
+  // twin said "Table Row Parent Reason" and then stopped: the header row is
+  // <th>, every value is <td>, and neither was matched. /product/overview's
+  // manifest walkthrough is a <dl>, so its twin carried the prose around a
+  // definition list and none of the definitions. An answer engine reading the
+  // twin could see that the page discusses masking and could not see a single
+  // rule.
+  //
+  // tr rather than th and td, so a row stays one line. The alternation is
+  // matched left to right and exec does not overlap, so the tr match consumes
+  // its own cells and a cell is never emitted twice.
+  const re =
+    /<(h1|h2|h3|h4|p|li|blockquote|code|figcaption|tr|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  const cell = /<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi;
 
   let m;
   while ((m = re.exec(body)) !== null) {
     const tag = m[1].toLowerCase();
+
+    if (tag === "tr") {
+      const cells = [...m[2].matchAll(cell)].map((c) => text(c[2]));
+      // A row of nothing but decoration, which this site's tables use for
+      // spacing and for a status pill with no text.
+      if (cells.every((value) => value.length < 2)) continue;
+      const row = `| ${cells.join(" | ")} |`;
+      if (seen.has(row)) continue;
+      seen.add(row);
+      out.push(row);
+      continue;
+    }
+
     const value = text(m[2]);
     // Skip empties, single glyphs from decorative spans, and repeated boilerplate.
     if (value.length < 2) continue;
@@ -143,6 +173,11 @@ function extract(html) {
     else if (tag === "h4") out.push(`#### ${value}`);
     else if (tag === "li") out.push(`- ${value}`);
     else if (tag === "blockquote") out.push(`> ${value}`);
+    // A definition list is a term and its meaning, and losing which is which
+    // makes the pair unreadable. `**term**` and the value beneath it is what
+    // the same content would look like written as markdown by hand.
+    else if (tag === "dt") out.push(`**${value}**`);
+    else if (tag === "dd") out.push(value);
     else out.push(value);
   }
   return out;
@@ -162,6 +197,7 @@ function htmlFiles(dir) {
 let written = 0;
 let bytesHtml = 0;
 let bytesMd = 0;
+const twins = [];
 
 for (const file of htmlFiles(OUT)) {
   const html = readFileSync(file, "utf8");
@@ -202,6 +238,7 @@ for (const file of htmlFiles(OUT)) {
 
   const target = file.replace(/\.html$/, ".md");
   writeFileSync(target, md);
+  twins.push({ canonical, markdown: md });
   written++;
   bytesHtml += html.length;
   bytesMd += md.length;
@@ -215,3 +252,21 @@ if (written === 0) {
   console.error("no twins written; did next build run and produce out/?");
   process.exit(1);
 }
+
+// The route-generated llms-full.txt used to contain only each page's summary,
+// despite calling itself the full text. Build it from the twins above, which
+// are themselves extracted from the rendered pages, so a section visible to a
+// reader cannot disappear from the one-fetch corpus.
+const corpus = [
+  "# Antifailure: full text of the public site",
+  "",
+  "> Generated from the rendered, indexable pages at build time.",
+  "",
+  ...twins
+    .sort((a, b) => a.canonical.localeCompare(b.canonical))
+    .flatMap((twin) => [twin.markdown.trim(), "", "---", ""]),
+].join("\n");
+writeFileSync(path.join(OUT, "llms-full.txt"), corpus);
+console.log(
+  `wrote llms-full.txt from ${twins.length} rendered pages (${Math.round(corpus.length / 1024)}KB)`,
+);

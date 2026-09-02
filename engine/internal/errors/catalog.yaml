@@ -905,6 +905,13 @@ errors:
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4
+  - code: AF-CP-003
+    area: CP
+    message: "The control plane could not complete this request."
+    next_step: "Retry once. If it fails again, quote the requestId the response carries: it is the only thing that ties the answer to a log line."
+    docs: self-hosting/control-plane
+    retryable: true
+    exit_code: 5
 
   # Infrastructure
   - code: AF-INF-001

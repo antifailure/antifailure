@@ -23,7 +23,7 @@ af model show            # what is configured, and where it came from
 They are different arrangements and the right one depends on whether you have a
 control plane.
 
-| | `af model` | [`af provider`](/docs/guides/provider-keys/) |
+| | `af model` | [`af provider`](/docs/guides/provider-keys) |
 | --- | --- | --- |
 | Where the key lives | this machine | the control plane, sealed |
 | Who calls the provider | this machine | the control plane |
