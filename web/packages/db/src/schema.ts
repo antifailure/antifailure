@@ -928,6 +928,14 @@ export const adminSessions = pgTable('admin_sessions', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  /** Set when this operator has stepped into a customer's account. The marker
+   *  lives on the OPERATOR's session because the fact to enforce is "this
+   *  operator cannot take operator actions right now". */
+  impersonatedUserId: uuid('impersonated_user_id'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised it, NOT NULL when impersonating, so the
+   *  record has to exist before the session that relies on it. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
 })
 
 export const adminAuditEntries = pgTable('admin_audit_entries', {
@@ -943,6 +951,7 @@ export const adminAuditEntries = pgTable('admin_audit_entries', {
   subjectOrgLabel: text('subject_org_label'),
   origin: text('origin').notNull(),
   ip: inet('ip'),
+  severity: text('severity').notNull().default('info'),
   detail: jsonb('detail').notNull().default({}),
   occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
   prevHash: text('prev_hash'),

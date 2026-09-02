@@ -205,7 +205,39 @@ CREATE TABLE admin_sessions (
   created_at      timestamptz NOT NULL DEFAULT now(),
   last_seen_at    timestamptz NOT NULL DEFAULT now(),
   expires_at      timestamptz NOT NULL,
-  revoked_at      timestamptz
+  revoked_at      timestamptz,
+  -- Set when this operator has stepped into a customer's account.
+  --
+  -- The marker lives on the OPERATOR's session rather than only on the
+  -- customer session it created, because the property that has to be enforced
+  -- is "this operator cannot take operator actions right now", and that is a
+  -- fact about the operator's own session. Reading it here means the gate can
+  -- refuse without a join, and a route added later cannot forget to look.
+  --
+  -- Refusing on this also makes a second impersonation impossible for free,
+  -- since starting one is itself an operator action.
+  impersonated_user_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  impersonation_reason text,
+  -- The audit entry that authorised it. NOT NULL when impersonating, so the
+  -- session cannot be inserted unless its record already exists: the ordering
+  -- is enforced by the constraint rather than by remembering to write first.
+  -- The foreign key is added AFTER admin_audit_entries is created, further
+  -- down this file, rather than inline here. Inline it is a forward reference
+  -- to a table that does not exist yet, and Postgres refuses the whole file
+  -- with `relation "admin_audit_entries" does not exist`, so this migration
+  -- could not be applied to a fresh database at all. The tables are kept in
+  -- this order because the sessions table is what the scope below is about and
+  -- reordering them to satisfy the parser would put the explanation in the
+  -- wrong place.
+  impersonation_audit_seq bigint,
+  CONSTRAINT admin_sessions_impersonation_whole CHECK (
+    (impersonated_user_id IS NULL
+      AND impersonation_reason IS NULL
+      AND impersonation_audit_seq IS NULL)
+    OR (impersonated_user_id IS NOT NULL
+      AND impersonation_reason IS NOT NULL AND btrim(impersonation_reason) <> ''
+      AND impersonation_audit_seq IS NOT NULL)
+  )
 );
 CREATE INDEX admin_sessions_user_idx ON admin_sessions (admin_user_id);
 CREATE INDEX admin_sessions_expiry_idx ON admin_sessions (expires_at);
@@ -290,6 +322,13 @@ CREATE TABLE admin_audit_entries (
   subject_org_label text,
   origin          text NOT NULL,
   ip              inet,
+  -- How bad it is, as a column rather than a key in detail.
+  --
+  -- It is the field an incident review filters on first, so it wants an index
+  -- rather than a jsonb probe. The stronger reason is that a value in detail is
+  -- one a caller can silently omit: a NOT NULL column with a CHECK means an
+  -- append that forgot to say how serious it was does not happen.
+  severity        text NOT NULL DEFAULT 'info',
   detail          jsonb NOT NULL DEFAULT '{}'::jsonb,
   occurred_at     timestamptz NOT NULL DEFAULT now(),
   prev_hash       text,
@@ -299,6 +338,21 @@ CREATE INDEX admin_audit_seq_idx ON admin_audit_entries (seq DESC);
 CREATE INDEX admin_audit_org_idx ON admin_audit_entries (subject_org_id, seq DESC)
   WHERE subject_org_id IS NOT NULL;
 CREATE INDEX admin_audit_actor_idx ON admin_audit_entries (admin_user_id, seq DESC);
+-- The first question an incident review asks, so it is not a scan.
+CREATE INDEX admin_audit_severity_idx ON admin_audit_entries (severity, seq DESC)
+  WHERE severity IN ('high', 'critical');
+
+ALTER TABLE admin_audit_entries
+  ADD CONSTRAINT admin_audit_severity_known
+  CHECK (severity IN ('info', 'notice', 'high', 'critical'));
+
+-- The foreign key admin_sessions could not declare inline, because this table
+-- is created after it. Same constraint, same guarantee: a session that claims
+-- to be an impersonation names the audit entry that authorised it, so the
+-- record has to exist before the session that relies on it can be inserted.
+ALTER TABLE admin_sessions
+  ADD CONSTRAINT admin_sessions_impersonation_audit_fkey
+  FOREIGN KEY (impersonation_audit_seq) REFERENCES admin_audit_entries(seq);
 
 -- ---------------------------------------------------------------------------
 -- Grants
@@ -421,6 +475,37 @@ CREATE POLICY admin_appends_audit ON admin_audit_entries
     current_admin_user() IS NOT NULL
     OR nullif(current_setting('antifailure.admin_email', true), '') IS NOT NULL
   );
+
+-- THE OTHER HALF OF THE DOUBLE WRITE.
+--
+-- An operator action against one tenant is recorded twice: in the chain above,
+-- which the tenant cannot read, and in that tenant's OWN audit_entries, which
+-- they can. The second copy is the half that makes this accountability rather
+-- than a vendor's private note, and appendAdminAudit writes it in the same
+-- transaction so the two cannot disagree about whether something happened.
+--
+-- Without these two policies that second write is refused with 42501, "new row
+-- violates row-level security policy for table audit_entries", because every
+-- policy in 0002 keys on org_id = current_org() and the admin scope sets no
+-- organization. It is not a hypothetical: it is what three tests in
+-- admin-audit.test.ts failed with before these existed.
+--
+-- SELECT as well as INSERT, and the SELECT is not optional: appendAudit reads
+-- the chain head with WHERE org_id = ... to link the new entry to it, so a
+-- scope that could insert and not read would write an entry claiming to be
+-- first and silently fork that tenant's chain.
+--
+-- Both are keyed on current_admin_user(), which is a stored session row and not
+-- a setting anybody can assert, exactly as every other cross tenant policy in
+-- this file is. An operator holding a live session can read and append to any
+-- tenant's audit log; nothing else can, and a tenant connection is unaffected
+-- because its own policies from 0002 still apply to it.
+CREATE POLICY admin_reads_tenant_audit ON audit_entries
+  FOR SELECT TO antifailure_app
+  USING (current_admin_user() IS NOT NULL);
+CREATE POLICY admin_appends_tenant_audit ON audit_entries
+  FOR INSERT TO antifailure_app
+  WITH CHECK (current_admin_user() IS NOT NULL);
 
 -- ---------------------------------------------------------------------------
 -- The cross tenant reads
