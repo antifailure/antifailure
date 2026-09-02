@@ -1,0 +1,81 @@
+# TEMPORARY. This file proves the gate added to release.yml can refuse, in real
+# GitHub Actions with the real token and the real permissions block, and is
+# deleted in the commit after the run it produces. The run URL is recorded in
+# the pull request.
+#
+# The four commits below are real commits in this repository whose CI runs
+# concluded the four ways that matter. Their run records age out, which is why
+# this is not a workflow anybody keeps.
+name: cigate proof
+
+on:
+  push:
+    branches: [release-ci-gate]
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    name: the gate can say no
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      # The positive control, first. A gate that refuses everything satisfies
+      # every negative test below and would make a release impossible.
+      - name: it PASSES a commit whose CI concluded success
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          GOTOOLCHAIN=local go run ./tools/cigate \
+            -repo "${{ github.repository }}" \
+            -sha 7f3f2337e931ac94d1fec89759587e4c082881aa \
+            -attempts 2 -interval 5s
+
+      - name: it REFUSES a commit whose CI concluded failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if GOTOOLCHAIN=local go run ./tools/cigate \
+              -repo "${{ github.repository }}" \
+              -sha 19e535ed234adeae90ace8406d64dedadf2b92eb \
+              -attempts 2 -interval 5s; then
+            echo "the gate published from a red commit" >&2
+            exit 1
+          fi
+          echo "refused, as it must"
+
+      - name: it REFUSES a commit whose CI was cancelled
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if GOTOOLCHAIN=local go run ./tools/cigate \
+              -repo "${{ github.repository }}" \
+              -sha 2213f391ca477d9825c0d82fb3bbf7bd83c8010f \
+              -attempts 2 -interval 5s; then
+            echo "the gate read a cancelled run as a pass" >&2
+            exit 1
+          fi
+          echo "refused, as it must"
+
+      - name: it WAITS and then REFUSES a commit with no CI run at all
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if GOTOOLCHAIN=local go run ./tools/cigate \
+              -repo "${{ github.repository }}" \
+              -sha 0000000000000000000000000000000000000001 \
+              -attempts 2 -interval 5s; then
+            echo "the gate published from a commit nothing has ever tested" >&2
+            exit 1
+          fi
+          echo "refused, as it must"
