@@ -106,8 +106,26 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
+          # 115 attempts at 20s is about 38 minutes, sized against this job's
+          # own timeout-minutes: 45 rather than picked. The previous 60 was 20
+          # minutes, less than half that timeout, and CI on this repository does
+          # not finish in 20 minutes when the queue is busy: the engine job alone
+          # runs about 14 minutes and control plane is similar, and they queue
+          # behind every other branch in flight.
+          #
+          # The failure that earned this: c5ae4385 merged, the marketing site
+          # deployed, and this gate gave up at 05:28 while CI was still running
+          # engine and control plane with every other job already green. CI then
+          # concluded success. Nothing was wrong with the commit and nothing
+          # reached staging, and the only way it moves after that is somebody
+          # noticing a red check and re-running the workflow by hand.
+          #
+          # Timing out and being red are different states and only one of them
+          # is a verdict about the commit. This keeps refusing a CI that
+          # concluded anything but success, which is the deliberate part, and
+          # stops calling a slow queue a failed one.
           echo "waiting for CI on $SHA"
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 115); do
             runs=$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=50" \
               --jq '[.workflow_runs[] | select(.name=="CI")] | .[0] | "\(.status) \(.conclusion // "-") \(.html_url)"' 2>/dev/null || true)
             if [ -z "$runs" ] || [ "$runs" = "null" ]; then

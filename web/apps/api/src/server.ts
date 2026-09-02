@@ -107,7 +107,9 @@ import {
   handleLifecycleDelivery,
   hashCallback,
   issueCallback,
+  issueWorkflowEngineToken,
   recordReport,
+  WORKFLOW_ENGINE_TTL_MS,
   type LifecycleDeps,
 } from './github/lifecycle.ts'
 import type { RepositoryApi } from './github/api.ts'
@@ -1844,6 +1846,60 @@ export function createServer(options: ServerOptions) {
       expires_in: Math.floor(CALLBACK_TTL_MS / 1000),
       repository: identity.repository,
       head_sha: headSha,
+    })
+  })
+
+  // The engine's own exchange.
+  //
+  // Same proof as the callback exchange above and deliberately the same code
+  // path for it: one JWKS cache, one verifier, one audience. What differs is
+  // what comes back. The callback credential publishes a result for one commit;
+  // this one lets the engine report its event stream while the run is still
+  // happening, which is not about a commit and cannot be bound to one.
+  //
+  // This route is why a workflow needs no AF_CONTROL_PLANE_TOKEN. Before it
+  // existed the engine's control plane sink read that variable, found nothing,
+  // and attached no sink at all, so a CI run reported its events nowhere.
+  app.post('/v1/engine/token', async (c) => {
+    const lifecycle = lifecycleDeps()
+    if (!lifecycle) {
+      return c.json({ error: 'This control plane has no GitHub App configured.' }, 503)
+    }
+    const presented = bearer(c.req.header('authorization'))
+    if (!presented) {
+      return c.json(
+        {
+          error:
+            'Present the workflow identity token as a bearer token. In a workflow with ' +
+            `id-token: write, ask for it with the audience ${CALLBACK_AUDIENCE}.`,
+        },
+        401,
+      )
+    }
+
+    let identity
+    try {
+      const keys = await actionsKeys.current(kidOf(presented))
+      identity = verifyWorkflowIdentity(presented, { keys, clock })
+    } catch (err) {
+      if (err instanceof TokenRefused) {
+        return c.json({ error: err.message, reason: err.reason }, 401)
+      }
+      throw err
+    }
+
+    const owner = identity.repository.split('/')[0] ?? ''
+    const issued = await issueWorkflowEngineToken(lifecycle, owner, {
+      repository: identity.repository,
+      workflowRunId: identity.runId,
+    })
+    if ('refused' in issued) {
+      return c.json({ error: issued.refused }, 409)
+    }
+    return c.json({
+      token: issued.token,
+      expires_in: Math.floor(WORKFLOW_ENGINE_TTL_MS / 1000),
+      repository: identity.repository,
     })
   })
 
