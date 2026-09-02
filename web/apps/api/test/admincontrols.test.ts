@@ -34,7 +34,7 @@ describe('the emergency switches actually stop things', { concurrency: 1 }, asyn
   /**
    * A pool connecting as antifailure_admin, which is what `ctx.adminDb` will
    * be once the admin portal's pool lands. Built here rather than imported so
-   * that this suite proves the GRANT in migration 0032 is what admits the
+   * that this suite proves the GRANT in migration 0030 is what admits the
    * write, rather than proving that some helper exists.
    */
   let operator: Pool
@@ -135,7 +135,7 @@ describe('the emergency switches actually stop things', { concurrency: 1 }, asyn
       assert.ok(thrown, why)
       const text = `${(thrown as Error).message} ${String((thrown as { cause?: unknown }).cause ?? '')}`
       // `permission denied` is the grant refusing, which is the guarantee
-      // migration 0032 makes. The other two are the older shapes and are kept
+      // migration 0030 makes. The other two are the older shapes and are kept
       // so this assertion cannot pass against a typo in the statement.
       assert.match(text, /permission denied|row-level security|adminDb/, why)
     }

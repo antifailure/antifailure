@@ -210,7 +210,7 @@ export interface Pool {
    *
    * The only scope in this file that can read across tenants, and the shape is
    * the same as every other non-tenant scope here: it declares a value the
-   * caller must ALREADY HOLD, and the policies in 0030 are keyed on that value.
+   * caller must ALREADY HOLD, and the policies in 0029 are keyed on that value.
    * What it declares is the hash of the operator's session cookie, so
    * current_admin_user() resolves to a row only for a connection physically
    * holding a live, unrevoked, unexpired operator session.
@@ -244,6 +244,33 @@ export interface Pool {
    * because a failed sign-in has no session and is the line most worth having.
    */
   withAdminSignin<T>(email: string, fn: (db: Db) => Promise<T>): Promise<T>
+  /**
+   * Runs fn as antifailure_sweeper, to delete expired sessions.
+   *
+   * Not withSweeper, which is a different mechanism for a different table.
+   * That one declares a setting the policies on antifailure_app consult, and
+   * those policies are SELECT only. Deleting a session needs a policy that
+   * permits the delete, and on THIS table such a policy on antifailure_app
+   * widens every other one, which is the whole argument in 0024.
+   *
+   * Deleting expired sessions belongs to no organization and no user, so no
+   * policy on that table matches it, and it deleted nothing for as long as it
+   * existed. The fix could not be a policy on antifailure_app: permissive
+   * policies are OR'd, so one naming no tenant widens every other policy on
+   * the table, and a session row names a user and an organization.
+   *
+   * So the sweep enters a role of its own for one transaction. Policies are
+   * attached to roles, so the one admitting it does not join the OR for
+   * ordinary requests. Inside here the role can reach expired sessions and can
+   * read two of their columns; it holds nothing else in the database. See
+   * 0024 for the whole argument, including why the row restriction is the
+   * database's clock rather than a value passed in from here.
+   *
+   * SET LOCAL, so the role is reverted when the transaction ends however it
+   * ends. A pooled connection returned still acting as the sweeper is the same
+   * class of bug as one returned with a tenant still set on it.
+   */
+  withSessionSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /** The raw client, for migrations and tests only. */
   sql: postgres.Sql
   close(): Promise<void>
@@ -653,6 +680,50 @@ export function createPool(options: PoolOptions): Pool {
           // password rather than as a bug.
           'antifailure.admin_session_hash': '',
           'antifailure.admin_email': address,
+        },
+        fn,
+      )
+    },
+    withSessionSweeper(fn) {
+      return scoped(
+        {
+          'antifailure.org_id': '',
+          'antifailure.user_id': '',
+          'antifailure.session_hash': '',
+          'antifailure.engine_token_hash': '',
+          'antifailure.email_token_hash': '',
+          'antifailure.github_ids': '',
+          'antifailure.signin_user_id': '',
+          'antifailure.github_logins': '',
+          'antifailure.sso_handle': '',
+          'antifailure.sso_entity_id': '',
+          'antifailure.sso_domain': '',
+          'antifailure.sso_state': '',
+          'antifailure.scim_token_hash': '',
+          'antifailure.device_code_hash': '',
+          'antifailure.device_user_code': '',
+          'antifailure.github_account': '',
+          'antifailure.stripe_customer': '',
+          'antifailure.github_delivery': '',
+          'antifailure.pr_callback_hash': '',
+          'antifailure.sweeper': '',
+          'antifailure.invitation_token_hash': '',
+          'antifailure.deletion_token_hash': '',
+          // Cleared like every other scope clears them. This one arrived from
+          // a different branch than the operator portal did, so neither side
+          // could see that the merge would leave a scope naming neither: the
+          // session sweeper would then have inherited whatever an operator
+          // transaction left on a pooled connection. admin-portal's guard
+          // counts scopes against settings and caught it, which is exactly the
+          // case it was written for.
+          'antifailure.admin_session_hash': '',
+          'antifailure.admin_email': '',
+          // Last, and through set_config for the same reason as everything
+          // else here: SET LOCAL ROLE would need the identifier spliced into
+          // the statement text. Every setting above is cleared first so that
+          // the sweeper cannot be handed a tenant it has no policy for and no
+          // business carrying.
+          role: 'antifailure_sweeper',
         },
         fn,
       )

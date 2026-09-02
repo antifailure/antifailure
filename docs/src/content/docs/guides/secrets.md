@@ -2,7 +2,7 @@
 title: Secrets
 description: Where a value is looked up, and why the manifest holds names and never values.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 The manifest names variables. It never holds values.

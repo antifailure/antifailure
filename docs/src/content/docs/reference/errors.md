@@ -25,8 +25,8 @@ Scripts can branch on these. They are stable.
 | `6` | A policy denied the operation. |
 | `7` | Verification failed. Masking or an invariant. |
 | `8` | A test failed. Agent verdicts or load thresholds. |
-| `9` | Interrupted, and teardown completed cleanly. |
-| `10` | Interrupted, and resources are still recorded. Run `af down` again. |
+| `9` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
+| `10` | Interrupted, or a teardown left resources recorded. Run `af down` again. |
 
 29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
@@ -469,6 +469,18 @@ The published golden {version} in {store} was made for a different project.
 | | |
 | --- | --- |
 | Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-016
+
+database.source_url_env names {variable}, and {variable} holds nothing in this shell.
+
+**What to do.** Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
 

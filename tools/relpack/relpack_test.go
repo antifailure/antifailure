@@ -80,20 +80,38 @@ func runBuild(root string) release {
 		r.err = fmt.Errorf("go is not on PATH, so the release build cannot run: %w", err)
 		return r
 	}
-	out, err := os.MkdirTemp("", "relpack")
+	// Inside the repository, and relative, because that is the shape both
+	// callers use and it was the one shape this test did not.
+	//
+	// `just build-release` and .github/workflows/release.yml both pass
+	// `dist stage`, relative, from the repository root. This passed absolute
+	// paths. build.sh builds from $root/engine, so a relative output path
+	// resolved against engine/ instead of against the directory the script had
+	// just made: the binary landed in engine/stage/<name>/af, the staged
+	// directory was archived without it, and the script exited 0 having
+	// packaged a release with no `af` in it. Every assertion below passed,
+	// because the absolute path this test handed over made the bug impossible.
+	//
+	// A temporary directory outside the tree does not reproduce it either. The
+	// relative path back out of the repository resolves to the same place from
+	// engine/ as from the root whenever the two are the same depth from the
+	// temporary directory's parent, which on macOS they are, so the test went
+	// on passing over a broken script. Under the root it cannot alias.
+	out, err := os.MkdirTemp(root, "relpack-")
 	if err != nil {
 		r.err = err
 		return r
 	}
 	buildDir = out
-	dist := filepath.Join(out, "dist")
 	r.stage = filepath.Join(out, "stage", prefix)
+	dist := filepath.Join(out, "dist")
+	base := filepath.Base(out)
 
 	// The commit and its date are fixed rather than read from git, so this
 	// measures what the script packages and not what the working tree is.
 	cmd := exec.Command(filepath.Join(root, "tools", "release", "build.sh"),
 		runtime.GOOS, runtime.GOARCH, "9.9.9", strings.Repeat("0", 40),
-		"2026-08-29T22:19:34Z", dist, filepath.Join(out, "stage"))
+		"2026-08-29T22:19:34Z", filepath.Join(base, "dist"), filepath.Join(base, "stage"))
 	cmd.Dir = root
 	if blob, err := cmd.CombinedOutput(); err != nil {
 		r.err = fmt.Errorf("build.sh: %w\n%s", err, blob)

@@ -399,6 +399,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-016",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
+      "resolution": "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-DB-020",
       "area": "DB",
       "areaName": "Database",

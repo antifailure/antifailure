@@ -3,9 +3,9 @@
 // development and CI build them together without the tools' dependencies
 // entering the engine's module graph, which is what keeps the shipped binary's
 // dependency set small and auditable.
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.14
+toolchain go1.26.8
 
 use (
 	./engine
