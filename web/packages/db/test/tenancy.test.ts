@@ -584,7 +584,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
   // so that would hand every tenant a list of which users of which OTHER
   // organizations had recently been signed in.
   //
-  // 0025 puts the policy on a role of its own instead, entered for one
+  // 0029 puts the policy on a role of its own instead, entered for one
   // transaction. These are the two directions that have to hold at once: the
   // sweep must reach expired rows, and nothing about it may widen what an
   // ordinary request can see.

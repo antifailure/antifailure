@@ -212,7 +212,7 @@ export interface Pool {
    * That one declares a setting the policies on antifailure_app consult, and
    * those policies are SELECT only. Deleting a session needs a policy that
    * permits the delete, and on THIS table such a policy on antifailure_app
-   * widens every other one, which is the whole argument in 0025.
+   * widens every other one, which is the whole argument in 0029.
    *
    * Deleting expired sessions belongs to no organization and no user, so no
    * policy on that table matches it, and it deleted nothing for as long as it
@@ -224,7 +224,7 @@ export interface Pool {
    * attached to roles, so the one admitting it does not join the OR for
    * ordinary requests. Inside here the role can reach expired sessions and can
    * read two of their columns; it holds nothing else in the database. See
-   * 0025 for the whole argument, including why the row restriction is the
+   * 0029 for the whole argument, including why the row restriction is the
    * database's clock rather than a value passed in from here.
    *
    * SET LOCAL, so the role is reverted when the transaction ends however it

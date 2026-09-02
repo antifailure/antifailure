@@ -820,7 +820,7 @@ describe('sessions', { skip: hasDatabase ? false : 'no Postgres' }, () => {
   // a presented token hash, or on the tenant. It matched no row and reported
   // success, because a statement that matches nothing does not raise.
   //
-  // It now enters antifailure_sweeper for one transaction (0025). The policy
+  // It now enters antifailure_sweeper for one transaction (0029). The policy
   // admitting that role restricts it to rows expired by the DATABASE's clock;
   // the statement restricts it to rows expired by the APPLICATION's. A row has
   // to be past both, so the four cases below are a table rather than one case,
