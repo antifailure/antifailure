@@ -341,7 +341,7 @@ The app is in `Multiple` revision mode with one revision at 100 percent, so
 there is a revision to roll back onto. The case where there is not is the one
 `deploy.sh` reports plainly rather than pretending a rollback happened.
 
-### This is an unusually large deploy, and four of its migrations are unread
+### This is an unusually large deploy, and one of its migrations wants a window
 
 Production is serving `f66d6af`. Ask how far ahead the tag is rather than
 carrying a number that goes stale between two merges:
@@ -361,20 +361,63 @@ count has already gone stale once:
 git diff --name-only f66d6af..origin/main -- web/packages/db/migrations
 ```
 
-Two of them have been checked and the check is recorded below so nobody repeats
-it nervously at tag time. **The rest have not been, and they are the reason to
-stop here.** `0020`, `0021`, `0022` and `0023` landed after the rehearsal that
-produced the two paragraphs below, and no line on this page has read them. Give
-each one the same treatment before you approve production: apply it to a real
-PostgreSQL 17 seeded from `0001` upwards, satisfy yourself that it is additive
-and that the currently deployed code tolerates the schema it leaves behind, and
-write what you found here. A migration is the only part of a deploy that cannot
-be rolled back, so this is the one item on this page that is not optional and
-not a formality.
+All of them have been checked, and the checks are recorded here so nobody
+repeats them nervously at tag time. Every migration from `0001` to `0023`
+applies cleanly to a real PostgreSQL 17 from an empty database, and `0023` was
+applied a second time to a database built to `0022` and then seeded, so that it
+met existing rows rather than an empty table. It validated its constraint and
+left every seeded session in place.
 
-`0001` through `0017` were applied to a real PostgreSQL 17, seeded with two
-organizations and three `network_rules` rows, and then `0018` and `0019` were
-applied on top.
+**Correctness is settled. Duration is not, and that is the one thing to decide
+before you approve production.** The seeded table held 500 rows and production
+does not, so what has been proved is that these migrations do the right thing,
+not that they do it quickly enough to run while the site is serving.
+
+Only three tables that exist at `0017` are touched at all. Everything else in
+`0018` to `0023` creates a new table, which locks nothing and cannot block a
+running request. The three are `network_rules`, `users` and `sessions`, and
+this is every operation against them:
+
+* **Nine nullable column adds with no default**, five on `users` and four on
+  `sessions`. On PostgreSQL 11 and later these rewrite nothing and touch only
+  the catalog, whatever the table holds.
+* **`0018` backfills `network_rules`**, in the same transaction as its own
+  schema change, and builds `network_rules_pending_idx` without
+  `CONCURRENTLY`. That takes a SHARE lock and blocks writes to
+  `network_rules` for the length of the build. It is a small table.
+* **`sessions.impersonated_by` carries a foreign key to `users`**, so adding it
+  locks `users` as well as `sessions`. Nothing on this path sets a
+  `lock_timeout`, which is the same exposure `0018` already has and which is
+  written out under the three migration budgets below.
+* **Two full scans of `sessions`, which is the hottest table in the product**,
+  because `resolveSession` reads it on every request.
+  `ADD CONSTRAINT sessions_impersonation_is_complete` takes ACCESS EXCLUSIVE
+  and validates every existing row, and `sessions_impersonated_idx` is partial
+  but still reads the whole table to evaluate its predicate. For as long as
+  the first of those runs, every authenticated request waits.
+
+So measure before you approve, rather than assuming the table is small:
+
+```sh
+psql "$PROD_URL" -c "SELECT count(*) FROM sessions"
+psql "$PROD_URL" -c "SELECT count(*) FROM network_rules"
+```
+
+`sessions` holds live sessions rather than history, so it is bounded by how
+many people are signed in and is very likely small enough that none of this
+matters. If it is not, this deploy needs a quiet window. The standard way out
+is `ADD CONSTRAINT ... NOT VALID` followed by `VALIDATE CONSTRAINT` as a
+separate statement, which holds ACCESS EXCLUSIVE only for an instant and
+validates under a lock that lets writes through. That is deliberately not being
+done to `0023`: a migration's digest is frozen the moment it is applied
+anywhere, staging has already applied this one, and `migrate` refuses a file
+whose digest has changed. If the split is ever wanted it belongs in a later
+migration, not in a rewrite of this one.
+
+The two records below are from the earlier rehearsal and are kept because they
+say what was observed rather than what was expected. `0001` through `0017` were
+applied to a real PostgreSQL 17, seeded with two organizations and three
+`network_rules` rows, and then `0018` and `0019` were applied on top.
 
 * **`0018`** adds three nullable columns to `network_rules` and backfills
   `approved_at` from `created_at`. After it ran, zero rules were left pending
@@ -387,10 +430,12 @@ applied on top.
   invisible, a query with no organization set returns zero rows, and an insert
   aimed at another tenant is refused by the policy.
 
-Both of those two are additive, which is what makes a rollback safe:
+Every one of `0018` to `0023` is additive, which is what makes a rollback safe:
 `deploy.sh` can put traffic back on the old revision and cannot un-apply a
-schema change, so the old code has to tolerate the new schema, and for `0018`
-and `0019` it does. That sentence covers those two and no others.
+schema change, so the old code has to tolerate the new schema. Nothing in the
+range drops a column, drops a table, renames anything, or adds a NOT NULL to a
+column that already exists, which is the property that lets the currently
+deployed revision keep running against the new schema.
 
 ## After it is green
 
