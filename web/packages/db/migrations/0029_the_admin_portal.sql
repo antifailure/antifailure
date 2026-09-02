@@ -512,9 +512,30 @@ CREATE POLICY admin_deletes_operators ON admin_users
 -- tenant connection cannot read it: what an operator did is not a tenant's
 -- record, and the tenant-visible half of an operator's action is written into
 -- that tenant's own audit_entries instead.
+-- Readable by a live operator, and ALSO by the sign-in scope.
+--
+-- The second half is not a convenience and leaving it out was a real defect
+-- rather than a theoretical one. appendAdminAudit links the chain by reading
+-- its own tail. The sign-in scope holds no session by definition, so without
+-- this it read NOTHING, recorded prev_hash = NULL, and FORKED THE CHAIN on
+-- every failed sign-in. A tamper-evident log that forks whenever somebody
+-- mistypes a password is not tamper evident: the breaks it reports are its own,
+-- so a real break is indistinguishable from the noise.
+--
+-- Caught by the verification function reporting eleven broken links on a chain
+-- nobody had touched. The INSERT policy below already admits this scope for the
+-- same reason; admitting the INSERT without the SELECT is what produced entries
+-- that existed and pointed at nothing.
+--
+-- The blast radius is one server-side route. withAdminSignin is entered only by
+-- the sign-in path, which returns no audit rows to its caller, and a connection
+-- can only enter it by declaring an email it is signing in as.
 CREATE POLICY admin_reads_audit ON admin_audit_entries
   FOR SELECT TO antifailure_app
-  USING (current_admin_user() IS NOT NULL);
+  USING (
+    current_admin_user() IS NOT NULL
+    OR nullif(current_setting('antifailure.admin_email', true), '') IS NOT NULL
+  );
 -- Appending is permitted to a live operator, and ALSO to the sign-in scope,
 -- which is the one that declares an email and holds no session.
 --

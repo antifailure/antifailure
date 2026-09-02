@@ -113,6 +113,37 @@ describe('the operator audit chain', { skip: hasDb ? false : 'no database' }, ()
     assert.equal(row!.actor_label, 'someone@example.test')
   })
 
+  test('a failed sign-in does not fork the chain', async () => {
+    // The regression this guards is not hypothetical: it shipped. appendAdminAudit
+    // links the chain by reading its own tail, the sign-in scope holds no
+    // session, and without a SELECT policy admitting that scope every failed
+    // sign-in wrote prev_hash = NULL. The verifier then reported breaks that
+    // were its own, which is worse than no verifier because a real break is
+    // indistinguishable from the noise.
+    const { adminSignIn, AdminSignInError, hashPassword } = await import(
+      '../../../apps/api/src/admin/session.ts'
+    )
+    const email = `forker-${randomUUID().slice(0, 8)}@example.test`
+    const { hash, salt } = await hashPassword('the-right-password')
+    await h.admin`
+      INSERT INTO admin_users (email, name, role, password_hash, password_salt)
+      VALUES (${email}, 'Forker', 'support', ${hash}, ${salt})`
+
+    for (let i = 0; i < 3; i += 1) {
+      await assert.rejects(
+        () => adminSignIn(h.pool, { email, password: 'wrong' }, new Date()),
+        AdminSignInError,
+      )
+    }
+
+    const report = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
+    assert.equal(
+      report.ok,
+      true,
+      `three failed sign-ins broke the chain: ${JSON.stringify(report.problems)}`,
+    )
+  })
+
   test('the chain verifies, and detects an alteration', async () => {
     const before = await h.pool.withPlatformAdmin(operatorToken, verifyAdminAuditChain)
     assert.equal(before.ok, true, `chain broken before tampering: ${JSON.stringify(before.problems)}`)
