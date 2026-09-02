@@ -120,13 +120,14 @@ export default function AdminAuditPage() {
                         <Td label="Operator">{e.actor}</Td>
                         <Td label="Organization">
                           {/* An installation-wide action names no tenant, and
-                              that is a real answer rather than missing data. A
-                              blank cell here would read as a bug; the dash and
-                              the title say which it is. */}
+                              that is a REAL ANSWER rather than missing data.
+                              A blank cell would read as a bug and a dash would
+                              make the reader infer which of the two it is, so
+                              the cell says the thing outright. This is the
+                              whole reason the operator chain is a separate
+                              table from any tenant's. */}
                           {e.organization ?? (
-                            <span className="text-muted" title="An installation-wide action, which belongs to no one organization">
-                              &mdash;
-                            </span>
+                            <span className="text-muted">Platform-wide</span>
                           )}
                         </Td>
                         <Td label="Severity">
