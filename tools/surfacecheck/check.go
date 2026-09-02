@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -37,6 +38,7 @@ type Problem struct {
 }
 
 const (
+	kindModules       = "Go modules this tool has no opinion about:"
 	kindInventory     = "Importable packages that nothing classifies:"
 	kindStale         = "Classified packages that no longer exist:"
 	kindLeak          = "Stable exports naming a type from a package that is not stable:"
@@ -45,6 +47,9 @@ const (
 )
 
 const (
+	remedyModules = "Add each one to moduleDirs in tools/surfacecheck/surface.go, saying whether its packages ship\n" +
+		"and why. A module nobody listed is a module whose packages are classified nowhere, which is the\n" +
+		"same silence one directory up."
 	remedyInventory = "Add each one to " + packagesFile + " with a classification and a reason.\n" +
 		"stable means breaking it costs a major version and it must appear in the release notes and in\n" +
 		"reference/stability. unstable means it may change in a minor release, which is the ordinary\n" +
@@ -358,3 +363,41 @@ const baselineHeader = `# The exported surface of the stable Go packages, as it 
 # a caller writes it, and the shape it has to keep. A constant longer than a
 # line is recorded as a digest, which still changes when the value does.
 `
+
+// CheckModules reports a Go module in the repository that moduleDirs says
+// nothing about.
+//
+// The layer above the package inventory. Listing packages is worth nothing if a
+// whole module can appear and never be walked, and the failure would look
+// exactly like a repository with no new packages in it.
+func CheckModules(root string) ([]Problem, error) {
+	found, err := FindModules(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("found no go.mod under %s, which means the walk is broken rather than the tree", root)
+	}
+	known := KnownModules()
+	var problems []Problem
+	for _, dir := range found {
+		if !known[dir] {
+			problems = append(problems, Problem{
+				Kind:    kindModules,
+				Message: dir,
+				Remedy:  remedyModules,
+			})
+		}
+	}
+	for dir := range known {
+		if !slices.Contains(found, dir) {
+			problems = append(problems, Problem{
+				Kind:    kindStale,
+				Message: fmt.Sprintf("%s is listed in moduleDirs and holds no go.mod", dir),
+				Remedy:  remedyStale,
+			})
+		}
+	}
+	sort.Slice(problems, func(i, j int) bool { return problems[i].Message < problems[j].Message })
+	return problems, nil
+}

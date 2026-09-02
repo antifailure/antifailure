@@ -36,24 +36,112 @@ type Package struct {
 	Fset *token.FileSet
 }
 
-// Module is a Go module this tool reads, with the reason it is read written
-// down beside it. A module absent from this list is absent on purpose and the
-// reason is in main.go.
+// Module is a Go module this tool reads, with its import path read out of its
+// own go.mod rather than written down here.
+//
+// Two reasons, and the second one is the one that decided it. A path written
+// down goes stale when the module is renamed, and it goes stale by falling
+// silently out of the inventory, which is the exact failure this tool exists to
+// stop one layer down. And `just edition` proves the community build cannot
+// reach the enterprise one by grepping Go files under engine and tools for the
+// enterprise module path; a literal here would trip that gate, and spelling it
+// in pieces to slip past it would be worse than useless.
 type Module struct {
 	Dir        string
 	ImportPath string
 }
 
-// shippedModules are the modules whose packages an outside module could import
-// and whose stability the release notes make a claim about.
+// moduleDir is a module directory and whether its packages are a promise
+// anybody could rely on.
+type moduleDir struct {
+	dir     string
+	shipped bool
+	why     string
+}
+
+// moduleDirs is every Go module in this repository.
 //
-// tools is deliberately not here. Its go.mod says it is never published and
-// never imported, and it holds the gates rather than the product, so a package
-// added to it is not a promise anybody could rely on. If that ever stops being
-// true the module belongs in this list rather than in an exception.
-var shippedModules = []Module{
-	{Dir: "engine", ImportPath: "github.com/antifailure/antifailure/engine"},
-	{Dir: "ee/engine", ImportPath: "github.com/antifailure/antifailure/ee/engine"},
+// Both halves are listed, because a module that is not read has to be a
+// decision rather than an omission: CheckModules walks the tree for go.mod and
+// fails on one that appears in neither half, so a new module cannot arrive with
+// its packages classified nowhere.
+var moduleDirs = []moduleDir{
+	{dir: "engine", shipped: true, why: "the engine that ships, and the module the release notes make a claim about"},
+	{dir: "ee/engine", shipped: true, why: "the enterprise engine, which ships too and whose packages nothing promises"},
+	{dir: "tools", shipped: false, why: "never published and never imported, by its own go.mod. It holds the gates rather than the product"},
+	{dir: "examples/go-api", shipped: false, why: "an example somebody copies, deliberately outside the workspace so its dependencies stay out of the engine's graph"},
+}
+
+// modulePathOf reads the module line out of a go.mod.
+func modulePathOf(goMod string) (string, error) {
+	data, err := os.ReadFile(goMod)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(after), nil
+		}
+	}
+	return "", fmt.Errorf("%s declares no module path", goMod)
+}
+
+// shippedModules returns the modules whose packages an outside module could
+// import and whose stability the release notes make a claim about.
+func shippedModules(root string) ([]Module, error) {
+	var out []Module
+	for _, m := range moduleDirs {
+		if !m.shipped {
+			continue
+		}
+		path, err := modulePathOf(filepath.Join(root, m.dir, "go.mod"))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Module{Dir: m.dir, ImportPath: path})
+	}
+	return out, nil
+}
+
+// FindModules returns every directory in the repository holding a go.mod.
+func FindModules(root string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			name := entry.Name()
+			if path != root && (skipDirs[name] || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Name() != "go.mod" {
+			return nil
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		out = append(out, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// KnownModules reports the module directories this tool has an opinion about.
+func KnownModules() map[string]bool {
+	out := map[string]bool{}
+	for _, m := range moduleDirs {
+		out[m.dir] = true
+	}
+	return out
 }
 
 // skipDirs are directories that hold no importable package by construction.
@@ -73,9 +161,13 @@ var skipDirs = map[string]bool{
 // that are importable, so that one appearing has to be classified rather than
 // arriving silently.
 func Load(root string) ([]*Package, error) {
+	modules, err := shippedModules(root)
+	if err != nil {
+		return nil, err
+	}
 	fset := token.NewFileSet()
 	var out []*Package
-	for _, module := range shippedModules {
+	for _, module := range modules {
 		moduleRoot := filepath.Join(root, module.Dir)
 		err := filepath.WalkDir(moduleRoot, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {

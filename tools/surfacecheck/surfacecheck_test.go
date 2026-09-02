@@ -33,10 +33,16 @@ func tree(t *testing.T, packages map[string]string, classes string) string {
 			t.Fatal(err)
 		}
 	}
-	// Both shipped modules have to exist or the walk errors on the missing
-	// one, which would be a different failure from the one under test.
-	for _, module := range shippedModules {
-		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(module.Dir)), 0o755); err != nil {
+	// Every module directory has to exist with a go.mod, because the import
+	// path is read from there rather than written down. A missing one is a
+	// different failure from the one under test.
+	for _, module := range moduleDirs {
+		dir := filepath.Join(root, filepath.FromSlash(module.dir))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := "github.com/antifailure/antifailure/" + module.dir
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module "+path+"\n\ngo 1.25.0\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -375,5 +381,43 @@ func TestTheRepositoryPasses(t *testing.T) {
 	// pass every check above.
 	if len(packages) < 10 {
 		t.Fatalf("the walk found only %d importable packages", len(packages))
+	}
+}
+
+func TestAModuleNothingListedFails(t *testing.T) {
+	// One directory up from the package inventory. A module that is never
+	// walked contributes no packages, and a repository with an unwalked module
+	// looks exactly like one with no new packages in it.
+	root := tree(t, map[string]string{
+		"engine/pkg/provider": "package provider\n\ntype Database interface{ Name() string }\n",
+	}, stableClass)
+	newModule := filepath.Join(root, "sdk", "go")
+	if err := os.MkdirAll(newModule, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newModule, "go.mod"), []byte("module example.com/sdk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	problems, err := CheckModules(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0].Message, "sdk/go") {
+		t.Fatalf("a new module was not reported:\n%s", messages(problems))
+	}
+}
+
+func TestTheRepositoryHasNoUnlistedModule(t *testing.T) {
+	root := "../.."
+	if _, err := os.Stat(filepath.Join(root, packagesFile)); err != nil {
+		t.Skipf("not running from the repository: %v", err)
+	}
+	problems, err := CheckModules(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 0 {
+		t.Fatalf("the repository holds a module moduleDirs says nothing about:\n%s", messages(problems))
 	}
 }

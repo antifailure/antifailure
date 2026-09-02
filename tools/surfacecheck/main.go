@@ -24,7 +24,9 @@
 // promise is decided by nobody. So every importable package in the shipped
 // modules is listed in engine/api/packages.txt with a classification and a
 // reason, and one that is not listed fails here rather than defaulting to
-// invisible.
+// invisible. A whole new module is the same failure one layer up, so every
+// go.mod in the repository has to be listed too, saying whether its packages
+// ship.
 //
 // AN INCOMPATIBLE CHANGE TO A STABLE PACKAGE. engine/api/v1.0.0.txt is the
 // exported surface of the stable packages as it stood at the tag. Adding to it
@@ -107,7 +109,11 @@ func run(root string, updateBaseline bool, out *os.File) (int, error) {
 		return 0, err
 	}
 
-	problems := CheckInventory(packages, classes)
+	problems, err := CheckModules(root)
+	if err != nil {
+		return 0, err
+	}
+	problems = append(problems, CheckInventory(packages, classes)...)
 	problems = append(problems, CheckLeaks(packages, classes)...)
 
 	if updateBaseline {
