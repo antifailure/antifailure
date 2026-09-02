@@ -24,7 +24,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { sql, type Db } from '@antifailure/db'
+import postgres from 'postgres'
+import { createAdminPool, sql, type AdminPool, type Db } from '@antifailure/db'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import {
@@ -40,7 +41,43 @@ import {
   retryPayment,
 } from '../src/admin/money.ts'
 import { IN_FLIGHT_GRACE_MS, MAX_ATTEMPTS, fingerprint, keyFor } from '../src/admin/ledger.ts'
-import { available, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
+import { adminUrl, available, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
+
+/** The operator role, with BYPASSRLS, created before the migrations run.
+ *
+ *  It has to exist first because 0030 and 0031 both GRANT to it, and a GRANT
+ *  naming a role that does not exist raises. That the role is created HERE and
+ *  not by a migration is a gap in the boundary rather than a choice of this
+ *  suite's; admin-pool.test.ts says the same thing in its own words. When a
+ *  migration creates it, this function goes. */
+const OPERATOR_PASSWORD = 'operator-test-password'
+async function createOperatorRole(): Promise<void> {
+  const root = postgres(adminUrl, { max: 1, onnotice: () => {} })
+  try {
+    await root.unsafe(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'antifailure_admin') THEN
+          CREATE ROLE antifailure_admin NOLOGIN BYPASSRLS;
+        ELSE
+          ALTER ROLE antifailure_admin BYPASSRLS;
+        END IF;
+      END
+      $$;
+      ALTER ROLE antifailure_admin LOGIN PASSWORD '${OPERATOR_PASSWORD}';
+      GRANT USAGE ON SCHEMA public TO antifailure_admin;
+    `)
+  } finally {
+    await root.end({ timeout: 5 })
+  }
+}
+
+function operatorUrl(): string {
+  const u = new URL(adminUrl)
+  u.username = 'antifailure_admin'
+  u.password = OPERATOR_PASSWORD
+  return u.toString()
+}
 
 /** This file's own source, so the check below can ask whether an operation is
  *  ever actually invoked here rather than merely imported. */
@@ -268,17 +305,21 @@ describe('money moves once', async () => {
   let h: ApiHarness
   let org: Org
   let operator: Buffer
+  let operatorUserId: string
+  let adminPool: AdminPool
   let sim: StripeSim
 
-  // The operator boundary 0029 defines, used exactly as an admin route would.
+  // The operator scope exactly as an admin route gets it: `ctx.adminDb`, which
+  // is `AdminPool.withOperator` bound to the operator making the request.
   //
-  // Not a privileged pool and not a second database role: the same
-  // `antifailure_app` connection every request uses, declaring the hash of a
-  // live operator session. Every policy on the ledger is keyed on that
-  // resolving to a row, so these tests exercise the real gate rather than a
-  // test-only bypass, and the last test in this block is the proof: a tenant
-  // connection running the same statement sees nothing.
-  const withAdmin = <R,>(fn: (db: Db) => Promise<R>) => h.pool.withPlatformAdmin(operator, fn)
+  // A SEPARATE credential from the application's, holding BYPASSRLS, which is
+  // the whole point of 0030's design: a cross-tenant reach has to be a
+  // credential the application cannot acquire rather than a flag it sets on its
+  // own connection. So these tests exercise the real gate, and the isolation
+  // test below is the proof from the other side: the application's own pool,
+  // same database, same instant, cannot write or read the ledger at all.
+  const withAdmin = <R,>(fn: (db: Db) => Promise<R>) =>
+    adminPool.withOperator({ adminUserId: operatorUserId, label: 'ops@antifailure.test' }, fn)
 
   function ctx(now = new Date('2026-03-01T12:00:00Z')) {
     const config: StripeConfig = {
@@ -290,18 +331,21 @@ describe('money moves once', async () => {
       stripe: { client: new RealStripeClient(config), config },
       withAdmin,
       now,
-      actorUserId: null,
+      adminUserId: operatorUserId,
       actorLabel: 'ops@antifailure.test',
     }
   }
 
   before(async () => {
+    await createOperatorRole()
     h = await startApi()
+    adminPool = createAdminPool({ url: operatorUrl(), max: 4, connectTimeoutSeconds: 30 })
     org = await seedOrg(h.admin, 'money')
     const email = `money-op-${randomUUID().slice(0, 8)}@example.test`
     const [row] = await h.admin<{ id: string }[]>`
       INSERT INTO admin_users (email, name, role) VALUES (${email}, 'Money operator', 'super_admin')
       RETURNING id`
+    operatorUserId = row!.id
     const token = randomBytes(32)
     operator = createHash('sha256').update(token).digest()
     await h.admin`
@@ -311,7 +355,18 @@ describe('money moves once', async () => {
 
   after(async () => {
     await h.admin`DELETE FROM admin_operations WHERE org_id = ${org.orgId}`
+    // The operator chain too, and BEFORE the organization goes.
+    //
+    // Not tidiness. `admin_audit_entries.subject_org_id` has ON DELETE SET
+    // NULL and the column is inside the entry hash, so deleting an
+    // organization rewrites every operator entry about it and the whole chain
+    // then verifies as ALTERED. Leaving these behind makes admin-audit.test.ts
+    // fail in whichever suite runs after this one, for a reason that has
+    // nothing to do with that suite. The underlying defect is reported
+    // separately; this stops this file from being the one that triggers it.
+    await h.admin`DELETE FROM admin_audit_entries WHERE subject_org_id = ${org.orgId}`
     await dropOrg(h.admin, org.orgId)
+    await adminPool.close()
     await h.close()
   })
 
@@ -457,7 +512,7 @@ describe('money moves once', async () => {
     // window the ledger CANNOT close on its own, and the one the key closes.
     const key = keyFor({
       action: 'billing.refunded', orgId: org.orgId, targetType: 'charge',
-      targetId: 'ch_6', actorUserId: null, actorLabel: 'ops', reason: 'AF-905',
+      targetId: 'ch_6', adminUserId: null, actorLabel: 'ops', reason: 'AF-905',
       params: { chargeId: 'ch_6', amountMinor: 4200, category: null },
       idempotencyKey: 'af-form-6',
     })
@@ -824,16 +879,33 @@ describe('money moves once', async () => {
         SELECT count(*) AS n FROM admin_operations WHERE org_id = ${org.orgId}`))
     assert.equal(Number(asOperator[0]!.n), 1)
 
-    // The same role, the same statement, without an operator session. Zero
-    // rows rather than an error, because the boundary is a policy rather than
-    // a grant: `antifailure_app` HAS the privilege and current_admin_user()
-    // is null, so nothing matches. This is the tenant's own organization's
-    // row, which is the case worth asserting: what an operator did is
-    // recorded in the tenant's audit log, not in the operator's ledger.
-    const asTenant = await h.pool.withTenant({ orgId: org.orgId }, async (db) =>
-      db.execute<{ n: string }>(sql`
-        SELECT count(*) AS n FROM admin_operations WHERE org_id = ${org.orgId}`))
-    assert.equal(Number(asTenant[0]!.n), 0)
+    // The application's own connection, same database, same instant, asking
+    // about ITS OWN organization's row. Refused outright rather than answered
+    // with an empty count, because the ledger grants the tenant-facing role
+    // nothing at all.
+    //
+    // That this is the tenant's own row is the case worth asserting: what an
+    // operator did is recorded in the tenant's AUDIT LOG, which they can read,
+    // and not in the operator's ledger, which they cannot. A customer is owed
+    // the fact of the refund, not the operator's working notes about it.
+    let read: unknown
+    try {
+      await h.pool.withTenant({ orgId: org.orgId }, async (db) =>
+        db.execute<{ n: string }>(sql`
+          SELECT count(*) AS n FROM admin_operations WHERE org_id = ${org.orgId}`))
+    } catch (e) { read = e }
+    assert.ok(read, 'a tenant read the money ledger')
+    const readSaid = `${(read as Error).message} ${(read as { cause?: Error }).cause?.message ?? ''}`
+    assert.match(readSaid, /permission denied/i, readSaid)
+
+    // And the fact of the refund IS in the tenant's own chain, written by
+    // appendAdminAudit's double write in the same transaction as the operator's
+    // entry. Asserting the absence above without this would be asserting that
+    // the customer is told nothing.
+    const [entry] = await h.admin<{ action: string; origin: string }[]>`
+      SELECT action, origin FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'billing.refunded'`
+    assert.equal(entry!.origin, 'admin')
 
     // And it cannot write one either.
     let thrown: unknown
@@ -848,36 +920,39 @@ describe('money moves once', async () => {
       })
     } catch (e) { thrown = e }
     const said = `${(thrown as Error)?.message} ${(thrown as { cause?: Error })?.cause?.message ?? ''}`
-    assert.match(said, /row-level security/i, said)
+    // A missing PRIVILEGE, not a policy that matched nothing, and that is a
+    // strengthening. An earlier draft gave the application role INSERT behind a
+    // policy keyed on the operator session; 0030 moved operators onto a
+    // separate BYPASSRLS credential, which made that grant dead, so it is
+    // withdrawn and the database refuses the statement outright.
+    assert.match(said, /permission denied/i, said)
   })
 
-  it('an expired operator session moves no money', async () => {
-    // The credential has to keep being a credential. A ledger write that
-    // worked on a stale cookie would make the whole boundary decorative.
-    const [row] = await h.admin<{ id: string }[]>`
-      INSERT INTO admin_users (email, name, role)
-      VALUES (${`stale-${randomUUID().slice(0, 8)}@example.test`}, 'Stale', 'super_admin')
-      RETURNING id`
-    const stale = createHash('sha256').update(randomBytes(32)).digest()
-    await h.admin`
-      INSERT INTO admin_sessions (token_hash, admin_user_id, expires_at)
-      VALUES (${stale}, ${row!.id}, ${new Date(Date.now() - 60_000).toISOString()})`
-
+  it('the application\'s own pool cannot move money, on the same database', async () => {
     await reset()
-    const before = ctx()
+    // The other half of the isolation, from the application's side. `h.pool` is
+    // the connection every customer request runs on; it holds no operator
+    // credential and cannot acquire one, which is the property 0030's separate
+    // BYPASSRLS role exists to give.
+    //
+    // Session EXPIRY is deliberately not asserted here. It is enforced a layer
+    // up, where the operator cookie is resolved and adminProcedure refuses
+    // before any of this code runs, and admin-boundary.test.ts owns that. A
+    // second, weaker version of it here would be a test passing for a reason it
+    // does not state.
+    const base = ctx()
     let thrown: unknown
     try {
       await refundCharge(
-        { ...before, withAdmin: (fn) => h.pool.withPlatformAdmin(stale, fn) },
+        { ...base, withAdmin: (fn) => h.pool.withoutTenant(fn) },
         { orgId: org.orgId, chargeId: 'ch_stale', amountMinor: 100, reason: 'AF-921' },
       )
     } catch (e) { thrown = e }
-    assert.ok(thrown, 'an expired operator session moved money')
+    assert.ok(thrown, 'the application pool moved money')
     const said = `${(thrown as Error).message} ${(thrown as { cause?: Error }).cause?.message ?? ''}`
-    assert.match(said, /row-level security/i, said)
-    // The important half: it failed on the CLAIM, before the provider was
-    // reached, so a stale cookie cannot refund anything even once.
-    assert.equal(sim.refunds.length, 0, 'an expired operator session reached the provider')
+    assert.match(said, /permission denied/i, said)
+    // It failed on the CLAIM, before the provider was reached.
+    assert.equal(sim.refunds.length, 0, 'the application pool reached the provider')
   })
 })
 

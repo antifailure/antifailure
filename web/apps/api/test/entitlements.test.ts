@@ -442,13 +442,13 @@ describe('an override changes what a route answers', async () => {
     // drizzle wraps the driver's error, so the reason is on the cause. Read
     // both rather than only the wrapper, or this asserts on the word "Failed".
     //
-    // Row-level security rather than a missing privilege, and the distinction
-    // is the whole of 0029's design: an operator IS `antifailure_app`, so the
-    // grant cannot be withheld from a tenant without also withholding it from
-    // the operator. What stops the tenant is that current_admin_user() is null
-    // on its connection, so the write policy is false.
+    // A missing PRIVILEGE. 0030 puts operators on a separate BYPASSRLS
+    // credential, so the tenant-facing role needs no write path here at all and
+    // is not given one: the statement is refused outright rather than matching
+    // no rows. Withholding the grant is the stronger of the two, and it is only
+    // available because the operator is a different role.
     const said = `${(thrown as Error).message} ${(thrown as { cause?: Error }).cause?.message ?? ''}`
-    assert.match(said, /row-level security/i, said)
+    assert.match(said, /permission denied/i, said)
   })
 })
 

@@ -321,7 +321,16 @@ CREATE TABLE admin_operations (
   -- invoice, a subscription. Text rather than uuid: these are Stripe's.
   target_id         text,
 
-  actor_user_id     uuid REFERENCES users(id) ON DELETE SET NULL,
+  -- The OPERATOR, not a customer's user.
+  --
+  -- admin_users(id), which is a different id space from users(id). The foreign
+  -- key is what makes confusing the two RAISE rather than quietly attributing a
+  -- refund to whichever customer happened to share the uuid, and getting the
+  -- attribution of a money action wrong is worse than failing to record it.
+  --
+  -- SET NULL rather than CASCADE: an operator leaving must not delete the
+  -- record of what they did, and actor_label below is the half that survives.
+  admin_user_id     uuid REFERENCES admin_users(id) ON DELETE SET NULL,
   actor_label       text NOT NULL,
   reason            text NOT NULL,
 
@@ -412,12 +421,46 @@ CREATE INDEX admin_operations_in_flight_idx ON admin_operations (started_at)
 -- what makes removing an answer take a schema change and a conversation.
 -- ---------------------------------------------------------------------------
 
+-- The tenant-facing role reads and never writes.
+GRANT SELECT ON
+  entitlement_overrides, feature_flags, feature_flag_targets TO antifailure_app;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON
+  entitlement_overrides, feature_flags, feature_flag_targets FROM antifailure_app;
+-- Nothing at all on the ledger. It records what an operator did across tenants;
+-- a customer's view of what was done to them is their own audit log, which is
+-- where these actions are also written.
+REVOKE ALL ON admin_operations FROM antifailure_app;
+
+-- The operator writes all four and deletes none of them.
+--
+-- These GRANTs are not redundant with BYPASSRLS and the distinction is the one
+-- 0030's own comment makes: BYPASSRLS exempts a role from row level security
+-- and gives it no table privileges whatsoever, so a connection as
+-- `antifailure_admin` with no grant here gets 42501 on every statement. The
+-- policies are what a tenant is stopped by; these are what the operator is
+-- allowed by, and both have to be right.
 GRANT SELECT, INSERT, UPDATE ON
   entitlement_overrides, feature_flags, feature_flag_targets, admin_operations
-TO antifailure_app;
+TO antifailure_admin;
 REVOKE DELETE, TRUNCATE ON
   entitlement_overrides, feature_flags, feature_flag_targets, admin_operations
-FROM antifailure_app;
+FROM antifailure_admin;
+
+-- The billing tables an operator has to READ, for the same reason: the policy
+-- half is moot under BYPASSRLS and the privilege half is not there yet.
+--
+-- 0030 grants the operator `admin_users`, `admin_sessions`,
+-- `admin_audit_entries` and `audit_entries` and stops. These six are the tables
+-- this lane reads, so this file grants them, and the extension is visible in
+-- the diff of the feature that needed it rather than buried in the boundary.
+--
+-- SELECT only, and that is not a formality. Moving a plan goes through Stripe
+-- and comes back as a webhook; an operator with UPDATE on `subscriptions` could
+-- make this database disagree with the provider about what somebody is paying
+-- for, and the provider would be right.
+GRANT SELECT ON billing_customers, subscriptions, invoices, payment_methods,
+  billing_events, golden_versions
+TO antifailure_admin;
 
 -- ---------------------------------------------------------------------------
 -- Isolation
@@ -462,84 +505,34 @@ CREATE POLICY tenant_reads_own_targets ON feature_flag_targets
   FOR SELECT TO antifailure_app
   USING (org_id IS NULL OR org_id = current_org());
 
--- The operator's policies.
+-- The ledger: nothing, said out loud.
 --
--- One per table, and each is true only for a connection physically holding a
--- live operator session, exactly as 0029's cross tenant reads are. They are
--- FOR ALL rather than FOR SELECT because these four tables ARE the operator's
--- workspace: an override is granted by an operator, a flag is killed by one,
--- and an operation is claimed and settled by one. There is no DELETE to permit,
--- because the grants above withhold it.
-DO $$
-DECLARE
-  t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'entitlement_overrides', 'feature_flags', 'feature_flag_targets', 'admin_operations']
-  LOOP
-    EXECUTE format($p$
-      CREATE POLICY admin_writes ON %I FOR ALL TO antifailure_app
-        USING (current_admin_user() IS NOT NULL)
-        WITH CHECK (current_admin_user() IS NOT NULL)
-    $p$, t);
-  END LOOP;
-END
-$$;
+-- The tenant-facing role already holds no privilege on this table, so this
+-- policy changes no behaviour today and is not decoration. It is the second
+-- lock. A table with row level security enabled and NO policy denies everything
+-- for the same reason, and denies it invisibly: the day somebody adds a GRANT
+-- here for a reporting screen, the absence of a policy silently becomes an open
+-- door, whereas this refuses and makes them come and read the sentence.
+--
+-- It also answers the tenancy suite, which treats a table carrying org_id with
+-- RLS on and no policy as a mistake. It is usually right about that. Here the
+-- honest statement is not "no policy" but "no rows, deliberately".
+CREATE POLICY tenant_sees_nothing ON admin_operations
+  FOR ALL TO antifailure_app
+  USING (false) WITH CHECK (false);
 
--- The billing tables an operator has to READ, which 0029 does not cover.
+-- Nothing here for the operator, and that is the change 0030 made necessary.
 --
--- 0029 opens organizations, users, members, sessions, repositories,
--- installations, environments, runs, verdicts, engine tokens, audit entries and
--- the two policy tables. It deliberately stops short of the five tables that
--- say what a company pays, because those are a different kind of disclosure and
--- because nothing was reading them across tenants yet. This file is what reads
--- them, so this file opens them, and the extension is visible in the diff of
--- the feature that needed it rather than buried in the boundary.
+-- An earlier draft of this file gave `antifailure_app` INSERT and UPDATE on
+-- these four tables behind a policy keyed on current_admin_user(). 0030 chose a
+-- different and better boundary: the operator connects as `antifailure_admin`,
+-- a separate credential holding BYPASSRLS, so policies do not apply to it at
+-- all. That leaves the old design as a write path on the tenant-facing role
+-- that nothing would ever use, and a grant nobody needs is a grant somebody
+-- will eventually reach through. It is gone.
 --
--- SELECT only, and that is not a formality. Moving a plan goes through Stripe
--- and comes back as a webhook; an operator with UPDATE on `subscriptions` could
--- make this database disagree with the provider about what somebody is paying
--- for, and the provider would be right.
-DO $$
-DECLARE
-  t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'billing_customers', 'subscriptions', 'invoices', 'payment_methods',
-    'billing_events', 'golden_versions']
-  LOOP
-    EXECUTE format($p$
-      CREATE POLICY admin_reads ON %I
-        FOR SELECT TO antifailure_app
-        USING (current_admin_user() IS NOT NULL)
-    $p$, t);
-  END LOOP;
-END
-$$;
-
--- Appending to a TENANT's own chain, as an operator.
---
--- 0029 opens `audit_entries` to an operator for SELECT and stops there, while
--- its own comment says "the tenant-visible half of an operator's action is
--- written into that tenant's own audit_entries instead". Both are right and
--- together they are incomplete: there was no policy that let the write happen,
--- so the first administrative refund raised on the INSERT with the money
--- already moved at Stripe and the ledger row already settled. That is the worst
--- possible place for this to fail, which is why it is a policy here rather than
--- a caught exception in the application.
---
--- INSERT only, and no UPDATE or DELETE policy to go with it, so an operator can
--- add to the record of what they did to somebody and can never edit it. The
--- SELECT half is already open by 0029, and appendAudit needs it: the chain is
--- linked by reading its own tail, and an operator who could not read it would
--- write an entry claiming a null predecessor and fork the tenant's chain.
---
--- What this deliberately does NOT do is restrict which organization an operator
--- may write about. An operator administers every tenant by definition, so a
--- predicate naming one would be theatre; the boundary that decides which tenant
--- is the operator session and the permission behind it, one layer up.
-CREATE POLICY admin_appends_tenant_audit ON audit_entries
-  FOR INSERT TO antifailure_app
-  WITH CHECK (current_admin_user() IS NOT NULL);
+-- What remains for `antifailure_app` is SELECT with the tenant policies above:
+-- a customer can see the overrides that apply to it and the flags, and can
+-- write none of it and reach the ledger not at all.
 
 COMMIT;

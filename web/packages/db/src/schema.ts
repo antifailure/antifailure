@@ -960,7 +960,7 @@ export const adminAuditEntries = pgTable('admin_audit_entries', {
 
 
 /* ---------------------------------------------------------------------------
- * Entitlements, flags, and the money ledger. See migration 0030.
+ * Entitlements, flags, and the money ledger. See migration 0031.
  *
  * Three of the four carry org_id and are in the cross-tenant list below.
  * `feature_flags` deliberately does not: a flag is the platform's own
@@ -1031,7 +1031,8 @@ export const adminOperations = pgTable('admin_operations', {
   orgId: uuid('org_id').notNull(),
   targetType: text('target_type').notNull(),
   targetId: text('target_id'),
-  actorUserId: uuid('actor_user_id'),
+  /** The operator, from admin_users. A different id space from users(id). */
+  adminUserId: uuid('admin_user_id'),
   actorLabel: text('actor_label').notNull(),
   reason: text('reason').notNull(),
   request: jsonb('request').notNull(),
