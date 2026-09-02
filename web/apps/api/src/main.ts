@@ -14,7 +14,7 @@ import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
-import { parseAllowlist, describeAllowlist } from './auth/signin.ts'
+import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -181,10 +181,12 @@ console.log(stripe.summary)
 
 let hostedRequiredPlan
 let githubAppInstallUrl
+let signupUrl
 let operatorSetsPlan = false
 try {
   hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
   githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
+  signupUrl = signupUrlFrom(process.env.AF_SIGNUP_URL)
   operatorSetsPlan = operatorSetsPlanFrom(process.env.AF_OPERATOR_SETS_PLAN)
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
@@ -258,6 +260,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   hostedRequiredPlan,
   operatorSetsPlan,
   githubAppInstallUrl,
+  signupUrl,
   modelPrices,
   consoleBuild,
   githubApi,
