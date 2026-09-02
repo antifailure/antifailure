@@ -282,6 +282,22 @@ jobs:
         # documentation quietly stops being true.
         run: go run ./tools/errcheck .
 
+      - name: The Go packages version 1 promised are the ones it still has
+        # Two sentences of the release notes, held to the tree. The engine's
+        # stable packages are engine/pkg/provider, engine/pkg/schema,
+        # engine/pkg/secret and engine/conformance, everything else is free to
+        # change, and engine/internal cannot be imported from outside the module
+        # at all. The last of those is the toolchain's and needs nothing; the
+        # rest had nothing behind them.
+        #
+        # It caught a live one. provider.Database.ConnString returned a type
+        # from engine/internal/secrets, so the interface the notes call an
+        # integration surface could not be implemented from outside the
+        # repository: the return type has no spelling an outside package is
+        # allowed to use. It compiled here, reviewed as correct, and would have
+        # failed on the first line of the first real provider anybody wrote.
+        run: go run ./tools/surfacecheck .
+
       - name: Vet
         run: cd engine && go vet ./...
 
