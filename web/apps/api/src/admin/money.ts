@@ -316,9 +316,18 @@ async function changeSubscription(
   /** Named so the fingerprint of a plan change and a trial extension on the
    *  same subscription differ even when the parameter maps happen to collide. */
   describe: Record<string, unknown>,
+  /** The subscription, when the caller has already had to read it.
+   *
+   *  changePlan does: it needs the current price to refuse a no-op and the item
+   *  id to replace rather than add. Passing it back in is not a micro
+   *  optimisation, it is one fact instead of two: reading twice means the
+   *  before state recorded in the ledger can differ from the one the caller
+   *  made its decision on, and a plan change that raced a webhook would be
+   *  audited against a subscription nobody ever saw. */
+  already?: StripeSubscription,
 ): Promise<OperationRun<{ subscription: Record<string, unknown> }>> {
   await refuseWhenKilled(ctx, intent.orgId, 'Changing a subscription')
-  const before = await ctx.stripe.client.getSubscription(intent.subscriptionId)
+  const before = already ?? (await ctx.stripe.client.getSubscription(intent.subscriptionId))
   if (!before) {
     throw new TRPCError({
       code: 'NOT_FOUND',
@@ -360,6 +369,11 @@ export async function changePlan(
     throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.plan} is not a plan with a price.` })
   }
   const priceId = ctx.stripe.config.prices[input.plan]
+  // The kill switch before the read, not just before the write. During a
+  // payments incident the useful behaviour is to stop touching the provider at
+  // all, and a refusal that first spends a round trip on a read is a refusal
+  // that took longer than it needed to.
+  await refuseWhenKilled(ctx, input.orgId, 'Changing a plan')
   const before = await ctx.stripe.client.getSubscription(input.subscriptionId)
   if (!before) {
     throw new TRPCError({
@@ -393,6 +407,7 @@ export async function changePlan(
         proration_behavior: input.prorate ? 'create_prorations' : 'none',
       },
       { plan: input.plan, priceId, prorate: input.prorate },
+      before,
     )
   } catch (err) {
     return asTrpc(err)
