@@ -22,27 +22,64 @@
  *     www fixed and left a comment about: the wide gap belongs at the wide end,
  *     and at 1024px this pushed the sign up button past the right edge.
  *
+ * EVERY BREAKPOINT IN THIS FILE IS 50rem, AND THAT IS NOT A STYLE CHOICE.
+ * Starlight's mobile menu is the only surface a collapsed link can live on and
+ * it exists only below 50rem, so anything hidden at a WIDER breakpoint than
+ * 50rem is hidden with nowhere to go. That is not a hypothetical. Measured on
+ * a real build, at twenty widths:
+ *
+ *     width   nav  log in  sign up  github  menu button
+ *     799      Y     n        n       n         Y
+ *     800      Y     n        n       n         n     <- gap opens
+ *     1023     Y     n        n       n         n
+ *     1024     Y     Y        Y       Y         n     <- gap closes
+ *
+ * From 800px to 1023px the documentation offered no way to log in, no way to
+ * sign up and no link to the repository, on any of 82 pages, because the
+ * buttons were hidden at `lg` while the menu that holds their only copies
+ * stops at 50rem. The docs footer carries Privacy and Terms and nothing else,
+ * so there was no other route. iPad portrait is 810 to 834.
+ *
+ * Three different boundaries caused it: the nav at `md`, the buttons at `lg`,
+ * the menu at 50rem. The comment here used to claim the nav collapsed "at
+ * Starlight's own 50rem reflow point" while the class said `max-md`, which is
+ * how the seam stayed invisible. So: one boundary, written as 50rem, matching
+ * the menu exactly, with no Tailwind breakpoint name in sight, because `md`
+ * and `lg` are the two values that are wrong here.
+ *
+ * GitHub is the exception and stays at `lg`. At 800px the row measures 890px
+ * with it and 749px without, so keeping it would push the sign up button off
+ * the edge, which is the bug this file already fixed once. It is in the mobile
+ * menu below 50rem and in the footer of every marketing page.
+ *
  * The dropdown panels from the marketing header are deliberately not here.
  * They are hover-driven React state, and the documentation already has a
  * sidebar doing navigation; a second overlapping navigation system would be
  * the inconsistency this is meant to remove. The top-level destinations are
  * links.
- *
- * The nav collapses at Starlight's own 50rem reflow point rather than at the
- * site's `xl`, because Starlight's mobile menu, the only place a collapsed
- * link could go, exists only below 50rem. Collapsing at `xl` to match the
- * site exactly would strand Product, Solutions and Pricing with nowhere to
- * live between 800px and 1280px. Below 50rem the links are in the mobile menu,
- * via MobileMenuFooter.astro.
  */
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+// `/docs`, not `/docs/`. www/lib/nav.ts writes the slashless form and the host
+// redirects the other one, so the trailing slash made the site's own Docs link
+// the only navigation on antifailure.dev that costs a round trip.
+const docsHome = base || "/docs";
+
+// Docs is the current SECTION on all 82 pages and the current PAGE on exactly
+// one of them. `aria-current="page"` was hardcoded true, so a screen reader
+// reading /docs/reference/cli was told it was already on the Docs page.
+// "true" is the value for "this is the relevant one" when it is not the page.
+const here = Astro.url.pathname.replace(/\/$/, "") || "/";
 const nav = [
   { text: "Product", href: "/product" },
   { text: "Solutions", href: "/solutions" },
-  // `base`, not `${base}/`: the host sets "trailingSlash": "never", so the
-  // slashed form 301s. This is the Docs link in the header of all 82
-  // documentation pages, which made it the most-served redirect on the site.
-  { text: "Docs", href: base || "/docs", current: true },
+  // Two fixes on one line. `base`, not `${base}/`: the host sets
+  // "trailingSlash": "never", so the slashed form 301s, and this is the Docs
+  // link in the header of all 82 documentation pages, which made it the
+  // most-served redirect on the site. And `current` is computed rather than
+  // hardcoded true, so the one page that IS the Docs home says "page" and the
+  // other 81, for which Docs is the section and not the page, say "true".
+  { text: "Docs", href: docsHome, current: here === docsHome ? "page" : "true" },
   { text: "Writing", href: "/blog" },
   { text: "Pricing", href: "/pricing" },
 ];
@@ -72,14 +109,14 @@ const nav = [
         </span>
       </a>
 
-      <nav class="max-md:hidden" aria-label="Main">
+      <nav class="max-[50rem]:hidden" aria-label="Main">
         <ul class="flex items-center">
           {
             nav.map((item, i) => (
               <li class="flex h-16 items-center max-xl:h-14">
                 <a
                   href={item.href}
-                  aria-current={item.current ? "page" : undefined}
+                  aria-current={item.current}
                   class:list={[
                     "relative flex h-16 items-center gap-x-1 rounded-sm px-2.5 text-[15px] leading-normal font-normal tracking-snug whitespace-pre transition-colors duration-200 hover:text-black max-xl:h-14",
                     item.current ? "text-black" : "text-black/70",
@@ -95,13 +132,13 @@ const nav = [
       </nav>
     </div>
 
-    <div class="flex items-center gap-x-8 max-lg:hidden">
-      <div class="flex items-center gap-x-6">
+    <div class="flex items-center gap-x-8 max-[50rem]:hidden">
+      <div class="flex items-center gap-x-6 max-lg:hidden">
         <a
           href="https://github.com/antifailure/antifailure"
           target="_blank"
           rel="noopener noreferrer"
-          class="group flex items-center gap-1.5 rounded-sm text-black transition-colors duration-200 hover:text-gray-new-40"
+          class="group flex items-center gap-1.5 rounded-sm py-1.5 text-black transition-colors duration-200 hover:text-gray-new-40"
         >
           <svg
             viewBox="0 0 24 24"
@@ -131,3 +168,29 @@ const nav = [
     </div>
   </div>
 </header>
+
+<style>
+  /* The focus ring has to be there the instant focus lands, and it was not.
+   *
+   * Tailwind v4 added `outline-color` to what `transition-colors` animates, and
+   * every link in this bar carries `transition-colors duration-200`. So the
+   * ring interpolates from the element's own colour to the brand green over
+   * 200ms. Measured on Sign up, holding focus and sampling:
+   *
+   *     t~0ms    rgb(255,255,255)   invisible, white on the white header
+   *     t~50ms   rgb(185,233,167)
+   *     t~150ms  rgb(52,191,1)
+   *     t~300ms  rgb(51,191,0)      settled
+   *
+   * Log in starts at black on white so it looks instant and hid the defect for
+   * both of them. Tabbing quickly along the bar never shows a finished ring on
+   * either. Only the colour is excluded here: hover still animates, because
+   * that transition is the reason the class is on these links at all.
+   *
+   * The same two lines belong in www/components/layout/SiteHeader.tsx, which
+   * has the identical markup and therefore the identical defect. */
+  .af-header a:focus-visible,
+  .af-header button:focus-visible {
+    transition-property: color, background-color, border-color;
+  }
+</style>

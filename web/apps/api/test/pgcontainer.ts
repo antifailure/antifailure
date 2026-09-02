@@ -20,8 +20,24 @@ import postgres from 'postgres'
 const run = promisify(execFile)
 
 export const CONTAINER = 'af-dr-test'
-export const PORT = 55433
-export const URL = `postgres://postgres:test@127.0.0.1:${PORT}/antifailure`
+
+/**
+ * Where the drill's cluster is, and how to reach it.
+ *
+ * Both are overridable because the port was hardcoded and a hardcoded port is
+ * a decision made on behalf of every machine this ever runs on. It is right
+ * for the container below, which this file also owns, and wrong for a machine
+ * that already has Postgres and no Docker: there the suite could not be
+ * pointed at the cluster sitting in front of it, so it skipped, and a suite
+ * that skips proves nothing about a backup nobody has restored.
+ *
+ * AF_DR_PORT moves the container and the client together. AF_DR_URL points at
+ * a cluster somebody else stood up, with its own role and password, and is
+ * what a machine running Postgres natively wants.
+ */
+export const PORT = Number(process.env.AF_DR_PORT ?? 55433)
+export const URL =
+  process.env.AF_DR_URL ?? `postgres://postgres:test@127.0.0.1:${PORT}/antifailure`
 
 /**
  * A token unique to this process, put in the name of every database this run
@@ -102,18 +118,26 @@ async function reachable(timeoutSeconds: number): Promise<boolean> {
 /**
  * Starts the container if it is not already answering, and waits for it.
  *
- * Returns false when there is no Docker at all, which is the one honest reason
- * to skip. Every other failure throws with what Docker said, because a skip the
- * code under test can cause is a pass with extra steps.
+ * Returns false when there is nothing to drill against, which is the one
+ * honest reason to skip. Every other failure throws with what Docker said,
+ * because a skip the code under test can cause is a pass with extra steps.
+ *
+ * Whether a cluster is already answering is asked BEFORE whether Docker
+ * exists, and the order is the whole point. It used to be the other way
+ * round, so a machine with Postgres running on the port and no Docker was
+ * told it had nowhere to restore into while the cluster sat there answering.
+ * Docker is how this file STARTS a cluster; it was never what the tests need,
+ * and requiring it to find one that is already up made the drill unrunnable
+ * on exactly the machines that had deliberately stopped running Docker.
  */
 export async function start(): Promise<boolean> {
+  if (await reachable(5)) return true
+
   try {
     await docker(['version', '--format', '{{.Server.Version}}'])
   } catch {
     return false
   }
-
-  if (await reachable(5)) return true
 
   const existing = await docker([
     'ps', '-a', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.State}}',

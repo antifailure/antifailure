@@ -9,7 +9,7 @@ import { sql } from 'drizzle-orm'
 import { createPool } from '@antifailure/db'
 import { migrate } from '@antifailure/db'
 import { seedOrg } from './harness.ts'
-import { URL as DR_URL, RUN, dropDatabasesNamed, start as startPostgres } from './pgcontainer.ts'
+import { PORT as DR_PORT, URL as DR_URL, RUN, dropDatabasesNamed, start as startPostgres } from './pgcontainer.ts'
 import {
   APP_ROLE,
   backup,
@@ -67,11 +67,30 @@ after(async () => {
   await h.end({ timeout: 5 })
 })
 
+/**
+ * Skips when there is no cluster to drill against.
+ *
+ * The only honest reason to skip. Every other failure throws, because a skip
+ * the code under test can cause is a pass with extra steps.
+ *
+ * Every test that touches a database calls this, and "every" is the part that
+ * was wrong: two of them opened their own connection to DR_URL without asking,
+ * so on a machine with no Docker they reported ECONNREFUSED as a failure while
+ * the other eleven skipped. That makes an environment outage indistinguishable
+ * from a defect in the backup code, which is the one thing a red test must
+ * never be ambiguous about, and it is what a full run of this suite reported
+ * tonight: two failures out of 963, both of them this.
+ *
+ * The guard is on the tests rather than on the file because the suite has one
+ * test that needs no database at all, and skipping that one would quietly drop
+ * real coverage on exactly the machines that have no Docker.
+ */
 function skipWithoutDatabase(t: { skip: (reason: string) => void }): boolean {
   if (!h) {
-    // The only honest reason to skip. Every other failure throws, because a
-    // skip the code under test can cause is a pass with extra steps.
-    t.skip('no Docker daemon, so there is nowhere to stand up a database to restore into')
+    t.skip(
+      `nothing is answering on 127.0.0.1:${DR_PORT} and Docker cannot start one, ` +
+        'so there is nowhere to stand up a database to restore into',
+    )
     return true
   }
   return false
@@ -358,6 +377,7 @@ test('the comparison notices row level security that did not come back', { timeo
 // It is treated as something this verification cannot speak for, which is the
 // honest answer and the one that makes somebody widen the check.
 test('a table this check does not look at is named rather than ignored', async (t) => {
+  if (skipWithoutDatabase(t)) return
   const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
   t.after(async () => {
     await admin.unsafe('DROP SCHEMA IF EXISTS ledger CASCADE').catch(() => {})
@@ -420,6 +440,7 @@ function blankManifestFields() {
 // the path where nothing was created, and this asserts the observable end of
 // it: the occupied database and its contents are still there afterwards.
 test('a drill refuses a database it did not create, and leaves it standing', async (t) => {
+  if (skipWithoutDatabase(t)) return
   const occupied = `af_occupied_${randomUUID().replace(/-/g, '').slice(0, 12)}`
   const admin = postgres(DR_URL, { max: 1, onnotice: () => {} })
   t.after(async () => {

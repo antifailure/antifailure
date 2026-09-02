@@ -377,29 +377,56 @@ async function applyToProjection(
   event: IncomingEvent,
   analytics: Analytics,
 ): Promise<string | null> {
-  // Validation first, because a verdict is not an environment lifecycle event
-  // and would otherwise fall out of this function before being counted.
-  //
-  // Reached only for an event the INSERT above actually inserted, so a resent
-  // batch does not count a run twice and this needs no idempotency of its own.
-  // NOTHING IN THE ENGINE EMITS verdict.recorded TODAY: agent.verdict is one of
-  // the five types engine/internal/controlplane/vocabulary_test.go names as
-  // mapped and emitted by nothing. This is the control plane's half, ready for
-  // the day the engine's half exists, and until then the validation funnel is
-  // honestly empty rather than quietly missing.
-  if (event.type === 'verdict.recorded') {
-    await analytics.record(db, {
-      name: 'validation.run_finished',
-      occurredAt: new Date(event.occurredAt),
-      orgId,
-      payload: {
-        kind: runKind(event.payload?.kind ?? event.payload?.workflow_kind),
-        verdict: verdictValue(event.payload?.value),
-      },
-    })
-    return null
+  switch (event.type) {
+    case 'golden.published':
+      return applyGolden(db, orgId, event)
+    case 'run.started':
+    case 'run.finished':
+      return applyRun(db, clock, orgId, event)
+    case 'verdict.recorded':
+      // Counted BEFORE the projection and deliberately not instead of it. This
+      // hook used to sit above the dispatch and return null, because nothing
+      // projected a verdict at the time; main now projects one in applyVerdict,
+      // so returning here would have made that work unreachable while still
+      // type checking and still passing every analytics test.
+      //
+      // Unconditional, and not gated on applyVerdict succeeding: the event says
+      // a verdict arrived, which is true even when the projection cannot hang it
+      // on an environment this control plane has never heard of.
+      //
+      // Reached only for an event the INSERT above actually inserted, so a
+      // resent batch does not count a run twice and this needs no idempotency
+      // of its own. NOTHING IN THE ENGINE EMITS verdict.recorded TODAY:
+      // agent.verdict is one of the five types
+      // engine/internal/controlplane/vocabulary_test.go names as mapped and
+      // emitted by nothing, so the validation funnel is honestly empty rather
+      // than quietly missing.
+      await analytics.record(db, {
+        name: 'validation.run_finished',
+        occurredAt: new Date(event.occurredAt),
+        orgId,
+        payload: {
+          kind: runKind(event.payload?.kind ?? event.payload?.workflow_kind),
+          verdict: verdictValue(event.payload?.value),
+        },
+      })
+      return applyVerdict(db, orgId, event)
+    default:
+      return applyEnvironment(db, clock, orgId, event, analytics)
   }
+}
 
+async function applyEnvironment(
+  db: Db,
+  clock: Clock,
+  orgId: string,
+  event: IncomingEvent,
+  // Carried in because the environment counters live in this half of the
+  // dispatch: advanceExisting and countEnvironment below both record. Main
+  // extracted this function out of applyToProjection, where analytics was
+  // already in scope, so the parameter has to follow the code that uses it.
+  analytics: Analytics,
+): Promise<string | null> {
   const state = STATE_FOR[event.type]
   if (!state || !event.envId) return null
 
@@ -646,6 +673,401 @@ async function advanceExisting(
     `event carries no repository and branch to create it from. Upgrade the engine to a ` +
     `version that reports them, or this environment will not appear in the console.`
   )
+}
+
+
+// ---------------------------------------------------------------------------
+// The projections that were not there
+// ---------------------------------------------------------------------------
+//
+// golden_versions, runs and verdicts had the same defect the environments
+// table had, and it survived the fix to that one because the fix was written
+// as a case for environment.* rather than as a rule about projections. The
+// engine emitted the events, the sink mapped them, this file accepted the
+// types, and STATE_FOR held six keys, so an event of any other type was stored
+// and projected nothing. The only INSERTs into all three tables in the whole
+// repository were the test harness and the staging seeder.
+//
+// That is why nobody saw it. The seeder fills every one of them, so the
+// console's runs list, its verdicts, the goldens quota on the plan page, the
+// masking page's attestation table and the compliance pack's masking control
+// all look right in development and are empty for every real customer. The
+// pack reported "the check ran and found nothing to show" for an organization
+// that produced a signed attestation every night.
+//
+// Each of these follows the rules applyEnvironment already established, and
+// they are stated once here rather than three times below:
+//
+// Existence on first sight, never on a particular event. A row is created by
+// whichever event about it arrives first, because the sink drops the OLDEST
+// events of a failed batch and the oldest event is exactly the one a listener
+// waiting for a "created" event would need.
+//
+// Identity from the payload, not from a join that cannot be made. Every one of
+// these events carries the repository, for the same reason every environment
+// event does: the control plane cannot name a row whose owning repository it
+// has not been told, and golden_versions and runs are both keyed through one.
+//
+// A miss is reported rather than swallowed. An event that cannot be projected
+// returns the sentence saying why, it is counted as unprojected, and the
+// sender is told. A projection that silently drops what it cannot handle is
+// how the first one of these lasted as long as it did.
+
+/**
+ * Records a golden version, and the attestation that says what was scanned.
+ *
+ * Keyed on (org_id, repository_id, version), which is the table's own unique
+ * index, so the announcement `af up` makes on every run collides with the
+ * first one rather than making a row per branch of the same golden.
+ *
+ * verified is last-writer-wins, and that is a deliberate choice rather than an
+ * oversight. There is no sequence column on this table to order two
+ * announcements by, and the engine never announces a version whose
+ * verification state it has not already established: every path that emits one
+ * has either just run the scanner or has read the flag off the provider's
+ * listing. Making it monotonically true instead would mean a golden could
+ * never be recorded as failing verification, which is the single fact the
+ * compliance control exists to surface.
+ *
+ * Everything else is COALESCEd, so a sparse announcement cannot erase
+ * evidence. The pinned and already-verified paths can emit a version they did
+ * not build and therefore have no attestation for, and that event must not
+ * blank the attestation the refresh that built it sent.
+ */
+async function applyGolden(db: Db, orgId: string, event: IncomingEvent): Promise<string | null> {
+  const payload = event.payload ?? {}
+  const version = text(payload.version, 200)
+  const repository = repositoryName(payload.repository)
+
+  if (version === null) {
+    return (
+      'Stored, but the event carries no golden version, so there is nothing to record it ' +
+      'against. This is an engine defect rather than a configuration problem.'
+    )
+  }
+  if (repository === null) {
+    return (
+      `Stored, but the golden ${version} arrived without a repository, and golden_versions is ` +
+      'keyed through one. Upgrade the engine to a version that reports it, or this golden will ' +
+      'not appear in the console and the compliance pack will not count it.'
+    )
+  }
+
+  const repositoryId = await repositoryIdFor(db, orgId, repository)
+  const createdAt = timestamp(payload.created_at) ?? event.occurredAt
+  // The engine's own word. Absent is not false: an announcement that does not
+  // mention verification must not record an unverified golden.
+  const verified = typeof payload.verified === 'boolean' ? payload.verified : null
+  const rulesDigest = text(payload.rules_digest, 200)
+  const sourceDigest = text(payload.source_digest, 200)
+  const sizeBytes = wholeBigNumber(payload.size_bytes)
+  // Stored as jsonb, so a document that is not JSON is stored as nothing
+  // rather than failing the whole event. The compliance pack already reports
+  // an attestation it cannot decode as one that does not verify, so a
+  // malformed document that did reach the column would be read correctly; one
+  // that made the INSERT throw would take the golden row with it.
+  const attestation = jsonDocument(payload.attestation)
+
+  await db.execute(sql`
+    INSERT INTO golden_versions (
+      org_id, repository_id, version, source_digest, rules_digest,
+      verified, attestation, size_bytes, created_at)
+    VALUES (
+      ${orgId}, ${repositoryId}, ${version}, ${sourceDigest}, ${rulesDigest},
+      COALESCE(${verified}::boolean, false), ${attestation}::jsonb,
+      ${sizeBytes}::bigint, ${createdAt}::timestamptz)
+    ON CONFLICT (org_id, repository_id, version) DO UPDATE SET
+      verified = COALESCE(${verified}::boolean, golden_versions.verified),
+      source_digest = COALESCE(EXCLUDED.source_digest, golden_versions.source_digest),
+      rules_digest = COALESCE(EXCLUDED.rules_digest, golden_versions.rules_digest),
+      attestation = COALESCE(EXCLUDED.attestation, golden_versions.attestation),
+      size_bytes = COALESCE(EXCLUDED.size_bytes, golden_versions.size_bytes),
+      -- A golden is as old as the moment it was made, not as old as the last
+      -- run that branched it. The compliance pack selects on created_at
+      -- within a reporting period, so a version that drifted forward on every
+      -- branch would wander out of the period it belongs to.
+      created_at = LEAST(golden_versions.created_at, EXCLUDED.created_at)`)
+
+  return null
+}
+
+/**
+ * Records an agent run, and advances it.
+ *
+ * runs carries no column for the engine's own identifier for a run, and there
+ * is no migration in this change to add one, so the row's primary key is
+ * derived from it instead: a version 5 UUID over the organization, the
+ * environment and the engine's run id. Deterministic, so run.finished finds
+ * the row run.started created without a lookup table, and so a retry that got
+ * past the events unique constraint still cannot make a second run.
+ *
+ * The alternative, a random id plus a run_id column, is the better schema and
+ * it is a migration. This is the same answer with the key computed rather than
+ * stored, and it is written down here so the next person adding that column
+ * knows the ids already in the table are reproducible from the event stream.
+ */
+async function applyRun(
+  db: Db,
+  clock: Clock,
+  orgId: string,
+  event: IncomingEvent,
+): Promise<string | null> {
+  const payload = event.payload ?? {}
+  const runId = text(payload.run_id, 200)
+  if (!event.envId || runId === null) {
+    return (
+      'Stored, but the event names no environment and run, so there is nothing to record. ' +
+      'Upgrade the engine to a version that reports both.'
+    )
+  }
+
+  const environmentId = await environmentIdFor(db, orgId, event, payload)
+  if (environmentId === null) {
+    return (
+      `Stored, but ${event.envId} is not an environment this control plane has heard of, and ` +
+      'the event carries no repository and branch to create it from, so the run has nowhere to ' +
+      'hang. Upgrade the engine to a version that reports them.'
+    )
+  }
+
+  const id = deterministicId(orgId, event.envId, runId)
+  const sequence = event.sequence ?? 0
+  const kind = text(payload.kind, 200) ?? 'workflows'
+  const finished = event.type === 'run.finished'
+  const state = finished ? runStateFrom(payload.state) : 'running'
+  const startedAt = timestamp(payload.started_at) ?? (finished ? null : event.occurredAt)
+  const finishedAt = finished ? event.occurredAt : null
+  const now = clock.now().toISOString()
+
+  await db.execute(sql`
+    INSERT INTO runs (
+      id, org_id, environment_id, kind, state, started_at, finished_at, last_sequence, created_at)
+    VALUES (
+      ${id}::uuid, ${orgId}, ${environmentId}::uuid, ${kind}, ${state}::run_state,
+      ${startedAt}::timestamptz, ${finishedAt}::timestamptz, ${sequence}, ${now}::timestamptz)
+    ON CONFLICT (id) DO UPDATE SET
+      -- Lifecycle only forwards, exactly as the environments projection does
+      -- it, and inside the statement rather than as a read and then a
+      -- decision, so two events landing at once cannot both apply.
+      state = CASE WHEN runs.last_sequence < EXCLUDED.last_sequence
+                   THEN EXCLUDED.state ELSE runs.state END,
+      last_sequence = GREATEST(runs.last_sequence, EXCLUDED.last_sequence),
+      kind = COALESCE(EXCLUDED.kind, runs.kind),
+      started_at = LEAST(
+        COALESCE(runs.started_at, EXCLUDED.started_at),
+        COALESCE(EXCLUDED.started_at, runs.started_at)),
+      -- Never earlier than the start, because both timestamps come from a
+      -- sender this service does not trust and a run that finished before it
+      -- began is a negative duration in every column computed from the pair.
+      finished_at = CASE WHEN EXCLUDED.finished_at IS NULL THEN runs.finished_at
+                         ELSE GREATEST(EXCLUDED.finished_at,
+                                       COALESCE(runs.started_at, EXCLUDED.started_at,
+                                                EXCLUDED.finished_at)) END,
+      created_at = LEAST(runs.created_at, EXCLUDED.created_at)`)
+
+  return null
+}
+
+/**
+ * Records one workflow's verdict.
+ *
+ * Keyed over the run and the workflow, because a workflow produces one verdict
+ * per run and the second copy of an event is a retry rather than a second
+ * opinion. verdicts carries no unique index for ON CONFLICT to name, so the
+ * primary key is the conflict target and it is derived from the identity the
+ * row actually has.
+ */
+async function applyVerdict(db: Db, orgId: string, event: IncomingEvent): Promise<string | null> {
+  const payload = event.payload ?? {}
+  const runId = text(payload.run_id, 200)
+  const workflow = text(payload.workflow, 500)
+  if (!event.envId || runId === null || workflow === null) {
+    return (
+      'Stored, but the event names no environment, run and workflow, so there is no verdict to ' +
+      'record. Upgrade the engine to a version that reports all three.'
+    )
+  }
+
+  const environmentId = await environmentIdFor(db, orgId, event, payload)
+  if (environmentId === null) {
+    return (
+      `Stored, but ${event.envId} is not an environment this control plane has heard of, and ` +
+      'the event carries no repository and branch to create it from, so the verdict has nowhere ' +
+      'to hang. Upgrade the engine to a version that reports them.'
+    )
+  }
+
+  // The run row is created here when the verdict is the first thing to arrive
+  // about it. A verdict whose run event was dropped from an overflowing spool
+  // is the ordinary case, not a hypothetical one, and a verdict that waited
+  // for a run.started that already came and went would wait forever.
+  const runRow = deterministicId(orgId, event.envId, runId)
+  await db.execute(sql`
+    INSERT INTO runs (id, org_id, environment_id, kind, state, created_at)
+    VALUES (${runRow}::uuid, ${orgId}, ${environmentId}::uuid, 'workflows',
+            'running'::run_state, ${event.occurredAt}::timestamptz)
+    ON CONFLICT (id) DO NOTHING`)
+
+  const value = verdictValueFrom(payload.value)
+  await db.execute(sql`
+    INSERT INTO verdicts (
+      id, org_id, run_id, workflow, persona, value, summary, steps, duration_ms,
+      reproduction, created_at)
+    VALUES (
+      ${deterministicId(runRow, workflow, '')}::uuid, ${orgId}, ${runRow}::uuid,
+      ${workflow}, ${text(payload.persona, 200)}, ${value}::verdict_value,
+      ${text(payload.summary, 4000)}, ${wholeNumber(payload.steps) ?? 0},
+      ${wholeNumber(payload.duration_ms)}, ${jsonDocument(payload.reproduction)}::jsonb,
+      ${event.occurredAt}::timestamptz)
+    ON CONFLICT (id) DO UPDATE SET
+      persona = COALESCE(EXCLUDED.persona, verdicts.persona),
+      value = EXCLUDED.value,
+      summary = COALESCE(EXCLUDED.summary, verdicts.summary),
+      steps = GREATEST(verdicts.steps, EXCLUDED.steps),
+      duration_ms = COALESCE(EXCLUDED.duration_ms, verdicts.duration_ms),
+      reproduction = COALESCE(EXCLUDED.reproduction, verdicts.reproduction)`)
+
+  return null
+}
+
+/**
+ * The environment a run or a verdict hangs off, created if this is the first
+ * the control plane has heard of it.
+ *
+ * The same shape as repositoryIdFor and for the same reason: refusing would
+ * mean an agent run reported after its environment's own events were dropped
+ * could never appear at all, and that failure looks exactly like the empty
+ * console this change exists to fix.
+ *
+ * The row it creates is deliberately inert. state is left at the column
+ * default and last_sequence at zero, so the first environment lifecycle event
+ * to arrive advances it normally: a run event carries a high sequence number
+ * and writing that number here would make every environment event that
+ * followed look stale and leave the environment reading "queued" forever.
+ */
+async function environmentIdFor(
+  db: Db,
+  orgId: string,
+  event: IncomingEvent,
+  payload: Record<string, unknown>,
+): Promise<string | null> {
+  const found = await db.execute<{ id: string }>(sql`
+    SELECT id FROM environments WHERE org_id = ${orgId} AND env_id = ${event.envId ?? null}`)
+  if (found[0]) return found[0].id
+
+  const repository = repositoryName(payload.repository)
+  const branch = text(payload.branch, 255)
+  if (repository === null || branch === null) return null
+
+  const repositoryId = await repositoryIdFor(db, orgId, repository)
+  const created = await db.execute<{ id: string }>(sql`
+    INSERT INTO environments (org_id, repository_id, env_id, branch, created_at, updated_at)
+    VALUES (${orgId}, ${repositoryId}, ${event.envId ?? null}, ${branch},
+            ${event.occurredAt}::timestamptz, ${event.occurredAt}::timestamptz)
+    ON CONFLICT (org_id, env_id) DO NOTHING
+    RETURNING id`)
+  if (created[0]) return created[0].id
+
+  const raced = await db.execute<{ id: string }>(sql`
+    SELECT id FROM environments WHERE org_id = ${orgId} AND env_id = ${event.envId ?? null}`)
+  return raced[0]?.id ?? null
+}
+
+/**
+ * A UUID derived from what a row is about rather than from randomness.
+ *
+ * Version 5, name-based, over SHA-1, which is what the standard specifies and
+ * is not being relied on for anything a collision would matter to: the inputs
+ * are already scoped to one organization, and two of them colliding would take
+ * a deliberate construction rather than an accident.
+ *
+ * It exists so that two events about the same thing, arriving in either order,
+ * write one row without a column to join them on.
+ */
+function deterministicId(a: string, b: string, c: string): string {
+  const hash = createHash('sha1').update(`${a} ${b} ${c}`).digest()
+  // Version 5 and the RFC 4122 variant, stamped into the bytes the standard
+  // reserves for them, so the value is a UUID rather than a hash that fits in
+  // one.
+  hash[6] = (hash[6]! & 0x0f) | 0x50
+  hash[8] = (hash[8]! & 0x3f) | 0x80
+  const hex = hash.subarray(0, 16).toString('hex')
+  return [
+    hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20, 32),
+  ].join('-')
+}
+
+const RUN_STATES = new Set(['queued', 'running', 'complete', 'failed', 'cancelled'])
+
+/** The run state a finished run reports, defaulting to complete.
+ *
+ *  A word this control plane does not know is complete rather than failed: the
+ *  run happened and this service could not read its outcome, and charging a
+ *  newer engine's vocabulary to the customer's application is the mistake the
+ *  blocked verdict exists to prevent. */
+function runStateFrom(value: unknown): string {
+  return typeof value === 'string' && RUN_STATES.has(value) ? value : 'complete'
+}
+
+const VERDICT_VALUES = new Set(['pass', 'fail', 'flaky', 'blocked', 'unverified'])
+
+/** The verdict a workflow reached, or unverified.
+ *
+ *  A word this control plane cannot read is unverified rather than pass or
+ *  fail, for the same reason the engine renders it as blocked: a verdict
+ *  nobody here understood is not evidence about the application in either
+ *  direction. */
+function verdictValueFrom(value: unknown): string {
+  return typeof value === 'string' && VERDICT_VALUES.has(value) ? value : 'unverified'
+}
+
+/** A timestamp a statement can use, or null. The same untrusted sender writes
+ *  it that writes occurredAt. */
+function timestamp(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return null
+  return at.toISOString()
+}
+
+/** A count that may exceed what an integer column holds, for bigint columns. */
+function wholeBigNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null
+  if (value < 0 || value > Number.MAX_SAFE_INTEGER) return null
+  return value
+}
+
+/**
+ * A jsonb column's value, or null.
+ *
+ * The payload has already been through JSON.parse to get here, so a string is
+ * a document that was serialised twice: the engine's event fields are strings
+ * and an attestation is a JSON document inside one. Parsed rather than stored
+ * as a JSON string, because a column holding a quoted document reads as text
+ * to every query written against it and the compliance pack casts it to text
+ * and parses it again.
+ *
+ * A string that is not JSON is stored as null rather than thrown, because one
+ * malformed field must not discard the row it is attached to.
+ */
+function jsonDocument(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed.length === 0) return null
+    try {
+      JSON.parse(trimmed)
+    } catch {
+      return null
+    }
+    return trimmed
+  }
+  if (typeof value !== 'object') return null
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return null
+  }
 }
 
 /**

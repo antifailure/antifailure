@@ -2,7 +2,7 @@
 title: Django
 description: Running Django's own migrations against a branch, and the three settings that decide whether it works.
 sidebar:
-  order: 13
+  order: 17
 ---
 
 Django needs nothing Antifailure specific either, and the interesting part is

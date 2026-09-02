@@ -20,10 +20,34 @@ import (
 const RuleSurprise = "egress_surprise"
 
 // Summarise counts the decision log and names the hosts nothing declared.
+//
+// It also splits the sandbox calls into the ones whose credential was replaced
+// on the way out and the ones whose was not. That split used to live only in
+// Observe, which the MCP server calls and the command line does not, so `af
+// ci` could report "4 allowed" over four requests that carried the
+// application's own live credential and had no way to say so.
 func Summarise(decisions []local.Decision) *report.Egress {
 	out := &report.Egress{}
 	surprises := map[string]bool{}
+	// Hosts a sandbox rule let out without replacing the credential. Kept as
+	// a set so one provider called forty times is named once.
+	leaked := map[string]bool{}
 	for _, d := range decisions {
+		if d.Mode == "sandbox" {
+			out.Sandbox++
+			if d.Substituted {
+				out.Substituted++
+			} else {
+				// The containment failure that presents as a success. The
+				// sidecar records Substituted only when a value existed for
+				// the rule's credential name, so this counts the requests
+				// that carried whatever the application sent.
+				out.Unsubstituted++
+				if d.Host != "" {
+					leaked[d.Host] = true
+				}
+			}
+		}
 		switch d.Mode {
 		case "allow", "sandbox":
 			out.Allowed++
@@ -45,6 +69,10 @@ func Summarise(decisions []local.Decision) *report.Egress {
 		out.Surprises = append(out.Surprises, host)
 	}
 	sort.Strings(out.Surprises)
+	for host := range leaked {
+		out.UnsubstitutedHosts = append(out.UnsubstitutedHosts, host)
+	}
+	sort.Strings(out.UnsubstitutedHosts)
 	return out
 }
 

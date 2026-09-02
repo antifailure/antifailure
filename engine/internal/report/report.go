@@ -108,6 +108,25 @@ type Egress struct {
 	// Surprises are refused hosts nothing in the manifest mentions, which is
 	// usually a dependency somebody added without noticing.
 	Surprises []string
+	// Sandbox is how many requests a sandbox rule decided.
+	Sandbox int
+	// Substituted is how many of those had their credential replaced on the
+	// way out, which is the whole difference between a sandbox rule and a
+	// request that merely says sandbox in the log.
+	Substituted int
+	// Unsubstituted is how many a sandbox rule let out WITHOUT replacing the
+	// credential, so the application's own credential reached the provider.
+	//
+	// The sidecar substitutes only when a value was configured for the rule's
+	// credential name. When none was, it forwards whatever the application
+	// sent, and in every other column that request is identical to a working
+	// sandbox call: allowed, mode sandbox, the rule named, a normal status.
+	// The only evidence is this number, and until it was here nothing counted
+	// it, so the report said "4 allowed" and could not say whether those four
+	// carried a sandbox credential or a live one.
+	Unsubstituted int
+	// UnsubstitutedHosts names where those went, so the line is actionable.
+	UnsubstitutedHosts []string
 }
 
 // Verification is the environment's own branch read back.
@@ -588,6 +607,22 @@ func (r Run) Markdown() string {
 	if e := r.Egress; e != nil {
 		fmt.Fprintf(&b, "Outbound: %d allowed, %d refused, %d captured, %d mocked.\n",
 			e.Allowed, e.Refused, e.Captured, e.Mocked)
+		if e.Sandbox > 0 {
+			// Stated either way. "All 4 sandbox calls had the credential
+			// replaced" is worth a line precisely because its absence is the
+			// thing that matters, and a reader who only ever sees the line
+			// when something is wrong learns nothing from its absence.
+			fmt.Fprintf(&b, "Sandbox: %d of %d calls had the credential replaced on the way out.\n",
+				e.Substituted, e.Sandbox)
+		}
+		if e.Unsubstituted > 0 {
+			fmt.Fprintf(&b,
+				"%s left under a sandbox rule WITHOUT the credential being replaced, so the "+
+					"application's own credential reached %s. Set the sandbox credential the "+
+					"rule names.\n",
+				plural(e.Unsubstituted, "1 request", fmt.Sprintf("%d requests", e.Unsubstituted)),
+				strings.Join(e.UnsubstitutedHosts, ", "))
+		}
 		if len(e.Surprises) > 0 {
 			fmt.Fprintf(&b,
 				"Refused hosts nothing in the manifest mentions: %s. If this change means to reach one, add a rule.\n",

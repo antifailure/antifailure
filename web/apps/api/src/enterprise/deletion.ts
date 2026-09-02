@@ -545,9 +545,37 @@ async function readFinished(deps: DeletionDeps, orgId: string): Promise<Deletion
  * developer's machine and does not pretend otherwise. That is a real limit of
  * this step and it is the same limit `environments.teardown` has.
  */
-async function stopWork(deps: DeletionDeps, orgId: string): Promise<boolean> {
+export async function stopWork(deps: DeletionDeps, orgId: string): Promise<boolean> {
   return deps.pool.withTenant({ orgId }, async (db) => {
     const now = deps.clock.now().toISOString()
+
+    // The claim comes first, before any work, and that ordering is the whole
+    // point of it.
+    //
+    // It used to be the last of four statements: tear down the environments,
+    // cancel the runs, suspend the organization, and only then try to mark the
+    // record. The comment above advanceDeletion says every step's write
+    // carries `WHERE <its timestamp> IS NULL` so two callers arriving at once
+    // do not both do it, and that was true of this bookkeeping row and false
+    // of the three statements that do the actual work. A second caller ran all
+    // three and was then told, at the very end, that it had lost: stopped at
+    // the point where stopping it no longer meant anything.
+    //
+    // It was not reachable as data loss, because each work statement locks the
+    // rows it touches and re-evaluates its WHERE after the winner commits, so
+    // the loser found nothing left to change. That is a real protection and it
+    // is not the one the comment describes, it is not written down anywhere,
+    // and it evaporates the moment a step touches a row nobody else locks.
+    // Claiming first makes the documented mechanism the actual one: the loser
+    // blocks here, re-reads after the winner commits, matches nothing, and
+    // returns before it has touched an environment.
+    const marked = await db.execute<{ id: string }>(sql`
+      UPDATE organization_deletions
+      SET work_stopped_at = ${now}, updated_at = ${now}
+      WHERE org_id = ${orgId}::uuid AND work_stopped_at IS NULL
+        AND purged_at IS NULL AND cancelled_at IS NULL
+      RETURNING id`)
+    if (marked.length === 0) return false
 
     const environments = await db.execute<{ id: string }>(sql`
       UPDATE environments SET state = 'torn_down', torn_down_at = ${now}, updated_at = ${now}
@@ -566,14 +594,18 @@ async function stopWork(deps: DeletionDeps, orgId: string): Promise<boolean> {
           suspended_by = 'the deletion this organization asked for', updated_at = ${now}
       WHERE id = ${orgId}::uuid AND suspended_at IS NULL`)
 
-    const marked = await db.execute<{ id: string }>(sql`
+    // Recorded by the caller that did the work, which is now necessarily the
+    // caller that holds the claim. Before, the counts came from whoever won
+    // the final statement, and the loser's counts were zero because the winner
+    // had already changed every row it would have counted. A ledger saying
+    // zero environments were stopped on a deletion that stopped one is worse
+    // than no ledger, because it is the record somebody reads afterwards to
+    // find out what happened.
+    await db.execute(sql`
       UPDATE organization_deletions
-      SET work_stopped_at = ${now}, environments_stopped = ${environments.length},
+      SET environments_stopped = ${environments.length},
           runs_cancelled = ${runs.length}, updated_at = ${now}
-      WHERE org_id = ${orgId}::uuid AND work_stopped_at IS NULL
-        AND purged_at IS NULL AND cancelled_at IS NULL
-      RETURNING id`)
-    if (marked.length === 0) return false
+      WHERE org_id = ${orgId}::uuid`)
 
     await appendAudit(db, {
       orgId,
