@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Badge,
   Card,
+  CellLink,
   Empty,
   Loaded,
   Page,
@@ -77,9 +78,16 @@ export default function AdminTenantsPage() {
                     {page.rows.map((t) => (
                       <Row key={t.id}>
                         {/* No label on this one: it names the row, and leads
-                            the stacked record on a phone by itself. */}
+                            the stacked record on a phone by itself.
+
+                            A link on the NAME rather than a whole clickable
+                            row: a row that navigates on click has no keyboard
+                            equivalent and no address to copy, and CellLink is
+                            already 44px tall under a thumb. */}
                         <Td>
-                          <span className="block truncate font-medium text-ink">{t.name}</span>
+                          <CellLink href={`/admin/tenant?org=${encodeURIComponent(t.slug)}`}>
+                            <span className="block truncate font-medium text-ink">{t.name}</span>
+                          </CellLink>
                           <span className="block truncate font-mono text-[12px] text-muted">
                             {t.slug}
                           </span>
