@@ -103,7 +103,7 @@ export function TaskTable({
             {heading}
           </div>
           <div className="shrink-0 font-mono text-[10px] tracking-extra-tight text-gray-new-40">
-            {last ? last.date : "—"}
+            {last ? last.date : "no runs"}
             {steps ? ` · ${pad(steps)}` : null}
           </div>
         </div>

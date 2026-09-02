@@ -80,7 +80,7 @@ function SideRow({
             miss ? "text-[#8A6A12]" : "text-[#285D49]",
           )}
         >
-          {miss ? "—" : `↔ ${via}`}
+          {miss ? "no match" : `↔ ${via}`}
         </div>
       </div>
       {side === "sellers" ? (
