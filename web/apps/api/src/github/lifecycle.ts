@@ -31,6 +31,7 @@ import { randomBytes, createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import { suspensionReason } from '../ingest.ts'
 import { GitHubApiError, GitHubPermissionError, type RepositoryApi } from './api.ts'
 import {
   CHECK_NAME,
@@ -1403,6 +1404,38 @@ export async function issueCallback(
   const token = randomBytes(32).toString('base64url')
   const hash = hashCallback(token)
   const now = deps.clock.now()
+
+  // A suspended organization is refused here, where the credential is minted,
+  // rather than only at /v1/events where it was already refused. A customer
+  // whose organization is stopped used to watch this call succeed and then
+  // watch ingestion fail, which points them at the reporting path instead of at
+  // their billing state.
+  //
+  // Its own read rather than a clause in the transaction below. That
+  // transaction is scoped to the GitHub account, and from that scope the
+  // organizations table is reachable only through the policy matching
+  // organizations.github_login against the account, so an organization whose
+  // installation sits on any other login reads back as zero rows: silence that
+  // is indistinguishable from "not suspended", on the one question being asked.
+  // suspensionReason runs under the tenant, where the ordinary policy covers it,
+  // and it is the same function /v1/events calls, so the two paths cannot drift
+  // apart on what counts as suspended.
+  //
+  // Missing repository is left to the transaction, which owns that sentence.
+  const owner = await deps.pool.withGitHubAccount(login, (db) =>
+    repositoryByName(db, claim.repository),
+  )
+  if (owner) {
+    const suspended = await suspensionReason(deps.pool, owner.org_id)
+    if (suspended !== null) {
+      return {
+        refused:
+          `This organization is suspended, so no credential is issued for ` +
+          `${shortSha(claim.headSha)}: ${suspended}. Checks that are already running are ` +
+          `untouched.`,
+      }
+    }
+  }
 
   const result: { refused: string } | { generationId: string } = await deps.pool.withGitHubAccount(
     login,
