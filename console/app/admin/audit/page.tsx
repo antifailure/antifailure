@@ -17,6 +17,7 @@ import {
   selectClass,
   type Tone,
 } from "@/components/ui";
+import { More } from "@/components/pagination";
 import { useAdminAudit, type AdminAuditEntry } from "@/lib/admin";
 
 /**
@@ -78,8 +79,8 @@ export default function AdminAuditPage() {
     >
       <Card>
         <Loaded state={state} skeleton={<TableSkeleton rows={8} cols={5} />}>
-          {(page) =>
-            page.rows.length === 0 ? (
+          {(rows) =>
+            rows.length === 0 ? (
               <Empty title={severity ? "Nothing at that severity" : "Nothing recorded yet"}>
                 {severity
                   ? "No operator action has been recorded at that severity. Choose all severities to see the whole log."
@@ -99,7 +100,7 @@ export default function AdminAuditPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {page.rows.map((e) => (
+                    {rows.map((e) => (
                       <Row key={e.seq}>
                         {/* The chain position. Numeric so the column lines up,
                             and it is the number somebody quotes when reporting
@@ -140,6 +141,14 @@ export default function AdminAuditPage() {
                     ))}
                   </tbody>
                 </Table>
+                <More
+                  shown={rows.length}
+                  noun={{ one: "entry", many: "entries" }}
+                  hasMore={state.hasMore}
+                  busy={state.busy}
+                  error={state.moreError}
+                  onMore={state.more}
+                />
               </TableWrap>
             )
           }

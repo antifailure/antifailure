@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
+// LOCAL REVIEW ONLY, reverted immediately after.
+const proxyForLocalReview = async () => [
+  { source: '/trpc/:path*', destination: 'http://127.0.0.1:8080/trpc/:path*' },
+  { source: '/v1/:path*', destination: 'http://127.0.0.1:8080/v1/:path*' },
+  { source: '/auth/:path*', destination: 'http://127.0.0.1:8080/auth/:path*' },
+]
+
 const nextConfig: NextConfig = {
+  rewrites: proxyForLocalReview,
   reactStrictMode: true,
   outputFileTracingRoot: path.resolve(__dirname),
   turbopack: { root: path.resolve(__dirname) },

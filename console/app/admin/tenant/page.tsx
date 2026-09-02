@@ -15,7 +15,7 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
-import { operatorMay, resumeTenant, suspendTenant, useAdminContext, useTenants } from "@/lib/admin";
+import { operatorMay, resumeTenant, suspendTenant, useAdminContext, useTenant } from "@/lib/admin";
 import type { ApiError } from "@/lib/api";
 
 /**
@@ -171,7 +171,7 @@ function Detail() {
   // The list route is the one that can find a tenant by slug, and it is the
   // only read this page needs. A second detail route would be a second query
   // to keep in step with this screen.
-  const state = useTenants(slug ?? "");
+  const state = useTenant(slug ?? "");
 
   if (!slug) {
     return (
