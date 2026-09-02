@@ -61,5 +61,5 @@ exactly what it received rather than against what you think it received.
 from a fixture pack, and a pack may include events to deliver, which is how a
 provider with no sandbox still exercises a callback path.
 
-Related: [egress](/docs/concepts/egress/), [mocking](/docs/guides/mocking/),
-[sandbox credentials](/docs/guides/sandbox/).
+Related: [egress](/docs/concepts/egress), [mocking](/docs/guides/mocking),
+[sandbox credentials](/docs/guides/sandbox).

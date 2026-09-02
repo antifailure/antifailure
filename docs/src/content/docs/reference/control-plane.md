@@ -122,7 +122,7 @@ guessing upward would hand out administrative rights on a timeout, and that
 applies to the first member of an empty organization as well: GitHub has to say
 `admin` for anybody to become an owner. If the App is permanently broken and
 that leaves an organization with nobody who can act, the way back is
-[break-glass](/docs/self-hosting/operations/#nobody-can-sign-in), which is an
+[break-glass](/docs/self-hosting/operations#nobody-can-sign-in), which is an
 operator holding the database credential rather than a guess made by a web
 request.
 
@@ -268,11 +268,11 @@ the database a question. It answers `200` with the build, or `503` with the
 reason:
 
 ```json
-{ "ready": true, "version": "v0.2.0", "commit": "31ce3f7" }
+{ "ready": true, "version": "v1.0.0", "commit": "31ce3f7" }
 ```
 
 ```json
-{ "ready": false, "version": "v0.2.0", "commit": "31ce3f7",
+{ "ready": false, "version": "v1.0.0", "commit": "31ce3f7",
   "reason": "password authentication failed for user \"af_app\"" }
 ```
 

@@ -7,11 +7,14 @@ Answering "why did this account's run fail" has needed somebody who can look at
 another organization's rows. Nothing in the schema allowed that, so in practice
 it would have happened through a shared password at a psql prompt, where
 nothing is recorded. `antifailure_admin` is that access made explicit: a
-separate role with BYPASSRLS, which is the only mechanism that reads two
-tenants at once now that every table carries FORCE ROW LEVEL SECURITY. It reads
-widely and writes narrowly, to exactly the actions the portal offers, and it
-gets INSERT and SELECT on the audit log and never UPDATE, so an operator cannot
-rewrite the record of what operators did.
+separate role with BYPASSRLS. It reads widely and writes narrowly, to exactly
+the actions the portal offers, and it gets INSERT and SELECT on the audit log
+and never UPDATE, so an operator cannot rewrite the record of what operators
+did.
+
+A role rather than a policy because the cost of a policy scales with the number
+of tables, so it is a boundary somebody eventually forgets to extend, and the
+forgotten table is silently invisible rather than loudly broken.
 
 It is a role rather than a privilege on purpose. The application cannot be
 granted its way into it, because reaching it means opening a connection with a

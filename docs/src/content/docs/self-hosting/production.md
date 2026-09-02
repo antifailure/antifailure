@@ -9,7 +9,7 @@ The production control plane is one `terraform apply` and eight things a person
 has to do in a browser or a shell, and the order matters because several of them
 fail if done early.
 
-Read [Azure](/docs/self-hosting/azure/) first. Everything on that page about
+Read [Azure](/docs/self-hosting/azure) first. Everything on that page about
 policy, regions, the Key Vault name and the revision mode trap applies here and
 is not repeated.
 
@@ -225,11 +225,12 @@ Organization permissions:
 **Grant Actions write at creation even if the console's controls are not in
 use yet.** It is the one on this list where waiting is worse than granting:
 widening an existing App's permissions makes GitHub ask every installation to
-accept the new grant, so adding it later interrupts every customer. Those three
-controls dispatch a `workflow_dispatch` run of the customer's own workflow
-through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and without the
-permission GitHub answers 404, which is the same answer it gives for a missing
-workflow file.
+accept the new grant, so adding it later interrupts every customer, and until
+somebody accepts, the App declares a permission that no installation holds.
+Those three controls dispatch a `workflow_dispatch` run of the customer's own
+workflow through `dispatchWorkflow` in `web/apps/api/src/auth/github.ts`, and
+without the permission GitHub refuses with
+`403 Resource not accessible by integration`.
 
 **Checks used to say "do not grant this" here, and that was right at the time:
 nothing called the Checks API.** Something does now. Without it, a pull request
@@ -380,6 +381,6 @@ it refuses cleanly if any of the above was skipped.
   0 and it fires on two failed probe locations.
 - Run the backup drill and write down the number it prints. That number is your
   recovery time objective and nothing else is. The
-  [operations page](/docs/self-hosting/operations/) has the command.
-- The [runbooks](/docs/self-hosting/runbooks/) are the pages the alerts link to.
+  [operations page](/docs/self-hosting/operations) has the command.
+- The [runbooks](/docs/self-hosting/runbooks) are the pages the alerts link to.
   Read the index once now, while nothing is broken.

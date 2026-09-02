@@ -228,6 +228,28 @@ jobs:
           # signing if it is true.
           (cd dist && sha256sum --check --ignore-missing checksums.txt)
 
+      - name: The release notes
+        # Written by hand, and this is also the step that refuses to publish a
+        # release with nothing to say. generate_release_notes was a list of
+        # merged pull requests, which over this release span is a wall and is
+        # the first thing somebody deciding whether to buy this reads.
+        #
+        # The preamble lives inside this command rather than in a `body:` block
+        # below, and that is not tidying. action-gh-release tries `body_path`
+        # first and falls back to `body` only when the path cannot be read, so
+        # the moment a notes file reads successfully the block is dropped,
+        # silently, with this step still green. The verification instructions
+        # would have vanished from every release note and nothing would have
+        # gone red. One emitter, no second copy to lose.
+        run: |
+          go run ./tools/relnotes \
+            -tag "$GITHUB_REF_NAME" \
+            -repo "${{ github.repository }}" \
+            -ref "${{ github.ref }}" \
+            -out release-notes.md .
+          echo "--- notes ---"
+          cat release-notes.md
+
       - name: Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
@@ -245,39 +267,7 @@ jobs:
           # Read out of the action's own src/main.ts at the pinned commit, where
           # an unmatched pattern is a console.warn unless this is set.
           fail_on_unmatched_files: true
-          generate_release_notes: true
-          # Prepended above the generated commit list. A signature nobody knows
-          # how to check is decoration, so the instructions ship with the thing
-          # they verify rather than in a documentation page a person would have
-          # to know exists. The longer version, including how to rebuild these
-          # archives yourself, is at antifailure.dev/docs/security/releases.
-          body: |
-            ### Verifying this release
-
-            `checksums.txt` names every archive by hash, and it is signed, so
-            checking the signature once covers all of them.
-
-            ```sh
-            cosign verify-blob \
-              --bundle checksums.txt.sigstore.json \
-              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
-              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-              checksums.txt
-
-            sha256sum --check --ignore-missing checksums.txt
-            ```
-
-            There is no public key to fetch. The certificate inside the bundle
-            records which workflow, in which repository, at which tag produced
-            these files, and `--certificate-identity` is what makes the check
-            mean something: without it you would be verifying that somebody
-            signed this, rather than that we did.
-
-            `sbom.spdx.json` lists what is inside the binaries, read out of the
-            built artifacts rather than from `go.mod`. It is signed the same
-            way, substituting its own bundle.
-
-            These archives are reproducible. Building this tag again produces
-            the same bytes, so you can check the hash above against one you
-            built yourself rather than taking ours:
-            antifailure.dev/docs/security/releases.
+          # Deliberately off. The generated notes are the merged pull request
+          # list, and the step above produces the notes a person should read.
+          generate_release_notes: false
+          body_path: release-notes.md

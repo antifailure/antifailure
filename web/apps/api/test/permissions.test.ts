@@ -53,6 +53,10 @@ function inputsFor(org: Org): Record<string, unknown> {
     // PRECONDITION_FAILED, which is what the matrix accepts and what proves the
     // gate let the call through rather than what GitHub then made of it.
     'environments.create': { repository: org.repository, branch: 'main' },
+    // Guarded by environments.create, because it answers one question about
+    // that one route: whether pressing it would work. It refuses nothing, so
+    // an allowed role gets an answer here rather than PRECONDITION_FAILED.
+    'environments.readiness': { repository: org.repository },
     'agents.run': { envId: org.envId },
     'load.run': { envId: org.envId },
     'runs.list': { envId: org.envId },
