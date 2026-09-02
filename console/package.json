@@ -1,6 +1,6 @@
 {
   "name": "@antifailure/console",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "The control plane's web application, served by the control plane itself.",
   "license": "MIT",
