@@ -112,6 +112,7 @@ var notASurface = map[string]string{
 	".govulncheck.yaml":      "vulnerability suppressions, which carry their own expiry gate",
 	".npmaudit.yaml":         "advisory suppressions, same",
 	".vale.ini":              "prose style configuration",
+	"CHANGELOG.md":           "what the fragments become, so requiring one to edit it would be circular",
 	"CODE_OF_CONDUCT.md":     "documentation",
 	"CONTRIBUTING.md":        "documentation",
 	"LICENSE":                "the licence text",

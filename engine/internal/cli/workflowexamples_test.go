@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/cli"
@@ -105,6 +107,12 @@ func checkFlagValues(line string) string {
 		return ""
 	}
 	if err := cmd.ParseFlags(rest); err != nil {
+		// pflag reports --help as an error so that a caller stops parsing, not
+		// because anything is wrong with the line. `af --help` is a real
+		// invocation and documenting it is not a defect.
+		if errors.Is(err, pflag.ErrHelp) {
+			return ""
+		}
 		return err.Error()
 	}
 	// -C names a directory that has to exist, and an example is entitled to

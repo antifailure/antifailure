@@ -89,7 +89,9 @@ test("a deployment with no connection string answers 503, not 400", async () => 
     assert.equal(context.res.status, 503);
     assert.deepEqual(JSON.parse(context.res.body), {
       ok: false,
+      code: "waitlist_unavailable",
       message: "The waitlist is temporarily unavailable. Please try again later.",
+      resolution: "Wait a minute and submit the same address again.",
     });
     assert.equal(context.logged.length, 1, "a misconfigured deployment is worth a log line");
     assert.match(String(context.logged[0][0]), /not configured/);
@@ -126,7 +128,11 @@ test("a surprise from inside is a 503 with our body, not the host's 500", async 
   await handler(context, { headers: {}, body: { email: "someone@example.test" } });
 
   assert.equal(context.res.status, 503);
-  assert.equal(JSON.parse(context.res.body).ok, false);
+  const body = JSON.parse(context.res.body);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, "waitlist_unavailable");
+  assert.ok(body.message);
+  assert.ok(body.resolution);
   assert.ok(!context.res.body.includes("something nobody predicted"), "the error text must not reach the caller");
   assert.equal(context.logged.length, 1);
 });

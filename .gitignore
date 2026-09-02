@@ -151,12 +151,15 @@ runner/artifacts/
 /readability
 /release
 /releasecheck
+/relnotes
+/relpack
 /reltar
 /sbomcheck
 /scanrepo
 /schemadoc
 /site
 /statuscheck
+/tagsync
 /vulncheck
 /walkthrough
 engine/af-proxy
