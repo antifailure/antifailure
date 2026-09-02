@@ -44,7 +44,7 @@ func newGetRunTool(p *Project, store *Store) *Tool {
 			"one response as evidence_cursor to read the next page.",
 		Input: &Schema{
 			Type:     "object",
-			Required: []string{"run_id"},
+			Required: []string{"project_id", "run_id"},
 			Properties: map[string]*Schema{
 				"run_id":     runIDSchema(),
 				"project_id": projectIDSchema(),
@@ -88,7 +88,7 @@ func newCancelRunTool(p *Project, store *Store) *Tool {
 			"cancelled and keeps the verdict it reached.",
 		Input: &Schema{
 			Type:     "object",
-			Required: []string{"run_id"},
+			Required: []string{"project_id", "run_id"},
 			Properties: map[string]*Schema{
 				"run_id":     runIDSchema(),
 				"project_id": projectIDSchema(),

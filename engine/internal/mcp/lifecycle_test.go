@@ -52,10 +52,21 @@ func newHarness(t *testing.T) *harness {
 	h.server.Register(newCancelRunTool(project, h.store))
 	h.server.Register(&Tool{
 		Name: "fake_rehearsal",
-		Input: &Schema{Type: "object", Properties: map[string]*Schema{
-			"idempotency_key": idempotencyKeySchema(),
-		}},
+		// Declared exactly as a real submitting tool is, project_id required
+		// and all, so that what this harness exercises is the shape the server
+		// actually serves rather than a laxer one.
+		Input: &Schema{
+			Type:     "object",
+			Required: []string{"project_id"},
+			Properties: map[string]*Schema{
+				"project_id":      projectIDSchema(),
+				"idempotency_key": idempotencyKeySchema(),
+			},
+		},
 		Handler: func(_ context.Context, call *Call, args map[string]any) (any, *Fault) {
+			if fault := project.checkAssertion(args); fault != nil {
+				return nil, fault
+			}
 			return h.engine.Submit(call, "fake_rehearsal", args,
 				func(ctx context.Context, runID string) (string, *ResultBody, *Fault) {
 					h.started <- struct{}{}
@@ -95,6 +106,11 @@ func manyRefs(n int) []Evidence {
 // call drives one tool call and returns the structured result.
 func (h *harness) call(t *testing.T, name string, args map[string]any) map[string]any {
 	t.Helper()
+	// project_id is required on every tool, so the harness supplies it unless
+	// a test is deliberately testing its absence.
+	if _, set := args["project_id"]; !set {
+		args["project_id"] = "test-project"
+	}
 	body, err := json.Marshal(map[string]any{"name": name, "arguments": args})
 	require.NoError(t, err)
 	frames := initFrame + "\n" +
@@ -227,3 +243,91 @@ func TestLifecycle_AFailedRunCarriesItsCodeAndNotItsCause(t *testing.T) {
 
 // errSecretHostDetail stands in for an engine error that names the machine.
 var errSecretHostDetail = &Fault{Code: FaultInternal, Detail: "/var/secret/host/path"}
+
+func TestLifecycle_ProjectIDIsRequiredOnEveryTool(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+
+	// The failure this guards against is an agent with several of these
+	// servers configured, one per repository, routing a call to the wrong one.
+	// Optional would answer it against the wrong checkout and hand back a
+	// confident verdict about code nobody asked about.
+	for _, tool := range []string{"get_rehearsal_run", "cancel_rehearsal_run", "fake_rehearsal"} {
+		// Built by hand rather than through h.call, because that helper fills
+		// project_id in when it is missing and this test needs it genuinely
+		// absent.
+		args := map[string]any{}
+		if tool != "fake_rehearsal" {
+			args["run_id"] = "run_00000000000000000000000000000000"
+		}
+
+		body, err := json.Marshal(map[string]any{"name": tool, "arguments": args})
+		require.NoError(t, err)
+		frames := initFrame + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":` + string(body) + "}\n"
+		out := &bytes.Buffer{}
+		require.NoError(t, h.server.Serve(context.Background(), bytes.NewBufferString(frames), out))
+
+		var last map[string]any
+		dec := json.NewDecoder(out)
+		for dec.More() {
+			var m map[string]any
+			require.NoError(t, dec.Decode(&m))
+			last = m
+		}
+		sc := last["result"].(map[string]any)["structuredContent"].(map[string]any)
+		require.Equal(t, string(FaultInvalidArgument), sc["code"],
+			"%s must refuse a call that does not name the project", tool)
+		require.Equal(t, "project_id", sc["field"], "tool %s", tool)
+	}
+}
+
+func TestLifecycle_TheServerNamesItselfSoTheValueCanBeLearned(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	// Requiring a field an agent has no way to learn would just be a wall.
+	// The identity appears in the handshake instructions and on every tool
+	// description, because a client rendering a tool picker may never show
+	// the instructions block.
+	out := &bytes.Buffer{}
+	require.NoError(t, h.server.Serve(context.Background(),
+		bytes.NewBufferString(initFrame+"\n"+
+			`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`+"\n"), out))
+
+	dec := json.NewDecoder(out)
+	var init, list map[string]any
+	require.NoError(t, dec.Decode(&init))
+	require.NoError(t, dec.Decode(&list))
+
+	instructions := init["result"].(map[string]any)["instructions"].(string)
+	require.Contains(t, instructions, "test-project")
+
+	for _, raw := range list["result"].(map[string]any)["tools"].([]any) {
+		tool := raw.(map[string]any)
+		require.Contains(t, tool["description"], "test-project",
+			"tool %v must name the project it serves", tool["name"])
+	}
+}
+
+func TestProject_CheckAssertionRefusesAnAbsentProjectDirectly(t *testing.T) {
+	t.Parallel()
+	// The schema's Required list refuses an absent project_id before a
+	// handler ever runs, so this branch is a backstop rather than the primary
+	// control. It is tested directly because the server path cannot reach it,
+	// and it is kept because the failure it guards against is a tool author
+	// declaring the property and forgetting to require it, which would lose
+	// the protection silently.
+	p := &Project{ID: "test-project"}
+
+	fault := p.checkAssertion(map[string]any{})
+	require.NotNil(t, fault, "an absent project_id must be refused")
+	require.Equal(t, FaultInvalidArgument, fault.Code)
+	require.Equal(t, "project_id", fault.Field)
+	require.Contains(t, fault.Detail, "test-project", "the refusal names the value to use")
+
+	fault = p.checkAssertion(map[string]any{"project_id": "some-other-repo"})
+	require.NotNil(t, fault)
+	require.Equal(t, FaultProjectMismatch, fault.Code)
+
+	require.Nil(t, p.checkAssertion(map[string]any{"project_id": "test-project"}))
+}

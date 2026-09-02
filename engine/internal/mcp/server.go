@@ -265,7 +265,7 @@ func (s *Server) handleInitialize(req request) {
 		"serverInfo": map[string]any{
 			"name": serverName, "version": buildVersion, "title": "Antifailure",
 		},
-		"instructions": serverInstructions,
+		"instructions": s.instructions(),
 	})
 }
 
@@ -275,19 +275,28 @@ func (s *Server) handleInitialize(req request) {
 // wrong: it chooses what to test, and it does not choose how safely the test
 // runs. Saying so plainly costs nothing and heads off a class of calls that
 // would only be refused.
-const serverInstructions = `Antifailure rehearses a change against a sanitized copy of production before it merges.
+func (s *Server) instructions() string {
+	return fmt.Sprintf(`Antifailure rehearses a change against a sanitized copy of production before it merges.
+
+THIS SERVER SERVES THE PROJECT %q. Every tool requires project_id, and this is the value. Pass it on every call. Several of these servers are usually configured at once, one per repository, and requiring the name is what turns a call routed to the wrong one into a refusal instead of a confident answer about the wrong code.
 
 You choose what to rehearse. Antifailure chooses the safety controls, and they are not adjustable from here: there is no way to disable sanitization, widen the network policy, lower a threshold, or point a run at a real database. A verdict is decided by the project's own policy, which lives in its manifest.
 
-Submitting a rehearsal returns a run id immediately. Poll it with get_rehearsal_run. A verdict of INCONCLUSIVE means the experiment did not finish, so it says nothing about the change; it is never a weaker PASS.`
+Submitting a rehearsal returns a run id immediately. Poll it with get_rehearsal_run. A verdict of INCONCLUSIVE means the experiment did not finish, so it says nothing about the change; it is never a weaker PASS.`, s.project)
+}
 
 func (s *Server) handleToolsList(req request) {
 	list := make([]map[string]any, 0, len(s.order))
 	for _, name := range s.order {
 		t := s.tools[name]
 		entry := map[string]any{
-			"name":        t.Name,
-			"description": t.Description,
+			"name": t.Name,
+			// The project is appended to every description rather than stated
+			// once in the instructions, because a client that renders a tool
+			// picker may never show the instructions block, and an agent that
+			// cannot see the value cannot pass the field that is now required.
+			"description": t.Description +
+				fmt.Sprintf(" This server serves the project %q; pass that as project_id.", s.project),
 			"inputSchema": t.Input.document(),
 		}
 		if t.Title != "" {

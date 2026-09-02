@@ -39,7 +39,8 @@ func newInspectEgressTool(p *Project, observe observeDecisions) *Tool {
 			"The policy itself comes from the project's manifest and cannot be changed " +
 			"from here.",
 		Input: &Schema{
-			Type: "object",
+			Type:     "object",
+			Required: []string{"project_id"},
 			Properties: map[string]*Schema{
 				"project_id": projectIDSchema(),
 				"probe": {

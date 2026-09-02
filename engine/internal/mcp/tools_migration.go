@@ -32,7 +32,8 @@ func newRehearseMigrationTool(p *Project, eng *Engine, run rehearseMigrations) *
 			"get_rehearsal_run. A verdict of INCONCLUSIVE means the rehearsal did not " +
 			"finish and says nothing about the migration.",
 		Input: &Schema{
-			Type: "object",
+			Type:     "object",
+			Required: []string{"project_id"},
 			Properties: map[string]*Schema{
 				"project_id":      projectIDSchema(),
 				"idempotency_key": idempotencyKeySchema(),

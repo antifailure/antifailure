@@ -80,17 +80,25 @@ func BindProject(workDir string) (*Project, error) {
 	}, nil
 }
 
-// checkAssertion refuses a call that names a different project.
+// checkAssertion refuses a call that does not name this project.
 //
-// An absent project_id is accepted, because there is exactly one project and a
-// caller that did not name it cannot have meant a different one. A present one
-// must match, so that a client configured against two checkouts cannot run an
-// experiment on the wrong repository and read the verdict as though it were
-// the right one.
+// Required rather than optional, and the difference is a real failure mode.
+// Agents commonly have several of these servers configured at once, one per
+// repository. With the field optional, a call routed to the wrong server
+// succeeds quietly against the wrong checkout, and the agent gets a confident
+// verdict about code it was not asking about. Required plus must-match turns
+// that silent success into a loud refusal, which is the fail closed version.
+//
+// It still selects nothing and grants nothing. There is exactly one project
+// and this function can only agree or refuse; there is no value that would
+// reach a different repository.
 func (p *Project) checkAssertion(args map[string]any) *Fault {
 	raw, present := args["project_id"]
 	if !present {
-		return nil
+		return fieldFault(FaultInvalidArgument, "project_id",
+			"This field is required. This server serves the project %q; pass that "+
+				"value so a call meant for another repository is refused here rather "+
+				"than answered against this one.", p.ID)
 	}
 	asserted, ok := raw.(string)
 	if !ok {
@@ -109,9 +117,13 @@ func (p *Project) checkAssertion(args map[string]any) *Fault {
 // choose something.
 func projectIDSchema() *Schema {
 	return &Schema{
-		Type: "string", MaxLength: 200,
-		Description: "Optional. The project this server serves, as a check that you are " +
-			"talking to the repository you meant. It selects nothing and grants nothing: " +
-			"a value naming another project is refused rather than followed.",
+		Type: "string", MaxLength: 200, MinLength: 1,
+		Description: "Required. The project this server serves, which is named in this " +
+			"server's instructions and at the end of every tool description. Passing it " +
+			"is how a call meant for a different repository is refused here rather than " +
+			"answered against this one, which matters because several of these servers " +
+			"are usually configured at once. It selects nothing and grants nothing: the " +
+			"only two outcomes are that it matches and the call proceeds, or it does not " +
+			"and the call is refused.",
 	}
 }

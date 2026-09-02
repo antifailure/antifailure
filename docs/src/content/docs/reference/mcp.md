@@ -153,10 +153,20 @@ injection leaves the injection.
 
 ## What `project_id` is for
 
-`project_id` is optional on every tool, and it is an assertion rather than a
+`project_id` is **required** on every tool, and it is an assertion rather than a
 selector. The server serves exactly the checkout it was started in. Naming that
 project is accepted; naming another is refused with `PROJECT_MISMATCH`. It can
 narrow or refuse, and it can never widen: it selects nothing and grants nothing.
+
+Required rather than optional because of how these servers are actually
+deployed. An agent usually has several configured at once, one per repository.
+If the field were optional, a call routed to the wrong server would succeed
+quietly against the wrong checkout, and the agent would get a confident verdict
+about code it was not asking about. Requiring the name turns that silent
+success into a loud refusal.
+
+The value is named in the server's handshake instructions and at the end of
+every tool description, so an agent can read it rather than guess it.
 
 ## Where output goes
 
