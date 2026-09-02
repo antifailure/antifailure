@@ -110,7 +110,11 @@ export default function AdminTenantsPage() {
                             <Badge tone="pass">active</Badge>
                           )}
                           {t.suspendedReason ? (
-                            <span className="mt-1 block max-w-[36ch] text-[12px] text-muted">
+                            // break-words for the same reason as the detail
+                            // card: a reason is whatever an operator pasted,
+                            // and an unbreakable token here widens the whole
+                            // table rather than just this cell.
+                            <span className="mt-1 block max-w-[36ch] break-words text-[12px] text-muted">
                               {t.suspendedReason}
                             </span>
                           ) : null}
