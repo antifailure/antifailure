@@ -48,9 +48,18 @@ export interface AdminActor {
   /** The admin_users row. A different id space from users(id): see the foreign
    *  key note on the double write in appendAdminAudit. */
   adminUserId: string
-  /** The operator's email, which is what an audit entry should name a year
-   *  from now when the row may be gone. */
+  /** The operator's display name, for a page that greets them. */
   label: string
+  /**
+   * The operator's email, and the identity every audit entry is written under.
+   *
+   * Both are carried rather than one, because they answer different questions
+   * and collapsing them makes one of the answers wrong. A display name is not
+   * unique and can be changed; the address is what identifies the person a year
+   * from now when the admin_users row may be gone, which is exactly what an
+   * audit entry has to survive.
+   */
+  email: string
   role: AdminRole
   sessionId: string
   /**
@@ -70,7 +79,8 @@ export interface AdminActor {
 export function actorOf(session: ResolvedAdminSession): AdminActor {
   return {
     adminUserId: session.adminUserId,
-    label: session.email,
+    label: session.label,
+    email: session.email,
     role: session.role,
     sessionId: session.sessionId,
     impersonating: session.impersonating,
@@ -117,7 +127,7 @@ const requireAdminActor = middleware(({ ctx, next }) => {
       ...c,
       admin: actor,
       adminDb: <T,>(fn: (db: Db) => Promise<T>) =>
-        pool.withOperator({ adminUserId: actor.adminUserId, label: actor.label }, fn),
+        pool.withOperator({ adminUserId: actor.adminUserId, label: actor.email }, fn),
     },
   })
 })
@@ -204,7 +214,7 @@ async function auditRead(ctx: AdminContext, path: string): Promise<void> {
   await ctx.adminDb((db) =>
     appendAdminAudit(db, {
       adminUserId: ctx.admin.adminUserId,
-      actorLabel: ctx.admin.label,
+      actorLabel: ctx.admin.email,
       action: `read.${path}`,
       targetType: 'route',
       targetId: path,
@@ -234,7 +244,7 @@ async function recordRefusal(
   await ctx.adminDb((db) =>
     appendAdminAudit(db, {
       adminUserId: ctx.admin.adminUserId,
-      actorLabel: ctx.admin.label,
+      actorLabel: ctx.admin.email,
       action: `refused.${path}`,
       targetType: 'route',
       targetId: path,
@@ -276,7 +286,7 @@ export async function adminAudit(
   await appendAdminAudit(db, {
     ...entry,
     adminUserId: ctx.admin.adminUserId,
-    actorLabel: ctx.admin.label,
+    actorLabel: ctx.admin.email,
     origin: 'admin',
     ip: ctx.ip ?? null,
     occurredAt: ctx.clock.now(),
