@@ -168,7 +168,7 @@ func (p *Provider) Capabilities() provider.Caps {
 		// advice that could not be followed: "use a provider that supports
 		// Postgres 18" named no such provider, and "upgrade the source" is the
 		// wrong direction.
-		SupportedVersions:     []int{14, 15, 16, 17, 18},
+		SupportedVersions: []int{14, 15, 16, 17, 18},
 	}
 }
 
