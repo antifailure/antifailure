@@ -87,6 +87,31 @@ on, and the rule name is what a person should read.
 that no longer exists, and an identifier that has left the catalogue since it
 was registered.
 
+### The event stream
+
+The types in the [event envelope reference](/docs/reference/schemas/events-v1)
+and the envelope around them. A type is not removed and does not change what it
+means. A field of the envelope is not removed, does not change type, and does
+not become optional, and a field holding a closed set does not lose a value
+from it.
+
+Types are added as features land and fields may be added, so read the stream
+the way you read `--output json`: take what you want and ignore what you have
+not seen, rather than refusing an event carrying something new.
+
+Two things are deliberately outside that. The `data` object is the type
+specific payload, it is documented as an object and nothing further, and its
+keys move with the code that writes them. And some types on that page are
+reserved rather than live: the engine does not emit all of them yet, and
+`engine/internal/events/emitters_test.go` carries the reason for each one. A
+reserved type is stable in the sense above, and it may start being emitted in
+any release.
+
+`schemas/events.v1.json` is the published artifact,
+`engine/internal/events/stream.register.json` is what version 1 promised, and
+`tools/eventcheck` fails the build on a type that has gone, a field that has
+changed shape, and a type the engine can emit that nothing documents.
+
 ## Not stable
 
 These are free to change in a minor release, and saying so plainly is more
@@ -107,7 +132,6 @@ useful than a promise that quietly bends.
   when a clearer name exists, and a release may find something in a migration
   an earlier one passed. That is the product working, and it is why the
   identifier above is the thing to match on rather than the name.
-- **The event stream's set of types.** Types are added as features land.
 - **Anything under `docs/plan/`.** Working notes, not documentation.
 
 ## Deprecation

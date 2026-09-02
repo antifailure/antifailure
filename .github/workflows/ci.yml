@@ -101,6 +101,7 @@ jobs:
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
+          go run ./tools/eventcheck -freeze .
           (cd engine && go test ./internal/masking -update-transforms)
           (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
@@ -255,6 +256,15 @@ jobs:
         # and above all a number that was handed out once and has since left the
         # catalogue, which is the promise itself breaking.
         run: go run ./tools/lintcheck .
+
+      - name: The event stream keeps the shape it promised
+        # "Types are added as features land" says what happens when the catalog
+        # grows and nothing about what happens when it shrinks. Both a deleted
+        # type and a field that left the envelope regenerate cleanly, because
+        # the schema is generated from the Go type and the catalog, so either
+        # would have produced a green diff and a consumer that stops working on
+        # the next upgrade.
+        run: go run ./tools/eventcheck .
 
       - name: Vet
         run: cd engine && go vet ./...

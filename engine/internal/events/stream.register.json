@@ -1,0 +1,108 @@
+{
+  "note": "The event stream as version 1 promised it. Every type listed here still exists and every envelope field still has the shape recorded, or tools/eventcheck fails. Appended to by 'go run ./tools/eventcheck -freeze .' and never rewritten by it: a type is added as a feature lands, and nothing takes one away inside a major version.",
+  "envelope": [
+    {
+      "field": "data",
+      "kind": "object",
+      "required": false
+    },
+    {
+      "field": "env",
+      "kind": "string",
+      "required": false
+    },
+    {
+      "field": "id",
+      "kind": "string",
+      "required": true
+    },
+    {
+      "field": "level",
+      "kind": "enum",
+      "required": true,
+      "values": [
+        "debug",
+        "error",
+        "info",
+        "warn"
+      ]
+    },
+    {
+      "field": "msg",
+      "kind": "string",
+      "required": false
+    },
+    {
+      "field": "seq",
+      "kind": "integer",
+      "required": true
+    },
+    {
+      "field": "ts",
+      "kind": "string",
+      "required": true
+    },
+    {
+      "field": "type",
+      "kind": "enum",
+      "required": true
+    }
+  ],
+  "types": [
+    "agent.finished",
+    "agent.started",
+    "agent.step",
+    "agent.verdict",
+    "build.failed",
+    "build.finished",
+    "build.log",
+    "build.started",
+    "capture.message",
+    "cron.fired",
+    "db.branched",
+    "db.branching",
+    "db.destroyed",
+    "db.reset",
+    "egress.decision",
+    "egress.tripwire",
+    "engine.error",
+    "engine.progress",
+    "engine.retry",
+    "engine.sink_dropped",
+    "engine.warning",
+    "env.creating",
+    "env.destroyed",
+    "env.destroying",
+    "env.failed",
+    "env.ready",
+    "env.sleeping",
+    "env.waking",
+    "golden.collected",
+    "golden.failed",
+    "golden.ready",
+    "golden.refreshing",
+    "insight.finding",
+    "load.finished",
+    "load.sample",
+    "mask.applied",
+    "mask.finding",
+    "mask.planned",
+    "mask.progress",
+    "mask.verified",
+    "mask.verifying",
+    "resource.created",
+    "resource.deleted",
+    "resource.leaked",
+    "service.exited",
+    "service.log",
+    "service.ready",
+    "service.restarted",
+    "service.starting",
+    "webhook.delivered",
+    "webhook.failed",
+    "webhook.queued",
+    "workload.cancelled",
+    "workload.finished",
+    "workload.started"
+  ]
+}

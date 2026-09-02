@@ -68,6 +68,7 @@ gate: _reports
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "lint findings keep their ids"   just lintcheck
+    run "the event stream keeps its shape" just eventcheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
@@ -455,6 +456,16 @@ errcheck:
 # registered are all failures here.
 lintcheck:
     go run ./tools/lintcheck .
+
+# No event type has been taken away and the envelope still has its fields.
+#
+# The catalog gains a type most weeks and that is compatible. Losing one is not,
+# and nothing was watching for it: the schema is generated from the Go type and
+# the catalog, so deleting a type or a field regenerates cleanly and the diff is
+# green. engine/internal/events/stream.register.json is what version 1 promised,
+# and this refuses to let any of it go.
+eventcheck:
+    go run ./tools/eventcheck .
 
 # The release stamps version variables that exist, and stamps every one it
 # declares.
@@ -1032,6 +1043,7 @@ _generated:
     (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    go run ./tools/eventcheck -freeze .
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     # The OpenAPI artifact is generated too, and its generator is TypeScript
@@ -1055,6 +1067,7 @@ _generated:
       schemas/mockpack-vectors.json \
       schemas/webhook-vectors.json \
       schemas/events.v1.json \
+      engine/internal/events/stream.register.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
       docs/src/content/docs/guides/dashboard.md \
@@ -1075,6 +1088,7 @@ generate:
     cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    go run ./tools/eventcheck -freeze .
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
 

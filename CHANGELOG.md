@@ -47,6 +47,12 @@ Stable, and breaking any of these costs a major version:
   `LINT-NNN` identifier, listed in the lint findings reference. It is assigned
   once, keeps its meaning, and is never reused, not even after the rule that
   earned it is deleted. Match on it rather than on the rule name.
+- **The event stream.** An event type is not removed and does not change what
+  it means, and the envelope around it does not lose a field, change a field's
+  type, or make a required field optional. Types and fields are added as
+  features land, so ignore what you were not built to understand rather than
+  refusing the event. The `data` object is the exception and is not promised:
+  it is the type specific payload and its keys move with the code.
 
 Explicitly not stable, and free to change in a minor release:
 
@@ -60,7 +66,8 @@ Explicitly not stable, and free to change in a minor release:
   a clearer name exists, and a release may find something an earlier one passed.
   That is the product working, and it is why the identifier above is what to
   match on.
-- The event stream's set of types. Types are added as features land.
+- Lint rule names and their findings, which move as the rules improve. The
+  stable identifier for a finding is its rule name within a release.
 
 ### What moves when this tag is pushed
 
