@@ -15,6 +15,8 @@ is a process that fails in production rather than at deploy time.
 | Variable | What it is |
 | --- | --- |
 | `AF_DATABASE_URL` | The connection string the application uses. This is the unprivileged role, not the owner: it cannot run DDL, because a role that can `ALTER TABLE` can drop the policies that isolate tenants. |
+| `AF_ADMIN_DATABASE_URL` | The connection string the operator portal uses, and the only credential on this instance that can read across tenants. A SEPARATE role from `AF_DATABASE_URL`, holding `BYPASSRLS`, never the application's own role: a different credential is something the application cannot be granted its way into, where a privilege is something it can. Leave it unset and `/admin` refuses every request naming this variable, rather than showing an empty page that reads like a platform with no customers on it. |
+| `AF_ADMIN_POOL_MAX` | Connections in the operator pool. Small on purpose: it serves a handful of operators, not customer traffic. Defaults to a low value and rarely needs changing. |
 | `AF_GITHUB_CLIENT_ID` | The OAuth App's client identifier. |
 | `AF_GITHUB_CLIENT_SECRET` | The OAuth App's client secret. |
 | `AF_GITHUB_REDIRECT_URI` | Where GitHub returns the browser after sign in. Must match what the App is configured with exactly. |
