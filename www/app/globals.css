@@ -17,6 +17,13 @@
   --color-gray-new-60: #94979e;
   --color-gray-new-80: #c9cbcf;
   --color-gray-new-90: #e4e5e7;
+  /* The warm accent. It is not new: kit.tsx and solutions/visuals.tsx already
+     draw the "warn" tone and the marked term in this exact value, inlined as a
+     hex in four places. It earns a name here because the trust band needs an
+     accent that separates from a mint ground, and the brand green does not:
+     #33bf00 on #e4f1eb measures 2.10:1, under the 3:1 a meaningful graphic
+     needs, while this measures 4.35:1. */
+  --color-ochre: #8a6a12;
   --color-green-45: #00e599;
   --color-green-52: #34d59a;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;

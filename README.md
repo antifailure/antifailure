@@ -138,7 +138,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to bu
 Before opening a pull request:
 
 1. Run `just gate` locally or the targeted gates for what you changed.
-2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`.
+2. Write a changelog fragment in `.changes/<slug>.md` with the first line being one of `# added`, `# fixed`, `# changed`, or `# security`. `just changecheck` says whether your change needs one, and [the changelog](https://antifailure.dev/changelog) is built from them.
 3. Update `docs/plan/STATUS.md` surgically: touch only the rows your work changes.
 4. Update published docs under `docs/src/content/docs/` if a user-visible behavior changes.
 

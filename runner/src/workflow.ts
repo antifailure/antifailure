@@ -188,12 +188,19 @@ export class DeterministicPlanner implements Planner {
       };
     }
 
+    // Deliberately does not name a verdict. This said "reported as blocked"
+    // while finalJudgement decides between blocked and unverified from whether
+    // the page contradicted the expectation, so a run that came back
+    // unverified printed a row saying unverified, a summary saying unverified,
+    // and this sentence saying blocked. The planner cannot know which it will
+    // be, and a verdict named in two places is one that will disagree with
+    // itself.
     return {
       kind: 'stuck',
       why:
         `Nothing on this page moves the workflow forward. It offers ${describe(snapshot)}. ` +
-        `The runner not knowing what to press is not evidence about the application, so this is ` +
-        `reported as blocked rather than as a failure.`,
+        `The runner not knowing what to press is not evidence about the application, so it is ` +
+        `not counted against it.`,
     };
   }
 }

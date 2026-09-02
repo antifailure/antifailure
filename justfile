@@ -104,6 +104,7 @@ gate: _reports
     run "license parser fuzz"            just fuzz-license
     run "engine parser fuzz"             just fuzz-engine
     run "authorship and sign-off"        just authorship
+    run "every change says what changed" just changecheck
 
     echo
     if [ ${#failed[@]} -eq 0 ]; then
@@ -1050,6 +1051,18 @@ authorship:
       exit 1
     fi
     echo "attributed and signed off"
+
+# Anything a user can see says what changed, and the fragments still parse.
+#
+# CONTRIBUTING.md has promised this gate since the first week and there was
+# none. The sign-off rule went the same way: required by the same document,
+# unchecked, and 65 of the first 80 commits had no trailer. Eight of the twenty
+# product changes since the fragment convention began landed without one.
+#
+# Runs the same range CI does, so a contributor finds out here rather than
+# twenty minutes later. Locally that range is where this branch left main.
+changecheck:
+    go run ./tools/changecheck .
 
 # Nothing this repository created is still running.
 leaks:

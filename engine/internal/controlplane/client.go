@@ -136,11 +136,43 @@ type SendResult struct {
 	Accepted   int `json:"accepted"`
 	Duplicates int `json:"duplicates"`
 	Rejected   int `json:"rejected"`
-	Outcomes   []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Reason string `json:"reason,omitempty"`
-	} `json:"outcomes"`
+	// Unprojected counts events that were stored and changed nothing. It is
+	// not a failure and it is not a success either: the event is on record and
+	// whatever it was meant to advance did not advance.
+	Unprojected int       `json:"unprojected"`
+	Outcomes    []Outcome `json:"outcomes"`
+}
+
+// Outcome is what happened to one event.
+//
+// `reason` and `note` are two fields because they are two answers, and reading
+// only one of them is how this type came to discard half of what it was told.
+// A rejected event has a `reason` and was not stored. An accepted event with a
+// `note` WAS stored and changed nothing, which is the more interesting of the
+// two: it is the control plane saying it understood the event and could not
+// apply it, and it is the only signal that distinguishes a report that landed
+// from one that was refused by a projection.
+//
+// The engine decoded `reason` and not `note`. The control plane's own comment
+// says the note "reaches the sender in the batch response", and it did not
+// reach it: it was dropped by this struct and then, further along, the whole
+// SendResult was discarded by the only caller. Two silent losses in one path,
+// on the one channel that explains why a run said nothing.
+type Outcome struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// Explanation is the sentence this outcome carries, or empty when it carries
+// none. A duplicate carries neither and is not worth a word: it is the ordinary
+// result of a resend and the idempotency key working.
+func (o Outcome) Explanation() string {
+	if o.Reason != "" {
+		return o.Reason
+	}
+	return o.Note
 }
 
 // Throttled is returned when the control plane asks for a pause.

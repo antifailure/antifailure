@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -131,6 +132,52 @@ func TestDockerBuilder_ReportsAFailingBuildWithTheOutputThatExplainsIt(t *testin
 	require.Contains(t, coded.Message(), "worker", "the message names the service that failed")
 	require.NotEmpty(t, res.Log, "the output is kept, because it is the only thing that explains the failure")
 	require.Contains(t, strings.Join(res.Log, "\n"), "the-reason-it-failed")
+}
+
+// A Dockerfile in a subdirectory is conventionally built with that directory
+// as its context, which is what 'docker build dashboard' does. When it is
+// built from the repository root instead, the daemon reports a path that is
+// not in the context, which reads as a broken Dockerfile rather than as one
+// line of manifest. The refusal has to name build.context.
+//
+// This tests the classification rather than a real build, deliberately: it has
+// to run on a machine with no Docker daemon, and a check that skips itself
+// reads as a pass in the summary.
+func TestBuildFailure_NamesTheContextWhenTheDockerfileIsNotAtItsRoot(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		req  Request
+		want aferrors.Code
+	}{
+		{
+			name: "a Dockerfile in a subdirectory of its context",
+			req:  Request{Service: "dashboard", DockerfilePath: "dashboard/Dockerfile"},
+			want: aferrors.AFBLD005,
+		},
+		{
+			name: "a Dockerfile at the root of its context",
+			req:  Request{Service: "web", DockerfilePath: "Dockerfile"},
+			want: aferrors.AFBLD001,
+		},
+		{
+			name: "a generated Dockerfile, which has no path in the repository",
+			req:  Request{Service: "web", Dockerfile: "FROM alpine\n", DockerfilePath: "a/Dockerfile"},
+			want: aferrors.AFBLD001,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := buildFailure(errors.New("the daemon said no"), tc.req, "2s")
+			var coded *aferrors.Error
+			require.True(t, aferrors.As(err, &coded))
+			require.Equal(t, tc.want, coded.Code())
+			if tc.want == aferrors.AFBLD005 {
+				require.Contains(t, coded.NextStep(), "build.context to dashboard",
+					"a refusal that does not name the fix is the dead end this exists to close")
+			}
+		})
+	}
 }
 
 func TestDockerBuilder_ReportsAnUnusableDockerfile(t *testing.T) {
