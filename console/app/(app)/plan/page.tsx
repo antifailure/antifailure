@@ -516,18 +516,23 @@ function Entitlements({ entitlements, plan }: { entitlements: Entitlement[]; pla
                       {e.description}
                     </span>
                   </Td>
-                  {/* nowrap on both number columns. A limit that wraps puts a
-                      strikethrough across two lines, which stops reading as
-                      "replaced" and starts reading as a rendering fault. The
-                      table scrolls on its own if that makes it too wide, which
-                      is the better failure. */}
-                  <Td label="Applies" numeric className="whitespace-nowrap">
+                  {/* nowrap on both number columns, and ONLY from sm up.
+                      A limit that wraps puts a strikethrough across two lines,
+                      which stops reading as "replaced" and starts reading as a
+                      rendering fault; the table scrolls on its own if that
+                      makes it too wide, which is the better failure.
+                      Below sm the table stacks into a two column grid whose
+                      first column is 10.5ch, and an unwrappable "ON THE FREE
+                      PLAN" overflows it and lands on top of its own value. The
+                      breakpoint is the same 640px the stacking media query in
+                      globals.css uses, so the two cannot disagree. */}
+                  <Td label="Applies" numeric className="sm:whitespace-nowrap">
                     <span className="font-medium">{value(e.value, e.unit)}</span>
                   </Td>
                   {/* The plan's own number, kept even when it is the same, so the
                       two columns can be read straight down rather than the eye
                       having to work out which rows are missing one. */}
-                  <Td label={`On the ${plan} plan`} numeric className="whitespace-nowrap">
+                  <Td label={`On the ${plan} plan`} numeric className="sm:whitespace-nowrap">
                     {e.override === null ? (
                       <span className="text-dim">Same</span>
                     ) : (
