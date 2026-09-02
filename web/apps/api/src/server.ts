@@ -223,6 +223,10 @@ export interface ServerOptions {
   /** Null for self-hosting. The hosted service requires this plan everywhere
    *  except authentication, billing, health, and sign-out. */
   hostedRequiredPlan?: HostedRequiredPlan | null
+  /** Whether the plan may be written by hand through `billing.set`. False by
+   *  default, deliberately: the safe answer is the one an operator who has not
+   *  thought about billing gets without doing anything. See hosted.ts. */
+  operatorSetsPlan?: boolean
   /** Public GitHub App installation address shown to a signed-in user who has
    *  no organization yet. */
   githubAppInstallUrl?: string
@@ -307,6 +311,7 @@ export function createServer(options: ServerOptions) {
   const secure = options.secureCookies ?? true
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
+  const operatorSetsPlan = options.operatorSetsPlan ?? false
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
@@ -2476,6 +2481,7 @@ export function createServer(options: ServerOptions) {
           mailer: options.emailSignIn?.mailer ?? null,
           productName: options.emailSignIn?.productName ?? 'Antifailure',
           hostedRequiredPlan,
+          operatorSetsPlan,
           actor,
           origin: 'web',
           ip: c.req.header('x-forwarded-for') ?? undefined,
