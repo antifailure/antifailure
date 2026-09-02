@@ -99,7 +99,7 @@ interface Resolution {
  * and a run whose engine died read identically here. Both are silence at the
  * deadline. The counts on the row are the only thing that separates them, and a
  * console that renders `detail` and nothing else should still get the true
- * sentence rather than the generic one. See migration 0025.
+ * sentence rather than the generic one. See migration 0027.
  */
 export async function resolveOverdueRuns(db: Db, now: Date): Promise<Resolution> {
   const rows = await db.execute<{ id: string }>(sql`
@@ -429,7 +429,7 @@ export async function startRun(db: Db, input: StartInput): Promise<StartOutcome>
  * the only thing that later distinguishes a run somebody took from a run whose
  * engine died. Both go quiet and both end as `abandoned`, because an engine that
  * has lost its lease correctly stops reporting rather than ending a run another
- * engine is running. See migration 0025.
+ * engine is running. See migration 0027.
  *
  * A re-claim by the SAME holder is not a takeover. That is a runner that
  * restarted and asked again, and its own report is still the only one there will

@@ -3,7 +3,7 @@
 -- Two branches built a durable teardown queue in the same week and neither
 -- collided with the other, because a duplicated CONCEPT is not a textual
 -- conflict and no gate can see one. `teardown_requests` arrived in 0021 with
--- the pull request lifecycle and `runtime_commands` in 0024 with Load, and the
+-- the pull request lifecycle and `runtime_commands` in 0026 with Load, and the
 -- product ended up with two answers to "was this environment torn down".
 -- Only one of them can be right and a reader has no way to tell which.
 --
@@ -90,7 +90,7 @@ ALTER TABLE runtime_commands ADD CONSTRAINT runtime_commands_target CHECK (
   kind = 'workload.cancel' AND workload_run_id IS NOT NULL AND environment_id IS NULL
 );
 
--- Recreated exactly as 0024 declared it. One live cancel per run, enforced by a
+-- Recreated exactly as 0026 declared it. One live cancel per run, enforced by a
 -- unique partial index rather than by a read and a decision, because two
 -- requests landing together both read nothing and both write.
 CREATE UNIQUE INDEX runtime_commands_one_live_cancel

@@ -350,7 +350,7 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO workload_evidence (org_id, workload_run_id, kind, availability, locator)
     VALUES (${orgId}, ${workloadRunId}, 'trace', 'runner_local', ${`/home/runner/${slug}/trace.zip`})`
   // workload.cancel, because it is the only kind runtime_commands still has.
-  // This row seeded 'environment.teardown' until 0026 removed that kind, and
+  // This row seeded 'environment.teardown' until 0028 removed that kind, and
   // the removal did not reach here: the insert then failed inside seedTenant,
   // which is awaited by every suite's setup, so the failure arrived as an
   // unresolved promise and the whole file hung rather than reporting itself.
