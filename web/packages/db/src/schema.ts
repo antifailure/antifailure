@@ -957,6 +957,31 @@ export const adminAuditEntries = pgTable('admin_audit_entries', {
   entryHash: text('entry_hash').notNull(),
 })
 
+/**
+ * The installation's emergency switches.
+ *
+ * No org_id, and deliberately absent from tenantScopedTables below: these rows
+ * are configuration for the whole installation rather than data belonging to
+ * any customer. What confines the application role here is a GRANT, not a
+ * policy: it holds SELECT and nothing else, so a tenant route that reached
+ * this table raises rather than writing. See migrations/0032.
+ */
+export const platformControls = pgTable('platform_controls', {
+  /** The control's name, from the catalog in api/src/admin/controls.ts. A
+   *  fixed vocabulary the enforcement points match by literal value, which is
+   *  why the masking rules preserve it rather than hashing it. */
+  name: text('name').primaryKey(),
+  /** Null means not engaged. A timestamp rather than a boolean because "when
+   *  did this start" is the first question anybody asks about a switch that is
+   *  on, and a boolean cannot answer it. */
+  engagedAt: timestamp('engaged_at', { withTimezone: true }),
+  reason: text('reason'),
+  /** The operator's address, kept as text so the row still says who paused the
+   *  installation once their account is gone. */
+  engagedBy: text('engaged_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
