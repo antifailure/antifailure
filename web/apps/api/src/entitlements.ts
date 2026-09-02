@@ -420,8 +420,20 @@ function coerce(spec: EntitlementSpec, raw: unknown): EntitlementValue | null {
  * field typed `Date` that holds one of those compiles, reads correctly in a log
  * line, and throws the first time anybody calls `.getTime()` on it.
  *
- * Exported so `billing-summary.ts` uses this one rather than growing a second
- * copy that rounds or parses differently.
+ * So the row type at every such read is `Date | string`, and the union is the
+ * load bearing half rather than defensive noise to be tidied away later. A
+ * declared `Date` does not fail, it lies: the compiler stops asking, and the
+ * error moves to whichever caller first treats the string as a date. The union
+ * is what makes the compiler demand this call. `auth/session.ts` reached the
+ * same conclusion independently and types `expires_at`, `last_seen_at` and
+ * `revoked_at` that way.
+ *
+ * Found by a test rather than by the compiler or the logs, which is the whole
+ * argument for asserting a shape at the boundary instead of trusting the
+ * interface that declares it.
+ *
+ * Exported so `billing-summary.ts` uses this one rather than growing another
+ * copy that parses differently.
  */
 export function asDate(v: string | Date): Date {
   return v instanceof Date ? v : new Date(v)
