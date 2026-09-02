@@ -20,7 +20,8 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPool, sql, type Db, type Pool } from '@antifailure/db'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { sql, type Db } from '@antifailure/db'
 import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import {
@@ -33,7 +34,7 @@ import {
   retryPayment,
 } from '../src/admin/money.ts'
 import { IN_FLIGHT_GRACE_MS, fingerprint, keyFor } from '../src/admin/ledger.ts'
-import { available, adminUrl, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
+import { available, dropOrg, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
 
 // ---------------------------------------------------------------------------
 // The simulator
@@ -247,10 +248,18 @@ describe('money moves once', async () => {
 
   let h: ApiHarness
   let org: Org
-  let adminPool: Pool
+  let operator: Buffer
   let sim: StripeSim
 
-  const withAdmin = <R,>(fn: (db: Db) => Promise<R>) => adminPool.withoutTenant(fn)
+  // The operator boundary 0029 defines, used exactly as an admin route would.
+  //
+  // Not a privileged pool and not a second database role: the same
+  // `antifailure_app` connection every request uses, declaring the hash of a
+  // live operator session. Every policy on the ledger is keyed on that
+  // resolving to a row, so these tests exercise the real gate rather than a
+  // test-only bypass, and the last test in this block is the proof: a tenant
+  // connection running the same statement sees nothing.
+  const withAdmin = <R,>(fn: (db: Db) => Promise<R>) => h.pool.withPlatformAdmin(operator, fn)
 
   function ctx(now = new Date('2026-03-01T12:00:00Z')) {
     const config: StripeConfig = {
@@ -270,17 +279,20 @@ describe('money moves once', async () => {
   before(async () => {
     h = await startApi()
     org = await seedOrg(h.admin, 'money')
-    await h.admin.unsafe(`ALTER ROLE antifailure_admin LOGIN PASSWORD 'admin-test-password'`)
-    const u = new URL(adminUrl)
-    u.username = 'antifailure_admin'
-    u.password = 'admin-test-password'
-    adminPool = createPool({ url: u.toString(), max: 6, connectTimeoutSeconds: 30 })
+    const email = `money-op-${randomUUID().slice(0, 8)}@example.test`
+    const [row] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, role) VALUES (${email}, 'Money operator', 'super_admin')
+      RETURNING id`
+    const token = randomBytes(32)
+    operator = createHash('sha256').update(token).digest()
+    await h.admin`
+      INSERT INTO admin_sessions (token_hash, admin_user_id, expires_at)
+      VALUES (${operator}, ${row!.id}, ${new Date(Date.now() + 3_600_000).toISOString()})`
   })
 
   after(async () => {
     await h.admin`DELETE FROM admin_operations WHERE org_id = ${org.orgId}`
     await dropOrg(h.admin, org.orgId)
-    await adminPool.close()
     await h.close()
   })
 
@@ -635,15 +647,69 @@ describe('money moves once', async () => {
     assert.equal(sim.countOf('POST /v1/refunds'), 0)
   })
 
-  it('the tenant role cannot read or write the money ledger', async () => {
+  it('a tenant sees none of the money ledger, including its own rows', async () => {
+    await reset()
+    await refundCharge(ctx(), {
+      orgId: org.orgId, chargeId: 'ch_seen', amountMinor: 100, reason: 'AF-920',
+    })
+    // The operator, holding a live session, sees it.
+    const asOperator = await withAdmin(async (db) =>
+      db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM admin_operations`))
+    assert.equal(Number(asOperator[0]!.n), 1)
+
+    // The same role, the same statement, without an operator session. Zero
+    // rows rather than an error, because the boundary is a policy rather than
+    // a grant: `antifailure_app` HAS the privilege and current_admin_user()
+    // is null, so nothing matches. This is the tenant's own organization's
+    // row, which is the case worth asserting: what an operator did is
+    // recorded in the tenant's audit log, not in the operator's ledger.
+    const asTenant = await h.pool.withTenant({ orgId: org.orgId }, async (db) =>
+      db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM admin_operations`))
+    assert.equal(Number(asTenant[0]!.n), 0)
+
+    // And it cannot write one either.
     let thrown: unknown
     try {
       await h.pool.withTenant({ orgId: org.orgId }, async (db) => {
-        await db.execute(sql`SELECT count(*) FROM admin_operations`)
+        await db.execute(sql`
+          INSERT INTO admin_operations (
+            idempotency_key, action, org_id, target_type, actor_label, reason,
+            request, request_fingerprint)
+          VALUES ('forged', 'billing.refunded', ${org.orgId}, 'charge', 'me', 'mine now',
+                  '{}'::jsonb, 'x')`)
       })
     } catch (e) { thrown = e }
     const said = `${(thrown as Error)?.message} ${(thrown as { cause?: Error })?.cause?.message ?? ''}`
-    assert.match(said, /permission denied/i, said)
+    assert.match(said, /row-level security/i, said)
+  })
+
+  it('an expired operator session moves no money', async () => {
+    // The credential has to keep being a credential. A ledger write that
+    // worked on a stale cookie would make the whole boundary decorative.
+    const [row] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, role)
+      VALUES (${`stale-${randomUUID().slice(0, 8)}@example.test`}, 'Stale', 'super_admin')
+      RETURNING id`
+    const stale = createHash('sha256').update(randomBytes(32)).digest()
+    await h.admin`
+      INSERT INTO admin_sessions (token_hash, admin_user_id, expires_at)
+      VALUES (${stale}, ${row!.id}, ${new Date(Date.now() - 60_000).toISOString()})`
+
+    await reset()
+    const before = ctx()
+    let thrown: unknown
+    try {
+      await refundCharge(
+        { ...before, withAdmin: (fn) => h.pool.withPlatformAdmin(stale, fn) },
+        { orgId: org.orgId, chargeId: 'ch_stale', amountMinor: 100, reason: 'AF-921' },
+      )
+    } catch (e) { thrown = e }
+    assert.ok(thrown, 'an expired operator session moved money')
+    const said = `${(thrown as Error).message} ${(thrown as { cause?: Error }).cause?.message ?? ''}`
+    assert.match(said, /row-level security/i, said)
+    // The important half: it failed on the CLAIM, before the provider was
+    // reached, so a stale cookie cannot refund anything even once.
+    assert.equal(sim.refunds.length, 0, 'an expired operator session reached the provider')
   })
 })
 

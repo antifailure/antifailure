@@ -389,7 +389,7 @@ describe('an override changes what a route answers', async () => {
     }
   })
 
-  it('the tenant role cannot write itself a grant', async () => {
+  it('a tenant cannot write itself a grant', async () => {
     const { sql } = await import('drizzle-orm')
     let thrown: unknown
     try {
@@ -403,11 +403,17 @@ describe('an override changes what a route answers', async () => {
     } catch (e) {
       thrown = e
     }
-    assert.ok(thrown, 'the tenant role wrote itself an entitlement override')
+    assert.ok(thrown, 'a tenant wrote itself an entitlement override')
     // drizzle wraps the driver's error, so the reason is on the cause. Read
     // both rather than only the wrapper, or this asserts on the word "Failed".
+    //
+    // Row-level security rather than a missing privilege, and the distinction
+    // is the whole of 0029's design: an operator IS `antifailure_app`, so the
+    // grant cannot be withheld from a tenant without also withholding it from
+    // the operator. What stops the tenant is that current_admin_user() is null
+    // on its connection, so the write policy is false.
     const said = `${(thrown as Error).message} ${(thrown as { cause?: Error }).cause?.message ?? ''}`
-    assert.match(said, /permission denied/i, said)
+    assert.match(said, /row-level security/i, said)
   })
 })
 

@@ -101,6 +101,15 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'the application role holds no grant on it at all, which the test below proves',
       ],
       [
+        'feature_flags',
+        'a flag is the platform\'s own configuration rather than a tenant\'s. It has no org_id ' +
+          'because it belongs to no organization: a rollout applies ACROSS tenants and the row ' +
+          'that says which tenants is feature_flag_targets, which does carry org_id and is in ' +
+          'the loops below. Every tenant may read a flag\'s key and state, which is a small ' +
+          'deliberate disclosure of unreleased feature names, and none may read who else is ' +
+          'targeted',
+      ],
+      [
         'admin_users',
         'an operator is not a tenant. The row is the platform\'s own identity, deliberately ' +
           'unrelated to users, and it is reachable only by declaring the email being signed in ' +
