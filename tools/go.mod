@@ -2,6 +2,8 @@ module github.com/antifailure/antifailure/tools
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/antifailure/antifailure/engine v0.0.0-20260827003151-4d231565e530
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3

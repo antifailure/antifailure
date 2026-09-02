@@ -14,6 +14,8 @@ module github.com/antifailure/antifailure/ee/engine
 
 go 1.26.0
 
+toolchain go1.26.8
+
 // The community engine is consumed from the same checkout rather than from a
 // published version, because the two are released from one tag.
 replace github.com/antifailure/antifailure/engine => ../../engine
