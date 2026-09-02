@@ -974,28 +974,14 @@ describe('money is never rendered without its currency', () => {
 // The gap between "implemented" and "reachable"
 // ---------------------------------------------------------------------------
 
-describe('every money operation is either routed or recorded as not yet routed', async () => {
+describe('every money operation is reachable, or says exactly how far it got', async () => {
   // The failure this exists for is the one that looks like success from every
-  // direction: a function that works, has tests, and that nothing calls. The
-  // entitlement catalogue guards it with `enforcedAt`; this is the same guard
-  // for the nine operations, and it is here rather than in a comment because a
-  // comment does not fail when somebody adds a tenth.
+  // direction: a function that works, has tests, and that nothing calls.
   //
-  // The admin router is owned by the `/admin` boundary and does not exist yet,
-  // so today the honest answer for every operation is "not routed". When it
-  // lands, each of these moves out of the map and this test fails until it is
-  // removed, which is the point: nothing here can be quietly left unreachable.
-  const notRoutedYet = new Map<string, string>([
-    ['refundCharge', 'the admin router is blocked on the /admin procedure builder'],
-    ['creditCustomer', 'the admin router is blocked on the /admin procedure builder'],
-    ['changePlan', 'the admin router is blocked on the /admin procedure builder'],
-    ['extendTrial', 'the admin router is blocked on the /admin procedure builder'],
-    ['cancelSubscription', 'the admin router is blocked on the /admin procedure builder'],
-    ['reactivateSubscription', 'the admin router is blocked on the /admin procedure builder'],
-    ['applyDiscount', 'the admin router is blocked on the /admin procedure builder'],
-    ['retryPayment', 'the admin router is blocked on the /admin procedure builder'],
-    ['resendInvoice', 'the admin router is blocked on the /admin procedure builder'],
-  ])
+  // "Called" is not one question but two, and collapsing them is how a feature
+  // ships half-wired. An operation can be called from a ROUTER and still be
+  // unreachable, because the router is not MOUNTED. Both are asserted, and the
+  // second is currently false on purpose.
 
   const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src')
   const money = await readFile(path.join(src, 'admin', 'money.ts'), 'utf8')
@@ -1008,9 +994,7 @@ describe('every money operation is either routed or recorded as not yet routed',
     assert.equal(operations.length, 9, `found ${operations.join(', ')}`)
   })
 
-  it('every operation is exercised by this file, routed or not', () => {
-    // An unroutable operation must at least be PROVEN to work, or "not routed
-    // yet" becomes a place to park code nobody has ever run.
+  it('every operation is exercised by this file', () => {
     for (const op of operations) {
       assert.ok(
         new RegExp(`\\b${op}\\(`).test(s_self),
@@ -1019,34 +1003,38 @@ describe('every money operation is either routed or recorded as not yet routed',
     }
   })
 
-  it('every operation is either called from a router or recorded as not yet routed', async () => {
-    const routers = path.join(src, 'routers')
-    const files = await readdir(routers)
-    const routed = new Set<string>()
-    for (const file of files) {
-      const body = await readFile(path.join(routers, file), 'utf8')
-      // Only a file that IMPORTS from admin/money.ts counts. Matching the bare
-      // name found `client.cancelSubscription(...)` in subscriptions.ts, which
-      // is the Stripe client's method of the same name on the customer-facing
-      // route: a name collision would have reported a dead operation as routed,
-      // which is the exact failure this test exists to catch.
-      if (!/from ['"]\.\.\/admin\/money\.ts['"]/.test(body)) continue
-      for (const op of operations) if (new RegExp(`\\b${op}\\(`).test(body)) routed.add(op)
-    }
+  it('every operation is called from a router', async () => {
+    const routers = await readFile(path.join(src, 'admin', 'routers.ts'), 'utf8')
     for (const op of operations) {
-      if (routed.has(op)) {
-        assert.ok(
-          !notRoutedYet.has(op),
-          `${op} IS routed now; take it out of notRoutedYet so the list stays true`,
-        )
-        continue
-      }
       assert.ok(
-        notRoutedYet.has(op),
-        `${op} is implemented, nothing calls it, and nobody wrote down why. That is a dead ` +
-          'feature that looks finished: wire it to a route, or record here that it is waiting ' +
-          'on one.',
+        new RegExp(`\\b${op}\\(`).test(routers),
+        `${op} is implemented, tested, and no route calls it. Wire it or delete it.`,
       )
     }
+  })
+
+  it('records that the operator router is not mounted, and where the mount goes', async () => {
+    // The remaining gap, asserted rather than described, so it cannot be
+    // forgotten and cannot be quietly half-done.
+    //
+    // `adminMoneyRouter` is complete and tested through `createCaller`, and no
+    // HTTP endpoint serves it. Mounting it is the boundary owner's: the
+    // operator cookie is `__Host-` and `SameSite=Strict`, which closes ordinary
+    // cross-site forgery, but the product's own /trpc guard exists because
+    // SameSite is site-scoped rather than origin-scoped and a subdomain an
+    // attacker controls is inside it. A mount without that guard would be a
+    // real vulnerability rather than a missing feature, so this lane does not
+    // add one.
+    //
+    // WHEN IT IS MOUNTED this test fails, which is the point: come back, read
+    // the paragraph above, confirm the guard is there, and delete the test.
+    const server = await readFile(path.join(src, 'server.ts'), 'utf8')
+    assert.equal(
+      /adminMoneyRouter/.test(server),
+      false,
+      'server.ts now mentions adminMoneyRouter. If it is mounted with the same cross-site ' +
+        'guard /trpc has, delete this test; the operations are reachable and the note above ' +
+        'is stale.',
+    )
   })
 })
