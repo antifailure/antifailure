@@ -46,6 +46,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_STRIPE_PRICE_ENTERPRISE` | unset | The Stripe price the `enterprise` plan is sold at. |
 | `AF_STRIPE_API_BASE` | `https://api.stripe.com` | Where the Stripe API lives. For tests, which point it at the engine's own Stripe mock pack, and for nothing else. |
 | `AF_HOSTED_REQUIRED_PLAN` | unset | Set to `enterprise` on a hosted control plane that is sold only to enterprise organizations. Authentication, sign-out and the exits remain reachable; browser procedures, CLI provider operations, model proxy requests and engine ingestion are refused until Stripe grants the enterprise plan. The exits are billing, exporting the organization's data, deleting the organization, closing an account, and listing and revoking sessions: a plan gate may restrict what the product does for a customer and may never restrict their ability to leave, to retrieve what is theirs, or to secure their account. Any other value stops the process. Setting this while billing is off also stops the process, because otherwise no customer could satisfy the gate. Leave it unset when self-hosting. |
+| `AF_OPERATOR_SETS_PLAN` | unset | Set to `1` on an installation where whoever runs the control plane also decides each organization's plan. Unset, `billing.set` is refused and the plan can only come from a signed Stripe delivery, which is the right answer anywhere the people signing in are not the operator: the first person into an organization becomes its owner, an owner holds `billing.manage`, and on a plane that takes no payment that would be a signed-in stranger granting themselves the largest plan. It is off by default rather than on because the dangerous configuration is the one where nothing has been configured yet, and a flag that has to be remembered would be forgotten by exactly that operator. Set it when you run the control plane for yourself; you can already write the column with `psql`, and this is the same act with an audit entry. Setting it together with any Stripe variable or with `AF_HOSTED_REQUIRED_PLAN` stops the process, because a plan that can be granted by hand is not a plan anybody has to buy. Any value other than `1`, `0`, `true`, `false` or unset stops the process. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
 
 ## Set on the engine, not here
@@ -53,6 +54,13 @@ is a process that fails in production rather than at deploy time.
 | Variable | Where it is set | What it is |
 | --- | --- | --- |
 | `AF_CONTROL_PLANE_TOKEN` | On the engine, or in a CI job | An engine token, which the control plane **issues and verifies but never reads from its own environment**. Somebody running their own control plane creates one by posting to `/v1/tokens`, then sets it where `af` runs so the CLI can reach a hosted control plane. It is listed here because this is the page somebody setting up a self-hosted installation reads, and a token the control plane mints is easy to mistake for a variable the control plane consumes. Setting it on the control plane process does nothing at all. |
+
+A job in GitHub Actions should set none of that. It asks GitHub for a workflow
+identity and exchanges it at `/v1/auth/github-oidc` for a token that expires in
+fifteen minutes, so there is no secret to paste and none to rotate. The
+repository has to be claimed once first, and
+[the GitHub guide](/docs/guides/github#sending-events-with-no-token-at-all)
+says why that step is what grants access rather than the signature.
 
 Everything above this section is read by the control plane process itself.
 
@@ -87,6 +95,11 @@ becomes its owner under the rule below.
 On an enterprise-only hosted deployment that owner lands on Plan. Checkout is
 the only path that can grant the required plan; `billing.set` is refused, so an
 owner cannot turn a free organization into an enterprise one without Stripe.
+That refusal does not depend on Stripe being configured. `billing.set` is
+refused on every installation that has not set `AF_OPERATOR_SETS_PLAN=1`,
+including one where billing has not been set up yet, because that is the
+installation on which an owner granting themselves the largest plan would
+otherwise succeed.
 The signed subscription webhook changes the plan. **Refresh from Stripe** asks
 Stripe for every subscription belonging to that customer and repairs the same
 state when a webhook never arrives, including the case where no local

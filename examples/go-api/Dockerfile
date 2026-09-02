@@ -1,7 +1,7 @@
 # Multi stage, so the image that runs carries a binary and nothing else: no
 # compiler, no module cache, no source. It is the smallest thing that can be
 # the service, which is what makes an image worth scanning.
-FROM golang:1.25-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Dependencies first, so a change to the source does not re-download them.
@@ -11,14 +11,16 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/api .
 
-FROM alpine:3.20
+FROM alpine:3.24
 # psql, because the manifest's migrate command uses it and it runs inside this
 # image. Leaving it out made `af up` wait on a migration that could never run,
 # which the walkthrough found and reading the Dockerfile did not.
 #
-# postgresql-client, not postgresql17-client. Alpine 3.20 has no such package
-# and `apk add` fails the build; the unversioned name gives psql 16, which
-# talks to a 17 server perfectly well.
+# postgresql-client, rather than a version in the name. On Alpine 3.20 that was
+# forced: postgresql17-client did not exist and `apk add` failed the build. On
+# 3.24 it does exist, so the unversioned name is now a choice, and it is still
+# the right one. It gives psql 18, and a client newer than the server is the
+# direction libpq supports.
 RUN apk add --no-cache postgresql-client && adduser -D -u 10001 api
 USER api
 

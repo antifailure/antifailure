@@ -2,7 +2,7 @@
 title: GitHub
 description: An environment per pull request, and the two ways to run it.
 sidebar:
-  order: 12
+  order: 13
 ---
 
 ```yaml
@@ -203,6 +203,101 @@ The control plane's own gate in front of this one is not configurable: it
 applies `label` behaviour to every repository, because it never reads your
 manifest, so it cannot honour `never` or `always`.
 
+## Sending events with no token at all
+
+A workflow that reports to a control plane needs a credential, and the obvious
+one is wrong. A repository secret holding an engine token is readable by every
+workflow in the repository, has to be created by a person before anything works,
+and never expires, so it is the single thing most likely to still be valid a
+year after whoever pasted it has left.
+
+So the job proves who it is instead. GitHub Actions can mint a short lived
+OpenID Connect token for a job, signed by GitHub, and the control plane
+exchanges it for an engine token that expires in fifteen minutes.
+
+```yaml
+permissions:
+  id-token: write        # without this GitHub mints nothing
+  contents: read
+```
+
+```bash
+# The identity, from the runner. ACTIONS_ID_TOKEN_REQUEST_* are set by the
+# runner only when id-token: write is granted.
+identity=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=antifailure-control-plane" | jq -r .value)
+
+# The exchange.
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/auth/github-oidc" \
+  -H 'content-type: application/json' \
+  -d "{\"token\": \"$identity\"}"
+# {"token": "aft_...", "expires_at": "...", "org_id": "...", "repository": "owner/name"}
+```
+
+The audience is `antifailure-control-plane` and it is not optional. GitHub's
+default audience is your organisation's URL, which every workflow of every
+repository in the organisation gets by asking for nothing, so a token minted for
+something else entirely would be a valid credential here. Naming an audience
+makes the token useless anywhere else and makes a token minted elsewhere useless
+here.
+
+### The claim, which usually makes itself
+
+Access to an organization comes from a claim on the repository, not from the
+token. Most customers never make one by hand: when a repository has no claim and
+exactly one organization has the Antifailure GitHub App installed on its owner,
+the claim is created on the first exchange and recorded as having come from the
+installation.
+
+**Why a claim exists at all**, because this is the part that looks like
+friction and is not. A GitHub identity token says, truthfully and with a
+signature nobody can fake, "this job runs in repository R". It says nothing
+about who R belongs to. Anybody with a GitHub account can create a repository,
+put `id-token: write` in a workflow, and mint a genuine, correctly signed token
+naming it. A control plane that read that claim and looked up "the organisation
+for that repository's owner" would have verified a stranger's signature
+perfectly and then let them write into whichever tenant the lookup landed on.
+
+So the claim is what grants and the token only identifies. What the installation
+changes is who makes the claim, not whether one is needed: an installation is
+GitHub telling this control plane you control the account, checked against a
+signature when it was delivered, which is the same evidence a manual claim is
+measured against with one step fewer.
+
+**What is refused** is a repository with no claim AND no installation to stand
+in for one, with `"reason": "no_binding"`. A repository whose owner nobody has
+installed the App on reaches nobody. So does one whose owner two organisations
+have installed on, because choosing between them would decide which tenant your
+events land in by the order rows come back, and that is refused rather than
+guessed at.
+
+One repository can be claimed by one organisation. A second claim is refused
+with `"reason": "already_claimed"`.
+
+**Claiming by hand** is for a repository the App is not installed on, or one you
+want claimed before its first run. An owner or admin does it once:
+
+```bash
+curl -sS -X POST "$AF_CONTROL_PLANE/v1/oidc/bindings" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"repository": "your-org/your-repo"}'
+```
+
+Revoking a claim stops new exchanges **and kills the credentials that claim
+already issued**, which is what makes it a revocation rather than a note:
+
+```bash
+curl -sS -X DELETE "$AF_CONTROL_PLANE/v1/oidc/bindings/your-org/your-repo" \
+  -H "authorization: Bearer $AF_CONTROL_PLANE_TOKEN"
+# {"revoked": true, "repository": "your-org/your-repo", "tokensRevoked": 1}
+```
+
+A fork gets none of this. GitHub does not grant `id-token: write` to a pull
+request job running on a fork, so there is no identity to exchange, and the fork
+case is closed by GitHub's own rules rather than by this control plane
+remembering to check.
+
 ## Teardown, and what "torn down" means
 
 An environment that outlives its pull request is the leak this product exists to
@@ -267,10 +362,11 @@ second thing to fix.
 
 ## Starting a run from the console
 
-The console's **Create environment** control and its workload controls do not
-run anything on the control plane. They dispatch a run of your own workflow, in
-your own repository, on the branch the environment is on. Your database, your
-secrets and your captured traffic stay where they already are.
+The console's **Create environment**, **Run agents**, **Run load**, **Run
+workload** and **Tear down** controls do not run anything on the control plane.
+They dispatch a run of your own workflow, in your own repository, on the branch
+the environment is on. Your database, your secrets and your captured traffic
+stay where they already are.
 
 That needs two things. The App has Actions write, above. And the workflow
 accepts a dispatch:
@@ -280,10 +376,7 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      command:
-        type: choice
-        default: up
-        options: [up, down, agents, load, scenario, explore]
+      command:     { type: choice, options: [up, down, agents, load, scenario, explore], default: up }
       workflows:   { required: false, default: '' }
       duration:    { required: false, default: '' }
       scale:       { required: false, default: '' }
@@ -321,10 +414,18 @@ is worse than one that tries and tells you.
 `agents` resolves to a browser workflow and `load` to an observed load mix. The
 result says which kind a verb resolved to, so nobody has to infer it.
 
+GitHub refuses a dispatch that carries an input the workflow does not declare,
+so a workflow still carrying the older four-input block runs `up`, `agents` and
+`load` and refuses `scenario` and `explore`. Copy the current example over
+your file on the default branch to get the rest. Nothing is lost while you
+have not: the workload run is recorded either way, and an engine can claim it.
+
 The control plane records nothing about the environment when it dispatches.
 The run appears in your Actions tab, and the environment appears in the console
 when the engine reports it, the same way it does for a run you started
-yourself.
+yourself. A workload run is the one thing it does record before dispatching,
+because the run names a definition that lives only in the control plane, and
+"asked for and never picked up" is a state you need to be able to see.
 
 ## The one secret without which nothing appears in the console
 

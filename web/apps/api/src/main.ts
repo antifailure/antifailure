@@ -27,7 +27,11 @@ import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
-import { githubAppInstallUrlFrom, hostedRequiredPlanFrom } from './hosted.ts'
+import {
+  githubAppInstallUrlFrom,
+  hostedRequiredPlanFrom,
+  operatorSetsPlanFrom,
+} from './hosted.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -178,10 +182,12 @@ console.log(stripe.summary)
 let hostedRequiredPlan
 let githubAppInstallUrl
 let signupUrl
+let operatorSetsPlan = false
 try {
   hostedRequiredPlan = hostedRequiredPlanFrom(process.env.AF_HOSTED_REQUIRED_PLAN)
   githubAppInstallUrl = githubAppInstallUrlFrom(process.env.AF_GITHUB_APP_INSTALL_URL)
   signupUrl = signupUrlFrom(process.env.AF_SIGNUP_URL)
+  operatorSetsPlan = operatorSetsPlanFrom(process.env.AF_OPERATOR_SETS_PLAN)
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(2)
@@ -192,10 +198,31 @@ if (hostedRequiredPlan && !stripe.config) {
   )
   process.exit(2)
 }
+// The other contradiction, refused for the same reason and in the same place.
+//
+// A route that grants any plan by hand, on a process that also sells those
+// plans, is a product nobody has to pay for. Refusing it HERE rather than only
+// inside `billing.set` is the point: a start-up refusal covers whatever writes
+// the plan next, and a check inside one procedure covers one procedure. The
+// pair of them is what makes `operatorSetsPlan` mean "this process takes no
+// money at all" wherever it is read.
+if (operatorSetsPlan && (stripe.config || hostedRequiredPlan)) {
+  console.error(
+    'AF_OPERATOR_SETS_PLAN is set on an installation that takes payment. A plan that can be ' +
+      'granted by hand is not a plan anybody has to buy: unset it, or unset the Stripe ' +
+      'variables and AF_HOSTED_REQUIRED_PLAN.',
+  )
+  process.exit(2)
+}
 console.log(
   hostedRequiredPlan
     ? `hosted access requires the ${hostedRequiredPlan} plan`
     : 'no hosted plan gate: this installation serves every plan',
+)
+console.log(
+  operatorSetsPlan
+    ? 'plans are set by hand: billing.set writes the plan on this installation'
+    : 'plans are not set by hand: billing.set is refused (AF_OPERATOR_SETS_PLAN is not set)',
 )
 
 // Located once, here, and said out loud either way. A control plane running
@@ -231,6 +258,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
     : {}),
   stripe: billing,
   hostedRequiredPlan,
+  operatorSetsPlan,
   githubAppInstallUrl,
   signupUrl,
   modelPrices,

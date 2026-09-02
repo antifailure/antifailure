@@ -28,6 +28,7 @@ import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from './clock.ts'
 import type { RateLimiter } from './ratelimit.ts'
+import { isWorkloadEvent, projectWorkloadEvent } from './workloads/projection.ts'
 
 /** The event types the control plane understands. An event of any other type
  *  is stored but changes nothing, so an older control plane can ingest a newer
@@ -148,6 +149,16 @@ export function hashEngineToken(token: string): Buffer {
  * side channel in principle; it is not one in practice here because the value
  * compared is already a hash of a 256-bit secret, so there is nothing to learn
  * by narrowing it.
+ *
+ * REVOKED AND EXPIRED ARE BOTH REFUSALS, and only one of them used to be. This
+ * read `revoked_at` and nothing else, which was correct for exactly as long as
+ * every row in the table was immortal. It has not been since the device grant:
+ * `expires_at` is set on the ninety day CLI token that `af login` mints, and
+ * src/auth/device.ts honours it, so an expired CLI token was refused by
+ * /v1/whoami and accepted here. The engine surface is the one that writes, and
+ * a credential whose expiry only some of the server believes in has no expiry.
+ * The exchanged workflow identity tokens in src/github/exchange.ts live fifteen
+ * minutes and rest entirely on this line.
  */
 export async function authenticateEngine(
   pool: Pool,
@@ -180,6 +191,12 @@ export async function authenticateEngine(
     // have cost everything the moment one was not: a workflow identity is
     // traded for a token that is supposed to die within the hour, and without
     // this line it would authenticate forever.
+    //
+    // Compared in this process against the clock this server runs on rather
+    // than as `expires_at > now()` in the statement, so that a test can move
+    // time and watch a token stop working. A database side comparison would
+    // read the wall clock and quietly ignore the FakeClock, which is how an
+    // expiry ends up shipped and untested.
     if (row.expires_at !== null && new Date(row.expires_at).getTime() <= clock.now().getTime()) {
       return null
     }
@@ -264,7 +281,7 @@ export async function ingest(
         continue
       }
 
-      const note = await applyToProjection(db, clock, engine.orgId, event)
+      const note = await applyToProjection(db, clock, engine, event)
       outcomes.push(note === null
         ? { id: event.id, status: 'accepted' }
         : { id: event.id, status: 'accepted', note })
@@ -372,9 +389,24 @@ const STATE_FOR: Record<string, string> = {
 async function applyToProjection(
   db: Db,
   clock: Clock,
-  orgId: string,
+  engine: AuthenticatedEngine,
   event: IncomingEvent,
 ): Promise<string | null> {
+  const orgId = engine.orgId
+  // A workload event is about a run rather than about an environment, so it is
+  // keyed on the run identifier this control plane minted rather than on the
+  // engine's env_id, and it goes to its own projection.
+  //
+  // The TOKEN travels with it, and not for authorization: this batch is already
+  // authenticated and scoped to the organization. It travels because it is the
+  // same string `claimRun` writes into `lease_holder`, so it is what says
+  // whether the sender still holds the run it is reporting on. A terminal event
+  // from an engine that lost the run used to end it, and destroy the report of
+  // the engine that had taken it over.
+  if (isWorkloadEvent(event.type)) {
+    return projectWorkloadEvent(db, clock, orgId, engine.tokenId, event)
+  }
+
   switch (event.type) {
     case 'golden.published':
       return applyGolden(db, orgId, event)
@@ -419,9 +451,10 @@ async function applyEnvironment(
   const tornDownAt = state === 'torn_down' ? event.occurredAt : null
 
   if (repository === null || branch === null) {
-    return advanceExisting(db, orgId, event.envId, {
+    const note = await advanceExisting(db, orgId, event.envId, {
       state, sequence, previewUrl, runtime, golden, ttl, tornDownAt, cameUp, now,
     })
+    return note
   }
 
   const repositoryId = await repositoryIdFor(db, orgId, repository)

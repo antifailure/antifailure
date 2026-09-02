@@ -152,7 +152,7 @@ setup:
     }
 
     echo "Toolchain"
-    need go     "go1.25"  "https://go.dev/dl/ , or: brew install go"           go version
+    need go     "go1.26"  "https://go.dev/dl/ , or: brew install go"           go version
     need node   "v24"     "https://nodejs.org/ , or: brew install node@24"     node --version
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
@@ -597,6 +597,21 @@ seo:
     go run ./tools/installcheck . www || npm --prefix www ci --no-audit --no-fund --silent
     (cd www && npm run build)
     (cd www && npm run check:seo)
+
+# Not in `just gate`, because it asks the live internet a question and a gate
+# that fails when the wifi drops teaches people to rerun a gate rather than read
+# it. It runs after a publish in .github/workflows/deploy.yml, which is the
+# moment a lapsed certificate is worth knowing about, and by hand any time
+# somebody reports that the site will not load for them.
+#
+# The apex and www are two custom domains with two separate managed
+# certificates and two separate renewal lifecycles, and .dev is an HSTS
+# preloaded top level domain, so a certificate fault on either name is a hard
+# failure a reader cannot click past.
+#
+# Every hostname the site answers on presents a valid certificate for its name.
+check-tls:
+    tools/site/check-tls.sh
 
 # The getting started path, run in order and timed.
 #
