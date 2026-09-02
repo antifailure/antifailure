@@ -17,3 +17,8 @@ flags it was handed and a variable nobody stamps is not in that list. It now
 also refuses a string variable declared in the same `var` group as a stamped
 one and left unstamped. A variable that is not a release stamp belongs in its
 own declaration, which the failure message says.
+
+The run's result document read that same variable and is fixed with it. Every
+workload an enterprise binary ran recorded `community` in the `engine.edition`
+field, and that document is the artifact an auditor keeps after the run itself
+is gone. It asks the running binary now, the way `af version` does.
