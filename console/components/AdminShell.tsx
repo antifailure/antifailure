@@ -265,7 +265,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-rule bg-ink px-3 py-4 lg:flex">
+      <aside data-surface="inverted" className="sticky top-0 hidden h-dvh flex-col border-r border-rule bg-ink px-3 py-4 lg:flex">
         <Wordmark />
         <nav aria-label="Operator portal" className="mt-6 flex-1">
           <NavList />
@@ -273,7 +273,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <Who />
       </aside>
 
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-ink px-4 lg:hidden">
+      <header data-surface="inverted" className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-ink px-4 lg:hidden">
         <Wordmark />
         <button
           type="button"
@@ -296,7 +296,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             onClick={() => setMenu(false)}
             className="absolute inset-0 bg-[rgba(16,16,16,0.45)]"
           />
-          <div className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-ink px-3 py-4">
+          <div data-surface="inverted" className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-ink px-3 py-4">
             <div className="flex items-center justify-between px-2.5">
               <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white">
                 Operator
