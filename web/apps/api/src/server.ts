@@ -150,6 +150,7 @@ import { openApiDocument } from './openapi.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import { engagedReason } from './admin/controls.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
   hasHostedAccess,
@@ -288,6 +289,62 @@ export const GRANTABLE_SCOPES: readonly string[] = [
 ]
 
 
+
+/**
+ * The reason maintenance is engaged, or null.
+ *
+ * Named so that the catalog entry in admin/controls.ts can point at a real
+ * function and a test can assert the pointer is not stale. It reads on a
+ * connection with no tenant, which the read policy on platform_controls
+ * deliberately admits: every request has to be able to learn that the
+ * installation is paused, including requests that have no organization yet.
+ */
+
+/**
+ * The paths maintenance mode does not refuse.
+ *
+ * Exported, and read by a test that walks the routes the server actually
+ * serves, because the failure this list guards against is not a wrong entry.
+ * It is a route somebody adds later, outside every prefix here, that turns out
+ * to be the one an operator needs in order to turn maintenance off. That
+ * failure is invisible in code review and total in production.
+ */
+export const maintenanceExemptions = [
+  // Signing in. Refusing this means the operator who engaged maintenance
+  // cannot authenticate to release it, and the only way back is a deploy or a
+  // psql session. That is the canonical way a maintenance mode becomes the
+  // incident it was meant to contain.
+  '/auth/',
+  // Operator sign-in, wherever the admin portal ends up putting it. See the
+  // comment at the middleware for why this prefix is not optional.
+  //
+  // BOTH spellings, and the second is not hypothetical: the portal landed
+  // sign-in at POST /v1/admin/signin, outside `/admin/`, and the route-table
+  // test caught it by name. That is the lockout this list exists to prevent,
+  // arriving from the exact direction that was predicted and still missed by a
+  // list written from memory. Either prefix is cheap to exempt and either one
+  // is an outage to omit.
+  '/admin/',
+  '/v1/admin/',
+  // Engines keep reporting. Refusing ingestion does not pause anything, it
+  // loses the record of work that ran anyway.
+  '/v1/events',
+  // The credential a running job needs in ORDER to report. `/v1/events` being
+  // open and this being closed is incoherent: a workflow exchanges its GitHub
+  // identity token here for the callback credential it then sends events with,
+  // so refusing this while accepting those leaves the job holding nothing it
+  // can use. The route-table test found it, under `/v1/auth/` rather than the
+  // `/auth/` this list already carried, which is the second time a prefix that
+  // LOOKS like it covers a path did not.
+  '/v1/auth/',
+  // The surface that owns the switch. admin-portal has committed to this
+  // prefix as a hard interface for exactly this reason.
+  '/trpc/admin.',
+] as const
+
+export async function refuseDuringMaintenance(pool: Pool): Promise<string | null> {
+  return pool.withoutTenant((db) => engagedReason(db, 'maintenance'))
+}
 /**
  * The code the unexpected path returns.
  *
@@ -494,6 +551,61 @@ export function createServer(options: ServerOptions) {
     if (!c.res.headers.get('content-security-policy')) {
       c.header('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // Maintenance mode.
+  // -------------------------------------------------------------------------
+  //
+  // Refuses everything that CHANGES something, for every organization, while
+  // the installation's maintenance switch is engaged. Four things are
+  // deliberately still allowed, and each one is the difference between a pause
+  // and an outage this product caused:
+  //
+  //   Reads. An operator and a customer can both still see what the state is,
+  //   which is what people do first when something is paused.
+  //
+  //   /auth. If signing in were refused, the operator who engaged maintenance
+  //   could not authenticate to release it, and the only way back would be a
+  //   deploy or a psql session. That is the canonical way a maintenance mode
+  //   becomes the incident.
+  //
+  //   /v1/events. Engines keep reporting. Refusing ingestion does not pause
+  //   anything, it loses the record of work that ran anyway.
+  //
+  //   The admin portal's own procedures. The switch has to be reachable from
+  //   the surface that owns it, and the matching prefix is asserted by a test
+  //   rather than trusted, because a rename here is a lockout.
+  //
+  // Enforced before the routes rather than inside each one, because the failure
+  // this guards against is a route somebody adds later and does not think
+  // about, which is the same reason ENDPOINT_LIMITS is a list rather than a
+  // decorator.
+  //
+  //   Anything under /admin. Operator sign-in runs BEFORE an operator session
+  //   exists, so it cannot be a procedure behind the admin session guard, and
+  //   if it lands at /admin/auth/... rather than under the tRPC prefix then
+  //   exempting only /trpc/admin. locks the operator away from the switch that
+  //   releases maintenance. This prefix is the one that costs nothing to add
+  //   and is a lockout to omit. `maintenanceExemptions` is exported so a test
+  //   can walk the server's REAL route table against it rather than against
+  //   somebody's recollection of it.
+  const MAINTENANCE_EXEMPT_PREFIXES = maintenanceExemptions
+  app.use('*', async (c, next) => {
+    const method = c.req.method.toUpperCase()
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next()
+    const path = new URL(c.req.url).pathname
+    if (MAINTENANCE_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return next()
+    const reason = await refuseDuringMaintenance(options.pool)
+    if (reason === null) return next()
+    return c.json(
+      {
+        error:
+          `This installation is paused for maintenance: ${reason}. Nothing has been lost, ` +
+          `everything can still be read, and work that was already running is untouched.`,
+      },
+      503,
+    )
   })
 
   // Liveness. Deliberately a static literal that touches nothing: it answers
