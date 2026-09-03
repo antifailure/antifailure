@@ -52,6 +52,16 @@ export interface RollupOptions {
 }
 
 export interface RollupResult {
+  /**
+   * Whether this call did the work.
+   *
+   * False when another process held the rollup lock, which is the ordinary
+   * state on a deployment with more than one replica: they all start their
+   * maintenance pass at once. Separate from `days` being empty, because a
+   * rollup that ran over a day with no events and a rollup that never started
+   * are different things and only one of them is worth logging.
+   */
+  ran: boolean
   /** The days recomputed, oldest first. */
   days: string[]
   /** Rows written into analytics_daily. */
@@ -101,6 +111,66 @@ export async function rollUp(
   }
   const settledAfter = days[0]!
 
+  // ONE ROLLUP AT A TIME ACROSS THE WHOLE DEPLOYMENT.
+  //
+  // This rides the maintenance pass, every replica runs that pass, and it runs
+  // once immediately on start. Production is configured for two replicas, so
+  // two of these begin within milliseconds of each other on every deploy.
+  //
+  // recomputeDay is a DELETE and an INSERT in one transaction, which is right
+  // for one writer and is a race for two: the second insert lands on rows the
+  // first has already written and fails on the primary key. That aborts the
+  // whole maintenance pass on that replica, so the failure is not a wrong
+  // number, it is a dashboard that silently stops updating while a line goes
+  // into a log nobody reads. Found by running three rollups at once, which no
+  // test did until one asked what happens in that order.
+  //
+  // TRY rather than wait, unlike the migration lock. Waiting would make the
+  // second replica recompute days the first has just finished, which is a full
+  // scan of the stream for an answer that is already correct. There is nothing
+  // to wait for.
+  const lock = await admin.reserve()
+  try {
+    const [held] = await lock<{ ok: boolean }[]>`
+      SELECT pg_try_advisory_lock(hashtext('antifailure.analytics.rollup')) AS ok`
+    if (held?.ok !== true) {
+      return {
+        ran: false,
+        days: [],
+        rows: 0,
+        pruned: 0,
+        settledAfter,
+        insights: {
+          subjectDayRows: 0,
+          activeRows: 0,
+          funnelRows: 0,
+          retentionRows: 0,
+          subjectDaysPruned: 0,
+          funnelsFinalBefore: settledAfter,
+          cohortsCompleteThrough: null,
+        },
+      }
+    }
+    try {
+      return await recompute(admin, days, now, lookback, settledAfter, options)
+    } finally {
+      await lock`SELECT pg_advisory_unlock(hashtext('antifailure.analytics.rollup'))`
+    }
+  } finally {
+    lock.release()
+  }
+}
+
+/** The rollup itself, with the lock above already held. */
+async function recompute(
+  admin: postgres.Sql,
+  days: string[],
+  now: Date,
+  lookback: number,
+  settledAfter: string,
+  options: RollupOptions,
+): Promise<RollupResult> {
+
   let rows = 0
   for (const day of days) {
     for (const name of EVENT_NAMES) {
@@ -145,7 +215,7 @@ export async function rollUp(
         subject_days_kept = ${SUBJECT_DAYS_KEPT}
     WHERE id`
 
-  return { days, rows, pruned, settledAfter, insights }
+  return { ran: true, days, rows, pruned, settledAfter, insights }
 }
 
 /**
