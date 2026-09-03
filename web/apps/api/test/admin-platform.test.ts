@@ -175,6 +175,10 @@ describe('the developer platform routes', { skip: hasDb ? false : 'no database' 
    *  nothing about the credential the customer actually holds. */
   async function mintForAlice(name: string) {
     return mintEngineToken(h.pool, h.clock, {
+      // The harness's own recorder, so the funnel event commits in the same
+      // transaction as the token, exactly as it does on the route. Passing a
+      // stub here would let this fixture mint a token the real path could not.
+      analytics: h.analytics,
       orgId: alice.orgId,
       name,
       actorUserId: aliceOwner.userId,
