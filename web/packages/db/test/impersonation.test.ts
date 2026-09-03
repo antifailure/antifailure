@@ -31,14 +31,37 @@ const hasDatabase = await available()
 describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: Harness
   let tenant: Fixture
+  /** The operator doing the impersonating. An `admin_users` row, not a `users`
+   *  one: 0032 repointed the foreign key at the table operators actually live
+   *  in, because they are a separate id space and the column could not hold one
+   *  before. See the note on `operator` below. */
+  let operator: string
+  /** A real entry in the operator chain for the session rows to point at. 0032
+   *  added the foreign key that makes "the record came first" structural on
+   *  this table too, so a made-up number is no longer insertable. */
+  let auditSeq: number
 
   before(async () => {
     h = await setup()
     tenant = await seedTenant(h.admin, 'impersonation')
+    const [op] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, role)
+      VALUES (${`impersonation-${randomBytes(4).toString('hex')}@example.test`}, 'An operator', 'support')
+      RETURNING id`
+    operator = op!.id
+    const [entry] = await h.admin<{ seq: string }[]>`
+      INSERT INTO admin_audit_entries
+        (admin_user_id, actor_label, action, target_type, origin, severity, entry_hash, prev_hash)
+      VALUES (${operator}, 'an operator', 'impersonation.started', 'user', 'admin', 'critical',
+              ${randomBytes(32).toString('hex')}, NULL)
+      RETURNING seq`
+    auditSeq = Number(entry!.seq)
   })
 
   after(async () => {
     await h.admin`DELETE FROM sessions WHERE user_id = ${tenant.userId}`
+    await h.admin`DELETE FROM admin_audit_entries WHERE admin_user_id = ${operator}`
+    await h.admin`DELETE FROM admin_users WHERE id = ${operator}`
     await dropTenant(h.admin, tenant.orgId)
     // Closed, or the pool's connections keep the process alive after the last
     // assertion and the file times out having passed every test in it.
@@ -63,9 +86,9 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
 
   it('refuses an impersonation with no reason captured', async () => {
     const err = await insert({
-      impersonated_by: tenant.userId,
+      impersonated_by: operator,
       impersonator_label: 'an operator',
-      impersonation_audit_seq: 1,
+      impersonation_audit_seq: auditSeq,
     })
     assert.ok(err, 'an impersonation with no reason was accepted')
     assert.match(err.message, new RegExp(CONSTRAINT))
@@ -73,10 +96,10 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
 
   it('refuses a reason that is only whitespace, which is not a reason', async () => {
     const err = await insert({
-      impersonated_by: tenant.userId,
+      impersonated_by: operator,
       impersonator_label: 'an operator',
       impersonation_reason: '   ',
-      impersonation_audit_seq: 1,
+      impersonation_audit_seq: auditSeq,
     })
     assert.ok(err, 'a blank reason was accepted')
     assert.match(err.message, new RegExp(CONSTRAINT))
@@ -91,7 +114,7 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
    */
   it('refuses an impersonation that names no audit entry', async () => {
     const err = await insert({
-      impersonated_by: tenant.userId,
+      impersonated_by: operator,
       impersonator_label: 'an operator',
       impersonation_reason: 'looking into a failed run',
     })
@@ -99,23 +122,90 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
     assert.match(err.message, new RegExp(CONSTRAINT))
   })
 
-  it('refuses a marker with no operator behind it', async () => {
+  it('refuses an audit entry that was never written', async () => {
+    // The other half of the rule, and it did not exist until 0032. The CHECK
+    // says the column must be SET; the foreign key says the entry it names must
+    // EXIST. Without the second, a handler could satisfy the constraint with any
+    // integer and the session would carry a pointer into nothing, which reads as
+    // an audited impersonation to everything that ever looks at it.
+    const err = await insert({
+      impersonated_by: operator,
+      impersonator_label: 'an operator',
+      impersonation_reason: 'looking into a failed run',
+      impersonation_audit_seq: 2_000_000_000,
+    })
+    assert.ok(err, 'a session pointing at an audit entry that does not exist was accepted')
+    assert.match(err.message, /sessions_impersonation_audit_fkey/)
+  })
+
+  it('refuses a marker with no operator named', async () => {
+    // Keyed on the LABEL now, not on the id. 0032 moved the constraint's
+    // predicate onto impersonation_audit_seq and let impersonated_by go null,
+    // because the foreign key is ON DELETE SET NULL and the two could not both
+    // hold: nulling one of four columns leaves exactly the shape the old
+    // all-or-nothing CHECK refused, so deleting an operator failed on a table
+    // nobody was looking at. What still cannot happen is a session that records
+    // an impersonation without saying who did it, because impersonator_label is
+    // text and no cascade can take it away.
     const err = await insert({
       impersonation_reason: 'looking into a failed run',
-      impersonation_audit_seq: 1,
+      impersonation_audit_seq: auditSeq,
     })
-    assert.ok(err, 'a session claiming a reason but no operator was accepted')
+    assert.ok(err, 'a session claiming a reason but naming no operator was accepted')
     assert.match(err.message, new RegExp(CONSTRAINT))
   })
 
   it('accepts a complete impersonation', async () => {
     const err = await insert({
-      impersonated_by: tenant.userId,
+      impersonated_by: operator,
       impersonator_label: 'an operator',
       impersonation_reason: 'looking into a failed run',
-      impersonation_audit_seq: 42,
+      impersonation_audit_seq: auditSeq,
     })
     assert.equal(err, null, `a complete impersonation was refused: ${err?.message}`)
+  })
+
+  it("survives its operator's account being deleted, with the record intact", async () => {
+    // THE PROPERTY 0032 EXISTS FOR, and the one the old shape could not have.
+    //
+    // Under the previous constraint this DELETE failed: the foreign key nulls
+    // impersonated_by, the all-or-nothing CHECK refuses a row with three of four
+    // columns set, and the delete came back with a constraint violation on a
+    // table nobody was thinking about. Now the id goes and the record stays,
+    // which is the same trade `suspended_by text` makes three tables over: the
+    // label names the person a year later, and the audit entry is immutable.
+    const [doomed] = await h.admin<{ id: string }[]>`
+      INSERT INTO admin_users (email, name, role)
+      VALUES (${`departing-${randomBytes(4).toString('hex')}@example.test`}, 'A leaver', 'support')
+      RETURNING id`
+    const err = await insert({
+      impersonated_by: doomed!.id,
+      impersonator_label: 'departing@example.test',
+      impersonation_reason: 'a support call that outlived the operator',
+      impersonation_audit_seq: auditSeq,
+    })
+    assert.equal(err, null, `the session could not be created: ${err?.message}`)
+
+    await assert.doesNotReject(
+      () => h.admin`DELETE FROM admin_users WHERE id = ${doomed!.id}`,
+      "deleting an operator with a past impersonation was refused",
+    )
+
+    const [row] = await h.admin<{
+      impersonated_by: string | null
+      impersonator_label: string
+      impersonation_reason: string
+    }[]>`
+      SELECT impersonated_by, impersonator_label, impersonation_reason
+      FROM sessions
+      WHERE impersonation_reason = 'a support call that outlived the operator'`
+    assert.ok(row, 'the session was deleted along with the operator')
+    assert.equal(row.impersonated_by, null, 'the operator id survived a delete that should null it')
+    assert.equal(
+      row.impersonator_label,
+      'departing@example.test',
+      'the record lost the only durable name it had',
+    )
   })
 
   /**

@@ -33,6 +33,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
 import { appRouter } from '../src/routers/index.ts'
 import {
   ADMIN_PERMISSIONS,
@@ -58,6 +59,39 @@ const AWAITING_A_ROUTE: Partial<Record<AdminPermission, string>> = {
   'admin.audit.export': 'the Security lane, which is building the export route',
 }
 
+/**
+ * Every permission enforced by a PLAIN HTTP route, read from the source.
+ *
+ * The walk below sees the tRPC tree and nothing else, so a permission enforced
+ * on an ordinary route is invisible to it and reads as dead. That is not
+ * hypothetical: `admin.impersonation.start` guards
+ * `POST /v1/admin/impersonation/start`, which cannot be a procedure because it
+ * ends in a Set-Cookie for the CUSTOMER's session, and this suite called it
+ * dead on the day it was wired.
+ *
+ * An exemption would have been the wrong answer. The exemption list means "being
+ * built", and this permission is not being built: it is enforced, right now, in
+ * a place the instrument could not look. Widening the instrument is the fix;
+ * exempting it would have taught the next reader that the list is where
+ * inconvenient answers go.
+ *
+ * Read as source rather than by calling anything, because enforcement here is a
+ * call inside a handler and there is no registry to ask. It still says no: a
+ * permission enforced nowhere appears in neither set and fails.
+ */
+function httpGuardedPermissions(): Set<string> {
+  const dir = new URL('../src/admin/', import.meta.url)
+  const found = new Set<string>()
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.ts')) continue
+    const source = readFileSync(new URL(file, dir), 'utf8')
+    for (const m of source.matchAll(/adminRoleHas\([^,]+,\s*'(admin\.[a-z.]+)'\)/g)) {
+      found.add(m[1]!)
+    }
+  }
+  return found
+}
+
 /** Every permission any route in the tree declares. */
 function declaredPermissions(): Set<string> {
   const procedures = (
@@ -70,6 +104,8 @@ function declaredPermissions(): Set<string> {
     const permission = procedures[path]!._def.meta?.adminPermission
     if (permission) declared.add(permission)
   }
+  // The plain HTTP routes too, or a permission enforced on one reads as dead.
+  for (const p of httpGuardedPermissions()) declared.add(p)
   return declared
 }
 

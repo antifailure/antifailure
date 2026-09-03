@@ -115,6 +115,31 @@ export interface ResolvedSession {
    *  already holds. */
   csrfToken: string
   expiresAt: Date
+  /**
+   * Set when this session is an operator acting as this account.
+   *
+   * READ HERE, ON EVERY REQUEST, and that is the whole reason the four columns
+   * are on the session row rather than in a side table. Migration 0023 argues
+   * it at length: a marker the application cannot see is a session that looks
+   * ordinary to every check in the product, which is the fail open the columns
+   * exist to prevent. They were added, the argument was written down, and then
+   * nothing read them, so the guarantee was a comment. This is the read that
+   * makes it true.
+   *
+   * Null on an ordinary sign-in, which is almost every session, so a caller
+   * that ignores this field behaves exactly as it did before.
+   */
+  impersonation: {
+    /** The operator, by the address the audit chain names them under. Text
+     *  from the row rather than a join, because the operator's own account may
+     *  be gone by the time somebody reads this. */
+    operator: string
+    reason: string
+    /** The entry in the platform audit chain that authorised it. The customer
+     *  has a copy of that entry in their own log, and this is the number that
+     *  ties the two together. */
+    auditSeq: number
+  } | null
 }
 
 /**
@@ -160,9 +185,13 @@ export async function resolveSession(
         suspended_at: Date | string | null
         github_login: string
         name: string | null
+        impersonator_label: string | null
+        impersonation_reason: string | null
+        impersonation_audit_seq: string | number | null
       }>(sql`
         SELECT s.id, s.user_id, s.org_id, s.expires_at, s.last_seen_at,
-               s.revoked_at, u.suspended_at, u.github_login, u.name
+               s.revoked_at, u.suspended_at, u.github_login, u.name,
+               s.impersonator_label, s.impersonation_reason, s.impersonation_audit_seq
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ${tokenHash}`)
@@ -209,6 +238,19 @@ export async function resolveSession(
         label: row.name || row.github_login,
         csrfToken: csrfTokenFor(token),
         expiresAt,
+        // Keyed on the sequence number rather than on impersonator_label,
+        // which is what 0032 moved the CHECK to. That column is NOT NULL
+        // whenever this is an impersonation and it is the one column no cascade
+        // can null out, so it is the only one that answers "is this an
+        // impersonation" for certain.
+        impersonation:
+          row.impersonation_audit_seq === null
+            ? null
+            : {
+                operator: row.impersonator_label ?? 'an operator',
+                reason: row.impersonation_reason ?? '',
+                auditSeq: Number(row.impersonation_audit_seq),
+              },
       }
     },
     { sessionHash: tokenHash },

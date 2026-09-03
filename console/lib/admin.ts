@@ -209,6 +209,30 @@ export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
   );
 }
 
+/**
+ * A POST to any operator endpoint, carrying the token.
+ *
+ * Separate from adminMutate because not every operator write is a procedure.
+ * Two of them cannot be: starting and ending an impersonation both end in a
+ * Set-Cookie for the CUSTOMER's session cookie, and a procedure that exists to
+ * set a cookie is a procedure pretending to be a route. They are plain JSON
+ * endpoints under /v1/admin/, they are behind the same operator cookie, and the
+ * server demands the same header on them, so they need this and not a third
+ * copy of it.
+ */
+export async function adminPost<T>(path: string, body?: unknown): Promise<T> {
+  // Through the same `csrf.send` as adminMutate rather than fetching its own
+  // token, so this client has ONE cache, ONE retry rule and ONE header name.
+  // The version that arrived here carried a second cache and a second retry
+  // predicate; four agents wrote this function today and the way that stops
+  // being expensive is that they all end up calling the same one.
+  //
+  // What it does NOT do is unwrap a tRPC envelope, because there is not one:
+  // these routes answer with their body.
+  return csrf.send((headers) => rest<T>(path, { method: "POST", body: body ?? {}, headers }));
+}
+
+
 export async function suspendTenant(orgId: string, reason: string) {
   return adminMutate<{ suspended: boolean; effect: string }>("admin.tenants.suspend", {
     orgId,
@@ -228,6 +252,10 @@ export async function resumeTenant(orgId: string) {
  * to set a cookie is a procedure pretending to be a route.
  */
 export async function adminSignIn(email: string, password: string): Promise<void> {
+  // Dropped BEFORE the request as well as after it. A failed sign-in can still
+  // have replaced the cookie, and a token from the previous session refuses
+  // silently rather than loudly.
+  csrf.forget();
   await rest("/v1/admin/signin", { method: "POST", body: { email, password } });
   // The new session has a new token, and the old one is now wrong rather than
   // merely stale: it would be sent, refused, and the refusal would name a
@@ -235,6 +263,16 @@ export async function adminSignIn(email: string, password: string): Promise<void
   csrf.forget();
 }
 
+/**
+ * Ends the operator session.
+ *
+ * It also ends any impersonation this session holds and clears the customer
+ * cookie, which the server does rather than this function: see the block on
+ * POST /v1/admin/signout in server.ts. That matters here because this is what
+ * the portal's impersonation refusal screen calls, so the one button an
+ * operator can reach from inside an impersonation actually gets them out
+ * rather than leaving a borrowed cookie in the browser.
+ */
 export async function adminSignOut(): Promise<void> {
   await rest("/v1/admin/signout", { method: "POST" });
   csrf.forget();

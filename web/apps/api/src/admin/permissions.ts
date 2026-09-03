@@ -47,6 +47,23 @@ export const ADMIN_PERMISSIONS = [
   'admin.sessions.read',
   'admin.sessions.revoke',
 
+  // What an operator wrote down about a customer, and stepping into their
+  // account.
+  //
+  // Read is separate from write on notes because a note is the vendor's own
+  // words about a paying customer: everybody answering a question needs to see
+  // what the last person found, and far fewer people need to add to the file.
+  //
+  // Impersonation is split the same way and the split is not symmetric with the
+  // others. Reading is oversight, so it is held widely: an operator should be
+  // able to see that somebody was inside a customer's account whether or not
+  // they could go in themselves. Starting one is the single most powerful thing
+  // in this portal and is held by three roles.
+  'admin.support.read',
+  'admin.support.write',
+  'admin.impersonation.read',
+  'admin.impersonation.start',
+
   // Money, and the three things that decide what a customer gets.
   //
   // Read is separate from write on all three, and on billing that split is the
@@ -119,13 +136,18 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.operators': 'the foundation',
   'admin.audit': 'the foundation',
   'admin.tenants': 'the foundation',
-  'admin.users': 'ops',
-  'admin.sessions': 'ops',
+  // The Customers group: Users & Organizations, Support & Impersonation, and
+  // Billing & Stripe. These four prefixes read 'ops' and 'money' when the
+  // portal was four lanes; the navigation now declares six groups and one
+  // module each, and admin/customers.ts owns all of them. Two places named a
+  // different owner for the same prefix, which is worse than either answer.
+  'admin.users': 'customers',
+  'admin.sessions': 'customers',
+  'admin.impersonation': 'customers',
+  'admin.support': 'customers',
+  'admin.billing': 'customers',
   'admin.projects': 'ops',
-  'admin.impersonation': 'ops',
-  'admin.support': 'ops',
   'admin.search': 'ops',
-  'admin.billing': 'money',
   'admin.entitlements': 'money',
   'admin.flags': 'money',
   'admin.infra': 'infra',
@@ -218,6 +240,14 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.users.write': 'Suspend and restore an account.',
   'admin.sessions.read': 'See who is signed in, on what, and since when.',
   'admin.sessions.revoke': 'Sign any account out of any session.',
+  'admin.support.read': "Read the notes operators have written about a customer, including ones that were retracted.",
+  'admin.support.write': 'Write a note about a customer, and retract one.',
+  'admin.impersonation.read':
+    'See which operators are signed in as a customer right now, and every impersonation that ' +
+    'has started or ended.',
+  'admin.impersonation.start':
+    'Sign in as a customer, for a stated reason and for a bounded number of minutes. The ' +
+    'customer sees it in their own audit log.',
 }
 
 /**
@@ -271,6 +301,8 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.emergency.read', 'admin.emergency.engage',
     'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
     'admin.keys.read', 'admin.keys.revoke',
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read', 'admin.impersonation.start',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -292,6 +324,12 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // the pager holder is who reaches it first.
     'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
     'admin.keys.read', 'admin.keys.revoke',
+    // What support already found, and who is inside an account right now.
+    // During an incident both are context rather than power, and neither is a
+    // write. Starting an impersonation is deliberately not here: an engineer
+    // reproducing a fault has the logs, the twin and the run, and none of
+    // those require becoming the customer.
+    'admin.support.read', 'admin.impersonation.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -310,6 +348,12 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // it is the first thing they do about it.
     'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
     'admin.keys.read', 'admin.keys.revoke',
+    // Notes both ways, because writing down what an investigation found is
+    // most of what a security review produces. Impersonation read and not
+    // start, for the same reason this role holds sessions.revoke and not the
+    // means to create a session: the job is establishing what happened.
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -320,6 +364,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.billing.write',
     'admin.entitlements.read', 'admin.entitlements.write',
     'admin.flags.read', 'admin.flags.write',
+    // Read, because the last person to touch this account left a note, and a
+    // refund argument that ignores it is an argument being had twice.
+    'admin.support.read',
   ],
   support: [
     'admin.portal.access', 'admin.audit.read',
@@ -334,6 +381,14 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // emphatically not the rota that should be able to stop a customer's
     // pipeline while answering.
     'admin.repos.read', 'admin.keys.read', 'admin.webhooks.read', 'admin.mcp.read',
+    // The role these four permissions exist for. Support is the rota that
+    // answers "it does not work for me", and it cannot answer that from the
+    // outside. This is the one role below owner and super_admin that can step
+    // into an account, and it is bounded rather than trusted: minutes, a
+    // stated reason, an entry in the customer's own audit log, and the
+    // operator portal closed for as long as it lasts.
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read', 'admin.impersonation.start',
   ],
   analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
   read_only: [

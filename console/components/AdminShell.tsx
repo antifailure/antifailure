@@ -25,6 +25,7 @@ import { Button, Field, Lede, Standalone, inputClass } from "@/components/ui";
 import { ADMIN_NAV, ADMIN_OVERVIEW } from "@/lib/admin-nav";
 import type { AdminNavItem } from "@/lib/admin-nav";
 import { adminSignIn, adminSignOut, operatorMay, useAdminContext } from "@/lib/admin";
+import { endImpersonation } from "@/lib/admin-customers";
 import type { AdminMe } from "@/lib/admin";
 import type { ApiError } from "@/lib/api";
 
@@ -115,25 +116,61 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
  * warning strip on top would be a page of failed panels underneath, and the
  * reader would have to infer the one cause from a dozen symptoms.
  */
-function Impersonating({ label }: { label: string }) {
+function Impersonating() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // NO OPERATOR NAME ON THIS SCREEN, and that is forced rather than chosen. The
+  // only route that answers "who are you" is admin.me, and the gate refuses it
+  // for the same reason it refuses everything else here. The sentence is
+  // written so it does not need one: the reader is the person holding this
+  // browser, and telling them what state it is in is the whole job.
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      window.location.assign("/admin");
+    } catch (err) {
+      setError((err as ApiError).message);
+      setBusy(false);
+    }
+  }
+
   return (
     <Standalone title="This session is impersonating a customer" width={460} alert>
       <Lede>
-        You are signed in as <strong className="font-medium text-ink">{label}</strong>, and this
-        session is currently acting as a customer. The operator portal is closed to it until the
-        impersonation ends. That is deliberate: starting an impersonation is itself an operator
-        action, so a session that is already inside one cannot take another.
+        This browser is currently signed in as a customer, and the operator portal is closed to it
+        until that ends. That is deliberate: starting an impersonation is itself an operator
+        action, so a session already inside one cannot take another.
       </Lede>
-      <div className="mt-7">
+      <div className="mt-7 flex flex-wrap gap-2">
+        {/* THE PRIMARY WAY OUT ENDS THE IMPERSONATION AND NOTHING ELSE.
+            It used to sign the operator out entirely, which worked and was the
+            wrong shape: somebody who finished a support call had to sign in
+            again to write down what they found. This revokes the customer
+            session, clears the marker, records the ending in both audit chains
+            and leaves the operator signed in. */}
         <Button
           variant="primary"
-          onClick={() => {
-            void adminSignOut().then(() => window.location.reload());
-          }}
+          busy={busy}
+          onClick={() => void run(() => endImpersonation())}
         >
-          End this session
+          End the impersonation
+        </Button>
+        {/* Kept beside it, because the two are not the same. This one ends the
+            operator session as well, which is what somebody walking away from a
+            shared machine wants. It also ends the impersonation: see the block
+            on POST /v1/admin/signout in server.ts. */}
+        <Button busy={busy} onClick={() => void run(() => adminSignOut())}>
+          Sign out completely
         </Button>
       </div>
+      {error ? (
+        <p role="alert" className="mt-4 text-[12.5px] leading-5 text-fail">
+          {error}
+        </p>
+      ) : null}
     </Standalone>
   );
 }
@@ -369,6 +406,28 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // AN IMPERSONATING SESSION REACHES THIS FILE AS AN ERROR, NOT AS `me`.
+  //
+  // `me.impersonating` below can never be true, and the branch that reads it
+  // was unreachable from the day it was written. admin.me is an adminProcedure,
+  // adminProcedure refuses EVERY operator procedure while the session is
+  // impersonating, and it refuses first, before the permission check. So the
+  // moment an impersonation exists, admin.me answers 403 and this component
+  // takes the branch below: an operator inside a customer's account was shown
+  // "The control plane did not answer" and a Try again button that could only
+  // ever fail, with no way out on the screen at all.
+  //
+  // Nothing could produce that state until the routes that start one existed,
+  // which is why it survived review: the branch reads correctly and the code
+  // path that reaches it did not exist yet.
+  //
+  // Matched on the refusal the gate composes, which is the only thing that
+  // distinguishes this 403 from "your role cannot see this". The server owns
+  // that sentence and it is one string in one file.
+  if (status === "error" && error && error.status === 403 && /impersonating/i.test(error.message)) {
+    return <Impersonating />;
+  }
+
   // 401 is "not signed in", which is a screen and not a failure. Anything else
   // is the control plane failing to answer, and saying so beats a sign-in form
   // that will not work.
@@ -386,7 +445,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!me) return <SignIn onSignedIn={reload} />;
-  if (me.impersonating) return <Impersonating label={me.label} />;
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[236px_1fr]">
