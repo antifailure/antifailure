@@ -263,29 +263,152 @@ func rehearse(t *testing.T, db testDB, files map[string]string) insights.Rehears
 	return r
 }
 
+// The three numbers the assertions below turn on.
+//
+// The FLOOR can only be crossed by a statement that slept for less time than
+// it was told to, which does not happen. Contention only ever pushes a duration
+// up, so a busy runner cannot drive the planted statement under its floor. That
+// is the property the assertion this replaces did not have.
+//
+// The CEILING is the one that has to be earned, and earning it is what decides
+// the shape of the fixture. A ceiling is only safe over a statement whose cost
+// is bounded, and the cost of real work is not bounded: it is set by whatever
+// else the machine is doing. Adding a nullable column is catalogue only and
+// measured 1.5ms to 4.2ms here, so 1500ms is several hundred times its worst.
+//
+// The backfill of 50,000 rows is the counter-example, and it is measured rather
+// than assumed. Run on its own it took 299ms to 444ms. Run thirty times back to
+// back it reached 2058ms, a factor of 4.6. So it sits at the END of the file
+// where nothing needs a ceiling over it, and the planted statement's neighbours
+// are both catalogue-only work. Moving it was the fix; raising the ceiling over
+// it would have been the same mistake in a new place, since no fixed number is
+// above a duration that has no upper bound.
+const (
+	plantedSleep     = 2
+	plantedFloor     = 1800.0
+	neighbourCeiling = 1500.0
+	// Bookkeeping between statements, not a share of the run. See the sum
+	// assertion at the end of the test for why this must not scale.
+	windowSlack = 50.0
+)
+
 func TestRehearse_TimesEveryStatementSeparately(t *testing.T) {
 	db, done := requireDatabase(t, "insightstiming")
 	defer done()
 
+	// A planted statement whose duration is a FACT rather than a measurement,
+	// in the MIDDLE, which is what makes this an attribution test.
+	//
+	// The assertion this replaces was `update.MS > add.MS`, on the premise
+	// that backfilling 50,000 rows outruns adding a nullable column. That is
+	// true and it is not the claim in the test's name, which is that each
+	// statement is timed SEPARATELY. Comparing two real wall clock
+	// measurements measures the runner: its sibling assertion, on the server
+	// side path, failed in CI with "33.12 is not greater than 84.532" on a
+	// pull request that changed one file mode bit and one markdown file.
+	//
+	// Distinctness alone is not enough either. A duration shifted by one, and
+	// a running total, both produce three different numbers and would survive
+	// a test that only asked whether the numbers differ. Asking WHERE a known
+	// duration landed catches both, and catches them by name.
+	//
+	// pg_sleep returns void, so it cannot be a column on its own. The cast is
+	// what makes the view legal, not decoration.
 	r := rehearse(t, db, map[string]string{
 		"001_add.sql": "ALTER TABLE orders ADD COLUMN currency text;\n" +
+			fmt.Sprintf(
+				"CREATE MATERIALIZED VIEW af_rehearsal_clock AS SELECT pg_sleep(%d)::text AS slept;\n",
+				plantedSleep) +
+			"ALTER TABLE orders ADD COLUMN refunded_at timestamptz;\n" +
 			"UPDATE orders SET currency = 'usd';\n",
 	})
 	require.False(t, r.Failed, r.Error)
-	require.Len(t, r.Statements, 2)
+	require.Len(t, r.Statements, 4)
 
-	// The point of the whole rehearsal. Every tool reports one number for the
-	// file, and the number somebody needs is which statement inside it took
-	// the time: adding a nullable column is instant and updating 50,000 rows
-	// is not.
-	add, update := r.Statements[0], r.Statements[1]
-	require.Contains(t, add.SQL, "ADD COLUMN")
+	before, planted, after, update :=
+		r.Statements[0], r.Statements[1], r.Statements[2], r.Statements[3]
+	require.Contains(t, before.SQL, "ADD COLUMN currency")
+	require.Contains(t, planted.SQL, "MATERIALIZED VIEW")
+	require.Contains(t, after.SQL, "ADD COLUMN refunded_at")
 	require.Contains(t, update.SQL, "UPDATE")
-	require.Greater(t, update.MS, add.MS,
-		"backfilling 50,000 rows must not be reported as faster than adding a column")
-	require.Greater(t, r.TotalMS, 0.0)
-	require.Equal(t, 1, r.Statements[0].Index)
-	require.Equal(t, 2, r.Statements[1].Index)
+	for i, s := range r.Statements {
+		require.Equal(t, i+1, s.Index, "statements are numbered in the order they ran")
+	}
+
+	// Every statement carries a duration of its own. A zero here is a
+	// statement that was listed and never timed, which is the shape of a
+	// duration read from the transaction clock rather than the wall clock.
+	for _, s := range r.Statements {
+		require.Greater(t, s.MS, 0.0,
+			"statement %d carries no duration, so it was listed rather than timed: %s",
+			s.Index, s.SQL)
+	}
+
+	// One total copied onto every row. Two durations measured to the
+	// microsecond do not agree by chance, so equality is a copy.
+	seen := map[float64]int{}
+	for _, s := range r.Statements {
+		if first, ok := seen[s.MS]; ok {
+			require.Failf(t, "two statements report the identical duration",
+				"statements %d and %d both report %v, which is one number copied rather "+
+					"than two measured", first, s.Index, s.MS)
+		}
+		seen[s.MS] = s.Index
+	}
+
+	// The planted seconds landed on the statement that slept, and on neither
+	// statement beside it. This is the whole test. A duration shifted by one
+	// fails the floor, and a running total fails the ceiling over the statement
+	// that follows the sleep.
+	require.Greater(t, planted.MS, plantedFloor,
+		"the statement that slept for %ds is not reported as taking about that long",
+		plantedSleep)
+	require.Less(t, before.MS, neighbourCeiling,
+		"adding a nullable column is not seconds of work, so a duration near the sleeping "+
+			"statement's is that statement's time charged to the wrong row")
+	require.Less(t, after.MS, neighbourCeiling,
+		"adding a nullable column is not seconds of work, so a duration near the sleeping "+
+			"statement's is that statement's time charged to the wrong row")
+
+	// The backfill gets no ceiling, deliberately. It is here because a real
+	// production-shaped statement has to be attributed too, and the assertions
+	// it can carry honestly are the ones above: it ran, it was timed, and its
+	// number is its own. How long 50,000 rows take is a fact about the machine.
+
+	// The run as a whole contains the statement it is made of.
+	require.Greater(t, r.TotalMS, planted.MS,
+		"the whole rehearsal cannot be shorter than one statement inside it")
+
+	// The statements fit inside the window the applier ran in. What this line
+	// catches, and nothing else here does, is a fixed overhead charged to every
+	// statement: measured on this fixture, adding 200ms to each of the four
+	// durations leaves the floor, both ceilings, the distinctness check and the
+	// total below all green, and fails only here.
+	//
+	// A uniform multiplier is a different shape and it is worth being exact
+	// about which line earns it, because the answer differs between the two
+	// timing paths. Agent flaky-timing measured on the SERVER side path that
+	// doubling every duration left every assertion in THEIR test green. It does
+	// not reach this line here: the planted sleep is most of the window, so
+	// doubling it fails the total assertion above first. Measured limit, stated
+	// rather than papered over: a multiplier small enough to stay under that
+	// total, around 1.05 on this fixture, is caught by nothing in this test.
+	// The overhead shape above is what this assertion is worth having for.
+	//
+	// It holds by construction rather than by luck. TotalMS is wall clock
+	// measured in Go around Apply, and the SQL applier times each statement
+	// with the same Go clock over non-overlapping intervals strictly inside
+	// that window, so the sum cannot exceed it. The slack covers the bookkeeping
+	// between statements and is a CONSTANT rather than a fraction of the
+	// window, because a fraction grows with the window and would forgive
+	// exactly the inflation this is here to catch.
+	var sum float64
+	for _, s := range r.Statements {
+		sum += s.MS
+	}
+	require.Less(t, sum, r.TotalMS+windowSlack,
+		"the statements add up to more time than the applier was running, so the durations "+
+			"are inflated rather than measured")
 }
 
 func TestRehearse_ReportsAMigrationThatDoesNotApply(t *testing.T) {
