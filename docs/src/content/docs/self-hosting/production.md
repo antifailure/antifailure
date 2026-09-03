@@ -354,13 +354,30 @@ az ad app federated-credential list --id "$APP_ID" \
 
 **What is missing is the role assignment**, because the production group does
 not exist until step 5 and a grant cannot precede its scope. The identity needs
-on the production group what it already has on staging's:
+on the production group what it already has on staging's: Contributor, scoped to
+that group and nothing wider.
+
+**Terraform owns it. Do not create it by hand.** This page used to print an
+`az role assignment create` here and that instruction outlived the code that
+replaced it, which is worse than either alone: a grant made by hand is absent
+from the stack's state, cannot survive a rebuild, and reads to the next person
+as a resource Terraform does not manage. The grant is
+`azurerm_role_assignment.cd_deploys_the_group` in
+`stacks/control-plane/ci.tf`, and it is switched on by `cd_principal_id` in
+`production.tfvars`, which is already set. Step 5 creates it along with
+everything else.
+
+Confirm it after the apply, rather than trusting this page:
 
 ```sh
-az role assignment create --role Contributor \
+az role assignment list \
   --assignee "$(az ad app list --display-name af-infra-ci --query '[0].appId' -o tsv)" \
-  --scope "$(az group show -n af-cp-prod-centralus --query id -o tsv)"
+  --scope "$(az group show -n af-cp-prod-centralus --query id -o tsv)" \
+  --query "[].roleDefinitionName" -o tsv
 ```
+
+If that prints nothing, `cd.yml`'s production job fails at its first
+`az containerapp` call and continuous deployment cannot reach production at all.
 
 ### 13. Set the approval rule on the production environment
 

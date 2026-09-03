@@ -365,6 +365,26 @@ jobs:
             --pricing infra/pricing.yaml \
             --budget 300 | tee cost.txt
 
+      # WHAT THE SUMMARY BELOW SAYS, SAID IN AN EXIT CODE INSTEAD.
+      #
+      # The Summarise step already counts destroys and already bolds the count.
+      # That instinct was right and it could not fail: it writes a sentence into
+      # a job summary and asks a person to read it. Commit ff893073 deleted the
+      # Contributor grant that lets continuous deployment reach production, and
+      # every plan afterwards said "1 to destroy" into a green check.
+      #
+      # GATED ON remote_state, not on the credential. A plan from an empty
+      # state shows every resource as a create and cannot contain a destroy, so
+      # running this against one would be a green check that examined nothing.
+      # planguard refuses such a plan outright rather than passing it, and this
+      # condition keeps it from being asked in the first place.
+      - name: staging destroys nothing unacknowledged
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        run: |
+          GOTOOLCHAIN=local go run ./tools/planguard \
+            -plan infra/terraform/stacks/control-plane/plan.json \
+            -environment staging
+
       # The destroy count, called out on its own. A plan buried in a log is a
       # plan nobody reads; "3 to destroy" in the summary is one somebody asks
       # about.
@@ -485,14 +505,22 @@ jobs:
             -backend-config="key=control-plane-production.tfstate" \
             -backend-config="use_azuread_auth=true" \
             -backend-config="use_oidc=true"
-          # No -out, and the log goes to the runner's temp directory rather
-          # than into the stack. `terraform show -json` on a plan file includes
-          # the values of sensitive input variables and this plan has no reader,
-          # and a log written beside staging.tfvars is one more untracked file
-          # in a directory an operator also works in by hand.
+          # THE PLAN IS WRITTEN OUT NOW, AND IT WAS NOT BEFORE. The reason
+          # given for not writing one was that `terraform show -json` on a plan
+          # file includes the values of sensitive input variables and this plan
+          # had no reader. It has one: tools/planguard, in the step below, and a
+          # plan with a reader is worth the file. Everything else about the
+          # original reasoning still holds and is kept, so both the plan and its
+          # JSON go to the runner's temp directory rather than into the stack,
+          # where they would be two more untracked files in a directory an
+          # operator also works in by hand. Neither is ever printed: planguard
+          # reads resource_changes and prior_state and deliberately does not
+          # touch the variables block.
           log="$RUNNER_TEMP/production-plan.txt"
           if terraform plan -input=false -lock=false -refresh=false \
-            -var-file=production.tfvars -no-color > "$log" 2>&1; then
+            -var-file=production.tfvars -no-color \
+            -out="$RUNNER_TEMP/production.tfplan" > "$log" 2>&1; then
+            terraform show -json "$RUNNER_TEMP/production.tfplan" > "$RUNNER_TEMP/production-plan.json"
             echo "Production planned successfully. The diff above is staging's; this step read only the exit status." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::error title=Production cannot be planned::terraform plan against production.tfvars and control-plane-production.tfstate failed. Until it passes, no change to this stack can be applied to production, including changes already merged. The failure is below."
@@ -509,3 +537,35 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+
+      # THE SAME QUESTION, ASKED WHERE IT WAS NEVER ASKED AT ALL.
+      #
+      # The step above reads the exit status and says so: a plan that SUCCEEDS
+      # can still be a plan that removes something nobody meant to remove, and
+      # that is not a hypothetical here. This is the environment where it
+      # happened, and it went unseen for days for two compounding reasons:
+      # production could not be planned at all, and the destroy counter that
+      # does exist runs against staging and reports rather than fails.
+      #
+      # IT IS SAFE TO READ THIS DIFF EVEN THOUGH THE STEP ABOVE SAYS THE DIFF
+      # CANNOT BE TRUSTED, and the distinction is the reason this step is
+      # allowed to exist. The inputs here are not the inputs an apply would use:
+      # alert_emails is a placeholder and ci_principal_id arrives from a
+      # repository variable, so the ADDS and the IN PLACE CHANGES in this plan
+      # describe a desired state nobody will ever apply. Neither placeholder can
+      # manufacture a DESTROY. A destroy appears when state holds a managed
+      # resource that no configuration declares, and no value passed on the
+      # command line makes a resource stop being declared. Verified rather than
+      # assumed: the pull request that added this planned production both ways
+      # and the destroy set was identical.
+      #
+      # It is a separate step from the plan on purpose. "Production cannot be
+      # planned" and "production plans, and the plan removes something" are
+      # different failures with different fixes, and a reader should not have to
+      # work out which one a red check meant.
+      - name: production destroys nothing unacknowledged
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        run: |
+          GOTOOLCHAIN=local go run ./tools/planguard \
+            -plan "$RUNNER_TEMP/production-plan.json" \
+            -environment production
