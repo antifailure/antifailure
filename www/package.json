@@ -10,6 +10,7 @@
     "build": "node scripts/optimize-images.mjs && next build && node scripts/markdown-twins.mjs",
     "start": "next start",
     "check:seo": "node scripts/check-seo.mjs",
+    "test": "node --import ./test/resolve.ts --test --test-concurrency=1 test/*.test.ts",
     "og": "node scripts/make-og.mjs"
   },
   "dependencies": {

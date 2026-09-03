@@ -425,13 +425,25 @@ describe('the subprocessor page describes the code that exists', () => {
     // the beacon would have published a site that counts page views when it
     // does not.
     const page = await read('www/lib/subprocessors.ts')
-    const beacon = await read('www/lib/analytics.ts').catch(() => null)
+    // EVERY file the beacon is made of, not just the one it started in. The
+    // queue, the session rules and the endpoint moved out of analytics.ts into
+    // beacon.ts so that a test runner could load them, and this gate went on
+    // reading analytics.ts, which by then held a React hook and no address at
+    // all. A gate pointed at the wrong file passes for the same reason an empty
+    // one does. Missing files are allowed here because the pair below asserts
+    // both states; a file that is present has to hold up.
+    const parts = await Promise.all(
+      ['www/lib/analytics.ts', 'www/lib/beacon.ts', 'www/lib/bots.ts'].map((f) =>
+        read(f).catch(() => null),
+      ),
+    )
+    const beacon = parts.some((p) => p !== null) ? parts.filter((p) => p !== null).join('\n') : null
 
     if (beacon === null) {
       assert.match(
         page,
         /This site loads no analytics and no third-party script/,
-        'there is no www/lib/analytics.ts, so the subprocessor page must still say the site ' +
+        'there is no site beacon in this tree, so the subprocessor page must still say the site ' +
           'loads no analytics. It says something else, which means the claim was rewritten ' +
           'for a beacon that is not in this tree.',
       )

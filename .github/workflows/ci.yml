@@ -475,6 +475,17 @@ jobs:
         run: npm run check:seo
         working-directory: www
 
+      - name: The site beacon's own unit tests
+        # The beacon decides what is measured, how long a session lasts, when a
+        # failed request is retried and who is a crawler, and until these tests
+        # existed not one of those rules could be loaded by a runner at all: the
+        # file imported next/navigation, which does not resolve outside the
+        # bundler. www is not one of web/'s workspaces, so `npm test
+        # --workspaces` never reaches it and a test file here would otherwise be
+        # decoration, which is the same argument the console step below makes.
+        run: npm test
+        working-directory: www
+
       - name: The site API
         # api/ is the marketing site's own backend and had no tests at all,
         # while the file it holds ended with a comment saying its exports were

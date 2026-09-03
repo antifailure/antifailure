@@ -116,7 +116,7 @@ export const NOT_ENGAGED: [string, string][] = [
   ],
   [
     "Analytics and error tracking",
-    "No third party sees anything. There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin. What it does do is count page views itself: a channel from a closed list, a page shape from a closed list, and a random identifier that lives in sessionStorage for one browsing session and cannot join two visits. The referrer and the URL are turned into those bounded values in your browser and never sent. There is no cookie, and the counter turns itself off if you have set Global Privacy Control or Do Not Track. The control plane exposes metrics for an operator to scrape and exports nothing.",
+    "No third party sees anything. There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin. What it does do is count page views itself: a channel from a closed list, a page shape from a closed list, and a random identifier that lives in sessionStorage for one browsing session and cannot join two visits. That session ends after thirty minutes of inactivity and after a day whatever happens, so the identifier is shorter lived than the tab. The referrer, the URL and your browser identification are turned into those bounded values in your browser and never sent. There is no cookie. The counter turns itself off if you have set Global Privacy Control or Do Not Track, and one value does outlive the tab: if you switch measurement off, a single flag saying so is kept in this browser and is never sent anywhere. The control plane exposes metrics for an operator to scrape and exports nothing.",
   ],
   [
     "Other model providers",
