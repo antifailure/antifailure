@@ -21,6 +21,15 @@ These work on every command.
 | `-q`, `--quiet` | `false` | Print only what was asked for. |
 | `-v`, `--verbose` | `false` | Print the underlying cause of an error. |
 
+## Flags on `af` itself
+
+These work on `af` on its own rather than on a command under it.
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--short` | `false` | With --version, print only the version number. |
+| `--version` | `false` | Print the version, commit, and edition. |
+
 ## How output adapts
 
 Text output is stable for the same input. There are no timestamps and no
