@@ -36,7 +36,11 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 18,
+    // Raised as lanes land, and it has to be: a floor that stays at the number
+    // it was written for stops being a floor the moment routes are added, and
+    // then this test passes over a tree that has lost half of itself. 18 on
+    // main, plus six infra and two emergency routes, plus four here.
+    atLeast: 30,
   })
 })
 

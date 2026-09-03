@@ -76,6 +76,15 @@ export const ADMIN_PERMISSIONS = [
   // none of them should be able to pause it.
   'admin.emergency.read',
   'admin.emergency.engage',
+
+  // Failures across every tenant, and the event stream by shape. Read only,
+  // and there is deliberately no write half: nothing on that page changes
+  // anything, so a write permission would guard no route.
+  'admin.logs.read',
+  // Whether this installation can send email, and what it has tried to send.
+  // Separate from admin.logs.read because it reaches addresses, which is
+  // personal data, and because the roles that need one rarely need the other.
+  'admin.email.read',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -110,6 +119,10 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.logs': 'infra',
   'admin.security': 'infra',
   'admin.emergency': 'infra',
+  // Same lane as admin.logs. Claimed here rather than left unlisted, because
+  // an unlisted prefix is one two agents can both reach for and neither will
+  // see the other take.
+  'admin.email': 'infra',
 }
 
 export const ADMIN_ROLES = [
@@ -147,6 +160,12 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
     'See whether maintenance mode, new sign-ups, or new runs are paused, and why.',
   'admin.emergency.engage':
     'Pause or resume the whole installation: maintenance mode, new sign-ups, and new runs.',
+  'admin.logs.read':
+    'See failing runs grouped by failure code across every organization, which workflows are ' +
+    'failing, and the event stream by type, timing and shape. Event payloads are never returned.',
+  'admin.email.read':
+    'See whether this installation can send email at all, and every sign-in link it has issued ' +
+    'recently with the address it was issued to and whether it was used.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -221,6 +240,7 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // permission rather than on rank: ordering roles and comparing ranks is how
     // a permission model stops being a table and starts being an assumption.
     'admin.emergency.read', 'admin.emergency.engage',
+    'admin.logs.read', 'admin.email.read',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -235,6 +255,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // debugging "their runs will not start" must be able to discover that runs
     // are frozen; pausing the installation is a different decision.
     'admin.emergency.read',
+    // The failure explorer and the mail surface. "Their runs will not start"
+    // and "the sign-in link never arrived" are both infrastructure questions
+    // before they are anybody else's, and neither is answerable without these.
+    'admin.logs.read', 'admin.email.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -248,6 +272,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
     'admin.infra.read', 'admin.emergency.read',
+    // Sign-in links carry an address, an IP and a user agent, and an account
+    // takeover investigation starts by reading exactly those three.
+    'admin.logs.read', 'admin.email.read',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -266,6 +293,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // Support answers "why was I charged this" every day and must never be the
     // rota that can refund. Read without write is the whole point of the split.
     'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
+    // The two questions support is actually asked: why did this run fail, and
+    // why has this person not received their sign-in link. Both are reads.
+    'admin.logs.read', 'admin.email.read',
   ],
   analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
   read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
