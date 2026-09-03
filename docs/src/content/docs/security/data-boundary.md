@@ -1,6 +1,6 @@
 ---
 title: The trust boundary
-description: What the engine sends a control plane, field by field, what never leaves the machine at all, and the four places the boundary is thinner than the marketing says.
+description: What the engine sends a control plane, field by field, what never leaves the machine at all, and the five places the boundary is thinner than the marketing says.
 sidebar:
   order: 2
 ---
@@ -10,7 +10,7 @@ and a control plane receives evidence rather than records. This page is the
 code behind that claim, written so a reviewer can check it instead of accepting
 it. Every assertion names the file it came from.
 
-It holds on the paths that matter most and it does not hold everywhere. Four
+It holds on the paths that matter most and it does not hold everywhere. Five
 places carry more than the word evidence suggests, and they are named in
 [Where the claim is thinner than it sounds](#where-the-claim-is-thinner-than-it-sounds)
 rather than left for a reviewer to find.
@@ -26,7 +26,8 @@ rather than left for a reviewer to find.
 │   │ read by af, from here  │
 │   ▼                        │
 │ af, the engine             │
-│   │ mask, verify, publish  │
+│   │ mask, then verify      │
+│   │ against one type list  │
 │   ▼                        │
 │ the golden: a masked image │
 │ on this machine's Docker   │
@@ -86,6 +87,7 @@ detail behind a row.
 | Route paths | Yes | `engine/internal/workload/result.go` |
 | The reproduce command | Yes | `engine/internal/workload/result.go` |
 | Twin database rows | Yes, five | `engine/internal/report/report.go` |
+| Unmasked production values | Possible | `engine/internal/masking/rules.go` |
 | Twin page text | Opt in | `runner/src/model.ts` |
 | Traces | Opt in | `engine/internal/telemetry/otel.go` |
 | Analytics, crash reports | None | no client exists |
@@ -101,10 +103,15 @@ read it back and found nothing, because `verifyDatabase` refuses to publish a
 golden whose report is not clean. An unpublished golden cannot be branched, so
 no environment can hold one.
 
-Read the scope of that scan rather than the word clean. It covers every column
-and it samples rows, up to a per-column limit the attestation records beside the
-result. It is sized to catch a rule that missed a column entirely, which shows
-up in the first rows, and not to prove that no single row anywhere survived.
+Read the scope of that scan rather than the word clean, because it is narrower
+than it sounds in two directions. It samples rows, up to a per-column limit the
+attestation records beside the result. And it reads only the columns whose
+`information_schema` type is one of six: `text`, `character varying`,
+`character`, `json`, `jsonb` and `xml`.
+
+The masking default reads the same six. That is the same list in two files, so
+the two steps are not two controls. See
+[masking and its check are the same instrument](#masking-and-its-check-are-the-same-instrument).
 
 **The golden itself.** It is an image committed to the local Docker daemon.
 Nothing pushes it. The provider's own words for an empty listing are that there
@@ -230,8 +237,9 @@ plain, base64 and percent-encoded forms.
 
 It does not remove personal data and it does not claim to. A name in a build
 log is a name in a build log. The control that keeps personal data out of the
-twin is masking, which happens before anything reads the copy, and which is
-verified by reading the masked database back before a golden may be branched.
+twin is masking, which happens before anything reads the copy. A scan reads the
+masked copy back before a golden may be branched, and that scan is a check on
+the masking rather than a second, independent one.
 
 ## Where the twin runs
 
@@ -307,7 +315,9 @@ tracing API.
 
 ## Where the claim is thinner than it sounds
 
-Four things, stated because a reviewer will find them.
+Five things, stated because a reviewer will find them. The last one is a current
+limitation of the product rather than a property of the boundary, and it is here
+because it changes what the first one can carry.
 
 **Rows from the twin reach the control plane.** An invariant holds when its
 statement returns no rows, so the rows are the evidence, and
@@ -317,10 +327,18 @@ comment, and `web/apps/api/src/github/lifecycle.ts` stores that Markdown on the
 generation row. The JSON alongside it is read for counts and dropped, so the
 rows persist in the comment and only there.
 
-Those rows come from the masked branch and not from production, and that is the
-whole reason a golden is scanned before it may be branched. They are still row
-values. "Evidence, not records" is not an accurate description of this path, and
-a reviewer who reads it that way has been misled.
+Those rows come from the branch and not from production, and the branch is
+masked, which is the whole reason a golden is scanned before it may be branched.
+They are still row values, so "evidence, not records" is not an accurate
+description of this path.
+
+Read this together with
+[masking and its check are the same instrument](#masking-and-its-check-are-the-same-instrument),
+because the two compound. A column whose type is outside the six is copied into
+the branch unchanged, so a statement that selects it puts a real production
+value into the comment. That is the one place in this system where a production
+value can leave the customer boundary, and it takes a violated invariant that
+selects such a column to get there.
 
 **Schema is not a secret in this design.** Table names, column names and row
 counts cross on ordinary masking events. For most buyers that is uninteresting.
@@ -336,9 +354,62 @@ forwarded rather than dropped. That is deliberate and it is documented, and it
 means a future event carrying more than these does so without any gate objecting
 that the boundary moved.
 
+### Masking and its check are the same instrument
+
+The masking default is fail closed: a column no rule names is emptied rather
+than copied, because a column nobody has classified is not one anybody has
+confirmed is safe. The verification scan then reads the golden back and refuses
+to publish it if a detector finds anything. Two controls, one behind the other.
+
+They are not two controls. Both decide what to look at from
+`information_schema.columns.data_type`, and both accept the same six values:
+
+```
+text  character varying  character  json  jsonb  xml
+```
+
+`looksSensitive` in `engine/internal/masking/rules.go` is one copy of that list
+and the query in `engine/internal/verify/scan.go` is the other. A column whose
+type is outside it is not emptied by the default and is not read by the scan.
+
+The third consequence used to be a silent one and is not any more. `Assign` set
+`Unmatched` only inside the branch that had already passed the type test, so
+such a column was not emptied, not scanned, and not listed among the
+unclassified columns that `af mask plan` asks you about. It was copied and
+nothing said so. #148 moved that flag above the type test and gave the column a
+reason: the plan now names it and says that nothing decided what happens to it,
+that it is copied unchanged, and that the verification scan does not read its
+type either.
+
+So the gap is announced rather than hidden, and it is still a gap. The plan
+telling you a column is copied is not the same as the fail-closed default
+emptying it, and reading a plan is a thing somebody does once while a default
+runs every time. What follows is what the plan is telling you about.
+
+A rule that matches on a column's name still fires, and most of them say
+nothing about type, so a column called `email` is masked whatever it is declared
+as. Two of the shipped defaults are the exception: the ones for `name` and for
+`*_key` require the type to be exactly `text`, and a `citext` column called
+`name` matches neither them nor the type default. The exposure is a column whose
+name no rule matches, or matches only through one of those two, and whose type
+is not one of the six. `citext` is the sharpest case, because `information_schema` reports it
+as `USER-DEFINED` and it is the ordinary Postgres type for an email address or a
+username. An array of text reports `ARRAY`, and `bytea` and `inet` report
+themselves.
+
+This is not being changed today, and the reason is worth stating rather than
+hiding. Widening the list is not an additive change: a column that is copied
+today would start being emptied, which changes `rules_digest`, invalidates every
+existing golden, and can break an environment that expects that column to hold a
+value. It is a decision with a migration attached, not a patch.
+
+Until it changes, treat a masked golden as covering the six types above, and
+name any other column that holds something you care about in `masking.yaml`
+explicitly, where the rule matches on name and the type never comes into it.
+
 ## What this page does not prove
 
-Three limits, so that nobody quotes this for more than it says.
+Four limits, so that nobody quotes this for more than it says.
 
 It is a reading of the source at one commit. It says what the software does. It
 says nothing about how any particular deployment is configured, what the hosted
@@ -351,15 +422,16 @@ Exact redaction covers values the engine loaded. A credential that the secrets
 subsystem never saw is caught only if it matches a pattern rule, and the pattern
 rules cover known provider shapes rather than everything.
 
-The masking verification samples rows. Clean means the scan found nothing in
-what it read, which is every column and a bounded number of rows in each. It is
-strong evidence that a rule did not miss a column and it is not a proof about
-every row in the database.
+Clean is a statement about what the scan read. It read a bounded number of rows
+per column, and it read only the six types named above. It is strong evidence
+that a rule missed nothing in a text column and it is not a proof about the
+whole database.
 
-Nothing gates payload content at the sink. The scrubber is a control over
-credentials, and there is no check that answers "did this release start sending
-a new category of data". The list in this page is what the code does today, and
-keeping it true is a review discipline rather than a gate.
+The engine does not check itself for the property this page describes. Nothing
+compares what a release sends against the list here, so keeping it true is a
+review discipline rather than a gate. The two sentences above and the shared
+type list were each found by reading the code, and each of them was green in
+every check at the time.
 
 Related: [egress](/docs/concepts/egress),
 [masking](/docs/concepts/masking),

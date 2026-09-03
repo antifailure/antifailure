@@ -60,6 +60,22 @@ export const ADMIN_PERMISSIONS = [
   'admin.entitlements.write',
   'admin.flags.read',
   'admin.flags.write',
+
+  // Infrastructure. One read covers system health, the fleet of twins, the
+  // teardown ledger and the egress firewall, because they are one question
+  // asked from four angles and an operator who can see one and not the next
+  // cannot answer it.
+  'admin.infra.read',
+  // Asking for twins to be torn down. Separate from read because it writes,
+  // and separate from the emergency switches because it is a routine action
+  // during an incident rather than one that stops the installation.
+  'admin.infra.teardown',
+
+  // The emergency switches. Read is separate from engage on purpose: every
+  // operator should be able to SEE that the installation is paused, and almost
+  // none of them should be able to pause it.
+  'admin.emergency.read',
+  'admin.emergency.engage',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -122,6 +138,15 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.operators.write': 'Create operators, change their role, and suspend them.',
   'admin.audit.read': 'Read the platform audit chain.',
   'admin.audit.export': 'Export the platform audit chain and verify its hashes.',
+  'admin.infra.read':
+    'See system health, every environment running on this installation, the teardown ledger, ' +
+    'and the egress rules across every organization.',
+  'admin.infra.teardown':
+    'Ask for environments to be torn down. This records a request; the runtime confirms it.',
+  'admin.emergency.read':
+    'See whether maintenance mode, new sign-ups, or new runs are paused, and why.',
+  'admin.emergency.engage':
+    'Pause or resume the whole installation: maintenance mode, new sign-ups, and new runs.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -191,6 +216,11 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.tenants.read', 'admin.tenants.suspend', 'admin.tenants.plan',
     'admin.users.read', 'admin.users.write',
     'admin.sessions.read', 'admin.sessions.revoke',
+    'admin.infra.read', 'admin.infra.teardown',
+    // The only role besides owner that may stop the installation. Gated on the
+    // permission rather than on rank: ordering roles and comparing ranks is how
+    // a permission model stops being a table and starts being an assumption.
+    'admin.emergency.read', 'admin.emergency.engage',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -200,6 +230,11 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // product one, and the people holding the pager have to be able to reach
     // it without finding somebody from billing at three in the morning.
     'admin.flags.read', 'admin.flags.write',
+    'admin.infra.read', 'admin.infra.teardown',
+    // Sees the switches, cannot throw them. An infrastructure operator
+    // debugging "their runs will not start" must be able to discover that runs
+    // are frozen; pausing the installation is a different decision.
+    'admin.emergency.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -212,6 +247,7 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // killing a feature is the one write it needs at speed.
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
+    'admin.infra.read', 'admin.emergency.read',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',

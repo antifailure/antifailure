@@ -42,6 +42,7 @@ import {
 } from '../entitlements.ts'
 import { environmentHoursSince } from '../costs.ts'
 import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
+import { engagedReason } from '../admin/controls.ts'
 
 /**
  * The workflow file a dispatch targets.
@@ -102,6 +103,32 @@ export async function installationFor(c: OrgContext): Promise<Installation> {
  * reached the ingestion path. A verb that dispatched work during a suspension
  * would be the switch quietly not working.
  */
+/**
+ * Refuses while the installation's new-runs switch is engaged.
+ *
+ * Beside refuseWhileSuspended rather than inside it, because the two answer
+ * different questions and a caller has to be refused by either. Suspension is
+ * about ONE organization and is set by that organization's own admins; this is
+ * about the installation and is set by whoever operates it. Folding them into
+ * one check would make the message wrong for one of the two cases, and the
+ * message is the whole value of a refusal.
+ *
+ * Read on the tenant's own connection: the read policy on platform_controls is
+ * open to the application role precisely so that this is one indexed read on
+ * the hot path rather than a privileged connection nobody wants to open here.
+ */
+async function refuseWhileFrozen(c: OrgContext): Promise<void> {
+  const reason = await c.pool.withTenant(c.tenant, (db) => engagedReason(db, 'new_runs'))
+  if (reason !== null) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `New runs and environments are paused on this installation: ${reason}. ` +
+        `Environments that are already running are untouched and can still be read.`,
+    })
+  }
+}
+
 export async function refuseWhileSuspended(c: OrgContext): Promise<void> {
   const reason = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<{ suspended_reason: string | null }>(sql`
@@ -309,6 +336,7 @@ export const createEnvironment = orgProcedure('environments.create')
   )
   .mutation(async ({ ctx, input }) => {
     const c = ctx as OrgContext
+    await refuseWhileFrozen(c)
     await refuseWhileSuspended(c)
 
     const prepared = await c.pool.withTenant(c.tenant, async (db) => {
@@ -436,6 +464,7 @@ export const agentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
+      await refuseWhileFrozen(c)
       await refuseWhileSuspended(c)
       const target = await c.pool.withTenant(c.tenant, (db) => targetFor(db, input.envId))
       const installation = await installationFor(c)
@@ -479,6 +508,7 @@ export const loadRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
+      await refuseWhileFrozen(c)
       await refuseWhileSuspended(c)
       const target = await c.pool.withTenant(c.tenant, (db) => targetFor(db, input.envId))
       const installation = await installationFor(c)

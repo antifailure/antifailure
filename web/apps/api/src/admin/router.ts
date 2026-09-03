@@ -31,6 +31,7 @@ import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
+import { emergencyRouter, infraRouter } from './infra.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
   adminBillingRouter,
@@ -805,7 +806,10 @@ export const adminRouter = router({
   // ---------------------------------------------------------------------------
   // Other lanes spread in here.
   //
-  // admin-infra:  infra: infraRouter, emergency: emergencyRouter
+  // admin-infra:  spread in below.
+  infra: infraRouter,
+  emergency: emergencyRouter,
+
   // admin-money:  billing, entitlements, flags
   // admin-ops:    users detail, projects, impersonation, support, search
   //

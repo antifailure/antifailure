@@ -96,6 +96,15 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
       [
+        'platform_controls',
+        'configuration for the installation rather than data belonging to a tenant, so there ' +
+          'is no org_id to key a policy on. Reading is open to the application role on purpose: ' +
+          'every request has to be able to learn that the installation is paused. Writing is ' +
+          'not granted to the application role at all, only to antifailure_admin, so a tenant ' +
+          'route that reached this table raises permission denied rather than writing nothing ' +
+          'and reporting success. See migrations/0031.',
+      ],
+      [
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',

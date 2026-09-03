@@ -143,6 +143,13 @@ errors:
     docs: guides/secrets
     retryable: false
     exit_code: 6
+  - code: AF-SEC-005
+    area: SEC
+    message: "The variable {name} could not be looked up: {detail}"
+    next_step: "Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed."
+    docs: guides/secrets
+    retryable: false
+    exit_code: 3
   - code: AF-SEC-010
     area: SEC
     message: "The environment certificate could not be created: {detail}"
@@ -232,19 +239,18 @@ errors:
     exit_code: 5
   - code: AF-DB-016
     area: DB
-    message: "database.source_url_env names {variable}, and {variable} holds nothing in this shell."
-    next_step: "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead."
+    message: "database.source_url_env names {variable}, and no configured source has a value for it."
+    next_step: "Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead."
     docs: concepts/goldens
     retryable: false
     exit_code: 3
   - code: AF-DB-007
-    planned: true
     area: DB
-    message: "Extension {extension} is required by the golden and is not available on the target."
-    next_step: "Install {extension} on the target, or remove its use from the schema before refreshing."
-    docs: providers/overview
+    message: "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it."
+    next_step: "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there."
+    docs: concepts/goldens
     retryable: false
-    exit_code: 5
+    exit_code: 3
   - code: AF-DB-008
     area: DB
     message: "The database provider {provider} at {endpoint} rejected the configured credential."
@@ -302,6 +308,41 @@ errors:
     docs: concepts/verdicts
     retryable: false
     exit_code: 8
+  - code: AF-DB-017
+    area: DB
+    message: "The role in the connection string cannot read all of the source database: {detail}"
+    next_step: "Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-018
+    area: DB
+    message: "Row level security stops pg_dump from reading the source as this role: {detail}"
+    next_step: "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-019
+    area: DB
+    message: "{program} stopped while copying the source database: {detail}"
+    next_step: "Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 5
+  - code: AF-DB-023
+    area: DB
+    message: "The source database answered and refused the connection: {detail}"
+    next_step: "Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 4
+  - code: AF-DB-024
+    area: DB
+    message: "The value of the variable named by database.source_url_env is not a connection string: {detail}"
+    next_step: "Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded."
+    docs: concepts/goldens
+    retryable: false
+    exit_code: 3
   - code: AF-DB-030
     area: DB
     message: "Migrations failed on the branch: {detail}"
