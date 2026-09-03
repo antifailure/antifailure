@@ -2727,7 +2727,19 @@ export function createServer(options: ServerOptions) {
       // token. Something between a browser and this process may strip those
       // headers, and refusing every such request would break the portal for a
       // reason nobody could diagnose.
-      const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+      //
+      // readAdminSessionCookie, NOT readCookie with the bare name, and this
+      // line was the bare name until somebody drove a browser at it.
+      // adminSessionCookie writes `__Host-af_admin_session` whenever the cookie
+      // is Secure, which is every deployment that matters and none of the tests
+      // in this repository, because the test server speaks plain HTTP. So this
+      // read returned null in production, the operator was resolved a hundred
+      // lines below by readAdminSessionCookie regardless, and the entire
+      // operator CSRF check was skipped on exactly the deployments it exists
+      // for while admincsrf.test.ts went on passing. The suite below now
+      // presents the prefixed name as well, which is the assertion that can say
+      // no to this.
+      const adminToken = readAdminSessionCookie(c.req.header('cookie'))
       if (adminToken) {
         const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
         if (operator) {

@@ -36,18 +36,22 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    // 48 was the floor before this lane, and this lane added four:
-    // admin.customers.notes.list, .add, .retract and
-    // admin.customers.impersonation.list.
+    // 59 routes, taken by RUNNING the walk rather than by counting call sites
+    // or by taking the highest of four lanes' guesses. Four branches edited
+    // this integer to 22, 29, 48 and 50 while the tree grew under all of them,
+    // and every one of those numbers was right when it was written. The floor
+    // has to move with the tree or it stops being a floor: an atLeast a
+    // SHRINKING router still clears is an assertion that has quietly stopped
+    // checking whether routes moved out of this tree, which is the one thing it
+    // exists for.
     //
-    // This number is the one coordination point between six lanes. It is a
-    // FLOOR rather than a count, and each lane raises it by exactly what it
-    // added, so a lane whose routes fall out of the tree makes it fail here
-    // rather than passing quietly on somebody else's routes. What a floor
-    // cannot do is notice a lane's OWN routes leaving, which is why each lane
-    // counts its own exactly: see the notes on MINE in adminrouters.test.ts and
-    // in admincustomers.test.ts.
-    atLeast: 52,
+    // 63 after the Customers lane, taken the same way: 59 plus
+    // admin.customers.notes.list, .add, .retract and
+    // admin.customers.impersonation.list. The floor is what a lane cannot
+    // check about itself, because it clears on somebody else's routes; each
+    // lane's own suite counts its own exactly. See the notes on MINE in
+    // adminrouters.test.ts and in admincustomers.test.ts.
+    atLeast: 63,
   })
 })
 

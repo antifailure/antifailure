@@ -192,7 +192,7 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "Repositories & Pull Requests",
         href: "/admin/platform/repositories",
         Icon: IconRepositories,
-        permission: "admin.tenants.read",
+        permission: "admin.repos.read",
         summary:
           "The repositories this installation is connected to and the pull requests it is answering on.",
       },
@@ -200,22 +200,37 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "MCP Management",
         href: "/admin/platform/mcp",
         Icon: IconMcp,
-        permission: "admin.tenants.read",
-        summary: "The MCP servers customers have connected, and what each one is allowed to reach.",
+        permission: "admin.mcp.read",
+        // Rewritten by the lane that built the section, and the change is the
+        // point rather than a wording preference. The MCP server runs on the
+        // developer's machine and never speaks to this control plane, so there
+        // are no connected servers to list and nothing this console could say
+        // one is allowed to reach. The summary is read on the overview
+        // directory, where a sentence promising a fleet is the same invented
+        // dashboard the page itself refuses to draw.
+        summary:
+          "What this control plane records about MCP, which is nothing, and the tools the engine serves.",
       },
       {
         label: "API Keys",
         href: "/admin/platform/api-keys",
         Icon: IconKeys,
-        permission: "admin.tenants.read",
+        permission: "admin.keys.read",
         summary: "Keys issued across the platform, when each was last used, and how to revoke one.",
       },
       {
         label: "Integrations & Webhooks",
         href: "/admin/platform/integrations",
         Icon: IconIntegrations,
-        permission: "admin.tenants.read",
-        summary: "Outbound deliveries, what failed, and the endpoints that keep refusing them.",
+        permission: "admin.webhooks.read",
+        // Also rewritten, for the same reason. This product registers no
+        // outbound webhooks: there is no subscription table, no delivery
+        // attempt table and no signing secret store. What exists is two INBOUND
+        // ledgers, github_deliveries and billing_events. A summary promising
+        // outbound deliveries and refusing endpoints describes a feature the
+        // schema does not have.
+        summary:
+          "The GitHub App installations here, and every delivery that arrived from GitHub or Stripe.",
       },
     ],
   },

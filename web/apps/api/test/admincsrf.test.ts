@@ -114,5 +114,55 @@ describe(
     const read = await h.fetch('/trpc/admin.flags.list', { headers: { cookie } })
     assert.equal(read.status, 200)
   })
+
+  describe('the cookie NAME a real browser sends', () => {
+    // THE HOLE THIS BLOCK EXISTS FOR, found by driving an actual browser at an
+    // actual server rather than by reading the middleware.
+    //
+    // adminSessionCookie writes `__Host-af_admin_session` whenever the cookie
+    // is Secure, and Secure is every deployment that matters. The guard read
+    // the BARE name, so in production it found no cookie, skipped the whole
+    // check, and let the request through; the tRPC context then resolved the
+    // operator anyway through readAdminSessionCookie, which knows both names.
+    // Every assertion above passed throughout, because this test server speaks
+    // plain HTTP and the fixture above builds the bare name by hand.
+    //
+    // So the fix is one function call, and this is the instrument that can say
+    // no to it: the same four questions, asked with the name a browser actually
+    // sends. Without it the next person to write `readCookie` here gets a green
+    // suite and a portal with no cross-site protection.
+    const prefixed = () => `__Host-${cookie}`
+
+    it('refuses a mutation with no token, under the prefixed name too', async () => {
+      const refused = await h.fetch('/trpc/admin.flags.kill', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: prefixed() },
+        body: JSON.stringify({ key: 'nothing.here', reason: 'a reason long enough' }),
+      })
+      assert.equal(
+        refused.status,
+        403,
+        'a prefixed operator cookie reached a mutation with no cross-site token',
+      )
+      assert.match(await refused.text(), /x-antifailure-admin-csrf/)
+    })
+
+    it('lets the real token through under the prefixed name, so the fix is not a blanket refusal', async () => {
+      // The other half. A guard that refuses every prefixed cookie would also
+      // make this test pass if it only asserted the 403 above, and it would
+      // break the portal for every operator in production.
+      const allowed = await h.fetch('/trpc/admin.flags.kill', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: prefixed(),
+          'x-antifailure-admin-csrf': csrf,
+        },
+        body: JSON.stringify({ key: 'nothing.here', reason: 'a reason long enough' }),
+      })
+      assert.equal(allowed.status, 404)
+      assert.match(await allowed.text(), /no flag called nothing.here/)
+    })
+  })
   },
 )
