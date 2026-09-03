@@ -76,6 +76,15 @@ spec:
             - name: AF_OPERATOR_SETS_PLAN
               value: "1"
             {{- end }}
+            {{- if not (kindIs "invalid" .Values.config.signinAllowlist) }}
+            # Set whenever the operator said anything at all, INCLUDING an
+            # empty list, because the application reads an unset variable as
+            # open to every GitHub account and an empty one as nobody. A block
+            # that disappeared when the list was empty would turn the most
+            # restrictive intent into the least restrictive deployment.
+            - name: AF_SIGNIN_ALLOWLIST
+              value: {{ join "," .Values.config.signinAllowlist | quote }}
+            {{- end }}
             {{- if .Values.config.eventRetentionMonths }}
             - name: AF_EVENT_RETENTION_MONTHS
               value: {{ .Values.config.eventRetentionMonths | quote }}

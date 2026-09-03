@@ -244,6 +244,52 @@ jobs:
           refuse --set database.url=x --set database.migrationUrl=y --set github.clientId=i \
                  --set github.clientSecret=s --set github.redirectUri=u --set maintenance.mode=weekly
 
+      # Who may sign in, in all three of its states, because the difference
+      # between them is the whole feature and two of the three are silent.
+      #
+      # The application reads an UNSET AF_SIGNIN_ALLOWLIST as open to every
+      # GitHub account and an EMPTY one as nobody. So a template block that
+      # disappeared when the list was empty would turn the most restrictive
+      # intent into the least restrictive deployment, and the rendered YAML of
+      # a chart that got this wrong looks exactly like the rendered YAML of one
+      # that got it right: the variable is simply not there.
+      - name: The sign-in allowlist renders in all three states
+        run: |
+          set -euo pipefail
+          render() {
+            helm template t deploy/helm/antifailure-control-plane               --set database.url=x --set database.migrationUrl=y               --set github.clientId=i --set github.clientSecret=s               --set github.redirectUri=https://x/cb "$@"
+          }
+          # The absent case has to come back as a SENTENCE rather than as a
+          # failed pipeline. Without the fallback, grep finding nothing exits
+          # the step under pipefail before the assertion below can say what was
+          # wrong, and a red step with no message is how somebody concludes the
+          # check is flaky.
+          allowlist() {
+            local rendered
+            rendered=$(render "$@" | grep -A1 'name: AF_SIGNIN_ALLOWLIST' | tail -1 | sed 's/.*value: //') \
+              || rendered="<absent, so this deployment lets any GitHub account sign in>"
+            printf '%s' "$rendered"
+          }
+          if render | grep -q AF_SIGNIN_ALLOWLIST; then
+            echo "FAIL: the default set the variable, which closes an installation that did not ask to be closed"
+            exit 1
+          fi
+          echo "default: the variable is absent, so sign-in is open"
+
+          empty=$(allowlist --set-json 'config.signinAllowlist=[]')
+          if [ "$empty" != '""' ]; then
+            echo "FAIL: an empty list rendered $empty, want an empty string, which is how the application spells nobody"
+            exit 1
+          fi
+          echo "empty list: the variable is set and empty, so sign-in is closed to everybody"
+
+          named=$(allowlist --set-json 'config.signinAllowlist=["octocat","hubot"]')
+          if [ "$named" != '"octocat,hubot"' ]; then
+            echo "FAIL: two logins rendered $named"
+            exit 1
+          fi
+          echo "two logins: $named"
+
       - name: A Postgres for the chart to talk to
         run: |
           set -euo pipefail
