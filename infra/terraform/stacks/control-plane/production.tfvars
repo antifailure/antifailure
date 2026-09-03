@@ -203,7 +203,7 @@ self_serve_signup = true
 # somebody turned away actually needs.
 signup_url = "https://antifailure.dev/contact"
 
-# EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
+# SET ONLY AFTER THE PRODUCTION GITHUB APP EXISTS. SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the
 # private key are the credentials that let a delivery write rows, so sharing
@@ -215,7 +215,23 @@ signup_url = "https://antifailure.dev/contact"
 # recreate it. So setting this id before those secrets are in the production
 # vault fails at PLAN, which is the correct order and not a bug. The checklist
 # in the production guide has the steps in the order that works.
-github_app_id = ""
+#
+# App 4775259, slug `antifailure`, installed on the antifailure organization as
+# installation 157834739. The OAuth App that signs people in is a separate
+# registration and its client id and secret are the seeded vault entries, not
+# this value: an App id is not a credential and unlocks nothing, which is why it
+# sits here rather than arriving as a TF_VAR_.
+#
+# The App this names is CONFIGURED AND SERVING. Read off the running container
+# rather than remembered: afcpprod-app carries AF_GITHUB_APP_ID=4775259 and both
+# vault secrets exist. Emptying this line does not remove the App; it removes
+# all three environment variables from the container app on the next apply, and
+# with them the installation webhook, which is the only path by which an
+# organization comes into being. That failure presents as a customer signing in
+# to an empty screen, so it reads as a product bug rather than a configuration
+# one. See ci.tf for the commit that emptied it and for what a plan gate can and
+# cannot catch.
+github_app_id = "4775259"
 
 # One identity applies this stack, and it is the same person as staging, so the
 # grant is pinned rather than following whoever is calling. See staging.tfvars
