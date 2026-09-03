@@ -212,7 +212,34 @@ export interface AdminChainReport {
   ok: boolean
   entries: number
   head: string | null
+  /** The first and last sequence numbers actually walked, or null when the
+   *  range held nothing. Reported because a verification of a RANGE is only
+   *  meaningful alongside the range it covered, and a report that says `ok`
+   *  without saying over what is a claim nobody can check. */
+  firstSeq: number | null
+  lastSeq: number | null
   problems: { seq: number; kind: 'altered' | 'broken_link'; detail: string }[]
+}
+
+/**
+ * A window of the chain to verify, inclusive at both ends.
+ *
+ * WHY A RANGE EXISTS AT ALL. The whole chain is the honest default and stays
+ * the default. But an export hands somebody a slice of the history, and a slice
+ * shipped with a verification of the WHOLE chain is a verification of something
+ * other than the file in their hands. So the same walk covers both, and there
+ * is exactly one hash comparison in this package rather than a second one
+ * written for exports that would eventually disagree with this one.
+ *
+ * The subtlety a second implementation would get wrong: the first entry of a
+ * range points at a predecessor OUTSIDE the range, so a naive range walk starts
+ * with `expectedPrev` of null and reports the range's own first entry as a
+ * broken link every single time. This reads that predecessor's hash first, so a
+ * range that is intact reports intact.
+ */
+export interface AdminChainRange {
+  fromSeq?: number | null
+  toSeq?: number | null
 }
 
 /**
@@ -224,7 +251,24 @@ export interface AdminChainReport {
  * being a vendor tool: tamper evidence only the vendor can check is not
  * evidence.
  */
-export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
+export async function verifyAdminAuditChain(
+  db: Db,
+  range: AdminChainRange = {},
+): Promise<AdminChainReport> {
+  const fromSeq = range.fromSeq ?? null
+  const toSeq = range.toSeq ?? null
+
+  // The hash the range's first entry must point at, read from the entry BEFORE
+  // it. Null when the range starts at the beginning of the chain, which is the
+  // whole-chain case and the one the original walk handled.
+  let expectedPrev: string | null = null
+  if (fromSeq !== null) {
+    const before = await db.execute<{ entry_hash: string }>(sql`
+      SELECT entry_hash FROM admin_audit_entries
+      WHERE seq < ${fromSeq} ORDER BY seq DESC LIMIT 1`)
+    expectedPrev = before[0]?.entry_hash ?? null
+  }
+
   const rows = await db.execute<{
     seq: string
     admin_user_id: string | null
@@ -244,11 +288,15 @@ export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
     SELECT seq, admin_user_id, actor_label, action, target_type, target_id,
            subject_org_id, subject_org_label, origin, severity, detail,
            occurred_at, prev_hash, entry_hash
-    FROM admin_audit_entries ORDER BY seq ASC`)
+    FROM admin_audit_entries
+    WHERE (${fromSeq}::bigint IS NULL OR seq >= ${fromSeq})
+      AND (${toSeq}::bigint IS NULL OR seq <= ${toSeq})
+    ORDER BY seq ASC`)
 
   const problems: AdminChainReport['problems'] = []
-  let expectedPrev: string | null = null
   let head: string | null = null
+  let firstSeq: number | null = null
+  let lastSeq: number | null = null
 
   for (const row of rows) {
     const seq = Number(row.seq)
@@ -292,7 +340,9 @@ export async function verifyAdminAuditChain(db: Db): Promise<AdminChainReport> {
 
     expectedPrev = row.entry_hash
     head = row.entry_hash
+    if (firstSeq === null) firstSeq = seq
+    lastSeq = seq
   }
 
-  return { ok: problems.length === 0, entries: rows.length, head, problems }
+  return { ok: problems.length === 0, entries: rows.length, head, firstSeq, lastSeq, problems }
 }

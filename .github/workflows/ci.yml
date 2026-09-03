@@ -663,6 +663,43 @@ jobs:
           done
           exit $missing
 
+      - name: Every operator section the navigation lists was exported
+        # The list above is written out by hand, which is right for a dozen
+        # routes and wrong for the operator portal: it has twenty three
+        # sections, six people are adding to them, and a hand kept copy would
+        # be behind within a day. So this reads the navigation itself, which is
+        # the same file the rail is drawn from, and checks the export for every
+        # route it declares.
+        #
+        # The failure it exists for is the one the whole portal is built to
+        # avoid. A stray server-only import stops one page exporting, its route
+        # starts answering with the 404 page, and the rail keeps the entry: the
+        # reader clicks a section that is supposed to exist and gets nothing,
+        # which teaches them to distrust the other twenty two as well.
+        run: |
+          routes=$(grep -oE 'href: "/admin[^"]*"' console/lib/admin-nav.ts | cut -d'"' -f2)
+          count=$(printf '%s\n' "$routes" | grep -c .)
+          # A grep that stops matching returns nothing, and a loop over nothing
+          # passes every time. The count is what keeps this from going quietly
+          # green if the navigation is ever reformatted out from under it.
+          if [ "$count" -ne 23 ]; then
+            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 23"
+            exit 1
+          fi
+          missing=0
+          # read rather than `for route in $routes`, which depends on the shell
+          # splitting an unquoted expansion on newlines. bash does and zsh does
+          # not, so the `for` version passes locally by running its body once
+          # with every route in one variable, and only tells the truth in CI.
+          while IFS= read -r route; do
+            [ -n "$route" ] || continue
+            if [ ! -f "console/out${route}.html" ]; then
+              echo "::error::console/out${route}.html was not exported, so ${route} answers 404"
+              missing=1
+            fi
+          done <<< "$routes"
+          exit $missing
+
       - name: Every documented error path has a page at the URL the engine prints
         # errors.go builds "https://antifailure.dev/docs/" + the catalog's docs
         # field. errcheck proves the source file exists; this proves the built
@@ -1153,6 +1190,18 @@ jobs:
         # schemas/manifest.v1.json, so this is a claim a machine can check
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
+
+      - name: Every contact route this repository publishes resolves
+        # CODE_OF_CONDUCT.md named conduct@antifailure.dev as the route for
+        # a person reporting harassment, and the legal pages named
+        # security@antifailure.dev for a researcher. The domain has no mail
+        # exchanger, an SPF policy authorising no sender, a DMARC policy of
+        # reject and a revoked DKIM key, so both went to the same silence and
+        # neither sender could tell. The site had already been fixed and the
+        # repository had not. Every address in the tree now needs a row in
+        # tools/docs/contact-routes.tsv saying who reads it, and an address
+        # with no row fails, which is what catches a domain nobody has checked.
+        run: go run ./tools/contactcheck .
 
   # Alone, and deliberately so.
   #

@@ -68,7 +68,7 @@ export function LoadPage() {
           kicker="Why the shape"
           title="<strong>The mix is the point.</strong> A load test that hammers one endpoint proves the endpoint is fast, which nobody doubted."
         />
-        <p className="mt-6 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
+        <p className="mt-8 max-w-[560px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40">
           What breaks under real traffic is the mix: the page nobody thinks about that is nine
           percent of requests, and the endpoint that is fine alone and holds a lock the hot path
           wants. So the traffic is a weighted mix read from what production actually served.
@@ -145,9 +145,9 @@ export function LoadPage() {
       <RelatedGrid
         items={[
           {
-            href: "/product/report",
-            title: "Safety Report",
-            description: "Where a regressed route lands on the pull request.",
+            href: "/product/twins",
+            title: "Isolated Twin",
+            description: "Where the traffic is sent.",
           },
           {
             href: "/product/migrations",

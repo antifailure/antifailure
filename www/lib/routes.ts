@@ -123,29 +123,6 @@ export const ROUTES: readonly Route[] = [
     priority: 0.9,
     parent: "/product",
   },
-  {
-    path: "/product/report",
-    title: pageTitle("Safety Report"),
-    description:
-      "Pass or fail on the pull request, with the video, trace and reproduction steps behind the decision.",
-    summary: "What lands on the pull request, the five verdicts a workflow can return, and the evidence behind each.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
-  {
-    path: "/product/architecture",
-    title: pageTitle("Architecture"),
-    description:
-      "The trust boundary between control plane and customer data plane, the environment lifecycle, and the Postgres branching strategy.",
-    summary:
-      "Control plane versus data plane, where production data is allowed to exist, and the branch lifecycle.",
-    section: "product",
-    indexable: true,
-    priority: 0.8,
-    parent: "/product",
-  },
 
   // Solutions
   {

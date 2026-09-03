@@ -242,6 +242,57 @@ body {
     text-transform: uppercase;
   }
 
+  /*
+   * The heading column, sized to the headings that are actually in it.
+   *
+   * The rule above gives every cell its own grid with a fixed 10.5ch heading
+   * track, and a heading wider than that has nowhere to go: it is one word, so
+   * it cannot wrap, and it runs straight into its own value. It rendered as
+   * "ORGANIZATIONopstwo-9051649e" with no space, which reads as a rendering
+   * fault rather than as a long word.
+   *
+   * It is worse than counting characters suggests. The heading is uppercase
+   * with 0.08em tracking, so it is far wider than the same number of digits,
+   * and `ch` resolves against the CELL's font, so a mono column gets a 90px
+   * budget and a proportional one 75px: the same heading fits in one column and
+   * not the one beside it. Measured at 320px, ENVIRONMENTS overflowed its track
+   * by 7.1px on the operator's organization list, and it was in a screenshot
+   * that had been looked at and passed. The customer console already carried
+   * two worse cases, "Where it came from" and "Against baseline".
+   *
+   * A shared subgrid track fixes it at the source rather than asking every
+   * table to keep its headings short. The row owns the tracks, each cell
+   * subgrids onto them, so ONE heading column is sized to the longest heading
+   * in that record and every value lines up against it. fit-content(45%) caps
+   * it, so a very long heading cannot squeeze the values it is labelling, and
+   * overflow-wrap is the backstop for a single word past even that: a wrapped
+   * heading is ugly and readable, an overlapping one is neither.
+   *
+   * Behind @supports, so a browser without subgrid keeps exactly the behaviour
+   * it has today rather than losing the stacked layout altogether.
+   */
+  @supports (grid-template-columns: subgrid) {
+    .af-table tr {
+      display: grid;
+      grid-template-columns: fit-content(45%) minmax(0, 1fr);
+    }
+
+    .af-table td[data-label] {
+      grid-column: 1 / -1;
+      grid-template-columns: subgrid;
+    }
+
+    /* The cell that names the row still spans both tracks and leads the
+       record, which is what it did before the row became a grid. */
+    .af-table td:not([data-label]) {
+      grid-column: 1 / -1;
+    }
+
+    .af-table td[data-label]::before {
+      overflow-wrap: anywhere;
+    }
+  }
+
   /* The scrolling shell has nothing left to scroll, so it must not paint the
      edge shadows that say there is. */
   .scroll-x {

@@ -47,6 +47,23 @@ export const ADMIN_PERMISSIONS = [
   'admin.sessions.read',
   'admin.sessions.revoke',
 
+  // What an operator wrote down about a customer, and stepping into their
+  // account.
+  //
+  // Read is separate from write on notes because a note is the vendor's own
+  // words about a paying customer: everybody answering a question needs to see
+  // what the last person found, and far fewer people need to add to the file.
+  //
+  // Impersonation is split the same way and the split is not symmetric with the
+  // others. Reading is oversight, so it is held widely: an operator should be
+  // able to see that somebody was inside a customer's account whether or not
+  // they could go in themselves. Starting one is the single most powerful thing
+  // in this portal and is held by three roles.
+  'admin.support.read',
+  'admin.support.write',
+  'admin.impersonation.read',
+  'admin.impersonation.start',
+
   // Money, and the three things that decide what a customer gets.
   //
   // Read is separate from write on all three, and on billing that split is the
@@ -76,6 +93,72 @@ export const ADMIN_PERMISSIONS = [
   // none of them should be able to pause it.
   'admin.emergency.read',
   'admin.emergency.engage',
+
+  // The developer platform: what customers connect to this installation, and
+  // the credentials that can act as one of them.
+  //
+  // Read on repositories is one permission rather than two because a pull
+  // request cannot be read usefully without the repository it is on, and a
+  // split there produces a role that can see a number and not what it is a
+  // number of.
+  'admin.repos.read',
+
+  // Credentials. Read and revoke are separate, and the split is the same one
+  // billing makes: everybody who answers "which key is this" should be able to
+  // answer it, and revoking a customer's credential stops their pipeline
+  // within seconds, which is an incident decision rather than a support one.
+  'admin.keys.read',
+  'admin.keys.revoke',
+
+  // What arrives here from GitHub and from Stripe, and whether it was handled.
+  'admin.webhooks.read',
+
+  // The MCP page, which reads no customer data at all. It is guarded because
+  // every route in this tree is guarded, not because what it returns is
+  // sensitive: it describes the engine's own tool surface and states that this
+  // control plane holds no MCP record.
+  'admin.mcp.read',
+  // The product itself: twins, the runs on them, and the branches they belong
+  // to. One read covers all three because they are one object seen from three
+  // sides, and an operator who can list a twin but not the run that failed on
+  // it has to ask somebody else to finish the sentence.
+  'admin.product.read',
+  // Golden data versions and masking rules, split off from the read above.
+  //
+  // The split is not symmetry. A masking rule enumerates a customer's schema
+  // and names which of its columns hold personal data, which is a narrower
+  // need than "why did this run fail" and a wider disclosure. The role this
+  // exists for is analytics, which holds the read above and not this one:
+  // counting runs and twins is its job, and reading somebody's column names
+  // is not.
+  'admin.product.data.read',
+  // Failures across every tenant, and the event stream by shape. Read only,
+  // and there is deliberately no write half: nothing on that page changes
+  // anything, so a write permission would guard no route.
+  'admin.logs.read',
+  // Whether this installation can send email, and what it has tried to send.
+  // Separate from admin.logs.read because it reaches addresses, which is
+  // personal data, and because the roles that need one rarely need the other.
+  'admin.email.read',
+  // The standing security posture: which credentials can currently act against
+  // this installation, how people sign in to it, and who holds an operator
+  // account. One read rather than a read per mechanism, because engine tokens,
+  // provider keys, OIDC bindings and SSO are four tables answering one
+  // question, and an operator who can see three of them and not the fourth
+  // cannot answer it.
+  'admin.security.read',
+
+  // What the company holds about a named person, and the erasure requests it
+  // has been asked for. SEPARATE FROM admin.security.read on purpose: seeing
+  // that a credential exists and seeing what data is held about an individual
+  // customer are different jobs, and the second is the one a data protection
+  // request is answered from.
+  'admin.governance.read',
+  // Producing the file. Reading a subject's data map answers a question in the
+  // room; exporting it makes a document about a named individual that leaves
+  // the system, which is the same reasoning that keeps admin.audit.export off
+  // every role but two.
+  'admin.governance.export',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -94,22 +177,46 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.operators': 'the foundation',
   'admin.audit': 'the foundation',
   'admin.tenants': 'the foundation',
-  'admin.users': 'ops',
-  'admin.sessions': 'ops',
+  // The Customers group: Users & Organizations, Support & Impersonation, and
+  // Billing & Stripe. These four prefixes read 'ops' and 'money' when the
+  // portal was four lanes; the navigation now declares six groups and one
+  // module each, and admin/customers.ts owns all of them. Two places named a
+  // different owner for the same prefix, which is worse than either answer.
+  'admin.users': 'customers',
+  'admin.sessions': 'customers',
+  'admin.impersonation': 'customers',
+  'admin.support': 'customers',
+  'admin.billing': 'customers',
   'admin.projects': 'ops',
-  'admin.impersonation': 'ops',
-  'admin.support': 'ops',
   'admin.search': 'ops',
-  'admin.billing': 'money',
   'admin.entitlements': 'money',
   'admin.flags': 'money',
   'admin.infra': 'infra',
-  'admin.deploys': 'infra',
-  'admin.webhooks': 'infra',
-  'admin.keys': 'infra',
+  'admin.deploys': 'the developer platform',
+  // Moved from infra to the developer platform, which is where the API Keys and
+  // Integrations & Webhooks sections live and where these two are now
+  // implemented. w-admin-infra implemented admin.infra.* and admin.emergency.*
+  // and neither of these, so nothing was taken from a lane that was using it.
+  'admin.webhooks': 'the developer platform',
+  'admin.keys': 'the developer platform',
+  // Repositories and pull requests, and the MCP surface. New prefixes rather
+  // than borrowed ones: admin.deploys does not describe a pull request, and a
+  // permission filed under a name that does not fit it is one nobody can find.
+  'admin.repos': 'the developer platform',
+  'admin.mcp': 'the developer platform',
   'admin.logs': 'infra',
-  'admin.security': 'infra',
+  // Claimed by the security lane rather than infra, which reserved the string
+  // and did not use it: origin/w-admin-infra's four permissions are all under
+  // admin.infra and admin.emergency. The Security Center page is the natural
+  // owner of the prefix and its routes are mounted at admin.security.
+  'admin.security': 'security',
+  'admin.governance': 'security',
   'admin.emergency': 'infra',
+  'admin.product': 'product',
+  // Same lane as admin.logs. Claimed here rather than left unlisted, because
+  // an unlisted prefix is one two agents can both reach for and neither will
+  // see the other take.
+  'admin.email': 'infra',
 }
 
 export const ADMIN_ROLES = [
@@ -138,6 +245,16 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.operators.write': 'Create operators, change their role, and suspend them.',
   'admin.audit.read': 'Read the platform audit chain.',
   'admin.audit.export': 'Export the platform audit chain and verify its hashes.',
+  'admin.security.read':
+    'See every standing credential on this installation, how each organization signs in, which ' +
+    'operator accounts exist, and which operator sessions are currently acting as a customer.',
+  'admin.governance.read':
+    'See what personal data this installation holds about a named person and where it lives, ' +
+    'every organization erasure that has been asked for, and the masking rules customers have ' +
+    'declared over their own data.',
+  'admin.governance.export':
+    'Produce a file describing what is held about a named person. A document about an ' +
+    'individual that leaves the system.',
   'admin.infra.read':
     'See system health, every environment running on this installation, the teardown ledger, ' +
     'and the egress rules across every organization.',
@@ -147,6 +264,32 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
     'See whether maintenance mode, new sign-ups, or new runs are paused, and why.',
   'admin.emergency.engage':
     'Pause or resume the whole installation: maintenance mode, new sign-ups, and new runs.',
+  'admin.repos.read':
+    'See every repository connected to this installation, its pull requests, and the check ' +
+    'generations behind them.',
+  'admin.keys.read':
+    'See every credential that can act as a customer: its name, its prefix, what created it and ' +
+    'when it was last used. Never its value, which is stored only as a hash.',
+  'admin.keys.revoke':
+    'Stop a credential working, and revoke a GitHub OIDC repository binding along with every ' +
+    'token it has minted.',
+  'admin.webhooks.read':
+    'See the GitHub App installations and the deliveries that arrived from GitHub and Stripe, ' +
+    'including the ones that were never handled.',
+  'admin.mcp.read':
+    'See what this control plane records about the MCP server, and the tools the engine serves.',
+  'admin.product.read':
+    'See every production twin on the installation, the agent runs, load runs and pull request ' +
+    'checks against them, and the branches holding them open.',
+  'admin.product.data.read':
+    'See a customer\'s golden data versions and the masking rules applied to them, including ' +
+    'which columns a scan flagged and nobody has confirmed.',
+  'admin.logs.read':
+    'See failing runs grouped by failure code across every organization, which workflows are ' +
+    'failing, and the event stream by type, timing and shape. Event payloads are never returned.',
+  'admin.email.read':
+    'See whether this installation can send email at all, and every sign-in link it has issued ' +
+    'recently with the address it was issued to and whether it was used.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -170,6 +313,14 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.users.write': 'Suspend and restore an account.',
   'admin.sessions.read': 'See who is signed in, on what, and since when.',
   'admin.sessions.revoke': 'Sign any account out of any session.',
+  'admin.support.read': "Read the notes operators have written about a customer, including ones that were retracted.",
+  'admin.support.write': 'Write a note about a customer, and retract one.',
+  'admin.impersonation.read':
+    'See which operators are signed in as a customer right now, and every impersonation that ' +
+    'has started or ended.',
+  'admin.impersonation.start':
+    'Sign in as a customer, for a stated reason and for a bounded number of minutes. The ' +
+    'customer sees it in their own audit log.',
 }
 
 /**
@@ -216,11 +367,21 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.tenants.read', 'admin.tenants.suspend', 'admin.tenants.plan',
     'admin.users.read', 'admin.users.write',
     'admin.sessions.read', 'admin.sessions.revoke',
+    // Sees the credential inventory and the data map. Not the export: a
+    // document about a named individual leaving the system is held by the two
+    // roles that answer for what happened, the same split audit.export makes.
+    'admin.security.read', 'admin.governance.read',
     'admin.infra.read', 'admin.infra.teardown',
     // The only role besides owner that may stop the installation. Gated on the
     // permission rather than on rank: ordering roles and comparing ranks is how
     // a permission model stops being a table and starts being an assumption.
     'admin.emergency.read', 'admin.emergency.engage',
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read', 'admin.impersonation.start',
+    'admin.product.read', 'admin.product.data.read',
+    'admin.logs.read', 'admin.email.read',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -230,11 +391,36 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // product one, and the people holding the pager have to be able to reach
     // it without finding somebody from billing at three in the morning.
     'admin.flags.read', 'admin.flags.write',
+    // The credential inventory, because expiring an engine token and finding
+    // the one nobody has used are infrastructure work. Not governance: what is
+    // held about a named person is not a question this role answers.
+    'admin.security.read',
     'admin.infra.read', 'admin.infra.teardown',
     // Sees the switches, cannot throw them. An infrastructure operator
     // debugging "their runs will not start" must be able to discover that runs
     // are frozen; pausing the installation is a different decision.
     'admin.emergency.read',
+    // The repositories, the deliveries and the credentials, because "their
+    // checks are not running" is an infrastructure question and the answer is
+    // usually a delivery that never arrived or a credential that stopped
+    // working. Revoke as well as read: a leaked engine token is an incident and
+    // the pager holder is who reaches it first.
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
+    // What support already found, and who is inside an account right now.
+    // During an incident both are context rather than power, and neither is a
+    // write. Starting an impersonation is deliberately not here: an engineer
+    // reproducing a fault has the logs, the twin and the run, and none of
+    // those require becoming the customer.
+    'admin.support.read', 'admin.impersonation.read',
+    // The twins, the runs and the golden data behind them. On call is the rota
+    // that gets "their environment came up empty", and the answer to that is
+    // whether the golden version it was built from was ever verified.
+    'admin.product.read', 'admin.product.data.read',
+    // The failure explorer and the mail surface. "Their runs will not start"
+    // and "the sign-in link never arrived" are both infrastructure questions
+    // before they are anybody else's, and neither is answerable without these.
+    'admin.logs.read', 'admin.email.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -248,6 +434,30 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
     'admin.infra.read', 'admin.emergency.read',
+    // Credentials are security's surface more than anybody's: a key that
+    // appeared in a public repository is the report they receive, and revoking
+    // it is the first thing they do about it.
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
+    // Notes both ways, because writing down what an investigation found is
+    // most of what a security review produces. Impersonation read and not
+    // start, for the same reason this role holds sessions.revoke and not the
+    // means to create a session: the job is establishing what happened.
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read',
+    // Masking posture is a security question before it is a product one: an
+    // unconfirmed rule is a column a scan believes holds personal data, on a
+    // copy somebody is running tests against.
+    'admin.product.read', 'admin.product.data.read',
+    // Sign-in links carry an address, an IP and a user agent, and an account
+    // takeover investigation starts by reading exactly those three.
+    'admin.logs.read', 'admin.email.read',
+    // The lane this role is named for. Both halves of governance, including
+    // the export, for the same reason it holds admin.audit.export: a security
+    // team that can read an incident's trail and cannot produce it for an
+    // investigation or for counsel is not much use, and answering a data
+    // protection request is exactly that job on a deadline.
+    'admin.security.read', 'admin.governance.read', 'admin.governance.export',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -258,6 +468,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.billing.write',
     'admin.entitlements.read', 'admin.entitlements.write',
     'admin.flags.read', 'admin.flags.write',
+    // Read, because the last person to touch this account left a note, and a
+    // refund argument that ignores it is an argument being had twice.
+    'admin.support.read',
   ],
   support: [
     'admin.portal.access', 'admin.audit.read',
@@ -266,9 +479,52 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // Support answers "why was I charged this" every day and must never be the
     // rota that can refund. Read without write is the whole point of the split.
     'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
+    // Read across the whole developer platform and revoke on none of it. This
+    // is the rota that answers "why did our check not run", which needs the
+    // repository, the delivery and whether the key is still live, and it is
+    // emphatically not the rota that should be able to stop a customer's
+    // pipeline while answering.
+    'admin.repos.read', 'admin.keys.read', 'admin.webhooks.read', 'admin.mcp.read',
+    // "Why did my run fail" and "why is this column blank in my twin" are the
+    // two questions support is asked about the product, and the second one is
+    // answered by a masking rule.
+    'admin.product.read', 'admin.product.data.read',
+    // The two questions support is actually asked: why did this run fail, and
+    // why has this person not received their sign-in link. Both are reads.
+    'admin.logs.read', 'admin.email.read',
+    // "I asked to be deleted three weeks ago and I am still being billed" is a
+    // support ticket before it is anything else, and answering it means seeing
+    // which step the erasure is stuck on. Read only, and no export.
+    'admin.governance.read',
+    // The role these four permissions exist for. Support is the rota that
+    // answers "it does not work for me", and it cannot answer that from the
+    // outside. This is the one role below owner and super_admin that can step
+    // into an account, and it is bounded rather than trusted: minutes, a
+    // stated reason, an entry in the customer's own audit log, and the
+    // operator portal closed for as long as it lasts.
+    'admin.support.read', 'admin.support.write',
+    'admin.impersonation.read', 'admin.impersonation.start',
   ],
-  analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
-  read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
+  // Reads the product's shape and not its customers' schemas. This is the role
+  // the data split exists for: counting runs and twins is analytics work, and
+  // reading which of a customer's columns hold personal data is not.
+  analytics: [
+    'admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read',
+    'admin.product.read',
+  ],
+  // Oversight is not a privilege to be rationed, so the auditor role reads the
+  // masking rules too. It still writes nothing, which is the only rule this
+  // role has.
+  read_only: [
+    'admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read',
+    // The auditor's read of the developer platform. Every one of these is a
+    // read, and the credential list holds no secret: only the prefix, which is
+    // what the customer's own console shows them. A role that can see which
+    // credentials exist and cannot touch one is exactly the role an auditor
+    // should be given.
+    'admin.repos.read', 'admin.keys.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.product.read', 'admin.product.data.read',
+  ],
 }
 
 export function adminRoleHas(role: AdminRole, permission: AdminPermission): boolean {

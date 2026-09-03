@@ -41,6 +41,11 @@ import {
   resolveAdminSession,
 } from './admin/session.ts'
 import { actorOf } from './admin/trpc.ts'
+// Lifted out of this file when a second one needed it. `x-forwarded-for` is a
+// LIST with optional ports, and Postgres refuses every one of those shapes on
+// an inet column. See clientaddress.ts.
+import { clientAddress, clientIP } from './clientaddress.ts'
+import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
@@ -1071,11 +1076,57 @@ export function createServer(options: ServerOptions) {
 
   app.post('/v1/admin/signout', async (c) => {
     const token = readAdminSessionCookie(c.req.header('cookie'))
-    if (token) await adminSignOut(options.pool, token, clock.now())
+    if (token) {
+      // AN IMPERSONATION IS ENDED BEFORE THE OPERATOR SESSION IS, and that
+      // order is the whole of this block.
+      //
+      // The portal's refusal screen has always offered "End this session" and
+      // it has always called this route, which cleared the OPERATOR cookie and
+      // nothing else. The moment impersonation could actually be started, that
+      // became a hole: the customer cookie stayed live in the browser for the
+      // rest of its lifetime, and the row that would have explained it had just
+      // had its operator marker removed. A way out that leaves the door open is
+      // not a way out.
+      //
+      // Read first, because adminSignOut revokes the row this needs to read.
+      const operator = await resolveAdminSession(options.pool, token, clock.now())
+      if (operator && options.adminPool) {
+        await endImpersonation(options.adminPool, operator, clock.now(), {
+          ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+          how: 'signed out',
+        })
+      }
+      await adminSignOut(options.pool, token, clock.now())
+    }
     // Cleared whether or not there was a session, so a stale or unparseable
     // cookie can still be got rid of by pressing the button.
+    //
+    // BOTH cookies, for the reason above. Clearing the customer one on an
+    // ordinary operator sign-out costs an operator who also has a product
+    // session in the same browser one sign-in, and buys the guarantee that
+    // signing out of the portal never leaves a borrowed identity behind. That
+    // trade is not close.
     c.header('set-cookie', clearedAdminCookie(secure))
+    // append, not set. Hono's header() REPLACES by default, so the second call
+    // would silently discard the first and this route would clear exactly one
+    // cookie while reading as though it cleared two. Set-Cookie is the one
+    // header where a response legitimately carries several.
+    c.header('set-cookie', clearedCookie(secure), { append: true })
     return c.json({ signedOut: true })
+  })
+
+  // The two impersonation routes, registered from the lane that owns them so
+  // that this file gains an import and a call rather than eighty lines. They
+  // are here rather than in the tRPC tree because both end in a Set-Cookie for
+  // the CUSTOMER's session, and because the operator gate refuses every
+  // procedure while impersonating, which would make a tRPC `end` unreachable
+  // exactly when it is the only thing left to press. See admin/customers.ts.
+  registerImpersonationRoutes(app, {
+    pool: options.pool,
+    adminPool: options.adminPool ?? null,
+    clock,
+    secure,
+    appBaseUrl: options.appBaseUrl ?? '',
   })
 
   app.post('/auth/signout', async (c) => {
@@ -1116,6 +1167,15 @@ export function createServer(options: ServerOptions) {
       // Handed to the page so it can send it back on mutations. Safe to expose:
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,
+      // Null on every ordinary sign-in. Set when this session is an operator
+      // acting as this account, and it is told to the PERSON BEING ACTED AS
+      // rather than only recorded about them. The audit entry is the durable
+      // record and the customer already gets a copy of it; this is what makes
+      // it visible while it is happening, which is the only time they can do
+      // anything about it. It carries no secret: the operator's address, the
+      // reason they typed, and the entry number, all three of which are already
+      // in that organization's own audit log.
+      impersonation: session.impersonation,
     })
   })
 
@@ -2791,7 +2851,19 @@ export function createServer(options: ServerOptions) {
       // token. Something between a browser and this process may strip those
       // headers, and refusing every such request would break the portal for a
       // reason nobody could diagnose.
-      const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+      //
+      // readAdminSessionCookie, NOT readCookie with the bare name, and this
+      // line was the bare name until somebody drove a browser at it.
+      // adminSessionCookie writes `__Host-af_admin_session` whenever the cookie
+      // is Secure, which is every deployment that matters and none of the tests
+      // in this repository, because the test server speaks plain HTTP. So this
+      // read returned null in production, the operator was resolved a hundred
+      // lines below by readAdminSessionCookie regardless, and the entire
+      // operator CSRF check was skipped on exactly the deployments it exists
+      // for while admincsrf.test.ts went on passing. The suite below now
+      // presents the prefixed name as well, which is the assertion that can say
+      // no to this.
+      const adminToken = readAdminSessionCookie(c.req.header('cookie'))
       if (adminToken) {
         const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
         if (operator) {
@@ -2973,9 +3045,6 @@ function clientKey(forwardedFor: string | undefined, userAgent: string | undefin
 // saw it. Later entries were supplied by the caller and must never be used: a
 // limiter keyed on an attacker-chosen value is a limiter with unlimited
 // buckets.
-function clientIP(forwardedFor: string | undefined): string {
-  return (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
-}
 
 /**
  * The caller's address, in a form the database will accept, or null.
@@ -2994,26 +3063,7 @@ function clientIP(forwardedFor: string | undefined): string {
  * because the audit field would not parse is the wrong trade in every
  * direction.
  */
-function clientAddress(forwardedFor: string | undefined): string | undefined {
-  const first = (forwardedFor ?? '').split(',')[0]?.trim()
-  if (!first) return undefined
-  // A bracketed IPv6 literal with a port, which is what some proxies send.
-  const unbracketed = /^\[(.+)\](?::\d+)?$/.exec(first)?.[1] ?? first
-  // An IPv4 address with a port, likewise. IPv6 is left alone here: it is
-  // full of colons, so stripping at the last one would truncate an address.
-  const withoutPort = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/.exec(unbracketed)?.[1] ?? unbracketed
-  return looksLikeAddress(withoutPort) ? withoutPort : undefined
-}
 
-function looksLikeAddress(value: string): boolean {
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
-    return value.split('.').every((octet) => Number(octet) <= 255)
-  }
-  // Deliberately shape rather than grammar: Postgres does the real parsing,
-  // and this only has to keep a header value that is plainly not an address
-  // out of the statement.
-  return /^[0-9a-fA-F:]+$/.test(value) && value.includes(':')
-}
 
 /**
  * Turns one ingested batch into the numbers the objectives are measured on.

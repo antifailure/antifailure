@@ -81,3 +81,96 @@ export const IconTenants = stroke(
 export const IconOperators = stroke(
   "M6 7.4a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM2.4 13c0-2 1.5-3.3 3.6-3.3M12.2 6.4a1.5 1.5 0 1 1-1.4 2l-2.2 2.2v1.2h1.2v-1h1v-1h1l.9-.9",
 );
+
+/* -------------------------------------------------------------------------
+ * The operator portal's navigation
+ *
+ * Twenty three entries in six groups, and in a rail that long the icon is not
+ * decoration: it is the thing that lets somebody find "Logs" again without
+ * reading twenty two labels. So every glyph here is drawn for the ONE section
+ * it names, on the same 16 grid and the same 1.3 stroke as the rest, and none
+ * of them is a sparkle, a rocket or a lightning bolt.
+ *
+ * Seven entries reuse an icon that already exists rather than getting a near
+ * duplicate: tenants, runs, keys, audit, the bar chart, the operator and the
+ * two sliders all mean here exactly what they mean where they were drawn. A
+ * second glyph for the same idea is how two lists in one product stop
+ * matching.
+ * ---------------------------------------------------------------------- */
+
+/** Overview: four panels, which is what the page is. */
+export const IconOverview = stroke(
+  "M2.6 2.6h4.4v4.4H2.6zM9 2.6h4.4v4.4H9zM2.6 9h4.4v4.4H2.6zM9 9h4.4v4.4H9z",
+);
+
+/** Support: a conversation. The portal's support section starts from somebody
+ *  having asked something. */
+export const IconSupport = stroke(
+  "M13.4 9.4a1.4 1.4 0 0 1-1.4 1.4H6.4L3.4 13.2v-2.4H3a1.4 1.4 0 0 1-1.4-1.4V4.2A1.4 1.4 0 0 1 3 2.8h9a1.4 1.4 0 0 1 1.4 1.4zM5 5.6h6M5 7.8h3.6",
+);
+
+/** Billing: a card with a stripe across it. */
+export const IconBilling = stroke("M2 4.6h12v6.8H2zM2 7.2h12M4.4 9.6h2.6");
+
+/** Production twins: one surface copied onto another, offset. */
+export const IconTwins = stroke("M2.6 2.8h7v7h-7zM6.4 6.4h7v7h-7");
+
+/** Safe state and databases: the cylinder, which is the only glyph everybody
+ *  reads as a database without a label. */
+export const IconDatabase = stroke(
+  "M8 2.4c2.8 0 4.8.8 4.8 1.7S10.8 5.8 8 5.8 3.2 5 3.2 4.1 5.2 2.4 8 2.4ZM3.2 4.1v3.8c0 .9 2 1.7 4.8 1.7s4.8-.8 4.8-1.7V4.1M3.2 7.9v3.8c0 .9 2 1.7 4.8 1.7s4.8-.8 4.8-1.7V7.9",
+);
+
+/** Branches: the git glyph, a trunk and one branch merging off it. */
+export const IconBranches = stroke(
+  "M4.8 5.4v5.2M4.8 5.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8ZM4.8 13.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8ZM11.2 5.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8ZM11.2 5.4v1.2c0 1.7-1.4 2.6-3.2 2.8",
+);
+
+/** Experiments: a flask. An experiment is a thing being measured, not a lab
+ *  coat and not a beaker of bubbles. */
+export const IconExperiments = stroke(
+  "M6.4 2.4v3.7L3.2 12a1 1 0 0 0 .9 1.5h7.8a1 1 0 0 0 .9-1.5L9.6 6.1V2.4M5.4 2.4h5.2M4.6 9.4h6.8",
+);
+
+/** Repositories: a book that opens, which is the shape every forge uses. */
+export const IconRepositories = stroke(
+  "M3.4 2.8h8.2a1 1 0 0 1 1 1v9.4H4.6a1.2 1.2 0 0 1-1.2-1.2zM3.4 11h9.2M5.8 5.4h4",
+);
+
+/** MCP: a connector with two pins, because what this section manages is what
+ *  is plugged into the product. */
+export const IconMcp = stroke(
+  "M6 2.6v3M10 2.6v3M4.4 5.6h7.2v2.2A3.6 3.6 0 0 1 8 11.4a3.6 3.6 0 0 1-3.6-3.6zM8 11.4v2",
+);
+
+/** Integrations: something leaving the box, which is what a webhook is. */
+export const IconIntegrations = stroke(
+  "M8.4 3.2H3.2v9.6h9.6V7.6M9.6 6.4l3.6-3.6M10.2 2.8h3v3",
+);
+
+/** Infrastructure: two racked machines, each with its own indicator. The dot
+ *  is a zero length segment under a round cap, so it inherits the one stroke
+ *  width rather than being a second shape to keep in step. */
+export const IconInfrastructure = stroke(
+  "M2.6 3.2h10.8v3.4H2.6zM2.6 9.4h10.8v3.4H2.6zM4.8 4.9h.01M4.8 11.1h.01",
+);
+
+/** Logs: a terminal, which is where the reader has been looking already. */
+export const IconLogs = stroke("M2.6 3.2h10.8v9.6H2.6zM5 6.4 7 8.4l-2 2M8.8 10.4h3");
+
+/** Email: an envelope. */
+export const IconEmail = stroke("M2.4 4.4h11.2v7.2H2.4zM2.4 4.8 8 8.9l5.6-4.1");
+
+/** Incidents and kill switches: the power symbol. The one glyph whose meaning
+ *  nobody has to be taught, on the section where being taught is too slow. */
+export const IconIncidents = stroke("M8 2.6v4.8M4.6 5a4.6 4.6 0 1 0 6.8 0");
+
+/** The security centre: a shield with a check, so it is not confused with the
+ *  plain shield the customer console uses for masking. */
+export const IconSecurity = stroke(
+  "M8 2.2 12.8 4v4c0 2.6-2 4.3-4.8 5-2.8-.7-4.8-2.4-4.8-5V4zM6 7.9 7.4 9.3 10 6.5",
+);
+
+/** Data governance: a records box with a label. Governance is custody of what
+ *  is kept, and this is the shape of custody. */
+export const IconGovernance = stroke("M2.6 3h10.8v2.6H2.6zM3.6 5.6h8.8v7.4H3.6zM6.4 8.6h3.2");

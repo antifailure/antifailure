@@ -169,6 +169,37 @@ export function adminCsrfMatches(
  * may strip them and refusing every such request would break the portal for
  * reasons nobody could diagnose. What it adds is that a request which DOES
  * declare a cross site origin is refused before its token is even looked at.
+ *
+ * WHY THIS COMPARES ORIGINS RATHER THAN STRINGS, which it used to.
+ *
+ * The second argument is `options.appBaseUrl`, and that is a BASE URL. A
+ * browser's `Origin` header is an origin: scheme, host, port, no trailing
+ * slash, no path, ever. The old `origin !== expectedOrigin` compared those two
+ * different things as text, so it agreed only when the base URL happened to be
+ * spelled exactly as an origin. Measured against a browser sending
+ * `https://app.example.com`:
+ *
+ *   AF_APP_BASE_URL unset, so the server passes ''   -> refused
+ *   "https://app.example.com/", the natural spelling -> refused
+ *   "https://app.example.com/console", a sub path    -> refused
+ *   "https://app.example.com", and only this one     -> allowed
+ *
+ * Three of those four are ordinary configurations and one of them is the
+ * DEFAULT: antifailure.yaml deliberately leaves the variable unset, because the
+ * address is allocated at run time. So on a stock deployment this refused every
+ * operator mutation with "This operator request came from another site", which
+ * is a sentence that sends whoever reads it looking for an attacker.
+ *
+ * Two other call sites in server.ts already normalise this value, one by
+ * stripping trailing slashes and one by falling back to the request's own
+ * origin. This one did neither, and it is the only one where getting it wrong
+ * refuses rather than merely renders a wrong link.
+ *
+ * WHEN NOTHING IS CONFIGURED this returns true rather than refusing. An
+ * unconfigured deployment gives this check nothing to judge against, and a
+ * check that cannot judge must not refuse: the CSRF token is what fails closed,
+ * and it is unaffected. That is the same reasoning as the missing headers case
+ * above, and the test below states it out loud.
  */
 export function looksSameOrigin(
   headers: { origin?: string | null; secFetchSite?: string | null },
@@ -176,9 +207,23 @@ export function looksSameOrigin(
 ): boolean {
   const site = headers.secFetchSite?.trim().toLowerCase()
   if (site && site !== 'same-origin' && site !== 'none') return false
-  const origin = headers.origin?.trim()
-  if (origin && origin !== expectedOrigin) return false
-  return true
+  const declared = headers.origin?.trim()
+  if (!declared) return true
+  const expected = originOf(expectedOrigin)
+  if (expected === null) return true
+  // A declared origin that does not parse is refused rather than waved
+  // through: it is not a browser, and the deployment did say what to expect.
+  return originOf(declared) === expected
+}
+
+/** The scheme, host and port of a URL, or null when there is not one to read. */
+function originOf(value: string | null | undefined): string | null {
+  if (!value) return null
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
 }
 
 export class AdminSignInError extends Error {}

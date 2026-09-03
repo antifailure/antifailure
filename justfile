@@ -83,6 +83,7 @@ gate: _reports
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "the mode lists are the real one" just modecheck
+    run "every contact route resolves"   just contactcheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
@@ -555,6 +556,16 @@ figurecheck:
 # read from schemas/manifest.v1.json rather than from a second copy of the list.
 modecheck:
     go run ./tools/modecheck .
+
+# No address published anywhere in this tree sends a reader into silence.
+#
+# CODE_OF_CONDUCT.md named conduct@antifailure.dev and the legal pages named
+# security@antifailure.dev. The domain has no mail exchanger, an SPF policy
+# authorising no sender and a revoked DKIM key, so a harassment report and a
+# security finding went to the same nowhere. Every address in the tree now
+# needs a row in tools/docs/contact-routes.tsv saying who reads it.
+contactcheck:
+    go run ./tools/contactcheck .
 
 # No class on a rendered element that another class on the same element beats,
 # so it is written, reviewed, and does nothing.

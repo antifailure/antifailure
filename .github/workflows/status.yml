@@ -114,8 +114,14 @@ jobs:
       - name: Move to status-data, creating it the first time this runs
         working-directory: data
         run: |
+          # The address is GitHub's own no-reply for the Actions bot, and it
+          # used to be status@antifailure.dev. That read like a mailbox and was
+          # not one: the domain publishes no mail exchanger, so anybody who
+          # replied to a status commit was writing into nothing. A no-reply
+          # address at a domain every reader already recognises as one says the
+          # same thing without the trap.
           git config user.name "antifailure-status"
-          git config user.email "status@antifailure.dev"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --heads origin status-data > /dev/null; then
             git fetch origin status-data
             git checkout -B status-data origin/status-data

@@ -61,6 +61,37 @@ func TestCSSIsNotAClaim(t *testing.T) {
 // and a colon treats every object literal as CSS, which silently swallowed five
 // real data rows. A gate that hides a true finding is worse than one that
 // reports a false one.
+// A transform value on a line of its own. A ternary inside style={{ }} puts
+// each branch on its own line, and the `transform:` property sits above them,
+// so the percentages arrive with nothing on the line to say they are geometry.
+// The transform functions themselves say it.
+func TestATransformBranchIsNotAClaim(t *testing.T) {
+	for _, s := range []string{
+		`              ? "translate(-100%, -50%)"` + "\n",
+		`                ? "translate(-50%, -50%)"` + "\n",
+		`                : "translateY(-50%)",` + "\n",
+		`  const t = wide ? "scaleX(50%)" : "rotate(45deg) translateX(-100%)";` + "\n",
+	} {
+		if got := Check("x.tsx", s); len(got) != 0 {
+			t.Errorf("%q is a transform, not a claim, got %+v", s, got)
+		}
+	}
+}
+
+// The transform rule names functions, so it cannot swallow a data row that
+// merely sits near one. This is the same guard TestAnObjectLiteralIsNotCSS
+// keeps over the older rules.
+func TestTheTransformRuleDoesNotSwallowARow(t *testing.T) {
+	line := `  { name: "translate", share: "18%" },` + "\n"
+	got := Check("x.tsx", line)
+	if len(got) != 1 {
+		t.Fatalf("want the share found beside the word translate, got %+v", got)
+	}
+	if got[0].fig != "18%" {
+		t.Errorf("fig = %q, want 18%%", got[0].fig)
+	}
+}
+
 func TestAnObjectLiteralIsNotCSS(t *testing.T) {
 	line := `  { route: "GET /api/subscriptions", share: "18%", p95: "412ms", delta: 1.29 },` + "\n"
 	got := Check("x.tsx", line)

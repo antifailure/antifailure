@@ -170,6 +170,16 @@ const UNWIRED: Record<string, string> = {
     'customer. Projecting the local paths would be worse than the blank: it would list files',
     'nobody can fetch. This needs the uploader, not a projector.',
   ].join(' '),
+  sso_connections: [
+    'Migration 0014 built a complete single sign-on and SCIM schema, and nothing in the product',
+    'ever reads or writes any of it: no route configures a connection, no sign-in path consults',
+    'one, and sso_assertions_seen and sso_break_glass_codes are equally untouched. So no customer',
+    'can turn single sign-on on, every account signs in through GitHub or an email link, and the',
+    'identity section of the operator portal\'s Security Center is a statement saying exactly that',
+    'rather than a table of zeroes. The counts are still read, because they are correct and',
+    'because the section becomes a real panel the day something writes the table. What is needed',
+    'is the configuration route and the sign-in path, not a screen.',
+  ].join(' '),
 }
 
 describe('every table a screen reads is written by something that is not a fixture', () => {

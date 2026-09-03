@@ -81,6 +81,14 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 2, burst: 10, key: 'ip',
     reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',
   },
+  'POST /v1/admin/impersonation/start': {
+    rate: 0.2, burst: 5, key: 'ip',
+    reason: 'Stepping into a customer account is a deliberate act that takes minutes and is preceded by somebody typing a reason. One every five seconds is far above honest use, and the burst covers an operator who mistyped the account twice before getting it right.',
+  },
+  'POST /v1/admin/impersonation/end': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'Getting back out. Deliberately looser than starting and looser than signing out, because a refusal here strands somebody inside a customer account, which is the one state this endpoint exists to leave.',
+  },
   'POST /auth/device/code': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Starting a terminal login is a human action. Ten at once covers somebody retrying in three shells; a sustained one per second does not.',

@@ -58,13 +58,48 @@ representative at an online or offline event.
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-conduct@antifailure.dev. All complaints will be reviewed and investigated
-promptly and fairly.
+**This project has no confidential reporting channel today.** That is written
+here rather than left to be discovered, because the alternative is the state
+this section was in until now: it named conduct@antifailure.dev, and that
+address has never been able to receive anything. The antifailure.dev domain
+publishes no mail exchanger and its SPF record authorises no sender, so a
+complaint addressed there was delivered nowhere. The reporter got silence, and
+silence is indistinguishable from being ignored.
 
-All community leaders are obligated to respect the privacy and security of the
-reporter of any incident.
+These are the routes that resolve today, with what each one costs you.
+
+* **A GitHub issue or discussion** at
+  https://github.com/antifailure/antifailure. Both work and both are public.
+  Anything you write is readable by anybody, including the person you are
+  reporting, and it stays readable. For a moderation question about a thread
+  everybody can already see, a public record is fine and sometimes better. For
+  harassment, or for anything where being named puts you at risk, it is the
+  wrong place and you should not be pushed into it.
+* **A booked call** at https://cal.com/virsanghavi/30min. That reaches the
+  maintainer directly and is private between the two of you. It is the closest
+  thing to a confidential route this project has. It also asks you to speak to
+  somebody in real time, which is not a fair thing to require of a person
+  reporting harassment, so it is offered and not presented as the answer.
+* **GitHub private vulnerability reporting is not a conduct channel.** It is
+  private, and it is the wrong queue: it feeds the security advisory workflow
+  and is read as a stream of security findings. Please do not file a conduct
+  complaint there.
+
+**The gap none of the above closes.** Whoever would read a complaint is one of
+the same few people who maintain this repository, so a complaint about a
+maintainer has nowhere independent to go inside the project. No wording here
+changes that. If that is your situation, GitHub's own abuse route is
+independent of this repository and of everybody in it:
+https://github.com/contact/report-abuse. Nearly all of this project's
+community activity happens in GitHub spaces, so it covers most of what this
+document covers.
+
+All complaints will be reviewed and investigated promptly and fairly, and all
+community leaders are obligated to respect the privacy and security of the
+reporter of any incident. One qualification on the word promptly, since it is
+the kind of promise that is easy to make and easy to miss: nobody here is on a
+rota for this, so a report that arrives on a Friday evening is most likely read
+on Monday.
 
 ## Enforcement Guidelines
 
