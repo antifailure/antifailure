@@ -38,13 +38,13 @@ describe('every operator route declares a permission', () => {
     prefix: 'admin.',
     // Taken by RUNNING the walk on the merged tree rather than by counting call
     // sites or by taking the highest of the lanes' guesses. Six branches edited
-    // this integer to 22, 29, 30, 48, 50 and 63 while the tree grew under all of
+    // this integer to 22, 29, 30, 48, 50, 53 and 63 while the tree grew under all of
     // them, and every one of those numbers was right when it was written. The
     // floor has to move with the tree or it stops being a floor: an atLeast a
     // SHRINKING router still clears is an assertion that has quietly stopped
     // checking whether routes moved out of this tree, which is the one thing it
     // exists for.
-    atLeast: 74,
+    atLeast: 85,
   })
 })
 
