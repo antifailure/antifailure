@@ -36,6 +36,7 @@ helm	value	config.insecureCookies	bool	optional
 helm	value	config.operatorSetsPlan	bool	optional
 helm	value	config.poolMax	number	optional
 helm	value	config.port	number	optional
+helm	value	config.selfServeSignup	bool	optional
 helm	value	config.signinAllowlist	null	optional
 helm	value	database.existingSecret	string	optional
 helm	value	database.migrationUrl	string	optional
@@ -185,6 +186,7 @@ terraform:modules/control-plane	variable	pool_max	number	optional
 terraform:modules/control-plane	variable	postgres_version	string	optional
 terraform:modules/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:modules/control-plane	variable	resource_group_name	string	required
+terraform:modules/control-plane	variable	self_serve_signup	bool	optional
 terraform:modules/control-plane	variable	signin_allowlist	list(string)	required
 terraform:modules/control-plane	variable	signup_url	string	optional
 terraform:modules/control-plane	variable	tags	map(string)	optional
@@ -250,6 +252,7 @@ terraform:stacks/control-plane	variable	name	string	optional
 terraform:stacks/control-plane	variable	pool_max	number	optional
 terraform:stacks/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:stacks/control-plane	variable	resource_group_name	string	optional
+terraform:stacks/control-plane	variable	self_serve_signup	bool	optional
 terraform:stacks/control-plane	variable	signin_allowlist	list(string)	required
 terraform:stacks/control-plane	variable	signup_url	string	optional
 terraform:stacks/control-plane	variable	subscription_id	string	required
