@@ -13,6 +13,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/personas"
+	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -498,31 +499,32 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 
 // findRunner locates the runner's entry point.
 //
-// Looked for beside the repository first, so a checkout works with no
-// installation, then on PATH, so an installed engine finds an installed
-// runner. A clear refusal beats a mysterious exec failure.
+// Looked for inside the checkout first, so a checkout works with no
+// installation, then where an install put one, then beside the binary, so an
+// installed engine finds an installed runner. A clear refusal beats a
+// mysterious exec failure.
+//
+// The candidate list is shared with `af runner install`, which is the whole
+// point of it living in runnerpath. This function used to keep its own copy:
+// o.opts.Root and one level above it, and nothing else. o.opts.Root is the
+// directory holding the manifest, so a project one directory further down than
+// that never reached the runner at the top of its own checkout. Every nightly
+// leg that ran an example under examples/ failed here, naming four paths and
+// not the one the runner was in, and so did any customer whose manifest is not
+// at the top of their repository.
 func (o *Orchestrator) findRunner(override string) (string, error) {
-	candidates := []string{override}
-	if override == "" {
-		candidates = []string{
-			filepath.Join(o.opts.Root, "runner", "src", "main.ts"),
-			filepath.Join(o.opts.Root, "..", "runner", "src", "main.ts"),
+	if override != "" {
+		if _, err := os.Stat(override); err == nil {
+			return override, nil
 		}
-		if home, err := os.UserHomeDir(); err == nil {
-			candidates = append(candidates,
-				filepath.Join(home, ".antifailure", "runner", "src", "main.ts"))
-		}
-		if self, err := os.Executable(); err == nil {
-			// Beside the binary, for an installed release that ships the
-			// runner next to it rather than fetching it separately.
-			candidates = append(candidates,
-				filepath.Join(filepath.Dir(self), "runner", "src", "main.ts"))
-		}
+		return "", aferrors.Coded(aferrors.AFAGT004, "detail", "looked in "+override)
+	}
+	dirs := runnerpath.ToRun(o.opts.Root)
+	candidates := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		candidates = append(candidates, filepath.Join(d, "src", "main.ts"))
 	}
 	for _, c := range candidates {
-		if c == "" {
-			continue
-		}
 		if _, err := os.Stat(c); err == nil {
 			return c, nil
 		}
