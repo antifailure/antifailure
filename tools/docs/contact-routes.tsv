@@ -45,6 +45,18 @@ ee/web/sso/src/provision.ts	ada@gmail.com	not-a-route	the same example, in the c
 justfile	potatogreenbean204@gmail.com	not-a-route	the same wrong git identity, checked once more over the commits on a branch before it is landed.
 tools/contactcheck/main.go	conduct@antifailure.dev	records-a-defect	named in this gate's own explanation of the defect it was written for, beside the dig output showing the domain has no mail exchanger.
 tools/contactcheck/main.go	security@antifailure.dev	records-a-defect	the other half of the same explanation.
+tools/preview/README.md	operator@preview.local	not-a-route	the operator the preview seeds, named in the section explaining that its password is generated fresh on every run and written outside the working tree. The preview database is thrown away, and .local is reserved by RFC 6762, so the address resolves nowhere.
+tools/preview/common.sh	operator@preview.local	not-a-route	the same seeded operator, as the shell variable the preview scripts sign in with.
+tools/preview/seed.ts	rhea.okafor@preview.local	not-a-route	one of eleven fixed fictional operators written into the throwaway preview database, this one holding super_admin. The identities are constant rather than random so two runs produce the same portal and screenshots can be compared.
+tools/preview/seed.ts	tomas.lindqvist@preview.local	not-a-route	the same seeded set, holding the infrastructure role.
+tools/preview/seed.ts	nadia.haddad@preview.local	not-a-route	the same seeded set, holding the security role.
+tools/preview/seed.ts	yusuf.demir@preview.local	not-a-route	the same seeded set, holding the billing role.
+tools/preview/seed.ts	clara.mendes@preview.local	not-a-route	the same seeded set, holding a support role.
+tools/preview/seed.ts	ines.duarte@preview.local	not-a-route	the same seeded set, holding the second support role.
+tools/preview/seed.ts	peter.novak@preview.local	not-a-route	the same seeded set, holding the analytics role.
+tools/preview/seed.ts	mira.solberg@preview.local	not-a-route	the same seeded set, holding read_only.
+tools/preview/seed.ts	oskar.wojcik@preview.local	not-a-route	the same seeded set, the one seeded suspended so the portal has a suspended operator to show.
+tools/preview/seed.ts	lena.fischer@preview.local	not-a-route	the same seeded set, the one seeded never provisioned so the portal has that state to show.
 www/components/AuthScreen.tsx	you@company.com	not-a-route	the placeholder inside the sign-in field.
 www/components/home/visuals/TwinLifecycleScene.tsx	ada@corp.io	not-a-route	a row of invented customer data in the animated lifecycle film, shown being masked. The film is captioned as a shaped example.
 www/components/home/visuals/TwinLifecycleScene.tsx	user_00418@mask.local	not-a-route	what the same film shows that row becoming after masking. A generated value at a domain that does not resolve, which is the output the masker actually produces.
