@@ -205,10 +205,12 @@ function People({
   setView: (v: View) => void;
 }) {
   const state = useAdminUsers(search);
-  // The open record, held here rather than in the drawer, because the list has
-  // to keep rendering underneath it and the drawer has to survive a reload of
-  // the list it came from.
-  const [open, setOpen] = useState<AdminUserRow | null>(null);
+  // THE ID, NOT THE ROW. Holding the row means holding a SNAPSHOT: suspend the
+  // account from inside the drawer, the list reloads underneath, and the drawer
+  // keeps rendering the object it captured, so the panel that just suspended
+  // somebody still says active. Deriving it from the current rows on every
+  // render means the drawer reads the same answer the table does, always.
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const columns: Column<AdminUserRow>[] = [
     {
@@ -249,7 +251,7 @@ function People({
       cell: (u) => (
         // A real button rather than a clickable row: a row that opens something
         // on click has no keyboard equivalent and is announced as nothing.
-        <Button onClick={() => setOpen(u)}>Open</Button>
+        <Button onClick={() => setOpenId(u.id)}>Open</Button>
       ),
     },
   ];
@@ -294,7 +296,22 @@ function People({
         </Loaded>
       </Card>
 
-      <PersonDrawer person={open} onClose={() => setOpen(null)} onChanged={state.reload} />
+      {/* OUTSIDE `Loaded`, and reading `state.data` directly.
+          
+          Inside it, the drawer is unmounted the moment a reload puts the list
+          back into its loading branch, so a suspend from within the drawer
+          destroys the drawer's own state on its way to succeeding: the
+          confirmation sentence the route composed disappears in the same frame
+          it was set. Out here the component stays mounted and still reads the
+          same rows the table does, because `state.data` is what the table is
+          rendering. A person who has fallen out of the current answer resolves
+          to null and the drawer closes, which is the right behaviour for
+          somebody who no longer matches the search. */}
+      <PersonDrawer
+        person={state.data?.find((u) => u.id === openId) ?? null}
+        onClose={() => setOpenId(null)}
+        onChanged={state.reload}
+      />
     </>
   );
 }
@@ -318,7 +335,6 @@ function PersonDrawer({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [effect, setEffect] = useState<string | null>(null);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -383,11 +399,17 @@ function PersonDrawer({
             ]}
           />
 
-          {effect ? (
-            <p role="status" className="px-4 pb-3 text-[12.5px] leading-5 text-muted">
-              {effect}
-            </p>
-          ) : null}
+          {/* NO "here is what just happened" LINE, deliberately.
+              
+              The route returns a sentence describing what a suspension does and
+              the obvious thing is to show it after the press. Two reasons not
+              to. The dialog above already shows that sentence BEFORE the button
+              is pressed, which is the only moment it can change somebody's
+              mind. And afterwards the facts themselves say it: the badge reads
+              suspended, the reason is beside it, and the action has become
+              Restore. A sentence repeating that is a third copy of one fact,
+              and it was the copy that did not survive the list reloading
+              underneath it. */}
           {error && asking === null ? (
             <p role="alert" className="px-4 pb-3 text-[12.5px] leading-5 text-fail">
               {error}
@@ -461,11 +483,7 @@ function PersonDrawer({
             }}
             onConfirm={() =>
               void run(async () => {
-                const result = await suspendUser(person.id, reason);
-                // The route's own sentence rather than this page's. Two
-                // sentences that mean the same thing today are two sentences
-                // that disagree after somebody edits one.
-                setEffect(result.effect);
+                await suspendUser(person.id, reason);
               })
             }
           >

@@ -323,20 +323,24 @@ function Notes({
   const state = useNotes(subjectType, subjectId);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // TWO error slots, not one. They are two different forms in two different
+  // places, and sharing a slot puts a failed retraction underneath the box
+  // somebody types a note into, where it reads as a refusal of the note.
+  const [addError, setAddError] = useState<string | null>(null);
+  const [retractError, setRetractError] = useState<string | null>(null);
   const [retracting, setRetracting] = useState<string | null>(null);
   const [retractReason, setRetractReason] = useState("");
 
   const mayWrite = operatorMay(me, "admin.support.write");
 
-  async function run(fn: () => Promise<unknown>) {
+  async function run(fn: () => Promise<unknown>, fail: (m: string | null) => void) {
     setBusy(true);
-    setError(null);
+    fail(null);
     try {
       await fn();
       state.reload();
     } catch (err) {
-      setError((err as ApiError).message);
+      fail((err as ApiError).message);
     } finally {
       setBusy(false);
     }
@@ -409,13 +413,13 @@ function Notes({
             void run(async () => {
               await addNote(subjectType, subjectId, draft.trim());
               setDraft("");
-            });
+            }, setAddError);
           }}
         >
           <Field
             label={`Add a note about ${label}`}
             hint="Visible to operators only. Recorded in the operator audit chain, which does not carry the text."
-            error={error}
+            error={addError}
           >
             <textarea
               className={`${inputClass} h-auto min-h-24 py-2 sm:h-auto`}
@@ -438,18 +442,18 @@ function Notes({
         title="Retract this note?"
         confirmLabel="Retract"
         busy={busy}
-        error={error}
+        error={retractError}
         onCancel={() => {
           setRetracting(null);
           setRetractReason("");
-          setError(null);
+          setRetractError(null);
         }}
         onConfirm={() =>
           void run(async () => {
             if (retracting) await retractNote(retracting, retractReason);
             setRetracting(null);
             setRetractReason("");
-          })
+          }, setRetractError)
         }
       >
         <p className="text-[13px] leading-6 text-muted">

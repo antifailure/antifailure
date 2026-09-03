@@ -69,6 +69,20 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
   const qs = input === undefined ? "" : `?input=${encodeURIComponent(JSON.stringify(input))}`;
   const res = await fetch(`${BASE}/trpc/${path}${qs}`, {
     credentials: "same-origin",
+    // NEVER FROM A CACHE, and this is a correctness fix rather than a
+    // precaution. Every read this function makes is live tenant or operator
+    // state behind a session, and the control plane sends no cache-control on
+    // /trpc, so the default fetch mode lets the browser reuse a response it
+    // already has. The symptom is specific and awful: suspend an account from
+    // the panel beside the list, the write commits, the list reloads, one
+    // request goes out, and the row still says active. An operator reads that
+    // as "the button did nothing" and presses it again.
+    //
+    // On the read side there is nothing to lose. These responses are per
+    // session, none of them is shared, and none is large enough for a cache to
+    // be worth the chance of showing somebody last minute's answer about a
+    // customer they are in the middle of changing.
+    cache: "no-store",
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw await readError(res);
