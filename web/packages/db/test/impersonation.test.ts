@@ -32,11 +32,11 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
   let h: Harness
   let tenant: Fixture
   /** The operator doing the impersonating. An `admin_users` row, not a `users`
-   *  one: 0033 repointed the foreign key at the table operators actually live
+   *  one: 0034 repointed the foreign key at the table operators actually live
    *  in, because they are a separate id space and the column could not hold one
    *  before. See the note on `operator` below. */
   let operator: string
-  /** A real entry in the operator chain for the session rows to point at. 0033
+  /** A real entry in the operator chain for the session rows to point at. 0034
    *  added the foreign key that makes "the record came first" structural on
    *  this table too, so a made-up number is no longer insertable. */
   let auditSeq: number
@@ -123,7 +123,7 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
   })
 
   it('refuses an audit entry that was never written', async () => {
-    // The other half of the rule, and it did not exist until 0033. The CHECK
+    // The other half of the rule, and it did not exist until 0034. The CHECK
     // says the column must be SET; the foreign key says the entry it names must
     // EXIST. Without the second, a handler could satisfy the constraint with any
     // integer and the session would carry a pointer into nothing, which reads as
@@ -139,7 +139,7 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
   })
 
   it('refuses a marker with no operator named', async () => {
-    // Keyed on the LABEL now, not on the id. 0033 moved the constraint's
+    // Keyed on the LABEL now, not on the id. 0034 moved the constraint's
     // predicate onto impersonation_audit_seq and let impersonated_by go null,
     // because the foreign key is ON DELETE SET NULL and the two could not both
     // hold: nulling one of four columns leaves exactly the shape the old
@@ -166,7 +166,7 @@ describe('an impersonated session cannot be incomplete', { skip: hasDatabase ? f
   })
 
   it("survives its operator's account being deleted, with the record intact", async () => {
-    // THE PROPERTY 0033 EXISTS FOR, and the one the old shape could not have.
+    // THE PROPERTY 0034 EXISTS FOR, and the one the old shape could not have.
     //
     // Under the previous constraint this DELETE failed: the foreign key nulls
     // impersonated_by, the all-or-nothing CHECK refuses a row with three of four

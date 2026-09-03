@@ -239,7 +239,7 @@ export async function resolveSession(
         csrfToken: csrfTokenFor(token),
         expiresAt,
         // Keyed on the sequence number rather than on impersonator_label,
-        // which is what 0033 moved the CHECK to. That column is NOT NULL
+        // which is what 0034 moved the CHECK to. That column is NOT NULL
         // whenever this is an impersonation and it is the one column no cascade
         // can null out, so it is the only one that answers "is this an
         // impersonation" for certain.

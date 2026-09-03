@@ -323,7 +323,7 @@ export const customersRouter = router({
           JOIN users u ON u.id = s.user_id
           LEFT JOIN organizations o ON o.id = s.org_id
           -- Keyed on the sequence number rather than on impersonated_by, which
-          -- is the predicate 0033 moved it to and the one the partial index is
+          -- is the predicate 0034 moved it to and the one the partial index is
           -- built on. impersonated_by goes null when an operator's account is
           -- deleted; the record does not.
           WHERE s.impersonation_audit_seq IS NOT NULL
@@ -580,7 +580,7 @@ export function registerImpersonationRoutes(
           // returns is a NOT NULL column on the row inserted below, with a
           // foreign key into this chain. A session that was never audited
           // cannot be represented, which is what 0023 built the column for and
-          // what 0033 made true.
+          // what 0034 made true.
           const entry = await appendAdminAudit(db, {
             adminUserId: operator.adminUserId,
             actorLabel: operator.email,
