@@ -75,6 +75,30 @@ export default function AdminOverviewPage() {
   const operators = useAdminOperators(mayReadOperators);
   const installation = useAdminInstallation(mayReadInfra);
 
+  /*
+   * WHETHER EACH CHECK ACTUALLY ANSWERED, not whether it was allowed to be
+   * asked. The statement below is assembled from three routes that return at
+   * different times, and an earlier version read whichever had arrived. So on
+   * a slow control plane the page rendered "Nothing is engaged and nothing is
+   * waiting" for as long as the switches took to load, and then changed its
+   * mind. A front page that says all clear while maintenance is engaged is the
+   * exact failure this page exists to prevent, and it is worse for being
+   * momentary: the reader has already gone somewhere else.
+   *
+   * So a source is CHECKED only when it is ready. Still loading holds the
+   * statement back; refused or failed makes it say what it could not read
+   * rather than implying it read everything.
+   */
+  const controlsChecked = mayReadInfra && installation.status === "ready";
+  const operatorsChecked = mayReadOperators && operators.status === "ready";
+  const waiting =
+    (mayReadInfra && installation.status === "loading") ||
+    (mayReadOperators && operators.status === "loading");
+  const unread = [
+    mayReadInfra && installation.status === "error" ? "the installation switches" : null,
+    mayReadOperators && operators.status === "error" ? "the operator accounts" : null,
+  ].filter((x): x is string => x !== null);
+
   const groups = ADMIN_NAV.map((group) => ({
     ...group,
     items: group.items.filter((item) => operatorMay(me, item.permission)),
@@ -91,13 +115,18 @@ export default function AdminOverviewPage() {
     >
       {mayReadTenants ? (
         <Loaded state={standing} skeleton={<StandingSkeleton />}>
-          {(data) => (
-            <Standing
-              standing={data}
-              controls={installation.data?.controls ?? null}
-              operators={operators.data ?? null}
-            />
-          )}
+          {(data) =>
+            waiting ? (
+              <StandingSkeleton />
+            ) : (
+              <Standing
+                standing={data}
+                controls={controlsChecked ? (installation.data?.controls ?? []) : null}
+                operators={operatorsChecked ? (operators.data ?? []) : null}
+                unread={unread}
+              />
+            )
+          }
         </Loaded>
       ) : null}
 
@@ -109,10 +138,10 @@ export default function AdminOverviewPage() {
                 {(data) => (
                   <Attention
                     standing={data}
-                    controls={installation.data?.controls ?? null}
-                    operators={operators.data ?? null}
-                    checkedOperators={mayReadOperators}
-                    checkedControls={mayReadInfra}
+                    controls={controlsChecked ? (installation.data?.controls ?? []) : null}
+                    operators={operatorsChecked ? (operators.data ?? []) : null}
+                    checkedOperators={operatorsChecked}
+                    checkedControls={controlsChecked}
                   />
                 )}
               </Loaded>
@@ -209,10 +238,16 @@ function Standing({
   standing,
   controls,
   operators,
+  unread,
 }: {
   standing: AdminStanding;
+  /** Null when this check did not answer, which is not the same as an empty
+   *  list. The statement below never treats the two alike. */
   controls: AdminInstallation["controls"] | null;
   operators: Operator[] | null;
+  /** The checks that were allowed and failed, named so the reader knows the
+   *  answer is partial. */
+  unread: string[];
 }) {
   const engaged = (controls ?? []).filter((c) => c.engaged);
   const unprovisioned = (operators ?? []).filter((o) => !o.provisioned && !o.suspended);
@@ -229,7 +264,9 @@ function Standing({
           ? `${count(suspended.length, "organization is", "organizations are")} suspended.`
           : unprovisioned.length > 0
             ? `${count(unprovisioned.length, "operator account has", "operator accounts have")} never been provisioned.`
-            : "Nothing is engaged and nothing is waiting.";
+            : unread.length > 0
+              ? "Nothing found in the checks that answered."
+              : "Nothing is engaged and nothing is waiting.";
 
   // The badge follows the SAME cascade as the headline, and that is not a
   // refactor for tidiness. An earlier version derived the tone from a shorter
@@ -240,13 +277,19 @@ function Standing({
   const tone =
     engaged.length > 0 || stuckDeletions.length > 0
       ? "fail"
-      : suspended.length > 0 || unprovisioned.length > 0
+      : suspended.length > 0 || unprovisioned.length > 0 || unread.length > 0
         ? "warn"
         : "pass";
   const label =
-    tone === "fail" ? "Needs attention" : tone === "warn" ? "Worth a look" : "All clear";
+    tone === "fail"
+      ? "Needs attention"
+      : unread.length > 0
+        ? "Partly read"
+        : tone === "warn"
+          ? "Worth a look"
+          : "All clear";
 
-  const supporting =
+  const found =
     engaged.length > 0
       ? `While a switch is engaged the product refuses work on purpose. ${engaged
           .map((c) => c.title)
@@ -258,6 +301,15 @@ function Standing({
           : unprovisioned.length > 0
             ? "An account with no password cannot be signed in to, so it is waiting for somebody rather than in use."
             : `Read across ${count(standing.organizations.total, "organization", "organizations")} and ${count(standing.environments.live, "live environment", "live environments")}.`;
+
+  // The unread clause is appended to EVERY branch, not only to the one where
+  // nothing was found. A reader who sees "Partly read" beside a real finding
+  // still has to be told which question went unanswered, or the badge is a
+  // warning with no subject.
+  const supporting =
+    unread.length === 0
+      ? found
+      : `${found} ${sentence(unread.join(" and "))} could not be read, so this is not the whole picture.`;
 
   return (
     <section aria-labelledby="standing">
@@ -611,6 +663,12 @@ function SectionLink({ item }: { item: AdminNavItem }) {
       </Link>
     </li>
   );
+}
+
+/** Starts a sentence with a capital, because these clauses are assembled from
+ *  fragments and one of them follows a full stop. */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** "1 organization" and "2 organizations", because a count that reads as a
