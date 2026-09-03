@@ -430,10 +430,15 @@ jobs:
       # credential alone, and it is why "plan production from empty state too"
       # would have been a check that could not say no.
       #
-      # WHAT IT COSTS IN PERMISSION: nothing new. The same federated credential,
-      # the same storage account and container, one more blob key. -lock=false
-      # because the identity is Storage Blob Data READER and cannot take a
-      # lease, exactly as above. -refresh=false, and with that flag the only
+      # WHAT IT COSTS IN PERMISSION: nothing new, and that was checked against
+      # Azure rather than inferred. The same federated credential, the same
+      # storage account and container, one more blob key. The Storage Blob Data
+      # Reader that stacks/tfstate grants this identity is scoped to the whole
+      # ACCOUNT, so the second blob is already readable by a grant that exists;
+      # no role is added for this step. -lock=false for the same reason the
+      # staging plan does not lock: a lease is a write, and stacks/tfstate
+      # deliberately grants this identity no write on the state.
+      # -refresh=false, and with that flag the only
       # Azure call this plan makes is azurerm_client_config, which reads the
       # caller's own identity and needs no role at all: every
       # azurerm_key_vault_secret data source in the module is counted to zero
