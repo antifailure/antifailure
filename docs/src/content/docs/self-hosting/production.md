@@ -81,9 +81,18 @@ terraform init -backend-config=backend.production.hcl -reconfigure
 `backend.hcl` and `backend.production.hcl` are both ignored by git, because the
 storage account name is an identifier this repository does not carry.
 
-**Read the first line of every plan.** A plan against the right state says
-roughly forty to add and nothing to destroy. Anything with destroys in it is the
-wrong state.
+**Read the first line of every plan, and then read its exit status.** A plan
+against the right state adds roughly forty resources and destroys nothing, and
+anything with destroys in it is the wrong state.
+
+The exit status is the separate check, and it is the one that has caught things
+here. This stack has twice produced a plan that printed in full, ended with its
+own `0 to destroy` summary, and then exited non-zero. Once for an output that
+carried a provider-sensitive value without declaring itself sensitive, which
+Terraform refuses while evaluating outputs and therefore after the whole diff
+has been printed. Once for the managed certificate's
+`RequireCustomHostnameInEnvironment`. Both look exactly like a plan that worked,
+and the only thing that tells them apart from one is `echo $?`.
 
 ### 2. Check the region, before anything else
 
@@ -151,18 +160,38 @@ the next three steps replace them.
 
 ### 6. Bind the certificate
 
-Terraform has added the hostname and created the certificate. Nothing has
-attached one to the other, and until something does, the name resolves and the
-TLS handshake is reset by the peer with no certificate offered at all.
+Terraform has added the hostname and created the certificate. Until something
+attaches one to the other, the name resolves and the TLS handshake is reset by
+the peer with no certificate offered at all.
 
-**Check before you run this, because `domain.tf` may now do it for you.** That
-file was rewritten after this step was written, and it says Azure attaches the
-certificate to the binding itself once the certificate issues, asynchronously
-and outside any apply. The one recorded stand-up of this stack needed the
-command, against the earlier ordering, and nobody has stood production up again
-since to find out. So run the `curl` at the end of this step first: if it
-already reports `sslverify=0`, the binding happened without you and there is
-nothing to do here.
+**Whether anything has to be that something is currently an open question, so
+this step checks first and fixes second.** Under the older `domain.tf` the bind
+below was a person's job, and the one recorded stand-up of this stack is the
+evidence: `afcpprod-unreachable` held Sev0 for ninety five minutes with the
+certificate issued and nothing serving it. `domain.tf` has since been rewritten
+so that the hostname is bound with no certificate and Azure attaches one itself
+when it issues, asynchronously and outside any apply. If that holds, the command
+below is a no-op.
+
+Nobody knows yet, and the honest reason is that nobody has applied the new
+configuration. It reasons from the provider's documented behaviour rather than
+from an observed apply, which is a good basis for a configuration change and a
+poor one for deleting a step whose absence is an outage.
+
+So prove it from outside first, because this is the step whose failure looks
+like a network problem:
+
+```sh
+curl -sS -o /dev/null -w 'http=%{http_code} sslverify=%{ssl_verify_result}\n' \
+  https://app.antifailure.dev/health
+```
+
+`sslverify=0` is a certificate the client trusts, and if you see it here then
+Azure bound the certificate without you. That is the thing this page cannot yet
+tell you, so say so, and the next person to stand production up can delete the
+command below with evidence rather than with an argument.
+
+A connection reset means the binding did not take, and this is the remedy:
 
 ```sh
 CERT_ID=$(az containerapp env certificate list \
@@ -173,17 +202,6 @@ az containerapp hostname bind -n afcpprod-app -g af-cp-prod-centralus \
   --hostname app.antifailure.dev --environment afcpprod-env \
   --certificate "$CERT_ID" --validation-method CNAME
 ```
-
-Then prove it from outside, because this is the step whose failure looks like a
-network problem:
-
-```sh
-curl -sS -o /dev/null -w 'http=%{http_code} sslverify=%{ssl_verify_result}\n' \
-  https://app.antifailure.dev/health
-```
-
-`sslverify=0` is a certificate the client trusts. A connection reset here means
-the binding did not take.
 
 `terraform plan` stays clean afterwards. The custom domain resource carries
 `ignore_changes` on the two fields this command writes, which is the provider's
