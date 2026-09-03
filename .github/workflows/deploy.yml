@@ -214,7 +214,24 @@ jobs:
             head -c 500 /tmp/api-404.json || true
             exit 1
           fi
-          if ! grep -q '"code":"endpoint_not_found"' /tmp/api-404.json; then
+          # Read the field, do not pattern match the serialization.
+          #
+          # This was `grep -q '"code":"endpoint_not_found"'` and it could never
+          # match, because the function pretty prints and the body carries
+          # `"code": "endpoint_not_found"` with a space after the colon. So the
+          # step failed on a deploy where the function was answering correctly,
+          # and the sentence it printed described a missing function app. An
+          # assertion that cannot succeed is indistinguishable from a real
+          # failure, and this one turned main red while telling whoever read it
+          # to go and look at the wrong thing.
+          #
+          # `jq -e` still fails on a body that is not JSON, on one with no
+          # `code`, and on one whose code is a different value, so nothing is
+          # weakened by no longer caring where the whitespace falls. Checked
+          # both ways against the live body before this was written: the old
+          # pattern matched zero times, and `jq` reported true for the real
+          # value and false for a wrong one.
+          if ! jq -e '.code == "endpoint_not_found"' /tmp/api-404.json >/dev/null 2>&1; then
             echo "::error::the 404 under /api did not come from this function app. A managed function"
             echo "::error::that is missing altogether also 404s, from the CDN, with an empty body, so"
             echo "::error::the status line alone cannot tell a working app from an absent one."
