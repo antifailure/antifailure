@@ -318,6 +318,14 @@ resource "azurerm_key_vault_secret" "owned" {
 # either. An apply that stops with "secret not found" beats a plan that only
 # verifies the environment where it does not matter.
 #
+# DO NOT RESTORE THE DATA SOURCE. This is the file somebody edits when they see
+# a constructed id where a read used to be, so the instruction belongs here and
+# not only in production.tfvars. Restoring it does not give the existence check
+# back: it gives back a plan that fails on permission, on production, for every
+# pull request, and the only way through is the grant refused above. If the
+# check is what you want, the honest place for it is the apply, which already
+# names the secret it could not find.
+#
 # Empty on no App, so a stack without one renders no secret block at all, which
 # is what the count on the old data sources was for.
 #
