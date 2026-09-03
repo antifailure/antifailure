@@ -438,3 +438,51 @@ head -1 events_2026_03.jsonl | jq -r .occurred_at
 # everything one environment did
 jq -c 'select(.env_id == "env-1234")' events_2026_03.jsonl
 ```
+
+## Analytics
+
+Off unless a surrogate secret is configured, and said out loud at startup either
+way. There is no fallback to a constant key: a constant key is a surrogate
+anybody can recompute, which is an organization identifier with extra steps.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_ANALYTICS_SURROGATE_SECRET` | unset | 64 hex characters, which is 32 bytes. The key organization surrogates are computed under. Unset records nothing at all, and the dashboard says so rather than showing an empty chart. A value of any other length stops the process at startup rather than on the first event. Generate one with `openssl rand -hex 32`. |
+| `AF_ANALYTICS_OPERATOR_ORG` | unset | The slug of the organization that operates this control plane. Its owners and admins may read the analytics dashboard; nobody else may, whatever permissions they hold in their own organization. Unset means nobody, and the route says which variable to set. |
+| `AF_ANALYTICS_RETENTION_DAYS` | unset | Delete raw analytics events older than this many days. The daily aggregates computed from them are kept, because a count of page views by channel has nothing in it that identifies anybody. Unset keeps the raw events forever, which is the default because retention is an operator's decision. |
+| `AF_SITE_ORIGIN` | unset | The origin the marketing site is served from, for the one endpoint a browser calls cross origin. Unset refuses every beacon rather than reflecting whatever `Origin` arrives, which is what a permissive default would do. |
+
+### What is recorded, and what is not
+
+The analytics stream is a closed schema. An event whose name is not in the
+catalog is refused and counted, and so is a payload field the catalog does not
+declare. There is no free-text field of any kind, so a repository name, a branch,
+a query string or a page URL cannot reach the store even by mistake.
+
+The organization is recorded as a keyed hash rather than as an identifier. The
+store can count organizations and follow one through a funnel, and it cannot
+name one without the key.
+
+The application role holds `INSERT` on the stream and no `SELECT`. Only the
+rollup, which runs as the schema owner, ever reads it, and only daily aggregates
+come back out. A read attempted by the application raises `42501` rather than
+returning nothing, which is the difference between a mistake somebody sees and
+one somebody ships.
+
+### The marketing site's beacon
+
+The site sends one event per page a reader lands on, one when the waitlist
+dialog opens, and one when an address is submitted. It sets no cookie, loads no
+third-party script, and keeps its session identifier in `sessionStorage`, so it
+dies with the tab and two visits a day apart cannot be joined. It turns itself
+off for a reader who has set Global Privacy Control or Do Not Track.
+
+The referrer, the URL and the query string are turned into a bounded channel, a
+page shape and a campaign identifier **in the browser**, so the raw values never
+cross the network at all. That is a stronger claim than discarding them on
+arrival, and it is why the normalization lives in the page rather than in a
+server reading a `Referer` header.
+
+The endpoint is unauthenticated, because a shared secret in a static page is a
+secret everybody has. Its counts are therefore a floor and a shape rather than
+an audited total, which the dashboard says beside them.

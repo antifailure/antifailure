@@ -22,7 +22,7 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
-import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
+import { router, orgProcedure, audit, type OrgContext, adopted } from '../trpc.ts'
 
 /** The providers the engine knows how to be. Kept in step with
  *  `RuntimeProvider` in engine/pkg/schema/manifest.go by hand, because the two
@@ -118,6 +118,7 @@ export const runtimesRouter = router({
           targetId: input.name,
           detail: { provider: input.provider, labels: input.labels },
         })
+        await adopted(db, c, 'runtime_registered')
         return { registered: true, id: rows[0]!.id, name: input.name }
       })
     }),

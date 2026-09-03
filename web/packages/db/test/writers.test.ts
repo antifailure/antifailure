@@ -220,6 +220,36 @@ describe('every table a screen reads is written by something that is not a fixtu
     )
   })
 
+  it('the UPDATE scan can see a writer it is certain exists', () => {
+    // The negative control for the SECOND matcher, and it exists because the
+    // defect this file just fixed was the first matcher being blind.
+    //
+    // `maintained` is built from sitesFor(table, 'UPDATE'). If that regex ever
+    // stops matching, the list silently becomes empty, analytics_rollup_state
+    // reads as unwritten again, and the check that is supposed to catch that
+    // passes by matching nothing. That failure is harder to see than the one it
+    // replaced, because the file now LOOKS like it handles updates.
+    //
+    // So this asserts the update scan finds the rollup, the same way the test
+    // above asserts the insert scan finds ingest.ts.
+    const updates = sitesFor('analytics_rollup_state', 'UPDATE')
+    assert.ok(
+      updates.length > 0,
+      'the UPDATE scan found no statement against analytics_rollup_state at all, so every ' +
+        'result that depends on it is meaningless',
+    )
+    assert.ok(
+      updates.some((s) => !isFixture(s.file) && !isMigration(s.file)),
+      `every UPDATE of analytics_rollup_state was read as a fixture or a migration, at ` +
+        `${JSON.stringify(updates)}, so a production writer maintained by UPDATE would be ` +
+        'invisible and the table would report as unwritten',
+    )
+    assert.ok(
+      updates.some((s) => s.file.endsWith('analytics/rollup.ts')),
+      `the rollup's UPDATE was found at ${JSON.stringify(updates)} rather than in rollup.ts`,
+    )
+  })
+
   it('the scan finds the readers it is supposed to find', () => {
     const readers = sitesFor('golden_versions', 'FROM').filter((s) => isCustomerFacingReader(s.file))
     assert.ok(
@@ -240,8 +270,31 @@ describe('every table a screen reads is written by something that is not a fixtu
     for (const table of tables) {
       const readers = sitesFor(table, 'FROM').filter((s) => isCustomerFacingReader(s.file))
       const writers = sitesFor(table, 'INSERT INTO')
-      const production = writers.filter((s) => !isFixture(s.file) && !isMigration(s.file))
+      const inserted = writers.filter((s) => !isFixture(s.file) && !isMigration(s.file))
       const fixtures = writers.filter((s) => isFixture(s.file))
+
+      // A SINGLETON SEEDED BY ITS MIGRATION AND MAINTAINED BY UPDATE.
+      //
+      // Looking only for INSERT INTO cannot see this shape, and it is a real
+      // one: analytics_rollup_state holds exactly one row of bookkeeping,
+      // created by `INSERT INTO analytics_rollup_state (id) VALUES (true)` in
+      // the migration that declares it, and thereafter only ever UPDATEd, by
+      // the rollup on the maintenance pass. That is a production writer on a
+      // real path, and this scan reported the table as having none, which
+      // would have sent somebody either to delete a working feature or to
+      // write a disclosure for a gap that does not exist.
+      //
+      // Deliberately NOT "count every UPDATE as a writer". A table whose rows
+      // have to be created per customer, and which nothing inserts into
+      // outside a fixture, is exactly the defect this file exists to catch,
+      // and blanket-counting UPDATEs would hide it. The migration INSERT is
+      // what makes the row's existence guaranteed rather than hoped for, so
+      // the pair is the evidence, not the UPDATE alone.
+      const seededByMigration = writers.some((s) => isMigration(s.file))
+      const maintained = seededByMigration
+        ? sitesFor(table, 'UPDATE').filter((s) => !isFixture(s.file) && !isMigration(s.file))
+        : []
+      const production = [...inserted, ...maintained]
       const exempt = Object.hasOwn(UNWIRED, table)
 
       if (production.length > 0) {

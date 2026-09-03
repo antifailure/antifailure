@@ -1175,6 +1175,10 @@ export function DataRetentionPage() {
                 `${cap(BACKUP_RECOVERY.production.words)} days of point-in-time recovery on production, ${BACKUP_RECOVERY.staging.words} on staging. A deletion is reflected in every backup only after that window has passed.`,
               ],
               [
+                "Analytics events",
+                "Raw analytics events are kept for as long as the deployment sets, and the daily counts computed from them outlive that: a count of page views by channel has nothing in it that identifies anybody. An event carries a keyed hash of the organization rather than its identifier, so the store can count organizations and cannot name one.",
+              ],
+              [
                 "Operational logs",
                 `${cap(LOG_RETENTION.production.words)} days on production and ${LOG_RETENTION.staging.words} on staging, in Azure Monitor. They hold request paths, status codes and timings, and never a request body, a token or a snapshot.`,
               ],

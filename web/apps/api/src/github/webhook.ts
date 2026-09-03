@@ -22,11 +22,32 @@
 import { sql } from 'drizzle-orm'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { Analytics } from '../analytics/record.ts'
 import type { GitHubClient } from '../auth/github.ts'
 import { grantMembership } from '../auth/signin.ts'
 import { verifySignature } from './app.ts'
 
 export class WebhookError extends Error {}
+
+/** The collaborators a delivery is handled with. See handleDelivery. */
+export interface DeliveryDeps {
+  /**
+   * The client adoptInstaller reaches GitHub with. Optional and nullable,
+   * because a control plane with no App configured still receives and refuses
+   * deliveries, and adoptInstaller returns null on its first line without one.
+   */
+  github?: GitHubClient | null
+  /** Where the organization event goes. Never null: the recorder does nothing
+   *  when analytics is unconfigured, so no call site has to check. */
+  analytics: Analytics
+  /**
+   * Drops the cached installation token, when there is a cache to drop from.
+   *
+   * Optional because the webhook has to work with no App configured, which is
+   * every self-hosted control plane that has not created one yet.
+   */
+  forgetTokens?: (installationId: number) => void
+}
 
 /** What one delivery did, for the response and for a log line. */
 export interface WebhookOutcome {
@@ -69,14 +90,18 @@ export async function handleDelivery(
   clock: Clock,
   event: string,
   payload: Record<string, unknown>,
-  github?: GitHubClient | null,
   /**
-   * Drops the cached installation token, when there is a cache to drop from.
+   * What this handler needs that is not the delivery itself.
    *
-   * Optional because the webhook has to work with no App configured, which is
-   * every self-hosted control plane that has not created one yet.
+   * AN OBJECT RATHER THAN MORE POSITIONAL PARAMETERS, and the reason is
+   * that three of these arrived within a day of each other on different
+   * branches and collided on the same line. `github` is how adoptInstaller
+   * reaches GitHub; `analytics` is where the organization event goes;
+   * `forgetTokens` drops the cached installation token. None is a property of
+   * the delivery, all are collaborators, and a sixth positional argument is
+   * where the next one goes wrong silently: a null in the wrong slot compiles.
    */
-  forgetTokens?: (installationId: number) => void,
+  deps: DeliveryDeps,
 ): Promise<WebhookOutcome> {
   const action = typeof payload.action === 'string' ? payload.action : null
   const installation = payload.installation as
@@ -111,7 +136,7 @@ export async function handleDelivery(
       // change what the token can do, `created` can arrive for an id a failed
       // earlier attempt already cached, and dropping a token that did not need
       // dropping costs one mint.
-      forgetTokens?.(id)
+      deps.forgetTokens?.(id)
       if (action === 'deleted') {
         await forgetInstallation(pool, account.login, id)
         return { event, action, handled: true, detail: `installation ${id} removed` }
@@ -127,9 +152,9 @@ export async function handleDelivery(
       // `live` here and nowhere else. This is the only event that means the
       // installation exists right now, so it is the only one allowed to clear a
       // suspension. See rememberInstallation.
-      const orgId = await rememberInstallation(pool, clock, account, id, { live: true })
+      const orgId = await rememberInstallation(pool, clock, account, id, deps.analytics, { live: true })
       await rememberRepositories(pool, clock, account.login, orgId, repos)
-      const adopted = await adoptInstaller(pool, clock, github ?? null, {
+      const adopted = await adoptInstaller(pool, clock, deps.github ?? null, {
         orgId,
         account,
         installationId: id,
@@ -151,7 +176,7 @@ export async function handleDelivery(
       if (typeof id !== 'number' || !account?.login) {
         return { event, action, handled: false, detail: 'no installation in the payload' }
       }
-      const orgId = await rememberInstallation(pool, clock, account, id)
+      const orgId = await rememberInstallation(pool, clock, account, id, deps.analytics)
       const added = Array.isArray(payload.repositories_added)
         ? (payload.repositories_added as Repo[])
         : []
@@ -189,7 +214,7 @@ export async function handleDelivery(
         return { event, action, handled: false, detail: 'no repository in the payload' }
       }
       const account: Account = { login, type: repo.owner?.type ?? 'Organization' }
-      const orgId = await rememberInstallation(pool, clock, account, id)
+      const orgId = await rememberInstallation(pool, clock, account, id, deps.analytics)
       if (action === 'deleted' || action === 'archived') {
         await archiveRepositories(pool, clock, account.login, orgId, [repo])
         return { event, action, handled: true, detail: `${repo.full_name} archived` }
@@ -228,19 +253,39 @@ async function rememberInstallation(
   clock: Clock,
   account: Account,
   installationId: number,
+  analytics: Analytics,
   options: { live: boolean } = { live: false },
 ): Promise<string> {
   const login = account.login
   return pool.withGitHubAccount(login, async (db) => {
     const slug = slugFor(login)
-    const rows = await db.execute<{ id: string }>(sql`
+    // `xmax = 0` in the RETURNING below is true only on a row this statement
+    // INSERTED. Every installation delivery reaches this upsert and most are
+    // for organizations that already exist, so counting the statement rather
+    // than the insert would count one organization once per delivery forever.
+    //
+    // The explanation sits above the statement rather than inside it because
+    // the gate in tenancy.test.ts that requires every write to this table to
+    // name its columns reads source text and cannot tell code from a comment.
+    // It said so, and said a false positive costs a rewording. This is the
+    // rewording.
+    const rows = await db.execute<{ id: string; created: boolean }>(sql`
       INSERT INTO organizations (slug, name, github_login)
       VALUES (${slug}, ${login}, ${login})
       ON CONFLICT (slug) DO UPDATE SET
         github_login = EXCLUDED.github_login,
         updated_at = ${clock.now().toISOString()}
-      RETURNING id`)
+      RETURNING id, (xmax = 0) AS created`)
     const orgId = rows[0]!.id
+
+    if (rows[0]!.created) {
+      await analytics.record(db, {
+        name: 'identity.organization_created',
+        occurredAt: clock.now(),
+        orgId,
+        payload: {},
+      })
+    }
 
     await db.execute(sql`
       INSERT INTO github_installations

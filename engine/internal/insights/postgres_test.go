@@ -888,7 +888,7 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 	// event trigger pair is how a Rails or Django migration still gets a
 	// duration per statement.
 	//
-	// The middle statement is told to sleep for a second, and that second is
+	// The second statement is told to sleep for a second, and that second is
 	// the only number here the machine does not get a vote on. What breaks
 	// silently in this path is not the size of a duration but where it lands:
 	// one statement's cost charged to its neighbour, one total copied onto
@@ -899,6 +899,17 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 	// request that changed no engine code at all: a contended runner spent
 	// 84ms adding a nullable column and 33ms building an index over 50,000
 	// rows, inverting an ordering that was never the claim.
+	//
+	// Both of the sleeping statement's neighbours are catalogue only, and
+	// that is deliberate. The assertions below put a ceiling over whatever
+	// sits beside the sleep, and a ceiling is only honest over work that has
+	// a bound. Adding a nullable column writes a catalogue row and touches no
+	// data: over forty five runs on a loaded workstation the two of them
+	// stayed between 0.2ms and 21.2ms. Building an index over 50,000 rows is
+	// real work with no bound at all, and across those same runs it ranged
+	// from 28.9ms to 454.9ms, which is most of the way through a ceiling
+	// anybody would have chosen from the tens of milliseconds it takes on an
+	// idle machine. So it goes last, where nothing needs a ceiling over it.
 	const plantedSleepMS = 1000.0
 	r, err := insights.Rehearse(context.Background(), db.conn, db.watch, db.url,
 		insights.MigrationSet{Tool: insights.ToolRails},
@@ -910,17 +921,19 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 			// timing being wrong.
 			"CREATE MATERIALIZED VIEW slow_orders AS " +
 				"SELECT n FROM (SELECT 1 AS n, pg_sleep(1)) s",
+			"ALTER TABLE orders ADD COLUMN region text",
 			"CREATE INDEX orders_status_idx ON orders (status)",
 		}},
 		insights.LargeTableRows)
 	require.NoError(t, err)
 	require.False(t, r.Failed, r.Error)
 
-	require.Len(t, r.Statements, 3,
+	require.Len(t, r.Statements, 4,
 		"the applier reported nothing, so every statement here came from the server")
-	require.Contains(t, r.Statements[0].SQL, "ADD COLUMN")
+	require.Contains(t, r.Statements[0].SQL, "ADD COLUMN currency")
 	require.Contains(t, r.Statements[1].SQL, "MATERIALIZED VIEW")
-	require.Contains(t, r.Statements[2].SQL, "CREATE INDEX")
+	require.Contains(t, r.Statements[2].SQL, "ADD COLUMN region")
+	require.Contains(t, r.Statements[3].SQL, "CREATE INDEX")
 
 	for i, s := range r.Statements {
 		require.Greaterf(t, s.MS, 0.0,
@@ -931,29 +944,39 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 	// Timed separately means separate numbers. Two clock deltas measured to
 	// the microsecond do not land on the same value by chance, so a repeat is
 	// one number copied across rows rather than two statements that agreed.
-	require.NotEqual(t, r.Statements[0].MS, r.Statements[1].MS)
-	require.NotEqual(t, r.Statements[1].MS, r.Statements[2].MS)
-	require.NotEqual(t, r.Statements[0].MS, r.Statements[2].MS)
+	// Which two collided is the first thing a reader of the failure needs, so
+	// it is named rather than left to a pairwise assertion.
+	seen := map[float64]int{}
+	for i, s := range r.Statements {
+		if first, ok := seen[s.MS]; ok {
+			require.Failf(t, "two statements report the same duration",
+				"statements %d and %d both report %.3fms, which is one number copied "+
+					"across rows rather than two measurements", first+1, i+1, s.MS)
+		}
+		seen[s.MS] = i
+	}
 
 	// The planted second landed on the statement that slept and on neither
 	// neighbour. Contention only ever makes a duration longer, so a slow
-	// machine cannot push the sleeping statement under its floor. The ceiling
-	// over the other two is half the sleep, six times the worst a catalogue
-	// only ALTER has been seen to take on the runner this test failed on.
+	// machine cannot push the sleeping statement under its floor, and the
+	// ceiling over the two catalogue only statements beside it is more than
+	// twenty times the worst either of them has been seen to take.
 	require.Greater(t, r.Statements[1].MS, plantedSleepMS*0.9,
 		"the statement that slept for a second is not reported as taking about a second")
-	require.Less(t, r.Statements[0].MS, plantedSleepMS/2,
-		"adding a nullable column is catalogue work, so a duration near the sleeping "+
-			"statement's is that statement's time charged to the wrong row")
-	require.Less(t, r.Statements[2].MS, plantedSleepMS/2,
-		"building this index is not a second of work, so a duration near the sleeping "+
-			"statement's is that statement's time charged to the wrong row")
+	for _, i := range []int{0, 2} {
+		require.Lessf(t, r.Statements[i].MS, plantedSleepMS/2,
+			"statement %d only adds a nullable column, so a duration near the sleeping "+
+				"statement's is that statement's time charged to the wrong row", i+1)
+	}
 
-	// And every duration is a slice of the one window the applier ran in
-	// rather than a copy of the whole of it. A running total, or the total
-	// repeated on every row, adds up to more than the window it happened in.
-	// The slack is for the two clocks involved, since the window is measured
-	// here and each statement is measured by the server.
+	// The index build carries no ceiling, only what holds whatever the
+	// machine is doing: it ran, it was timed on its own, and it fits inside
+	// the window. That last one is the whole list's, and it is the only
+	// assertion here that catches a duration inflated without being copied.
+	// Each statement is a slice of the one window the applier ran in, so a
+	// running total, or the total repeated on every row, adds up to more than
+	// the window it happened in. The slack is for the two clocks involved,
+	// since the window is measured here and each statement by the server.
 	var sum float64
 	for _, s := range r.Statements {
 		sum += s.MS

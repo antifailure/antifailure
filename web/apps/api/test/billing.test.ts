@@ -411,7 +411,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   }
 
   async function deliver(raw: string) {
-    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw))
+    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw), h.analytics)
   }
 
   // -------------------------------------------------------------------------
@@ -572,7 +572,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     // The organization catches up. Attaching resolves what was waiting.
     const { attachCustomer } = await import('../src/billing/store.ts')
     const attached = await h.pool.withTenant({ orgId: o.orgId }, async (db) =>
-      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }),
+      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }, h.analytics),
     )
     assert.equal(attached.created, true)
     assert.equal(attached.resolved, 1, 'the waiting event was not replayed')

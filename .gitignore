@@ -136,6 +136,7 @@ runner/artifacts/
 /dogfood
 /errcheck
 /errgen
+/eventcheck
 /execcheck
 /figurecheck
 /gatecheck

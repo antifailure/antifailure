@@ -24,6 +24,7 @@
 import type { Context, Hono } from 'hono'
 import type { ApiEnv } from '../env.ts'
 import type { Pool } from '@antifailure/db'
+import type { Analytics } from '../analytics/record.ts'
 import type { Clock } from '../clock.ts'
 import {
   CSRF_HEADER,
@@ -54,6 +55,8 @@ export interface ConsoleOptions {
   sealingKey?: Buffer | null
   /** The exported console. A build that is absent is reported, never faked. */
   build: ConsoleBuild
+  /** Where the analytics event goes when a key is stored from these pages. */
+  analytics: Analytics
 }
 
 /**
@@ -213,6 +216,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
 
     try {
       const result = await saveKey(pool, clock, options.sealingKey, {
+        analytics: options.analytics,
         orgId: viewer.organization!,
         provider,
         key,
@@ -276,6 +280,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
       return c.json({ error: 'Give a number of US dollars, zero or more.' }, 400)
     }
     const budget = await setBudget(pool, clock, {
+      analytics: options.analytics,
       orgId: viewer.organization!,
       provider,
       capUsd: cap,

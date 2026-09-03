@@ -152,6 +152,8 @@ import {
   setBudget,
 } from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
+import { createAnalytics, type Analytics } from './analytics/record.ts'
+import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
@@ -256,6 +258,37 @@ export interface ServerOptions {
    *  gets its own, deliberately not module state: two servers in one process
    *  sharing counters means one test passes because of another. */
   metrics?: ControlPlaneMetrics
+  /**
+   * The key organization surrogates are computed under.
+   *
+   * Null turns analytics off: nothing is recorded, the site beacon answers that
+   * it is off, and the dashboard says so rather than showing an empty chart
+   * that looks like nobody came. There is deliberately no fallback to a
+   * constant, because a constant key is a surrogate anybody can recompute,
+   * which is an org_id with extra steps.
+   */
+  analyticsSecret?: Buffer | null
+  /**
+   * The organization whose members may read the analytics dashboard.
+   *
+   * The dashboard shows the whole installation: every organization's funnel, the
+   * plan mix, the acquisition channels. On a hosted control plane that is the
+   * operator's business and nobody else's, so a permission alone is not enough
+   * to gate it, because every organization has an owner and every owner holds
+   * every permission in their own organization.
+   *
+   * Null means nobody can read it, which is the safe default and is what a
+   * self-hosted installation gets until its operator names their own
+   * organization here. The route says which variable to set rather than
+   * answering an empty page.
+   */
+  analyticsOperatorOrgSlug?: string | null
+  /**
+   * Where the marketing site is served from, for the one endpoint the browser
+   * calls cross-origin. Null refuses every beacon rather than reflecting
+   * whatever Origin arrives, which is what a permissive default would do.
+   */
+  siteOrigin?: string | null
 }
 
 /**
@@ -450,6 +483,16 @@ export function createServer(options: ServerOptions) {
   // stolen-cookie or code-guessing attempt shows up.
   const ingestLimiter = new RateLimiter(clock, options.ingestLimit ?? { rate: 200, burst: 2000 })
   const authLimiter = new RateLimiter(clock, options.authLimit ?? { rate: 1, burst: 20 })
+
+  // Analytics. Off when no surrogate secret is configured, and off means every
+  // method still works and records nothing, so no producer has to check first.
+  // A producer wrapped in `if (analytics.enabled)` is a producer that stops
+  // being exercised by tests the moment somebody forgets the secret.
+  const analytics = createAnalytics({
+    secret: options.analyticsSecret ?? null,
+    clock,
+    counters: { events: metrics.analyticsEvents, rejections: metrics.analyticsRejections },
+  })
 
   // -------------------------------------------------------------------------
   // Rate limiting, before anything else does work.
@@ -671,6 +714,49 @@ export function createServer(options: ServerOptions) {
     return c.body(metrics.registry.render())
   })
 
+  /**
+   * Records a completed sign-in.
+   *
+   * Detached from whatever transaction the sign-in used, and that is the one
+   * place in this subsystem where the "same transaction as the thing it
+   * describes" rule is deliberately broken. The sign-in exchange spans several
+   * transactions across two modules, so there is no single one to join; and if
+   * there were, this is the path where a failed analytics insert would keep
+   * somebody out of their own account. Losing the event is the cheaper failure
+   * and it is counted either way.
+   *
+   * first_time is read from the age of the user row rather than from a session
+   * count, because sessions are swept when they expire, so a member returning
+   * after a month would read as new and the number would be quietly inflated.
+   * A user row is created during the exchange that issues the first session, so
+   * a row younger than five minutes is a first sign-in; five minutes is far
+   * above any exchange and far below any return visit.
+   */
+  async function recordSignIn(
+    method: 'github' | 'email_link' | 'device' | 'sso',
+    userId: string,
+    orgId: string | null,
+  ): Promise<void> {
+    const created = await options.pool
+      .withoutTenant(
+        (db) =>
+          db.execute<{ created_at: Date | string }>(
+            rawSql`SELECT created_at FROM users WHERE id = ${userId}::uuid`,
+          ),
+        { signinUserId: userId },
+      )
+      .catch(() => [])
+    const at = created[0]?.created_at
+    const ageMs = at ? clock.now().getTime() - new Date(at).getTime() : Number.POSITIVE_INFINITY
+
+    await analytics.recordDetached(options.pool, {
+      name: 'identity.signed_in',
+      occurredAt: clock.now(),
+      orgId,
+      payload: { method, first_time: ageMs < 5 * 60 * 1000 },
+    })
+  }
+
   // Resolving the browser's session, for the routes that need one outside tRPC.
   async function sessionFrom(cookie: string | undefined) {
     const token = readCookie(cookie, SESSION_COOKIE)
@@ -868,6 +954,7 @@ export function createServer(options: ServerOptions) {
       })
 
       c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+      await recordSignIn('github', result.userId, decision.orgId)
       const base = options.appBaseUrl ?? '/'
       const target = safeRedirect(result.redirectTo) ?? '/'
       const landing = new URL(target, base.endsWith('/') ? base : `${base}/`)
@@ -1166,6 +1253,7 @@ export function createServer(options: ServerOptions) {
           replacing: existing ?? undefined,
         })
         c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+        await recordSignIn('email_link', result.userId, result.orgId)
         const base = options.appBaseUrl ?? '/'
         const target = result.redirectTo ?? '/'
         return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
@@ -1691,6 +1779,7 @@ export function createServer(options: ServerOptions) {
 
     try {
       const result = await saveKey(options.pool, clock, options.sealingKey, {
+        analytics,
         orgId: caller.orgId,
         provider,
         key,
@@ -1773,6 +1862,7 @@ export function createServer(options: ServerOptions) {
     }
     try {
       const budget = await setBudget(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         provider,
         capUsd: cap,
@@ -1818,6 +1908,7 @@ export function createServer(options: ServerOptions) {
     const name = typeof body.name === 'string' ? body.name : ''
     try {
       const made = await mintEngineToken(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         name,
         actorUserId: caller.userId,
@@ -2131,14 +2222,14 @@ export function createServer(options: ServerOptions) {
       // the sign in before install ordering that fix exists to close.
       const installation = outcome.handled
         ? null
-        : await handleDelivery(
-            options.pool,
-            clock,
-            event,
-            payload,
-            options.github,
-            options.forgetInstallationToken,
-          )
+        : await handleDelivery(options.pool, clock, event, payload, {
+            // Named fields rather than positions, for the reason the comment
+            // above gives: three optional collaborators on one call is where a
+            // value in the wrong slot still type checks.
+            github: options.github,
+            analytics,
+            forgetTokens: options.forgetInstallationToken,
+          })
 
       const detail = outcome.handled ? outcome.detail : (installation?.detail ?? outcome.detail)
       await closeDelivery(
@@ -2386,7 +2477,7 @@ export function createServer(options: ServerOptions) {
     }
 
     try {
-      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event)
+      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event, analytics)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side, and the retry is wanted: a database that
@@ -2462,7 +2553,7 @@ export function createServer(options: ServerOptions) {
     if (!events) return c.json({ error: 'The body needs an events array.' }, 400)
 
     try {
-      const result = await ingest(options.pool, clock, ingestLimiter, engine, events)
+      const result = await ingest(options.pool, clock, ingestLimiter, engine, events, analytics)
       countIngestion(metrics, result, events)
       // 207 when some were rejected, so a caller that only checks the status
       // still learns that the batch was not wholly accepted.
@@ -2523,6 +2614,39 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // The site beacon
+  //
+  // The only unauthenticated write on this server, and the only route a browser
+  // on another origin may call. See analytics/beacon.ts for why that is safe:
+  // the application role cannot read the table it writes to, and the events it
+  // accepts are declared as carrying no organization at all.
+  // -------------------------------------------------------------------------
+
+  app.options('/v1/site/events', (c) => {
+    // The preflight. Answered here rather than by a wildcard handler, because a
+    // wildcard OPTIONS handler answers for every route on the server and that
+    // is how an endpoint nobody meant to expose becomes reachable from a page.
+    if (!beaconCors(c, options.siteOrigin ?? null)) return c.body(null, 403)
+    return c.body(null, 204)
+  })
+
+  app.post('/v1/site/events', async (c) => {
+    // The origin check comes first and refuses rather than answering without
+    // the header. A browser would refuse the response anyway; a non-browser
+    // caller would not, and this is the line that bounds it to the site.
+    if (!beaconCors(c, options.siteOrigin ?? null)) {
+      return c.json({ error: 'This endpoint serves the marketing site only.' }, 403)
+    }
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const result = await siteBeacon(body, { pool: options.pool, analytics, clock })
+    return c.json(result.body, result.status as 202)
+  })
+
   // Studio, for an engine
   //
   // An engine on a CI runner has no browser, no cookie and no way to obtain
@@ -2835,6 +2959,8 @@ export function createServer(options: ServerOptions) {
           // misconfigured.
           mailer: options.emailSignIn?.mailer ?? null,
           productName: options.emailSignIn?.productName ?? 'Antifailure',
+          analytics,
+          analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
           hostedRequiredPlan,
           operatorSetsPlan,
           actor,
@@ -2863,6 +2989,7 @@ export function createServer(options: ServerOptions) {
     mountConsole(app, {
       pool: options.pool,
       clock,
+      analytics,
       secureCookies: secure,
       sealingKey: options.sealingKey ?? null,
       build: options.consoleBuild ?? {
@@ -2873,7 +3000,7 @@ export function createServer(options: ServerOptions) {
     })
   }
 
-  return { app, ingestLimiter, authLimiter, metrics }
+  return { app, ingestLimiter, authLimiter, metrics, analytics }
 }
 
 /**

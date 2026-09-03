@@ -56,7 +56,14 @@ describe('a maintenance pass', { skip: has ? false : 'no database' }, () => {
     const before_ = await connectionCount(h)
 
     const run = await runMaintenance({ adminUrl, monthsAhead: 2 }, clock)
-    assert.deepEqual(run.created, ['events_2037_02', 'events_2037_03', 'events_2037_04'])
+    // Both partitioned tables, because a pass keeps analytics_events ahead of
+    // its writes exactly as it does events: see the comment in maintenance.ts.
+    // Still the exact list rather than a length or a subset, so a month that
+    // stops being created on either table fails here.
+    assert.deepEqual(run.created, [
+      'events_2037_02', 'events_2037_03', 'events_2037_04',
+      'analytics_events_2037_02', 'analytics_events_2037_03', 'analytics_events_2037_04',
+    ])
     assert.deepEqual(run.dropped, [])
     assert.equal(run.pruned, 0, 'pruning happened with no retention asked for')
 

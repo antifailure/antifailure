@@ -24,7 +24,7 @@ import { test, describe, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
-import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org } from './harness.ts'
+import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org, testAnalytics } from './harness.ts'
 import { saveKey, setBudget, listBudgets, borrowKey, recordSpend } from '../src/providers/store.ts'
 import { costOf, pricesFrom, PricingError, usageFrom, DEFAULT_PRICES } from '../src/providers/pricing.ts'
 
@@ -188,10 +188,12 @@ describe('spending a key against a budget', {
 
   async function ready(capUsd: number) {
     await setBudget(api.pool, api.clock, {
+      analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', capUsd,
       actorLabel: 'a test', actorUserId: null,
     })
     await saveKey(api.pool, api.clock, sealingKey, {
+      analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', key: KEY,
       actorLabel: 'a test', actorUserId: null,
     })
@@ -235,6 +237,7 @@ describe('spending a key against a budget', {
     // A missing cap reads as zero, not unlimited. The key is stored and there
     // is no allowance, so nothing goes out.
     await saveKey(api.pool, api.clock, sealingKey, {
+      analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', key: KEY,
       actorLabel: 'a test', actorUserId: null,
     })
@@ -263,6 +266,7 @@ describe('spending a key against a budget', {
 
   test('no stored key is a refusal that says what to do', async () => {
     await setBudget(api.pool, api.clock, {
+      analytics: testAnalytics(),
       orgId: org.orgId, provider: 'anthropic', capUsd: 100,
       actorLabel: 'a test', actorUserId: null,
     })

@@ -190,7 +190,7 @@ export const subscriptionsRouter = router({
           attachCustomer(db, c.clock, billing.config, c.actor.orgId, {
             id: customer.id,
             email: customer.email,
-          }),
+          }, c.analytics),
         )
         customerId = attached.customerId
       }
@@ -335,7 +335,7 @@ export const subscriptionsRouter = router({
     const billing = billingOf(c)
 
     const result = await reconcile(
-      c.pool, c.clock, billing.config, billing.client, c.actor.orgId,
+      c.pool, c.clock, billing.config, billing.client, c.actor.orgId, c.analytics,
     ).catch((err: unknown) => {
       throw refused(err, 'reconcile this organization against Stripe')
     })
