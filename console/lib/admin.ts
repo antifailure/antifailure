@@ -19,6 +19,7 @@
 
 import { createContext, useContext } from "react";
 import { query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { ADMIN_CSRF_HEADER, createCsrfGuard, trpcData } from "@/lib/wire";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -163,17 +164,50 @@ export function useAdminAudit(severity: string) {
 }
 
 /**
+ * The operator session as `GET /v1/admin/session` answers it. The token it
+ * carries is derived from the session cookie without revealing it, which is
+ * what makes it safe to hand to the page.
+ */
+export interface AdminSession {
+  signedIn: boolean;
+  csrfToken?: string;
+  label?: string;
+  email?: string;
+  role?: string;
+  impersonating?: boolean;
+}
+
+export async function adminSession(): Promise<AdminSession> {
+  return rest<AdminSession>("/v1/admin/session");
+}
+
+/** The token cache and the single retry live in lib/wire.ts, which has no
+ *  imports so that `node --test lib/*.test.ts` can drive the real behaviour
+ *  rather than parse the source for a header name. */
+const csrf = createCsrfGuard(async () => (await adminSession()).csrfToken ?? null);
+
+/**
  * A tRPC mutation on the operator router.
  *
- * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
- * console sends one because its session cookie is SameSite=Lax, which a
- * cross-site top-level POST still carries. The operator cookie is
- * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
- * and there is nothing for a token to add. If that cookie's SameSite is ever
- * loosened, this is the line that has to grow a token.
+ * IT SENDS THE TOKEN. The comment that used to sit here argued it did not need
+ * to, and it was wrong in a way nothing failed on: the server refuses every
+ * operator mutation without the header, and nothing in this directory ever
+ * fetched one. See lib/admin-csrf.ts for the full account and the retry.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+  return csrf.send(async (token) =>
+    // Unwrapped, because `rest` answers the body as it stands and the operator
+    // router is tRPC. Without this every operator mutation returns
+    // `{result: {data: ...}}` carrying the type of the thing inside it, which
+    // is a bug the compiler cannot see. See lib/wire.ts.
+    trpcData<T>(
+      await rest<unknown>(`/trpc/${path}`, {
+        method: "POST",
+        body: input,
+        headers: { [ADMIN_CSRF_HEADER]: token },
+      }),
+    ),
+  );
 }
 
 export async function suspendTenant(orgId: string, reason: string) {
@@ -200,6 +234,11 @@ export async function adminSignIn(email: string, password: string): Promise<void
 
 export async function adminSignOut(): Promise<void> {
   await rest("/v1/admin/signout", { method: "POST" });
+  // The token is derived from the session that just ended, so keeping it would
+  // leave the next operator to sign in on this page sending the previous one's.
+  // The retry would recover, at the cost of one refused mutation nobody could
+  // explain.
+  csrf.forget();
 }
 
 /** The operator, shared by the chrome and every page under it, so a navigation

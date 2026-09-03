@@ -909,6 +909,26 @@ export const securityRouter = router({
     }),
 
   /**
+   * What this product can and cannot erase, without naming anybody.
+   *
+   * ITS OWN ROUTE so the page can render the honest half without looking a
+   * person up. Reading a subject writes an audit entry naming that subject, and
+   * a panel that says "there is no per person erasure" is not about anybody: a
+   * page that had to search for a human being in order to render its own
+   * caveats would put somebody in the operator log every time it loaded.
+   *
+   * The sentences come from here rather than from the page so that the copy the
+   * reader sees and the copy the exported document carries are the same
+   * sentences. Two copies of a compliance statement is one copy that is wrong,
+   * and the wrong one is whichever a lawyer is reading.
+   */
+  erasure: adminProcedure('admin.governance.read').query(() => ({
+    erasure: ERASURE_STATEMENT,
+    retained: RETAINED_BY_DESIGN,
+    countCeiling: COUNT_CEILING,
+  })),
+
+  /**
    * The same answer as a file, for the person who has to hand it to somebody.
    *
    * WHY THIS IS A SEPARATE PERMISSION FROM READING IT. A lookup answers a

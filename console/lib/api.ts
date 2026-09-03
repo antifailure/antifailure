@@ -93,12 +93,28 @@ export async function mutate<T>(path: string, input: unknown, csrf: string): Pro
  *  tRPC: the session, sign-out, device approval, and provider keys. */
 export async function rest<T>(
   path: string,
-  init: { method?: string; body?: unknown; csrf?: string } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    csrf?: string;
+    /**
+     * Anything else the endpoint requires, merged last.
+     *
+     * The operator portal is why this exists. Its mutations need
+     * `x-antifailure-admin-csrf`, which is a different header over a different
+     * session secret from the product console's, and the alternative was a
+     * second fetch wrapper in lib/admin.ts. A second wrapper is a second place
+     * for the error shape and the credentials mode to drift, which is the
+     * mistake the operator client's own header comment argues against.
+     */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  Object.assign(headers, init.headers ?? {});
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",
