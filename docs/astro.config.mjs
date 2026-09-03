@@ -226,6 +226,7 @@ export default defineConfig({
             "reference/api",
             "reference/environment-lifetime",
             "reference/mcp",
+            "reference/lint-findings",
             {
               label: "Generated schemas",
               items: ["reference/schemas/manifest-v1", "reference/schemas/events-v1"],

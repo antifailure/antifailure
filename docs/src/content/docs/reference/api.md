@@ -20,6 +20,7 @@ Apps managed function with a single endpoint behind it.
 | `GET` | `/api` | Returns this list as JSON. |
 | `GET` | `/openapi.json` | The control plane's OpenAPI 3.1 document, published at the apex address. |
 | `GET` | `/errors.v1.json` | The versioned error catalog: code, message, recovery, whether retrying is safe, documentation and exit status. |
+| `GET` | `/lint-findings.v1.json` | The versioned migration lint catalogue: the identifier of each finding, which does not change between releases, and the rule name and title, which do. |
 | `POST` | `/api/waitlist` | Adds one email address to the design partner waitlist. |
 
 `POST /api/waitlist` takes `{"email": "...", "source": "..."}` and answers

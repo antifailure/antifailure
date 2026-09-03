@@ -1133,6 +1133,30 @@ export const adminNotes = pgTable('admin_notes', {
    *  wrote about a customer, and the retraction is worth being able to see. */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
+/**
+ * The installation's emergency switches.
+ *
+ * No org_id, and deliberately absent from tenantScopedTables below: these rows
+ * are configuration for the whole installation rather than data belonging to
+ * any customer. What confines the application role here is a GRANT, not a
+ * policy: it holds SELECT and nothing else, so a tenant route that reached
+ * this table raises rather than writing. See migrations/0031.
+ */
+export const platformControls = pgTable('platform_controls', {
+  /** The control's name, from the catalog in api/src/admin/controls.ts. A
+   *  fixed vocabulary the enforcement points match by literal value, which is
+   *  why the masking rules preserve it rather than hashing it. */
+  name: text('name').primaryKey(),
+  /** Null means not engaged. A timestamp rather than a boolean because "when
+   *  did this start" is the first question anybody asks about a switch that is
+   *  on, and a boolean cannot answer it. */
+  engagedAt: timestamp('engaged_at', { withTimezone: true }),
+  reason: text('reason'),
+  /** The operator's address, kept as text so the row still says who paused the
+   *  installation once their account is gone. */
+  engagedBy: text('engaged_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 /* ---------------------------------------------------------------------------
  * The operator portal (0029)

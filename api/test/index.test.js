@@ -47,7 +47,7 @@ test("GET /api discovers every public endpoint and machine-readable resource", a
   // web/apps/api/scripts/openapi.ts for why that was wrong and what replaced it.
   assert.deepEqual(
     answer.body.resources.map((r) => r.path),
-    ["/openapi.json", "/errors.v1.json", "/llms.txt"],
+    ["/openapi.json", "/errors.v1.json", "/lint-findings.v1.json", "/llms.txt"],
   );
 });
 

@@ -83,6 +83,27 @@ A code in the [error reference](/docs/reference/errors) keeps its meaning. The
 code is the stable identifier for a refusal; the sentence printed beside it is
 not, and it is reworded whenever a clearer one exists. Match on the code.
 
+### The lint finding identifiers
+
+Every migration lint finding carries an identifier of the form `LINT-NNN`, and
+the [lint findings reference](/docs/reference/lint-findings) lists them. An
+identifier is assigned once and keeps its meaning. It is never reused, not even
+after the rule that earned it is deleted, because a number handed out twice is
+worse than one that changed: the first breaks a filter silently and the second
+breaks it loudly.
+
+What stays free to move is everything else about a finding, and deliberately
+so. The rule name, the title, the sentence saying what will happen and the
+suggested fix are prose. Rules are sharpened, split and renamed as they get
+better at their job, and a name that cannot be improved is a rule that cannot
+be improved. So the identifier is what a filter or a suppression should match
+on, and the rule name is what a person should read.
+
+`engine/internal/insights/lintcatalog.yaml` is the source of truth, and
+`findings.register.json` beside it records every identifier ever handed out.
+`tools/lintcheck` refuses a rule with no identifier, an identifier for a rule
+that no longer exists, and an identifier that has left the catalogue since it
+was registered.
 ### The self-hosting configuration
 
 Every key in the Helm chart's `values.yaml`, and every variable and output in
@@ -155,9 +176,10 @@ useful than a promise that quietly bends.
   import `engine/internal` at all: the Go toolchain refuses an import of an
   internal path from outside the subtree rooted at its parent, so that half
   needs nothing from us and gets nothing.
-- **Lint rule names and their findings.** Rules are added and sharpened, and a
-  release may find something in a migration an earlier one passed. That is the
-  product working. Within a release the rule name identifies the finding.
+- **Lint rule names, and which findings a release reports.** A rule is renamed
+  when a clearer name exists, and a release may find something in a migration
+  an earlier one passed. That is the product working, and it is why the
+  identifier above is the thing to match on rather than the name.
 - **The event stream's set of types.** Types are added as features land.
 - **Anything under `docs/plan/`.** Working notes, not documentation.
 

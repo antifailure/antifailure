@@ -310,7 +310,10 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 
 	result := &GoldenResult{}
 	started := o.opts.Clock.Now()
-	source := o.sourceURL()
+	source, err := o.sourceURL(ctx)
+	if err != nil {
+		return result, err
+	}
 
 	// A manifest that names production and a shell that does not hold it is a
 	// refusal rather than an empty golden.
@@ -502,7 +505,11 @@ func (o *Orchestrator) RefreshDue(
 	if err != nil {
 		return "", err
 	}
-	if o.sourceURL().IsZero() {
+	source, err := o.sourceURL(ctx)
+	if err != nil {
+		return "", err
+	}
+	if source.IsZero() {
 		// No production to refresh from. The empty golden `af up` makes is not
 		// stale in any meaningful sense, and refreshing it on a timer would be
 		// a message about nothing.
@@ -536,22 +543,38 @@ func (o *Orchestrator) RefreshDue(
 }
 
 // sourceURL is the production database to copy, when one is configured.
-func (o *Orchestrator) sourceURL() secrets.Value {
+//
+// Looked up through the same chain as every other variable the manifest names,
+// which is what the secrets guide has always said happens. That page opens with
+// source_url_env as its example and then lists four places a value is looked
+// up: this shell, .env, the encrypted local store, and the system keyring. This
+// function read the first of those and no others, so a project that put the
+// production URL in .env, next to the STRIPE_SECRET_KEY that `af up` finds
+// there, was told the variable held nothing.
+//
+// The chain also carries the two places a production credential actually
+// belongs. `af secret set PRODUCTION_DATABASE_URL` writes to an encrypted store
+// and the keyring holds it across repositories, and neither was reachable for
+// this one value.
+func (o *Orchestrator) sourceURL(ctx context.Context) (secrets.Value, error) {
 	if o.opts.Manifest.Database == nil || o.opts.Manifest.Database.SourceURLEnv == "" {
-		return secrets.Value{}
+		return secrets.Value{}, nil
 	}
-	getenv := o.opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
+	value, _, found, err := o.secretChain().Lookup(ctx, o.opts.Manifest.Database.SourceURLEnv)
+	if err != nil {
+		// Reported rather than treated as absent. A keyring that will not open
+		// is not a variable that is unset, and calling it one would send the
+		// reader to export something they had already stored.
+		return secrets.Value{}, aferrors.Wrap(err, aferrors.AFSEC005,
+			"name", o.opts.Manifest.Database.SourceURLEnv, "detail", err.Error())
 	}
-	raw := getenv(o.opts.Manifest.Database.SourceURLEnv)
-	if raw == "" {
-		return secrets.Value{}
+	if !found || strings.TrimSpace(value.Reveal()) == "" {
+		return secrets.Value{}, nil
 	}
 	// Registered before it is used, so that it is redacted everywhere rather
 	// than everywhere somebody remembered.
-	o.opts.Redactor.Register(raw)
-	return secrets.New(raw)
+	o.opts.Redactor.Register(value.Reveal())
+	return value, nil
 }
 
 // maskDatabase applies the rules to a database.
@@ -816,7 +839,10 @@ func (o *Orchestrator) connectForPlan(
 		return conn, done, "this environment's branch", nil
 	}
 
-	url := o.sourceURL()
+	url, urlErr := o.sourceURL(ctx)
+	if urlErr != nil {
+		return nil, nil, "", urlErr
+	}
 	if url.IsZero() {
 		// Nothing to fall back to, so the branch's own failure is the honest
 		// answer and it is passed through rather than replaced.

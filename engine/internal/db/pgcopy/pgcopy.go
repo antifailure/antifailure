@@ -188,45 +188,77 @@ var searchDirs = []string{
 // It returns the newest one it can find, and whether that one is new enough,
 // so the caller can produce a message about the actual gap rather than a
 // generic one.
-func toolFor(name string, wantMajor int) (path string, haveMajor int, err error) {
-	type candidate struct {
-		path  string
-		major int
-	}
-	var found []candidate
+// toolCandidate is one install of pg_dump or pg_restore this machine has.
+type toolCandidate struct {
+	path  string
+	major int
+}
 
+// toolsFound is every install of name this machine has, in no order.
+//
+// Split out of toolFor so that a caller which wants the CEILING rather than a
+// match can have it. toolFor answers "the oldest that is still new enough",
+// which is the right question when a server version is known and the wrong one
+// when nothing has connected yet: with no bar to clear, the oldest install is
+// exactly the wrong answer.
+func toolsFound(name string) ([]toolCandidate, error) {
+	var found []toolCandidate
 	if p, lookErr := exec.LookPath(name); lookErr == nil {
-		found = append(found, candidate{p, toolMajor(p)})
+		found = append(found, toolCandidate{p, toolMajor(p)})
 	}
 	for _, pattern := range searchDirs {
 		matches, _ := filepath.Glob(filepath.Join(pattern, name))
 		for _, m := range matches {
-			found = append(found, candidate{m, toolMajor(m)})
+			found = append(found, toolCandidate{m, toolMajor(m)})
 		}
 	}
 	if len(found) == 0 {
-		return "", 0, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"pgcopy: %s is not on the path and is not installed anywhere this looked. "+
 				"It is what copies a source database. Install the Postgres client tools, "+
 				"or configure a seed command instead of a source", name)
 	}
+	return found, nil
+}
 
+// newest is the highest major among the candidates, which is the highest
+// server version they can read.
+func newest(found []toolCandidate) toolCandidate {
 	best := found[0]
 	for _, c := range found[1:] {
 		if c.major > best.major {
 			best = c
 		}
 	}
-	// Prefer the oldest that is still new enough, so a machine with several
-	// installed uses the one that matches rather than the newest for its own
-	// sake.
-	chosen := best
+	return best
+}
+
+func toolFor(name string, wantMajor int) (path string, haveMajor int, err error) {
+	found, err := toolsFound(name)
+	if err != nil {
+		return "", 0, err
+	}
+	chosen := bestFor(found, wantMajor)
+	return chosen.path, chosen.major, nil
+}
+
+// bestFor picks the oldest candidate that is still new enough for the server,
+// so a machine with several installed uses the one that matches rather than
+// the newest for its own sake. With nothing new enough it returns the newest,
+// which is what makes the refusal name the actual gap.
+//
+// Pure, and separate from the search, because it and [newest] answer different
+// questions and the wrong one of the two reads as correct. bestFor with no bar
+// to clear returns the OLDEST install on the machine, which as an answer to
+// "what could this machine read" is exactly backwards.
+func bestFor(found []toolCandidate, wantMajor int) toolCandidate {
+	chosen := newest(found)
 	for _, c := range found {
 		if c.major >= wantMajor && (chosen.major < wantMajor || c.major < chosen.major) {
 			chosen = c
 		}
 	}
-	return chosen.path, chosen.major, nil
+	return chosen
 }
 
 // toolMajor asks a binary its version. Zero when it will not say, which sorts
@@ -347,10 +379,10 @@ func copyThroughPipe(ctx context.Context, source, target secrets.Value, opts Cop
 	}
 	if err := dump.Wait(); err != nil {
 		_ = restore.Process.Kill()
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError(ctx, source, "pg_dump", dumpErr.String())
 	}
 	if err := restore.Wait(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError(ctx, source, "pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -433,7 +465,7 @@ func copyThroughArchive(ctx context.Context, source, target secrets.Value, opts 
 	var dumpErr strings.Builder
 	dump.Stderr = &dumpErr
 	if err := dump.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError(ctx, source, "pg_dump", dumpErr.String())
 	}
 
 	list := exec.CommandContext(ctx, restorePath, "--list", archive)
@@ -455,7 +487,7 @@ func copyThroughArchive(ctx context.Context, source, target secrets.Value, opts 
 	var restoreErr strings.Builder
 	restore.Stderr = &restoreErr
 	if err := restore.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError(ctx, source, "pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -564,10 +596,10 @@ func CopyTableData(ctx context.Context, source, target secrets.Value, tables []s
 	}
 	if err := dump.Wait(); err != nil {
 		_ = restore.Process.Kill()
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(dumpErr.String()))
+		return transcriptError(ctx, source, "pg_dump", dumpErr.String())
 	}
 	if err := restore.Wait(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(restoreErr.String()))
+		return transcriptError(ctx, source, "pg_restore", restoreErr.String())
 	}
 	return nil
 }
@@ -629,7 +661,7 @@ func DumpTo(ctx context.Context, source secrets.Value, w io.Writer) error {
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_dump failed: %s", Tail(stderr.String()))
+		return transcriptError(ctx, source, "pg_dump", stderr.String())
 	}
 	return nil
 }
@@ -655,7 +687,7 @@ func RestoreFrom(ctx context.Context, target secrets.Value, r io.Reader) error {
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pgcopy: pg_restore failed: %s", Tail(stderr.String()))
+		return transcriptError(ctx, secrets.Value{}, "pg_restore", stderr.String())
 	}
 	return nil
 }
@@ -744,7 +776,7 @@ func ensureRoles(ctx context.Context, source, target secrets.Value) error {
 func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 	db, err := sql.Open("pgx", conn.Reveal())
 	if err != nil {
-		return nil, fmt.Errorf("pgcopy: open a connection to read the source's roles: %w", err)
+		return nil, connectError(err, "the address in database.source_url_env")
 	}
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
@@ -759,7 +791,13 @@ func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 		// A source that cannot be asked is not a source that has no policies.
 		// Saying which is which matters: the first is a connection problem and
 		// the second is a schema that needs nothing done.
-		return nil, fmt.Errorf("pgcopy: read the roles the source's policies name: %w", err)
+		//
+		// This is the first statement any copy sends, so it is where a typo in
+		// the connection string is met. It used to arrive as the driver's own
+		// account of four failed dial attempts under the words "read the roles
+		// the source's policies name", which describes the query rather than
+		// the problem and sends the reader to look at their policies.
+		return nil, connectError(err, "the address in database.source_url_env")
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -794,4 +832,43 @@ func Tail(s string) string {
 		lines = lines[len(lines)-6:]
 	}
 	return strings.Join(lines, "; ")
+}
+
+// ClientTools reports the newest pg_dump and pg_restore this machine can find,
+// and the major version they can read up to.
+//
+// It exists so that `af doctor` can answer the question a refresh answers far
+// too late. Copying a source shells out to these two, and a machine with
+// neither, or with a client older than the server, fails at the one step that
+// comes after everything else: the repository has been read, the manifest
+// written, the images built, and only then does the copy stop. pg_dump refuses
+// a server newer than itself outright and that cannot be worked around, so
+// knowing the ceiling in advance is the difference between a five second
+// correction and a twenty minute one.
+//
+// It runs the binaries to ask their versions and touches no database, so it is
+// safe in a check that promises to change nothing.
+// lookupTools is toolsFound, injected so that a test can present a machine with
+// several clients installed. The distinction this function turns on only shows
+// up when there is more than one, and a test that skips unless the machine
+// happens to have three is a test that runs nowhere.
+var lookupTools = toolsFound
+
+func ClientTools() (path string, major int, err error) {
+	// The newest rather than the one a copy would choose. A copy picks the
+	// oldest client that still clears the server's version, which is right
+	// when a server has been asked and wrong here, where nothing has
+	// connected: the question is what this machine COULD read, and that is
+	// the ceiling.
+	dumps, err := lookupTools("pg_dump")
+	if err != nil {
+		return "", 0, err
+	}
+	// Both, because a copy runs both and a machine with only one of them fails
+	// halfway through with the archive already written.
+	if _, restoreErr := lookupTools("pg_restore"); restoreErr != nil {
+		return "", 0, restoreErr
+	}
+	best := newest(dumps)
+	return best.path, best.major, nil
 }

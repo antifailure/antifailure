@@ -1,0 +1,91 @@
+{
+  "$id": "https://antifailure.dev/lint-findings.v1.json",
+  "description": "Every migration lint finding Antifailure can report. The id is stable across releases and is what a filter should match on. The rule name and the title are prose and are rewritten whenever a clearer one exists.",
+  "findings": [
+    {
+      "id": "LINT-001",
+      "rule": "no_lock_timeout",
+      "title": "no lock_timeout, so a lock wait becomes an outage"
+    },
+    {
+      "id": "LINT-002",
+      "rule": "not_null_without_default",
+      "title": "NOT NULL column added with no default"
+    },
+    {
+      "id": "LINT-003",
+      "rule": "set_not_null_existing_column",
+      "title": "NOT NULL set on a column that already exists"
+    },
+    {
+      "id": "LINT-004",
+      "rule": "alter_column_type",
+      "title": "column type change that rewrites the table"
+    },
+    {
+      "id": "LINT-005",
+      "rule": "index_not_concurrent",
+      "title": "index built without CONCURRENTLY"
+    },
+    {
+      "id": "LINT-006",
+      "rule": "drop_index_not_concurrent",
+      "title": "index dropped without CONCURRENTLY"
+    },
+    {
+      "id": "LINT-007",
+      "rule": "reindex_not_concurrent",
+      "title": "index rebuilt without CONCURRENTLY"
+    },
+    {
+      "id": "LINT-008",
+      "rule": "foreign_key_not_valid",
+      "title": "foreign key added without NOT VALID"
+    },
+    {
+      "id": "LINT-009",
+      "rule": "check_constraint_not_valid",
+      "title": "CHECK constraint added without NOT VALID"
+    },
+    {
+      "id": "LINT-010",
+      "rule": "unique_constraint_builds_index",
+      "title": "unique constraint that builds its index in place"
+    },
+    {
+      "id": "LINT-011",
+      "rule": "backfill_in_ddl_transaction",
+      "title": "rows changed in the same transaction as the schema"
+    },
+    {
+      "id": "LINT-012",
+      "rule": "rename_column_in_use",
+      "title": "column renamed while something still reads it"
+    },
+    {
+      "id": "LINT-013",
+      "rule": "drop_column_in_view",
+      "title": "column dropped while a view still selects it"
+    },
+    {
+      "id": "LINT-014",
+      "rule": "vacuum_full",
+      "title": "VACUUM FULL, which rewrites the table offline"
+    },
+    {
+      "id": "LINT-015",
+      "rule": "cluster",
+      "title": "CLUSTER, which rewrites the table offline"
+    },
+    {
+      "id": "LINT-016",
+      "rule": "drop_table",
+      "title": "table dropped"
+    },
+    {
+      "id": "LINT-017",
+      "rule": "truncate",
+      "title": "table truncated"
+    }
+  ]
+}
