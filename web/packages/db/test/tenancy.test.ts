@@ -105,6 +105,15 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'and reporting success. See migrations/0031.',
       ],
       [
+        'enterprise_leads',
+        'somebody asking to buy, who has no organization and may never have one, which is the ' +
+          'whole reason the route exists. What confines the application role is a GRANT rather ' +
+          'than a policy: it holds INSERT and no SELECT, so the anonymous route that writes ' +
+          'here cannot read a row back even holding its id, and a query bug on a public path ' +
+          'cannot publish a prospect\'s contact details. Reading is antifailure_admin or the ' +
+          'migration role, through af-control-plane-backup leads. See migrations/0035.',
+      ],
+      [
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',

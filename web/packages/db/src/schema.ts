@@ -1409,7 +1409,7 @@ export const tenantScopedTables = [
 ] as const
 
 /* ---------------------------------------------------------------------------
- * Somebody asking to buy (0031)
+ * Somebody asking to buy (0035)
  *
  * No org_id, and deliberately absent from tenantScopedTables: a lead is written
  * by somebody who has no organization and may never have one, which is the
@@ -1419,7 +1419,7 @@ export const tenantScopedTables = [
  * schema is what the drift test compares against the migrations, and a table
  * left untyped is a table where a renamed column produces a query that fails at
  * runtime on the one path nobody exercises. The reader is the operator CLI, on
- * a privileged connection; see migration 0031 for why the serving role holds no
+ * a privileged connection; see migration 0035 for why the serving role holds no
  * SELECT on this table at all.
  * ------------------------------------------------------------------------ */
 

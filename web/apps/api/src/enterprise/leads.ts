@@ -9,7 +9,7 @@
 //
 //   RECORD    the row lands in the product's own database, which is backed up,
 //             restored, drilled and readable by the operator CLI. Migration
-//             0031 is where the write-only boundary is.
+//             0035 is where the write-only boundary is.
 //   NOTIFY    somebody is told, when this installation has a way to tell them.
 //   SAY SO    the caller is told which of those happened, in the response,
 //             rather than being shown a success that means "written down

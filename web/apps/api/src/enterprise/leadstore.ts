@@ -13,7 +13,7 @@
 // else, and cannot read a row back even holding its id. The read path is this
 // file, on the same privileged connection break-glass and create-org take,
 // which is a credential the process serving public traffic does not have and
-// cannot acquire. Migration 0031 is where that boundary is drawn.
+// cannot acquire. Migration 0035 is where that boundary is drawn.
 
 import { createPool, sql, type Pool } from '@antifailure/db'
 
