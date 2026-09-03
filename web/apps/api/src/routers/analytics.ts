@@ -28,19 +28,25 @@ import {
   CATALOG,
   DERIVED_FROM_FACTS,
   EVENT_NAMES,
-  FUNNELS,
+  FUNNEL_DEFINITIONS,
   isEventName,
   type EventName,
 } from '../analytics/catalog.ts'
 import {
+  actives,
   breakdown,
   catalogStatus,
+  conversion,
   freshness,
+  funnelOrder,
   organizationFunnel,
   planMix,
   retention,
+  retentionGrid,
   series,
+  MIN_COHORT_FOR_A_RATE,
 } from '../analytics/read.ts'
+import { ACTIVE_WINDOWS, RETENTION_WEEKS } from '../analytics/insights.ts'
 
 /** The windows the dashboard offers. A closed set, because each one becomes a
  *  date range in a query and an unbounded one is a table scan a visitor can
@@ -107,6 +113,18 @@ export interface Provenance {
   settledAfter: string | null
   /** False when no surrogate secret is configured, so nothing is recorded. */
   recording: boolean
+  /**
+   * The three insight shapes settle at different rates, so each carries its
+   * own answer. One freshness line for all of them would be right about the
+   * daily counts and wrong about the other two: a funnel week is still gaining
+   * conversions while every subject in it is inside its window, and a cohort's
+   * first column is not its size until its week has ended.
+   */
+  funnelsFinalBefore: string | null
+  cohortsCompleteThrough: string | null
+  /** How far back a cohort grid can reach at all, so an empty corner reads as
+   *  a retention policy rather than as a product with no customers. */
+  subjectDaysKept: number | null
 }
 
 async function provenanceFor(c: OrgContext, days: number): Promise<Provenance> {
@@ -119,6 +137,9 @@ async function provenanceFor(c: OrgContext, days: number): Promise<Provenance> {
     lastRolledUpAt: state.lastRunAt,
     settledAfter: state.settledAfter,
     recording: c.analytics.enabled,
+    funnelsFinalBefore: state.funnelsFinalBefore,
+    cohortsCompleteThrough: state.cohortsCompleteThrough,
+    subjectDaysKept: state.subjectDaysKept,
   }
 }
 
@@ -145,7 +166,7 @@ export const analyticsRouter = router({
         acquisition: {
           bySource: await breakdown(db, 'site.page_viewed', 'a', days, today),
           byLanding: await breakdown(db, 'site.page_viewed', 'b', days, today),
-          waitlistBySource: await breakdown(db, 'site.waitlist_submitted', 'a', days, today),
+          leadsBySource: await breakdown(db, 'site.lead_submitted', 'a', days, today),
           views: await series(db, 'site.page_viewed', days, today),
         },
         organizations: {
@@ -156,6 +177,30 @@ export const analyticsRouter = router({
         adoption: await breakdown(db, 'adoption.feature_used', 'a', days, today),
         validation: await breakdown(db, 'validation.run_finished', 'b', days, today),
         environments: await breakdown(db, 'environment.torn_down', 'a', days, today),
+
+        // The three insights a daily count cannot produce. In the same call as
+        // everything else for the reason the comment above gives: one page, one
+        // loading state, one error state, one provenance line.
+        insights: {
+          // A DISTINCT count over the window, which is a different number from
+          // anything in `acquisition` above. The panel says so, because two
+          // numbers on one page that look like the same measurement and are not
+          // is how somebody quotes the wrong one.
+          activeOrganizations: await actives(db, 'organization', 28, '', days, today),
+          activeSessions: await actives(db, 'session', 7, '', days, today),
+          activeWindows: { organizations: 28, sessions: 7 },
+          // Declared sequences, computed over events with a conversion window,
+          // rather than the milestone funnel above which has no window and
+          // cannot have one.
+          conversions: (
+            await Promise.all(
+              FUNNEL_DEFINITIONS.map((f) => conversion(db, f.id, RETENTION_WEEKS, today)),
+            )
+          ).filter((f) => f !== null),
+          cohorts: await retentionGrid(db, today),
+          minCohortForARate: MIN_COHORT_FOR_A_RATE,
+          windowsKept: ACTIVE_WINDOWS,
+        },
       }))
     }),
 
@@ -200,7 +245,7 @@ export const analyticsRouter = router({
     await requireOperator(c)
     return c.pool.withoutTenant(async (db) => ({
       provenance: await provenanceFor(c, 28),
-      funnels: FUNNELS.map((funnel) => ({
+      funnels: funnelOrder().map((funnel) => ({
         funnel,
         // The reason a funnel has no event of its own, when it has none.
         // Written next to it rather than left to a reader to infer, because a

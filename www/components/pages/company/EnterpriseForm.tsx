@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import { CONTROL_PLANE_URL } from "@/lib/site";
+import { leadSubmitted } from "@/lib/analytics";
 
 /**
  * The one form on this site that takes something from a stranger.
@@ -82,6 +83,10 @@ export function EnterpriseForm() {
         message:
           "Could not reach the server. Check your connection and press it again; nothing you typed is lost.",
       });
+      // Deliberately not counted. `refused` means the endpoint answered and
+      // would not take it, which is a fact about the submission; a request that
+      // never arrived says nothing about this person and counting it would put
+      // every flaky connection in the denominator of the acquisition funnel.
       return;
     }
 
@@ -90,6 +95,7 @@ export function EnterpriseForm() {
         kind: "failed",
         message: "That was a lot of attempts at once. Wait a minute and press it again.",
       });
+      leadSubmitted("refused");
       return;
     }
 
@@ -105,6 +111,7 @@ export function EnterpriseForm() {
         // Keep the default.
       }
       setState({ kind: "failed", message });
+      leadSubmitted("refused");
       return;
     }
 
@@ -117,6 +124,13 @@ export function EnterpriseForm() {
       // confirmation then says the more conservative of the two things.
     }
     setState({ kind: "sent", notified });
+    // THE ONLY PRODUCER OF site.lead_submitted, which is the last step of the
+    // acquisition funnel. The event carries the channel the SESSION started on
+    // rather than this page's referrer, so the funnel answers what brought
+    // somebody here rather than which page held the form. It carries no name,
+    // no address and nothing that was typed: see www/lib/beacon.ts for the
+    // whole list of what leaves the browser.
+    leadSubmitted(notified ? "notified" : "recorded");
     formRef.current?.reset();
   }
 

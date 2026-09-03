@@ -35,6 +35,7 @@ kubeconfig
 llms
 lockfile
 lockfiles
+lookback
 lychee
 millicores
 ndjson

@@ -427,11 +427,25 @@ export function CompactSwap({ desktop, compact }: { desktop: ReactNode; compact:
   );
 }
 
+/**
+ * A block of body copy.
+ *
+ * `[&>p+p]:mt-6` is not a flourish. Tailwind's preflight zeroes the margin on
+ * every `p`, and nothing here put one back, so twenty four call sites across
+ * the legal, pricing and contact pages were rendering three separate paragraphs
+ * as one unbroken column of text. Every paragraph break an author wrote was
+ * being thrown away at render, on the pages where a reader is most likely to be
+ * looking for one specific sentence.
+ *
+ * On the child rather than on every descendant, and on `p + p` rather than on
+ * every `p`, so that the first paragraph still sits where its container put it
+ * and a paragraph nested inside a list is left alone.
+ */
 export function Prose({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={cn(
-        "max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 [&_a]:text-black [&_a]:underline [&_a]:decoration-black/20 [&_a]:underline-offset-4 [&_strong]:font-medium [&_strong]:text-black",
+        "max-w-[720px] text-[17px] leading-7 tracking-extra-tight text-gray-new-40 [&>p+p]:mt-6 [&_a]:text-black [&_a]:underline [&_a]:decoration-black/20 [&_a]:underline-offset-4 [&_strong]:font-medium [&_strong]:text-black",
         className,
       )}
     >

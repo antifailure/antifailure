@@ -40,6 +40,8 @@
 import type postgres from 'postgres'
 import type { Clock } from '../clock.ts'
 import { CATALOG, EVENT_NAMES, type EventName } from './catalog.ts'
+import { SUBJECT_DAYS_KEPT, recomputeInsights, type InsightResult } from './insights.ts'
+import { TAKE_ROLLUP_LOCK } from './lock.ts'
 
 export interface RollupOptions {
   /** How many days back to recompute, including today. */
@@ -59,9 +61,13 @@ export interface RollupResult {
   pruned: number
   /** The oldest day that will never be recomputed again. */
   settledAfter: string
+  /** What the insight passes did. See insights.ts. */
+  insights: InsightResult
 }
 
 const DEFAULT_LOOKBACK_DAYS = 3
+
+
 
 /** The dimension columns each event rolls up under, as SQL over the payload.
  *  Built from the catalog rather than written twice, so an event that gains a
@@ -98,12 +104,26 @@ export async function rollUp(
   }
   const settledAfter = days[0]!
 
+
   let rows = 0
   for (const day of days) {
     for (const name of EVENT_NAMES) {
       rows += await recomputeDay(admin, day, name)
     }
   }
+
+  // The insights, after the daily counts and before the raw stream is pruned.
+  //
+  // AFTER, because the working set they start from is read out of the same rows
+  // analytics_daily was just computed from, and a pass that ran first would
+  // build this day's insights out of yesterday's stream.
+  //
+  // BEFORE the prune, because every one of them reads the raw stream for the
+  // days it is recomputing, and pruning first would recompute a day whose rows
+  // had just been deleted and write a zero over a real number. The two orders
+  // differ only on the boundary day, which is exactly the kind of difference
+  // that shows up as one wrong bar a month after somebody reorders these.
+  const insights = await recomputeInsights(admin, days, now, lookback)
 
   // Retention on the raw stream, which is the half that carries surrogates.
   // The aggregates outlive it deliberately: a count of page views by source has
@@ -118,10 +138,18 @@ export async function rollUp(
   await admin`
     UPDATE analytics_rollup_state
     SET last_run_at = ${now.toISOString()}::timestamptz,
-        settled_after = ${settledAfter}::date
+        settled_after = ${settledAfter}::date,
+        -- Three freshness answers rather than one, because these settle at
+        -- different rates and a page that showed the daily figure for all of
+        -- them would be wrong about two. A funnel with a thirty day window
+        -- cannot be final for last week; a cohort's own week has to end before
+        -- its first column is its size.
+        funnels_final_before = ${insights.funnelsFinalBefore}::date,
+        cohorts_complete_through = ${insights.cohortsCompleteThrough}::date,
+        subject_days_kept = ${SUBJECT_DAYS_KEPT}
     WHERE id`
 
-  return { days, rows, pruned, settledAfter }
+  return { days, rows, pruned, settledAfter, insights }
 }
 
 /**
@@ -142,6 +170,10 @@ async function recomputeDay(admin: postgres.Sql, day: string, name: EventName): 
   const dimB = dimensionExpression(name, 1)
 
   return admin.begin(async (tx) => {
+    // The lock first, so two replicas recomputing the same day queue rather
+    // than colliding on the primary key. See lock.ts for why it is transaction
+    // scoped rather than held across the run.
+    await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`DELETE FROM analytics_daily WHERE day = ${day}::date AND name = ${name}`
     const inserted = await tx.unsafe(
       `INSERT INTO analytics_daily (day, name, dim_a, dim_b, events, organizations, sessions, computed_at)

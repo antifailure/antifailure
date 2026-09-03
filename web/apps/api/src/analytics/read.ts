@@ -1,10 +1,16 @@
 // What the dashboard is allowed to ask, and nothing wider.
 //
-// Every function here reads analytics_daily or analytics_org_facts and never
-// analytics_events, which the application role cannot read at all. So the
-// widest answer any of these can give is a count, and there is no argument to
-// any of them that could narrow one to a single organization: the surrogate
-// never leaves this file's queries, and the queries never select it.
+// Every function here reads a table of COUNTS and never a table that carries a
+// surrogate. analytics_events, which the application role cannot read at all,
+// and analytics_subject_days, which it has no grant on either, are both out of
+// reach here by permission rather than by habit. So the widest answer any of
+// these can give is a count, and there is no argument to any of them that could
+// narrow one to a single organization.
+//
+// The one exception is analytics_org_facts, which the application does read and
+// which is keyed by a surrogate. Nothing here selects that column: every query
+// over it is an aggregate, and the analytics migration explains why the table
+// is shaped that way.
 //
 // A NUMBER WITH NO SOURCE DOES NOT GO ON THE PAGE, so every shape returned here
 // carries enough to say where it came from: the window it covers, whether the
@@ -14,7 +20,14 @@
 
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
-import { CATALOG, EVENT_NAMES, FUNNELS, type EventName, type Funnel } from './catalog.ts'
+import {
+  CATALOG,
+  EVENT_NAMES,
+  FUNNELS,
+  funnelDefinition,
+  type EventName,
+  type Funnel,
+} from './catalog.ts'
 
 /** When the numbers were last computed, and how far back they are settled. */
 export interface Freshness {
@@ -23,15 +36,46 @@ export interface Freshness {
   lastRunAt: string | null
   /** Days on or after this are still absorbing late arrivals. */
   settledAfter: string | null
+  /**
+   * Three freshness answers rather than one, because the three insight shapes
+   * settle at different rates and showing the daily figure beside all of them
+   * would be wrong about two.
+   *
+   * A funnel week on or after `funnelsFinalBefore` can still gain conversions,
+   * because a subject that entered it is still inside its window. A cohort week
+   * after `cohortsCompleteThrough` has not finished taking members, so its
+   * first column is not yet its size. And `subjectDaysKept` says how far back a
+   * cohort grid can reach at all, so an empty corner reads as a retention
+   * policy rather than as a product with no customers.
+   */
+  funnelsFinalBefore: string | null
+  cohortsCompleteThrough: string | null
+  subjectDaysKept: number | null
 }
 
 export async function freshness(db: Db): Promise<Freshness> {
-  const rows = await db.execute<{ last_run_at: Date | string | null; settled_after: Date | string | null }>(sql`
-    SELECT last_run_at, settled_after FROM analytics_rollup_state WHERE id`)
+  const rows = await db.execute<{
+    last_run_at: Date | string | null
+    settled_after: Date | string | null
+    funnels_final_before: Date | string | null
+    cohorts_complete_through: Date | string | null
+    subject_days_kept: number | string | null
+  }>(sql`
+    SELECT last_run_at, settled_after, funnels_final_before,
+           cohorts_complete_through, subject_days_kept
+    FROM analytics_rollup_state WHERE id`)
   const row = rows[0]
   return {
     lastRunAt: row?.last_run_at ? asIso(row.last_run_at) : null,
     settledAfter: row?.settled_after ? asDay(row.settled_after) : null,
+    funnelsFinalBefore: row?.funnels_final_before ? asDay(row.funnels_final_before) : null,
+    cohortsCompleteThrough: row?.cohorts_complete_through
+      ? asDay(row.cohorts_complete_through)
+      : null,
+    subjectDaysKept:
+      row?.subject_days_kept === null || row?.subject_days_kept === undefined
+        ? null
+        : Number(row.subject_days_kept),
   }
 }
 
@@ -273,6 +317,268 @@ export async function retention(db: Db, today: Date): Promise<Retention> {
     activeLast28,
     dormant: total - activeLast28,
   }
+}
+
+// ---------------------------------------------------------------------------
+// The three insights a daily count cannot produce
+//
+// Each of these reads a table of COUNTS that the rollup materialized, never the
+// working set it computed them from, which the application holds no SELECT on.
+// See migrations/0033: that is a permission rather than a habit, so a query
+// added here later still cannot follow one subject.
+// ---------------------------------------------------------------------------
+
+export interface ActivePoint {
+  day: string
+  subjects: number
+}
+
+/**
+ * Distinct subjects over a rolling window, one point per day.
+ *
+ * The number analytics_daily could not give. Its `organizations` column is a
+ * distinct count WITHIN a day, so summing a week double counts anybody active
+ * on two days, which is why breakdown() returns the daily peak and says so.
+ * This is the real distinct count, computed once by the rollup over the working
+ * set and stored as a scalar.
+ *
+ * `name` empty means any event, which is the number usually meant by weekly
+ * actives, and it is NOT the sum of the per event numbers: an organization that
+ * created an environment and finished a run is one active organization and two
+ * rows.
+ *
+ * Every day in the window appears, including the ones the rollup has no row
+ * for, for the same reason series() fills its gaps: a line drawn straight
+ * across a missing day is the one shape a chart must never make.
+ */
+export async function actives(
+  db: Db,
+  subjectKind: 'organization' | 'session',
+  windowDays: number,
+  name: EventName | '',
+  days: number,
+  today: Date,
+): Promise<ActivePoint[]> {
+  const from = dayString(new Date(today.getTime() - (days - 1) * 86_400_000))
+  const rows = await db.execute<{ day: Date | string; subjects: string | number | null }>(sql`
+    SELECT d.day::date AS day, COALESCE(a.subjects, 0) AS subjects
+    FROM generate_series(${from}::date, ${dayString(today)}::date, interval '1 day') AS d(day)
+    LEFT JOIN analytics_actives a
+      ON a.day = d.day::date
+     AND a.window_days = ${windowDays}
+     AND a.subject_kind = ${subjectKind}
+     AND a.name = ${name}
+    ORDER BY d.day`)
+  return rows.map((r) => ({ day: asDay(r.day), subjects: Number(r.subjects ?? 0) }))
+}
+
+export interface ConversionStep {
+  step: string
+  meaning: string
+  /** How many subjects reached this step or any step after it. */
+  subjects: number
+  /** Of the subjects that reached the step before, what share reached this one.
+   *  Null on the first step, which has nothing to be a share of. */
+  ofPrevious: number | null
+}
+
+export interface Conversion {
+  id: string
+  title: string
+  subject: string
+  windowDays: number
+  windowReason: string
+  /** The entry weeks this covers, so a reader knows which cohort converted. */
+  fromWeek: string
+  toWeek: string
+  steps: ConversionStep[]
+  /** True when no subject entered the funnel in this window at all, which is a
+   *  different page from a funnel that everybody dropped out of. */
+  empty: boolean
+}
+
+/**
+ * A declared funnel over a window of entry weeks.
+ *
+ * WHY THE STEPS ARE A RUNNING SUM AND NOT A COUNT PER STEP.
+ *
+ * The table stores how far each subject got, one depth per subject, and a
+ * step's total is every depth at or above it. That makes the numbers monotone
+ * BY CONSTRUCTION: a subject has exactly one depth, so step four counts a
+ * subset of the rows step three counts and cannot be wider.
+ *
+ * read.ts learned this the hard way on the other funnel, which counted each
+ * milestone column independently and rendered a step wider than the one above
+ * it under a caption promising that could not happen. Storing a depth is what
+ * makes the caption true rather than hopeful.
+ */
+export async function conversion(
+  db: Db,
+  id: string,
+  weeks: number,
+  today: Date,
+): Promise<Conversion | null> {
+  const definition = funnelDefinition(id)
+  if (!definition) return null
+
+  const fromWeek = weekStart(new Date(today.getTime() - (weeks - 1) * 7 * 86_400_000))
+  const toWeek = weekStart(today)
+
+  const rows = await db.execute<{ steps_completed: number | string; subjects: string | number }>(sql`
+    SELECT steps_completed, sum(subjects) AS subjects
+    FROM analytics_funnel_weeks
+    WHERE funnel = ${id}
+      AND entered_week >= ${dayString(fromWeek)}::date
+      AND entered_week <= ${dayString(toWeek)}::date
+    GROUP BY steps_completed`)
+
+  const byDepth = new Map<number, number>()
+  for (const row of rows) byDepth.set(Number(row.steps_completed), Number(row.subjects))
+
+  let previous: number | null = null
+  const steps: ConversionStep[] = definition.steps.map((step, index) => {
+    const depth = index + 1
+    let reached = 0
+    for (const [d, n] of byDepth) if (d >= depth) reached += n
+    const ofPrevious = previous === null || previous === 0 ? null : reached / previous
+    previous = reached
+    return {
+      step: stepLabel(step.event, step.where),
+      meaning: step.meaning,
+      subjects: reached,
+      ofPrevious: index === 0 ? null : ofPrevious,
+    }
+  })
+
+  return {
+    id: definition.id,
+    title: definition.title,
+    subject: definition.subject,
+    windowDays: definition.windowDays,
+    windowReason: definition.windowReason,
+    fromWeek: dayString(fromWeek),
+    toWeek: dayString(toWeek),
+    steps,
+    empty: (steps[0]?.subjects ?? 0) === 0,
+  }
+}
+
+/** The step's name as a reader sees it: the event, and the values that count
+ *  when the step only accepts some of them. Built here rather than stored,
+ *  because it is a label and the catalog is the source for labels. */
+function stepLabel(event: string, where?: { field: string; values: readonly string[] }): string {
+  if (!where) return event
+  return `${event} (${where.field}: ${where.values.join(', ')})`
+}
+
+/**
+ * The smallest cohort this reports a rate for.
+ *
+ * A retention percentage over three organizations is not a measurement, it is
+ * three organizations described as a fraction, and it moves by thirty three
+ * points when one of them opens a laptop. Reporting it invites somebody to
+ * quote it. So a cohort below this floor is returned with its counts and marked
+ * as too small, and the page shows the count rather than a rate.
+ *
+ * The suppression is a DISPLAY rule over a true stored number rather than a
+ * changed number in the table, so raising or lowering this floor later changes
+ * what is shown and never what was recorded.
+ */
+export const MIN_COHORT_FOR_A_RATE = 5
+
+export interface CohortRow {
+  cohortWeek: string
+  /** The cohort's own size, which is the row's week zero. */
+  size: number
+  /** Subjects still active, by weeks after the cohort week. Index 0 is the
+   *  cohort itself, so it always equals `size`. */
+  weeks: number[]
+  /** False when the cohort is too small for a rate to mean anything. */
+  enough: boolean
+}
+
+export interface RetentionGrid {
+  rows: CohortRow[]
+  /** How many return weeks the grid holds, which is how wide a row can be. */
+  width: number
+  /** True when no cohort has any members, which reads differently from a grid
+   *  whose cohorts all churned. */
+  empty: boolean
+}
+
+/**
+ * Retention as a cohort grid: of the organizations first seen in one week, how
+ * many were still doing anything each week after.
+ *
+ * WHY THIS EXISTS ALONGSIDE retention() RATHER THAN REPLACING IT.
+ *
+ * They answer different questions and both are worth having. retention() is
+ * three scalars over last_active_on: how many are active now, which is the
+ * number an operator checks daily. This is a grid: whether the organizations
+ * who arrived in March are still here, which is the number that says whether
+ * the product keeps people. A dashboard that only had the first would show a
+ * healthy active count made entirely of new arrivals, which is what churn looks
+ * like from the wrong angle.
+ *
+ * WHAT A ROW CANNOT SHOW. A cohort week older than the working set's retention
+ * is not in the grid at all, because the days its members would have returned
+ * on have been deleted. The page says how far back the grid reaches rather than
+ * drawing an empty corner that reads as no customers.
+ */
+export async function retentionGrid(db: Db, today: Date): Promise<RetentionGrid> {
+  const rows = await db.execute<{
+    cohort_week: Date | string
+    weeks_later: number | string
+    subjects: string | number
+  }>(sql`
+    SELECT cohort_week, weeks_later, subjects
+    FROM analytics_retention_cohorts
+    WHERE subject_kind = 'organization'
+    ORDER BY cohort_week DESC, weeks_later`)
+
+  const byCohort = new Map<string, Map<number, number>>()
+  for (const row of rows) {
+    const week = asDay(row.cohort_week)
+    let cells = byCohort.get(week)
+    if (!cells) {
+      cells = new Map()
+      byCohort.set(week, cells)
+    }
+    cells.set(Number(row.weeks_later), Number(row.subjects))
+  }
+
+  let width = 0
+  for (const cells of byCohort.values()) {
+    for (const later of cells.keys()) if (later + 1 > width) width = later + 1
+  }
+  // A grid one column wide is every cohort's own size and no returns, which is
+  // what a brand new deployment looks like. Two columns is the minimum that
+  // shows anything, so the shape is stable rather than collapsing to a list.
+  if (width < 2) width = 2
+
+  const built: CohortRow[] = []
+  for (const [week, cells] of byCohort) {
+    const size = cells.get(0) ?? 0
+    const weeks: number[] = []
+    for (let i = 0; i < width; i += 1) weeks.push(cells.get(i) ?? 0)
+    built.push({ cohortWeek: week, size, weeks, enough: size >= MIN_COHORT_FOR_A_RATE })
+  }
+  // Newest first, matching the order the query asked for and the order a reader
+  // expects: the cohort they are still waiting on is the interesting one.
+  built.sort((a, b) => (a.cohortWeek < b.cohortWeek ? 1 : -1))
+
+  return {
+    rows: built,
+    width,
+    empty: built.every((r) => r.size === 0),
+  }
+}
+
+/** The Monday on or before a day, in UTC, matching date_trunc('week', ...). */
+function weekStart(at: Date): Date {
+  const day = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()))
+  const back = (day.getUTCDay() + 6) % 7
+  return new Date(day.getTime() - back * 86_400_000)
 }
 
 /**

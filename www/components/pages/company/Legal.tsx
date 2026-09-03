@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/layout/Button";
+import { MeasurementSwitch } from "@/components/MeasurementSwitch";
 import {
   Blank,
   Callout,
@@ -194,6 +195,35 @@ export function PrivacyPage() {
             rather than kept in step by hand.
           </p>
         </Prose>
+      </PageSection>
+      <PageSection tone="ruled">
+        <PageHeading
+          kicker="This site"
+          title="<strong>It counts page views itself,</strong> and it will stop if you say so."
+        />
+        <Prose className="mt-10">
+          <p>
+            There is no Google Analytics here, no PostHog, no Sentry, and no script from any other
+            origin. What there is, is a counter this repository wrote, sending to this project&rsquo;s
+            own control plane. It exists so that the question &ldquo;does anybody read the docs&rdquo;
+            has an answer, and it is built to answer that question and no other.
+          </p>
+          <p>
+            Five things leave your browser: a page shape from a closed list, a channel from a closed
+            list, a random identifier for one browsing session, a timestamp, and a campaign tag when
+            you followed a link carrying one. The referrer and the URL are turned into those bounded
+            values <em>in your browser</em>, so the address you came from is never put on the
+            network at all. There is no cookie. The session identifier lives in{" "}
+            <code>sessionStorage</code>, ends after thirty minutes of inactivity and after a day
+            whatever happens, and nothing here can join two of your visits together.
+          </p>
+          <p>
+            Global Privacy Control and Do Not Track are both honoured without asking. The switch
+            below is for everybody else, and it takes effect on the page you are reading rather than
+            on the next one: anything captured and not yet sent is thrown away with it.
+          </p>
+        </Prose>
+        <MeasurementSwitch />
       </PageSection>
       <PageSection>
         <CounselNotice>

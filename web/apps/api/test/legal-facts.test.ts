@@ -58,6 +58,55 @@ const repoRoot = path.join(here, '..', '..', '..', '..')
 
 const read = (p: string) => readFile(path.join(repoRoot, p), 'utf8')
 
+/** An http or https address that is not the loopback a local control plane
+ *  serves on. Named once so the gate and its negative control cannot drift. */
+const NAMES_A_HOST = /https?:\/\/(?!127\.0\.0\.1)/
+
+/**
+ * The same source with its comments taken out.
+ *
+ * WHY A GATE OVER SOURCE HAS TO DO THIS. The address check below is looking for
+ * a host this code CONTACTS. A comment is prose, and prose about crawlers has
+ * to be able to quote the address a crawler announces itself with without the
+ * gate reading it as a new network destination. That is not hypothetical: this
+ * branch already moved one comment out of a SQL SET clause for exactly this
+ * reason, and then tripped the same gate a second time with a comment in
+ * bots.ts explaining why an address was REMOVED from the matcher.
+ *
+ * A gate that cannot be explained next to is a gate people route around, and
+ * the way they route around it is by deleting the explanation.
+ *
+ * Block comments go first, then a line comment, and the line comment is only
+ * cut where the `//` is outside a quote, so that a string holding a URL is
+ * still the code it is. The negative control below drives that case.
+ */
+function withoutComments(source: string): string {
+  const noBlocks = source.replace(/\/\*[\s\S]*?\*\//g, ' ')
+  return noBlocks
+    .split('\n')
+    .map((line) => {
+      let quote: string | null = null
+      for (let i = 0; i < line.length; i += 1) {
+        const c = line[i]!
+        if (c === '\\') {
+          i += 1
+          continue
+        }
+        if (quote) {
+          if (c === quote) quote = null
+          continue
+        }
+        if (c === '"' || c === "'" || c === '`') {
+          quote = c
+          continue
+        }
+        if (c === '/' && line[i + 1] === '/') return line.slice(0, i)
+      }
+      return line
+    })
+    .join('\n')
+}
+
 const facts = await read('www/lib/legal-facts.ts')
 
 /** One `{ days: N, words: "x" }` out of the facts file, by the constant and the
@@ -425,13 +474,25 @@ describe('the subprocessor page describes the code that exists', () => {
     // the beacon would have published a site that counts page views when it
     // does not.
     const page = await read('www/lib/subprocessors.ts')
-    const beacon = await read('www/lib/analytics.ts').catch(() => null)
+    // EVERY file the beacon is made of, not just the one it started in. The
+    // queue, the session rules and the endpoint moved out of analytics.ts into
+    // beacon.ts so that a test runner could load them, and this gate went on
+    // reading analytics.ts, which by then held a React hook and no address at
+    // all. A gate pointed at the wrong file passes for the same reason an empty
+    // one does. Missing files are allowed here because the pair below asserts
+    // both states; a file that is present has to hold up.
+    const parts = await Promise.all(
+      ['www/lib/analytics.ts', 'www/lib/beacon.ts', 'www/lib/bots.ts'].map((f) =>
+        read(f).catch(() => null),
+      ),
+    )
+    const beacon = parts.some((p) => p !== null) ? parts.filter((p) => p !== null).join('\n') : null
 
     if (beacon === null) {
       assert.match(
         page,
         /This site loads no analytics and no third-party script/,
-        'there is no www/lib/analytics.ts, so the subprocessor page must still say the site ' +
+        'there is no site beacon in this tree, so the subprocessor page must still say the site ' +
           'loads no analytics. It says something else, which means the claim was rewritten ' +
           'for a beacon that is not in this tree.',
       )
@@ -444,8 +505,75 @@ describe('the subprocessor page describes the code that exists', () => {
       'a beacon exists and the subprocessor page still claims the site loads no analytics',
     )
     assert.ok(
-      !/https?:\/\/(?!127\.0\.0\.1)/.test(beacon.replace(/CONTROL_PLANE_URL/g, '')),
+      !NAMES_A_HOST.test(withoutComments(beacon).replace(/CONTROL_PLANE_URL/g, '')),
       'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    )
+  })
+
+  it('offers the switch it tells the reader they have', async () => {
+    // THE CLASS: a privacy claim that describes a capability with no reachable
+    // way to use it. The subprocessor page says, of the counting this site
+    // does, that "if you switch measurement off" a flag is kept in this
+    // browser. For as long as the only way to switch it off was a query
+    // parameter documented in one source comment, that sentence described
+    // something no reader could do, which is the same defect as a gate function
+    // with no caller: everything built except the part that makes it happen.
+    //
+    // Held to three things rather than to the words: the beacon exports a way
+    // to set it, a component calls that, and a page renders the component. Any
+    // one of the three going missing leaves a promise on a published page.
+    const page = await read('www/lib/subprocessors.ts')
+    if (!/switch measurement off/.test(page)) return
+
+    const beacon = await read('www/lib/beacon.ts')
+    assert.match(
+      beacon,
+      /export function setMeasurement/,
+      'the page says measurement can be switched off and the beacon exports no way to do it',
+    )
+
+    const control = await read('www/components/MeasurementSwitch.tsx').catch(() => null)
+    assert.ok(
+      control !== null,
+      'the page says measurement can be switched off and there is no control that does it',
+    )
+    assert.match(
+      control,
+      /setMeasurement\(/,
+      'the measurement control does not call setMeasurement, so pressing it changes nothing',
+    )
+
+    const privacy = await read('www/components/pages/company/Legal.tsx')
+    assert.match(
+      privacy,
+      /<MeasurementSwitch \/>/,
+      'the control exists and no page renders it, so no reader can reach it',
+    )
+  })
+
+  it('would still see an address in code, which is what makes the case above worth anything', () => {
+    // THE NEGATIVE CONTROL on the comment stripping immediately above. Taking
+    // comments out of the subject of a gate is exactly the kind of loosening
+    // that quietly turns a check into a check of nothing, and the failure would
+    // be invisible: the suite stays green either way. So the same predicate is
+    // driven against source that does name a host, in the three places a host
+    // could actually be named.
+    const inCode = [
+      `const ENDPOINT = "https://plausible.io/api/event"`,
+      `fetch('https://cdn.example.com/a.js')`,
+      'const hosts = [`https://analytics.example.com`]',
+    ]
+    for (const line of inCode) {
+      assert.ok(
+        NAMES_A_HOST.test(withoutComments(line)),
+        `stripping comments hid a real address: ${line}`,
+      )
+    }
+    // And a comment quoting one is not a destination, which is the case that
+    // sent this gate red on a branch that had added no address at all.
+    assert.ok(
+      !NAMES_A_HOST.test(withoutComments('// yandex announces "+http://yandex.com/bots"')),
+      'a comment quoting a crawler address still reads as a network destination',
     )
   })
 })

@@ -148,6 +148,11 @@ export const SITE_ROUTES = [
   'blog',
   'blog_post',
   'legal',
+  // The page the only form on the site is on, and therefore the one page the
+  // acquisition funnel ends on. It classified as `other` until the form moved
+  // there, which made "views of the page that converts" a question the
+  // dashboard could not answer about the page it most needed to.
+  'contact',
   'signin',
   'signup',
   'other',
@@ -195,7 +200,7 @@ export const CATALOG = {
     // built, nothing is shared, and the identifier dies with the tab.
     privacyBasis: 'legitimate_interest',
     answers: 'Which pages people land on, and which channel sent them.',
-    producer: 'www/lib/analytics.ts, from the site beacon on every page view',
+    producer: 'www/lib/beacon.ts, from the site beacon on every page view',
     payload: {
       route: { kind: 'enum', values: SITE_ROUTES },
       source: { kind: 'enum', values: VISIT_SOURCES },
@@ -216,7 +221,7 @@ export const CATALOG = {
     actorKind: 'visitor',
     privacyBasis: 'legitimate_interest',
     answers: 'Which call to action people press, and on which page.',
-    producer: 'www/lib/analytics.ts, from the waitlist dialog and the primary buttons',
+    producer: 'www/lib/beacon.ts, from the sign-up screen the primary buttons lead to',
     payload: {
       // One value, because there is one producer. The docs, GitHub and install
       // buttons are server-rendered links with no click handler, and declaring
@@ -231,16 +236,22 @@ export const CATALOG = {
     session: 'required',
   },
 
-  'site.waitlist_submitted': {
+  'site.lead_submitted': {
     funnel: 'acquisition',
     version: 1,
     source: 'site',
     actorKind: 'visitor',
     privacyBasis: 'legitimate_interest',
     answers:
-      'Which channel and which landing page produce a waitlist address, which is ' +
-      'the join between acquisition and identity.',
-    producer: 'www/lib/analytics.ts, after the waitlist endpoint answers',
+      'Which channel and which landing page produce somebody asking to be ' +
+      'contacted, which is the join between acquisition and identity.',
+    // RENAMED FROM site.waitlist_submitted, because the waitlist is gone. The
+    // form that replaced it posts a lead at POST /v1/leads, and an event still
+    // called waitlist_submitted would have put a name in the data that nothing
+    // in the product answers to. The old name was left with no caller at all
+    // when the waitlist went, which every gate here read as fine, and that is
+    // what the caller case in analytics-producers.test.ts now catches.
+    producer: 'www/lib/beacon.ts, after the leads endpoint answers',
     payload: {
       /** The channel and page the SESSION started on, not this page. That is
        *  what makes attribution answer "what brought them here" rather than
@@ -248,7 +259,12 @@ export const CATALOG = {
       source: { kind: 'enum', values: VISIT_SOURCES },
       landing: { kind: 'enum', values: SITE_ROUTES },
       campaign: { kind: 'id', pattern: CAMPAIGN_PATTERN, maxLength: 32 },
-      outcome: { kind: 'enum', values: ['joined', 'already', 'refused'] as const },
+      /** What the endpoint did, which the form renders two different sentences
+       *  from. `notified` means a mailer told somebody; `recorded` means the
+       *  lead is in the database and a person reads the queue. Both are
+       *  conversions and the difference is the deployment's, not the reader's,
+       *  so they are separate values rather than one. */
+      outcome: { kind: 'enum', values: ['notified', 'recorded', 'refused'] as const },
     },
     dimensions: ['source', 'landing'],
     organization: 'never',
@@ -557,6 +573,147 @@ export function eventsIn(funnel: Funnel): EventName[] {
 }
 
 // ---------------------------------------------------------------------------
+// Conversion sequences
+//
+// A NOTE ON THE WORD FUNNEL, WHICH THIS FILE NOW USES FOR TWO THINGS.
+//
+// `Funnel` above is a SECTION of the catalog: eight names that group the events
+// by which part of the product they are about. It has no order and no window,
+// and it is metadata for a reader.
+//
+// What follows is a MEASURED SEQUENCE: an ordered list of steps, a subject that
+// has to complete them, and a window they all have to fall inside. That is the
+// thing anybody means by a conversion funnel, and it is a different object.
+// Both names are kept because renaming the first would touch every event.
+//
+// WHY THE SEQUENCES ARE DECLARED HERE RATHER THAN BUILT IN A UI.
+//
+// The obvious product is a funnel builder: pick any events, pick a window, see
+// a chart. It is not available here and the reason is the same one the closed
+// event catalog is built on. The rows a funnel is computed from carry a subject
+// surrogate, and the application cannot read them; only the rollup can, and the
+// rollup computes what this file declares. A builder would need the application
+// to be able to run an arbitrary query against subject level rows, which is the
+// exact capability the two analytics migrations exist to withhold.
+//
+// So a new question costs a declaration here and a rollup pass, and in exchange
+// nobody can ask the store to single anybody out. This repository has made that
+// trade once already for events; this is the same trade for queries.
+// ---------------------------------------------------------------------------
+
+/** Who has to complete the steps. Matches subject_kind in analytics_subject_days. */
+export type FunnelSubject = 'organization' | 'session'
+
+export interface FunnelStepDefinition {
+  event: EventName
+  /**
+   * Which payload values count as completing this step. Absent means any
+   * occurrence of the event does.
+   *
+   * The field must be one the event declares, and every value must be in that
+   * field's enum. A test checks both, because a step filtering on a value that
+   * cannot occur is a step nobody ever completes, which renders as a funnel
+   * that collapses to zero and reads like a product problem.
+   */
+  where?: { field: string; values: readonly string[] }
+  /** What reaching this step means, in the words the page needs. */
+  meaning: string
+}
+
+export interface FunnelDefinition {
+  /** Stored in analytics_funnel_weeks.funnel, so it is a stable identifier
+   *  rather than a title: renaming the title must not orphan the rows. */
+  id: string
+  title: string
+  subject: FunnelSubject
+  /**
+   * How long after the FIRST step the remaining steps have to happen.
+   *
+   * From the first step rather than between consecutive steps, because "signed
+   * up and got a proven run within thirty days" is the question somebody asks,
+   * and "each step within thirty days of the last" is a much weaker claim that
+   * a subject could satisfy over a year without ever converting.
+   */
+  windowDays: number
+  /** Why this window and not another, shown next to the chart. A window is an
+   *  assumption, and an assumption a reader cannot see is one they will read
+   *  the numbers without. */
+  windowReason: string
+  steps: readonly FunnelStepDefinition[]
+}
+
+export const FUNNEL_DEFINITIONS: readonly FunnelDefinition[] = [
+  {
+    id: 'acquisition',
+    title: 'Visit to lead',
+    subject: 'session',
+    // A session cannot outlive a day: www/lib/beacon.ts caps it at twenty
+    // four hours and ends it after thirty minutes idle. So a window wider than
+    // a day could never change an answer, and a narrower one would cut off a
+    // reader who left the tab open over lunch.
+    windowDays: 1,
+    windowReason:
+      'One day, because a browsing session cannot last longer than that: the site ends a ' +
+      'session after thirty minutes idle and after twenty four hours whatever happens.',
+    steps: [
+      {
+        event: 'site.page_viewed',
+        meaning: 'Landed on any page of the site.',
+      },
+      {
+        event: 'site.cta_engaged',
+        meaning: 'Reached the sign-up screen, from wherever they were.',
+      },
+      {
+        event: 'site.lead_submitted',
+        // `refused` is excluded on purpose. A submission the endpoint would not
+        // take is not a conversion, and counting it as one would make the last
+        // step move whenever the validation rules changed.
+        where: { field: 'outcome', values: ['notified', 'recorded'] },
+        meaning: 'Asked to be contacted, and the endpoint took it.',
+      },
+    ],
+  },
+  {
+    id: 'activation',
+    title: 'Organization to proven run',
+    subject: 'organization',
+    windowDays: 30,
+    windowReason:
+      'Thirty days, which is the period a trial covers. An organization that takes longer ' +
+      'than that to prove something did not activate; it came back.',
+    steps: [
+      {
+        event: 'identity.organization_created',
+        meaning: 'The organization came into existence.',
+      },
+      {
+        event: 'onboarding.engine_token_minted',
+        meaning: 'Somebody wired an engine into their CI, which needs a token.',
+      },
+      {
+        event: 'environment.created',
+        meaning: 'That engine brought an environment up.',
+      },
+      {
+        event: 'validation.run_finished',
+        // The verdicts that PROVED something. blocked and unverified finished a
+        // run without proving anything, which is the distinction the whole
+        // product is about, so it cannot be smoothed over here.
+        where: { field: 'verdict', values: ['pass', 'fail', 'flaky'] },
+        meaning: 'Got a verdict that proved something, rather than blocked or unverified.',
+      },
+    ],
+  },
+]
+
+/** One funnel by id, or undefined. Used by the read layer, which takes an id
+ *  from a request and must not assume it names anything. */
+export function funnelDefinition(id: string): FunnelDefinition | undefined {
+  return FUNNEL_DEFINITIONS.find((f) => f.id === id)
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
@@ -660,15 +817,4 @@ function checkField(field: FieldSpec, value: unknown): string | number | boolean
  *  check before indexing. */
 export function isEventName(name: string): name is EventName {
   return Object.hasOwn(CATALOG, name)
-}
-
-/**
- * The two dimension values a row rolls up under.
- *
- * The empty string for an absent dimension rather than null, because the daily
- * table's primary key has to distinguish rows and null is not equal to itself.
- */
-export function dimensionsOf(name: EventName, payload: ValidPayload): [string, string] {
-  const dims = CATALOG[name].dimensions
-  return [String(payload[dims[0] ?? ''] ?? ''), String(payload[dims[1] ?? ''] ?? '')]
 }

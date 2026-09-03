@@ -48,7 +48,18 @@ import { PLAN_QUOTAS } from '../src/limits.ts'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(here, '..', '..', '..', '..')
 const apiSrc = path.join(here, '..', 'src')
-const siteAnalytics = path.join(repoRoot, 'www', 'lib', 'analytics.ts')
+// The beacon, in the file it now lives in. It was analytics.ts until the queue,
+// the session rules and the endpoint moved out so that a test runner could load
+// them; analytics.ts is a React hook and a set of re-exports now, and a scan
+// pointed at it found no producer for site.cta_engaged. bots.ts is read too, so
+// a string the crawler filter compares against cannot be mistaken for one the
+// beacon sends.
+const siteBeacon = path.join(repoRoot, 'www', 'lib', 'beacon.ts')
+const siteFiles = [
+  siteBeacon,
+  path.join(repoRoot, 'www', 'lib', 'analytics.ts'),
+  path.join(repoRoot, 'www', 'lib', 'bots.ts'),
+]
 
 async function filesUnder(dir: string, ext = '.ts'): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
@@ -81,7 +92,7 @@ async function filesUnder(dir: string, ext = '.ts'): Promise<string[]> {
  */
 async function producerSources(): Promise<Map<string, string>> {
   const analyticsDir = path.join(apiSrc, 'analytics') + path.sep
-  const files = [...(await filesUnder(apiSrc)), siteAnalytics].filter(
+  const files = [...(await filesUnder(apiSrc)), ...siteFiles].filter(
     (f) => !f.startsWith(analyticsDir),
   )
   const out = new Map<string, string>()
@@ -98,7 +109,7 @@ describe('every analytics event has a producer', () => {
     // empty map. This is the negative control on the instrument.
     assert.ok(sources.size > 20, `only ${sources.size} source files were read`)
     assert.ok(
-      [...sources.keys()].some((f) => f.endsWith(path.join('www', 'lib', 'analytics.ts'))),
+      [...sources.keys()].some((f) => f.endsWith(path.join('www', 'lib', 'beacon.ts'))),
       'the site beacon source was not read, so no site.* event could be found',
     )
     assert.ok(
@@ -124,6 +135,65 @@ describe('every analytics event has a producer', () => {
     })
   }
 
+  it('every site producer has a caller on a page, not only a definition', async () => {
+    // THE HOLE THE CASE ABOVE LEAVES, and it opened for real.
+    //
+    // That case passes when the event NAME appears in a producer file. The name
+    // appears inside the function that emits it, so a producer function with
+    // zero callers anywhere satisfies it while emitting nothing. The waitlist
+    // was removed from the site and `waitlistSubmitted` kept its definition,
+    // its export, its re-export and its catalog entry, and every gate here
+    // stayed green over an event the site could no longer produce.
+    //
+    // A function is not a producer. A function something CALLS is a producer.
+    // So this reads beacon.ts for the exported functions that emit a catalogued
+    // event, and asks the pages and components whether anything calls them.
+    const beacon = sources.get(siteBeacon)!
+    const pages = [
+      ...(await filesUnder(path.join(repoRoot, 'www', 'app'), '.tsx')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'app'), '.ts')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'components'), '.tsx')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'components'), '.ts')),
+      // lib/ too, minus the beacon itself. usePageViews is a hook in
+      // lib/analytics.ts and PageViews.tsx calls the hook, not the producer, so
+      // a caller set of pages alone reports the site's most-fired event as
+      // dead. A re-export is not a call: `export { x } from` has no
+      // parenthesis after the name, so the pattern below still cannot be
+      // answered by the line that merely forwards it.
+      ...(await filesUnder(path.join(repoRoot, 'www', 'lib'), '.ts')).filter(
+        (f) => f !== siteBeacon,
+      ),
+    ]
+    const callers = new Map<string, string>()
+    for (const file of pages) callers.set(file, await readFile(file, 'utf8'))
+    assert.ok(callers.size > 20, `only ${callers.size} page files were read, so this proves nothing`)
+
+    // Each exported function and the text up to the next one, which is enough
+    // to say which event names it emits without parsing TypeScript.
+    const blocks = [...beacon.matchAll(/export function (\w+)\(/g)]
+    assert.ok(blocks.length > 3, 'no exported functions found in the beacon, so nothing was checked')
+
+    const orphaned: string[] = []
+    for (let i = 0; i < blocks.length; i += 1) {
+      const fn = blocks[i]![1]!
+      const from = blocks[i]!.index!
+      const to = i + 1 < blocks.length ? blocks[i + 1]!.index! : beacon.length
+      const body = beacon.slice(from, to)
+      const emits = EVENT_NAMES.filter((n) => body.includes(`'${n}'`) || body.includes(`"${n}"`))
+      if (emits.length === 0) continue
+      const called = [...callers.values()].some((text) => new RegExp(`\\b${fn}\\(`).test(text))
+      if (!called) orphaned.push(`${fn} emits ${emits.join(', ')} and nothing on the site calls it`)
+    }
+
+    assert.deepEqual(
+      orphaned,
+      [],
+      'a catalogued event has a producer function with no caller. It will read zero forever, ' +
+        'which is indistinguishable from a quiet week. Call it from the thing that should ' +
+        'produce it, or take the event out of the catalog.',
+    )
+  })
+
   it('names a producer file that exists, for every event', async () => {
     // The `producer` sentence is what a reader follows when a number looks
     // wrong. A sentence naming a file that was renamed a month ago sends them
@@ -146,7 +216,25 @@ describe('every analytics event has a producer', () => {
 })
 
 describe('the catalog and the site agree', () => {
-  const site = sources.get(siteAnalytics)!
+  const site = sources.get(siteBeacon)!
+
+  /**
+   * One exported function's body, so a scrape of its return values is about
+   * that function.
+   *
+   * The scrape used to run over the whole file, which worked while the file was
+   * only the beacon's vocabulary. When the queue moved in beside it, `sent`,
+   * `retry`, `stop`, `idle` and `expired` all started reading as route ids the
+   * catalog does not declare, and the gate failed for a reason that had nothing
+   * to do with routes. A scrape whose scope is the file rather than the thing
+   * it is about drifts the moment the file gains a neighbour.
+   */
+  function bodyOf(name: string): string {
+    const start = site.indexOf(`export function ${name}(`)
+    assert.notEqual(start, -1, `${name} is not exported from the beacon any more`)
+    const next = site.indexOf('\nexport ', start + 1)
+    return site.slice(start, next === -1 ? site.length : next)
+  }
 
   it('declares the same page shapes the site can produce', () => {
     // Two lists that must agree, in two npm projects that cannot import from
@@ -154,7 +242,7 @@ describe('the catalog and the site agree', () => {
     // starts arriving as `other`, which looks like readers landing nowhere.
     const declared = new Set(SITE_ROUTES as readonly string[])
     const inSite = new Set(
-      [...site.matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!).filter((v) => v !== 'direct'),
+      [...bodyOf('routeIdFor').matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!),
     )
     const onlyInSite = [...inSite].filter((v) => !declared.has(v) && !isVisitSource(v))
     assert.deepEqual(
@@ -169,14 +257,14 @@ describe('the catalog and the site agree', () => {
     // reader's URL bar holds is the host's decision, not this site's, and the
     // first version of routeIdFor handled only the first, so every page under a
     // plain file server arrived as `other`.
-    assert.match(site, /replace\(\/\\\.html\$\/, ""\)/,
+    assert.match(bodyOf('routeIdFor'), /replace\(\/\\\.html\$\/, ""\)/,
       'routeIdFor no longer strips a trailing .html, so a static host that serves files ' +
       'classifies every page as other')
   })
 
   it('declares every channel the site can derive', () => {
     const declared = new Set(VISIT_SOURCES as readonly string[])
-    const returned = [...site.matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!)
+    const returned = [...bodyOf('sourceFor').matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!)
     const onlyInSite = returned.filter((v) => isVisitSource(v) && !declared.has(v))
     assert.deepEqual(onlyInSite, [])
   })

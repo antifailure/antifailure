@@ -109,6 +109,7 @@ gate: _reports
     run "control plane"                  just test-web
     run "the site API"                   just test-site-api
     run "the console"                    just test-console
+    run "the site beacon"                just test-site-beacon
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -410,6 +411,21 @@ test-site-api:
 test-console:
     go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
     npm --prefix console test
+
+# The marketing site's beacon.
+#
+# www/ is a separate npm project too, not one of web/'s workspaces, so the same
+# argument the console recipe makes applies here: `npm test --workspaces` never
+# reaches it and a test file there would be decoration. The beacon decides what
+# is measured, how long a session lasts, when a failed request is retried and
+# who is a crawler, and until this suite existed not one of those rules could be
+# loaded by a runner at all, because the file imported next/navigation.
+#
+# Before the build, as in CI, and for the same reason: seconds against minutes,
+# and a failure here is about the beacon rather than about Next.
+test-site-beacon:
+    go run ./tools/installcheck . www || npm --prefix www ci --no-audit --no-fund
+    npm --prefix www test
 
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming
