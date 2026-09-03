@@ -19,6 +19,32 @@ export const PLANS: readonly string[] = Object.keys(PLAN_QUOTAS)
 export type PaidPlan = 'team' | 'enterprise'
 export const PAID_PLANS: readonly PaidPlan[] = ['team', 'enterprise']
 
+/**
+ * The environment variable each paid plan's price is read from.
+ *
+ * ONE FULL LITERAL PER PLAN, never a prefix concatenated with an uppercased
+ * plan name.
+ *
+ * A name assembled at run time is not enumerable. Nothing can list the settings
+ * this process reads, which is the property `test/config-docs.test.ts` exists
+ * to hold and the property an operator needs, and its scanner can only see the
+ * literal fragment that is actually in the source. A message that built a name
+ * that way turned that test red, reporting a truncated prefix as an
+ * undocumented variable, which is a name nobody can set.
+ *
+ * Note that a comment is source too: writing the concatenation out as an
+ * example here would put the same truncated fragment back in the scan.
+ *
+ * It is also how a typo becomes silence: a built name for a plan that does not
+ * correspond to any variable reads as unset rather than failing, so the plan is
+ * quietly unsellable. A `Record<PaidPlan, string>` makes a missing entry a
+ * compile error instead.
+ */
+export const PRICE_ENV: Record<PaidPlan, string> = {
+  team: 'AF_STRIPE_PRICE_TEAM',
+  enterprise: 'AF_STRIPE_PRICE_ENTERPRISE',
+}
+
 export interface StripeConfig {
   /** The API key. Server side only: this never reaches a browser and never
    *  appears in a response. */
@@ -26,8 +52,17 @@ export interface StripeConfig {
   /** The signing secret for the webhook endpoint. Without it the endpoint
    *  refuses every delivery rather than accepting unsigned ones. */
   webhookSecret: string
-  /** The price each paid plan is sold at. */
-  prices: Record<PaidPlan, string>
+  /**
+   * The price each paid plan is sold at, for the plans that HAVE one.
+   *
+   * Partial, and the partiality is the point. A plan can be real and still not
+   * be sold self-serve: Enterprise is arranged with a person, so there is no
+   * Stripe price behind it and `AF_STRIPE_PRICE_ENTERPRISE` is deliberately
+   * unset. A plan missing from this map is not a misconfiguration, and the
+   * routes that would have sold it say so by name rather than reaching Stripe
+   * with an empty price id.
+   */
+  prices: Partial<Record<PaidPlan, string>>
   /** Where Stripe lives. Overridden by tests so nothing reaches the real one,
    *  and by nothing else. */
   apiBase?: string
@@ -51,24 +86,41 @@ export function stripeConfigFrom(env: Record<string, string | undefined>): {
 } {
   const secretKey = env.AF_STRIPE_SECRET_KEY ?? ''
   const webhookSecret = env.AF_STRIPE_WEBHOOK_SECRET ?? ''
-  const team = env.AF_STRIPE_PRICE_TEAM ?? ''
-  const enterprise = env.AF_STRIPE_PRICE_ENTERPRISE ?? ''
+  const team = env[PRICE_ENV.team] ?? ''
+  const enterprise = env[PRICE_ENV.enterprise] ?? ''
 
-  const missing = [
+  // AF_STRIPE_PRICE_ENTERPRISE IS NOT REQUIRED, and leaving it out of this
+  // list is a fix rather than a relaxation.
+  //
+  // It used to be the fourth required variable, so a deployment that set the
+  // secret, the webhook secret and the Team price and nothing else fell into
+  // the "partially configured" branch below: `config` came back null, billing
+  // was entirely OFF, and the Team price that DOES exist could not be sold
+  // either. The startup line called it an operator error. That is the shape
+  // this product actually sells in: Team has a recurring price a person can buy
+  // on their own, and Enterprise is arranged with a human, so it has no price
+  // and never will until somebody decides to sell it self-serve.
+  //
+  // A plan with no price is a plan that is not sold here. `checkout` refuses it
+  // by name and points at the contact route; it is not a reason to stop taking
+  // money for the plans that do have one.
+  const required = [
     ['AF_STRIPE_SECRET_KEY', secretKey],
     ['AF_STRIPE_WEBHOOK_SECRET', webhookSecret],
-    ['AF_STRIPE_PRICE_TEAM', team],
-    ['AF_STRIPE_PRICE_ENTERPRISE', enterprise],
-  ]
-    .filter(([, value]) => !value)
-    .map(([name]) => name as string)
+    [PRICE_ENV.team, team],
+  ] as const
+  const missing = required.filter(([, value]) => !value).map(([name]) => name)
 
-  if (missing.length === PLAN_ENV_COUNT) {
+  // Nothing set AT ALL, which is the self-hosted default and not a mistake.
+  // The optional variable is checked too, so an installation that set only
+  // AF_STRIPE_PRICE_ENTERPRISE is reported as half configured rather than as
+  // untouched.
+  if (missing.length === required.length && !enterprise) {
     return { config: null, summary: 'billing is off: no Stripe configuration (AF_STRIPE_SECRET_KEY is not set)' }
   }
   if (missing.length > 0) {
     // Partially configured is the dangerous state and it is called out rather
-    // than quietly treated as off: an operator who set three of four believes
+    // than quietly treated as off: an operator who set some of these believes
     // billing works, and the one they missed is usually the webhook secret,
     // which fails only when a real customer pays.
     return {
@@ -77,18 +129,29 @@ export function stripeConfigFrom(env: Record<string, string | undefined>): {
     }
   }
 
+  // Only the plans that have a price. An empty string is left OUT rather than
+  // stored, so `prices.enterprise` is undefined instead of '', and nothing can
+  // compare a subscription's missing price id against it and match.
+  const prices: Partial<Record<PaidPlan, string>> = { team }
+  if (enterprise) prices.enterprise = enterprise
+
+  const sold = PAID_PLANS.filter((plan) => prices[plan])
+  const arranged = PAID_PLANS.filter((plan) => !prices[plan])
   return {
     config: {
       secretKey,
       webhookSecret,
-      prices: { team, enterprise },
+      prices,
       ...(env.AF_STRIPE_API_BASE ? { apiBase: env.AF_STRIPE_API_BASE } : {}),
     },
-    summary: `billing is on: prices for ${PAID_PLANS.join(' and ')} are configured`,
+    // Names both halves. An operator reading "billing is on" needs to know
+    // which plans that sentence covers, or the first Enterprise refusal reads
+    // like an outage.
+    summary:
+      `billing is on: ${sold.join(' and ')} sold self-serve` +
+      (arranged.length > 0 ? `, ${arranged.join(' and ')} has no price and is arranged with a person` : ''),
   }
 }
-
-const PLAN_ENV_COUNT = 4
 
 /**
  * The plan a price sells, or null.
@@ -102,7 +165,13 @@ const PLAN_ENV_COUNT = 4
 export function planForPrice(config: StripeConfig, priceId: string | null): PaidPlan | null {
   if (!priceId) return null
   for (const plan of PAID_PLANS) {
-    if (config.prices[plan] === priceId) return plan
+    // `configured &&` before the comparison, and it is load bearing now that a
+    // plan may have no price. Without it, a plan whose price is undefined would
+    // match any priceId that is also undefined, and a subscription object Stripe
+    // sent with no items would resolve to enterprise and move somebody onto the
+    // largest plan for free.
+    const configured = config.prices[plan]
+    if (configured && configured === priceId) return plan
   }
   return null
 }

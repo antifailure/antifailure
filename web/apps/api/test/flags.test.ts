@@ -159,7 +159,7 @@ describe('a kill switch and a rollout default in opposite directions', async () 
 
   async function checkout() {
     return callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
-      plan: 'team', seats: 2,
+      plan: 'team',
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
   }

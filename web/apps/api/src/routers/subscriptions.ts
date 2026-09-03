@@ -38,14 +38,20 @@ import { StripeError } from '../billing/stripe.ts'
 /** The billing context, or a refusal that names the variables an operator has
  *  to set. A self-hosted installation takes no money and has to be able to run
  *  without ever having heard of Stripe, so this is a precondition rather than a
- *  crash at start-up. */
+ *  crash at start-up.
+ *
+ *  THREE VARIABLES, not four. This named AF_STRIPE_PRICE_ENTERPRISE as well,
+ *  which is no longer required and on most installations never will be: a
+ *  message that sends an operator to set a variable that is correctly unset
+ *  costs them the time it takes to find that out. The three below are what
+ *  `stripeConfigFrom` actually needs. */
 function billingOf(c: OrgContext) {
   if (!c.stripe) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
       message:
         'This control plane is not configured to take payments. Set AF_STRIPE_SECRET_KEY, ' +
-        'AF_STRIPE_WEBHOOK_SECRET, AF_STRIPE_PRICE_TEAM and AF_STRIPE_PRICE_ENTERPRISE.',
+        'AF_STRIPE_WEBHOOK_SECRET and AF_STRIPE_PRICE_TEAM.',
     })
   }
   return c.stripe
@@ -99,9 +105,29 @@ export const subscriptionsRouter = router({
       /** Whether this control plane can take money at all, so a screen can say
        *  so rather than showing a button that always fails. */
       configured: c.stripe !== null,
-      plans: c.hostedRequiredPlan
-        ? PAID_PLANS.filter((plan) => plan === c.hostedRequiredPlan)
-        : PAID_PLANS,
+      // Only the plans this installation can actually SELL, which is the same
+      // rule the comment above states and was not applying. It listed every
+      // paid plan whether or not a price existed for it, so a control plane
+      // with no Enterprise price rendered a "Subscribe to enterprise" button
+      // that reached checkout and was refused every single time.
+      plans: PAID_PLANS.filter(
+        (plan) =>
+          Boolean(c.stripe?.config.prices[plan]) &&
+          (c.hostedRequiredPlan ? plan === c.hostedRequiredPlan : true),
+      ),
+      /**
+       * Paid plans this control plane knows but does not sell here, because it
+       * takes money and no price is configured for them. Named separately so a
+       * screen can say "arranged with a person" rather than leaving a plan
+       * unexplained.
+       *
+       * EMPTY when billing is off altogether. An installation that takes no
+       * payment is not arranging anything with anybody, and listing every plan
+       * here would make the field say the opposite of what it means.
+       */
+      arrangedPlans: c.stripe
+        ? PAID_PLANS.filter((plan) => !c.stripe?.config.prices[plan])
+        : [],
       hostedRequiredPlan: c.hostedRequiredPlan,
     }
   }),
@@ -135,7 +161,16 @@ export const subscriptionsRouter = router({
     .input(
       z.object({
         plan: z.enum(['team', 'enterprise']),
-        seats: z.number().int().min(1).max(1000).default(1),
+        // NO SEAT COUNT, and its absence is the fix for a real defect.
+        //
+        // This took `seats` between one and a thousand and passed it to Stripe
+        // as the line item quantity, so the price multiplied by it. Nothing
+        // read it back: `entitlements.ts` decides how many members a plan holds
+        // from a per plan constant and never looks at the subscription. An
+        // organization that bought three seats on `team` got fifty, and one
+        // that bought two hundred also got fifty, at two hundred times the
+        // price. What is sold is one hosted control plane per organization at a
+        // flat fee, so there is no number here for a price to multiply.
         /** Where Stripe sends the browser afterwards. Both are required rather
          *  than defaulted, because a default that pointed at the wrong
          *  deployment would land somebody who has just paid on a stranger's
@@ -156,6 +191,38 @@ export const subscriptionsRouter = router({
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: `This hosted control plane sells only the ${c.hostedRequiredPlan} plan.`,
+        })
+      }
+
+      // A plan can be real and have no price. Enterprise is arranged with a
+      // person, so `AF_STRIPE_PRICE_ENTERPRISE` is deliberately unset and there
+      // is nothing here to sell somebody on their own.
+      //
+      // HERE, beside the kill switch and the hosted gate, rather than beside
+      // the checkout call that uses the price. Everything below this reads
+      // rows and CREATES A STRIPE CUSTOMER, and a refusal placed after that
+      // leaves a customer at Stripe for somebody who was never able to buy
+      // anything. The first draft of this check sat next to its own use and
+      // did exactly that.
+      //
+      // Without it the empty price id reached Stripe as
+      // `line_items[0][price]=`, which comes back as a generic
+      // invalid_request_error and reaches the buyer as "could not open a
+      // checkout page": a wall with no explanation, on the plan with the
+      // largest cheque behind it.
+      const priceId = billing.config.prices[input.plan as PaidPlan]
+      if (!priceId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          // Reads as a ROUTE, not as a failure. The person on the other end of
+          // this is a buyer who wants the largest plan, and the worst outcome
+          // is that they read it as an outage and go away. So it says what
+          // happens next and who does it, and never uses the word error.
+          message:
+            `The ${input.plan} plan is agreed with a person rather than bought here, because ` +
+            'the scope, the term and the price are set for each organization. Ask at ' +
+            'https://antifailure.dev/contact and somebody will arrange it for this ' +
+            'organization. Nothing was charged and nothing changed.',
         })
       }
 
@@ -195,12 +262,10 @@ export const subscriptionsRouter = router({
         customerId = attached.customerId
       }
 
-      const priceId = billing.config.prices[input.plan as PaidPlan]
       const session = await billing.client
         .createCheckoutSession({
           customerId,
           priceId,
-          quantity: input.seats,
           orgId: c.actor.orgId,
           successUrl: input.successUrl,
           cancelUrl: input.cancelUrl,
@@ -216,7 +281,7 @@ export const subscriptionsRouter = router({
           targetId: c.actor.orgId,
           // No card, no amount, no session secret. What an auditor needs is who
           // started buying what, and when.
-          detail: { plan: input.plan, seats: input.seats, session: session.id },
+          detail: { plan: input.plan, session: session.id },
         })
       })
       return { url: session.url, sessionId: session.id }

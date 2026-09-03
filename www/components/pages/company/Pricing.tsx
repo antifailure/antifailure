@@ -10,7 +10,7 @@ import {
   Prose,
   type FaqItem,
 } from "@/components/pages/kit";
-import { FREE_PLAN } from "@/lib/plan-facts";
+import { FREE_PLAN, members } from "@/lib/plan-facts";
 
 type PlanCta = {
   href: string;
@@ -59,20 +59,34 @@ const PLANS: Plan[] = [
     featured: true,
     cta: { href: "/contact#book", label: "Start a design partnership", theme: "green" },
     includes: [
-      "Base platform fee per organization",
+      "Flat platform fee per organization, not per person",
+      `Up to ${members("team")} members, counting invitations not yet accepted`,
       "Included run credits for deployment twins",
       "Usage for environment minutes, data volume, and workload execution",
       "Customer-cloud execution for margin and data exposure",
       "Pull-request checks and aggregated reports across repositories",
     ],
   },
+  // ONE band above Team, and it is called Enterprise.
+  //
+  // This card used to be "Growth + Enterprise", and the page named a Growth
+  // band that nothing behind it has ever had. The control plane sells exactly
+  // two paid plans: `PaidPlan = "team" | "enterprise"` in
+  // web/apps/api/src/billing/plans.ts, `PLAN_QUOTAS` in limits.ts knows free,
+  // team and enterprise, and the only two prices an operator can configure are
+  // AF_STRIPE_PRICE_TEAM and AF_STRIPE_PRICE_ENTERPRISE. A third name on a
+  // pricing page is a plan a reader can ask to buy and nobody can sell.
+  //
+  // No number moved. The monthly band and the annual figure are the ones that
+  // were already here; only the labels that called the monthly one "Growth"
+  // now say what it is.
   {
-    name: "Growth + Enterprise",
+    name: "Enterprise",
     badge: "Illustrative",
     price: "$2,000 to $8,000",
-    period: "per month · Growth band",
+    period: "per month · Enterprise band",
     secondary: {
-      label: "Enterprise",
+      label: "Annual contract",
       value: "$30,000 to $250,000+",
       hint: "annually · scale, governance, residency, fleet",
     },
@@ -80,6 +94,7 @@ const PLANS: Plan[] = [
     cta: { href: "/contact#book", label: "Talk to us", theme: "outlined" },
     includes: [
       "More repositories, volume, and peak workload",
+      `Up to ${members("enterprise")} members, counting invitations not yet accepted`,
       "Organization-wide release policy",
       "Governance, evidence retention, and residency",
       "Fleet management and premium connectors",
@@ -200,6 +215,26 @@ const PRICING_FAQ: FaqItem[] = [
       "Yes, under the MIT license. Everything outside the ee directory is MIT, which is the engine, the command line interface, the masking, the egress gateway, the reports and the MCP server. The ee directory is public source under a separate enterprise license and running it needs a license key.",
   },
   {
+    // The question the page stopped answering when the seat picker went away.
+    //
+    // Checkout used to take a seat count and send it to Stripe as a per unit
+    // quantity, which multiplied the price and entitled nothing: the member
+    // limit is a constant per plan and always was. Removing the picker without
+    // publishing the constant would leave a reader with no way to find out how
+    // many people they get except by hitting the refusal.
+    //
+    // The three numbers come from lib/plan-facts.ts, held against the
+    // enforcement by web/apps/api/test/plan-facts.test.ts.
+    question: "How many people can be in my organization?",
+    answer:
+      `${members("free")} on the free plan, ${members("team")} on Team, and ${members("enterprise")} on Enterprise. ` +
+      "The count is members plus invitations that have been sent and not yet accepted, because an " +
+      "invitation nobody has accepted is still holding the place. There is nothing to buy here and no " +
+      "per person price: the plan decides the number, so an organization is never charged per head for " +
+      "a limit it already has. Reaching it refuses the next invitation, names what you are holding, and " +
+      "removes nobody.",
+  },
+  {
     question: "What happens when a free limit is reached?",
     answer:
       "The next environment is refused, with a message naming the limit, what the organization is currently holding, and who can change it. Nothing that already exists is torn down. Taking somebody's running environment away because a number moved is not a behaviour this product has.",
@@ -223,7 +258,7 @@ export function PricingPage() {
         path="/pricing"
         eyebrow="Pricing"
         title="Operational value, not AI personalities."
-        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. Those bands are illustrative, not a quote."
+        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a flat platform fee per organization plus run usage. Enterprise adds volume, policy, and governance. Those bands are illustrative, not a quote."
         actions={
           <>
             {/* The quickstart still leads, which is this page's own decision

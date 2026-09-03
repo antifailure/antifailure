@@ -31,7 +31,7 @@ import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
-import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { PRICE_ENV, RealStripeClient, stripeConfigFrom } from './billing/index.ts'
 import {
   githubAppInstallUrlFrom,
   hostedRequiredPlanFrom,
@@ -270,7 +270,34 @@ try {
 }
 if (hostedRequiredPlan && !stripe.config) {
   console.error(
-    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Set AF_STRIPE_SECRET_KEY, ' +
+      'AF_STRIPE_WEBHOOK_SECRET and AF_STRIPE_PRICE_TEAM so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+// The same contradiction reached through a second door, which opened when
+// AF_STRIPE_PRICE_ENTERPRISE stopped being required.
+//
+// The check above asks whether billing is on. Billing can now be on while the
+// gated plan itself has no price: set AF_HOSTED_REQUIRED_PLAN=enterprise with a
+// Team price and no Enterprise price and every organization is refused
+// everything until it holds a plan that this process has no way to sell it.
+// That is exactly the state the check above exists to prevent, so it is refused
+// in the same place and for the same reason rather than discovered by the first
+// customer who cannot get in.
+if (hostedRequiredPlan && stripe.config && !stripe.config.prices[hostedRequiredPlan]) {
+  // The variable is NAMED from PRICE_ENV rather than built out of the plan.
+  //
+  // This line originally wrote a prefix and appended the uppercased plan, which
+  // put a truncated fragment in the source and nothing else. config-docs.test.ts
+  // scans for AF_ names and reported that fragment as a variable read and not
+  // documented, which is true and unfixable from the reference: it is not a
+  // name anybody can set. A closed map is the only shape that keeps the set of
+  // settings this process reads enumerable.
+  console.error(
+    `AF_HOSTED_REQUIRED_PLAN is ${hostedRequiredPlan} and there is no Stripe price for that ` +
+      `plan, so no organization could ever satisfy the gate. Set ${PRICE_ENV[hostedRequiredPlan]}, ` +
+      'or unset AF_HOSTED_REQUIRED_PLAN.',
   )
   process.exit(2)
 }

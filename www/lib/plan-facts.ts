@@ -57,3 +57,34 @@ export const FREE_PLAN: Record<"environments" | "perRunHours" | "perDayHours", P
     body: "The total across a moving twenty four hours, not a calendar day. It is what stops a workflow that creates an environment per push from running up a month of environment time in an afternoon.",
   },
 };
+
+/**
+ * How many people each plan holds, from the constants that refuse the next one.
+ *
+ * WHY THIS IS PUBLISHED. Checkout used to take a seat count between one and a
+ * thousand and send it to Stripe as a per unit quantity. It entitled nothing:
+ * the member limit was, and is, a constant per plan. So a reader who is no
+ * longer offered a seat picker has a fair question, how many people do I get,
+ * and the answer was written down nowhere they could read it.
+ *
+ * WHAT THE NUMBER COUNTS is members plus invitations that are still open, which
+ * is what `seatVerdict` counts. An invitation nobody has accepted holds a seat,
+ * because counting only accepted members lets an organization at its limit send
+ * a hundred invitations and land the refusal on the person accepting.
+ *
+ * These are held against `ENTITLEMENTS.seats.byPlan` by
+ * `web/apps/api/test/plan-facts.test.ts`, the same way the free numbers above
+ * are held against the quota table. Reaching one refuses the next invitation
+ * and removes nobody.
+ */
+export const PLAN_MEMBERS: Record<"free" | "team" | "enterprise", number> = {
+  free: 5,
+  team: 50,
+  enterprise: 1000,
+};
+
+/** The same numbers as a reader meets them, so a card and a sentence cannot
+ *  disagree about whether 1000 has a comma in it. */
+export function members(plan: keyof typeof PLAN_MEMBERS): string {
+  return PLAN_MEMBERS[plan].toLocaleString("en-US");
+}
