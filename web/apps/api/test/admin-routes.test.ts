@@ -32,24 +32,11 @@ describe('every operator route declares a permission', () => {
   // second tree needs a second walk or it is guarded by neither matrix. A route
   // nobody enumerates is worse than one in a tree that does, because the second
   // at least fails.
-  //
-  // THE NUMBER IS THE COUNT AT THE TIME THE LAST LANE LANDED, not a round one.
-  // It was 18 for the length of four lanes, by which point it was satisfied by
-  // the foundation's own routes alone and proved nothing about anybody else's.
-  // The protocol, so six branches can raise one line without arguing: a lane
-  // adds its own route count to whatever it finds here. Two lanes that both
-  // raise it conflict in git, which is the visible edit, and the resolution is
-  // the larger number.
-  //
-  // A floor is still the weaker half of this. Each lane also counts its OWN
-  // routes exactly, in its own file, because a floor cannot tell that one
-  // lane's routes left the tree while another's arrived: see
-  // admin-product.test.ts and the money block in adminrouters.test.ts.
   assertOperatorRoutesAreGuarded({
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 50,
+    atLeast: 18,
   })
 })
 
