@@ -679,3 +679,198 @@ func hostPort(value string) (string, string) {
 	}
 	return rest, ""
 }
+
+// A job that runs the check can report the check.
+//
+// THE DEFECT THIS IS THE INSTRUMENT FOR, and it is the most visible one this
+// repository has ever carried, because every contributor who opened a pull
+// request saw it. The hosted App posts a check named `Antifailure` on every
+// commit here, and on every commit it said:
+//
+//	Nothing was verified
+//	The workflow run finished successfully and Antifailure never reported a
+//	result, so nothing was verified.
+//
+// It was telling the truth. This job ran the whole product against the control
+// plane's own schema for twenty minutes and then reported the result to a pull
+// request comment and to nowhere else. There was no `id-token: write`, so the
+// runner set no ACTIONS_ID_TOKEN_REQUEST_URL and the job could not prove what
+// it was; there was no control plane address, so the engine's event sink did
+// not try; and there was no step that posted a report, so nothing arrived. The
+// job exited zero, the comment appeared, and the pipeline looked fine, which is
+// the exact shape of failure this repository names most often: a gate that
+// passes while checking nothing. Here the product itself was the thing saying
+// so on every pull request, and it went unread for the life of the check.
+//
+// So this asserts the four things that together make a run reportable, because
+// any one of them missing is silence and three of the four were missing:
+//
+//   - `id-token: write` on the job, which is what lets it prove what it is;
+//   - an address for the control plane, without which every route is off;
+//   - `--report-json`, because the check needs counts and the Markdown is
+//     prose;
+//   - a step that posts to /v1/pr/report, because a report written to a file
+//     is a report nobody receives.
+//
+// It reads the workflow rather than trusting the comments in it, and it is
+// keyed on the job that runs the harness rather than on a job name, so a job
+// that starts running `af ci` tomorrow is covered without anybody remembering
+// this file.
+func TestAJobThatRunsTheCheckCanReportIt(t *testing.T) {
+	type step struct {
+		Name string            `yaml:"name"`
+		If   string            `yaml:"if"`
+		Run  string            `yaml:"run"`
+		Env  map[string]string `yaml:"env"`
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Permissions map[string]string `yaml:"permissions"`
+			Env         map[string]string `yaml:"env"`
+			Steps       []step            `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+
+	// Only the pull request job. The nightly runs on a schedule, where there is
+	// no pull request and so no check to report to, and demanding a credential
+	// of it would be a check enforcing a habit rather than a requirement.
+	checked := 0
+	for name, job := range workflow.Jobs {
+		runsTheCheck := false
+		for _, s := range job.Steps {
+			if strings.Contains(s.Run, "tools/dogfood") && strings.Contains(s.Run, "--mode pr") {
+				runsTheCheck = true
+			}
+		}
+		if !runsTheCheck {
+			continue
+		}
+		checked++
+
+		if job.Permissions["id-token"] != "write" {
+			t.Errorf("job %q runs the check and has no `id-token: write`, so the runner sets no "+
+				"identity variables, the job cannot prove what it is, and the check on every pull "+
+				"request says nothing was verified", name)
+		}
+		if job.Env["AF_CONTROL_PLANE"] == "" {
+			t.Errorf("job %q runs the check and names no AF_CONTROL_PLANE, so there is nowhere "+
+				"to report to and every route to the control plane is skipped", name)
+		}
+
+		wantsJSON, claims, publishes := false, false, false
+		for _, s := range job.Steps {
+			if strings.Contains(s.Run, "--report-json") {
+				wantsJSON = true
+			}
+			if strings.Contains(s.Run, "/v1/pr/callback-token") {
+				claims = true
+			}
+			if strings.Contains(s.Run, "/v1/pr/report") {
+				publishes = true
+			}
+		}
+		if !wantsJSON {
+			t.Errorf("job %q never asks for --report-json, so there are no counts to send and "+
+				"the only report is Markdown, which reading would be a parser for prose", name)
+		}
+		if !claims {
+			t.Errorf("job %q never asks for a callback credential, so the control plane is never "+
+				"told which of this repository's workflow runs is the one checking the commit", name)
+		}
+		if !publishes {
+			t.Errorf("job %q runs the whole product and posts to /v1/pr/report nowhere, so the "+
+				"result reaches a comment and the check hears nothing", name)
+		}
+
+		// AND THE FORK CASE, WHICH IS THE ONE THAT MUST NOT GO RED.
+		//
+		// GitHub withholds the workflow identity from a pull request opened
+		// from a fork, on purpose, and sets neither runner variable. A step
+		// under `set -u` that reads one of them bare aborts with "unbound
+		// variable" and exit 1, so the single case that has to degrade
+		// gracefully, an outside contributor who can fix nothing, would be the
+		// one case that fails. The step reads them through `:-` and says so
+		// instead. Proved rather than assumed: bash exits 1 on the bare read
+		// and 0 on the guarded one.
+		for _, st := range job.Steps {
+			if !strings.Contains(st.Run, "/v1/pr/callback-token") {
+				continue
+			}
+			if !strings.Contains(st.Run, "set -u") && !strings.Contains(st.Run, "set -euo") {
+				continue
+			}
+			for _, v := range []string{
+				"ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL",
+			} {
+				if strings.Contains(st.Run, "${"+v+"}") {
+					t.Errorf("job %q reads ${%s} bare under set -u, so a pull request from a "+
+						"fork, where GitHub sets neither, ends the step with an unbound "+
+						"variable and a red check nobody outside this repository can fix. "+
+						"Read it as ${%s:-} and say what happened", name, v, v)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no job in dogfood.yml runs the harness in pull request mode, so this test " +
+			"checked nothing. Either the job was renamed out from under it or the check is gone")
+	}
+}
+
+// The claim comes before the work, not beside the report.
+//
+// A run that introduces itself only at the end is a run the control plane
+// cannot name while it matters. For the whole twenty minutes the check would
+// read "Waiting for a runner" when a runner is plainly working, and a job that
+// dies at minute ten leaves an environment the control plane has no run id to
+// cancel, because the only route it has into the runtime holding that
+// environment is cancelling the workflow run.
+//
+// It is also what makes the control plane's side safe to tighten. A workflow
+// run that has not claimed cannot end a generation any more, so a late claim
+// would trade one silence for another.
+func TestTheClaimComesBeforeTheWork(t *testing.T) {
+	type step struct {
+		Run string `yaml:"run"`
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []step `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+
+	for name, job := range workflow.Jobs {
+		claimed, ran := -1, -1
+		for i, s := range job.Steps {
+			if claimed < 0 && strings.Contains(s.Run, "/v1/pr/callback-token") {
+				claimed = i
+			}
+			if ran < 0 && strings.Contains(s.Run, "tools/dogfood") &&
+				strings.Contains(s.Run, "--mode pr") {
+				ran = i
+			}
+		}
+		if claimed < 0 || ran < 0 {
+			continue
+		}
+		if claimed > ran {
+			t.Errorf("job %q claims its callback credential at step %d and runs the check at "+
+				"step %d, so the check reads as waiting for a runner while one is working and a "+
+				"run that dies leaves an environment nothing can name", name, claimed, ran)
+		}
+	}
+}
