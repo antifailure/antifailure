@@ -498,3 +498,184 @@ func TestTheNightlyMakesAGoldenBeforeItRunsThePipeline(t *testing.T) {
 	t.Error("no step in the nightly job refreshes a golden, so every leg reaches " +
 		"af ci with none and fails with AF-DB-012")
 }
+
+// Every leg can reach the source database its own manifest names.
+//
+// This is the question TestTheNightlyMakesAGoldenBeforeItRunsThePipeline above
+// is one step away from asking, and the gap between the two is a red nightly
+// that ran for its whole history. That test asks whether some step refreshes a
+// golden. A step that refreshes a golden and a step that can refresh a golden
+// are different claims, and the nightly satisfied the first while failing the
+// second on its most important leg: the job carried the `--refresh-golden`
+// flag, so the test passed, and carried neither the Postgres service nor the
+// AF_STAGING_DATABASE_URL that the repository's own manifest names, so the
+// refresh refused with AF-DB-016 before it copied a byte. `af ci` then had no
+// golden and reported that it had checked nothing, honestly, which is the only
+// reason anybody noticed.
+//
+// So this reads the manifests instead of the workflow's own vocabulary, and
+// asserts three things per leg:
+//
+//   - a manifest that names database.source_url_env has that variable set by
+//     the job that runs it, because job level env does not cross jobs and that
+//     is precisely how the nightly lost it;
+//   - the value names a loopback address, because the alternative is a public
+//     runner holding a route to a database that somebody's rows are in, and
+//     that is the single worst thing this repository could do;
+//   - a service container in the same job publishes the port the value names,
+//     because a variable pointing at nothing fails at connect time instead of
+//     with AF-DB-016 and is just as red.
+//
+// A manifest that names no source asserts nothing at all. Three of the four
+// legs are in that case today and need no Postgres, so widening this to "every
+// leg has a database" would be a check that enforces a habit rather than a
+// requirement.
+func TestEveryLegCanReachTheSourceItsManifestNames(t *testing.T) {
+	root := filepath.Join("..", "..")
+
+	type service struct {
+		Ports []string `yaml:"ports"`
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Env      map[string]string  `yaml:"env"`
+			Services map[string]service `yaml:"services"`
+			Strategy struct {
+				Matrix struct {
+					Manifest []string `yaml:"manifest"`
+				} `yaml:"matrix"`
+			} `yaml:"strategy"`
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	body, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "dogfood.yml"))
+	if err != nil {
+		t.Fatalf("could not read the workflow: %v", err)
+	}
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatalf("could not parse the workflow: %v", err)
+	}
+
+	// Which manifests a job runs, taken from the -C it passes rather than from
+	// a list here. A job that grew a leg without this test noticing would be
+	// the same defect one level up.
+	dashC := regexp.MustCompile(`-C\s+"?([^\s"\\]+)"?`)
+
+	checked := 0
+	for name, job := range workflow.Jobs {
+		var legs []string
+		for _, step := range job.Steps {
+			for _, m := range dashC.FindAllStringSubmatch(step.Run, -1) {
+				arg := m[1]
+				// The matrix value, however this job spells it.
+				if strings.Contains(arg, "matrix.manifest") || arg == "$MANIFEST" {
+					legs = append(legs, job.Strategy.Matrix.Manifest...)
+					continue
+				}
+				legs = append(legs, arg)
+			}
+		}
+
+		seen := map[string]bool{}
+		for _, leg := range legs {
+			if seen[leg] {
+				continue
+			}
+			seen[leg] = true
+
+			var m struct {
+				Database struct {
+					SourceURLEnv string `yaml:"source_url_env"`
+				} `yaml:"database"`
+			}
+			raw, err := os.ReadFile(filepath.Join(root, leg, "antifailure.yaml"))
+			if err != nil {
+				// Covered by TestTheNightlyCorpusIsEveryExample, which names
+				// the defect better than this test would.
+				continue
+			}
+			if err := yaml.Unmarshal(raw, &m); err != nil {
+				t.Errorf("%s: could not parse %s/antifailure.yaml: %v", name, leg, err)
+				continue
+			}
+			if m.Database.SourceURLEnv == "" {
+				// Builds its golden from nothing, which the engine does
+				// deliberately and reports. Nothing to supply.
+				continue
+			}
+			checked++
+
+			value, ok := job.Env[m.Database.SourceURLEnv]
+			if !ok || strings.TrimSpace(value) == "" {
+				t.Errorf("job %q runs %s, whose manifest names %s as the database to copy, "+
+					"and the job sets no value for it. The refresh will refuse with AF-DB-016 "+
+					"and af ci will then have no golden to branch, so this leg checks nothing. "+
+					"A job level env: block in another job does not reach this one.",
+					name, leg, m.Database.SourceURLEnv)
+				continue
+			}
+
+			host, port := hostPort(value)
+			if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+				t.Errorf("job %q points %s at host %q. Every leg of this workflow runs on a "+
+					"public runner, so the only database it may reach is one this job stood "+
+					"up itself. Copying a real customer's database here is the single worst "+
+					"thing this repository could do.", name, m.Database.SourceURLEnv, host)
+				continue
+			}
+			if port == "" {
+				t.Errorf("job %q sets %s to %q, which names no port, so nothing here can say "+
+					"what it reaches", name, m.Database.SourceURLEnv, value)
+				continue
+			}
+
+			published := false
+			for _, svc := range job.Services {
+				for _, p := range svc.Ports {
+					if strings.HasPrefix(p, port+":") || p == port {
+						published = true
+					}
+				}
+			}
+			if !published {
+				t.Errorf("job %q points %s at port %s and no service container in that job "+
+					"publishes it, so the refresh fails on connect rather than on AF-DB-016 "+
+					"and the leg is red either way", name, m.Database.SourceURLEnv, port)
+			}
+		}
+	}
+
+	// The assertion that keeps this test from passing by looking at nothing.
+	//
+	// Every branch above is a continue on a leg that needs no source, so a
+	// tree in which no manifest names one, or in which the -C parsing stopped
+	// matching the workflow's shape, would run zero comparisons and report
+	// success. That is the failure this whole file exists to argue against.
+	if checked == 0 {
+		t.Error("no leg of any job was found to name a source database, so this test " +
+			"compared nothing. Either every manifest dropped database.source_url_env, " +
+			"or the -C arguments in dogfood.yml stopped being readable here.")
+	}
+}
+
+// hostPort pulls the host and port out of a Postgres connection string without
+// requiring it to parse as a URL, because a workflow expression in the middle
+// of one is still a value this test has to be able to talk about.
+func hostPort(value string) (string, string) {
+	rest := value
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+3:]
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	if i := strings.IndexAny(rest, "/?"); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, ":"); i >= 0 {
+		return rest[:i], rest[i+1:]
+	}
+	return rest, ""
+}
