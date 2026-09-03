@@ -397,3 +397,105 @@ jobs:
             cat "$GITHUB_WORKSPACE/cost.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # THE FOURTH MODE, AND THE ONE THIS JOB DID NOT HAVE.
+      #
+      # Every step above plans STAGING. Production is a second var-file against
+      # a second state blob and nothing planned it, so the one environment
+      # Terraform could not manage was the one nothing checked. That gap is
+      # quiet by construction: deploys go out through `az containerapp update`
+      # in deploy/cd/deploy.sh rather than through Terraform, so production kept
+      # shipping normally for days while its stack could not be planned at all.
+      # A stack that cannot be planned is a stack nobody can change, and the
+      # settings that were merged and could not be applied were the ones that
+      # turn the operator portal on.
+      #
+      # IT LOOKS AT THE EXIT STATUS AND AT NOTHING ELSE. It does not review the
+      # diff and must not be read as reviewing it, because the inputs here are
+      # not the inputs an apply would use: alert_emails is a placeholder, so
+      # this plan always proposes an in-place change to the action group's
+      # receiver that no apply would ever make. A plan run with different inputs
+      # is a plan about a different desired state, which is the same reason the
+      # staging block pins ci_principal_id. Whether the plan SUCCEEDS is the one
+      # thing that does not depend on those inputs, and it is the whole question
+      # being asked.
+      #
+      # WHY IT NEEDS THE REAL STATE, measured rather than assumed. The failure
+      # this catches is a provider argument validator refusing a value it can
+      # never accept. Terraform SKIPS a validator whose value is unknown, and
+      # from an empty state every id in the plan is unknown, so the empty-state
+      # mode above plans the identical broken configuration clean and exits
+      # zero. Only a plan holding the recorded state has a known value to
+      # refuse. That is why this is gated on remote_state and not on a
+      # credential alone, and it is why "plan production from empty state too"
+      # would have been a check that could not say no.
+      #
+      # WHAT IT COSTS IN PERMISSION: nothing new. The same federated credential,
+      # the same storage account and container, one more blob key. -lock=false
+      # because the identity is Storage Blob Data READER and cannot take a
+      # lease, exactly as above. -refresh=false, and with that flag the only
+      # Azure call this plan makes is azurerm_client_config, which reads the
+      # caller's own identity and needs no role at all: every
+      # azurerm_key_vault_secret data source in the module is counted to zero
+      # under production.tfvars, so no secret is read and no role on
+      # af-cp-prod-centralus is required.
+      #
+      # LAST IN THE JOB ON PURPOSE. It re-initialises the backend against the
+      # production state, and every step above reads files the staging plan
+      # wrote. Running it earlier would leave those steps describing one
+      # environment from a directory pointed at the other, which is the exact
+      # confusion infra/ISOLATION.md warns about in this shared stack directory.
+      - name: production can still be planned
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        working-directory: infra/terraform/stacks/control-plane
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_github_client_id: plan-only
+          TF_VAR_github_client_secret: plan-only
+          TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          # Production refuses to plan with alerting on and no receiver, which
+          # is a deliberate validation and not something to work around: an
+          # action group with no receivers creates cleanly, attaches to every
+          # rule, reports healthy and tells nobody. A placeholder satisfies it
+          # so the check can reach the configuration behind it. Nothing is
+          # delivered to this address because nothing is applied from here.
+          TF_VAR_alert_emails: '["plan-only@example.invalid"]'
+        run: |
+          set -euo pipefail
+          terraform init -reconfigure -input=false \
+            -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=control-plane-production.tfstate" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="use_oidc=true"
+          # No -out, and the log goes to the runner's temp directory rather
+          # than into the stack. `terraform show -json` on a plan file includes
+          # the values of sensitive input variables and this plan has no reader,
+          # and a log written beside staging.tfvars is one more untracked file
+          # in a directory an operator also works in by hand.
+          log="$RUNNER_TEMP/production-plan.txt"
+          if terraform plan -input=false -lock=false -refresh=false \
+            -var-file=production.tfvars -no-color > "$log" 2>&1; then
+            echo "Production planned successfully. The diff above is staging's; this step read only the exit status." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=Production cannot be planned::terraform plan against production.tfvars and control-plane-production.tfstate failed. Until it passes, no change to this stack can be applied to production, including changes already merged. The failure is below."
+            {
+              echo
+              echo "### Production cannot be planned"
+              echo
+              echo 'This is not about the diff. `terraform plan -var-file=production.tfvars`'
+              echo 'exited non-zero, so production has no applyable plan at all.'
+              echo
+              echo '```'
+              tail -c 20000 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
