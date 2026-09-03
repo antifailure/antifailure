@@ -1242,6 +1242,23 @@ export function createServer(options: ServerOptions) {
       orgSlug: session.orgSlug,
       role: session.role,
       plan: session.plan,
+      // Whether THIS organization is the one operating this installation.
+      //
+      // The console is one static export served by every installation, so it
+      // cannot know at build time which organization that is, and the slug
+      // itself is not the console's business: naming it would tell every
+      // customer who operates the plane they are a tenant of. A boolean
+      // answers the only question a navigation menu has.
+      //
+      // Not a permission, deliberately. analytics.read is held by owners and
+      // admins of EVERY organization, because it describes a kind of reading
+      // rather than a right over this installation, and routers/analytics.ts
+      // refuses on the organization regardless of it. Without this field the
+      // console showed an installation-wide dashboard in every customer's
+      // sidebar and let them click through to a refusal.
+      analyticsOperator:
+        options.analyticsOperatorOrgSlug != null &&
+        session.orgSlug === options.analyticsOperatorOrgSlug,
       hostedRequiredPlan,
       hostedAccess: hasHostedAccess(session.plan, hostedRequiredPlan),
       githubAppInstallUrl: options.githubAppInstallUrl,

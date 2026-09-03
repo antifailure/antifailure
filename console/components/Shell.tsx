@@ -62,8 +62,26 @@ const NAV = [
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
   { href: "/cli", label: "Command line", Icon: IconTerminal },
-  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/settings", label: "Settings", Icon: IconSettings },
+];
+
+/**
+ * Analytics is not a customer's page and was in every customer's sidebar.
+ *
+ * The dashboard behind it covers the WHOLE installation: where people came
+ * from, where they landed, how far they got. `routers/analytics.ts` refuses
+ * anybody outside the organization named by AF_ANALYTICS_OPERATOR_ORG, so
+ * every tenant who clicked it got an error, and on an installation with that
+ * variable unset, so did the operator. A navigation entry that always leads to
+ * a refusal is worse than no entry.
+ *
+ * It is not gated on analytics.read. That permission is held by owners and
+ * admins of every organization, because it describes a kind of reading rather
+ * than a right over this installation. The session's `analyticsOperator` is
+ * the only field that answers the question the menu is actually asking.
+ */
+const OPERATOR_NAV = [
+  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
 ];
 
 /**
@@ -318,9 +336,13 @@ function SignOutButton() {
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const session = useSessionContext();
+  // Appended rather than merged into NAV, so the operator's one extra entry
+  // sits at the end and the order every customer sees never moves.
+  const items = session.data?.analyticsOperator ? [...NAV, ...OPERATOR_NAV] : NAV;
   return (
     <ul className="space-y-0.5">
-      {NAV.map(({ href, label, Icon }) => {
+      {items.map(({ href, label, Icon }) => {
         const active = pathname === href;
         return (
           <li key={href}>

@@ -38,6 +38,11 @@ export interface Session {
   selfServeSignup?: boolean;
   githubAppInstallUrl?: string;
   plan?: string | null;
+  /** Whether this organization is the one operating this installation. Absent
+   *  from an older control plane, which is read as false: showing an
+   *  installation-wide dashboard to a tenant is the failure this field exists
+   *  to end, so an unknown answer hides it rather than showing it. */
+  analyticsOperator?: boolean;
   hostedRequiredPlan?: string | null;
   hostedAccess?: boolean;
 }

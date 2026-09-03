@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
-import { may } from "@/lib/roles";
+import { permissionVerdict, type PermissionVerdict } from "@/lib/roles";
 import {
   Badge,
   Bar,
   Button,
   Card,
+  CardSkeleton,
   CommandBlock,
   Empty,
   LinkButton,
@@ -285,12 +286,29 @@ function ForCI({ origin }: { origin: string | null }) {
  * engine token is a secret somebody pasted into a build machine. Revoking
  * either takes effect on the next request, since every route re-reads the row.
  */
-function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
+function Tokens({ verdict, csrf }: { verdict: PermissionVerdict; csrf: string }) {
   const state = useApi<TokenRow[]>(() => query<TokenRow[]>("tokens.list"), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!mayManage) {
+  // Only a resolved session decides this. While it is loading, a refusal here
+  // reads as "your role was checked and found wanting", which is a sentence
+  // about a role nobody has read yet.
+  if (verdict === "loading") {
+    return <CardSkeleton count={1} />;
+  }
+  if (verdict === "unavailable") {
+    return (
+      <Card title="Terminals and tokens">
+        <p className="max-w-[74ch] px-4 py-4 text-[13px] leading-6 text-muted">
+          This session could not be read, so which machines can act as this
+          organization is not known here. Signing your own terminal in above
+          still works.
+        </p>
+      </Card>
+    );
+  }
+  if (verdict === "refused") {
     return (
       <Card title="Terminals and tokens">
         <p className="max-w-[74ch] px-4 py-4 text-[13px] leading-6 text-muted">
@@ -430,7 +448,7 @@ export default function CliPage() {
         <SignIn origin={origin} />
         <FirstRun />
         <ForCI origin={origin} />
-        <Tokens mayManage={may(role, "tokens.manage")} csrf={csrf} />
+        <Tokens verdict={permissionVerdict(session.status, role, "tokens.manage")} csrf={csrf} />
       </div>
     </Page>
   );
