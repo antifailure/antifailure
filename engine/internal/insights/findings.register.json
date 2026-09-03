@@ -1,0 +1,73 @@
+{
+  "note": "Every lint finding identifier this repository has ever assigned. Appended to by tools/lintgen and never rewritten by it. tools/lintcheck fails when an identifier listed here is missing from engine/internal/insights/lintcatalog.yaml, which is what makes the identifier stable rather than merely intended to be.",
+  "assigned": [
+    {
+      "id": "LINT-001",
+      "first_named": "no_lock_timeout"
+    },
+    {
+      "id": "LINT-002",
+      "first_named": "not_null_without_default"
+    },
+    {
+      "id": "LINT-003",
+      "first_named": "set_not_null_existing_column"
+    },
+    {
+      "id": "LINT-004",
+      "first_named": "alter_column_type"
+    },
+    {
+      "id": "LINT-005",
+      "first_named": "index_not_concurrent"
+    },
+    {
+      "id": "LINT-006",
+      "first_named": "drop_index_not_concurrent"
+    },
+    {
+      "id": "LINT-007",
+      "first_named": "reindex_not_concurrent"
+    },
+    {
+      "id": "LINT-008",
+      "first_named": "foreign_key_not_valid"
+    },
+    {
+      "id": "LINT-009",
+      "first_named": "check_constraint_not_valid"
+    },
+    {
+      "id": "LINT-010",
+      "first_named": "unique_constraint_builds_index"
+    },
+    {
+      "id": "LINT-011",
+      "first_named": "backfill_in_ddl_transaction"
+    },
+    {
+      "id": "LINT-012",
+      "first_named": "rename_column_in_use"
+    },
+    {
+      "id": "LINT-013",
+      "first_named": "drop_column_in_view"
+    },
+    {
+      "id": "LINT-014",
+      "first_named": "vacuum_full"
+    },
+    {
+      "id": "LINT-015",
+      "first_named": "cluster"
+    },
+    {
+      "id": "LINT-016",
+      "first_named": "drop_table"
+    },
+    {
+      "id": "LINT-017",
+      "first_named": "truncate"
+    }
+  ]
+}

@@ -67,6 +67,7 @@ gate: _reports
     run "release notes exist for the tag" just relnotes
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
+    run "lint findings keep their ids"   just lintcheck
     run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -447,6 +448,16 @@ fmt-check:
 # Every error code is documented and every documented code is reachable.
 errcheck:
     go run ./tools/errcheck .
+
+# Every lint finding has an identifier, and every identifier ever handed out is
+# still spoken for.
+#
+# The rule name is prose and moves as the rules sharpen. The number does not,
+# and this is what keeps that true: a rule with no entry, an entry for a rule
+# that is gone, and an identifier that has left the catalogue since it was
+# registered are all failures here.
+lintcheck:
+    go run ./tools/lintcheck .
 
 # The Go packages version 1 promised, and the ones it deliberately did not.
 # Also the leak that makes the difference meaningless: a stable signature
@@ -1034,6 +1045,7 @@ _generated:
     #!/usr/bin/env bash
     set -euo pipefail
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
@@ -1056,6 +1068,10 @@ _generated:
       www/public/errors.v1.json \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
+      www/public/lint-findings.v1.json \
+      engine/internal/insights/findings.gen.go \
+      engine/internal/insights/findings.register.json \
+      docs/src/content/docs/reference/lint-findings.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/mockpack-vectors.json \
@@ -1070,6 +1086,7 @@ _generated:
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
