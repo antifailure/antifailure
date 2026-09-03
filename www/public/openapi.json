@@ -7325,12 +7325,6 @@
                       "enterprise"
                     ]
                   },
-                  "seats": {
-                    "default": 1,
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000
-                  },
                   "successUrl": {
                     "type": "string",
                     "format": "uri"

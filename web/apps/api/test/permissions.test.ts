@@ -111,7 +111,7 @@ function inputsFor(org: Org): Record<string, unknown> {
     'subscriptions.current': {},
     'subscriptions.invoices': { limit: 10 },
     'subscriptions.checkout': {
-      plan: 'team', seats: 1,
+      plan: 'team',
       successUrl: 'https://app.test/billing/done',
       cancelUrl: 'https://app.test/billing',
     },

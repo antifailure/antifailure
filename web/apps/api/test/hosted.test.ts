@@ -242,7 +242,6 @@ describe('enterprise-only hosted access', { skip: hasDatabase ? false : 'no Post
   it('leaves Stripe checkout reachable because it is how the gate is resolved', async () => {
     const wrongPlan = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'team',
-      seats: 1,
       successUrl: 'https://app.test/plan?checkout=success',
       cancelUrl: 'https://app.test/plan',
     })
@@ -250,7 +249,6 @@ describe('enterprise-only hosted access', { skip: hasDatabase ? false : 'no Post
 
     const checkout = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'enterprise',
-      seats: 1,
       successUrl: 'https://app.test/plan?checkout=success',
       cancelUrl: 'https://app.test/plan',
     })

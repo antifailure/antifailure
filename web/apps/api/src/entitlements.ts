@@ -140,6 +140,17 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
     kind: 'number',
     unit: 'seats',
     description: 'Members and open invitations together.',
+    // THE ONLY SOURCE OF TRUTH FOR HOW MANY MEMBERS A PLAN MAY HOLD.
+    //
+    // Per plan, and per plan is the whole design. A subscription row carries a
+    // `quantity` that Stripe reported, and nothing in this file reads it: it is
+    // a record of what was billed, not a grant. Checkout sends no quantity at
+    // all, so there is no purchased number for it to disagree with. The
+    // alternative, where a quantity somebody typed at checkout raised the
+    // limit, is what shipped first and it charged per unit for a limit that
+    // never moved. test/entitlements.test.ts holds this: the same plan resolves
+    // to the same number whatever the subscription row says.
+    //
     // Not derived, because there was no seat limit before this. The numbers
     // are the environment quota's shape: generous enough that no honest team
     // meets them by accident, present so that a seat sold is a seat counted.

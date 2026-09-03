@@ -135,7 +135,16 @@ export const subscriptionsRouter = router({
     .input(
       z.object({
         plan: z.enum(['team', 'enterprise']),
-        seats: z.number().int().min(1).max(1000).default(1),
+        // NO SEAT COUNT, and its absence is the fix for a real defect.
+        //
+        // This took `seats` between one and a thousand and passed it to Stripe
+        // as the line item quantity, so the price multiplied by it. Nothing
+        // read it back: `entitlements.ts` decides how many members a plan holds
+        // from a per plan constant and never looks at the subscription. An
+        // organization that bought three seats on `team` got fifty, and one
+        // that bought two hundred also got fifty, at two hundred times the
+        // price. What is sold is one hosted control plane per organization at a
+        // flat fee, so there is no number here for a price to multiply.
         /** Where Stripe sends the browser afterwards. Both are required rather
          *  than defaulted, because a default that pointed at the wrong
          *  deployment would land somebody who has just paid on a stranger's
@@ -200,7 +209,6 @@ export const subscriptionsRouter = router({
         .createCheckoutSession({
           customerId,
           priceId,
-          quantity: input.seats,
           orgId: c.actor.orgId,
           successUrl: input.successUrl,
           cancelUrl: input.cancelUrl,
@@ -216,7 +224,7 @@ export const subscriptionsRouter = router({
           targetId: c.actor.orgId,
           // No card, no amount, no session secret. What an auditor needs is who
           // started buying what, and when.
-          detail: { plan: input.plan, seats: input.seats, session: session.id },
+          detail: { plan: input.plan, session: session.id },
         })
       })
       return { url: session.url, sessionId: session.id }

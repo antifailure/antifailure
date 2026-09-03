@@ -669,7 +669,22 @@ export const subscriptions = pgTable('subscriptions', {
   /** The plan this entitles, which is what moves organizations.plan. */
   plan: text('plan').notNull(),
   priceId: text('price_id'),
-  /** Seats. The only number a price multiplies. */
+  /**
+   * What Stripe reported as the subscription item's quantity. A RECORD, never
+   * a grant.
+   *
+   * The comment in migrations/0020_billing.sql calls this "the seat count" and
+   * cannot be corrected there, because a migration that already ran is
+   * digested and editing one breaks every database that applied it. This is the
+   * correction. Nothing this control plane sells has a quantity: checkout sends
+   * Stripe none, and how many members a plan may hold is a per plan constant in
+   * apps/api/src/entitlements.ts. The column is kept because Stripe puts a
+   * quantity on every subscription object, and an operator reconciling an
+   * invoice needs to see what was billed. It is displayed by the admin money
+   * screen, the billing summary and the organization export, and read by no
+   * entitlement or quota; apps/api/test/entitlements.test.ts fails if one
+   * starts.
+   */
   quantity: integer('quantity').notNull().default(1),
   status: text('status').notNull(),
   currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),

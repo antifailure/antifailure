@@ -466,7 +466,16 @@ export async function buildExport(
       subscriptions: subscriptions.map((s) => ({
         plan: s.plan,
         status: s.status,
-        seats: s.quantity,
+        // `stripeQuantity`, not `seats`, and the rename is a correction.
+        //
+        // This said `seats`, which told the reader their subscription had
+        // bought them that many members. It never did: how many members an
+        // organization may hold comes from its PLAN, in entitlements.ts, and
+        // this column only records the quantity Stripe reported. An export is
+        // the document a customer takes to somebody else, so a field in it that
+        // states a limit the product does not enforce is the worst place in the
+        // codebase for that sentence to be.
+        stripeQuantity: s.quantity,
         periodStart: iso(s.current_period_start),
         periodEnd: iso(s.current_period_end),
         cancelAtPeriodEnd: s.cancel_at_period_end,

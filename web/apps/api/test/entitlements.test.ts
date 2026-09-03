@@ -14,6 +14,7 @@
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,6 +39,11 @@ import {
 } from './harness.ts'
 
 const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src')
+
+/** entitlements.ts as text, for the assertion that it reads no subscription
+ *  quantity. Text rather than imports, because the claim is about the whole
+ *  file and not about the handful of symbols this test happens to import. */
+const entitlementsSource = await readFile(path.join(srcDir, 'entitlements.ts'), 'utf8')
 
 // ---------------------------------------------------------------------------
 // The catalogue's own claim
@@ -505,5 +511,160 @@ describe('seats are enforced where they can be refused', async () => {
       email: 'seat-over@example.test', role: 'member',
     })
     assert.equal(errorCode(allowed.body), null, JSON.stringify(allowed.body))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The purchased quantity, which entitles nothing.
+//
+// THE DEFECT THIS EXISTS FOR. Checkout took a `seats` number between one and a
+// thousand and passed it to Stripe as the line item quantity, so the price
+// multiplied by it. Nothing ever read it back. The seat limit is a per plan
+// constant here and always was, so an organization that bought three seats on
+// `team` got fifty, and an organization that bought two hundred also got fifty,
+// at two hundred times the price.
+//
+// Checkout no longer sends a quantity, and test/billing.test.ts holds that. The
+// subscription row still records the quantity Stripe reported, because Stripe
+// reports one and an operator reconciling an invoice needs to see it. This is
+// the guard on the other half: that the recorded number stays a RECORD. Both
+// directions are asserted, because a quantity wired back in could plausibly be
+// read as either a floor or a ceiling and only one of these would catch each:
+//
+//   plan free, quantity 200   the limit stays 5, so a purchase cannot RAISE it
+//   plan team, quantity 3     the limit stays 50, so a purchase cannot LOWER it
+//
+// Both go through invitations.create, which is a call site that can refuse, for
+// the reason at the top of this file: an assertion about a resolver that no
+// route consults would pass just as well if nothing enforced anything.
+// ---------------------------------------------------------------------------
+
+describe('a subscription quantity is a record of what was billed, not a grant', async () => {
+  if (!(await available())) {
+    it('skipped: no database', () => {})
+    return
+  }
+
+  let h: ApiHarness
+
+  before(async () => {
+    h = await startApi()
+  })
+
+  after(async () => {
+    await h.close()
+  })
+
+  /**
+   * An organization on `plan`, with a live subscription row recording
+   * `quantity`, and its owner signed in.
+   *
+   * The row is written directly rather than bought, because the point is a
+   * quantity that no longer has any way to be created through checkout. A
+   * subscription sold before that change is exactly this row, and it is the
+   * case that has to keep resolving to its plan's number.
+   */
+  async function orgHolding(
+    label: string,
+    plan: string,
+    quantity: number,
+  ): Promise<{ org: Org; owner: SignedIn }> {
+    // Fresh Stripe ids per run. A fixed `cus_qtylow` survives any run that
+    // failed before its cleanup, and `billing_customers.stripe_customer_id` is
+    // unique, so the NEXT run dies on a duplicate key in its fixture and
+    // reports a failure that has nothing to do with what it tests. This suite
+    // did exactly that once.
+    const unique = `${label}${randomUUID().slice(0, 8).replaceAll('-', '')}`
+    const org = await seedOrg(h.admin, label)
+    await h.admin`UPDATE organizations SET plan = ${plan} WHERE id = ${org.orgId}`
+    await h.admin`
+      INSERT INTO billing_customers (org_id, stripe_customer_id, email)
+      VALUES (${org.orgId}, ${`cus_${unique}`}, 'billing@example.test')`
+    await h.admin`
+      INSERT INTO subscriptions (
+        org_id, stripe_subscription_id, stripe_customer_id, plan, status, quantity, last_event_at)
+      VALUES (${org.orgId}, ${`sub_${unique}`}, ${`cus_${unique}`}, ${plan}, 'active',
+              ${quantity}, now())`
+    // The row says what the test needs it to say before anything reads it. A
+    // quantity that silently failed to insert would make every assertion below
+    // pass against a default of 1, which is the shape of check that proves
+    // nothing.
+    const [row] = await h.admin<{ quantity: number }[]>`
+      SELECT quantity FROM subscriptions WHERE org_id = ${org.orgId}`
+    assert.equal(row!.quantity, quantity, 'the subscription row was not written with that quantity')
+    return { org, owner: await signInAs(h, org, 'owner') }
+  }
+
+  async function cleanUp(orgId: string): Promise<void> {
+    await h.admin`DELETE FROM subscriptions WHERE org_id = ${orgId}`
+    await h.admin`DELETE FROM billing_customers WHERE org_id = ${orgId}`
+    await dropOrg(h.admin, orgId)
+  }
+
+  it('a quantity of two hundred does not raise a five seat plan', async () => {
+    const { org, owner } = await orgHolding('qtyhigh', 'free', 200)
+
+    // Free is five, and the owner is one of them, so four invitations fit.
+    for (let i = 0; i < 4; i += 1) {
+      const ok = await callProcedure(h, owner, 'invitations.create', 'mutation', {
+        email: `high-${i}@example.test`, role: 'member',
+      })
+      assert.equal(errorCode(ok.body), null, `invitation ${i} was refused: ${JSON.stringify(ok.body)}`)
+    }
+
+    const refused = await callProcedure(h, owner, 'invitations.create', 'mutation', {
+      email: 'high-over@example.test', role: 'member',
+    })
+    assert.equal(
+      errorCode(refused.body), 'PRECONDITION_FAILED',
+      'a recorded quantity of 200 bought a sixth seat on a five seat plan',
+    )
+    assert.match(
+      JSON.stringify(refused.body), /5 of 5 seats/,
+      'the refusal did not come from the plan number',
+    )
+
+    await cleanUp(org.orgId)
+  })
+
+  it('a quantity of three does not lower a fifty seat plan', async () => {
+    const { org, owner } = await orgHolding('qtylow', 'team', 3)
+
+    // Three would have stopped this at the third. Team is fifty.
+    for (let i = 0; i < 6; i += 1) {
+      const ok = await callProcedure(h, owner, 'invitations.create', 'mutation', {
+        email: `low-${i}@example.test`, role: 'member',
+      })
+      assert.equal(
+        errorCode(ok.body), null,
+        `invitation ${i} was refused on a fifty seat plan: ${JSON.stringify(ok.body)}`,
+      )
+    }
+
+    await cleanUp(org.orgId)
+  })
+
+  it('the seat catalogue entry is per plan, with no path to a subscription', () => {
+    // The structural half. The two tests above prove the behaviour at a route;
+    // this one names the reason it holds, so that wiring a quantity in has to
+    // pass a line that says not to.
+    const seats = ENTITLEMENTS.seats!
+    assert.deepEqual(seats.byPlan, { free: 5, team: 50, enterprise: 1000 })
+
+    // entitlements.ts must not read a quantity at all. Read as text, so the
+    // assertion covers the whole file rather than the exports it happens to
+    // import, and negative-controlled below so a renamed file cannot pass it.
+    assert.ok(entitlementsSource.length > 1000, 'entitlements.ts did not load, so this proves nothing')
+    // Any occurrence, not a word-bounded one. `\bquantity\b` misses
+    // `seatQuantity` and `subQuantity`, because a word boundary needs a
+    // non-word character before the q and camelCase has none. Checked by
+    // breaking it both ways: `sub.quantity` failed the bounded version and
+    // `brokenQuantity` passed it. This form says no to both.
+    assert.equal(
+      /quantity/i.test(entitlementsSource.replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')),
+      false,
+      'entitlements.ts now reads a quantity. A number somebody typed at checkout must ' +
+        'not decide what a plan allows: that is the defect this file was corrected for.',
+    )
   })
 })
