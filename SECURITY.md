@@ -154,9 +154,8 @@ because govulncheck reads Go modules and stops there, and every `npm ci` in CI
 passes `--no-audit`, so the half of this repository that faces the internet had
 no advisory check at all. One caveat that is not true of the Go scanner: npm
 audit has no reachability analysis, so an entry in `.npmaudit.yaml` argues from
-how a package is used rather than from a call graph. One gap: `runner/` has
-dependencies and no lockfile, so nothing resolves its tree, and the tool reports
-that on every run rather than skipping it quietly.
+how a package is used rather than from a call graph. All eight lockfiles are
+covered, including the runner's.
 
 **Release artifacts.** Built with `-trimpath` and CGO disabled from the tagged
 commit, by `tools/release/build.sh`, which is the one copy of the build that

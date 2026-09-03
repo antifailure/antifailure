@@ -2,7 +2,7 @@
 // holds the result to a policy, the way tools/vulncheck does for Go.
 //
 // THE GAP THIS CLOSES. govulncheck covers the Go modules and nothing covered
-// the JavaScript. Seven lockfiles ship here, one of them the control plane that
+// the JavaScript. Eight lockfiles ship here, one of them the control plane that
 // holds organizations, policy and billing, and every `npm ci` in
 // .github/workflows/ci.yml passes --no-audit. So the half of this repository
 // that is exposed to the internet had no dependency advisory check at all,
@@ -29,8 +29,8 @@
 // skipped. npm audit cannot speak for a tree it cannot resolve, and a check that
 // quietly leaves one project out is the shape of assertion this repository has
 // been caught by before: scoped to a collection that excludes the casualty, it
-// passes forever and discovers nothing. Today that is runner, which is installed
-// with `npm install` rather than `npm ci` and has no lockfile to audit.
+// passes forever and discovers nothing. Runner used to be that project. It has
+// its own lockfile now and is audited with the other seven.
 package main
 
 import (
@@ -80,6 +80,7 @@ type allowEntry struct {
 type report struct {
 	AuditReportVersion *int                   `json:"auditReportVersion"`
 	Vulnerabilities    map[string]packageVuln `json:"vulnerabilities"`
+	Message            string                 `json:"message"`
 	Error              *npmError              `json:"error"`
 }
 
@@ -321,7 +322,7 @@ func parse(stdout []byte, project string, runErr error, stderr string) ([]*findi
 		return nil, fmt.Errorf("%s: npm audit printed something that is not a report: %w\n%s", project, err, trim(stderr))
 	}
 	if rep.Error != nil {
-		return nil, fmt.Errorf("%s: npm audit refused: %s %s\n%s", project, rep.Error.Code, rep.Error.Summary, rep.Error.Detail)
+		return nil, npmRefusal(project, &rep, runErr, stderr)
 	}
 	if rep.AuditReportVersion == nil {
 		if runErr != nil {
@@ -358,6 +359,37 @@ func parse(stdout []byte, project string, runErr error, stderr string) ([]*findi
 		}
 	}
 	return findings, nil
+}
+
+// npmRefusal keeps every diagnostic channel npm uses for an audit endpoint
+// failure. npm 11 writes the useful network failure into the root message,
+// then adds an error object whose code, summary and detail are all empty. Older
+// releases put the useful fields inside error. The process error and stderr are
+// independent evidence and must not disappear merely because stdout was JSON.
+func npmRefusal(project string, rep *report, runErr error, stderr string) error {
+	var lines []string
+	nested := []string{trim(rep.Error.Code), trim(rep.Error.Summary), trim(rep.Error.Detail)}
+	var fields []string
+	for _, field := range nested {
+		if field != "" {
+			fields = append(fields, field)
+		}
+	}
+	if len(fields) == 0 {
+		lines = append(lines, "npm supplied no error code, summary, or detail")
+	} else {
+		lines = append(lines, strings.Join(fields, " "))
+	}
+	if message := trim(rep.Message); message != "" {
+		lines = append(lines, "npm message: "+message)
+	}
+	if runErr != nil {
+		lines = append(lines, "process error: "+runErr.Error())
+	}
+	if diagnostic := trim(stderr); diagnostic != "" {
+		lines = append(lines, "stderr: "+diagnostic)
+	}
+	return fmt.Errorf("%s: npm audit refused: %s", project, strings.Join(lines, "\n"))
 }
 
 // identifier is the GHSA id out of the advisory URL, because that is the name a

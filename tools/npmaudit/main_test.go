@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,9 +82,8 @@ func TestACleanReportIsNoFindings(t *testing.T) {
 }
 
 // npm exits non-zero both when it finds advisories and when it cannot run, so
-// the two have to be told apart by whether a report came back. ENOLOCK is the
-// one this repository will actually meet: runner/ has dependencies and no
-// lockfile.
+// the two have to be told apart by whether a report came back. ENOLOCK is a
+// stable refusal shape that exercises the older nested fields.
 func TestNpmRefusingIsAnErrorAndNotAnEmptyReport(t *testing.T) {
 	const enolock = `{"error":{"code":"ENOLOCK","summary":"This command requires an existing lockfile.","detail":"Try creating one first"}}`
 	_, err := parse([]byte(enolock), "runner", nil, "")
@@ -92,6 +92,31 @@ func TestNpmRefusingIsAnErrorAndNotAnEmptyReport(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ENOLOCK") || !strings.Contains(err.Error(), "runner") {
 		t.Fatalf("the error should name the project and npm's code: %v", err)
+	}
+}
+
+// npm 11 emits audit endpoint failures in this shape: the useful message is at
+// the root and the nested error fields are empty. Every channel is asserted in
+// its own subtest so removing any one production line turns a named assertion
+// red rather than stopping before the later checks run.
+func TestNpmElevenRefusalKeepsEveryDiagnosticChannel(t *testing.T) {
+	const body = `{"message":"request to the audit endpoint timed out","error":{"code":"","summary":"","detail":""}}`
+	_, err := parse([]byte(body), "api", errors.New("exit status 1"), "registry closed the connection")
+	if err == nil {
+		t.Fatal("npm's refusal was accepted")
+	}
+	message := err.Error()
+	for name, want := range map[string]string{
+		"empty nested fields": "npm supplied no error code, summary, or detail",
+		"root message":        "request to the audit endpoint timed out",
+		"process error":       "process error: exit status 1",
+		"stderr":              "stderr: registry closed the connection",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(message, want) {
+				t.Fatalf("error does not contain %q:\n%s", want, message)
+			}
+		})
 	}
 }
 
