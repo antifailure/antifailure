@@ -25,7 +25,8 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { available, startApi, type ApiHarness } from './harness.ts'
+import postgres from 'postgres'
+import { adminUrl, available, startApi, type ApiHarness } from './harness.ts'
 import { rollUp } from '../src/analytics/rollup.ts'
 
 const hasDatabase = await available()
@@ -248,15 +249,15 @@ describe(
       )
     })
 
-    it('concurrent: three rollups at once, one does the work and the count is right', async () => {
+    it('concurrent: three rollups at once, and none of them crashes the pass', async () => {
       // THE ORDERING THAT FOUND A REAL DEFECT. Every replica runs the
       // maintenance pass, and runs it once immediately on start, so on a
       // deployment with two replicas two rollups begin within milliseconds of
-      // each other on every deploy. recomputeDay is a DELETE and an INSERT in
-      // one transaction, which is right for one writer and a race for two: the
-      // second insert failed on the primary key and took the whole maintenance
-      // pass down with it. The dashboard would then stop updating while a line
-      // went into a log.
+      // each other on every deploy. Each day recompute is a DELETE and an
+      // INSERT in one transaction, which is right for one writer and a race
+      // for two: the second insert failed on the primary key and took the
+      // whole maintenance pass down with it. The dashboard would then stop
+      // updating while a line went into a log.
       //
       // Three rather than two, because the lock has to hold under more than
       // the one contender the fix was written against.
@@ -264,24 +265,44 @@ describe(
       await send(batch(run, 5, h.clock.now(), 'other'))
 
       const results = await Promise.all([roll(), roll(), roll()])
-      const ran = results.filter((r) => r.ran)
-      assert.equal(ran.length, 1, 'more than one rollup did the work at the same time')
+      for (const r of results) assert.deepEqual(r.days, [today()])
       assert.equal(await counted(today(), 'other'), 5, 'concurrent rollups moved the count')
+    })
 
-      // And the ones that skipped said so, rather than reporting an empty day.
-      for (const skipped of results.filter((r) => !r.ran)) {
-        assert.deepEqual(skipped.days, [])
-        assert.equal(skipped.rows, 0)
+    it('runs on the one connection the maintenance pass gives it', async () => {
+      // THE DEADLOCK THIS RULES OUT, which every other case here missed because
+      // a test harness pool is wider than one.
+      //
+      // maintenance.ts opens its admin pool with `max: 1`, which is right for a
+      // pass that does one thing at a time. The rollup reserves a connection
+      // from that pool to hold its advisory lock, so any statement it then sent
+      // to the POOL would wait for the connection it is itself holding. The
+      // symptom is not a slow rollup: it is a maintenance pass that never
+      // returns, on a control plane whose analytics quietly stop, and in CI it
+      // was a job cancelled at its timeout.
+      //
+      // A pool of exactly one, which is the shape production uses.
+      const narrow = postgres(adminUrl, { max: 1, onnotice: () => {} })
+      try {
+        const result = await Promise.race([
+          rollUp(narrow, h.clock, { lookbackDays: 1 }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('the rollup never returned on a pool of one')), 30_000),
+          ),
+        ])
+        assert.deepEqual(result.days, [today()])
+      } finally {
+        await narrow.end({ timeout: 5 })
       }
     })
 
-    it('and the lock is released, so the next pass rolls up rather than skipping forever', async () => {
-      // The failure a try-lock invites: taken on a reserved connection and
-      // never given back, so every rollup after the first silently does
-      // nothing and the dashboard freezes at whatever it last said. That is a
-      // worse outcome than the crash it replaced, because nothing reports it.
+    it('and the lock is given back, so the next pass is not waiting on the last one', async () => {
+      // The failure a lock invites: taken and never released, so every rollup
+      // after the first blocks forever and the dashboard freezes at whatever it
+      // last said. Postgres releases a transaction scoped lock at COMMIT, and
+      // this is the case that says so rather than assuming it.
       const after = await roll()
-      assert.equal(after.ran, true, 'the rollup lock was never released')
+      assert.deepEqual(after.days, [today()])
       assert.equal(await counted(today(), 'other'), 5)
     })
   },

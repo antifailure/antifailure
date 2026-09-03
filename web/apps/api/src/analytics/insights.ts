@@ -40,6 +40,7 @@
 
 import type postgres from 'postgres'
 import { CATALOG, FUNNEL_DEFINITIONS, type FunnelDefinition } from './catalog.ts'
+import { TAKE_ROLLUP_LOCK } from './lock.ts'
 
 /**
  * The windows a distinct count is kept for.
@@ -107,6 +108,8 @@ export interface InsightResult {
  */
 export async function recomputeSubjectDays(admin: postgres.Sql, day: string): Promise<number> {
   return admin.begin(async (tx) => {
+    // One writer at a time, for the reason in lock.ts.
+    await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`DELETE FROM analytics_subject_days WHERE day = ${day}::date`
     const inserted = await tx`
       INSERT INTO analytics_subject_days (subject_kind, subject, name, day, events, computed_at)
@@ -152,6 +155,8 @@ export async function recomputeSubjectDays(admin: postgres.Sql, day: string): Pr
 export async function recomputeActives(admin: postgres.Sql, day: string): Promise<number> {
   const windows = [...ACTIVE_WINDOWS]
   return admin.begin(async (tx) => {
+    // One writer at a time, for the reason in lock.ts.
+    await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`DELETE FROM analytics_actives WHERE day = ${day}::date`
     const inserted = await tx`
       INSERT INTO analytics_actives (day, window_days, subject_kind, name, subjects, computed_at)
@@ -206,6 +211,8 @@ export async function recomputeRetention(
   const oldest = dayString(new Date(today.getTime() - RETENTION_WEEKS * 7 * 86_400_000))
 
   const rows = await admin.begin(async (tx) => {
+    // One writer at a time, for the reason in lock.ts.
+    await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`DELETE FROM analytics_retention_cohorts WHERE subject_kind = 'organization'`
     const inserted = await tx`
       INSERT INTO analytics_retention_cohorts (subject_kind, cohort_week, weeks_later, subjects, computed_at)
@@ -335,6 +342,8 @@ async function recomputeOneFunnel(
     GROUP BY 2, 3`
 
   return admin.begin(async (tx) => {
+    // One writer at a time, for the reason in lock.ts.
+    await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`
       DELETE FROM analytics_funnel_weeks
       WHERE funnel = ${funnel.id} AND entered_week >= ${fromDay}::date`

@@ -64,10 +64,6 @@ export interface MaintenanceRun {
   pruned: number
   /** Days of analytics recomputed by the rollup. */
   rolledUp: string[]
-  /** True when another process held the rollup lock, so this pass did not roll
-   *  up. Reported rather than silent, because no days rolled and no days to
-   *  roll look identical in a log and only one of them is worth acting on. */
-  rollupSkipped: boolean
   /** Raw analytics events deleted by retention. */
   analyticsPruned: number
 }
@@ -171,7 +167,6 @@ export async function runMaintenance(
       archived,
       pruned,
       rolledUp: rolled.days,
-      rollupSkipped: !rolled.ran,
       analyticsPruned: rolled.pruned,
     }
   } finally {
@@ -204,9 +199,7 @@ export function startMaintenance(
       if (run.archived.length) log(`archived partitions: ${run.archived.join(', ')}`)
       if (run.dropped.length) log(`dropped partitions: ${run.dropped.join(', ')}`)
       if (run.pruned) log(`pruned ${run.pruned} late events past the retention`)
-      if (run.rollupSkipped) {
-        log('another process is rolling up analytics, so this pass did not')
-      } else if (run.rolledUp.length) {
+      if (run.rolledUp.length) {
         log(`rolled up analytics for ${run.rolledUp.join(', ')}`)
       }
       if (run.analyticsPruned) {
