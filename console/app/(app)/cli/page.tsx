@@ -201,6 +201,83 @@ function FirstRun() {
 }
 
 /**
+ * The credential CI needs, which is a different credential and is deliberately
+ * not mintable from here.
+ *
+ * `POST /v1/tokens` answers a bearer token and has no cookie path at all, so no
+ * screen in this console can reach it. That is the design rather than a gap:
+ * the mint produces a credential, so it is gated on a terminal already holding
+ * one that was approved for `tokens.manage` by name, on a screen that showed
+ * the words. A browser session that could mint would be a credential factory
+ * behind a cookie.
+ *
+ * What was missing was anybody being told. The two commands are the only way to
+ * get a token into CI, `af token --help` has always said so, and nothing a
+ * person could see while thinking "how do I put this in my pipeline" mentioned
+ * either of them.
+ */
+function ForCI({ origin }: { origin: string | null }) {
+  const plane = origin === null || origin === HOSTED ? "" : ` --control-plane ${origin}`;
+  return (
+    <Card
+      title="Wire it into CI"
+      note="Only where GitHub cannot vouch for the job. A different credential, and it comes last."
+    >
+      <div className="space-y-5 px-4 py-4">
+        <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+          A GitHub Actions job needs none of this. Give the job{" "}
+          <code className="font-mono">permissions: id-token: write</code> and the
+          engine trades the identity GitHub signs for that job for a short lived
+          credential of its own, so nothing is stored in your repository and
+          nothing has to be rotated. What follows is for an engine running
+          somewhere GitHub will not vouch for it: a self hosted runner outside
+          Actions, another CI system, or a machine that is nobody&rsquo;s laptop.
+        </p>
+        <div className="space-y-2">
+          {plane === "" && origin === null ? (
+            <div className="flex items-center gap-3" aria-hidden>
+              <div className="min-w-0 flex-1 rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5">
+                <Bar className="h-4 w-[28ch] max-w-full" />
+              </div>
+            </div>
+          ) : (
+            <CommandBlock
+              command={`af login --scope tokens.manage${plane}`}
+              said="Scoped sign-in command copied to the clipboard"
+            />
+          )}
+          <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+            Minting is a capability, so it is asked for by name and approved on
+            the screen that shows the words. A token from a plain{" "}
+            <code className="font-mono">af login</code> cannot make another one,
+            which is deliberate: a credential that can make credentials is a
+            credential worth stealing twice.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <CommandBlock command="af token create ci" said="Mint command copied to the clipboard" />
+          <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+            Prints the token once and stores nothing but its hash, so nothing
+            can show it again. It goes in{" "}
+            <code className="font-mono">AF_CONTROL_PLANE_TOKEN</code> wherever
+            that engine runs. It belongs to the organization rather than to you,
+            so it keeps working after you leave, and it carries no identity: it
+            can send events and read an environment back, and it cannot reach a
+            provider key, a member, or another token.
+          </p>
+        </div>
+        <p className="max-w-[74ch] text-[12px] leading-5 text-dim">
+          No screen here can mint one. The route answers a terminal holding a
+          credential and never a browser holding a cookie, so a stolen session
+          cannot become a permanent one. It appears in the list below the moment
+          it exists.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/**
  * Every credential this organization has handed out, of both kinds.
  *
  * The two are shown together and told apart, because they are one question with
@@ -346,12 +423,13 @@ export default function CliPage() {
   return (
     <Page
       title="Command line"
-      lede="The engine runs on your machine and in your CI, never on this control plane. These three commands take you from nothing to a signed in terminal whose runs are recorded here."
+      lede="The engine runs on your machine and in your CI, never on this control plane. Install it, sign this terminal in, and run it: three commands, and the runs appear here. What CI needs is a different credential and it comes last."
     >
       <div className="space-y-6">
         <Install />
         <SignIn origin={origin} />
         <FirstRun />
+        <ForCI origin={origin} />
         <Tokens mayManage={may(role, "tokens.manage")} csrf={csrf} />
       </div>
     </Page>

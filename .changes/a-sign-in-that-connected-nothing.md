@@ -38,3 +38,13 @@ keychain prompt. The command returned an error and left a ninety day credential
 nobody held, nobody could see and nobody could revoke, with another one beside
 it on every retry. It now revokes what it cannot keep, and says the token is
 still live, and where to revoke it, when the revocation fails too.
+
+The credential CI needs was the other half of the same silence. `POST /v1/tokens`
+mints an engine token, it answers a bearer credential and has no cookie path at
+all, and that is deliberate: a browser session that could mint would be a
+credential factory behind a cookie. So no screen can reach it and none should,
+which leaves telling somebody as the only thing a console can do, and nothing
+did. The page now carries the two commands, says the scope has to be asked for
+by name, and says first that a GitHub Actions job needs no token at all, so
+nobody pastes a permanent secret into a repository to solve a problem the
+identity exchange already solves.
