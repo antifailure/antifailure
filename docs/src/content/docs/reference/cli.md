@@ -1198,9 +1198,10 @@ af mcp
 # Started by an MCP client, not typed. It speaks the protocol on
 # standard input and output, so running it in a terminal looks idle.
 af mcp
-# It serves exactly the checkout it starts in. A client with nowhere
-# to set a working directory passes an absolute path instead.
-af -C /absolute/path/to/your/project mcp
+# It serves exactly the checkout it starts in, so the client is
+# configured to run it there, or to pass -C with an absolute path
+# when it has nowhere to set a working directory.
+af mcp
 ```
 
 ### `af model`
