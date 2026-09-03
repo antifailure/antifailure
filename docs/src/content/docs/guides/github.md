@@ -90,6 +90,44 @@ GitHub's conclusion vocabulary is smaller than ours, so two of ours share
 `action_required`. They stay apart in the check's title, which is the first line
 anybody reads, and in the comment.
 
+## Which of your workflow runs is the check
+
+A GitHub App is delivered a `workflow_run` event for **every** workflow in your
+repository, not only the one that runs Antifailure. A repository with one
+workflow never notices. A repository with seventeen does, and this one did: a
+lint job that finishes green in fifty seconds looks, from the outside, exactly
+like the check finishing without reporting, and the check on this repository's
+own pull requests read "Nothing was verified" for its entire life because a
+security scan kept crossing the line first.
+
+So a workflow run has no standing here until it says which run it is, and it
+says so by asking for a callback credential:
+
+```
+POST /v1/pr/callback-token
+Authorization: Bearer <the workflow identity GitHub signed>
+{"head_sha": "<the commit>"}
+```
+
+The `run_id` inside that identity is GitHub's own claim about the job, not
+something the workflow asserts, so no job can introduce itself as another one.
+From then on that run is the check: its completion decides the verdict when it
+did not report, and cancelling it is how an environment gets torn down.
+
+**Ask for it before the work, not beside the report.** The example workflow does
+this in its second step, and the three things it buys are all lost by asking at
+the end:
+
+- the check reads "Building the environment and running the agents" for the
+  minutes that is true, rather than "Waiting for a runner" while one is working;
+- a job that dies halfway is a run this control plane can name and cancel, which
+  is its only route into the runtime holding your environment;
+- a run that dies is reported in seconds rather than at the deadline.
+
+A commit where no run ever introduces itself is not passed and not failed. It
+sits until the deadline and then reads "Nothing was verified: the run never
+reported back", which is `timed_out` and true: nothing came back at all.
+
 ## One comment, about one commit
 
 The comment's first line carries the commit it is about. That is not decoration:

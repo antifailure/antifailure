@@ -26,9 +26,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Read, and only read, for everything that runs untrusted code. The one job
-# that needs to write a comment declares it for itself and does nothing else,
-# which is narrower than granting it here and hoping.
+# Read, and only read, for everything that runs untrusted code. The two jobs
+# that need more declare it for themselves and nothing else, which is narrower
+# than granting it here and hoping: the comment job takes
+# `pull-requests: write`, and the job below takes `id-token: write`, which is
+# not a write to this repository at all. It lets the job ask GitHub to sign a
+# statement about itself, which is what it trades for a credential good for
+# this one commit on the control plane.
 permissions:
   contents: read
 
@@ -43,6 +47,21 @@ jobs:
     # apart. They run on the schedule below.
     name: control plane
     runs-on: ubuntu-latest
+
+    # `id-token: write` is the whole reason this check reported nothing for as
+    # long as it has existed. Without it the runner sets neither
+    # ACTIONS_ID_TOKEN_REQUEST_URL nor _TOKEN, the job cannot prove what it is,
+    # and every route to the control plane is closed: the two steps below skip
+    # and the engine's own event sink finds no identity to exchange. The job
+    # then exits zero having posted a comment, and the App, hearing nothing,
+    # says "Nothing was verified" on every pull request this repository has.
+    #
+    # It is not a write to the repository. GitHub mints a short lived signed
+    # statement about this job, and it withholds it from a fork's pull request,
+    # which is the fork case working rather than failing.
+    permissions:
+      contents: read
+      id-token: write
     # Larger than the budgets inside it, deliberately. The harness fails a step
     # that runs over its budget and writes a report saying which one and by how
     # much; a runner timeout kills the job and writes nothing, so a budget that
@@ -69,6 +88,17 @@ jobs:
           --health-retries 10
 
     env:
+      # The hosted control plane this repository is connected to, and the one
+      # whose App posts the `Antifailure` check on every pull request here.
+      #
+      # A literal rather than `vars.AF_CONTROL_PLANE`, which is what
+      # examples/github-workflow.yml tells a customer to set. A customer's
+      # address is their own and belongs in a variable; this repository's is
+      # this repository's own product at its published address, and a variable
+      # that has to be set by hand before the check can work is a variable
+      # somebody will not set. It was not set here, which is the second of the
+      # two reasons nothing was ever reported.
+      AF_CONTROL_PLANE: https://app.antifailure.dev
       # The source the masking rules are written against. Synthesised rather
       # than restored from production: a control plane that copies a real
       # customer's database into a public CI runner would be the single worst
@@ -78,6 +108,61 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # BEFORE THE WORK, NOT AFTER IT, AND THE ORDER IS THE POINT.
+      #
+      # This tells the control plane which of this repository's workflow runs
+      # is the one checking this commit. Until a run says so the control plane
+      # is guessing, and it used to guess by binding the first `workflow_run`
+      # delivery it saw for the commit, which on this repository is whichever
+      # of seventeen workflows GitHub happened to start first. On ada5644 that
+      # was `Security`, green in fifty seconds, and its completion ended the
+      # generation as "Nothing was verified" while this job was still building
+      # its database. That guess is gone from the control plane now, and this
+      # step is the half that replaces it.
+      #
+      # Claiming here rather than beside the report below also means the check
+      # reads "Building the environment and running the agents" for the twenty
+      # minutes that is true, and that a job which dies at minute ten is a run
+      # the control plane can name, cancel, and tear the environment down for.
+      #
+      # The credential is good for one hour and for this commit alone. It is
+      # not a secret in the repository: there is nothing here to steal when the
+      # job is not running.
+      - name: Tell the control plane this run is the one checking this commit
+        id: claim
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # The audience matters. Without one GitHub mints an identity for the
+          # repository owner's URL, which every workflow in the organization
+          # can obtain, and a credential any workflow can get is not a
+          # credential.
+          identity=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=antifailure-control-plane" |
+            jq -r '.value // empty')
+          if [ -z "$identity" ]; then
+            echo "GitHub would not mint a workflow identity for this job."
+            echo "On a pull request from a fork it never will, which is deliberate."
+            exit 0
+          fi
+          token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+            -H "Authorization: Bearer ${identity}" \
+            -H 'content-type: application/json' \
+            -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
+            jq -r '.token // empty')
+          if [ -z "$token" ]; then
+            echo "The control plane issued no callback credential for ${HEAD_SHA}."
+            echo "That is not a failure of this run: it reports through the comment below."
+            exit 0
+          fi
+          # Masked so that no later step can print it into a public log, and
+          # written to the step output rather than to a file the artifact
+          # upload would then publish.
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "The control plane is expecting a report from this run."
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -182,13 +267,83 @@ jobs:
         # adds is a budget per step, taken from the environment's own event
         # stream, and a JSON record of the run, which is what a ten green
         # streak is a claim about.
+        env:
+          # What the engine's own event sink reports to, which is a different
+          # thing from the report below and needs saying. The report is one
+          # verdict about one commit, posted by the step at the end; this is
+          # forty event types streamed while the run happens, and the console's
+          # run view is built out of them. `attachControlPlane` reads this
+          # variable and this variable only, and mints its own credential from
+          # the same workflow identity the claim above used. Unset, it does not
+          # even try, which is right for a laptop and was wrong here.
+          AF_CONTROL_PLANE_URL: ${{ env.AF_CONTROL_PLANE }}
         run: |
           go run ./tools/dogfood \
             -C . \
             --af "$GITHUB_WORKSPACE/bin/af" \
             --mode pr \
             --report "$GITHUB_WORKSPACE/dogfood-report.md" \
+            --report-json "$GITHUB_WORKSPACE/dogfood-report.json" \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
+
+      # The verdict, to the check the App posts on this pull request.
+      #
+      # `always()`, because the report of a failing run is the one worth
+      # reading, and because a run that fails is exactly the run whose check
+      # must not stay amber.
+      #
+      # Skipped without a credential, which is the fork case and the case where
+      # the control plane refused the claim, and in both of those the comment
+      # below is the whole answer. It is NOT skipped when the report is
+      # missing: a run that produced no report still has to say so, because a
+      # check that hears nothing is the state this whole change is about.
+      - name: Tell the control plane what this commit did
+        if: always() && steps.claim.outputs.token != ''
+        env:
+          TOKEN: ${{ steps.claim.outputs.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # jq rather than a hand built string. A report carries quotes,
+          # newlines and backslashes, and a body pasted together in the shell
+          # is malformed on the first interesting run.
+          if [ -f "$GITHUB_WORKSPACE/dogfood-report.json" ]; then
+            markdown="$GITHUB_WORKSPACE/dogfood-report.md"
+            [ -f "$markdown" ] || printf '' > "$markdown"
+            jq -n --arg sha "$HEAD_SHA" \
+                  --rawfile markdown "$markdown" \
+                  --slurpfile report "$GITHUB_WORKSPACE/dogfood-report.json" \
+                  '{head_sha: $sha, markdown: $markdown, report: $report[0]}' > payload.json
+          else
+            # No report at all. Sent rather than skipped, and sent as a report
+            # with no workflows in it, which the control plane reads as
+            # unverified because a run that evaluated nothing verified nothing.
+            # Saying it here rather than leaving the check to the deadline is
+            # the difference between a reader learning this in ten seconds and
+            # learning it in forty five minutes.
+            jq -n --arg sha "$HEAD_SHA" \
+                  --arg url "$RUN_URL" \
+                  '{head_sha: $sha,
+                    markdown: ("## Dogfood\n\nThis run produced no report, so nothing about the change itself was checked. That is a failure of the pipeline rather than a verdict on the diff.\n\n[What happened](" + $url + ")"),
+                    report: {Workflows: [], Invariants: []}}' > payload.json
+          fi
+
+          code=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "${AF_CONTROL_PLANE}/v1/pr/report" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H 'content-type: application/json' \
+            --data-binary @payload.json)
+          cat response.json
+          echo
+          # A refused report is a red step. The reason this defect lived so
+          # long is that every route to the control plane failed quietly, and a
+          # publish step that swallows its own answer is that same failure
+          # rebuilt one layer up.
+          if [ "$code" != "200" ]; then
+            echo "::error::the control plane refused this run's report with HTTP $code"
+            exit 1
+          fi
 
       # There was a step here called "What the database noticed about this
       # change", running `af insights || true`. It was removed rather than
@@ -227,6 +382,7 @@ jobs:
           name: dogfood-report
           path: |
             dogfood-report.md
+            dogfood-report.json
             dogfood-record.json
             .antifailure/logs
           retention-days: 30
