@@ -152,7 +152,12 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
         <div className="flex flex-1 items-center justify-center py-10 max-sm:py-6">
           <div className="w-full max-w-[400px]">
             <h1 className="text-[32px] font-normal leading-dense tracking-tighter text-black max-sm:text-[28px]">
-              {signUp ? "Create your account" : "Sign in"}
+              {/* The same words as the route title in lib/routes.ts, which is
+                  what the tab, the link preview and the markdown twin carry.
+                  They differed by one word and the twin check caught it: a
+                  reader arriving from a search result should land on the
+                  heading they clicked. */}
+              {signUp ? "Create an account" : "Sign in"}
             </h1>
             <p className="mt-4 text-[14px] leading-6 text-black/55">
               {signUp

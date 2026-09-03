@@ -10,8 +10,8 @@ import { CONTROL_PLANE_URL } from "@/lib/site";
  * component. The site's only commercial route was a waitlist: it posted an
  * address to a function that wrote one row into a store nothing in the
  * repository could read, and mailed nobody, on a domain that publishes no mail
- * exchanger and an SPF policy authorizing no sender. The confirmation said
- * "you will hear from us". Nothing could have done that.
+ * exchanger and an SPF policy authorizing no sender. The confirmation promised
+ * a message anyway. Nothing could have sent one.
  *
  * So the two rules here are:
  *
@@ -26,8 +26,8 @@ import { CONTROL_PLANE_URL } from "@/lib/site";
  * confirmation below renders one of two different sentences from it. On a
  * deployment with a mailer, somebody has been told. On ours today, the lead is
  * recorded and a person reads the queue, and the screen says so in those words.
- * A single cheerful "thanks, we will be in touch" would be the waitlist again,
- * with better spacing.
+ * A single cheerful promise of contact would be the waitlist again, with better
+ * spacing.
  *
  * THE STATES ARE ALL BUILT, and they are the reason this is a client component
  * on an otherwise static page. Idle, submitting with the control disabled and

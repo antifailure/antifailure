@@ -129,7 +129,14 @@ export function ContactPage() {
           waitlist, which stored an address in a place nothing could read and
           mailed nobody on a domain that authorizes no sender. What is different
           is not the form, it is where the row goes and who can see it. */}
-      <PageSection tone="panel">
+      {/* `ruled` rather than `panel`, and it is the difference between a card
+          somebody can see and one they cannot. The form is a white surface with
+          a hairline, which is the vocabulary the contact-route cards below
+          already use, and on `panel` that is a white card on a white band: the
+          boundary all but disappears and the fields look loose on the page. On
+          the page ground it reads as one surface, with a rule above it doing
+          the separating a background was doing badly. */}
+      <PageSection tone="ruled">
         <div id="enterprise" className="scroll-mt-24">
           <PageHeading
             kicker="Buying for a team"
