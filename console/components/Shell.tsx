@@ -17,6 +17,7 @@ import {
   IconRuns,
   IconSettings,
   IconSignOut,
+  IconTerminal,
   LogoMark,
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
@@ -60,6 +61,7 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/cli", label: "Command line", Icon: IconTerminal },
   { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];

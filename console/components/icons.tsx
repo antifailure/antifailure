@@ -45,6 +45,12 @@ export const IconAudit = stroke("M4 2.6h8v10.8H4zM6.2 5.6h3.6M6.2 8h3.6M6.2 10.4
 export const IconMembers = stroke("M6 7.6a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM2.6 13c0-2 1.5-3.2 3.4-3.2S9.4 11 9.4 13M10.6 4a2 2 0 0 1 0 3.6M11.4 9.9c1.3.3 2 1.4 2 3.1");
 export const IconKeys = stroke("M10.4 2.6a3.4 3.4 0 1 1-3.2 4.5L2.6 11.7v1.7h1.7v-1.3h1.3v-1.3h1.3l1.3-1.3");
 export const IconPlan = stroke("M2.6 12.6V7.4M6.2 12.6V3.4M9.8 12.6V9M13.4 12.6V5.6");
+// A shell prompt, unframed. The obvious terminal glyph is a rounded rectangle
+// with a chevron inside it, and at 16 pixels in this rail that rectangle is the
+// same shape as IconAudit's document: two entries a reader tells apart by
+// squinting at what is inside a box. The chevron and the caret carry the whole
+// meaning, so the box is what goes.
+export const IconTerminal = stroke("M3.2 4.6 6.6 8l-3.4 3.4M8.4 11.4h4.4");
 // A rising trend inside an axis. Distinct from IconPlan, which is a bar chart:
 // two icons that are both bars are two rail entries a reader cannot tell apart
 // at 16 pixels, and the rail is scanned rather than read.

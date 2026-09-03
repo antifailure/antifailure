@@ -1523,7 +1523,7 @@ export function createServer(options: ServerOptions) {
           {
             error:
               'That login was not declined: it was already approved, already answered, or is no longer live. ' +
-              'If a terminal has a token it should not have, revoke it under Keys.',
+              'If a terminal has a token it should not have, revoke it under Command line.',
           },
           409,
         )

@@ -119,6 +119,16 @@ type Options struct {
 	// Getenv reads the environment this command is running in, for sandbox
 	// credentials. Nil uses the process environment.
 	Getenv func(string) string
+	// ControlPlaneURL and ControlPlaneToken are the credential af login stored
+	// on this machine, resolved by the CLI and passed through to telemetry.
+	//
+	// BOTH OR NEITHER. An address on its own would turn on the GitHub Actions
+	// identity exchange for every CI run in the world, which attachControlPlane
+	// deliberately leaves off unless a repository has said it uses a control
+	// plane. They are set together, only when a credential was actually found,
+	// so a machine nobody has signed in behaves exactly as it did before.
+	ControlPlaneURL   string
+	ControlPlaneToken string
 	// Secrets is where declared variables are looked up. Nil builds the
 	// default chain: this process's environment, then a .env beside the
 	// manifest, then the encrypted local store.
@@ -143,6 +153,19 @@ type Orchestrator struct {
 	envID    string
 	progress func(string)
 	sinks    []events.Sink
+}
+
+// ControlPlane reports where this orchestrator will report, and with what.
+//
+// Two empty strings mean nowhere, which is the ordinary state of a laptop.
+//
+// It exists because the credential travels CLI -> Options -> telemetry as two
+// struct field copies, and a copy that is forgotten is invisible from every
+// direction: the engine still builds, still runs, and still reports to nobody,
+// which is the state af login was in for as long as it existed. This is what
+// lets the CLI assert its half of that chain rather than trusting the literal.
+func (o *Orchestrator) ControlPlane() (string, string) {
+	return o.opts.ControlPlaneURL, o.opts.ControlPlaneToken
 }
 
 // New returns an orchestrator for a branch.
@@ -370,13 +393,15 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 	// A failure to attach is reported and survived. An environment must not
 	// fail to come up because a log directory is read only.
 	tel, terr := telemetry.Attach(ctx, s.bus, telemetry.Options{
-		StateDir: stateDir,
-		EnvID:    o.envID,
-		Redactor: o.opts.Redactor,
-		Clock:    o.opts.Clock,
-		State:    s.db,
-		Getenv:   o.opts.Getenv,
-		Version:  o.opts.Version,
+		StateDir:          stateDir,
+		EnvID:             o.envID,
+		Redactor:          o.opts.Redactor,
+		Clock:             o.opts.Clock,
+		State:             s.db,
+		Getenv:            o.opts.Getenv,
+		Version:           o.opts.Version,
+		ControlPlaneURL:   o.opts.ControlPlaneURL,
+		ControlPlaneToken: o.opts.ControlPlaneToken,
 		OnWarning: func(msg string) {
 			o.progress(msg)
 		},
