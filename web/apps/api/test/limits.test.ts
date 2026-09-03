@@ -10,7 +10,8 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID, createHash } from 'node:crypto'
 import {
-  ENDPOINT_LIMITS, checkQuota, limitFor, bucketFor, PLAN_QUOTAS, DEFAULT_PLAN,
+  ENDPOINT_LIMITS, checkQuota, limitFor, bucketFor, servedRoute,
+  PLAN_QUOTAS, DEFAULT_PLAN,
 } from '../src/limits.ts'
 import { listProcedures } from '../src/openapi.ts'
 import { RateLimiter } from '../src/ratelimit.ts'
@@ -18,6 +19,9 @@ import { FakeClock } from '../src/clock.ts'
 import {
   available, startApi, seedOrg, dropOrg, signInAs, type ApiHarness, type Org,
 } from './harness.ts'
+import { createServer } from '../src/server.ts'
+import type { Pool } from '@antifailure/db'
+import type { GitHubClient } from '../src/auth/github.ts'
 
 const hasDatabase = await available()
 
@@ -108,6 +112,229 @@ describe('the limit catalog', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// A path with no route, and a route with no limit
+// ---------------------------------------------------------------------------
+//
+// These two were answered identically until the gate learned to tell them
+// apart, and one of them was wrong in production: `GET /v1/health` on the
+// deployed control plane answered 500 saying "This endpoint has no declared
+// rate limit ... Add it to ENDPOINT_LIMITS with the reason for the number".
+// No such endpoint has ever existed. The 500 told every monitor the server was
+// broken, and the sentence told a stranger how this codebase's own gate is
+// built while telling the one person who could act on it nothing.
+//
+// The gate itself is not softened by any of this and these tests are written
+// to prove that: the case it was built for, a route that EXISTS with no
+// declared limit, is still refused, and refused BEFORE its handler runs.
+//
+// No database. createServer builds the whole route table from a pool it never
+// reaches on these paths, and a property this load bearing should not be one
+// that stops being checked on a machine without Postgres.
+function serverWithoutDatabase() {
+  return createServer({
+    pool: {} as unknown as Pool,
+    github: {} as unknown as GitHubClient,
+  })
+}
+
+/** The paths that reach the gate: every prefix the API owns, and every method
+ *  that can change something. A GET outside those prefixes is the console's
+ *  and is classified before it ever gets here. */
+const UNROUTED = [
+  ['GET', '/v1/health'],
+  ['GET', '/v1/version'],
+  ['GET', '/v1/status'],
+  ['GET', '/v1/nonsense-xyz'],
+  ['GET', '/v1/environments/af-1/artifacts'],
+  ['HEAD', '/v1/nonsense-xyz'],
+  ['GET', '/auth/nothing'],
+  ['GET', '/trpc'],
+  ['GET', '/webhooks/nothing'],
+  ['GET', '/byok/nothing'],
+  ['GET', '/console/api/nothing'],
+  ['POST', '/v1/nonsense'],
+  ['POST', '/nothing-here'],
+  ['PUT', '/nothing-here'],
+  ['PATCH', '/nothing-here'],
+  ['DELETE', '/nothing-here'],
+] as const
+
+describe('a path the server has no route for', () => {
+  const { app } = serverWithoutDatabase()
+  const call = (method: string, path: string) =>
+    app.fetch(new Request(`http://control-plane.test${path}`, { method }))
+
+  for (const [method, path] of UNROUTED) {
+    it(`answers 404 to ${method} ${path}`, async () => {
+      const res = await call(method, path)
+      assert.equal(res.status, 404, `${method} ${path}`)
+      assert.match(res.headers.get('content-type') ?? '', /json/)
+    })
+  }
+
+  it('says something a stranger can act on, in no vocabulary of this codebase', async () => {
+    const res = await call('GET', '/v1/health')
+    const { error } = (await res.json()) as { error: string }
+    // What the caller can do: ask the server what it serves. The endpoint
+    // named is served by this same process, so the answer cannot rot the way
+    // a link to a documentation page can.
+    assert.match(error, /openapi\.json/)
+    for (const internal of [/ENDPOINT_LIMITS/, /rate limit/i, /limits\.ts/, /middleware/i]) {
+      assert.doesNotMatch(error, internal, `the 404 body leaks ${internal}`)
+    }
+  })
+
+  it('the endpoint it points at is one this server actually serves', async () => {
+    // Otherwise the resolution is advice nobody can carry out, which reads
+    // like a resolution and is not one.
+    assert.equal((await call('GET', '/openapi.json')).status, 200)
+  })
+})
+
+describe('a route that exists with no declared limit', () => {
+  it('is still refused, and refused before its handler runs', async () => {
+    const { app } = serverWithoutDatabase()
+    let handlerRan = false
+    // Under /v1, so consoleClass cannot classify it and limitFor finds
+    // nothing. This is exactly the endpoint the gate exists to catch: mounted,
+    // reachable, and unbounded.
+    app.get('/v1/undeclared-by-this-test', (c) => {
+      handlerRan = true
+      return c.json({ served: true })
+    })
+
+    const res = await app.fetch(
+      new Request('http://control-plane.test/v1/undeclared-by-this-test'),
+    )
+    assert.equal(res.status, 500, 'an unbounded endpoint was served')
+    assert.equal(handlerRan, false, 'the handler ran, so the endpoint was served unbounded')
+
+    const body = (await res.json()) as {
+      error: { code: string; message: string; resolution: string }
+      requestId: string
+    }
+    // The same shape every other control plane failure answers with, so a
+    // client needs one branch rather than two.
+    assert.equal(body.error.code, 'AF-CP-003')
+    assert.ok(body.requestId.length > 0, 'nothing ties this answer to the log line')
+    // And the instruction to a maintainer is not in it. That moved to the log.
+    assert.doesNotMatch(JSON.stringify(body), /ENDPOINT_LIMITS/)
+  })
+
+  it('is refused for a mutating method outside every API prefix too', async () => {
+    const { app } = serverWithoutDatabase()
+    let handlerRan = false
+    app.post('/somewhere-else-entirely', (c) => {
+      handlerRan = true
+      return c.json({ served: true })
+    })
+    const res = await app.fetch(
+      new Request('http://control-plane.test/somewhere-else-entirely', { method: 'POST' }),
+    )
+    assert.equal(res.status, 500)
+    assert.equal(handlerRan, false)
+  })
+
+  it('names the route to declare, in the catalog\'s own syntax, on the log', async () => {
+    const { app } = serverWithoutDatabase()
+    app.post('/v1/also-undeclared', (c) => c.json({ served: true }))
+
+    const lines: unknown[][] = []
+    const real = console.error
+    console.error = (...args: unknown[]) => lines.push(args)
+    try {
+      await app.fetch(
+        new Request('http://control-plane.test/v1/also-undeclared', { method: 'POST' }),
+      )
+    } finally {
+      console.error = real
+    }
+    // The key an ENDPOINT_LIMITS entry is written under, so the fix is a
+    // copy and paste rather than a hunt.
+    const said = JSON.stringify(lines)
+    assert.match(said, /POST \/v1\/also-undeclared/)
+    assert.match(said, /ENDPOINT_LIMITS/)
+  })
+
+  it('logs the pattern and not the caller\'s path, so nothing forges a log line', async () => {
+    const { app } = serverWithoutDatabase()
+    app.get('/v1/undeclared/:name', (c) => c.json({ served: true }))
+
+    const lines: unknown[][] = []
+    const real = console.error
+    console.error = (...args: unknown[]) => lines.push(args)
+    try {
+      await app.fetch(
+        new Request('http://control-plane.test/v1/undeclared/%0Aforged%20line'),
+      )
+    } finally {
+      console.error = real
+    }
+    const said = JSON.stringify(lines)
+    assert.match(said, /GET \/v1\/undeclared\/:name/)
+    assert.doesNotMatch(said, /forged/)
+  })
+})
+
+describe('which case the gate is looking at', () => {
+  it('reads the router rather than a second list of paths', () => {
+    const { app } = serverWithoutDatabase()
+    // Exactly the key an ENDPOINT_LIMITS entry is written under.
+    assert.equal(servedRoute(app, 'GET', '/health'), 'GET /health')
+    assert.equal(
+      servedRoute(app, 'GET', '/v1/environments/af-1'),
+      'GET /v1/environments/:envId',
+    )
+    assert.equal(servedRoute(app, 'GET', '/v1/health'), null)
+    assert.equal(servedRoute(app, 'POST', '/health'), null)
+  })
+
+  it('does not count middleware as a route', () => {
+    // Every one of the server's own `app.use('*', ...)` calls matches every
+    // path. A probe built from them would answer "that exists" for anything at
+    // all, which is the 500 this replaces, arrived at from the other side.
+    const { app } = serverWithoutDatabase()
+    assert.ok(
+      app.routes.some((r) => r.method === 'ALL' && r.path === '/*'),
+      'the server registered no wildcard middleware, so this proves nothing',
+    )
+    assert.equal(servedRoute(app, 'GET', '/v1/nothing-at-all'), null)
+  })
+
+  it('sees a route mounted after the first request', () => {
+    // The gate is installed before the routes it has to know about, so the
+    // probe is built lazily. A cache that never noticed a later route would
+    // 404 a real endpoint.
+    const { app } = serverWithoutDatabase()
+    assert.equal(servedRoute(app, 'POST', '/v1/mounted-later'), null)
+    app.post('/v1/mounted-later', (c) => c.json({}))
+    assert.equal(servedRoute(app, 'POST', '/v1/mounted-later'), 'POST /v1/mounted-later')
+  })
+
+  it('resolves HEAD through GET, the way the framework dispatches it', async () => {
+    // Hono answers a HEAD by dispatching it again as a GET. The catalog holds
+    // no HEAD entries, so before this the gate found nothing for one and
+    // refused it: `HEAD /v1/environments/af-1` answered 500 on the deployed
+    // control plane while the GET beside it answered 401.
+    const { app } = serverWithoutDatabase()
+    assert.equal(
+      servedRoute(app, 'HEAD', '/v1/environments/af-1'),
+      'GET /v1/environments/:envId',
+    )
+    assert.ok(limitFor('HEAD', '/v1/environments/af-1'))
+    assert.equal(
+      limitFor('HEAD', '/v1/environments/af-1'),
+      limitFor('GET', '/v1/environments/af-1'),
+    )
+
+    const res = await app.fetch(
+      new Request('http://control-plane.test/v1/environments/af-1', { method: 'HEAD' }),
+    )
+    assert.notEqual(res.status, 500)
+  })
+})
+
 describe('every endpoint the server serves is in the catalog', { skip: hasDatabase ? false : 'no Postgres' }, () => {
   let h: ApiHarness
   before(async () => {
@@ -164,12 +391,29 @@ describe('every endpoint the server serves is in the catalog', { skip: hasDataba
     // The safe direction. An endpoint nobody remembered to limit is the one
     // that has never been load tested, so answering with an error is a bug
     // report and leaving it open is an outage.
-    // A mutating method, because a GET the API does not claim is now served by
-    // the console's static handler and has to answer 404 rather than 500.
-    const res = await h.fetch('/some-endpoint-nobody-declared', { method: 'POST' })
+    //
+    // Through a route MOUNTED ON THE RUNNING SERVER, because that is the case
+    // this asserts. The earlier version of this test asked for a path that had
+    // no route either, so it passed on a server that refused everything it did
+    // not recognise and would have passed just the same on one that had
+    // stopped distinguishing the two.
+    let handlerRan = false
+    h.app.post('/v1/undeclared-on-a-live-server', (c) => {
+      handlerRan = true
+      return c.json({ served: true })
+    })
+    const res = await h.fetch('/v1/undeclared-on-a-live-server', { method: 'POST' })
     assert.equal(res.status, 500)
+    assert.equal(handlerRan, false, 'the handler ran, so the endpoint was served unbounded')
+    const body = (await res.json()) as { error: { code: string } }
+    assert.equal(body.error.code, 'AF-CP-003')
+  })
+
+  it('and a path with no route at all is a 404 on the running server too', async () => {
+    const res = await h.fetch('/some-endpoint-nobody-declared', { method: 'POST' })
+    assert.equal(res.status, 404)
     const body = (await res.json()) as { error: string }
-    assert.match(body.error, /no declared rate limit/)
+    assert.doesNotMatch(body.error, /ENDPOINT_LIMITS/)
   })
 
   it('answers a burst with 429 and a Retry-After, then lets it through after the wait', async () => {
