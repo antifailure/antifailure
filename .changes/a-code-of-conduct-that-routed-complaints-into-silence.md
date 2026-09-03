@@ -20,8 +20,9 @@ complaint about a maintainer has nowhere independent to go inside the project,
 and it points at GitHub's own abuse route, which is outside it.
 
 The daily status workflow committed as status@antifailure.dev, which reads like
-a mailbox and is not one. It now commits under GitHub's own no-reply identity
-for the Actions bot.
+a mailbox and is not one. It is the same domain, which has no mail exchanger,
+so anybody who replied to a status commit was writing into nothing. It commits
+under GitHub's own no-reply identity for the Actions bot now.
 
 # added
 

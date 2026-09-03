@@ -248,3 +248,35 @@ func TestEvidenceIsFoundAcrossAWrappedLine(t *testing.T) {
 		t.Errorf("want clean, got %+v", got)
 	}
 }
+
+// The review finding that tightened the evidence rule from the file to the
+// paragraph. CODE_OF_CONDUCT.md legitimately quotes the dead address once,
+// with the correction beside it. Under the file wide rule that one correction
+// licensed every later occurrence in the same file, including a genuine
+// instruction forty lines down, in the file a person opens after being
+// harassed. File membership is not proximity.
+func TestEvidenceFarFromTheAddressDoesNotCountAsBesideIt(t *testing.T) {
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+	body := "The old address cannot receive mail, and here is why.\n" +
+		strings.Repeat("A paragraph about something else entirely.\n", 40) +
+		"The address is conduct@antifailure.dev.\n"
+
+	got := problems(t, "CODE_OF_CONDUCT.md", body, rows)
+	if len(got) != 1 {
+		t.Fatalf("want the far quotation refused, got %d: %+v", len(got), got)
+	}
+	if !strings.Contains(got[0].problem, "lines of it") {
+		t.Errorf("problem = %q, want the proximity rule", got[0].problem)
+	}
+}
+
+// The same quotation with the correction in its own paragraph is fine, which
+// is what every real one in this repository looks like.
+func TestEvidenceBesideTheAddressCounts(t *testing.T) {
+	rows := rowsFor(t, &row{path: "CODE_OF_CONDUCT.md", address: "conduct@antifailure.dev", verdict: verdictDefect})
+	body := strings.Repeat("A paragraph about something else entirely.\n", 40) +
+		"It named conduct@antifailure.dev, and that address\ncannot receive mail.\n"
+	if got := problems(t, "CODE_OF_CONDUCT.md", body, rows); len(got) != 0 {
+		t.Errorf("want clean, got %+v", got)
+	}
+}

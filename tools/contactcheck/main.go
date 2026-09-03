@@ -1,9 +1,10 @@
 // Command contactcheck refuses a contact route this project cannot answer.
 //
 // THE DEFECT THIS EXISTS FOR. CODE_OF_CONDUCT.md named conduct@antifailure.dev
-// as the place a person reporting harassment should go. The legal pages named
-// security@antifailure.dev for a security researcher. Neither address has ever
-// been able to receive anything, and the reason is not subtle:
+// as the place a person reporting harassment should go, and the legal pages
+// named security@antifailure.dev for a security researcher. Neither address
+// can receive mail. There is no mail exchanger on that domain, and the rest of
+// its records close the door behind that one:
 //
 //	$ dig +short MX antifailure.dev                        (empty)
 //	$ dig +short TXT antifailure.dev                        "v=spf1 -all"
@@ -70,9 +71,9 @@
 //
 //	records-a-defect   the address is quoted inside a description of a mailbox
 //	                   that did not work, which is what this very file does.
-//	                   REFUSED unless the same file also states that the
-//	                   address cannot receive, so the quotation cannot be the
-//	                   only thing a reader takes away.
+//	                   REFUSED unless the correction sits WITHIN A FEW LINES of
+//	                   the quotation, so a reader who stops at that paragraph
+//	                   cannot leave with the address and nothing else.
 //
 // One rule sits above the verdicts and no row can excuse it: AT A DOMAIN
 // PROVEN DEAD, no text in this repository may read as an instruction to write
@@ -103,11 +104,11 @@
 //     If this project acquires a second domain and publishes a mailbox on it
 //     with a row saying `receives`, the gate passes and the mail may still go
 //     nowhere. Adding a domain to deadDomains is a human check with `dig`.
-//  2. `records-a-defect` is satisfied by evidence anywhere in the same file.
-//     Somebody could write a genuine instruction to a dead address in a file
-//     that elsewhere explains the address is dead, and this would pass. That
-//     is a strange thing to write and it is visible in a diff, which is the
-//     whole of the defence.
+//  2. The correction beside a quotation is matched as a phrase, not read. A
+//     paragraph could carry one of those phrases in a sentence that means
+//     something else and satisfy the rule. The evidence has to be within eight
+//     lines now rather than anywhere in the file, which was the earlier and
+//     much wider version of this hole.
 //  3. It reads source, not the rendered page. An address assembled at runtime
 //     from parts, or read from an environment variable, is invisible to it.
 //  4. It says nothing about whether a route that is not an address works. A
@@ -361,7 +362,7 @@ func run(root string, out io.Writer) error {
 // place rather than being restated by whatever reads them next.
 func Check(rel, body string, rows []*row) []finding {
 	var out []finding
-	evidence := deadEvidence.MatchString(flow(body))
+	lines := strings.Split(body, "\n")
 
 	for _, hit := range address.FindAllStringIndex(body, -1) {
 		found := body[hit[0]:hit[1]]
@@ -408,16 +409,48 @@ func Check(rel, body string, rows []*row) []finding {
 			continue
 		}
 
-		if r.verdict == verdictDefect && !evidence {
+		if r.verdict == verdictDefect && !deadEvidence.MatchString(flow(near(lines, num))) {
 			out = append(out, finding{
 				path: rel, num: num, address: found,
-				problem: "the row says " + verdictDefect + ", and nothing in this file tells the reader the address does not work",
-				fix:     "say in the file that the address cannot receive mail, or the quotation reads as an instruction",
+				problem: "the row says " + verdictDefect + ", and nothing within " +
+					fmt.Sprint(evidenceWindow) + " lines of it tells the reader the address does not work",
+				fix: "put the correction beside the quotation, not elsewhere in the file. A reader who stops " +
+					"at this paragraph must not leave with the address and nothing else",
 			})
 			continue
 		}
 	}
 	return out
+}
+
+// evidenceWindow is how many lines either side of a quoted address the
+// correction has to sit in.
+//
+// It was the whole file, and that was the review finding that changed it. The
+// evidence is a string, so a file could satisfy it once and thereby license
+// every later occurrence, and the file this mattered most in is
+// CODE_OF_CONDUCT.md: the one somebody opens after being harassed, needing the
+// route to work. File membership is not proximity. A reader stops at the
+// paragraph in front of them, so the correction has to be in that paragraph.
+//
+// Eight lines is a paragraph of wrapped prose plus the blank line on each side
+// of it, measured against the seven places in this repository that quote a
+// dead address rather than picked as a round number. The tightest of them,
+// this file's own header, puts the dig output five lines under the address and
+// the sentence reading it three lines under that.
+const evidenceWindow = 8
+
+// near returns the lines within evidenceWindow of a one based line number.
+func near(lines []string, num int) string {
+	lo := num - 1 - evidenceWindow
+	if lo < 0 {
+		lo = 0
+	}
+	hi := num + evidenceWindow
+	if hi > len(lines) {
+		hi = len(lines)
+	}
+	return strings.Join(lines[lo:hi], " ")
 }
 
 // wrapping is what separates two words of a phrase when prose reaches the
