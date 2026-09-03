@@ -36,7 +36,11 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 18,
+    // Raised from 18 by the developer platform lane, which adds eleven routes
+    // under admin.platform. The floor has to move with the tree or it stops
+    // being a floor: an atLeast that a shrinking router still clears is a test
+    // that has quietly stopped checking anything.
+    atLeast: 29,
   })
 })
 

@@ -19,6 +19,11 @@ const BASE = process.env.NEXT_PUBLIC_AF_API ?? "";
 /** Sent on every mutation. Read from GET /auth/session, which derives it from
  *  the session secret without revealing it. */
 const CSRF_HEADER = "x-antifailure-csrf";
+/** The operator portal's own header. A SECOND name rather than the same one,
+ *  because the two cookies are independent credentials in independent tables
+ *  and a request can legitimately carry both. The server checks each against
+ *  its own cookie, so sending the tenant token here would present nothing. */
+const ADMIN_CSRF_HEADER = "x-antifailure-admin-csrf";
 
 export interface Session {
   signedIn: boolean;
@@ -93,12 +98,13 @@ export async function mutate<T>(path: string, input: unknown, csrf: string): Pro
  *  tRPC: the session, sign-out, device approval, and provider keys. */
 export async function rest<T>(
   path: string,
-  init: { method?: string; body?: unknown; csrf?: string } = {},
+  init: { method?: string; body?: unknown; csrf?: string; adminCsrf?: string } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  if (init.adminCsrf) headers[ADMIN_CSRF_HEADER] = init.adminCsrf;
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",

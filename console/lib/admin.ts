@@ -163,17 +163,65 @@ export function useAdminAudit(severity: string) {
 }
 
 /**
+ * The operator session's cross-site token, fetched once and kept.
+ *
+ * A module level cache rather than state on a component, because every screen
+ * in the portal mutates through one function and refetching the token before
+ * each write would be a second round trip on every button.
+ *
+ * A PROMISE rather than a string, so two buttons pressed at once share one
+ * request instead of racing to fill the same slot.
+ */
+let operatorCsrf: Promise<string> | null = null;
+
+async function csrfToken(): Promise<string> {
+  operatorCsrf ??= rest<{ signedIn: boolean; csrfToken: string }>("/v1/admin/session").then(
+    (s) => s.csrfToken,
+    (err) => {
+      // Never cache a failure. A token fetch that failed because the network
+      // dropped would otherwise poison every mutation for the life of the tab.
+      operatorCsrf = null;
+      throw err;
+    },
+  );
+  return operatorCsrf;
+}
+
+/**
  * A tRPC mutation on the operator router.
  *
- * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
- * console sends one because its session cookie is SameSite=Lax, which a
- * cross-site top-level POST still carries. The operator cookie is
- * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
- * and there is nothing for a token to add. If that cookie's SameSite is ever
- * loosened, this is the line that has to grow a token.
+ * THE COMMENT HERE USED TO SAY NO TOKEN WAS NEEDED, and it was wrong in a way
+ * worth recording. Its argument was that the operator cookie is
+ * SameSite=Strict, so a browser sends it on no cross-site request at all and a
+ * token adds nothing. SameSite is SITE scoped rather than origin scoped, so a
+ * subdomain an attacker controls is inside it, which is exactly the case the
+ * token is for. The server agrees: it refuses every non GET request that
+ * carries a live operator cookie without a matching x-antifailure-admin-csrf.
+ *
+ * Retried ONCE on the refusal that names the header, and only that one. A token
+ * is derived from the session, so signing out and back in in another tab makes
+ * the cached one stale, and an operator who has to reload the portal to press a
+ * button twice will conclude the button is broken. Once rather than in a loop,
+ * because a second refusal is a real one and retrying it forever would turn a
+ * configuration problem into a page that hangs.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+  try {
+    return await rest<T>(`/trpc/${path}`, {
+      method: "POST",
+      body: input,
+      adminCsrf: await csrfToken(),
+    });
+  } catch (err) {
+    const failure = err as ApiError;
+    if (failure.status !== 403 || !/admin-csrf/i.test(failure.message)) throw failure;
+    operatorCsrf = null;
+    return rest<T>(`/trpc/${path}`, {
+      method: "POST",
+      body: input,
+      adminCsrf: await csrfToken(),
+    });
+  }
 }
 
 export async function suspendTenant(orgId: string, reason: string) {
