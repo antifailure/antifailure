@@ -16,7 +16,8 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { listProcedures } from '../src/openapi.ts'
-import { declaredPermissions } from '../src/trpc.ts'
+import { declaredAdminPermissions, declaredPermissions } from '../src/trpc.ts'
+import { ADMIN_PERMISSIONS } from '../src/admin/permissions.ts'
 import {
   PERMISSIONS, ROLES, ROLE_PERMISSIONS, roleHas, type Permission, type Role,
 } from '../src/permissions.ts'
@@ -198,6 +199,79 @@ const PUBLIC_ROUTES = new Map<string, string>([
   ['permissions', 'describes the product, not any tenant; the docs table is built from it'],
 ])
 
+/**
+ * The instrument, before its answer.
+ *
+ * EVERY ASSERTION IN THIS FILE IS SATISFIED BY FINDING NOTHING, and that is not
+ * a figure of speech about one of them. The matrix itself is BUILT from
+ * `listProcedures()`: the cells below are generated inside
+ * `for (const { path } of listProcedures())`, so a route list that came back
+ * empty would not fail this file, it would EMIT NO TESTS AT ALL. Zero cells,
+ * zero refusals checked, zero escalations found, and a green run reporting that
+ * the permission matrix passed.
+ *
+ * The three scans above the matrix fail the same way and more quietly, because
+ * they at least run. "Every route declares a permission" filters an empty list
+ * and finds nothing undeclared. "Every route has a sample input" filters an
+ * empty list and finds nothing missing. Both are the assertion this file exists
+ * to make, and both are satisfied by a router that handed over nothing.
+ *
+ * The header of this file says the matrix is worth something precisely because
+ * the route list is not written here but read out of the router. That is true,
+ * and it is exactly why the read has to be checked: a list nobody wrote is a
+ * list nobody notices the absence of.
+ *
+ * Deliberately OUTSIDE the matrix's describe, so it is not skipped when there
+ * is no Postgres. None of it touches a database, and an instrument check that
+ * only runs on the machines that already run everything is not much of a check.
+ */
+describe('the matrix is generated from a route list, so the route list has to be there', () => {
+  it('the router hands over a plausible number of routes', () => {
+    const routes = listProcedures()
+    assert.ok(
+      routes.length >= 60,
+      `listProcedures() returned ${routes.length} routes. The matrix below is generated from ` +
+        'this list, so a short one does not fail it, it silently shrinks it. Every assertion ' +
+        'in this file is then satisfied by having examined nothing.',
+    )
+  })
+
+  it('it names routes this file is certain exist', () => {
+    // Named rather than only counted, because a list of the right length made
+    // of the wrong things passes a count. One route per shape the matrix
+    // depends on: a query, a mutation, one guarded by a permission only an
+    // owner holds, and one deliberately public.
+    const paths = new Set(listProcedures().map((r) => r.path))
+    for (const path of ['environments.list', 'environments.teardown', 'billing.set', 'health']) {
+      assert.ok(paths.has(path), `listProcedures() no longer names ${path}, so the scan is wrong`)
+    }
+  })
+
+  it('every route it names carries the type the matrix calls it with', () => {
+    // The matrix calls each route as `type`, and a route arriving with neither
+    // 'query' nor 'mutation' would be called wrongly and refused for a reason
+    // that has nothing to do with permissions, which reads as a passing cell.
+    const wrong = listProcedures().filter((r) => r.type !== 'query' && r.type !== 'mutation')
+    assert.deepEqual(wrong.map((r) => `${r.path}: ${r.type}`), [])
+  })
+
+  it('the roles and permissions it crosses the routes with are not empty either', () => {
+    // ROLES is the outer loop of the matrix and PERMISSIONS is what the catalog
+    // assertions are made against. Either one empty is the same defect from a
+    // different direction.
+    assert.ok(ROLES.length >= 4, `only ${ROLES.length} roles, so the matrix has almost no rows`)
+    assert.ok(
+      PERMISSIONS.length >= 20,
+      `only ${PERMISSIONS.length} permissions, so the catalog assertions check almost nothing`,
+    )
+    assert.ok(
+      declaredPermissions().size >= 60,
+      `only ${declaredPermissions().size} routes declare a permission; the matrix reads this map ` +
+        'to decide what each cell should expect, and an empty one expects nothing of anybody',
+    )
+  })
+})
+
 describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL' }, () => {
   let h: ApiHarness
   let org: Org
@@ -217,24 +291,72 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   })
 
   it('every route declares a permission or is deliberately public', () => {
+    // Operator routes declare a PLATFORM permission and are walked by their own
+    // matrix in admin-routes.test.ts, which asserts the same three properties
+    // against the platform catalog.
+    //
+    // Skipped by DECLARATION and never by path prefix. A prefix skip would let
+    // a route named `admin.something` that declares nothing at all fall through
+    // this test AND be absent from the platform one, guarded by neither and
+    // visible to no test, which is worse than the problem it solves.
     const declared = declaredPermissions()
+    const operatorRoutes = declaredAdminPermissions()
     const undeclared = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !declared.has(path) && !PUBLIC_ROUTES.has(path))
+      .filter(
+        (path) =>
+          !declared.has(path) && !PUBLIC_ROUTES.has(path) && !operatorRoutes.has(path),
+      )
 
     assert.deepEqual(
       undeclared,
       [],
       `these routes are reachable with no permission check:\n  ${undeclared.join('\n  ')}\n` +
-        'Build them with orgProcedure(permission), or add them to PUBLIC_ROUTES with the reason.',
+        'Build them with orgProcedure(permission) or adminProcedure(adminPermission), ' +
+        'or add them to PUBLIC_ROUTES with the reason.',
+    )
+  })
+
+  it('every operator route declares a real platform permission', () => {
+    // The other half. A route could declare `adminPermission` as any string
+    // and satisfy the skip above; this requires the string to be one the
+    // platform catalog actually knows, so a typo is a failure rather than a
+    // silently unguarded operator route.
+    const known = new Set<string>(ADMIN_PERMISSIONS)
+    const bogus = [...declaredAdminPermissions().entries()].filter(
+      ([, permission]) => !known.has(permission),
+    )
+    assert.deepEqual(
+      bogus.map(([path, permission]) => `${path} declares ${permission}`),
+      [],
+      'these operator routes declare a permission the platform catalog does not contain',
+    )
+    // And every operator route must be under the admin. prefix, because the
+    // maintenance-mode middleware in server.ts exempts /trpc/admin. so the
+    // switches stay reachable while the installation is paused. One mounted
+    // elsewhere is refused during maintenance, which locks the operator away
+    // from the control that releases it.
+    const misplaced = [...declaredAdminPermissions().keys()].filter(
+      (path) => !path.startsWith('admin.'),
+    )
+    assert.deepEqual(
+      misplaced,
+      [],
+      'these operator routes are not under the admin. prefix, so maintenance mode refuses them',
     )
   })
 
   it('every route has a sample input, so none drops out of the matrix', () => {
+    // Operator routes are excluded for the same reason and by the same test as
+    // above: they are driven by their own matrix against the platform catalog,
+    // and they take an operator session this org-scoped harness does not have.
+    // Excluded by DECLARATION, so an operator route that declares nothing is
+    // still missing here and still fails.
     const inputs = inputsFor(org)
+    const operatorRoutes = declaredAdminPermissions()
     const missing = listProcedures()
       .map(({ path }) => path)
-      .filter((path) => !(path in inputs))
+      .filter((path) => !(path in inputs) && !operatorRoutes.has(path))
     assert.deepEqual(missing, [], `no sample input for: ${missing.join(', ')}`)
   })
 
@@ -277,12 +399,21 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
     }
   })
 
+  /** Operator routes, excluded from the TENANT matrix by declaration rather
+   *  than by path, so one that declares nothing still fails above. */
+  const operatorPaths = declaredAdminPermissions()
+
   // The matrix itself. One test per role per route, named so that a failure
   // says which cell broke.
   for (const role of ROLES) {
     describe(`as ${role}`, () => {
+      const adminPaths = declaredAdminPermissions()
       for (const { path, type } of listProcedures()) {
+        if (adminPaths.has(path)) continue
         if (PUBLIC_ROUTES.has(path)) continue
+        // Operator routes take an operator session, which this org-scoped
+        // harness cannot mint. admin-routes.test.ts drives them with one.
+        if (operatorPaths.has(path)) continue
 
         it(`${type} ${path}`, async () => {
           const permission = declaredPermissions().get(path) as Permission
@@ -327,6 +458,7 @@ describe('permission matrix', { skip: hasDatabase ? false : 'no Postgres at AF_T
   it('no session at all is unauthorized, not forbidden and not allowed', async () => {
     for (const { path, type } of listProcedures()) {
       if (PUBLIC_ROUTES.has(path)) continue
+      if (operatorPaths.has(path)) continue
       const { body } = await callProcedure(h, null, path, type, inputsFor(org)[path])
       assert.equal(
         errorCode(body),

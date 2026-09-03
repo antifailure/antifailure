@@ -32,6 +32,25 @@ verification is a check, and the whole product rests on the check. A provider
 that publishes an unverified version, or branches one, has broken the promise
 that a preview environment cannot contain real customer data.
 
+## What you import
+
+Four packages, and no others. They are the four the
+[stability page](/docs/reference/stability) names as stable, and they are
+stable together because an interface is only as usable as the types its
+signatures name.
+
+| Package | Why you need it |
+| --- | --- |
+| `engine/pkg/provider` | The interface you implement. |
+| `engine/pkg/secret` | `Database.ConnString` returns a `secret.Value`, so you have to name the type. Build one with `secret.New`; it renders as `[redacted]` through every path that turns a value into text. |
+| `engine/pkg/schema` | The manifest types the interfaces carry. |
+| `engine/conformance` | The suite. |
+
+Anything under `engine/internal` is not importable from your module, and that
+is the toolchain refusing it rather than a convention. If you find yourself
+needing something in there, that is a gap in these four packages worth raising
+rather than a barrier to work around.
+
 ## Getting started
 
 ```go

@@ -20,11 +20,75 @@ import { appendAudit } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import type { GitHubClient, GitHubUser } from './github.ts'
 import type { Role } from '../permissions.ts'
+import { engagedReason } from '../admin/controls.ts'
 
 /** How long the browser has to come back from GitHub. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
 
-export class SignInError extends Error {}
+/**
+ * Why a sign-in did not happen.
+ *
+ * `not-invited` is a different event from every other value here and the
+ * difference is what the person sees. Nothing is broken, nothing expired and
+ * nothing needs retrying: this installation admits a list of accounts and
+ * theirs is not on it. A page that told them to "try again" would be sending
+ * them around the same loop forever.
+ *
+ * `link-expired` is the one where trying again IS the fix. It is separated from
+ * `exchange-failed` rather than being the default, because the default is what
+ * a throw added later gets, and telling somebody their link expired when the
+ * real answer was that GitHub reported no members for their organization sends
+ * them to press the same button until they give up.
+ */
+export type SignInRefusal = 'not-invited' | 'link-expired' | 'exchange-failed'
+
+export class SignInError extends Error {
+  readonly refusal: SignInRefusal
+  /**
+   * Whether the OAuth authorization this exchange just created was withdrawn
+   * again.
+   *
+   * Only ever true on a refusal, and it is not decoration. Refusing at the
+   * callback means the visitor has already granted a third party application
+   * access to their GitHub account, and a refusal that leaves that grant
+   * standing has taken something from somebody it then turned away. The page
+   * says the grant is gone only when this says it is, because a reassurance
+   * that might not be true is worse than none.
+   */
+  readonly authorizationRevoked: boolean
+
+  constructor(
+    message: string,
+    options: { refusal?: SignInRefusal; authorizationRevoked?: boolean } = {},
+  ) {
+    super(message)
+    this.refusal = options.refusal ?? 'exchange-failed'
+    this.authorizationRevoked = options.authorizationRevoked ?? false
+  }
+}
+
+/**
+ * Where somebody this installation will not admit is sent instead.
+ *
+ * Unset is the self-hosted default and means there is nowhere: an operator who
+ * runs an allowlist has their own way of being asked, and inventing a link to
+ * the vendor's waitlist on their deployment would be wrong. The hosted planes
+ * set it to the marketing site's request page, which is the list the visitor
+ * was standing one click away from when they pressed Continue with GitHub.
+ */
+export function signupUrlFrom(value: string | undefined | null): string | undefined {
+  if (!value?.trim()) return undefined
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error('AF_SIGNUP_URL must be an absolute http or https address.')
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('AF_SIGNUP_URL must be an absolute http or https address.')
+  }
+  return url.toString()
+}
 
 /**
  * Who may sign in at all.
@@ -132,6 +196,37 @@ export interface CompletedSignIn {
  * Consuming the state and exchanging the code both happen before anything is
  * written, so a replayed callback cannot create a user or a session.
  */
+
+/**
+ * Refuses somebody this installation has never seen while sign-ups are paused.
+ *
+ * Named so that the catalog entry in admin/controls.ts points at a real
+ * function, and exported so a test can drive it directly as well as through
+ * the callback.
+ *
+ * A known account is never refused. That is the entire difference between this
+ * and the allowlist, and it is the reason the switch is safe to reach for: an
+ * operator pausing sign-ups during an incident must not also be signing out
+ * every customer who is mid-task.
+ */
+export async function refuseNewAccounts(pool: Pool, githubId: number): Promise<void> {
+  const reason = await pool.withoutTenant((db) => engagedReason(db, 'signups'))
+  if (reason === null) return
+  const known = await pool.withoutTenant(
+    async (db) => {
+      const rows = await db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM users WHERE github_id = ${githubId}`)
+      return Number(rows[0]?.n ?? 0) > 0
+    },
+    { githubIds: [githubId] },
+  )
+  if (known) return
+  throw new SignInError(
+    `New sign-ups are paused on this installation: ${reason}. ` +
+      `Accounts that already exist are unaffected.`,
+  )
+}
+
 export async function completeSignIn(
   pool: Pool,
   clock: Clock,
@@ -152,11 +247,15 @@ export async function completeSignIn(
     // One message for "never issued", "already used", and "expired". Telling
     // them apart tells an attacker probing state values which of their guesses
     // was once real.
-    throw new SignInError('This sign-in link is no longer valid. Start again.')
+    throw new SignInError('This sign-in link is no longer valid. Start again.', {
+      refusal: 'link-expired',
+    })
   }
   const expiresAt = consumed.expires_at instanceof Date ? consumed.expires_at : new Date(consumed.expires_at)
   if (expiresAt.getTime() <= clock.now().getTime()) {
-    throw new SignInError('This sign-in link is no longer valid. Start again.')
+    throw new SignInError('This sign-in link is no longer valid. Start again.', {
+      refusal: 'link-expired',
+    })
   }
 
   const { user, accessToken } = await github.exchangeCode(input.code)
@@ -169,11 +268,40 @@ export async function completeSignIn(
   // for the same reason the rest of this file matches on the id: an address can
   // be moved between accounts.
   if (allowlist !== null && !allowlist.has(user.login.toLowerCase())) {
+    // And nothing left on GitHub either.
+    //
+    // "Leaves nothing behind" used to mean nothing in this database. It was
+    // never the whole of it: by the time this line runs, the visitor has
+    // pressed Authorize on a third party application, and that grant sits on
+    // their account until they go and find it. Refusing somebody and keeping
+    // the access they just handed over is the part of this flow that reads as
+    // dishonest, so it is given back.
+    //
+    // Not awaited for its answer's sake alone: whether it succeeded decides
+    // what the page is allowed to claim.
+    const { revoked } = await github.revokeAuthorization(accessToken)
     throw new SignInError(
       'This installation is not open for sign-ups. Ask an owner to add your ' +
         'GitHub account to the allowlist.',
+      { refusal: 'not-invited', authorizationRevoked: revoked },
     )
   }
+
+  // The installation's sign-up switch, checked in the same place and for the
+  // same reason as the allowlist above: before the user row, before the
+  // membership lookup, before anything is written.
+  //
+  // It refuses only people this installation has never seen. An allowlist
+  // refuses everybody not named on it, including somebody who has been signing
+  // in for a year, and that is the right shape for an allowlist and the wrong
+  // shape for a pause. What an operator wants during an incident is "stop new
+  // accounts appearing", not "lock out the customers".
+  //
+  // The githubIds declaration is what makes the read possible at all: see
+  // migrations/0006, writing to users is permitted and reading it is not,
+  // except for the ids the caller names. The id here came from GitHub moments
+  // ago for the person holding this code.
+  await refuseNewAccounts(pool, user.id)
 
   const orgs = await github.organizationsFor(accessToken)
 

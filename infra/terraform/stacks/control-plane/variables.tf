@@ -89,7 +89,7 @@ variable "image_repository" {
 
 variable "image_tag" {
   type    = string
-  default = "v0.1.1"
+  default = "v1.0.0"
 }
 
 variable "image_digest" {
@@ -184,6 +184,14 @@ variable "database_extensions" {
 variable "signin_allowlist" {
   type        = list(string)
   description = "GitHub logins that may sign in. Empty means nobody."
+}
+
+# Where the people that list turns away are sent. See the module's variable of
+# the same name. Empty means the refusal page offers no link at all.
+variable "signup_url" {
+  type        = string
+  default     = ""
+  description = "Where somebody the allowlist refuses is sent to ask for access."
 }
 
 variable "provider_key_secret_enabled" {

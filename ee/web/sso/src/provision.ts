@@ -234,7 +234,7 @@ export async function provision(options: ProvisionOptions): Promise<ProvisionRes
         throw new ProvisioningRefused(
           'AF-EE-004',
           `The license covers ${options.seats} seats and they are all in use, so ${email} was not ` +
-            `added. Remove an inactive member, or contact licensing@antifailure.dev to add seats. ` +
+            `added. Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. ` +
             `No existing member was removed.`,
         )
       }

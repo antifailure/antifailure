@@ -323,10 +323,11 @@
             14,
             15,
             16,
-            17
+            17,
+            18
           ],
           "default": 17,
-          "description": "Postgres major version. Must match the source, because a dump does not restore across majors."
+          "description": "Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not."
         },
         "source_url_env": {
           "type": "string",

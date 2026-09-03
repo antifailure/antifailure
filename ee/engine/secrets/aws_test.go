@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 package secrets
 
 // The signing, against the example AWS publishes.

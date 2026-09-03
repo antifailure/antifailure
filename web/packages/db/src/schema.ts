@@ -1133,6 +1133,190 @@ export const adminNotes = pgTable('admin_notes', {
    *  wrote about a customer, and the retraction is worth being able to see. */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
+/**
+ * The installation's emergency switches.
+ *
+ * No org_id, and deliberately absent from tenantScopedTables below: these rows
+ * are configuration for the whole installation rather than data belonging to
+ * any customer. What confines the application role here is a GRANT, not a
+ * policy: it holds SELECT and nothing else, so a tenant route that reached
+ * this table raises rather than writing. See migrations/0031.
+ */
+export const platformControls = pgTable('platform_controls', {
+  /** The control's name, from the catalog in api/src/admin/controls.ts. A
+   *  fixed vocabulary the enforcement points match by literal value, which is
+   *  why the masking rules preserve it rather than hashing it. */
+  name: text('name').primaryKey(),
+  /** Null means not engaged. A timestamp rather than a boolean because "when
+   *  did this start" is the first question anybody asks about a switch that is
+   *  on, and a boolean cannot answer it. */
+  engagedAt: timestamp('engaged_at', { withTimezone: true }),
+  reason: text('reason'),
+  /** The operator's address, kept as text so the row still says who paused the
+   *  installation once their account is gone. */
+  engagedBy: text('engaged_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/* ---------------------------------------------------------------------------
+ * The operator portal (0029)
+ *
+ * Deliberately absent from tenantScopedTables below. None of these three has an
+ * org_id and none of them should: an operator is not a tenant, and the audit
+ * row records what an operator did rather than something an organization owns.
+ * ------------------------------------------------------------------------ */
+
+export const adminUsers = pgTable('admin_users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  role: text('role').notNull(),
+  /** Null until provisioned, and a null hash cannot be signed in against. */
+  passwordHash: bytea('password_hash'),
+  passwordSalt: bytea('password_salt'),
+  passwordSetAt: timestamp('password_set_at', { withTimezone: true }),
+  isRoot: boolean('is_root').notNull().default(false),
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+  suspendedReason: text('suspended_reason'),
+  lastSignedInAt: timestamp('last_signed_in_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminSessions = pgTable('admin_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tokenHash: bytea('token_hash').notNull(),
+  adminUserId: uuid('admin_user_id').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  /** Set when this operator has stepped into a customer's account. The marker
+   *  lives on the OPERATOR's session because the fact to enforce is "this
+   *  operator cannot take operator actions right now". */
+  impersonatedUserId: uuid('impersonated_user_id'),
+  impersonationReason: text('impersonation_reason'),
+  /** The audit entry that authorised it, NOT NULL when impersonating, so the
+   *  record has to exist before the session that relies on it. */
+  impersonationAuditSeq: bigint('impersonation_audit_seq', { mode: 'number' }),
+})
+
+export const adminAuditEntries = pgTable('admin_audit_entries', {
+  seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  action: text('action').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The tenant an action concerned, when it concerned one. Not org_id: the
+   *  row belongs to the platform, not to that tenant. */
+  subjectOrgId: uuid('subject_org_id'),
+  subjectOrgLabel: text('subject_org_label'),
+  origin: text('origin').notNull(),
+  ip: inet('ip'),
+  severity: text('severity').notNull().default('info'),
+  detail: jsonb('detail').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  prevHash: text('prev_hash'),
+  entryHash: text('entry_hash').notNull(),
+})
+
+
+/* ---------------------------------------------------------------------------
+ * Entitlements, flags, and the money ledger. See migration 0030_entitlements_flags_and_the_money_ledger.
+ *
+ * Three of the four carry org_id and are in the cross-tenant list below.
+ * `feature_flags` deliberately does not: a flag is the platform's own
+ * configuration and a rollout applies ACROSS tenants, so the row that says
+ * which tenants is feature_flag_targets, not the flag.
+ * ------------------------------------------------------------------------ */
+
+export const entitlementOverrides = pgTable('entitlement_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** global, organization, project or user. */
+  scope: text('scope').notNull(),
+  /** The organization, repository or user this applies to. Null only for
+   *  global, which the migration makes an invariant rather than a habit. */
+  scopeId: uuid('scope_id'),
+  orgId: uuid('org_id'),
+  feature: text('feature').notNull(),
+  /** A JSON scalar: a number for a limit, a boolean for a capability. */
+  value: jsonb('value').notNull(),
+  reason: text('reason').notNull(),
+  ticket: text('ticket'),
+  createdByUserId: uuid('created_by_user_id'),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Null is forever, and is a typed choice rather than an empty field. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedByLabel: text('revoked_by_label'),
+  revokedReason: text('revoked_reason'),
+})
+
+export const featureFlags = pgTable('feature_flags', {
+  key: text('key').primaryKey(),
+  description: text('description').notNull(),
+  /** off, on or targeted. `off` is the kill switch and beats everything. */
+  state: text('state').notNull().default('off'),
+  rolloutPercent: integer('rollout_percent').notNull().default(0),
+  internalOnly: boolean('internal_only').notNull().default(false),
+  /** Recorded apart from an ordinary edit, so an incident timeline can be
+   *  reconstructed from the database rather than from somebody's memory. */
+  killedAt: timestamp('killed_at', { withTimezone: true }),
+  killedByLabel: text('killed_by_label'),
+  killedReason: text('killed_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedByLabel: text('updated_by_label').notNull(),
+})
+
+export const featureFlagTargets = pgTable('feature_flag_targets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  flagKey: text('flag_key').notNull(),
+  kind: text('kind').notNull(),
+  value: text('value').notNull(),
+  /** Deny beats allow, so one tenant can be pulled out of a rollout that is
+   *  working for everybody else. */
+  allow: boolean('allow').notNull().default(true),
+  /** Null for the kinds that name no tenant: plan and environment. */
+  orgId: uuid('org_id'),
+  reason: text('reason').notNull(),
+  createdByLabel: text('created_by_label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const adminOperations = pgTable('admin_operations', {
+  /** The idempotency key IS the primary key: the second attempt to claim it is
+   *  a constraint violation rather than a second refund. */
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  action: text('action').notNull(),
+  orgId: uuid('org_id').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: text('target_id'),
+  /** The operator, from admin_users. A different id space from users(id). */
+  adminUserId: uuid('admin_user_id'),
+  actorLabel: text('actor_label').notNull(),
+  reason: text('reason').notNull(),
+  request: jsonb('request').notNull(),
+  requestFingerprint: text('request_fingerprint').notNull(),
+  state: text('state').notNull().default('in_flight'),
+  beforeState: jsonb('before_state'),
+  afterState: jsonb('after_state'),
+  providerObjectId: text('provider_object_id'),
+  /** Minor units beside their currency, both or neither. */
+  amountMinor: bigint('amount_minor', { mode: 'number' }),
+  currency: text('currency'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  /** Whether the provider ANSWERED. Decides whether a deliberate retry may
+   *  have a key of its own or has to reuse this one. */
+  errorAnswered: boolean('error_answered'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+})
 
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
@@ -1152,4 +1336,5 @@ export const tenantScopedTables = [
 
   githubDeliveries, pullRequests, prGenerations, teardownRequests,
   oidcRepositoryBindings,
+  entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const

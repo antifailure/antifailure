@@ -203,7 +203,8 @@ export function PrivacyPage() {
         </CounselNotice>
         <Prose className="mt-10">
           <p>
-            Sign-in today is for the waitlist. The three documents that a security review asks for
+            Signing in creates a session record and grants membership of the organization the
+            GitHub App was installed on. The three documents that a security review asks for
             by name are now drafted rather than promised: the{" "}
             <Link href="/dpa">Data Processing Agreement</Link>, the{" "}
             <Link href="/subprocessors">subprocessor list</Link>, and the{" "}
@@ -272,7 +273,7 @@ export function TermsPage() {
               ],
               [
                 "Accounts",
-                "Sign-in is for the waitlist. There is no public production control plane yet, and these terms are not a paid-service agreement.",
+                "Installing the GitHub App creates an organization in the hosted control plane, on the plan the schema gives a new one. Nothing can be run in that organization until somebody signs in to it, and sign-in can be restricted to named accounts. Nothing here is sold and no card is taken, so these terms are not a paid-service agreement.",
               ],
               [
                 "Availability",
@@ -674,7 +675,7 @@ export function DpaPage() {
               ],
               [
                 "Contact for data protection",
-                "Security reports go to security@antifailure.dev today. A separate privacy address will be published with the signed copy.",
+                "No address at antifailure.dev can receive mail: the domain publishes no mail exchanger. Security reports go through GitHub private vulnerability reporting, and the contact page lists the routes that resolve today. A privacy address will be published with the signed copy.",
               ],
             ]}
           />
@@ -1218,7 +1219,7 @@ export function DataRetentionPage() {
             rows={[
               [
                 "How to ask",
-                "Write to the privacy contact once it is published. Until then, security@antifailure.dev reaches a person who can act on it.",
+                "Write to the privacy contact once it is published. Until then, open a GitHub private vulnerability report, which reaches a person who can act on it without posting anything publicly. Mail is not a route: the domain publishes no mail exchanger, so a request sent to any address at antifailure.dev is delivered nowhere.",
               ],
               [
                 "What happens",

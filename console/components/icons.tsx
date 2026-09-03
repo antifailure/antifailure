@@ -51,3 +51,26 @@ export const IconPlan = stroke("M2.6 12.6V7.4M6.2 12.6V3.4M9.8 12.6V9M13.4 12.6V
 // this rail.
 export const IconSettings = stroke("M2.8 5.4h10.4M2.8 10.6h10.4M6.2 3.9v3M10 9.1v3");
 export const IconSignOut = stroke("M6.4 3.2H3.2v9.6h3.2M9.6 10.4 12.8 8 9.6 5.6M12.8 8H6.4");
+
+/* -------------------------------------------------------------------------
+ * The operator portal
+ *
+ * Its own icons rather than borrowed ones. Reusing IconMembers for tenants and
+ * IconSettings for operators would have shipped faster and read wrong: the
+ * navigation is the one place where an icon is the only thing distinguishing
+ * two entries at a glance, and "a person" meaning both a customer's member and
+ * a member of staff is exactly the confusion this portal cannot afford.
+ *
+ * Same stroke() helper, so they inherit the one grid, one width and one size
+ * the rest of the navigation uses.
+ * ---------------------------------------------------------------------- */
+
+/** Organizations: two buildings, because a tenant is a company and not a person. */
+export const IconTenants = stroke(
+  "M2.6 13.4V5.2l4-1.8v10M6.6 13.4V7l6.8-2.2v8.6M2 13.4h12M8.6 8.6v1M8.6 10.8v1M11 8v1M11 10.2v1",
+);
+
+/** Operators: a person with a key, which is what an operator account is. */
+export const IconOperators = stroke(
+  "M6 7.4a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM2.4 13c0-2 1.5-3.3 3.6-3.3M12.2 6.4a1.5 1.5 0 1 1-1.4 2l-2.2 2.2v1.2h1.2v-1h1v-1h1l.9-.9",
+);
