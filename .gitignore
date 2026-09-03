@@ -263,3 +263,13 @@ examples/*/report.md
 # for lands a 60MB static binary, and the first `git add -A` after a run of the
 # negative control staged it.
 relpack-*
+
+# `go build ./tools/preview` writes ./preview at the repository root, and
+# tools/gatecheck refuses any tools directory whose name is not ignored. That
+# directory holds shell and TypeScript rather than Go, so the build is one
+# nobody runs on purpose, which is exactly why the artefact would go unnoticed
+# until a `git add -A` committed it.
+#
+# Anchored, so it ignores the build artefact at the root and not the harness at
+# tools/preview.
+/preview
