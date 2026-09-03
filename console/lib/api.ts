@@ -31,6 +31,11 @@ export interface Session {
    *  older control plane, which is read as GitHub alone rather than as none. */
   methods?: string[];
   signupsOpen?: boolean;
+  /** Whether signing in with no organization creates one. Absent from an older
+   *  control plane, which is read as off: that is what every deployment did
+   *  before it existed, and reading an absent field as "on" would tell somebody
+   *  a provisioning step failed when there was no step. */
+  selfServeSignup?: boolean;
   githubAppInstallUrl?: string;
   plan?: string | null;
   hostedRequiredPlan?: string | null;

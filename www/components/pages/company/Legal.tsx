@@ -273,7 +273,15 @@ export function TermsPage() {
               ],
               [
                 "Accounts",
-                "Installing the GitHub App creates an organization in the hosted control plane, on the plan the schema gives a new one. Nothing can be run in that organization until somebody signs in to it, and sign-in can be restricted to named accounts. Nothing here is sold and no card is taken, so these terms are not a paid-service agreement.",
+                "Anybody can create one. Signing in with GitHub creates an organization on the free plan, owned by that account, and installing the GitHub App creates or adopts one the same way. The free plan's limits are enforced against it: reaching one refuses the next creation and tears nothing down.",
+              ],
+              [
+                "Paying",
+                "A paid plan is bought through Stripe's own hosted checkout and managed in Stripe's customer portal. No card ever reaches this product. These terms are not a paid-service agreement: the contracting entity, the governing law and the liability cap are all still blank below, and a contract with no party to it is not one. A purchase is governed by whatever is agreed in writing at the time.",
+              ],
+              [
+                "The enterprise edition",
+                "The source under ee/ is public to read and audit. Running it in production requires a written agreement with Antifailure and a valid licence, which is arranged through the contact form. Its licence used to accept this page as that agreement; it no longer names it, because this page says it is not one.",
               ],
               [
                 "Availability",

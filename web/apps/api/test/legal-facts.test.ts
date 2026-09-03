@@ -789,3 +789,137 @@ describe('the legal pages do not deny a control plane the webhook creates tenant
     )
   })
 })
+
+describe('the enterprise licence and the terms it points at agree', () => {
+  /**
+   * ONE PUBLISHED LEGAL DOCUMENT HELD TO ANOTHER, which is a step past the rest
+   * of this file: everything above holds prose to CODE, and this holds prose to
+   * prose, because the contradiction was between two documents and neither was
+   * wrong on its own.
+   *
+   * WHAT WAS WRONG. ee/LICENSE.md permitted production use of the enterprise
+   * directory only if you "have agreed to, and are in compliance with, the
+   * Antifailure Terms of Service, available at https://antifailure.dev/terms,
+   * or a substantially similar written agreement". The page at that address
+   * says of itself that it is not a paid-service agreement, and leaves the
+   * contracting entity, the registered address, the governing law and the
+   * liability cap deliberately blank. So the condition a customer had to
+   * satisfy resolved, for the route the licence named FIRST, to a document
+   * stating it is not the kind of document that could satisfy it. A reader
+   * could not comply by reading.
+   *
+   * It was bounded rather than total: the licence also accepted a negotiated
+   * written agreement, so an enterprise deal with a signed contract was
+   * unaffected. What was broken is the self serve path, which is the one a
+   * reader can follow without talking to a human.
+   *
+   * HOW IT IS RESOLVED, and why this direction. Two ways out: make the page an
+   * agreement, or stop naming it. Making it one would mean publishing a
+   * contract with no contracting entity, no governing law and no cap, which is
+   * not an agreement either, only one that hides its own gap better. So the
+   * licence stops naming it, and this gate makes that a PAIR rather than a
+   * single edit: the day somebody fills those blanks in and the page becomes a
+   * real agreement, the second assertion tells them the licence may name it
+   * again.
+   *
+   * The prepared version of this gate was written to be RED, as a way of
+   * recording the contradiction until somebody decided. It is green because the
+   * decision is made, and it is written so it goes red again if either half
+   * moves without the other.
+   */
+  it('reads both documents, so an empty parse cannot pass', async () => {
+    const licence = await read('ee/LICENSE.md')
+    const pages = await read('www/components/pages/company/Legal.tsx')
+    assert.ok(licence.length > 500, 'ee/LICENSE.md did not load')
+    assert.ok(pages.length > 500, 'Legal.tsx did not load')
+    // The operative sentence, so a licence rewritten past recognition fails
+    // here rather than passing every assertion below by containing nothing.
+    assert.match(
+      licence,
+      /may only be\s+used in production if you/,
+      'ee/LICENSE.md no longer states a production-use condition at all, so nothing below is ' +
+        'checking what it was written to check',
+    )
+  })
+
+  it('does not condition production use on a page that disclaims being an agreement', async () => {
+    const licence = await read('ee/LICENSE.md')
+    const pages = await read('www/components/pages/company/Legal.tsx')
+
+    // Only the OPERATIVE clause. The licence explains at length why it stopped
+    // naming that URL and quotes the URL to do it, and a rule that could not
+    // tell an explanation from a condition would force the correction to be
+    // made silently, which is the opposite of what this repository wants.
+    const clause = licence.slice(
+      licence.indexOf('## Terms'),
+      licence.indexOf('### Why this does not name a public terms page'),
+    )
+    const conditionsOnThePage = /antifailure\.dev\/terms/.test(clause)
+    const pageDisclaims = /not a paid-service agreement/i.test(pages)
+
+    assert.ok(
+      !(conditionsOnThePage && pageDisclaims),
+      'ee/LICENSE.md conditions production use of the enterprise directory on agreeing to the ' +
+        'Terms of Service at https://antifailure.dev/terms, and that page says these terms are ' +
+        'not a paid-service agreement. A customer following the self serve route arrives at a ' +
+        'document disclaiming that it is the kind of document the licence requires. Either ' +
+        '/terms becomes an agreement, entity and governing law and cap included, or the licence ' +
+        'stops naming it.',
+    )
+  })
+
+  it('tells whoever fills in the blanks that the licence may name the page again', async () => {
+    // The direction the assertion above cannot see. It goes quiet the moment
+    // the licence stops naming the page, and quiet is exactly how the pair
+    // would drift back apart: somebody makes /terms a real agreement, nothing
+    // says the licence could accept it, and the self serve route stays closed
+    // for a reason that has gone away.
+    const licence = await read('ee/LICENSE.md')
+    const pages = await read('www/components/pages/company/Legal.tsx')
+    const clause = licence.slice(
+      licence.indexOf('## Terms'),
+      licence.indexOf('### Why this does not name a public terms page'),
+    )
+    if (/antifailure\.dev\/terms/.test(clause)) return
+
+    if (!/not a paid-service agreement/i.test(pages)) {
+      assert.fail(
+        '/terms no longer says it is not a paid-service agreement, so it may now be one, and ' +
+          'ee/LICENSE.md has stopped naming it. The self serve route to an enterprise licence ' +
+          'is closed for a reason that has gone away. Either restore the page\'s disclaimer or ' +
+          'name the page in the licence again, and delete the section in ee/LICENSE.md that ' +
+          'explains why it does not.',
+      )
+    }
+  })
+
+  it('leaves a reader of the licence somewhere to go', async () => {
+    // The failure this replaces was a condition nobody could satisfy by
+    // reading. Removing the route it named is only half a fix: a licence that
+    // says "a written agreement" and gives no way to ask for one is the same
+    // dead end wearing different words.
+    const licence = await read('ee/LICENSE.md')
+    assert.match(
+      licence,
+      /antifailure\.dev\/contact/,
+      'ee/LICENSE.md requires a written agreement and names no way to ask for one',
+    )
+    // The address it used to name could not receive anything, on a domain with
+    // no mail exchanger and an SPF policy authorizing no sender.
+    assert.ok(
+      !/licensing@antifailure\.dev\.\s*$/m.test(licence),
+      'ee/LICENSE.md answers a licensing question with an email address on a domain that ' +
+        'publishes no mail exchanger',
+    )
+  })
+
+  it('the page says what the licence actually requires, so the two are readable together', async () => {
+    const pages = await read('www/components/pages/company/Legal.tsx')
+    assert.match(
+      pages,
+      /Running it in production requires a written agreement with Antifailure/,
+      '/terms does not say what running the enterprise edition requires, so a reader sent there ' +
+        'by ee/LICENSE.md learns nothing about the condition they are under',
+    )
+  })
+})
