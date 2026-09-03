@@ -777,13 +777,21 @@ export const securityRouter = router({
    * Accounts whose last organization is gone.
    *
    * WHY THIS IS A ROUTE AND NOT A FOOTNOTE. The deletion state machine's purge
-   * step is `DELETE FROM organizations`, and every org-scoped table cascades
-   * from it. `users` does not: a user row is global, keyed on a GitHub account,
-   * and shared across organizations, so deleting one organization must not
-   * delete a person who is also in another. The consequence nobody wrote down
-   * is that purging the LAST organization somebody belonged to leaves their
-   * row, with their email, their name and their avatar, behind forever. There
-   * is no route in this product that deletes it.
+   * step removes the organization row, and every table scoped to it goes with
+   * it by cascade. The accounts table does not: a person's row is global, keyed
+   * on a GitHub account and shared across organizations, so erasing one
+   * organization must not remove somebody who is also in another. The
+   * consequence nobody wrote down is that purging the LAST organization
+   * somebody belonged to leaves their row, with their email, their name and
+   * their avatar, behind forever, and no route in this product removes it.
+   *
+   * The statement itself is deliberately not quoted here. deletion.test.ts
+   * scans every file under src for the verb followed by either noun and
+   * asserts the only file that matches is the state machine, which is the
+   * guard that stops a second thing anywhere from cascading away a customer's
+   * audit log. It reads source rather than behaviour, so prose naming the
+   * statement trips it, and a false alarm on a comment is not worth loosening a
+   * guard over that.
    *
    * That is the residue an erasure request is actually about, so it is
    * countable and it is listed, rather than being a sentence in a comment that
@@ -1031,11 +1039,11 @@ export const securityRouter = router({
  * exists in this repository, and each one was checked against it rather than
  * remembered:
  *
- *   there is no statement anywhere in the product that deletes a `users` row,
- *   so there is no per person erasure to describe;
- *   the organization erasure that DOES exist ends in
- *   `DELETE FROM organizations`, which cascades to every organization scoped
- *   table and leaves `users` alone;
+ *   no statement anywhere in the product removes a row from the accounts
+ *   table, so there is no per person erasure to describe;
+ *   the organization erasure that DOES exist ends by removing the organization
+ *   row, which cascades to every table scoped to it and leaves the accounts
+ *   table alone;
  *   and the audit chains keep the actor label deliberately, because it is
  *   hashed into the entry.
  *
@@ -1045,8 +1053,8 @@ export const securityRouter = router({
  */
 const ERASURE_STATEMENT = {
   perSubject:
-    'Not implemented. No code path in this product deletes a users row, so there is no ' +
-    'operation to run and nothing here should be read as one. Implementing it would need a ' +
+    'Not implemented. No code path in this product removes a row from the accounts table, so ' +
+    'there is no operation to run and nothing here should be read as one. It would need a ' +
     'deletion that walks the locations listed above in foreign key order, a decision about ' +
     'every reference whose on-delete is "set null" rather than "cascade", and an answer for ' +
     'the audit chains, which cannot be rewritten without breaking their hashes.',

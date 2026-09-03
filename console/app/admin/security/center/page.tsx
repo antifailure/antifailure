@@ -145,27 +145,18 @@ export default function SecurityCenterPage() {
               >
                 How people sign in
               </h2>
-              <MetricRow
-                metrics={[
-                  { label: "SSO connections", value: data.sso.connections },
-                  {
-                    label: "Enabled",
-                    value: data.sso.enabled,
-                    note: "Configured completely enough to be used",
-                  },
-                  {
-                    label: "Not enforced",
-                    value: data.sso.bypassable,
-                    note: "Members can still sign in the old way",
-                  },
-                  {
-                    label: "Break-glass codes",
-                    value: data.sso.breakGlassOutstanding,
-                    note: `${data.sso.breakGlassUsed.toLocaleString()} ${data.sso.breakGlassUsed === 1 ? "has" : "have"} been used`,
-                  },
-                ]}
-              />
-              <Sso />
+              {/* A STATEMENT WHEN THERE IS NOTHING, AND THE REAL PANEL WHEN
+                  THERE IS. Migration 0014 built a complete single sign-on and
+                  SCIM schema and nothing in the product reads or writes any of
+                  it: no route configures a connection and no sign-in path
+                  consults one. So on every real installation these counts are
+                  zero, and four zeroes over an empty table is the most
+                  expensive thing this portal could ship, because an operator
+                  reads it as an answer. The day something writes the table this
+                  becomes the panel underneath with no edit here. The exemption
+                  and its reason are recorded in web/packages/db/test/writers
+                  .test.ts, which fails if either direction drifts. */}
+              {data.sso.connections === 0 ? <SsoNotWired /> : <SsoConfigured data={data} />}
             </section>
 
             <section aria-labelledby="operators-heading">
@@ -370,6 +361,66 @@ function Credentials() {
 /* -------------------------------------------------------------------------
  * Single sign-on
  * ---------------------------------------------------------------------- */
+
+/**
+ * What "how people sign in" answers today.
+ *
+ * Every account on this installation arrives through GitHub or an email link,
+ * because there is no other way in: the single sign-on tables exist and nothing
+ * writes them. Saying that is a real answer to the question the section asks.
+ * A row of zeroes over an empty table would be the same fact rendered as though
+ * somebody had measured it and found nothing, which is what an operator would
+ * act on.
+ */
+function SsoNotWired() {
+  return (
+    <Card title="Single sign-on is not wired">
+      <div className="px-4 py-4">
+        <p className="max-w-[72ch] text-[13px] leading-6 text-muted">
+          Every account on this installation signs in through GitHub or an email link. The tables
+          for single sign-on exist, with connections, break-glass codes and a replay guard for
+          assertions, and nothing in the product reads or writes any of them: no route configures a
+          connection and no sign-in path consults one. So no customer can turn it on, and there is
+          nothing here to show rather than nothing found.
+        </p>
+        <p className="mt-3 max-w-[72ch] text-[13px] leading-6 text-muted">
+          What is missing is the configuration route and the sign-in path, not a screen. This
+          section fills in on its own the moment a connection is written, and shows which
+          organizations enforce it and which have it enabled and bypassable.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/** The panel this becomes once single sign-on exists. */
+function SsoConfigured({ data }: { data: Posture }) {
+  return (
+    <>
+      <MetricRow
+        metrics={[
+          { label: "SSO connections", value: data.sso.connections },
+          {
+            label: "Enabled",
+            value: data.sso.enabled,
+            note: "Configured completely enough to be used",
+          },
+          {
+            label: "Not enforced",
+            value: data.sso.bypassable,
+            note: "Members can still sign in the old way",
+          },
+          {
+            label: "Break-glass codes",
+            value: data.sso.breakGlassOutstanding,
+            note: `${data.sso.breakGlassUsed.toLocaleString()} ${data.sso.breakGlassUsed === 1 ? "has" : "have"} been used`,
+          },
+        ]}
+      />
+      <Sso />
+    </>
+  );
+}
 
 function Sso() {
   const rows = useSso();
