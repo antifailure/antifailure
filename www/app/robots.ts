@@ -84,8 +84,17 @@ const TRAINING_AND_DATASET = [
  *  Next's build manifests. /signup is NOT here any more. It used to be a
  *  waitlist with nothing to rank for; it now describes what creating an account
  *  does on a product anybody can create one on, which is the page somebody
- *  searching for this product by name is looking for. */
-const DISALLOW = ["/signin", "/_next/static/chunks/", "/api/"];
+ *  searching for this product by name is looking for.
+ *
+ *  `/login` and `/sign-in` are here because they are 301s to `/signin`, added
+ *  in staticwebapp.config.json because those are the spellings a person types
+ *  first and a 404 is the worst answer somebody trying to get back into their
+ *  account can receive. A redirect source is a crawlable URL of its own, so
+ *  without these two lines the page excluded here would have gained two new
+ *  paths into it. `/sign-up` is deliberately NOT here: it redirects to a page
+ *  that IS indexable, and the canonical tag on `/signup` is what resolves the
+ *  two spellings into one result rather than a rule hiding one of them. */
+const DISALLOW = ["/signin", "/login", "/sign-in", "/_next/static/chunks/", "/api/"];
 
 export default function robots(): MetadataRoute.Robots {
   return {
