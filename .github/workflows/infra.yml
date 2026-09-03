@@ -83,29 +83,51 @@ jobs:
       # the promise is that a green `just gate` means a green CI, and that only
       # holds while the two run the same things.
 
-      # tfsec reads the configuration and needs no credentials of its own, so it
-      # runs on every pull request including one from a fork.
+      # tfsec reads the configuration and needs no credentials, so it runs on
+      # every pull request including one from a fork.
       #
-      # The token is for the INSTALLER, not for the scan, and it is the
-      # difference between this step working and this step failing for reasons
-      # no diff can explain. The action downloads tfsec by asking the GitHub
-      # releases API which version is latest, and it asked anonymously, so on a
-      # busy night it got HTTP 403 and said so in its own error: "The request to
-      # the GitHub API was likely rate-limited. Set a GITHUB_TOKEN to prevent
-      # this". `soft_fail` does not cover that, because soft_fail is about what
-      # tfsec FINDS and this is tfsec never running at all, which is the worst
-      # shape a gate can take: red, unrelated to the change, and teaching
-      # everybody to rerun a job without reading it.
+      # INSTALLED BY HAND RATHER THAN BY THE ACTION, and the reason is the whole
+      # of this block. aquasecurity/tfsec-action downloads tfsec by asking the
+      # GitHub releases API which version is `latest`, and that request returned
+      # HTTP 403 on every pull request touching this directory. The action's own
+      # error says "The request to the GitHub API was likely rate-limited. Set a
+      # GITHUB_TOKEN to prevent this", so a token was set, and the request still
+      # returned 403 with the token being sent. The advice in the message
+      # answers a nearby question: it explains one cause of a 403 from that
+      # endpoint and not the one we were getting, and following it produced a
+      # second red run that looked exactly like the first.
       #
-      # The automatic token is enough. This job holds `contents: read`, which is
-      # all the releases API needs, and the token exists on a pull request from
-      # a fork as well, so the fork sentence above is unchanged.
+      # `soft_fail` never covered this and could not. It decides what happens
+      # when tfsec FINDS something. This was tfsec never running at all, so the
+      # step failed before there was anything to soft fail: a red check,
+      # unrelated to the diff, green on a rerun. That is the shape that teaches
+      # people to rerun a red job without reading it, and it had already cost
+      # one lane an hour looking for a Terraform problem that did not exist.
+      #
+      # So the API is removed from the path. A release asset is served from a
+      # CDN and needs no token and no rate limit budget, the version is pinned
+      # the way every action here is pinned by SHA, and the checksum is the
+      # published one for that release. A mismatch fails the step, because a
+      # scanner downloaded over the network with no integrity check is a worse
+      # thing to run than no scanner.
       - name: tfsec
-        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
-        with:
-          working_directory: infra/terraform
-          soft_fail: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          TFSEC_VERSION: v1.28.14
+          TFSEC_SHA256: a32d0799bbefababaa4fcd814da9f4d251cd932789590b99d1d5fcb89ace6f68
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/tfsec/releases/download/${TFSEC_VERSION}/tfsec-linux-amd64"
+          curl --fail --silent --show-error --location --retry 3 -o /tmp/tfsec "$url"
+          echo "${TFSEC_SHA256}  /tmp/tfsec" | sha256sum --check --status || {
+            echo "::error title=tfsec checksum::The download did not match the published checksum for ${TFSEC_VERSION}. Refusing to run it."
+            exit 1
+          }
+          chmod +x /tmp/tfsec
+          /tmp/tfsec --version
+          # --soft-fail is the same decision the action carried: findings are
+          # reported and do not break the build. What is no longer soft is the
+          # scanner failing to run.
+          /tmp/tfsec infra/terraform --soft-fail
 
   plan:
     name: plan
