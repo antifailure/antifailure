@@ -413,11 +413,13 @@ func (e *usageError) Unwrap() error { return e.err }
 
 func newRootCommand(env *Env) *cobra.Command {
 	var (
-		formatFlag  string
-		quiet       bool
-		verbose     bool
-		workDirFlag string
-		noColor     bool
+		formatFlag   string
+		quiet        bool
+		verbose      bool
+		workDirFlag  string
+		noColor      bool
+		versionFlag  bool
+		versionShort bool
 	)
 
 	root := &cobra.Command{
@@ -443,6 +445,19 @@ recoverable by replay.`),
 		// A command with no subcommand prints help rather than an error,
 		// because "af" alone is how people find out what it does.
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Before the help, because af --version is the first thing typed
+			// after an installer finishes and answering it with the manual is
+			// how this looked broken. It delegates to the same writeVersion
+			// af version calls, so the two spellings cannot drift.
+			if versionFlag {
+				return writeVersion(cmd.Context(), env, versionShort)
+			}
+			// --short on its own would otherwise fall through to the help,
+			// which is a flag that silently means something it does not say.
+			if versionShort {
+				return &usageError{err: fmt.Errorf(
+					"--short prints the version number on its own, so it needs --version")}
+			}
 			if len(args) == 0 {
 				return cmd.Help()
 			}
@@ -485,6 +500,18 @@ recoverable by replay.`),
 		"Run as if started in this directory")
 	root.PersistentFlags().BoolVar(&noColor, "no-color", false,
 		"Do not emit colour, regardless of the terminal")
+
+	// Local to the root rather than persistent, so no subcommand inherits a
+	// --version or a --short it does not implement.
+	//
+	// No -v shorthand. -v is already the shorthand for --verbose on every
+	// command in this tree, and moving it would break a documented flag to save
+	// six keystrokes on one. Somebody who types af -v gets the help today
+	// because a bare af prints the help, not because the letter is unhandled.
+	root.Flags().BoolVar(&versionFlag, "version", false,
+		"Print the version, commit, and edition")
+	root.Flags().BoolVar(&versionShort, "short", false,
+		"With --version, print only the version number")
 
 	root.AddCommand(
 		newStartCommand(env),
