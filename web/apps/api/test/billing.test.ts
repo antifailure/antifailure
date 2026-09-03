@@ -1286,7 +1286,24 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
       form.has('line_items[0][quantity]'), false,
       'a seat count in the input reached Stripe as a quantity',
     )
-    assert.equal(sent.body.includes('200'), false, `200 reached Stripe: ${sent.body}`)
+    // Every VALUE, rather than a substring of the whole body.
+    //
+    // This was `sent.body.includes('200')`, and it went red on a pull request
+    // that changed one line of .gitignore. The body it printed carried no
+    // quantity at all and was exactly right; what it matched was the
+    // organization's own identifier, `1338f347-4154-445c-bac5-606e5200be24`,
+    // which happens to contain those three digits. The test generates that id
+    // and does not control it, so the assertion failed on a coin toss and would
+    // have gone on doing it forever.
+    //
+    // A check that fails for a reason no diff can explain is worse than one
+    // that is missing, because it teaches everybody to rerun a red job without
+    // reading it, and that habit is what lets a real failure through. Reading
+    // the values keeps everything the substring version was for: a 200 sent as
+    // any field's value still fails, including one nobody thought to name.
+    for (const [field, value] of form.entries()) {
+      assert.notEqual(value, '200', `the seat count reached Stripe as ${field}`)
+    }
 
     // And the audit entry does not record a seat count either, because there
     // is no longer any such thing to record.
