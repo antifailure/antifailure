@@ -728,6 +728,27 @@ var exemptFromGate = map[string]string{
 		"than silently costed at zero. " +
 		"It runs on every pull request touching infra/ in infra.yml, against the " +
 		"plan produced there, with --budget so an over-budget plan fails.",
+
+	"tool planguard": "" +
+		"Its input is not in the tree, for the same reason tools/cost's is not. " +
+		"planguard reads a Terraform plan and the whole of its question is about " +
+		"what the RECORDED STATE holds that the configuration no longer declares, " +
+		"so it needs the real state blob and not merely a cloud account. It " +
+		"refuses a plan made without one rather than passing it, which is the " +
+		"point: a plan from an empty state shows every resource as a create and " +
+		"cannot contain a destroy, so a green result from a laptop would be a " +
+		"check that examined nothing. " +
+		"What IS a function of the tree is every rule it applies, and `go test " +
+		"./tools/planguard` covers each one inside `gate`: an unacknowledged " +
+		"destroy is refused, a replace counts as a destroy, an acknowledged one " +
+		"passes, an acknowledgement with no expiry or no reason is not a " +
+		"decision, an expired one has lapsed, one that matched nothing is stale, " +
+		"a plan with no managed resources in its prior state is refused rather " +
+		"than passed, and a plan it cannot parse is an error rather than an empty " +
+		"result. " +
+		"It runs on every pull request touching infra/ in infra.yml, against both " +
+		"the staging and the production plan produced there, and only when those " +
+		"plans were made against the real state.",
 }
 
 // workflowSet is the workflows that run on a pull request, kept with their

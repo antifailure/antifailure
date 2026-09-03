@@ -247,6 +247,7 @@ terraform:stacks/control-plane	variable	app_base_url	string	optional
 terraform:stacks/control-plane	variable	assign_deployer_secret_officer	bool	optional
 terraform:stacks/control-plane	variable	backup_retention_days	number	optional
 terraform:stacks/control-plane	variable	budget_contact_emails	list(string)	optional
+terraform:stacks/control-plane	variable	cd_principal_id	string	optional
 terraform:stacks/control-plane	variable	ci_principal_id	string	optional
 terraform:stacks/control-plane	variable	custom_domain	string	optional
 terraform:stacks/control-plane	variable	database_extensions	list(string)	optional

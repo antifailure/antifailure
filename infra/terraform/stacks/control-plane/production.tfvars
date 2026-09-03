@@ -223,6 +223,28 @@ github_app_id = ""
 assign_deployer_secret_officer = true
 deployer_principal_id          = "3537595b-8059-4839-9cd8-04325c824291"
 
+# WITHOUT THIS, CONTINUOUS DEPLOYMENT CANNOT REACH PRODUCTION AT ALL.
+#
+# The object id of af-infra-ci, the Entra application GitHub Actions federates
+# into. cd.yml's production job updates the container app's image, starts the
+# bootstrap job and shifts ingress traffic; every one of those is a write and
+# the identity holds nothing on this group until this line grants it.
+#
+# An object id is not a secret. It identifies a principal and unlocks nothing,
+# which is why it sits here beside deployer_principal_id rather than arriving as
+# an environment variable. That placement is deliberate and is the difference
+# between this grant and staging's: a value passed as TF_VAR_ by the plan job
+# and NOT by the person who runs apply produces a plan that says "1 to add" on
+# every pull request forever, for a resource nobody ever creates. That is
+# exactly what ci_principal_id does today, and a plan that is never empty is one
+# people stop reading.
+#
+# The grant this line describes is live in Azure and recorded in
+# control-plane-production.tfstate. Deleting the line does not revoke it; it
+# turns it into an orphan that the next apply removes. See ci.tf for the commit
+# that did exactly that and for the gate that now refuses it.
+cd_principal_id = "f99916dc-1e11-4305-8e03-1e116a1e93e1"
+
 # ---------------------------------------------------------------------------
 # Alerting.
 # ---------------------------------------------------------------------------

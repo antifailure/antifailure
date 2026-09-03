@@ -239,6 +239,12 @@ variable "ci_principal_id" {
   description = "Object id of the service principal GitHub Actions federates into. Gets Reader on this resource group and nothing else. Empty disables the grant."
 }
 
+variable "cd_principal_id" {
+  type        = string
+  default     = ""
+  description = "Object id of the identity cd.yml deploys with. Gets Contributor on this resource group and nothing else, which is what updating the container app and shifting traffic needs. Empty disables the grant, and with it continuous deployment into this environment."
+}
+
 variable "geo_redundant_backup" {
   type        = bool
   default     = false
