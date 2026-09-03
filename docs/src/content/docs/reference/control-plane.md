@@ -10,13 +10,20 @@ start without what it needs, naming the variable that is missing. A process
 that starts with a missing secret and fails on the first request that needs it
 is a process that fails in production rather than at deploy time.
 
+Every variable on this page can be set by the deploy paths this project ships,
+and that is checked rather than asserted: `tools/wirecheck` fails a build when a
+variable documented here has no env block in the Terraform module and no row in
+`tools/docs/wiring-exemptions.tsv` saying why it cannot have one. It was written
+because the two checks that already covered this ground both proved a variable
+was DOCUMENTED, which a variable nothing could deliver satisfies perfectly.
+[Standing up production](/docs/self-hosting/azure#turning-on-the-parts-that-need-a-credential)
+has the order for the four features whose credential Terraform must not hold.
+
 ## Required
 
 | Variable | What it is |
 | --- | --- |
 | `AF_DATABASE_URL` | The connection string the application uses. This is the unprivileged role, not the owner: it cannot run DDL, because a role that can `ALTER TABLE` can drop the policies that isolate tenants. |
-| `AF_ADMIN_DATABASE_URL` | The connection string the operator portal uses, and the only credential on this instance that can read across tenants. A SEPARATE role from `AF_DATABASE_URL`, holding `BYPASSRLS`, never the application's own role: a different credential is something the application cannot be granted its way into, where a privilege is something it can. Leave it unset and `/admin` refuses every request naming this variable, rather than showing an empty page that reads like a platform with no customers on it. |
-| `AF_ADMIN_POOL_MAX` | Connections in the operator pool. Small on purpose: it serves a handful of operators, not customer traffic. Defaults to a low value and rarely needs changing. |
 | `AF_GITHUB_CLIENT_ID` | The OAuth App's client identifier. |
 | `AF_GITHUB_CLIENT_SECRET` | The OAuth App's client secret. |
 | `AF_GITHUB_REDIRECT_URI` | Where GitHub returns the browser after sign in. Must match what the App is configured with exactly. |

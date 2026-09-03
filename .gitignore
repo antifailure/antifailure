@@ -173,6 +173,7 @@ runner/artifacts/
 /varcheck
 /vulncheck
 /walkthrough
+/wirecheck
 engine/af-proxy
 engine/af
 

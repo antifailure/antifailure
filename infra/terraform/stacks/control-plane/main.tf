@@ -129,6 +129,33 @@ module "control_plane" {
   custom_domain           = var.custom_domain
   dns_zone_name           = var.dns_zone_name
   dns_zone_resource_group = var.dns_zone_resource_group
+
+  # The application's own configuration, which this stack could not pass on
+  # until now. tools/wirecheck is the gate that keeps this list level with
+  # docs/reference/control-plane.md.
+  operator_portal_enabled = var.operator_portal_enabled
+  admin_pool_max          = var.admin_pool_max
+
+  analytics_enabled        = var.analytics_enabled
+  analytics_operator_org   = var.analytics_operator_org
+  analytics_retention_days = var.analytics_retention_days
+  site_origin              = var.site_origin
+
+  github_app_install_url = var.github_app_install_url
+  github_api_base        = var.github_api_base
+
+  mail_from                  = var.mail_from
+  public_url                 = var.public_url
+  resend_api_key_secret_name = var.resend_api_key_secret_name
+  product_name               = var.product_name
+
+  stripe_price_team                 = var.stripe_price_team
+  stripe_secret_key_secret_name     = var.stripe_secret_key_secret_name
+  stripe_webhook_secret_secret_name = var.stripe_webhook_secret_secret_name
+
+  hosted_required_plan = var.hosted_required_plan
+  operator_sets_plan   = var.operator_sets_plan
+  model_prices         = var.model_prices
 }
 
 # Alerting, which staging does not run and production does.
