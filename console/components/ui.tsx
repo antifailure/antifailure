@@ -585,6 +585,8 @@ export function Confirm({
   title,
   phrase,
   confirmLabel,
+  tone = "danger",
+  cancelLabel = "Keep it",
   busy = false,
   error,
   onConfirm,
@@ -597,6 +599,21 @@ export function Confirm({
    *  serious but reversible, which gets a button and no field. */
   phrase?: string;
   confirmLabel: string;
+  /**
+   * The weight of the confirm button.
+   *
+   * Danger by default, because everything this component was written for
+   * destroys or withdraws something. `primary` exists for the one shape that is
+   * neither: an action that GIVES access back, where a red button says the
+   * opposite of what the action does. Restoring a suspended operator is the
+   * case that found it, rendered in red beside a cancel button reading "Keep
+   * it", which together read as a deletion dialog.
+   */
+  tone?: "danger" | "primary";
+  /** What declining says. "Keep it" is right for destroying something and
+   *  wrong for undoing a suspension, where the thing being kept is the
+   *  suspension rather than the account. */
+  cancelLabel?: string;
   busy?: boolean;
   error?: string | null;
   onConfirm: () => void;
@@ -671,9 +688,9 @@ export function Confirm({
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-rule px-5 py-3.5">
           <Button onClick={onCancel} disabled={busy}>
-            Keep it
+            {cancelLabel}
           </Button>
-          <Button type="submit" variant="danger" disabled={!ready} busy={busy}>
+          <Button type="submit" variant={tone} disabled={!ready} busy={busy}>
             {confirmLabel}
           </Button>
         </div>

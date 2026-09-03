@@ -507,6 +507,11 @@ function OperatorDrawer({
         open={confirming === "restore"}
         title={`Restore ${operator.name}`}
         confirmLabel="Restore this operator"
+        // Not danger. Restoring gives an operator their account back, and a red
+        // button beside "Keep it" reads as a deletion dialog: the two together
+        // say the opposite of what pressing them does.
+        tone="primary"
+        cancelLabel="Leave it suspended"
         busy={busy === "restore"}
         error={error}
         onCancel={() => {
