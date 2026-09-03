@@ -516,10 +516,20 @@ The user agent is read in the page and never sent, so the crawler filter only
 sees crawlers that execute JavaScript: these counts are a floor and a shape
 rather than an audited total, and the dashboard says so beside them.
 
-Opening any page with `?af-analytics=off` switches measurement off for that
-browser until it is switched back on with `?af-analytics=on`. That is the only
-value the beacon keeps beyond the tab, it is a single flag, and it is never
-sent anywhere.
+A switch on the privacy page turns measurement off for that browser, and
+opening any page with `?af-analytics=off` does the same thing without a click,
+which is what makes excluding a colleague a link rather than an install. Either
+is undone by the switch or by `?af-analytics=on`. That is the only value the
+beacon keeps beyond the tab, it is a single flag, and it is never sent anywhere.
+
+The switch takes effect on the page it is pressed on rather than on the next
+one, and it discards whatever is queued and unsent, because the queue holds
+events for up to three seconds and sending them because they were captured a
+moment before the reader objected is the disclosure the switch was pressed to
+prevent. It reports which of four things is deciding: this reader asked, the
+browser asked through Global Privacy Control or Do Not Track, the browser looks
+automated, or this build has no endpoint configured. Only the first is the
+switch's to change, and where it is not the switch is not offered.
 
 The referrer, the URL and the query string are turned into a bounded channel, a
 page shape and a campaign identifier **in the browser**, so the raw values never
