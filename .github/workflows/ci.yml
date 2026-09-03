@@ -1101,6 +1101,18 @@ jobs:
         # happy user who never learns the feature exists.
         run: go run ./tools/constcheck .
 
+      - name: The self-hosting inputs are the ones v1.0.0 promised
+        # A self hoster writes a Helm values file and a tfvars file once and
+        # keeps them in their own repository. Until v1.0.0 the release notes
+        # said both surfaces were free to change in a minor release, and the
+        # cost of that sentence lands entirely on the operator: every upgrade
+        # becomes a hand migration, because nobody outside this repository can
+        # know whether pool_max still exists in the version they are taking.
+        # v1.0.0 promises the names, the types and which inputs are required,
+        # and this is what holds the tree to it. Adding an optional input stays
+        # compatible and only asks for the snapshot to record it.
+        run: go run ./tools/inputcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the

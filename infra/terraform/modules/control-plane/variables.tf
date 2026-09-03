@@ -138,11 +138,11 @@ variable "goldens_enabled" {
   EOT
 }
 
-variable "golden_replication" {
+variable "goldens_replication" {
   type    = string
   default = "LRS"
 }
-variable "golden_soft_delete_days" {
+variable "goldens_soft_delete_days" {
   type    = number
   default = 30
 }

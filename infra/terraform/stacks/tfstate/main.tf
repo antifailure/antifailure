@@ -58,15 +58,15 @@ provider "azurerm" {
 module "foundation" {
   source = "../../modules/foundation"
 
-  name        = var.resource_group_name
-  location    = var.location
-  environment = "tfstate"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  environment         = "tfstate"
 
   # No budget: this group holds one storage account with a few megabytes in it.
   # A budget here would be noise, and noise is how a real budget alert gets
   # ignored.
-  monthly_budget_usd = 0
-  log_analytics      = false
+  monthly_budget_usd    = 0
+  log_analytics_enabled = false
 }
 
 resource "azurerm_storage_account" "state" {

@@ -63,11 +63,28 @@ Stable, and breaking any of these costs a major version:
   features land, so ignore what you were not built to understand rather than
   refusing the event. The `data` object is the exception and is not promised:
   it is the type specific payload and its keys move with the code.
+- **The self-hosting configuration.** Every key in the Helm chart's
+  `values.yaml`, and every variable and output in the Terraform under
+  `infra/terraform`. A key or a variable will not be removed, renamed, or given
+  a different type, an optional input will not become required, and a new input
+  arrives with a default. This one changed in this release: it used to be on
+  the list below. A self hoster's values file and tfvars file are their
+  configuration, kept in their repository and applied by their pipeline, and a
+  rename does not fail that pipeline loudly. Helm accepts a key no template
+  reads and Terraform only warns about a variable nothing declares, so the
+  setting stops being in force while the apply still reports success. Outputs
+  are promised by name because two runbook commands read one. The values
+  themselves are not promised: `image_tag` names the release being cut, and
+  `tools/tagsync` exists to make sure it does. `tools/inputcheck` holds the tree
+  to a snapshot of every one of them, so a rename fails in the pull request
+  that proposes it rather than in somebody's upgrade.
 
 Explicitly not stable, and free to change in a minor release:
 
-- The Helm chart's values and the Terraform module's variables. The chart is
-  versioned separately and is at 0.1.1 for that reason.
+- The defaults and the validation rules those self-hosting inputs carry, and
+  what the Terraform creates behind them. The names and the types are the
+  contract; the resources are an implementation and a default moves with a
+  release.
 - Most of the control plane's HTTP API, which is mostly how the console and the
   engine speak to each other. The part that is published is named rather than
   described: every route the router serves is classified in
@@ -299,6 +316,16 @@ manifest or pipeline does.
 <!-- relnotes:omit -->
 
 ### Added
+
+**Who may sign in, from the Helm chart.** `config.signinAllowlist` sets
+`AF_SIGNIN_ALLOWLIST` on the Deployment. The chart named every other setting the
+application reads and not this one, so a control plane installed from it on a
+public address accepted any GitHub account in the world, which is exactly the
+week the Terraform module's own comment describes. Left alone it sets nothing
+and behaviour is unchanged. An empty list is a real answer and means nobody, so
+the variable is set whenever the operator said anything at all, including an
+empty list: a block that vanished when the list was empty would turn the most
+restrictive intent into the least restrictive deployment.
 
 **Before an environment exists.** `af change` reads the diff of a pull request
 and says which checks will exercise what it touched, opening no environment and

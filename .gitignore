@@ -42,6 +42,7 @@ service-account*.json
 # stray binary of that name lands here as a FILE. A directory-only rule ignored
 # the first and not the second.
 /coverage
+/inputcheck
 *.out
 *.test
 *.prof
