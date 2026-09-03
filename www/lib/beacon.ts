@@ -321,7 +321,14 @@ export function setMeasurement(on: boolean): void {
     // storedOptOut returning false and nothing being remembered, which is the
     // wrong direction, so the query switch below also sets the in-memory flag.
   }
-  if (!on) memoryOptOut = true;
+  // Assigned in BOTH directions. It was only ever set, so a reader who opted
+  // out and then changed their mind cleared the stored preference and stayed
+  // opted out for the rest of the visit, because this flag still said no. That
+  // was invisible while the only way to opt back in was ?af-analytics=on, which
+  // arrives on load before anything has set it. A control on the page is
+  // pressed after, and it is the case where an opt in that does nothing looks
+  // exactly like a broken switch.
+  memoryOptOut = !on;
   // THE DECISION IS CACHED, SO CLEARING IT IS PART OF RECORDING THE CHOICE.
   //
   // measurementAllowed answers once per page and then remembers, because it
@@ -368,16 +375,81 @@ function applyQuerySwitch(): void {
   }
 }
 
-/** Whether the reader has asked not to be measured, by any of the ways of
- *  asking. */
-function optedOut(): boolean {
-  if (memoryOptOut || storedOptOut()) return true;
+/**
+ * Whether the BROWSER asks not to be tracked, through either of the two
+ * signals that exist for saying so.
+ *
+ * Its own function rather than four lines inside measurementOff, because the
+ * control on the privacy page has to tell these two cases apart. A reader whose browser
+ * sends Global Privacy Control is not measured whatever the site switch says,
+ * and a control that renders "off" without saying why invites them to turn it
+ * on, watch nothing change, and conclude the switch is decoration.
+ */
+function browserAskedNotToBeTracked(): boolean {
+  if (typeof navigator === "undefined") return false;
   const nav = navigator as Navigator & { globalPrivacyControl?: boolean; doNotTrack?: string };
   if (nav.globalPrivacyControl === true) return true;
   if (nav.doNotTrack === "1") return true;
   // Safari and older Firefox put it on window rather than on navigator.
   const legacy = (window as unknown as { doNotTrack?: string }).doNotTrack;
   return legacy === "1" || legacy === "yes";
+}
+
+/**
+ * Why this reader is not being measured, when they are not.
+ *
+ * A closed set rather than a boolean, because the control on the privacy page
+ * has to say which of these it is and they do not behave alike. `browser` and
+ * `build` are not the reader's decision and the switch cannot change either, so
+ * a control that renders a bare "off" for all four invites somebody to press it,
+ * watch nothing happen, and conclude the switch is decoration.
+ */
+export type MeasurementOff =
+  /** This reader stored a preference not to be measured, in this browser. */
+  | "reader"
+  /** The browser asks not to be tracked, through GPC or Do Not Track. */
+  | "browser"
+  /** This browser is a crawler or is being driven by a test. */
+  | "automated"
+  /** This build has no endpoint, so nothing anywhere is counting. */
+  | "build";
+
+/** Whether this reader is being measured, and why not when they are not. */
+export interface MeasurementStatus {
+  measuring: boolean;
+  off: MeasurementOff | null;
+}
+
+/**
+ * The one predicate, which measurementAllowed below is defined in terms of.
+ *
+ * Written as the reason rather than as a boolean so that there is no second
+ * copy of the rules to answer the control with. A status that computed the same
+ * question a second way is a status that can disagree with the producers, and a
+ * privacy control that disagrees with what is on the wire is worse than none.
+ *
+ * `browser` is reported ahead of `reader` deliberately. Both can be true at
+ * once, and the one that decides whether the switch can do anything is the
+ * browser's.
+ */
+function measurementOff(): MeasurementOff | null {
+  if (typeof window === "undefined" || !ENDPOINT) return "build";
+  if (browserAskedNotToBeTracked()) return "browser";
+  if (memoryOptOut || storedOptOut()) return "reader";
+  if (looksAutomated(navigator)) return "automated";
+  return null;
+}
+
+/**
+ * Reads the state above, through the same cache the producers read.
+ *
+ * Which means it runs the query switch exactly as an event would, and that is
+ * right: a reader who arrived on an opt out link and then opened this page
+ * should see the link's effect rather than the state before it.
+ */
+export function measurementStatus(): MeasurementStatus {
+  const measuring = measurementAllowed();
+  return { measuring, off: measuring ? null : measurementOff() };
 }
 
 /**
@@ -398,7 +470,7 @@ function measurementAllowed(): boolean {
     return false;
   }
   applyQuerySwitch();
-  measuring = !optedOut() && !looksAutomated(navigator);
+  measuring = measurementOff() === null;
   return measuring;
 }
 

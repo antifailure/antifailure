@@ -343,6 +343,87 @@ describe('the beacon decides whether to measure at all', () => {
     assert.equal(h.sent.length, 0, 'the queue was flushed after the reader opted out')
   })
 
+  it('starts measuring again when the reader changes their mind on the same page', async () => {
+    // THE ORDERING: opt out, then opt IN, without a reload between them. Before
+    // there was a control on the page, the only way to opt back in was
+    // ?af-analytics=on, which arrives on load before anything has switched the
+    // beacon off, so this path had never been taken. The in-memory flag was
+    // only ever SET, never cleared, so clearing the stored preference left the
+    // reader opted out for the rest of the visit and the control looked broken.
+    const beacon = await loadBeacon()
+    beacon.setMeasurement(false)
+    beacon.pageViewed('home')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 0, 'the reader was opted out')
+
+    beacon.setMeasurement(true)
+    beacon.pageViewed('pricing')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 1, 'the reader asked to be counted again and was not')
+    assert.equal(h.local.has('af.analytics.optout.v1'), false)
+  })
+
+  it('reports why it is not measuring, so the control can say which of four it is', async () => {
+    // The control on the privacy page renders one of these four sentences, and
+    // a control that showed a bare "off" for all four would invite a reader
+    // with Global Privacy Control set to press it, watch nothing change, and
+    // conclude the disclosure is theatre. Each reason is asserted against the
+    // browser that produces it rather than against the enum, because the
+    // failure worth catching is the status disagreeing with what is on the wire.
+    install()
+    const measured = await loadBeacon()
+    assert.deepEqual(measured.measurementStatus(), { measuring: true, off: null })
+
+    install()
+    const reader = await loadBeacon()
+    reader.setMeasurement(false)
+    assert.deepEqual(reader.measurementStatus(), { measuring: false, off: 'reader' })
+
+    install({ gpc: true })
+    const gpc = await loadBeacon()
+    assert.deepEqual(gpc.measurementStatus(), { measuring: false, off: 'browser' })
+
+    install({ dnt: '1' })
+    const dnt = await loadBeacon()
+    assert.deepEqual(dnt.measurementStatus(), { measuring: false, off: 'browser' })
+
+    install({ webdriver: true })
+    const driven = await loadBeacon()
+    assert.deepEqual(driven.measurementStatus(), { measuring: false, off: 'automated' })
+  })
+
+  it('reports the browser ahead of the reader, because that is the one the switch cannot change', async () => {
+    // Both can be true at once. Reporting `reader` there would let the control
+    // offer a switch that changes the stored flag and changes nothing else,
+    // which is the exact thing the reason exists to prevent.
+    install({ gpc: true })
+    const beacon = await loadBeacon()
+    beacon.setMeasurement(false)
+    assert.deepEqual(beacon.measurementStatus(), { measuring: false, off: 'browser' })
+  })
+
+  it('agrees with what is on the wire, which is the only thing that makes it worth rendering', async () => {
+    // The status and the producers could each answer the question their own
+    // way. They do not: measurementStatus goes through the same predicate the
+    // producers do. This is the negative control on that, driven through a real
+    // event rather than through the flag.
+    const beacon = await loadBeacon()
+    assert.equal(beacon.measurementStatus().measuring, true)
+    beacon.pageViewed('home')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 1)
+
+    beacon.setMeasurement(false)
+    assert.equal(beacon.measurementStatus().measuring, false)
+    beacon.pageViewed('pricing')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 1, 'the status said it had stopped and it had not')
+  })
+
   it('takes the opt out from a link, so excluding a colleague needs no install', async () => {
     install({ href: 'https://antifailure.dev/?af-analytics=off' })
     const beacon = await loadBeacon()

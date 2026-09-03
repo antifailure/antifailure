@@ -19,6 +19,7 @@ export {
   SESSION_MAX_LENGTH_MS,
   campaignFor,
   ctaEngaged,
+  measurementStatus,
   pageViewed,
   retryDelay,
   routeIdFor,
@@ -27,7 +28,14 @@ export {
   sourceFor,
   waitlistSubmitted,
 } from "./beacon";
-export type { Cta, SessionEnd, SiteRoute, VisitSource } from "./beacon";
+export type {
+  Cta,
+  MeasurementOff,
+  MeasurementStatus,
+  SessionEnd,
+  SiteRoute,
+  VisitSource,
+} from "./beacon";
 
 /**
  * Fires one page view per route the reader lands on.
