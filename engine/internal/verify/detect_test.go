@@ -278,3 +278,39 @@ func BenchmarkDetectors_OnOrdinaryValue(b *testing.B) {
 		}
 	}
 }
+
+// A column nobody could read is not a column that passed.
+//
+// That sentence was written twice in scan.go, once above the Skipped field and
+// once above the append that fills it, and it was implemented nowhere: Clean()
+// read only Findings, so a scan that failed to read a column reported itself
+// clean and the golden was published. It is the same shape as a function with
+// no callers. The guarantee was stated, believed, and absent.
+//
+// The consequence is specific rather than theoretical. env/golden.go refuses to
+// publish on !report.Clean(), so an unreadable column was the one way a golden
+// could pass verification without anybody having verified it, and the
+// attestation it carries says how many columns were read.
+func TestReport_AColumnThatCouldNotBeReadIsNotClean(t *testing.T) {
+	t.Parallel()
+
+	// No findings at all. Under the old Clean() this was indistinguishable
+	// from a scan that read everything and found nothing.
+	report := verify.Report{
+		Columns: 2,
+		Skipped: []string{"public.customers.notes: permission denied"},
+	}
+	require.False(t, report.Clean(),
+		"a scan that could not read a column reported itself clean, so a golden holding "+
+			"that column would be published as verified")
+}
+
+func TestReport_CleanStillMeansCleanWhenNothingWasSkipped(t *testing.T) {
+	t.Parallel()
+
+	// The other half, so the fix cannot be "always return false".
+	require.True(t, verify.Report{Columns: 2, RowsSampled: 40}.Clean())
+	require.False(t, verify.Report{
+		Findings: []verify.Finding{{Detector: "email", Table: "customers", Column: "email"}},
+	}.Clean())
+}

@@ -2,6 +2,7 @@
 # Kept as a file rather than inside cspell.json so that adding one is a one
 # Words this project uses that no general dictionary has.
 # line diff a reviewer can read, and so the list stays sorted.
+BYPASSRLS
 PKCE
 Procfile
 SCIM
@@ -18,6 +19,7 @@ burstable
 cobra
 cspell
 dblab
+dbname
 dedupe
 depguard
 eastus

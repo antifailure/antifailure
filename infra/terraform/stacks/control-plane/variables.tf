@@ -89,7 +89,7 @@ variable "image_repository" {
 
 variable "image_tag" {
   type    = string
-  default = "v0.1.1"
+  default = "v1.0.0"
 }
 
 variable "image_digest" {

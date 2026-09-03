@@ -149,11 +149,26 @@ jobs:
         env:
           AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
 
-      - name: The rules classify every column
-        # Before anything is copied. `af mask plan` refuses a column no rule
-        # names and no default can decide, so this fails on a migration that
-        # added a column nobody classified, at the point where the fix is one
-        # line in masking.yaml rather than after a golden has been published.
+      - name: The masking plan is readable and every column has an answer
+        # WHAT THIS ACTUALLY CHECKS, corrected. It used to say `af mask plan`
+        # refuses a column no rule names, and it does not: the command exits 0
+        # for an unclassified column of any type. Every refusal keys on
+        # Problems, and Runnable() is len(Problems) == 0, so a column with no
+        # transform cannot make the plan unrunnable because checkFeasible
+        # returns before assigning a Problem when the transform is empty.
+        #
+        # So this step fails on a plan that cannot be BUILT or cannot be RUN:
+        # a rule naming a transform that does not exist, a transform that would
+        # break a unique constraint, nullify on a NOT NULL column, or a schema
+        # it cannot read. Those are the ones that would leave a table half
+        # masked, and catching them here is worth the step.
+        #
+        # It does NOT fail on a column nobody classified. That column is listed
+        # under "Columns no rule covers" in the output above, with what the
+        # default did to it, and the output is where somebody has to look.
+        # Making the step refuse instead would fail the next migration that
+        # adds a text column before anybody has written a rule for it, which is
+        # a deliberate product decision nobody has taken.
         run: ./bin/af -C . mask plan
 
       - name: Refresh the golden, with the attestation required

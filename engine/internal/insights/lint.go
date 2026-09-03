@@ -54,7 +54,9 @@ const (
 )
 
 // AllRules is every rule, in the order the documentation lists them. Kept so
-// the docs page and the code cannot drift: a test walks this list.
+// the catalogue and the code cannot drift: TestEveryRuleIsInAllRules walks it
+// against the constants, and tools/lintcheck walks the constants against
+// lintcatalog.yaml.
 func AllRules() []Rule {
 	return []Rule{
 		RuleNoLockTimeout,
@@ -69,7 +71,12 @@ func AllRules() []Rule {
 
 // LintFinding is one statement a rule objected to.
 type LintFinding struct {
-	Rule Rule `json:"rule"`
+	// ID is the stable identifier, LINT-004 and its kind. It is assigned once
+	// and never reused, and it is what a filter or a suppression should match
+	// on. Rule beside it is prose: rules are renamed as they sharpen, and a
+	// name that cannot be improved is a rule that cannot be improved.
+	ID   FindingID `json:"id"`
+	Rule Rule      `json:"rule"`
 	// Migration and Statement locate it in the repository.
 	Migration string `json:"migration"`
 	Statement string `json:"statement"`
@@ -242,6 +249,13 @@ func Lint(stmts []Statement, schema Schema, largeRows int) []LintFinding {
 	locking := lockingDDLPerMigration(stmts, schema)
 	for _, st := range stmts {
 		out = append(out, lintStatement(st, schema, largeRows, locking)...)
+	}
+	// The identifier is stamped here rather than at each rule, so that a rule
+	// added tomorrow cannot ship a finding with an empty one by forgetting a
+	// field. It comes from the generated catalogue, and tools/lintcheck fails
+	// the build when a rule has no entry there.
+	for i := range out {
+		out[i].ID = out[i].Rule.ID()
 	}
 	return out
 }

@@ -6,6 +6,17 @@
  * like a different company. What is deliberately NOT shared is the density:
  * a landing page is read once and a console is read every day, so the type is
  * smaller, the rows are tighter, and nothing is centred.
+ *
+ * LIGHT ONLY, AND THAT IS A DECISION RATHER THAN AN UNFINISHED THEME. There is
+ * no dark palette here, no `prefers-color-scheme` rule and no `dark:` class,
+ * and the same is true of every file in www. The decision is written down in
+ * docs/astro.config.mjs, next to the theme toggle it disables: one theme, not a
+ * light and dark pair, because the site commits to a single light appearance.
+ *
+ * This note exists because the absence looks exactly like an oversight from a
+ * dark viewport, and somebody notices roughly once per person. Before changing
+ * it, read that config and change the decision there first, because a dark
+ * console beside a light site is the one thing the paragraph above rules out.
  */
 @theme {
   --color-ink: #101010;

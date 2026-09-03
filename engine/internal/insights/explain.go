@@ -5,38 +5,6 @@ import (
 	"strings"
 )
 
-// ruleTitle is the one line summary of each rule, used as a heading in the
-// report. The rationale and the fix live on the finding, because they depend
-// on the table it found.
-var ruleTitle = map[Rule]string{
-	RuleNotNullNoDefault:   "NOT NULL column added with no default",
-	RuleAlterColumnType:    "column type change that rewrites the table",
-	RuleIndexNotConcurrent: "index built without CONCURRENTLY",
-	RuleForeignKeyNotValid: "foreign key added without NOT VALID",
-	RuleRenameColumnInUse:  "column renamed while something still reads it",
-	RuleDropColumnInView:   "column dropped while a view still selects it",
-
-	RuleNoLockTimeout:          "no lock_timeout, so a lock wait becomes an outage",
-	RuleSetNotNull:             "NOT NULL set on a column that already exists",
-	RuleCheckNotValid:          "CHECK constraint added without NOT VALID",
-	RuleUniqueConstraint:       "unique constraint that builds its index in place",
-	RuleBackfillWithDDL:        "rows changed in the same transaction as the schema",
-	RuleDropIndexNotConcurrent: "index dropped without CONCURRENTLY",
-	RuleReindexNotConcurrent:   "index rebuilt without CONCURRENTLY",
-	RuleVacuumFull:             "VACUUM FULL, which rewrites the table offline",
-	RuleCluster:                "CLUSTER, which rewrites the table offline",
-	RuleDropTable:              "table dropped",
-	RuleTruncate:               "table truncated",
-}
-
-// Title is the rule's one line summary.
-func (r Rule) Title() string {
-	if t, ok := ruleTitle[r]; ok {
-		return t
-	}
-	return string(r)
-}
-
 // Explain renders every check for a person.
 //
 // Worst first, and the worst thing is always a migration that did not apply,
@@ -123,7 +91,11 @@ func (r Rehearsal) Explain() string {
 	if len(r.Lint) > 0 {
 		b.WriteString("What these migrations do to a table this size:\n")
 		for _, l := range r.Lint {
-			fmt.Fprintf(b, "  %s\n", l.Rule.Title())
+			// The identifier leads, because it is the thing that does not move
+			// and therefore the thing somebody writes down. A report that shows
+			// only the title makes a reader go and find the identifier
+			// elsewhere, which mostly means they match on the title instead.
+			fmt.Fprintf(b, "  %s  %s\n", l.ID, l.Rule.Title())
 			if l.Table != "" {
 				fmt.Fprintf(b, "    on %s, about %d rows\n", l.Table, l.Rows)
 			}

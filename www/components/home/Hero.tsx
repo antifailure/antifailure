@@ -1,6 +1,7 @@
 import { Button } from "@/components/layout/Button";
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
+import { CopyCodeButton } from "./media/CopyCodeButton";
 import { HeroFilm } from "./media/HeroFilm";
 import { HeroServices } from "./HeroServices";
 
@@ -16,28 +17,42 @@ export function Hero() {
           <br className="max-xl:hidden" />{" "}
           on a disposable production twin.
         </h1>
+        {/* The free path first, because it is the only one a visitor can take
+            today without somebody else's permission. The primary button used
+            to be "Request access", which leads to an invitation wall, so the
+            page pitched a product and then pointed at a locked door. The
+            engine is MIT licensed and the quickstart needs no account, so that
+            is the action, and the install line under it is the first command
+            of it rather than a third call to action. */}
         <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:gap-y-3 max-md:[&_a]:w-full">
-          <Button href="/signup" theme="filled">
-            Request access
+          <Button href="/docs/getting-started/quickstart" theme="filled">
+            Start the quickstart
           </Button>
-          <Button href="/docs" theme="outlined">
-            Read the docs
+          <Button href="/signup" theme="outlined">
+            Request hosted access
           </Button>
         </div>
+        <CopyCodeButton
+          variant="white"
+          className="mt-5 w-auto max-w-full border border-black/12 bg-white px-4 hover:bg-[#f7f7f5] max-xl:w-auto max-lg:w-full"
+        />
         {/* The state of the product, on the page that sends the most people to
             /signup. This button said "Get started" and led to an invitation
             wall, and the only page that admitted it was /pricing, which most
             visitors never open. Worded to match that page rather than beside
             it: two descriptions of one product state is how the first of them
-            goes stale. */}
+            goes stale.
+
+            The two sentences are now in the order a visitor needs them: what
+            they can have, then what they cannot have yet. */}
         <p className="mt-6 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-5 max-lg:max-w-[520px] max-md:text-[14px]">
-          The hosted control plane is invitation only while it is in development.
+          The engine is open source and runs in your own continuous integration
+          today, with no account.
           {/* Broken at the sentence, the same way the h1 above is, rather than
               left to text-balance, which put the first sentence's "The" alone
               at the end of a line. */}
           <br className="max-lg:hidden" />{" "}
-          The engine is open source and runs in your own continuous integration
-          today.
+          The hosted control plane is invitation only while it is in development.
         </p>
         <div className="relative mt-36 max-md:mt-24 max-sm:mt-16">
           <HeroServices />

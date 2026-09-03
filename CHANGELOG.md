@@ -45,24 +45,72 @@ Stable, and breaking any of these costs a major version:
 - **`--output json`.** The documented fields of every command's JSON. Fields may
   be added, so parse for the fields you want rather than refusing unknown ones.
   A documented field will not be removed or change type.
-- **The provider interfaces.** `engine/pkg/provider` and the `engine/pkg/schema`
-  types they carry. A provider is meant to be written outside this repository
-  and each interface ships with a conformance suite, so it is an integration
-  surface and is treated as one.
+- **The provider interfaces.** `engine/pkg/provider`, the `engine/pkg/schema`
+  types they carry, the `engine/pkg/secret` type their signatures name, and
+  `engine/conformance`, the suite that decides whether an implementation is
+  conformant. A provider is meant to be written outside this repository, so all
+  four are stable together: an interface is only as usable as the types its
+  signatures name.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
+- **The lint finding identifiers.** Every migration lint finding carries a
+  `LINT-NNN` identifier, listed in the lint findings reference. It is assigned
+  once, keeps its meaning, and is never reused, not even after the rule that
+  earned it is deleted. Match on it rather than on the rule name.
 
 Explicitly not stable, and free to change in a minor release:
 
 - The Helm chart's values and the Terraform module's variables. The chart is
   versioned separately and is at 0.1.1 for that reason.
-- The control plane's HTTP API, which the console and the engine speak to each
-  other and which is not a published integration surface.
-- Every Go package except the two named above, and everything under
-  `engine/internal`, which is unimportable on purpose.
-- Lint rule names and their findings, which move as the rules improve. The
-  stable identifier for a finding is its rule name within a release.
+- Most of the control plane's HTTP API, which is mostly how the console and the
+  engine speak to each other. The part that is published is named rather than
+  described: every route the router serves is classified in
+  `web/apps/api/src/boundary.ts`, either as part of the published contract,
+  which means it appears in the OpenAPI document, or as deliberately excluded
+  on one of seven recorded grounds. A route that is neither fails the build.
+- Every Go package except the four named above, and everything under
+  `engine/internal`, which is unimportable on purpose. `engine/api/packages.txt`
+  lists every importable package with its classification and the reason for it,
+  and one that is listed nowhere fails the build rather than arriving public by
+  default.
+- Lint rule names, and which findings a release reports. A rule is renamed when
+  a clearer name exists, and a release may find something an earlier one passed.
+  That is the product working, and it is why the identifier above is what to
+  match on.
 - The event stream's set of types. Types are added as features land.
+
+### The boundary is now checked rather than described
+
+Both of those carve-outs were true and neither had anything holding it, and the
+improvement worth stating is that the line is enforced rather than asserted.
+
+`tools/surfacecheck` refuses a Go package that becomes importable and is
+classified nowhere, a change to a stable package that version 1 does not allow,
+and a stable signature naming a type from a package that is not stable.
+`engine/api/v1.0.0.txt` records the exported surface as it stood at this tag,
+so adding an export passes and removing one does not. The half about
+`engine/internal` needs nothing: the toolchain refuses an import of an internal
+path from outside the subtree rooted at its parent, and that was verified from
+the tools module rather than taken on trust.
+
+The third check found a live one. `provider.Database.ConnString` returned a
+type from `engine/internal/secrets`, so the interface these notes call an
+integration surface could not be implemented from outside the repository at
+all. Naming the return type needed the internal import, the toolchain refuses
+that import by path, and there was no third spelling. It compiled here, it read
+as correct, and it would have failed on the first line of the first provider
+anybody wrote, with this tag holding it for the whole of version 1. The type is
+now `engine/pkg/secret.Value`, the old name is an alias so nothing inside the
+module changed, and a provider written outside the module is compiled in CI to
+prove the promise rather than restate it.
+
+On the HTTP side, `route-boundary.test.ts` walks the router's own route table
+and holds it against the published document in both directions: a contract
+route the document does not carry fails, and an excluded route the document
+does carry fails too. The check that existed before compared the published file
+to what the generator declares, which is the file against itself, and it was
+blind to a route the generator never mentioned. Four routes under
+`/v1/oidc/bindings` were exactly that.
 
 ### What moves when this tag is pushed
 
@@ -126,10 +174,13 @@ manifest or pipeline does.
   `deploy/docker/control-plane.Dockerfile` move together, the dependency
   install, the console build and the runtime, so an operator pulling the new
   tag gets one runtime rather than a mixture of two. The three examples move
-  with it, because an example is the first Dockerfile most people copy. Alpine
-  3.24 carries psql 18 under the unversioned `postgresql-client` package where
-  3.20 carried psql 16, and a client newer than the server is the direction
-  libpq supports, so the migration those examples run behaves as it did.
+  with it, because an example is the first Dockerfile most people copy. One of
+  them changes the psql its migration runs: the Go example's runtime moves from
+  Alpine 3.20 to 3.24, which carries psql 18 under the unversioned
+  `postgresql-client` package where 3.20 carried psql 16. A client newer than
+  the server is the direction libpq supports, so that migration behaves as it
+  did. The Next.js example does not move, because its Node base was already
+  built on Alpine 3.24 and was already giving it psql 18.
 - Every route to the hosted control plane says the same thing about it. The
   `/signin` and `/signup` tabs both read "Join the waitlist" and both
   descriptions said there was no hosted control plane, which a crawler, a

@@ -159,3 +159,70 @@ func TestUnclassified_ListsWhatWasEmptiedByDefaultAsWellAsWhatCouldNotBe(t *test
 		"the questions a plan asks are wrong: a masked-by-default column must still be asked "+
 			"about, and a structural column must not be")
 }
+
+// A type the classifier has never heard of is a question, not a silence.
+//
+// THE GAP THIS CLOSES. looksSensitive answered "can this hold a sentence?" with
+// a known-yes list of six types, and everything else fell through with no
+// transform and, crucially, with Unmatched unset. So a citext column was not
+// masked AND not reported: absent from `af mask plan` entirely, which is worse
+// than the not-null case, because that one at least prints a line telling
+// somebody what shipped.
+//
+// The types are not exotic. information_schema reports citext as USER-DEFINED
+// and text[] as ARRAY, checked against a real PostgreSQL 17 rather than
+// remembered, and citext is what an application uses for an email column
+// precisely because a person types into it.
+//
+// This does NOT mask them. Masking them by default would change what an
+// existing golden contains, invalidate every rules_digest, and empty a column
+// some environment needs populated. It makes the plan say "I do not know about
+// this column" where it used to say nothing at all, which is the only half that
+// is safe to change without a decision from somebody who owns the product.
+func TestAssign_AsksAboutATypeItDoesNotRecognise(t *testing.T) {
+	assignments := assign(t,
+		masking.ColumnInfo{Name: "id", Type: "uuid", Nullable: true},
+		// citext, as information_schema reports it.
+		masking.ColumnInfo{Name: "handle", Type: "USER-DEFINED", Nullable: true},
+		// text[], as information_schema reports it.
+		masking.ColumnInfo{Name: "tags", Type: "ARRAY", Nullable: true},
+		masking.ColumnInfo{Name: "passport_scan", Type: "bytea", Nullable: true},
+	)
+
+	for _, column := range []string{"handle", "tags", "passport_scan"} {
+		a := find(t, assignments, "orders", column)
+		require.True(t, a.Unmatched,
+			"%s is of a type nothing classifies, so it is copied into every preview "+
+				"environment and does not appear in the plan that is supposed to list "+
+				"what nobody looked at", column)
+		require.Empty(t, a.Transform,
+			"%s must not be masked by this change: masking it would empty a column an "+
+				"environment may need and invalidate every existing golden", column)
+		require.Empty(t, a.Problem, "%s must not make the plan unrunnable", column)
+		require.Contains(t, a.Why, "does not recognise")
+	}
+}
+
+func TestAssign_StillSaysNothingAboutAStructuralType(t *testing.T) {
+	// The other half, and the reason this is a third category rather than
+	// "report everything unmatched". A list containing every bigint and every
+	// timestamp in the schema is a list nobody reads, which is the same as no
+	// list at all.
+	assignments := assign(t,
+		masking.ColumnInfo{Name: "id", Type: "uuid", Nullable: true},
+		masking.ColumnInfo{Name: "quantity", Type: "bigint", Nullable: true},
+		masking.ColumnInfo{Name: "ratio", Type: "double precision", Nullable: true},
+		masking.ColumnInfo{Name: "placed_at", Type: "timestamp with time zone", Nullable: true},
+		masking.ColumnInfo{Name: "due", Type: "date", Nullable: true},
+		masking.ColumnInfo{Name: "shipped", Type: "boolean", Nullable: true},
+		masking.ColumnInfo{Name: "amount", Type: "numeric", Nullable: true},
+	)
+
+	for _, column := range []string{
+		"id", "quantity", "ratio", "placed_at", "due", "shipped", "amount",
+	} {
+		a := find(t, assignments, "orders", column)
+		require.False(t, a.Unmatched, "%s is not a question anybody has to answer", column)
+		require.Empty(t, a.Transform, "%s holds nothing about a person", column)
+	}
+}

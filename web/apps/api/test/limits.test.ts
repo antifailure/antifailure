@@ -143,7 +143,18 @@ describe('every endpoint the server serves is in the catalog', { skip: hasDataba
   })
 
   it('has a declared limit for every tRPC procedure', () => {
-    const missing = listProcedures().filter(
+    const routes = listProcedures()
+    // The scan before its answer. `missing` is a filter over this list, so a
+    // list that came back empty reports nothing missing, which is the same
+    // sentence as "every procedure has a limit" and means the opposite. The
+    // number is a floor rather than a count, so removing a route does not fail
+    // here for no reason.
+    assert.ok(
+      routes.length >= 60,
+      `listProcedures() returned ${routes.length} routes, so this assertion filtered almost ` +
+        'nothing and would pass with every procedure unlimited',
+    )
+    const missing = routes.filter(
       ({ path, type }) => !limitFor(type === 'query' ? 'GET' : 'POST', `/trpc/${path}`),
     )
     assert.deepEqual(missing.map((m) => m.path), [])

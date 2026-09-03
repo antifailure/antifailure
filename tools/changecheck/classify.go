@@ -116,6 +116,7 @@ var notASurface = map[string]string{
 	"CODE_OF_CONDUCT.md":     "documentation",
 	"CONTRIBUTING.md":        "documentation",
 	"LICENSE":                "the licence text",
+	"LICENSING.md":           "the licence text, in the file LICENSE cannot hold it in",
 	"README.md":              "documentation",
 	"SECURITY.md":            "documentation",
 	"THIRD_PARTY_NOTICES.md": "generated from the dependency set",

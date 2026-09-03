@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 package compliance
 
 // The attestation verifier, checked against attestations the engine signed.

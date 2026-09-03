@@ -253,6 +253,19 @@ console.log(
     : 'plans are not set by hand: billing.set is refused (AF_OPERATOR_SETS_PLAN is not set)',
 )
 
+// Said out loud for the same reason as its neighbours, and because this one was
+// unset on both control planes for weeks without anybody noticing. Nothing
+// fails when it is missing: sign-in works, the console renders, and the only
+// symptom is on a screen the operator does not see, shown to somebody who has
+// just arrived and has no organization yet. A configuration whose absence is
+// invisible from the inside is one the startup line has to name.
+console.log(
+  githubAppInstallUrl
+    ? `people with no organization are offered the GitHub App at ${githubAppInstallUrl}`
+    : 'people with no organization are NOT offered the GitHub App: AF_GITHUB_APP_INSTALL_URL is ' +
+        'not set. They can still ask GitHub to recheck their membership.',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a

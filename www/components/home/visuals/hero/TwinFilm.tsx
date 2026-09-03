@@ -27,7 +27,8 @@ export function TwinFilm({ active }: FilmProps) {
         style={moveStyle({ opacity: 1 - page, scale: 1 + page * 0.22, y: page * 8 })}
       >
         <EnvCard
-          className="absolute inset-x-1 top-0 h-[58%]"
+          height="h-[58%]"
+          className="absolute inset-x-1 top-0"
           label="baseline"
           host="prod.internal"
           ttl="12:41"
@@ -68,6 +69,7 @@ function EnvCard({
   ttl,
   dim,
   live,
+  height = "h-full",
   className,
   style,
   children,
@@ -77,6 +79,7 @@ function EnvCard({
   ttl: string;
   dim?: boolean;
   live?: boolean;
+  height?: string;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
@@ -84,7 +87,14 @@ function EnvCard({
   return (
     <div
       className={cn(
-        "flex h-full flex-col justify-between rounded-[10px] border border-black/[0.08] px-2.5 py-2",
+        "flex flex-col justify-between rounded-[10px] border border-black/[0.08] px-2.5 py-2",
+        // A prop rather than a class, for the same reason as the background
+        // below. h-full used to live in the string above and the baseline card
+        // passed h-[58%] through className to override it. Every arbitrary
+        // value is emitted before every named utility, so h-full won and the
+        // baseline card rendered full height. It looked correct in the diff,
+        // it read correctly in review, and the frame it was drawing was wrong.
+        height,
         // Chosen rather than layered: bg-white is emitted after this, so as
         // an additive class the dim card rendered the same white as a lit
         // one and the state the prop names never reached the screen.

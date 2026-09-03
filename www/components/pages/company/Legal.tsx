@@ -203,7 +203,8 @@ export function PrivacyPage() {
         </CounselNotice>
         <Prose className="mt-10">
           <p>
-            Sign-in today is for the waitlist. The three documents that a security review asks for
+            Signing in creates a session record and grants membership of the organization the
+            GitHub App was installed on. The three documents that a security review asks for
             by name are now drafted rather than promised: the{" "}
             <Link href="/dpa">Data Processing Agreement</Link>, the{" "}
             <Link href="/subprocessors">subprocessor list</Link>, and the{" "}
@@ -272,7 +273,7 @@ export function TermsPage() {
               ],
               [
                 "Accounts",
-                "Sign-in is for the waitlist. There is no public production control plane yet, and these terms are not a paid-service agreement.",
+                "Installing the GitHub App creates an organization in the hosted control plane, on the plan the schema gives a new one. Nothing can be run in that organization until somebody signs in to it, and sign-in can be restricted to named accounts. Nothing here is sold and no card is taken, so these terms are not a paid-service agreement.",
               ],
               [
                 "Availability",
