@@ -287,6 +287,9 @@ const (
 	plantedSleep     = 2
 	plantedFloor     = 1800.0
 	neighbourCeiling = 1500.0
+	// Bookkeeping between statements, not a share of the run. See the sum
+	// assertion at the end of the test for why this must not scale.
+	windowSlack = 50.0
 )
 
 func TestRehearse_TimesEveryStatementSeparately(t *testing.T) {
@@ -375,6 +378,28 @@ func TestRehearse_TimesEveryStatementSeparately(t *testing.T) {
 	// The run as a whole contains the statement it is made of.
 	require.Greater(t, r.TotalMS, planted.MS,
 		"the whole rehearsal cannot be shorter than one statement inside it")
+
+	// The statements fit inside the window the applier ran in, and this is the
+	// ONLY assertion here that catches every duration being inflated by the
+	// same factor. Agent flaky-timing found that hole on the server side path
+	// and measured it: doubling every duration left every other assertion in
+	// their test green, floor and ceiling included, because doubling preserves
+	// order, distinctness and which statement is largest.
+	//
+	// It holds by construction rather than by luck. TotalMS is wall clock
+	// measured in Go around Apply, and the SQL applier times each statement
+	// with the same Go clock over non-overlapping intervals strictly inside
+	// that window, so the sum cannot exceed it. The slack covers the bookkeeping
+	// between statements and is a CONSTANT rather than a fraction of the
+	// window, because a fraction grows with the window and would forgive
+	// exactly the inflation this is here to catch.
+	var sum float64
+	for _, s := range r.Statements {
+		sum += s.MS
+	}
+	require.Less(t, sum, r.TotalMS+windowSlack,
+		"the statements add up to more time than the applier was running, so the durations "+
+			"are inflated rather than measured")
 }
 
 func TestRehearse_ReportsAMigrationThatDoesNotApply(t *testing.T) {
