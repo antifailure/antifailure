@@ -139,14 +139,44 @@ describe('serving the console build', { skip: ok ? false : 'no database' }, () =
   })
 
   test('a POST to a path with no route never reaches the console at all', async () => {
-    // A static file server answers GET and HEAD. Everything else still falls
-    // through to the undeclared-endpoint refusal, which is the property that
-    // makes a new mutating endpoint impossible to add without a limit -- and
-    // the reason the console is classified only for GET.
+    // A static file server answers GET and HEAD, so the console never claims a
+    // mutating method: it is classified only for GET, which is what keeps a
+    // new mutating endpoint impossible to add without a limit.
+    //
+    // What it answers is 404, and it used to be 500. There is no route here, so
+    // nothing is wrong with the server; saying 500 told a load balancer
+    // otherwise. The refusal that makes the classification worth having is
+    // asserted in limits.test.ts against a route that actually exists, which is
+    // the case where the answer really is this server's fault.
     const res = await h.fetch('/nothing-here', { method: 'POST' })
-    assert.equal(res.status, 500)
+    assert.equal(res.status, 404)
     assert.match(res.headers.get('content-type') ?? '', /json/)
-    assert.match(((await res.json()) as { error: string }).error, /no declared rate limit/)
+    const { error } = (await res.json()) as { error: string }
+    assert.match(error, /openapi\.json/)
+    assert.doesNotMatch(error, /ENDPOINT_LIMITS/)
+  })
+
+  test('a GET under a prefix the API owns answers as the API, not as a page', async () => {
+    // With a console build present, this is the case that has two wrong
+    // answers rather than one. Answering 500 said the server was broken.
+    // Answering the console's HTML 404 page would be the right status wrapped
+    // in a body no API client can read, on a path a browser never asks for.
+    //
+    // The split is consoleClass, the same predicate the rate limiter uses to
+    // decide the same question, rather than a second copy of the prefix list.
+    for (const path of ['/v1/health', '/auth/nothing', '/console/api/nothing']) {
+      const res = await h.fetch(path)
+      assert.equal(res.status, 404, path)
+      assert.match(res.headers.get('content-type') ?? '', /json/, path)
+    }
+  })
+
+  test('a page a browser asked for still gets the console 404 page', async () => {
+    // The other side of the same split, so a change that sent everything to
+    // the API branch fails here rather than by handing a person JSON.
+    const res = await h.fetch('/nothing-here')
+    assert.equal(res.status, 404)
+    assert.match(res.headers.get('content-type') ?? '', /html/)
   })
 })
 
