@@ -83,13 +83,29 @@ jobs:
       # the promise is that a green `just gate` means a green CI, and that only
       # holds while the two run the same things.
 
-      # tfsec reads the configuration and needs no credentials, so it runs on
-      # every pull request including one from a fork.
+      # tfsec reads the configuration and needs no credentials of its own, so it
+      # runs on every pull request including one from a fork.
+      #
+      # The token is for the INSTALLER, not for the scan, and it is the
+      # difference between this step working and this step failing for reasons
+      # no diff can explain. The action downloads tfsec by asking the GitHub
+      # releases API which version is latest, and it asked anonymously, so on a
+      # busy night it got HTTP 403 and said so in its own error: "The request to
+      # the GitHub API was likely rate-limited. Set a GITHUB_TOKEN to prevent
+      # this". `soft_fail` does not cover that, because soft_fail is about what
+      # tfsec FINDS and this is tfsec never running at all, which is the worst
+      # shape a gate can take: red, unrelated to the change, and teaching
+      # everybody to rerun a job without reading it.
+      #
+      # The automatic token is enough. This job holds `contents: read`, which is
+      # all the releases API needs, and the token exists on a pull request from
+      # a fork as well, so the fork sentence above is unchanged.
       - name: tfsec
         uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
         with:
           working_directory: infra/terraform
           soft_fail: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   plan:
     name: plan
