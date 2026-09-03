@@ -30,7 +30,8 @@ is a process that fails in production rather than at deploy time.
 | `AF_APP_BASE_URL` | unset | The public origin, used to build absolute links. |
 | `AF_ADMIN_DATABASE_URL` | unset | The connection string the **operator portal** uses, and the only credential on this instance that can read across tenants. A second credential rather than a second setting on the first: its role holds `BYPASSRLS`, which is how an operator reads across tenants, and the application's role must never hold it, because a different credential is something the application cannot be granted its way into where a privilege is something it can. **Optional rather than required**, and the process says which at startup: unset means this installation has no operator portal, which is the right default for a single team, and `/admin` then refuses every request naming this variable rather than answering an empty list that reads like a platform with no customers on it. |
 | `AF_ADMIN_POOL_MAX` | `4` | Connections in the operator pool. Small on purpose: it serves a handful of operators rather than customer traffic. |
-| `AF_SIGNIN_ALLOWLIST` | unset | GitHub logins, comma or whitespace separated, that may sign in. Unset means any GitHub account may sign in, which is the right default for an installation whose network already decides who reaches it. **Set but empty means nobody**, not everybody: a deployment that lost this value should close, not open. The mode is printed at startup. |
+| `AF_SIGNIN_ALLOWLIST` | unset | GitHub logins, comma or whitespace separated, that may sign in. **Unset means any GitHub account may sign in**, which is the default and is what Antifailure's own hosted plane runs: it is the right answer both for an installation whose network already decides who reaches it, and for a product people sign themselves up to. **Set but empty means nobody**, not everybody: a deployment that lost this value should close, not open. The mode is printed at startup. To close sign-ups on a self-hosted installation, name the logins here, or set it to an empty string to admit nobody at all. |
+| `AF_SELF_SERVE_SIGNUP` | unset | Set to `1` to give somebody who signs in with no organization one of their own, on the free plan, owned by them. Unset, that person lands in no organization and waits for a GitHub App installation or an invitation, which is what happened before this existed. **Off by default**, and the direction is the argument rather than an opinion about convenience: what it grants is a tenant with real quotas and real compute against them, so on an installation where `AF_SIGNIN_ALLOWLIST` is unset it grants that to anybody who can reach the address, and forgetting the variable has to close the door rather than open it. The organization is named after the GitHub account and carries its login, so installing the App on that account later **adopts** the same organization rather than creating a second one beside it. The mode is printed at startup next to the allowlist's, because the two are one sentence: who may sign in, and whether there is anything on the other side of the door. Any value other than `1`, `0`, `true`, `false` or unset stops the process. |
 | `AF_INSECURE_COOKIES` | unset | Set to `1` to drop the `Secure` attribute from cookies. For local development over plain HTTP and nothing else. |
 | `AF_MIGRATE` | unset | Set to `1` to apply migrations at startup. Requires `AF_MIGRATION_DATABASE_URL`. |
 | `AF_MIGRATION_DATABASE_URL` | unset | A connection string for a role that may run DDL. |
@@ -39,8 +40,15 @@ is a process that fails in production rather than at deploy time.
 | `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
 | `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
 | `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
+<<<<<<< HEAD
 | `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action. When it is unset they are told the address has not been configured and are still offered **Check my GitHub membership**, which never depended on it. Either way the startup log says which. Any other origin or path, or a value that is not a URL, stops the process at startup. |
 | `AF_SIGNUP_URL` | unset | Where somebody `AF_SIGNIN_ALLOWLIST` refuses is sent instead. A refused sign-in renders a page rather than a JSON body, and when this is set that page carries one link to it. Unset is the self-hosted default and means the page offers no link: an operator running an allowlist has their own way of being asked, and pointing their users at somebody else's waitlist would be wrong. Must be an absolute `http` or `https` address, or the process stops at startup. |
+=======
+| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action instead of a dead-end empty state. Any other origin or path stops the process at startup. |
+| `AF_SIGNUP_URL` | unset | Where somebody `AF_SIGNIN_ALLOWLIST` refuses is sent instead. A refused sign-in renders a page rather than a JSON body, and when this is set that page carries one link to it. Unset is the self-hosted default and means the page offers no link: an operator running an allowlist has their own way of being asked, and pointing their users at somebody else's contact page would be wrong. Never rendered at all when the allowlist is unset, because then nobody is refused. Must be an absolute `http` or `https` address, or the process stops at startup. |
+| `AF_SITE_ORIGIN` | unset | The one browser origin allowed to post to `POST /v1/leads`, the enterprise contact form, as a whole origin such as `https://antifailure.dev`. This is the only route on the server that answers a cross-origin browser, and it is the only variable that widens it. Unset means no other origin may post, so a contact form on a separate marketing host cannot submit and reports a network error; the route still answers `curl` and a page on this origin. Never a wildcard: there is no value meaning "any origin". A value carrying a path, a query or a fragment stops the process, because a browser sends only scheme, host and port and such a value could never match, which would allow nobody while looking configured. |
+| `AF_LEAD_NOTIFY_EMAIL` | unset | Where an enterprise lead is announced. Unset means leads are recorded and nobody is mailed, which the startup log says and which the form itself tells the person who filled it in. Setting it **without** a mailer, meaning `AF_RESEND_API_KEY` and `AF_MAIL_FROM`, is called out at startup as its own state: that deployment believes it is announcing leads and cannot. Read the queue in either case with `af-control-plane-backup leads`. |
+>>>>>>> 406000d0 (enterprise: a way to ask, a way to read it, and a first operator)
 | `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
 | `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
 | `AF_PROVIDER_KEY_SECRET` | unset | 32 bytes of base64, the secret that seals customers' Anthropic and OpenAI keys. Generate one with `openssl rand -base64 32`. Unset means keys cannot be stored at all: saving one is refused rather than written in the clear. It must not live in the same place as the database, or a database dump carries both halves. Anything other than 32 bytes stops the process at startup rather than failing later on the one action the feature exists for. |
@@ -52,6 +60,12 @@ is a process that fails in production rather than at deploy time.
 | `AF_HOSTED_REQUIRED_PLAN` | unset | Set to `enterprise` on a hosted control plane that is sold only to enterprise organizations. Authentication, sign-out and the exits remain reachable; browser procedures, CLI provider operations, model proxy requests and engine ingestion are refused until Stripe grants the enterprise plan. The exits are billing, exporting the organization's data, deleting the organization, closing an account, and listing and revoking sessions: a plan gate may restrict what the product does for a customer and may never restrict their ability to leave, to retrieve what is theirs, or to secure their account. Any other value stops the process. Setting this while billing is off also stops the process, because otherwise no customer could satisfy the gate. Leave it unset when self-hosting. |
 | `AF_OPERATOR_SETS_PLAN` | unset | Set to `1` on an installation where whoever runs the control plane also decides each organization's plan. Unset, `billing.set` is refused and the plan can only come from a signed Stripe delivery, which is the right answer anywhere the people signing in are not the operator: the first person into an organization becomes its owner, an owner holds `billing.manage`, and on a plane that takes no payment that would be a signed-in stranger granting themselves the largest plan. It is off by default rather than on because the dangerous configuration is the one where nothing has been configured yet, and a flag that has to be remembered would be forgotten by exactly that operator. Set it when you run the control plane for yourself; you can already write the column with `psql`, and this is the same act with an audit entry. Setting it together with any Stripe variable or with `AF_HOSTED_REQUIRED_PLAN` stops the process, because a plan that can be granted by hand is not a plan anybody has to buy. Any value other than `1`, `0`, `true`, `false` or unset stops the process. |
 | `AF_CONSOLE_DIR` | `/app/console-out` | Where the console's build is. The published image carries it at the default and nothing needs setting. Point it elsewhere only if you build `console/` yourself. A directory that is not there is not fatal: the API serves normally, the start-up log says the console is missing, and every page answers with that sentence rather than a blank 404 that reads like a routing bug. |
+
+## Read by a command, not by the server
+
+| Variable | Where it is set | What it is |
+| --- | --- | --- |
+| `AF_ADMIN_BOOTSTRAP_PASSWORD` | In the shell that runs the command | The password for `af-control-plane-backup bootstrap-operator` and `set-operator-password`. The serving process never reads it. It is an environment variable or standard input and deliberately **not a command line argument**, because an argument is visible in `ps` to every user on the machine, lands in the shell history file, and on a CI runner is printed by any step that echoes its own invocation. At least twelve characters, and a value that begins or ends with whitespace is refused, since that is almost always a newline a heredoc added and would be part of the password invisibly forever. |
 
 ## Set on the engine, not here
 
@@ -86,8 +100,51 @@ signs in lands with no tenant. Somebody can
 therefore sign in successfully and have no tenant at all, which is what happens
 to any account added to the allowlist before it is invited anywhere.
 
-Both are needed. The allowlist is a closed door; the installation check is what
-makes an open one safe.
+There is a third setting and it decides what a signed-in person with no
+organization finds. `AF_SELF_SERVE_SIGNUP=1` gives them one, on the free plan,
+owned by them, named after their GitHub account. Without it they wait for an
+installation or an invitation. It is off by default because it hands out a
+tenant with real quotas, so on an installation with no allowlist it hands one to
+anybody who can reach the address; forgetting the variable has to close the door
+rather than open it.
+
+The organization it creates carries the person's GitHub login, and that is what
+makes the two paths one path. `slugFor` derives the same slug from the same
+login on both sides, so installing the App on that account afterwards **adopts**
+the organization the signup made rather than creating a second one beside it.
+Environments, audit chain and plan survive the step.
+
+All three are needed. The allowlist is a closed door, self serve signup is what
+makes an open one lead somewhere, and the installation check is what makes both
+safe.
+
+## Closing sign-ups on a self-hosted installation
+
+Sign-in is open by default, which is right for an instance reached only from
+inside a network and wrong for one on a public address that should admit named
+people. Two ways to close it, and they are different:
+
+```
+# Only these GitHub accounts.
+AF_SIGNIN_ALLOWLIST=ada,grace
+
+# Nobody at all. Note that this is the variable SET to an empty string, which
+# is not the same as leaving it unset.
+AF_SIGNIN_ALLOWLIST=
+```
+
+The process prints which mode it is in on every start, in one of three
+sentences, so this is never something to infer from a deployment template.
+
+Under Helm, `config.signinAllowlist` is the same three states: `null` for
+anybody, a list for those accounts, and `[]` for nobody. In Terraform,
+`signin_allowlist` is `null`, a list, or `[]`, and Terraform will not produce a
+plan without a value at all, so opening the door stays a decision somebody wrote
+down.
+
+Closing sign-ups does not by itself stop somebody who is already a member. Their
+sessions continue until they expire or are revoked, which the operator portal
+and the Sessions page can do.
 
 When sign-ups are open and `AF_GITHUB_APP_INSTALL_URL` is set, a new customer
 can complete the whole path without an operator: sign in with GitHub, install

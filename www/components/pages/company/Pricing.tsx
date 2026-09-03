@@ -192,7 +192,7 @@ const PRICING_FAQ: FaqItem[] = [
   {
     question: "Do I need an account to use Antifailure?",
     answer:
-      "No. The quickstart goes from an empty machine to a running environment with no account and no sign-up. An account exists only for the hosted control plane, which coordinates environments across a team and is invitation only while it is in development.",
+      "No. The quickstart goes from an empty machine to a running environment with no account and no sign-up. An account exists only for the hosted control plane, which coordinates environments across a team. Anybody can create one with a GitHub sign-in, and it needs no card and no invitation.",
   },
   {
     question: "Is the engine really open source?",
@@ -226,20 +226,38 @@ export function PricingPage() {
         lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. Those bands are illustrative, not a quote."
         actions={
           <>
+            {/* The quickstart still leads, which is this page's own decision
+                and survives: the engine is MIT licensed, it installs with one
+                command, and it needs no account at all. What changes is the
+                label beside it. "Request hosted access" was true while the
+                hosted plane admitted an allowlist of two; anybody can create an
+                account now, so asking for access describes nothing. */}
             <Button href="/docs/getting-started/quickstart">Start the quickstart</Button>
             <Button href="/signup" theme="outlined">
-              Request hosted access
+              Create an account
             </Button>
           </>
         }
       />
       <PageSection className="pt-0">
+        {/* This paragraph said the hosted control plane was invitation only and
+            that the access button led to a waitlist. Both stopped being true
+            when sign-up became a GitHub exchange anybody can complete, and a
+            pricing page that turns a reader away is the most expensive place on
+            a site to be out of date.
+
+            It deliberately does not describe the free plan's numbers. Those are
+            enforced by PLAN_QUOTAS and PLAN_COST_CAPS in the control plane, and
+            publishing them belongs in a band that is held to that code rather
+            than in a paragraph somebody retyped. */}
         <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
           Community needs nothing from us. The engine is MIT licensed, it installs with one
           command, and the quickstart runs on your own compute without an account. The hosted
-          control plane is deployed and invitation only while it is in development, so the access
-          button leads to a waitlist unless you have been invited. Team and Enterprise are open
-          for design partners, and those two buttons book a call rather than take an address.
+          control plane is open: signing up is a GitHub exchange with no card and no invitation,
+          and it lands you in your own organization on the free plan, whose limits are the ones
+          below and are enforced from the first environment. Team and Enterprise are open for
+          design partners, and those two buttons book a call or reach a person rather than take
+          an address.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (

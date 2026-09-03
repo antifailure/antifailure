@@ -119,6 +119,7 @@ module "control_plane" {
 
   signin_allowlist            = var.signin_allowlist
   signup_url                  = var.signup_url
+  self_serve_signup           = var.self_serve_signup
   provider_key_secret_enabled = var.provider_key_secret_enabled
   github_app_id               = var.github_app_id
 

@@ -43,6 +43,21 @@
       "statusCode": 301
     },
     {
+      "route": "/login",
+      "redirect": "/signin",
+      "statusCode": 301
+    },
+    {
+      "route": "/sign-in",
+      "redirect": "/signin",
+      "statusCode": 301
+    },
+    {
+      "route": "/sign-up",
+      "redirect": "/signup",
+      "statusCode": 301
+    },
+    {
       "route": "/_next/static/*",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"

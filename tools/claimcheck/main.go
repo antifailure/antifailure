@@ -805,12 +805,54 @@ var siteClaims = []siteClaim{
 	{
 		name:      "there is no hosted control plane",
 		forbidden: regexp.MustCompile(`(?i)no hosted control plane`),
-		premise:   [2]string{"www/components/AuthScreen.tsx", "invitation only"},
-		reason: "the hosted control plane is deployed and invitation only, and " +
-			"AuthScreen says so while offering sign-in with GitHub. The sentence " +
-			"survived as the meta description of /signin and /signup, which is what " +
-			"a crawler and a link preview read, so an invited customer following the " +
-			"header was told the thing they were invited to does not exist",
+		// Re-anchored. The premise was the words "invitation only" in
+		// AuthScreen, which were true while the plane admitted an allowlist of
+		// two and a waitlist stood beside it. Sign-up is open now, those words
+		// are gone, and the rule they anchored is MORE true rather than less:
+		// there is a hosted control plane and anybody can sign up to it.
+		//
+		// So the premise moves to the fact that outlives the copy. The sign-up
+		// screen sends a browser at a control plane's GitHub exchange. If this
+		// product ever stops having one, that link is the first thing to go, and
+		// whoever removes it is told to revisit what the site may say.
+		premise: [2]string{"www/components/AuthScreen.tsx", `CONTROL_PLANE_URL + "/auth/github"`},
+		reason: "the hosted control plane is deployed and open, and AuthScreen sends " +
+			"people to it. The denial survived once as the meta description of " +
+			"/signin and /signup, which is what a crawler and a link preview read, " +
+			"so a customer following the header was told the thing they were being " +
+			"offered does not exist",
+	},
+	{
+		name: "mail this domain cannot send",
+		// Carried forward from the change that corrected the waitlist copy,
+		// because the fact it rests on is unchanged and the temptation is
+		// permanent. antifailure.dev publishes no MX record, an SPF policy of
+		// `v=spf1 -all`, a DMARC policy of reject with strict alignment, and a
+		// wildcard DKIM record whose public key is empty, which per RFC 6376 is
+		// a revoked key. Measured with dig rather than taken from a page.
+		//
+		// Twice already the site has promised a message it could not send, once
+		// from a form that never left the browser and once from a form that
+		// reached a server which mailed nobody. The promise is easy to write
+		// because it is what a form is supposed to do, and nothing about the
+		// page makes its impossibility visible.
+		//
+		// Deliberately narrow. It bans the MAIL promise and nothing else:
+		// SECURITY.md says "We will tell you which release we expect to" about a
+		// channel that genuinely works, and a rule that refused that sentence
+		// would be a rule somebody turns off.
+		forbidden: regexp.MustCompile(`(?i)we('ll| will) (e-?mail|mail) you|you will hear from us|we('ll| will) be in touch|we('ll| will) let you know`),
+		// The site's own record of the DNS fact. The day antifailure.dev gains a
+		// sending identity that sentence has to go, this rule lapses loudly, and
+		// whoever removed it is told to revisit what the page may promise.
+		premise: [2]string{"www/components/pages/company/Contact.tsx", "no mail exchanger"},
+		reason: "the domain authorizes no outbound sender, so a page may say what " +
+			"happens to what somebody typed and who reads it, and may not say that " +
+			"something will reach them, because nothing can. The contact form's own " +
+			"confirmation renders one of two sentences from whether the control " +
+			"plane actually announced the lead, which is the honest shape. If mail " +
+			"starts working, delete this rule; the premise beside it is what tells " +
+			"you the day that happens",
 	},
 	{
 		name:      "the build runs inside the sandbox",
@@ -1030,13 +1072,6 @@ type claimException struct {
 // licence nobody granted, and it fails the build. Same rule as notAPath above,
 // for the same reason.
 var siteClaimExceptions = []claimException{
-	{
-		file: "www/components/AuthScreen.tsx",
-		rule: "there is no hosted control plane",
-		line: "The page said",
-		reason: "the header comment recording what this screen used to say and why it " +
-			"changed, which is the note that stops somebody restoring it",
-	},
 	{
 		file: "www/components/Chrome.tsx",
 		rule: "there is no hosted control plane",

@@ -26,8 +26,13 @@ import type { Analytics } from '../analytics/record.ts'
 import type { GitHubClient } from '../auth/github.ts'
 import { grantMembership } from '../auth/signin.ts'
 import { verifySignature } from './app.ts'
+import { slugFor } from '../slug.ts'
 
-export class WebhookError extends Error {}
+// `WebhookError` used to be declared here and thrown from exactly one place,
+// `slugFor`, which has moved to src/slug.ts and throws `SlugError` instead.
+// Nothing ever caught it, in this file or anywhere else, so keeping the class
+// would have left an exported type with no thrower and no catcher: a name that
+// reads as a handled failure mode and is neither.
 
 /** The collaborators a delivery is handled with. See handleDelivery. */
 export interface DeliveryDeps {
@@ -475,22 +480,9 @@ async function adoptInstaller(
   return senderLogin
 }
 
-/**
- * A GitHub login turned into something the slug constraint accepts.
- *
- * organizations_slug_shape is `^[a-z0-9][a-z0-9-]{0,62}$`. GitHub logins are
- * already close to that, but not identical: they may contain uppercase, and the
- * constraint would reject one, which would make an installation from an account
- * with a capital letter fail with a constraint violation rather than work.
- */
-export function slugFor(login: string): string {
-  const slug = login
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/^-+/, '')
-    .slice(0, 63)
-  if (!slug) throw new WebhookError(`"${login}" has no characters a slug may contain.`)
-  return slug
-}
-
 export { verifySignature }
+// Moved to src/slug.ts, which is what lets self serve signup derive the same
+// slug from the same login without this file and auth/signin.ts importing each
+// other. Re-exported here because that is where its callers and its tests have
+// always looked for it.
+export { slugFor }

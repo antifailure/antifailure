@@ -1407,3 +1407,40 @@ export const tenantScopedTables = [
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const
+
+/* ---------------------------------------------------------------------------
+ * Somebody asking to buy (0035)
+ *
+ * No org_id, and deliberately absent from tenantScopedTables: a lead is written
+ * by somebody who has no organization and may never have one, which is the
+ * whole reason the route exists.
+ *
+ * Typed here even though the application can only INSERT into it. The typed
+ * schema is what the drift test compares against the migrations, and a table
+ * left untyped is a table where a renamed column produces a query that fails at
+ * runtime on the one path nobody exercises. The reader is the operator CLI, on
+ * a privileged connection; see migration 0035 for why the serving role holds no
+ * SELECT on this table at all.
+ * ------------------------------------------------------------------------ */
+
+export const enterpriseLeads = pgTable('enterprise_leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  company: text('company').notNull(),
+  /** Null when the person did not say. Zero is refused by a constraint, so
+   *  "unknown" has one representation rather than two. */
+  seats: integer('seats'),
+  message: text('message').notNull(),
+  /** Which page it came from. */
+  source: text('source').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The queue. Unhandled and handled-last-week look identical without these,
+   *  and the practical consequence is answering one person twice and another
+   *  never. */
+  handledAt: timestamp('handled_at', { withTimezone: true }),
+  handledBy: uuid('handled_by'),
+  handledNote: text('handled_note'),
+})

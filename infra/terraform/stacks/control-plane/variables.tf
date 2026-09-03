@@ -180,10 +180,21 @@ variable "database_extensions" {
 
 # No default. See the module's variable of the same name: an unset allowlist
 # means the control plane accepts any GitHub account, and a default is a value
-# somebody gets by forgetting.
+# somebody gets by forgetting. Null is the deliberate way to say everybody, and
+# it is a different value from the empty list, which says nobody.
 variable "signin_allowlist" {
   type        = list(string)
-  description = "GitHub logins that may sign in. Empty means nobody."
+  nullable    = true
+  description = "GitHub logins that may sign in. Empty means nobody, null means anybody."
+}
+
+# Whether a sign-in that lands in no organization creates one. See the module's
+# variable of the same name: without it a new person authenticates and reaches
+# the console's empty state, which is a working sign-in and no product.
+variable "self_serve_signup" {
+  type        = bool
+  default     = false
+  description = "Whether signing up gives somebody their own organization on the free plan."
 }
 
 # Where the people that list turns away are sent. See the module's variable of

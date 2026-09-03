@@ -65,9 +65,9 @@ plan.json
 crash.log
 
 # The Azure Functions host reads api/local.settings.json when somebody runs the
-# site's API locally, and the value it needs there is the real connection
-# string for the waitlist table. Ignored before anybody writes one, because a
-# credential is only committed once.
+# site's API locally. It needs no credential today, and it is still ignored,
+# because the day it needs one is the day somebody commits it: a credential is
+# only committed once.
 local.settings.json
 
 # Node

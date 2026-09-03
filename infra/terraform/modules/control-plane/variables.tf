@@ -219,25 +219,54 @@ variable "github_redirect_uri" { type = string }
 # So there is no default. A plan cannot be produced without somebody deciding
 # who may sign in.
 #
-# An EMPTY list is a real answer and means nobody, which is what to set on an
-# instance nobody should be signing in to yet. It is not the same as unset.
+# THREE ANSWERS, NOT TWO, because the application has three states and this used
+# to be able to express two of them. A list names those accounts. An EMPTY list
+# means nobody, which is what to set on an instance nobody should be signing in
+# to yet. And NULL means everybody, which is the state a product with self serve
+# signup is in and which had no representation here at all: `join(",", [])` is
+# the empty string, and the application reads an empty string as "set, and names
+# nobody", so the most open intent and the most closed one produced the same
+# deployment. See app.tf for the block, which is careful about exactly this.
 variable "signin_allowlist" {
   type        = list(string)
-  description = "GitHub logins that may sign in. Empty means nobody. There is no value that means everybody."
+  nullable    = true
+  description = "GitHub logins that may sign in. Empty means nobody, null means anybody. There is no default."
 }
 
 # Where a refused person is sent instead.
 #
 # The allowlist decides who gets in. This decides what the ones it turns away
 # see, and it is the difference between a closed door and a closed door with a
-# note on it. Empty is the right answer for any installation that does not run
-# a waitlist: the refusal page then names who to ask rather than inventing a
-# link. Our own instances point at the request page on the marketing site,
-# which is the list the visitor was standing one click away from.
+# note on it. Empty is the right answer for an installation whose operator has
+# their own way of being asked: the refusal page then names who to ask rather
+# than inventing a link. Our own instances point at the contact page on the
+# marketing site, which reaches a person.
+#
+# On a plane where signin_allowlist is null this is never rendered, because
+# nobody is refused. It is set anyway, so that closing signups later is one
+# decision rather than two.
 variable "signup_url" {
   type        = string
   default     = ""
   description = "Where somebody the allowlist refuses is sent to ask for access. Empty means the refusal page offers no link."
+}
+
+# Whether somebody who signs in with no organization is given one.
+#
+# The other half of the sentence the allowlist starts. That decides who may sign
+# in; this decides whether there is anything on the other side of the door.
+# Without it a new person authenticates, belongs to nothing, and reaches the
+# console's empty state, which is a working sign-in and a product that appears
+# broken.
+#
+# Defaults to false, which is what the application defaults to and for the
+# reason auth/provision.ts gives: what it grants is a tenant with real quotas
+# and real compute against them, so forgetting the variable has to close the
+# door rather than open it. Antifailure's own planes set it to true.
+variable "self_serve_signup" {
+  type        = bool
+  default     = false
+  description = "Whether a sign-in that lands in no organization creates one, on the free plan, owned by that person."
 }
 
 # The secret that seals customers' provider keys, 32 bytes.

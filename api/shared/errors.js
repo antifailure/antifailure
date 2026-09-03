@@ -7,17 +7,21 @@
  * every code in it has a message, a resolution, a documentation page and a row
  * in https://antifailure.dev/errors.v1.json, enforced in both directions by
  * `tools/errcheck`. This function app is not in that namespace and should not
- * be: it is the marketing site's form backend, its codes are already live in
- * `www/lib/waitlist.ts`, and renaming them would break a shipped client to buy
- * an agent nothing, because none of these situations is one the product can
- * recover from by looking up a product error.
+ * be: it answers for the marketing host, not for the product, and none of its
+ * situations is one the product can recover from by looking up a product error.
  *
- * What was actually wrong is that the codes were written out at each throw
- * site, so nothing listed them, nothing checked them, and a caller receiving
- * `waitlist_unavailable` had no way to find out what it meant. Two things fix
- * that and both are here: the bodies are built from this table, so a code
- * cannot be emitted without an entry, and `GET /api` publishes the table, so a
- * caller can resolve any code it receives from the same host that sent it.
+ * What was wrong before this table existed is that the codes were written out
+ * at each throw site, so nothing listed them and a caller receiving one had no
+ * way to find out what it meant. Two things fix that and both are here: the
+ * bodies are built from this table, so a code cannot be emitted without an
+ * entry, and `GET /api` publishes the table, so a caller can resolve any code
+ * it receives from the same host that sent it.
+ *
+ * The table is down to one entry, which is the right size for what this app
+ * does now. Three others went with the waitlist, kept honest by the test below
+ * that fails on a catalog entry no code path can return: an entry nothing emits
+ * is a description, published at GET /api, of a situation this app cannot be
+ * in.
  *
  * `api/test/errors.test.js` reads this directory's source for code literals and
  * fails on one that is not here, which is what stops a future emitter from
@@ -29,21 +33,6 @@ const CATALOG = {
     status: 404,
     message: "No such endpoint.",
     resolution: "GET /api to list this host's public endpoints and product API.",
-  },
-  invalid_email: {
-    status: 400,
-    message: "That does not look like an email address.",
-    resolution: "Enter one complete email address and submit it again.",
-  },
-  rate_limited: {
-    status: 429,
-    message: "Too many attempts.",
-    resolution: "Wait one minute before trying again.",
-  },
-  waitlist_unavailable: {
-    status: 503,
-    message: "The waitlist is temporarily unavailable. Please try again later.",
-    resolution: "Wait a minute and submit the same address again.",
   },
 };
 

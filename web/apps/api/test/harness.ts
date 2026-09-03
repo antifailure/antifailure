@@ -16,6 +16,7 @@ import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
 import type { HostedRequiredPlan } from '../src/hosted.ts'
+import type { LeadNotifier } from '../src/enterprise/leads.ts'
 import type { RepositoryApi } from '../src/github/api.ts'
 import { ActionsKeys } from '../src/github/oidc.ts'
 import { MockPack, loadPack } from './mockpack.ts'
@@ -104,6 +105,13 @@ export interface StartApiOptions {
   secureCookies?: boolean
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
+  /** Whether a sign-in with no organization creates one. Undefined is off,
+   *  which is the server's default, so every suite written before self serve
+   *  signup existed keeps testing the behaviour it was written against. */
+  selfServeSignup?: boolean
+  /** Where a recorded lead is announced. Undefined means nowhere, which is the
+   *  state our own production is in and has its own suite. */
+  leadNotifier?: LeadNotifier | null
   /** The secret that seals provider keys. Undefined means none is configured,
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
@@ -135,7 +143,10 @@ export interface StartApiOptions {
   /** The organization allowed to read the dashboard, by slug. Undefined means
    *  none, which is the production default until an operator names one. */
   analyticsOperatorOrgSlug?: string | null
-  /** Where the marketing site is served from, for the beacon's origin check. */
+  /** Where the marketing site is served from. One value for both routes a
+   *  browser on it calls cross-origin: the analytics beacon and POST /v1/leads.
+   *  Defaults to a fixed test origin rather than none, so a suite that does not
+   *  care gets a working one. */
   siteOrigin?: string | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
@@ -255,6 +266,8 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     secureCookies: options.secureCookies ?? false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
+    selfServeSignup: options.selfServeSignup ?? false,
+    leadNotifier: options.leadNotifier ?? null,
     sealingKey: options.sealingKey ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),

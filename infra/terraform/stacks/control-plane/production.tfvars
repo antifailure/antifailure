@@ -170,17 +170,38 @@ monthly_budget_usd = 450
 # Identity and access.
 # ---------------------------------------------------------------------------
 
-# The same two people. This is not a public sign-up and the enterprise SSO path
-# is a separate feature; adding somebody is an edit here and an apply, which is
-# deliberate, because an allowlist that can be edited in a portal is one nobody
-# can review.
-signin_allowlist = ["virsanghavi", "maksymrajszewski"]
+# OPEN. Anybody with a GitHub account may sign in.
+#
+# Null, and null is not the same value as the empty list: an empty list renders
+# AF_SIGNIN_ALLOWLIST="" and the application reads that as "set, and names
+# nobody", which closes the plane to everyone. See the module's app.tf, which is
+# careful about exactly this. Terraform will not let a plan be produced without
+# a value here at all, so opening the door is still a decision somebody wrote
+# down rather than one they forgot.
+#
+# It named two people until this change, alongside a waitlist form that stored
+# an address on a host with no way to mail anybody back. That was a closed
+# product with a queue nobody could be taken off. What replaces it is a sign-up
+# anybody can complete, defended by the things that make an open door safe
+# rather than by a list: GitHub has to report the address as verified before a
+# user row is written, every sign-in endpoint is rate limited by address in
+# src/limits.ts, and a refusal says the same sentence whoever asks, so the form
+# cannot be used to find out who has an account.
+#
+# Closing it again is one line: a list of logins here and an apply.
+signin_allowlist = null
 
-# Where the accounts that list does not name are sent. Without it a refused
-# visitor reads "ask an owner of this installation", which is the right answer
-# for somebody self-hosting and the wrong one for a person who arrived from the
-# marketing site and was one click away from the waitlist.
-signup_url = "https://antifailure.dev/signup"
+# Everybody who signs in gets their own organization on the free plan, owned by
+# them, whose quotas and cost caps are enforced against it. Without this a new
+# person authenticates and lands in nothing, which is the state this deployment
+# was in for every visitor who was not one of the two names above.
+self_serve_signup = true
+
+# Where a refused account is sent. Never rendered while the allowlist is null,
+# because nobody is refused; set anyway so that closing signups later is one
+# decision rather than two. The contact page reaches a person, which is what
+# somebody turned away actually needs.
+signup_url = "https://antifailure.dev/contact"
 
 # EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
 #

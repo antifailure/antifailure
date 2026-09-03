@@ -85,6 +85,13 @@ spec:
             - name: AF_SIGNIN_ALLOWLIST
               value: {{ join "," .Values.config.signinAllowlist | quote }}
             {{- end }}
+            # The other half of that sentence, and always set, both ways. The
+            # allowlist decides who may sign in; this decides whether there is a
+            # room on the other side of the door. Rendered as an explicit 0
+            # rather than omitted, because the value a reader of the manifest
+            # needs is the answer rather than the absence of a question.
+            - name: AF_SELF_SERVE_SIGNUP
+              value: {{ ternary "1" "0" .Values.config.selfServeSignup | quote }}
             {{- if .Values.config.eventRetentionMonths }}
             - name: AF_EVENT_RETENTION_MONTHS
               value: {{ .Values.config.eventRetentionMonths | quote }}

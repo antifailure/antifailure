@@ -91,6 +91,18 @@ config:
   # nobody should be signing in to yet. There is no value that means everybody
   # other than leaving this alone.
   signinAllowlist: null
+  # Whether somebody who signs in with no organization is given one, on the free
+  # plan, owned by them.
+  #
+  # False by default, and that direction is deliberate. What this grants is a
+  # tenant with real quotas and real compute against them, so on an installation
+  # where signinAllowlist is null it grants that to anybody who can reach the
+  # address. Forgetting the setting has to close the door rather than open it.
+  #
+  # Leave it false and membership arrives the way it always has, from a GitHub
+  # App installation or an invitation. Turn it on to run a control plane people
+  # sign themselves up to.
+  selfServeSignup: false
 # Keeping event partitions ahead of the writes. A range-partitioned table with
 # no partition for an incoming row does not slow down, it fails, so this is not
 # optional housekeeping.
