@@ -182,6 +182,37 @@ describe(
       assert.equal(body.recorded, 1, 'the good event in the batch was discarded with the bad ones')
     })
 
+    it('accepts the body sendBeacon can actually send, which is not JSON typed', async () => {
+      // WHY THIS IS NOT A DETAIL. The queue flushes on the way out of the page
+      // through navigator.sendBeacon, because a fetch started during pagehide
+      // is cancelled by some browsers. sendBeacon cannot answer a CORS
+      // preflight, and application/json is not a safelisted content type, so a
+      // JSON typed beacon would force a preflight and the request would simply
+      // never be made. There is no error to see: the events vanish.
+      //
+      // So the beacon sends text/plain and the control plane parses the body
+      // regardless of what the header says. That is a real contract between two
+      // files in two npm projects, and this is the only place it is checked.
+      const res = await h.fetch('/v1/site/events', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain;charset=UTF-8', origin: 'https://www.test' },
+        body: JSON.stringify({
+          events: [
+            {
+              id: `unload-${randomUUID()}`,
+              name: 'site.page_viewed',
+              at: h.clock.now().toISOString(),
+              session: 'a-browsing-session-identifier',
+              payload: { route: 'pricing', source: 'direct', entry: true },
+            },
+          ],
+        }),
+      })
+      assert.equal(res.status, 202, 'the unload flush would be dropped for its content type')
+      const body = (await res.json()) as { recorded: number }
+      assert.equal(body.recorded, 1)
+    })
+
     it('refuses a beacon from any origin but the configured one', async () => {
       const res = await h.fetch('/v1/site/events', {
         method: 'POST',
