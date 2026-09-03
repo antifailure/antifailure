@@ -94,9 +94,8 @@ on:
         default: ''
       seed:
         description: >-
-          Replays the same schedule or the same wander. A whole number for
-          scenario and any string for explore, because that is what each
-          command's own --seed takes.
+          Makes load, scenario and explore repeat the same choices. Use a whole
+          number for load or scenario, and any string for explore.
         required: false
         default: ''
       concurrency:

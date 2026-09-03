@@ -169,6 +169,7 @@ setup:
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
     need git    ""        "brew install git"                                   git --version
+    need helm   ""        "https://helm.sh/docs/intro/install/ , or: brew install helm" helm version
 
     echo
     echo "Documentation gates"
@@ -976,9 +977,10 @@ execcheck:
 
 # No YAML key is defined twice in one mapping.
 #
-# Charts are rendered before they are read: a template is Go template source
-# that no YAML parser can take, and helm lint returns clean on a chart whose
-# service.yaml defines `type` twice.
+# Charts are rendered through three valid profiles before they are read: a
+# template is Go template source that no YAML parser can take, and helm lint
+# returns clean on a chart whose service.yaml defines `type` twice. Helm's
+# source markers prove that every authored YAML template was reached.
 keycheck:
     go run ./tools/keycheck .
 

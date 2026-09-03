@@ -221,11 +221,12 @@ jobs:
         # failed: the workflow parsed, GitHub accepted it, and half the block
         # was simply gone.
         #
-        # The chart templates are rendered rather than skipped, because they
-        # are Go template source that no YAML parser can read and because
-        # `helm lint` was pointed at a chart whose service.yaml defined `type`
-        # twice and returned "0 chart(s) failed". Rendering is the only way
-        # anything looks inside them.
+        # The chart templates are rendered in three valid profiles rather than
+        # skipped, because they are Go template source that no YAML parser can
+        # read. `helm lint` was pointed at a chart whose service.yaml defined
+        # `type` twice and returned "0 chart(s) failed". Rendering is the only
+        # way anything looks inside them. Helm's source markers prove that the
+        # profiles reached every authored YAML template.
         run: go run ./tools/keycheck .
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
