@@ -215,13 +215,33 @@ signup_url = "https://antifailure.dev/contact"
 # vault and the module addresses them by id.
 #
 # SETTING THIS BEFORE THOSE SECRETS EXIST NOW FAILS AT APPLY RATHER THAN AT
-# PLAN, and that changed deliberately. The module used to read both with a
-# `data "azurerm_key_vault_secret"`, which asserted they existed and made the
-# order enforceable at plan time. It also made every plan a privileged Key Vault
-# read, which the pull request plan identity cannot perform on this vault, so
-# the plan time check only ever worked on staging. See keyvault.tf for the whole
-# argument. The apply names the secret it could not find. The checklist in the
-# production guide still has the steps in the order that works.
+# PLAN. That is a deliberate trade, and on THIS plane it costs nothing, because
+# the check it replaces has never once run here.
+#
+# The module used to read both secrets with a `data "azurerm_key_vault_secret"`,
+# which asserted they existed. Asserting existence requires READING, and the
+# identity that runs the production plan holds Contributor on the resource group
+# and nothing at all on this vault. So the read failed on PERMISSION before it
+# could ever report on EXISTENCE. What was given up on production is an
+# intention this deployment's own permission model has never permitted, not a
+# check that worked.
+#
+# DO NOT RESTORE THE DATA SOURCE TO GET THE CHECK BACK. It does not come back.
+# The wall is the grant, and the grant has no per secret scope: it would open
+# every secret in this vault, this one included, to an identity that a pull
+# request can reach and whose workflow a pull request can edit in the same
+# commit. keyvault.tf carries the whole argument.
+#
+# STAGING IS THE HONEST COST, and it is worth stating because it is easy to
+# assume otherwise. staging.tfvars sets github_app_id too, both environments
+# share this module, and staging's plan identity CAN read staging's vault. So
+# staging did have a working plan time existence check and this removes it. A
+# missing secret there now surfaces at apply with Azure naming the secret, which
+# is a later moment than plan and not a dangerous one, on the environment where
+# somebody is experimenting anyway.
+#
+# The checklist in the production guide still has the steps in the order that
+# works.
 #
 # App 4775259, slug `antifailure`, installed on the antifailure organization as
 # installation 157834739. The OAuth App that signs people in is a separate
