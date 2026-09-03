@@ -76,6 +76,21 @@ export const ADMIN_PERMISSIONS = [
   // none of them should be able to pause it.
   'admin.emergency.read',
   'admin.emergency.engage',
+
+  // The product itself: twins, the runs on them, and the branches they belong
+  // to. One read covers all three because they are one object seen from three
+  // sides, and an operator who can list a twin but not the run that failed on
+  // it has to ask somebody else to finish the sentence.
+  'admin.product.read',
+  // Golden data versions and masking rules, split off from the read above.
+  //
+  // The split is not symmetry. A masking rule enumerates a customer's schema
+  // and names which of its columns hold personal data, which is a narrower
+  // need than "why did this run fail" and a wider disclosure. The role this
+  // exists for is analytics, which holds the read above and not this one:
+  // counting runs and twins is its job, and reading somebody's column names
+  // is not.
+  'admin.product.data.read',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -110,6 +125,7 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.logs': 'infra',
   'admin.security': 'infra',
   'admin.emergency': 'infra',
+  'admin.product': 'product',
 }
 
 export const ADMIN_ROLES = [
@@ -147,6 +163,12 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
     'See whether maintenance mode, new sign-ups, or new runs are paused, and why.',
   'admin.emergency.engage':
     'Pause or resume the whole installation: maintenance mode, new sign-ups, and new runs.',
+  'admin.product.read':
+    'See every production twin on the installation, the agent runs, load runs and pull request ' +
+    'checks against them, and the branches holding them open.',
+  'admin.product.data.read':
+    'See a customer\'s golden data versions and the masking rules applied to them, including ' +
+    'which columns a scan flagged and nobody has confirmed.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -221,6 +243,7 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // permission rather than on rank: ordering roles and comparing ranks is how
     // a permission model stops being a table and starts being an assumption.
     'admin.emergency.read', 'admin.emergency.engage',
+    'admin.product.read', 'admin.product.data.read',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -235,6 +258,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // debugging "their runs will not start" must be able to discover that runs
     // are frozen; pausing the installation is a different decision.
     'admin.emergency.read',
+    // The twins, the runs and the golden data behind them. On call is the rota
+    // that gets "their environment came up empty", and the answer to that is
+    // whether the golden version it was built from was ever verified.
+    'admin.product.read', 'admin.product.data.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -248,6 +275,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
     'admin.infra.read', 'admin.emergency.read',
+    // Masking posture is a security question before it is a product one: an
+    // unconfirmed rule is a column a scan believes holds personal data, on a
+    // copy somebody is running tests against.
+    'admin.product.read', 'admin.product.data.read',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -266,9 +297,25 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // Support answers "why was I charged this" every day and must never be the
     // rota that can refund. Read without write is the whole point of the split.
     'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
+    // "Why did my run fail" and "why is this column blank in my twin" are the
+    // two questions support is asked about the product, and the second one is
+    // answered by a masking rule.
+    'admin.product.read', 'admin.product.data.read',
   ],
-  analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
-  read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
+  // Reads the product's shape and not its customers' schemas. This is the role
+  // the data split exists for: counting runs and twins is analytics work, and
+  // reading which of a customer's columns hold personal data is not.
+  analytics: [
+    'admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read',
+    'admin.product.read',
+  ],
+  // Oversight is not a privilege to be rationed, so the auditor role reads the
+  // masking rules too. It still writes nothing, which is the only rule this
+  // role has.
+  read_only: [
+    'admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read',
+    'admin.product.read', 'admin.product.data.read',
+  ],
 }
 
 export function adminRoleHas(role: AdminRole, permission: AdminPermission): boolean {
