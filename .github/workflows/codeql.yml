@@ -1,0 +1,122 @@
+name: CodeQL
+
+# GitHub's own code scanning, which this repository had none of.
+#
+# `security.yml` asks whether a dependency carries a known advisory. That is a
+# question about somebody else's code. Nothing was asking the same question
+# about ours, so a query built by string concatenation in the control plane, or
+# a path escaping the archive it was extracted from in the engine, would have
+# been found by whoever found it first.
+#
+# WHY THIS IS A FILE AND NOT THE DEFAULT SETUP. GitHub offers the same analysis
+# configured from a settings page. A control that lives in a settings page
+# cannot be reviewed in a pull request, cannot be diffed, and cannot say why it
+# is shaped the way it is. Every other gate in this repository is a file, and
+# the repository's own supply chain rules only mean anything if the scanner is
+# held to them too.
+#
+# WHAT IT STILL CANNOT SEE, stated rather than implied away: CodeQL reports
+# findings to the security tab. It does not fail this workflow on them, so a
+# green tick here means the analysis ran, not that it found nothing. The alerts
+# are the output; this job only proves they were produced.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, on an offset minute rather than the hour, because a cron written
+    # on the hour queues behind everybody else's.
+    - cron: "43 17 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Same reasoning as `security.yml`: a run on main is the verdict the security
+  # tab is read against, so it is never cancelled. On a branch nothing depends
+  # on the superseded answer, so cancelling stays.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read at the top level. The one job that needs to write does so below, which
+# keeps the write scoped to the job that earns it.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # Measured rather than guessed, because of what the failure looks like. A
+    # job that exceeds its timeout reports `cancelled`, and in this repository
+    # `cancelled` is the word that means three unrelated things and is never a
+    # verdict, so a bound set too low does not fail loudly, it fails ambiguously
+    # and somebody re-runs the world to find out which.
+    #
+    # Four runs of this workflow, wall clock per leg:
+    #
+    #   go                       53s, 59s, 54s, 2m26s
+    #   javascript-typescript    89s, 91s, 93s
+    #   actions                  43s, 46s, 45s
+    #
+    # Go gets its own ceiling because it is the one that compiles: `autobuild`
+    # builds the whole workspace before it can analyse it, and that time moves
+    # with the codebase and with a cold module cache in a way the other legs do
+    # not. Twenty minutes on the legs that measured under two, so a hang in a
+    # cheap leg is still caught quickly rather than hidden behind Go's bound.
+    timeout-minutes: ${{ matrix.language == 'go' && 60 || 20 }}
+
+    permissions:
+      # Writing the alerts back is the entire point of the job.
+      security-events: write
+      # The CodeQL query packs are fetched from the registry.
+      packages: read
+      # Reading the workflow files is how the `actions` analysis works.
+      actions: read
+      contents: read
+
+    strategy:
+      # One language failing must not hide the answer for the other two.
+      fail-fast: false
+      matrix:
+        include:
+          # The workflow files themselves. This matters more here than in most
+          # repositories, because pinning every action to a commit is a rule
+          # this project already enforces, and the supply chain is the reason.
+          - language: actions
+            build-mode: none
+          # The engine, the tools and the enterprise engine, as one workspace.
+          - language: go
+            build-mode: autobuild
+          # The control plane, the runner, the API, the console and the site.
+          - language: javascript-typescript
+            build-mode: none
+          # NO PYTHON LEG, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT.
+          #
+          # There are thirteen Python files here. Twelve are
+          # `examples/django-api`, a deliberately naive demo the product exists
+          # to operate on, so CodeQL would flag it and go on flagging it, and
+          # every one of those findings would be working as intended. The
+          # thirteenth is `deploy/helm/hook-ordering-check.py`, 109 lines that
+          # read a rendered Helm manifest on standard input with `re` and
+          # `sys`, invoked once from control-plane-image.yml. It takes no
+          # untrusted input, opens no socket and holds no credential, so the
+          # security queries have nothing to look for in it.
+          #
+          # A security tab whose findings are all in a fixture is a tab people
+          # stop opening, and the first person to see forty of them deletes
+          # this file rather than the noise. Adding the leg back means adding
+          # a config that excludes `examples/` in the same commit.
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: "/language:${{ matrix.language }}"

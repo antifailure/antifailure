@@ -706,3 +706,86 @@ describe('the acceptable use and developer policy pages describe real mechanisms
     )
   })
 })
+
+describe('the legal pages do not deny a control plane the webhook creates tenants in', () => {
+  /**
+   * THE CLAIM THAT WAS FALSE, and how it got there.
+   *
+   * /terms said "Sign-in is for the waitlist. There is no public production
+   * control plane yet", and /privacy said "Sign-in today is for the waitlist".
+   * Both were true when written and both stopped being true when the GitHub
+   * App started creating organizations.
+   *
+   * `rememberInstallation` in github/webhook.ts inserts into `organizations`
+   * on an installation delivery, and its own comment says why: an installation
+   * IS the moment a tenant begins. It consults no allowlist. The row lands on
+   * the plan the schema defaults to, which is a real plan with real quotas.
+   *
+   * The nuance the corrected wording carries, and the reason it is not simply
+   * "there is a public control plane": nothing can be SPENT in that
+   * organization until somebody signs in, because createEnvironment is an
+   * orgProcedure and orgProcedure runs requireActor. Sign-in is where the
+   * allowlist bites. So an organization can exist for an account nobody let
+   * in, and it can do nothing.
+   *
+   * This gate is keyed on the MECHANISM rather than on the sentence. It fails
+   * if a page denies a public control plane while the webhook still creates
+   * organizations, which is the combination that was published.
+   */
+  it('reads the webhook it is reasoning about, so an empty parse cannot pass', async () => {
+    const webhook = await read('web/apps/api/src/github/webhook.ts')
+    assert.ok(webhook.length > 500, 'github/webhook.ts did not load')
+    assert.match(
+      webhook,
+      /INSERT INTO organizations/,
+      'the webhook no longer creates organizations, so this gate is reasoning about a ' +
+        'mechanism that is gone and the pages it constrains may need rereading',
+    )
+  })
+
+  it('does not deny a control plane while an installation still creates a tenant', async () => {
+    const webhook = await read('web/apps/api/src/github/webhook.ts')
+    const createsTenants = /INSERT INTO organizations/.test(webhook)
+    if (!createsTenants) return
+
+    const pages = await read('www/components/pages/company/Legal.tsx')
+    const denials: [RegExp, string][] = [
+      [
+        /no public production control plane yet/i,
+        'installing the GitHub App creates an organization, so there is one',
+      ],
+      [
+        /[Ss]ign-in (?:today )?is for the waitlist/,
+        'signing in grants membership of an organization the App created, not a place on a list',
+      ],
+    ]
+    for (const [pattern, why] of denials) {
+      assert.ok(
+        !pattern.test(pages),
+        `a legal page denies something the code does: ${why}. rememberInstallation in ` +
+          `github/webhook.ts inserts into organizations on an installation delivery and ` +
+          `consults no allowlist.`,
+      )
+    }
+  })
+
+  it('keeps the spending guard the corrected wording relies on', async () => {
+    // The page says nothing can be run until somebody signs in. That is only
+    // true while creating an environment requires an actor, so the sentence
+    // and the middleware have to move together.
+    const dispatch = await read('web/apps/api/src/routers/dispatch.ts')
+    const trpc = await read('web/apps/api/src/trpc.ts')
+    assert.match(
+      dispatch,
+      /export const createEnvironment = orgProcedure\(/,
+      'createEnvironment is no longer an orgProcedure, so the claim on /terms that nothing ' +
+        'can be run in an organization until somebody signs in may no longer hold',
+    )
+    assert.match(
+      trpc,
+      /export function orgProcedure[\s\S]{0,200}requireActor/,
+      'orgProcedure no longer requires an actor, so an organization created by an ' +
+        'installation could act with nobody signed in, and /terms says it cannot',
+    )
+  })
+})

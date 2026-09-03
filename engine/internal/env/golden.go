@@ -310,7 +310,10 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 
 	result := &GoldenResult{}
 	started := o.opts.Clock.Now()
-	source := o.sourceURL()
+	source, err := o.sourceURL(ctx)
+	if err != nil {
+		return result, err
+	}
 
 	// A manifest that names production and a shell that does not hold it is a
 	// refusal rather than an empty golden.
@@ -502,7 +505,11 @@ func (o *Orchestrator) RefreshDue(
 	if err != nil {
 		return "", err
 	}
-	if o.sourceURL().IsZero() {
+	source, err := o.sourceURL(ctx)
+	if err != nil {
+		return "", err
+	}
+	if source.IsZero() {
 		// No production to refresh from. The empty golden `af up` makes is not
 		// stale in any meaningful sense, and refreshing it on a timer would be
 		// a message about nothing.
@@ -536,22 +543,38 @@ func (o *Orchestrator) RefreshDue(
 }
 
 // sourceURL is the production database to copy, when one is configured.
-func (o *Orchestrator) sourceURL() secrets.Value {
+//
+// Looked up through the same chain as every other variable the manifest names,
+// which is what the secrets guide has always said happens. That page opens with
+// source_url_env as its example and then lists four places a value is looked
+// up: this shell, .env, the encrypted local store, and the system keyring. This
+// function read the first of those and no others, so a project that put the
+// production URL in .env, next to the STRIPE_SECRET_KEY that `af up` finds
+// there, was told the variable held nothing.
+//
+// The chain also carries the two places a production credential actually
+// belongs. `af secret set PRODUCTION_DATABASE_URL` writes to an encrypted store
+// and the keyring holds it across repositories, and neither was reachable for
+// this one value.
+func (o *Orchestrator) sourceURL(ctx context.Context) (secrets.Value, error) {
 	if o.opts.Manifest.Database == nil || o.opts.Manifest.Database.SourceURLEnv == "" {
-		return secrets.Value{}
+		return secrets.Value{}, nil
 	}
-	getenv := o.opts.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
+	value, _, found, err := o.secretChain().Lookup(ctx, o.opts.Manifest.Database.SourceURLEnv)
+	if err != nil {
+		// Reported rather than treated as absent. A keyring that will not open
+		// is not a variable that is unset, and calling it one would send the
+		// reader to export something they had already stored.
+		return secrets.Value{}, aferrors.Wrap(err, aferrors.AFSEC005,
+			"name", o.opts.Manifest.Database.SourceURLEnv, "detail", err.Error())
 	}
-	raw := getenv(o.opts.Manifest.Database.SourceURLEnv)
-	if raw == "" {
-		return secrets.Value{}
+	if !found || strings.TrimSpace(value.Reveal()) == "" {
+		return secrets.Value{}, nil
 	}
 	// Registered before it is used, so that it is redacted everywhere rather
 	// than everywhere somebody remembered.
-	o.opts.Redactor.Register(raw)
-	return secrets.New(raw)
+	o.opts.Redactor.Register(value.Reveal())
+	return value, nil
 }
 
 // maskDatabase applies the rules to a database.
@@ -703,16 +726,52 @@ func (o *Orchestrator) verifyDatabase(
 				events.F("detector", f.Detector),
 				events.F("table", f.Schema+"."+f.Table), events.F("column", f.Column))
 		}
-		first := report.Findings[0]
-		return report, string(body), aferrors.Coded(aferrors.AFMSK002,
-			"detector", first.Detector, "table", first.Schema+"."+first.Table,
-			"column", first.Column)
+		// A skip with no findings reaches here now, and it did not before, so
+		// this index was safe and is not. Clean() used to ignore Skipped, which
+		// meant every path into this branch had at least one finding;
+		// report.Findings[0] on a report whose only problem is an unreadable
+		// column is an index out of range, and the fix for a silent pass would
+		// have been a panic. Findings first, because a column the scan READ and
+		// disliked is the more specific answer.
+		if len(report.Findings) > 0 {
+			first := report.Findings[0]
+			return report, string(body), aferrors.Coded(aferrors.AFMSK002,
+				"detector", first.Detector, "table", first.Schema+"."+first.Table,
+				"column", first.Column)
+		}
+		for _, skipped := range report.Skipped {
+			o.eventErr(s, events.MaskFinding,
+				"verification could not read "+skipped,
+				events.F("skipped", skipped))
+		}
+		// Safe because !Clean() with no findings means Skipped is non empty,
+		// which is Clean()'s definition and not an assumption about the caller.
+		table, column, detail := describeSkip(report.Skipped[0])
+		return report, string(body), aferrors.Coded(aferrors.AFMSK011,
+			"table", table, "column", column, "detail", detail)
 	}
 	o.event(s, events.MaskVerified,
 		fmt.Sprintf("verified %d columns across %d tables", report.Columns, report.Tables),
 		events.F("tables", report.Tables), events.F("columns", report.Columns),
 		events.F("rows_sampled", report.RowsSampled), events.F("verified", true))
 	return report, string(body), nil
+}
+
+// describeSkip splits one of verify.Scan's skipped lines into the fields the
+// error catalogue names.
+//
+// The line is "schema.table.column: reason", so the column is what follows the
+// LAST dot rather than the first: a schema qualified name has two, and cutting
+// on the first turns public.customers.notes into table "public" and column
+// "customers.notes". Written as its own function because that off by one is
+// invisible in an error nobody has triggered yet.
+func describeSkip(line string) (table, column, detail string) {
+	where, detail, _ := strings.Cut(line, ": ")
+	table, column = where, ""
+	if i := strings.LastIndex(where, "."); i >= 0 {
+		table, column = where[:i], where[i+1:]
+	}
+	return table, column, detail
 }
 
 // PlanResult is what af mask plan produced.
@@ -780,7 +839,10 @@ func (o *Orchestrator) connectForPlan(
 		return conn, done, "this environment's branch", nil
 	}
 
-	url := o.sourceURL()
+	url, urlErr := o.sourceURL(ctx)
+	if urlErr != nil {
+		return nil, nil, "", urlErr
+	}
 	if url.IsZero() {
 		// Nothing to fall back to, so the branch's own failure is the honest
 		// answer and it is passed through rather than replaced.

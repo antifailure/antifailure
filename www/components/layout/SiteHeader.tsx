@@ -219,20 +219,33 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               {/* There is no Discord. The link that used to sit here was
                   labelled Discord and went to the waitlist form, which is a
                   broken promise in the header of every page. */}
-              <Link
+              {/* HeaderLink rather than next/link. The documentation is built
+                  by Astro and merged into the published site afterwards, so
+                  the app router does not own /docs: it prefetched an RSC
+                  payload that does not exist and answered the click with a
+                  client side navigation to nothing. The helper above this file
+                  makes exactly that distinction and this one link, in the
+                  header of every page, was not using it. */}
+              <HeaderLink
                 href="/docs"
                 className="flex items-center gap-1.5 text-black transition-colors hover:text-gray-new-40"
               >
                 <BookIcon className="h-[18px] w-[18px] text-gray-new-20" />
                 <span className="text-sm leading-none tracking-extra-tight">Docs</span>
-              </Link>
+              </HeaderLink>
             </div>
+            {/* The filled action in the header of every page used to be
+                "Request access", which is an invitation wall. The engine is
+                MIT licensed and installs with one command, so the action a
+                visitor can actually take is the one that leads. Somebody who
+                has been invited signs in beside it, and /signin carries the
+                waitlist form for somebody who has not. */}
             <div className="flex gap-x-3.5">
               <Button href="/signin" theme="outlined" size="xxs">
                 Sign in
               </Button>
-              <Button href="/signup" theme="filled" size="xxs">
-                Request access
+              <Button href="/docs/getting-started/quickstart" theme="filled" size="xxs">
+                Install the engine
               </Button>
             </div>
           </div>
@@ -461,8 +474,12 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               <Button href="/signin" theme="outlined" className="flex-1">
                 Sign in
               </Button>
-              <Button href="/signup" theme="filled" className="flex-1">
-                Request access
+              <Button
+                href="/docs/getting-started/quickstart"
+                theme="filled"
+                className="flex-1"
+              >
+                Install the engine
               </Button>
             </div>
           </div>

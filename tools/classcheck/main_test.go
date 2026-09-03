@@ -35,6 +35,11 @@ func write(t *testing.T, root, rel, body string) {
 func tree(t *testing.T, html string) string {
 	t.Helper()
 	root := t.TempDir()
+	// A fixture has to look like a repository, not just like a build output.
+	// The gate finds its applications by looking for the config file that makes
+	// one, so a tree with a .next and no next.config is not an application it
+	// has any reason to read.
+	write(t, root, "www/next.config.ts", "export default {};\n")
 	write(t, root, "www/.next/static/chunks/a.css", css)
 	write(t, root, "www/.next/server/app/index.html", html)
 	return root
@@ -151,5 +156,34 @@ func TestNoBuildSaysSo(t *testing.T) {
 	code, out := run(root)
 	if code == 0 || !strings.Contains(out, "npm run build") {
 		t.Fatalf("a missing build should say how to make one:\n%s", out)
+	}
+}
+
+// An application that exists and is NOT built must fail, naming itself.
+//
+// The regression guard for the reason this gate reads both applications. It
+// read www alone for its first life, and the console looked exempt from the
+// whole class of defect because it never imports cn. It composes in template
+// literals instead, and `${inputClass} mt-0` carries the same hazard for the
+// same reason: the interpolated string can already set a margin, and the
+// cascade rather than the order of the literal decides which one lands.
+//
+// Refusing is the point. Reading one application and reporting success reads
+// exactly like reading both.
+func TestAnApplicationThatIsNotBuiltFailsAndNamesItself(t *testing.T) {
+	root := tree(t, `<div class="text-black text-black/70"></div>`)
+	if err := os.MkdirAll(filepath.Join(root, "console"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "console", "next.config.ts"), []byte("export default {};\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := run(root)
+	if code == 0 {
+		t.Fatalf("an unbuilt application was skipped rather than refused:\n%s", out)
+	}
+	if !strings.Contains(out, "console") {
+		t.Errorf("the report does not name the application that is missing:\n%s", out)
 	}
 }

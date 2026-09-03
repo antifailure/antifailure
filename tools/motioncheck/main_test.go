@@ -13,6 +13,23 @@ import (
 func site(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
+	// A fixture has to look like a repository, not just like a build output.
+	// The gate finds its applications by looking for the config file that makes
+	// one, so a tree with a .next and no next.config is not an application it
+	// has any reason to read. Writing the config here is what makes these
+	// fixtures faithful; without it they were testing a shape the repository
+	// never has.
+	for name := range files {
+		if i := strings.Index(name, "/"); i > 0 {
+			cfg := filepath.Join(root, name[:i], "next.config.ts")
+			if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cfg, []byte("export default {};\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	for name, body := range files {
 		full := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -182,5 +199,38 @@ func TestARuleNoElementCarriesIsNotAFinding(t *testing.T) {
 	})
 	if code, out := run(root); code != 0 {
 		t.Fatalf("a rule no element carries was reported:\n%s", out)
+	}
+}
+
+// An application that exists and is NOT built must fail, naming itself.
+//
+// This is the regression guard for the defect that motivated reading both
+// applications. discover used to append a site only when something was found
+// on disk, so an unbuilt application was dropped from the run in silence. In
+// CI the console was installed and built after this gate ran, so for the whole
+// life of the gate it read www alone and reported success. It said 42 built
+// files where the built tree has 64, and exited zero.
+//
+// Skipping is the failure, not the message. A gate that is green about a
+// surface it never opened is worse than no gate, because it is quoted.
+func TestAnApplicationThatIsNotBuiltFailsAndNamesItself(t *testing.T) {
+	root := site(t, map[string]string{
+		cssPath:  ".x{color:red}",
+		htmlPath: `<div class="x"></div>`,
+	})
+	// A second application, with a config and no build. It must not be skipped.
+	if err := os.MkdirAll(filepath.Join(root, "console"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "console", "next.config.ts"), []byte("export default {};\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := run(root)
+	if code == 0 {
+		t.Fatalf("an unbuilt application was skipped rather than refused:\n%s", out)
+	}
+	if !strings.Contains(out, "console") {
+		t.Errorf("the report does not name the application that is missing:\n%s", out)
 	}
 }

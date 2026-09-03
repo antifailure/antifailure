@@ -70,18 +70,19 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
   const res = await fetch(`${BASE}/trpc/${path}${qs}`, {
     credentials: "same-origin",
     // NEVER FROM A CACHE, and this is a correctness fix rather than a
-    // precaution. Every read this function makes is live tenant or operator
-    // state behind a session, and the control plane sends no cache-control on
-    // /trpc, so the default fetch mode lets the browser reuse a response it
-    // already has. The symptom is specific and awful: suspend an account from
-    // the panel beside the list, the write commits, the list reloads, one
+    // precaution. Every read this makes is live tenant or operator state behind
+    // a session, and the control plane sends no cache-control on /trpc, so the
+    // default fetch mode lets the browser reuse a response it already has.
+    // Nothing noticed while no screen both listed something and changed it. The
+    // operator portal does: suspend an account from the panel beside the list,
+    // the write commits, the audit entry is written, the list reloads, one
     // request goes out, and the row still says active. An operator reads that
-    // as "the button did nothing" and presses it again.
+    // as the button having done nothing and presses it again.
     //
-    // On the read side there is nothing to lose. These responses are per
-    // session, none of them is shared, and none is large enough for a cache to
-    // be worth the chance of showing somebody last minute's answer about a
-    // customer they are in the middle of changing.
+    // There is nothing to lose on this side. Every response is per session,
+    // none is shared between people, and none is large enough for a cache to be
+    // worth showing somebody last minute's answer about a customer they are in
+    // the middle of changing.
     cache: "no-store",
     headers: { accept: "application/json" },
   });
@@ -90,12 +91,28 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
   return body.result?.data as T;
 }
 
-/** A tRPC mutation. Needs the CSRF token from the session. */
-export async function mutate<T>(path: string, input: unknown, csrf: string): Promise<T> {
+/**
+ * A tRPC mutation. Needs the CSRF token from the session.
+ *
+ * `header` exists because the operator portal is a second session with a second
+ * token under a second name, `x-antifailure-admin-csrf`. It sends through HERE
+ * rather than through `rest` for a reason that cost an afternoon: `rest` speaks
+ * to plain JSON endpoints and returns the body as it arrives, while a tRPC
+ * response is an envelope and the answer is at `result.data`. The operator
+ * client used to call `rest` for a `/trpc/` path, so every operator mutation
+ * resolved to `{result: {data: ...}}` and every field the caller read off it
+ * was undefined. Nothing noticed, because until now nothing read one.
+ */
+export async function mutate<T>(
+  path: string,
+  input: unknown,
+  csrf: string,
+  header: string = CSRF_HEADER,
+): Promise<T> {
   const res = await fetch(`${BASE}/trpc/${path}`, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "content-type": "application/json", [CSRF_HEADER]: csrf },
+    headers: { "content-type": "application/json", [header]: csrf },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res);
@@ -110,26 +127,31 @@ export async function rest<T>(
   init: {
     method?: string;
     body?: unknown;
+    /** The TENANT token, sent as x-antifailure-csrf. */
     csrf?: string;
     /**
      * Anything else the caller has to send.
      *
-     * It exists for the OPERATOR portal, which authenticates with a different
-     * cookie and presents a differently named forgery token,
-     * `x-antifailure-admin-csrf`. Its client reuses this transport for the
-     * reason lib/admin.ts states at length: a second fetch wrapper is a second
-     * place for the error shape, the credentials mode and the header names to
-     * drift. `csrf` stays a named option rather than becoming a header entry,
-     * because the product's own token is sent from a dozen call sites and none
-     * of them should be spelling a header name.
+     * The operator portal is the only such caller, and it needs this because
+     * the two sessions are two sessions: a different cookie, a different table,
+     * and a different header, `x-antifailure-admin-csrf`, which the guard for
+     * `af_admin_session` reads and which `csrf` above is never sent as. Passing
+     * the operator token as `csrf` would send it under the tenant name and be
+     * refused exactly as if nothing had been sent, a failure with no symptom in
+     * the request.
+     *
+     * A hook here rather than a second client, so the operator portal does not
+     * carry its own copy of the fetch, the error shape and the credentials
+     * mode, which is the drift this module exists to prevent.
      */
     headers?: Record<string, string>;
   } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
-  const headers: Record<string, string> = { accept: "application/json", ...init.headers };
+  const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  Object.assign(headers, init.headers ?? {});
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",

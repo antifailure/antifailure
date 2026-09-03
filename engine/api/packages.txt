@@ -1,0 +1,41 @@
+# Every Go package in the shipped modules that something outside them can
+# import, and what version 1 promises about it.
+#
+# Read and enforced by tools/surfacecheck. A package that is importable and not
+# listed here fails the gate, so a new one under engine/pkg cannot arrive
+# already public with nobody having decided whether it is covered. A line here
+# for a package that no longer exists fails too, so this does not become a list
+# of exemptions nobody rereads.
+#
+# stable   breaking it costs a major version. It appears in the release notes
+#          and in docs/reference/stability, its exported surface is frozen in
+#          v1.0.0.txt beside this file, and every type its exported signatures
+#          name must itself come from a stable package.
+# unstable it may change in a minor release. This is the ordinary answer and it
+#          is a real one. Most of these exist so the enterprise binary can plug
+#          into the community one, which is a narrow and deliberate socket
+#          rather than a general embedding API.
+#
+# Anything under engine/internal is absent because it is not importable at all:
+# the Go toolchain refuses an import of an internal path from outside the
+# subtree rooted at its parent, and no other module is in that subtree. That is
+# the compiler's guarantee and not this file's.
+#
+# Format: <stable|unstable> <import path> <reason>
+
+stable   github.com/antifailure/antifailure/engine/pkg/provider    The database and runtime interfaces a provider implements. Meant to be written outside this repository, so it is an integration surface and is treated as one.
+stable   github.com/antifailure/antifailure/engine/pkg/schema      The manifest types the provider interfaces carry across the boundary. Mirrors schemas/manifest.v1.json, which is stable for the same reason.
+stable   github.com/antifailure/antifailure/engine/pkg/secret      The Value type provider signatures name. Public because an interface whose signatures name a type the caller cannot name is an interface the caller cannot implement.
+stable   github.com/antifailure/antifailure/engine/conformance     The suite that decides whether an implementation of the provider interfaces is conformant. Named stable alongside them because conformant is something a test says, and a suite that moves says nothing.
+
+unstable github.com/antifailure/antifailure/engine/pkg/afcli       The socket the enterprise binary plugs its command tree into. Deliberately narrow rather than a general embedding API for the CLI.
+unstable github.com/antifailure/antifailure/engine/pkg/edition     How a binary reports which edition it is. Enterprise wiring, and the set of editions is ours to change.
+unstable github.com/antifailure/antifailure/engine/pkg/extension   The registration point for an edition's extra behaviour. The same socket as afcli, one layer down.
+unstable github.com/antifailure/antifailure/engine/pkg/livekey     Reads the live key material a hosted deployment is configured with. Internal plumbing that happens to sit outside internal so the enterprise module can reach it.
+unstable github.com/antifailure/antifailure/engine/chaos           The suite that proves the failure paths the documentation claims. Tests of this repository, run against this repository, and not an interface anybody integrates against.
+
+unstable github.com/antifailure/antifailure/ee/engine/compliance     Enterprise. The whole module is a separate one so the community binary cannot import it, and nothing in it is promised to anybody.
+unstable github.com/antifailure/antifailure/ee/engine/feature        Enterprise. Feature gating for the licensed build, which moves with the licence terms rather than with semantic versioning.
+unstable github.com/antifailure/antifailure/ee/engine/license        Enterprise. Licence parsing and verification, which changes whenever the licence format does.
+unstable github.com/antifailure/antifailure/ee/engine/policyenforce  Enterprise. Policy enforcement for the licensed build, tied to rules that are added and sharpened in minor releases.
+unstable github.com/antifailure/antifailure/ee/engine/secrets        Enterprise. The licensed secret backends, which follow whatever each vendor's API does.

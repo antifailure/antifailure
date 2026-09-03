@@ -110,10 +110,15 @@ export function Planned({ item }: { item: AdminNavItem }) {
     <Card>
       <div className="px-6 py-12 text-center">
         <p className="text-[14px] font-medium text-ink">This section is not built yet</p>
-        <p className="mx-auto mt-2 max-w-[52ch] text-[13px] leading-6 text-muted">{item.summary}</p>
-        <p className="mx-auto mt-4 max-w-[52ch] text-[12.5px] leading-5 text-dim">
+        {/* The summary is NOT repeated here. AdminPage has already put it under
+            the heading, and saying the same sentence twice on a page whose
+            whole job is to be honest about being empty reads as padding. */}
+        <p className="mx-auto mt-2 max-w-[52ch] text-[13px] leading-6 text-muted">
           Nothing is missing and nothing has failed. The route exists so the navigation has no dead
-          entry in it while the section is written. Reading it will need the{" "}
+          entry in it while the section is written.
+        </p>
+        <p className="mx-auto mt-3 max-w-[52ch] text-[12.5px] leading-5 text-dim">
+          Reading it will need the{" "}
           <code className="font-mono text-[12px] text-muted">{item.permission}</code> permission.
         </p>
       </div>
@@ -595,21 +600,17 @@ export function DataTable<T>({
                       mono={c.mono}
                     >
                       {i === 0 && href ? (
+                        // `block`, not `inline-flex`. A naming cell is usually
+                        // two lines, a title over an identifier, and an
+                        // inline-flex link lays those two blocks out as flex
+                        // items side by side: "Northwind Tradingnorthwind",
+                        // with no space between them, on every list in the
+                        // portal. min-h-11 keeps the 44px target under a thumb
+                        // and is dropped above the phone breakpoint, where the
+                        // row is already dense on purpose.
                         <Link
                           href={href(row)}
-                          // flex-col, not the row `items-center` this had.
-                          //
-                          // The first cell of a list in this portal is two
-                          // lines: the thing's name and its identifier under
-                          // it, which is what every one of these tables needs
-                          // to show and what CellLink in ui.tsx is used for
-                          // everywhere else. An inline-flex ROW makes those two
-                          // block spans flex ITEMS, so they sit side by side
-                          // and render as "Brightlinebrightline". Column with
-                          // items-start lays them out as written, and
-                          // justify-center keeps a one line cell vertically
-                          // centred in the 44px target it still is.
-                          className="-mx-1 -my-2 inline-flex min-h-11 flex-col items-start justify-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
+                          className="-mx-1 -my-2 block min-h-11 min-w-0 px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
                         >
                           {c.cell(row)}
                         </Link>
@@ -657,25 +658,36 @@ function SortableTh<T>({
       <button
         type="button"
         onClick={() => onSort(column.key, next)}
-        className={`inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.08em] ${
+        className={`group inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.08em] ${
           active ? "text-ink" : "text-dim hover:text-muted"
         }`}
       >
         {column.header}
-        {/* The caret is present only on the sorted column. An outline on every
-            heading is three shapes competing with the one that means
-            something, and aria-sort already says "none" for the rest. */}
-        {active ? (
-          <svg viewBox="0 0 10 10" className="h-2.5 w-2.5" fill="none" aria-hidden>
-            <path
-              d={sort.direction === "asc" ? "M2 6.4 5 3.4l3 3" : "M2 3.6 5 6.6l3-3"}
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : null}
+        {/* The caret is solid on the sorted column and transparent on the
+            others until they are hovered or focused.
+            
+            Drawn either way rather than rendered conditionally, because a
+            caret that appears on hover would change the heading's width and
+            shift the row under the pointer. And it has to be there at all: a
+            first version showed it only on the sorted column, so the one
+            column already sorted was the only one that looked sortable, and
+            nothing invited the reader to try the others. */}
+        <svg
+          viewBox="0 0 10 10"
+          className={`h-2.5 w-2.5 shrink-0 ${
+            active ? "opacity-100" : "opacity-0 group-hover:opacity-40 group-focus-visible:opacity-40"
+          }`}
+          fill="none"
+          aria-hidden
+        >
+          <path
+            d={active && sort.direction === "desc" ? "M2 3.6 5 6.6l3-3" : "M2 6.4 5 3.4l3 3"}
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
     </th>
   );

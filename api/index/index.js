@@ -39,7 +39,7 @@ const INDEX = {
   ],
   // Static files the site publishes rather than endpoints this app serves.
   // Listed here because the question somebody typing /api is asking is what
-  // this host offers a machine, and the answer is mostly these two.
+  // this host offers a machine, and the answer is mostly these.
   resources: [
     {
       path: "/openapi.json",
@@ -49,6 +49,11 @@ const INDEX = {
     {
       path: "/errors.v1.json",
       description: "The versioned Antifailure error and recovery catalog.",
+    },
+    {
+      path: "/lint-findings.v1.json",
+      description:
+        "Every migration lint finding, with the identifier for each one that does not change between releases.",
     },
     { path: "/llms.txt", description: "What this product is, and where its machine-readable surfaces are." },
   ],

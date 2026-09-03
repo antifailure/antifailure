@@ -18,13 +18,8 @@
  */
 
 import { createContext, useContext } from "react";
-import { ApiError, query, rest, useApi, usePages } from "@/lib/api";
-// Re-exported so callers have one import for the operator client. The two
-// constants live in a module with no dependencies because that is the only
-// kind this package can unit test: see lib/admin-csrf.ts.
-import { ADMIN_CSRF_HEADER, isStaleToken } from "@/lib/admin-csrf";
-
-export { ADMIN_CSRF_HEADER, isStaleToken };
+import { mutate, query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { ADMIN_CSRF_HEADER, createAdminCsrf } from "@/lib/admin-csrf";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -168,102 +163,73 @@ export function useAdminAudit(severity: string) {
   );
 }
 
-
-/**
- * The operator's forgery token, fetched once and remembered.
+/*
+ * The operator's cross-site token.
  *
- * WHY IT HAS TO BE FETCHED AT ALL. This function replaces a comment that argued
- * no token was needed, because the operator cookie is SameSite=Strict and a
- * browser sends it on no cross-site request. The argument is half right and the
- * half it misses is the half that matters: SameSite is SITE scoped rather than
- * ORIGIN scoped, so a subdomain an attacker controls is inside it. The server
- * has always disagreed and always refused. `web/apps/api/src/server.ts` refuses
- * every non-GET /trpc/* request carrying a live `af_admin_session` cookie
- * unless it presents a matching token, and `admincsrf.test.ts` pins that in
- * three ways. So the comment was a claim and the 403 was the fact: every
- * operator mutation this console has ever sent was refused, which is why the
- * portal had a working Suspend button that suspended nothing.
- *
- * The token is derived from the cookie, and the cookie is HttpOnly, so a page
- * cannot compute it. `GET /v1/admin/session` returns it to whoever already
- * holds the cookie, which is exactly what a forgery token is: not a secret, but
- * a value a page on another origin cannot read because it cannot make this
- * request and see the answer.
- *
- * Cached in a module variable rather than fetched per mutation, and refreshed
- * on the one refusal that means it went stale. See adminMutate.
+ * The rule lives in lib/admin-csrf.ts, which imports nothing, because this file
+ * imports React and a path alias and therefore cannot be executed by the
+ * console's test runner. That is not a detail: the reason every operator
+ * mutation was refused for as long as it was is that the one piece of this
+ * client with a rule in it sat in the one file nothing could run. See the
+ * header of that module.
  */
-let cachedAdminCsrf: string | null = null;
-
-async function adminCsrfToken(force = false): Promise<string> {
-  if (cachedAdminCsrf !== null && !force) return cachedAdminCsrf;
-  const session = await rest<{ signedIn: boolean; csrfToken?: string }>("/v1/admin/session");
-  cachedAdminCsrf = session.signedIn && session.csrfToken ? session.csrfToken : null;
-  if (cachedAdminCsrf === null) {
-    // A 401 rather than a network error, and the message says what to do. The
-    // alternative is sending the mutation without a token and letting the
-    // server answer with a sentence about a header, which describes the
-    // transport to somebody whose session simply ended.
-    throw new ApiError(
-      "Your operator session has ended. Sign in again to continue.",
-      401,
-      "UNAUTHORIZED",
-    );
-  }
-  return cachedAdminCsrf;
-}
-
-/** Dropped when a session begins or ends, because a token derived from one
- *  cookie is refused by the next one, and a stale token in this variable would
- *  turn a fresh sign-in into a 403 nobody could explain. */
-export function forgetAdminCsrf(): void {
-  cachedAdminCsrf = null;
-}
+const csrf = createAdminCsrf(async () => {
+  const session = await rest<{ signedIn: boolean; csrfToken?: string | null }>(
+    "/v1/admin/session",
+  );
+  return session.csrfToken ?? null;
+});
 
 /**
  * A tRPC mutation on the operator router.
  *
- * RETRIED EXACTLY ONCE, and only on the refusal that names the header. The
- * cached token belongs to a specific operator session, so signing out in
- * another tab, or an operator session expiring and being replaced, leaves this
- * variable holding a value the server will refuse. One refetch and one retry
- * turns that into a mutation that works; a loop would turn a genuinely refused
- * request into a hammer. Every other 403, including "your operator role does
- * not have this permission", is passed straight through, because refetching a
- * token cannot help with a permission.
+ * THIS SENDS A CSRF TOKEN, and the comment that used to stand here explaining
+ * why it did not was wrong in a way nothing caught. It argued that the operator
+ * cookie is SameSite=Strict, so a browser sends it on no cross-site request and
+ * a token adds nothing. The reasoning is sound and the server does not agree:
+ * server.ts refuses every non-GET under /trpc/ that carries a resolving
+ * af_admin_session cookie without a matching x-antifailure-admin-csrf, and
+ * admincsrf.test.ts has asserted exactly that in three ways the whole time. So
+ * suspendTenant and resumeTenant were answered 403 on every call.
+ *
+ * The lesson is the one this repository keeps relearning: a client side
+ * argument about what a server requires is a claim, and the server is the only
+ * thing that can settle it.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return adminPost<T>(`/trpc/${path}`, input);
+  // `mutate` rather than `rest`, and that is not a stylistic choice. A tRPC
+  // response is an envelope and the answer is at `result.data`; `rest` returns
+  // the body as it arrives. This function used to call `rest` for a `/trpc/`
+  // path, so every operator mutation resolved to the envelope and every field a
+  // caller read off it was undefined. Creating an operator wrote the row, wrote
+  // the audit entry, and left the panel showing its own form, so the obvious
+  // next move was to press the button again.
+  return csrf.send((headers) =>
+    mutate<T>(path, input, headers[ADMIN_CSRF_HEADER] ?? "", ADMIN_CSRF_HEADER),
+  );
 }
 
 /**
- * A POST to any operator endpoint, carrying the token.
+ * A POST to an operator endpoint that is NOT a procedure.
  *
- * Separate from adminMutate because not every operator write is a procedure.
- * Two of them cannot be: starting and ending an impersonation both end in a
- * Set-Cookie for the CUSTOMER's session cookie, and a procedure that exists to
- * set a cookie is a procedure pretending to be a route. They are plain JSON
- * endpoints under /v1/admin/, they are behind the same operator cookie, and the
- * server demands the same header on them, so they need this and not a third
- * copy of it.
+ * Two of them are not, and cannot be. Starting an impersonation ends with a
+ * Set-Cookie for the CUSTOMER's session cookie and ending one ends with
+ * clearing it, and a procedure that exists to set a cookie is a procedure
+ * pretending to be a route. There is a harder reason for the second: the
+ * operator gate refuses EVERY admin procedure while a session is impersonating,
+ * so a tRPC `end` would be refused exactly when it is the only thing left to
+ * press.
+ *
+ * Same token, same one retry, through the same `csrf.send`, so these two cannot
+ * drift from every other operator write. `rest` rather than `mutate` because
+ * these answer plain JSON rather than a tRPC envelope, which is the distinction
+ * adminMutate above was getting wrong in the other direction.
  */
 export async function adminPost<T>(path: string, body?: unknown): Promise<T> {
-  const send = (csrf: string) =>
-    rest<T>(path, {
-      method: "POST",
-      body: body ?? {},
-      headers: { [ADMIN_CSRF_HEADER]: csrf },
-    });
-  try {
-    return await send(await adminCsrfToken());
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 403 && isStaleToken(err.message)) {
-      return send(await adminCsrfToken(true));
-    }
-    throw err;
-  }
+  return csrf.send((headers) =>
+    rest<T>(path, { method: "POST", body: body ?? {}, headers }),
+  );
 }
-
 
 export async function suspendTenant(orgId: string, reason: string) {
   return adminMutate<{ suspended: boolean; effect: string }>("admin.tenants.suspend", {
@@ -284,27 +250,16 @@ export async function resumeTenant(orgId: string) {
  * to set a cookie is a procedure pretending to be a route.
  */
 export async function adminSignIn(email: string, password: string): Promise<void> {
-  // Dropped BEFORE the request as well as after it. A failed sign-in can still
-  // have replaced the cookie, and a token from the previous session refuses
-  // silently rather than loudly.
-  forgetAdminCsrf();
   await rest("/v1/admin/signin", { method: "POST", body: { email, password } });
-  forgetAdminCsrf();
+  // The new session has a new token, and the old one is now wrong rather than
+  // merely stale: it would be sent, refused, and the refusal would name a
+  // header that is right there in the request.
+  csrf.forget();
 }
 
-/**
- * Ends the operator session.
- *
- * It also ends any impersonation this session holds and clears the customer
- * cookie, which the server does rather than this function: see the block on
- * POST /v1/admin/signout in server.ts. That matters here because this is what
- * the portal's impersonation refusal screen calls, so the one button an
- * operator can reach from inside an impersonation actually gets them out
- * rather than leaving a borrowed cookie in the browser.
- */
 export async function adminSignOut(): Promise<void> {
   await rest("/v1/admin/signout", { method: "POST" });
-  forgetAdminCsrf();
+  csrf.forget();
 }
 
 /** The operator, shared by the chrome and every page under it, so a navigation

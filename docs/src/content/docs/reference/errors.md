@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
 | `10` | Interrupted, or a teardown left resources recorded. Run `af down` again. |
 
-29 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+28 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -388,6 +388,18 @@ The provider's concurrent branch limit ({limit}) is reached.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [providers/limits](/docs/providers/limits) |
 
+### AF-DB-007
+
+The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.
+
+**What to do.** Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
 ### AF-DB-008
 
 The database provider {provider} at {endpoint} rejected the configured credential.
@@ -474,13 +486,49 @@ The published golden {version} in {store} was made for a different project.
 
 ### AF-DB-016
 
-database.source_url_env names {variable}, and {variable} holds nothing in this shell.
+database.source_url_env names {variable}, and no configured source has a value for it.
 
-**What to do.** Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.
+**What to do.** Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.
 
 | | |
 | --- | --- |
 | Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-017
+
+The role in the connection string cannot read all of the source database: {detail}
+
+**What to do.** Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-018
+
+Row level security stops pg_dump from reading the source as this role: {detail}
+
+**What to do.** Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-019
+
+{program} stopped while copying the source database: {detail}
+
+**What to do.** Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/goldens](/docs/concepts/goldens) |
 
@@ -519,6 +567,30 @@ No table that looks like a users table was found, so there is nowhere to create 
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/personas](/docs/guides/personas) |
+
+### AF-DB-023
+
+The source database answered and refused the connection: {detail}
+
+**What to do.** Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
+
+### AF-DB-024
+
+The value of the variable named by database.source_url_env is not a connection string: {detail}
+
+**What to do.** Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/goldens](/docs/concepts/goldens) |
 
 ### AF-DB-030
 
@@ -636,7 +708,7 @@ The diff at {path} could not be read: {detail}
 
 The license covers {seats} seats and they are all in use.
 
-**What to do.** Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.
+**What to do.** Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.
 
 | | |
 | --- | --- |
@@ -895,6 +967,18 @@ Masking could not run: {detail}
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking) |
+
+### AF-MSK-011
+
+Verification could not read {table}.{column}, so the golden was not verified: {detail}
+
+**What to do.** Grant the scanner read access to {table}.{column} and refresh the golden. A column the scan could not read is not a column that passed.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verification](/docs/concepts/verification) |
 
 ## Egress
 
@@ -1329,6 +1413,18 @@ The value supplied for {name} carries a live credential prefix, and {name} is co
 The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.
 
 **What to do.** Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/secrets](/docs/guides/secrets) |
+
+### AF-SEC-005
+
+The variable {name} could not be looked up: {detail}
+
+**What to do.** Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed.
 
 | | |
 | --- | --- |

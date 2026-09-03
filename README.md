@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT%20except%20ee%2F-101014" alt="MIT licensed, except the ee directory" /></a>
+  <a href="LICENSING.md"><img src="https://img.shields.io/badge/license-MIT%20except%20ee%2F-101014" alt="MIT licensed, except the ee directory" /></a>
 </p>
 
 ---
@@ -232,10 +232,19 @@ Builds are reproducible, and that is a gate rather than an aspiration: two
 builds in two directories with two caches produce identical archives on all
 four platforms, checked in CI on every pull request.
 
+Every release from v1.0.0 carries `checksums.txt.sigstore.json` and
+`sbom.spdx.json`: the checksums and a bill of materials read out of the built
+binaries, each signed with cosign keyless so there is no public key to fetch.
+The verification commands are on the release page. Neither is a claim you have
+to take on trust, because a release that ran them carries both files and
+v0.1.0 and v0.1.1 carry neither.
+
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers building
 locally, running the gates and structuring commits.
 
-MIT, except `ee`, which is under the Antifailure Enterprise License. The
-boundary is proved rather than asserted: a CI job deletes `ee`, builds and
-tests the engine from what is left, and then inspects the binary it shipped for
-enterprise package paths.
+MIT, except the `ee` directory of this repository, which is under the
+Antifailure Enterprise License. Nothing under `engine` imports it and a release
+archive carries no enterprise source, so a release you download is MIT
+throughout. The boundary is proved rather than asserted: a CI job deletes `ee`,
+builds and tests the engine from what is left, and then inspects the binary it
+shipped for enterprise package paths.

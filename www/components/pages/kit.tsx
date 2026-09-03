@@ -66,11 +66,11 @@ function PagesClose() {
           </div>
           <div className="flex min-w-0 flex-col items-start gap-4 max-lg:w-full">
             <div className="flex gap-x-5 max-sm:w-full max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
-              <Button href="/signup" theme="filled">
-                Request access
+              <Button href="/docs/getting-started/quickstart" theme="filled">
+                Start the quickstart
               </Button>
-              <Button href="/docs" theme="outlined">
-                Read the docs
+              <Button href="/signup" theme="outlined">
+                Request hosted access
               </Button>
             </div>
             <CopyCodeButton
@@ -136,11 +136,11 @@ export function PageHero({
         <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full max-sm:[&_button]:w-full">
           {actions ?? (
             <>
-              <Button href="/signup" theme="filled">
-                Request access
+              <Button href="/docs/getting-started/quickstart" theme="filled">
+                Start the quickstart
               </Button>
-              <Button href="/docs" theme="outlined">
-                Read the docs
+              <Button href="/signup" theme="outlined">
+                Request hosted access
               </Button>
             </>
           )}
