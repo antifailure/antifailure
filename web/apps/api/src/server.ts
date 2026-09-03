@@ -159,6 +159,7 @@ import {
   limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import { apiNotFound } from './notfound.ts'
 import { engagedReason } from './admin/controls.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
@@ -3019,6 +3020,17 @@ export function createServer(options: ServerOptions) {
       },
     }),
   )
+
+  // What answers a path with no route, when the console is not mounted to
+  // answer it with a page. Registered before mountConsole rather than after,
+  // because Hono holds ONE not-found handler and the last call wins: the
+  // console's handler has to be able to replace this, and it answers exactly
+  // this for the paths the API owns.
+  //
+  // Without it, an API-only deployment answered Hono's default, which is plain
+  // text, for the one response a caller finding its way around is most likely
+  // to get.
+  app.notFound(apiNotFound)
 
   // The console, last, so that every API route above wins a path collision.
   // Mounted on this app rather than a second one: the session cookie the

@@ -45,6 +45,7 @@ import {
 } from '../providers/store.ts'
 import { readAsset, type ConsoleBuild } from './static.ts'
 import { consoleClass } from '../limits.ts'
+import { apiNotFound } from '../notfound.ts'
 
 export interface ConsoleOptions {
   pool: Pool
@@ -321,16 +322,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     // which is the defect this replaces; sending it here instead and then
     // handing it the console's HTML would only trade one wrong answer for
     // another, quieter one.
-    if (consoleClass(c.req.method, c.req.path) === null) {
-      return c.json(
-        {
-          error:
-            'No endpoint at this path. GET /openapi.json lists every endpoint this ' +
-            'control plane serves.',
-        },
-        404,
-      )
-    }
+    if (consoleClass(c.req.method, c.req.path) === null) return apiNotFound(c)
     if (!build.present) {
       // Said plainly, in the response as well as the log. A blank 404 here
       // looks exactly like a routing bug and is not one.

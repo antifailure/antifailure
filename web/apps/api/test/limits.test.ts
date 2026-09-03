@@ -190,6 +190,24 @@ describe('a path the server has no route for', () => {
     // like a resolution and is not one.
     assert.equal((await call('GET', '/openapi.json')).status, 200)
   })
+
+  it('answers JSON on a deployment with the console switched off', async () => {
+    // Hono's own default not-found handler writes plain text. Without a
+    // handler of the API's own, an API-only deployment would answer text for
+    // the one response a caller finding its way around is most likely to get,
+    // which is the contract the 500 handler above it is written to keep.
+    const { app: apiOnly } = createServer({
+      pool: {} as unknown as Pool,
+      github: {} as unknown as GitHubClient,
+      console: false,
+    })
+    const res = await apiOnly.fetch(
+      new Request('http://control-plane.test/v1/health'),
+    )
+    assert.equal(res.status, 404)
+    assert.match(res.headers.get('content-type') ?? '', /json/)
+    assert.match(((await res.json()) as { error: string }).error, /openapi\.json/)
+  })
 })
 
 describe('a route that exists with no declared limit', () => {
