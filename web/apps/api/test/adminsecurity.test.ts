@@ -216,6 +216,125 @@ describe('security and governance', { skip: hasDb ? false : 'no database' }, () 
     })
   })
 
+  describe('single sign-on, which nothing in the product writes yet', () => {
+    // THE ROUTE IS TESTED EVEN THOUGH NO CUSTOMER CAN REACH THE STATE. Migration
+    // 0014 built the whole schema and nothing reads or writes it, which
+    // writers.test.ts records as an exemption with the reason. The operator page
+    // says that in words rather than rendering a row of zeroes, and it renders
+    // the real panel the moment a connection exists. This is what makes that
+    // second half a claim somebody checked: the fixture writes the rows the
+    // product cannot yet write, and the route is asked what it says about them.
+    test('reports enabled, enforced and bypassable as three different states', async () => {
+      const handle = () => randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8)
+      // The entity id is globally unique by a partial index, deliberately,
+      // because IdP-initiated SAML arrives with an Issuer and no handle. A
+      // fixture that reuses one passes on a fresh database and fails on the
+      // second run, which is a suite that depends on what ran before it.
+      const entity = () => `https://idp-${randomUUID().slice(0, 8)}.example/entity`
+      const enforced = await seedOrg(h.admin, 'sso-on')
+      const bypassable = await seedOrg(h.admin, 'sso-soft')
+      const off = await seedOrg(h.admin, 'sso-off')
+      await h.admin`
+        INSERT INTO sso_connections
+          (org_id, handle, kind, display_name, enabled, enforced,
+           idp_entity_id, idp_sso_url, idp_certificates)
+        VALUES
+          (${enforced.orgId}, ${handle()}, 'saml', 'Okta', true, true,
+           ${entity()}, 'https://idp.example/s', ARRAY['cert']),
+          (${bypassable.orgId}, ${handle()}, 'saml', 'Entra ID', true, false,
+           ${entity()}, 'https://idp2.example/s', ARRAY['cert'])`
+      // Its own statement: an unfinished connection names none of the SAML
+      // columns, and a check constraint refuses one that claims to be enabled
+      // without them.
+      await h.admin`
+        INSERT INTO sso_connections (org_id, handle, kind, display_name, enabled, enforced)
+        VALUES (${off.orgId}, ${handle()}, 'oidc', 'Google Workspace', false, false)`
+
+      const { caller } = await callerFor('security')
+      const page = await caller.admin.security.sso({ limit: 200 })
+      const bySlug = (slug: string) => page.rows.find((r) => r.organization === slug)
+
+      assert.equal(bySlug(enforced.slug)?.enforced, true)
+      assert.equal(bySlug(bypassable.slug)?.enabled, true)
+      assert.equal(
+        bySlug(bypassable.slug)?.enforced,
+        false,
+        'a connection every member can still sign in around was reported as enforced, which is ' +
+          'the one state on this page worth surfacing',
+      )
+      assert.equal(bySlug(off.slug)?.enabled, false)
+
+      // And the summary agrees with the list, which is the property the page
+      // rests on: bypassable is enabled AND NOT enforced, and getting that
+      // predicate backwards would report the safe organizations as the risky
+      // ones.
+      const posture = await caller.admin.security.posture()
+      assert.ok(posture.sso.connections >= 3)
+      assert.equal(
+        posture.sso.enabled,
+        page.rows.filter((r) => r.enabled).length,
+        'the summary and the list disagree about how many connections are enabled',
+      )
+      assert.equal(
+        posture.sso.bypassable,
+        page.rows.filter((r) => r.enabled && !r.enforced).length,
+      )
+      assert.equal(page.nextCursor, null, 'the fixture set grew past one page, so this is void')
+    })
+
+    test('never returns an identity provider certificate, only how many there are', async () => {
+      // A page that can print an identity provider's signing material is a page
+      // that can leak one, and the count is what answers "is this configured".
+      //
+      // The material is marked, rather than asserting on the word certificate.
+      // The response has a `certificates` FIELD, so a substring test for that
+      // word passes on a response that leaks and fails on one that does not,
+      // which is a check that answers a nearby question instead of this one.
+      const marked = `PEM-MUST-NOT-LEAVE-${randomUUID()}`
+      const org = await seedOrg(h.admin, 'sso-cert')
+      await h.admin`
+        INSERT INTO sso_connections
+          (org_id, handle, kind, display_name, enabled, enforced,
+           idp_entity_id, idp_sso_url, idp_certificates)
+        VALUES (${org.orgId}, ${randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 8)},
+                'saml', 'Marked', true, true,
+                ${`https://idp-${randomUUID().slice(0, 8)}.example/entity`},
+                'https://idp3.example/s', ARRAY[${marked}])`
+
+      const { caller } = await callerFor('owner')
+      const page = await caller.admin.security.sso({ limit: 200 })
+      assert.ok(
+        !JSON.stringify(page).includes(marked),
+        'an SSO response carried an identity provider certificate',
+      )
+      const row = page.rows.find((r) => r.organization === org.slug)
+      assert.equal(row?.certificates, 1, 'the count of certificates is missing or wrong')
+    })
+  })
+
+  describe('what the product can and cannot erase', () => {
+    test('the statement is served rather than written into the page', async () => {
+      // The page and the exported document have to say the same thing, and two
+      // copies of a compliance statement is one copy that is wrong. This is the
+      // route both read, and it names nobody, so rendering the caveats does not
+      // put a person in the operator log.
+      const { caller } = await callerFor('support')
+      const answer = await caller.admin.security.erasure()
+      assert.match(answer.erasure.perSubject, /Not implemented/)
+      assert.match(answer.erasure.perOrganization, /Implemented/)
+      assert.ok(answer.retained.some((r) => r.table === 'audit_entries'))
+      assert.equal(typeof answer.countCeiling, 'number')
+
+      const before = await auditCount('governance.subject_inspected')
+      await caller.admin.security.erasure()
+      assert.equal(
+        await auditCount('governance.subject_inspected'),
+        before,
+        'reading the erasure statement recorded a lookup against a person',
+      )
+    })
+  })
+
   describe('who may read what', () => {
     test('support can read governance and cannot read the credential inventory', async () => {
       // The split the two permissions exist for. Support answers "where is my
