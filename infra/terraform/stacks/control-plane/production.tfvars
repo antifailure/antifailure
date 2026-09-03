@@ -210,11 +210,18 @@ signup_url = "https://antifailure.dev/contact"
 # them means a staging compromise writes into production's tenants. Installation
 # ids differ per App and github_installations keys on them.
 #
-# The module reads the App's two secrets from Key Vault with a data source,
-# because GitHub mints the private key once and Terraform can neither create nor
-# recreate it. So setting this id before those secrets are in the production
-# vault fails at PLAN, which is the correct order and not a bug. The checklist
-# in the production guide has the steps in the order that works.
+# GitHub mints the private key once and shows it once, so Terraform can neither
+# create the App's two secrets nor recreate them. A person puts both in the
+# vault and the module addresses them by id.
+#
+# SETTING THIS BEFORE THOSE SECRETS EXIST NOW FAILS AT APPLY RATHER THAN AT
+# PLAN, and that changed deliberately. The module used to read both with a
+# `data "azurerm_key_vault_secret"`, which asserted they existed and made the
+# order enforceable at plan time. It also made every plan a privileged Key Vault
+# read, which the pull request plan identity cannot perform on this vault, so
+# the plan time check only ever worked on staging. See keyvault.tf for the whole
+# argument. The apply names the secret it could not find. The checklist in the
+# production guide still has the steps in the order that works.
 #
 # App 4775259, slug `antifailure`, installed on the antifailure organization as
 # installation 157834739. The OAuth App that signs people in is a separate

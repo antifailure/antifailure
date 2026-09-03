@@ -463,12 +463,25 @@ jobs:
       # no role is added for this step. -lock=false for the same reason the
       # staging plan does not lock: a lease is a write, and stacks/tfstate
       # deliberately grants this identity no write on the state.
-      # -refresh=false, and with that flag the only
-      # Azure call this plan makes is azurerm_client_config, which reads the
-      # caller's own identity and needs no role at all: every
-      # azurerm_key_vault_secret data source in the module is counted to zero
-      # under production.tfvars, so no secret is read and no role on
-      # af-cp-prod-centralus is required.
+      # -refresh=false, and the only Azure call this plan makes is
+      # azurerm_client_config, which reads the caller's own identity and needs
+      # no role at all. No secret is read and no role on af-cp-prod-centralus
+      # is required.
+      #
+      # THE REASON FOR THAT CHANGED, AND THE OLD REASON WAS LOAD BEARING BY
+      # ACCIDENT. This used to hold because every azurerm_key_vault_secret data
+      # source was counted to zero under production.tfvars, which was true only
+      # because github_app_id had been emptied by a revert. The moment it was
+      # restored this step failed, on a vault read this identity is not granted
+      # and should not be: it is reachable from a pull_request federated
+      # credential, and the App private key signs as the installation on every
+      # customer repository. It holds now because the module CONSTRUCTS those
+      # secret ids instead of reading them. See modules/control-plane/keyvault.tf.
+      #
+      # -refresh=false does NOT suppress a data source. Terraform evaluates it
+      # on every plan, which is why the staging plan above still reads staging's
+      # vault, where this identity does hold Secrets Officer. Do not reintroduce
+      # a data source here believing the flag covers it.
       #
       # LAST IN THE JOB ON PURPOSE. It re-initialises the backend against the
       # production state, and every step above reads files the staging plan

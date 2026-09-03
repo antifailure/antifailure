@@ -286,25 +286,48 @@ resource "azurerm_key_vault_secret" "owned" {
   depends_on = [azurerm_role_assignment.deployer_writes_secrets]
 }
 
-# The GitHub App's two secrets, read rather than written.
+# The GitHub App's two secrets, ADDRESSED RATHER THAN READ.
 #
 # See the variable comments: GitHub mints the private key and shows it once, so
 # Terraform cannot create it and must not manage it. A person puts both in the
-# vault; this reads them so the container app can reference them by id.
+# vault and the container app references them by id.
 #
-# count on github_app_id rather than on the secrets existing, so that a stack
-# with no App plans clean instead of failing on a data source for a secret that
-# is deliberately absent.
-data "azurerm_key_vault_secret" "github_app_private_key" {
-  count        = var.github_app_id == "" ? 0 : 1
-  name         = var.github_app_private_key_secret_name
-  key_vault_id = azurerm_key_vault.this.id
-}
-
-data "azurerm_key_vault_secret" "github_app_webhook_secret" {
-  count        = var.github_app_id == "" ? 0 : 1
-  name         = var.github_app_webhook_secret_name
-  key_vault_id = azurerm_key_vault.this.id
+# THESE WERE `data "azurerm_key_vault_secret"` AND THAT MADE EVERY PLAN A
+# PRIVILEGED READ. The container app never wants the secret's VALUE, only its
+# versionless id, which is a URI built from the vault's own uri and the secret's
+# name. Both are already here, so a data source was spending a Key Vault data
+# plane read to obtain a string that is a function of two things in this
+# configuration. Reading a secret to learn its address is the wrong shape.
+#
+# What that cost, measured rather than argued. `terraform plan -refresh=false`
+# does NOT serve a data source from state; it evaluates it, so the read happened
+# on every plan. On staging that passed, because the plan identity holds Key
+# Vault Secrets Officer there. On production it holds Contributor on the group
+# and nothing on the vault, so the moment `github_app_id` was set the production
+# plan check failed and could only have been fixed by granting a pull request
+# identity read access to production's App private key. That key signs as the
+# installation on every customer repository this product is installed on, and a
+# pull request can edit the workflow that uses the identity in the same commit.
+# Constructing the id needs no role at all.
+#
+# WHAT THIS GIVES UP, and it is a real trade rather than a free win. The data
+# source also asserted the secret EXISTS, so a missing secret failed at plan.
+# Now it fails at apply, with Azure naming the secret it could not find. That
+# check was only ever load bearing on staging: on production the identity that
+# runs the plan cannot read the vault, so the plan could not assert it there
+# either. An apply that stops with "secret not found" beats a plan that only
+# verifies the environment where it does not matter.
+#
+# Empty on no App, so a stack without one renders no secret block at all, which
+# is what the count on the old data sources was for.
+#
+# Addressed, not read: the trailing slash on vault_uri is trimmed rather than
+# assumed, so this cannot depend on how the provider spells it.
+locals {
+  github_app_secret_ids = var.github_app_id == "" ? {} : {
+    "github-app-private-key"    = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.github_app_private_key_secret_name}"
+    "github-app-webhook-secret" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.github_app_webhook_secret_name}"
+  }
 }
 
 # Stripe's two credentials and Resend's one, read rather than written, and the
