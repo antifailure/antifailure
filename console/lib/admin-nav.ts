@@ -286,8 +286,9 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "Security Center",
         href: "/admin/security/center",
         Icon: IconSecurity,
-        permission: "admin.audit.read",
-        summary: "Refused requests, suspicious sign-ins, and what the platform is currently blocking.",
+        permission: "admin.security.read",
+        summary:
+          "Every standing credential on this installation, how each organization signs in, and who holds an operator account.",
       },
       {
         label: "Audit Logs",
@@ -300,8 +301,9 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "Data Governance",
         href: "/admin/security/data-governance",
         Icon: IconGovernance,
-        permission: "admin.tenants.read",
-        summary: "What customer data is kept, for how long, and the deletions that were carried out.",
+        permission: "admin.governance.read",
+        summary:
+          "What is held about a named person, where it lives, and every organization erasure this installation was asked for.",
       },
     ],
   },

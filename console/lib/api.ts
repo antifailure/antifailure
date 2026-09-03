@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trpcData } from "@/lib/wire";
 
 /**
  * Where the API is.
@@ -87,8 +88,7 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return trpcData<T>(await res.json());
 }
 
 /**
@@ -116,8 +116,7 @@ export async function mutate<T>(
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return trpcData<T>(await res.json());
 }
 
 /** A plain JSON endpoint on the control plane, for the few things that are not

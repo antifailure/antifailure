@@ -181,6 +181,24 @@ const csrf = createAdminCsrf(async () => {
 });
 
 /**
+ * The operator session as `GET /v1/admin/session` answers it. The token it
+ * carries is derived from the session cookie without revealing it, which is
+ * what makes it safe to hand to the page.
+ */
+export interface AdminSession {
+  signedIn: boolean;
+  csrfToken?: string;
+  label?: string;
+  email?: string;
+  role?: string;
+  impersonating?: boolean;
+}
+
+export async function adminSession(): Promise<AdminSession> {
+  return rest<AdminSession>("/v1/admin/session");
+}
+
+/**
  * A tRPC mutation on the operator router.
  *
  * THIS SENDS A CSRF TOKEN, and the comment that used to stand here explaining

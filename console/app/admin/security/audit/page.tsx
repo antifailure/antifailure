@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Card, Loaded, TableSkeleton, When, type Tone } from "@/components/ui";
+import { Badge, Button, Card, Loaded, TableSkeleton, When, type Tone } from "@/components/ui";
 import {
   AdminPage,
   DataTable,
@@ -13,7 +13,9 @@ import {
   type Column,
 } from "@/components/admin/primitives";
 import { More } from "@/components/pagination";
-import { useAdminAudit, type AdminAuditEntry } from "@/lib/admin";
+import { ApiError } from "@/lib/api";
+import { operatorMay, useAdminAudit, useAdminContext, type AdminAuditEntry } from "@/lib/admin";
+import { exportChain, saveDocument, verifyChain, type ChainReport } from "@/lib/admin-security";
 
 /**
  * The operator log: what people at this company did to customers' accounts.
@@ -28,6 +30,16 @@ import { useAdminAudit, type AdminAuditEntry } from "@/lib/admin";
  * copy of it in their own log, written in the same transaction as this entry.
  * This page shows the vendor's half; the customer's half is the one that makes
  * it accountability rather than a private note.
+ *
+ * THE CHAIN IS HASH LINKED, AND THAT IS ONLY WORTH SOMETHING IF SOMEBODY CAN
+ * CHECK IT. The verifier has existed in the database package since the chain
+ * did, was tested, and had no caller outside a test, so the tamper evidence was
+ * a property of the code rather than of the product. It is a button now, and
+ * the export it sits beside carries every entry's prev_hash and entry_hash so
+ * the file can be checked by somebody who does not trust us. Both need
+ * admin.audit.export, which owner and security hold: reading the log is
+ * oversight and every role has it, and producing a file of it is the act of
+ * answering for it.
  *
  * THE DETAIL PANEL IS NOT DECORATION. Every entry carries a `detail` object
  * saying WHAT changed, and this page used to drop it on the floor: the table
@@ -55,6 +67,8 @@ export default function AdminAuditPage() {
   const [severity, setSeverity] = useState("");
   const [open, setOpen] = useState<AdminAuditEntry | null>(null);
   const state = useAdminAudit(severity);
+  const { me } = useAdminContext();
+  const mayExport = operatorMay(me, "admin.audit.export");
 
   const columns: Column<AdminAuditEntry>[] = [
     {
@@ -103,6 +117,8 @@ export default function AdminAuditPage() {
       href="/admin/security/audit"
       lede="Every action taken from this portal, newest first. Where an action concerned one organization, that customer has the same entry in their own audit log."
     >
+      {mayExport ? <ChainTools severity={severity} /> : null}
+
       <Card>
         <FilterBar
           filters={[
@@ -150,6 +166,145 @@ export default function AdminAuditPage() {
         {open ? <EntryDetail entry={open} /> : null}
       </Drawer>
     </AdminPage>
+  );
+}
+
+/**
+ * Checking the chain, and taking a copy of it.
+ *
+ * Rendered only for an operator who holds admin.audit.export. The navigation
+ * already hides what a role cannot reach and the server refuses it anyway, so
+ * this is the third layer and the one that stops the page offering a button
+ * that answers 403.
+ */
+function ChainTools({ severity }: { severity: string }) {
+  const [report, setReport] = useState<ChainReport | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function fail(err: unknown) {
+    setError(err instanceof ApiError ? err.message : "The control plane could not be reached.");
+  }
+
+  async function verify() {
+    setVerifying(true);
+    setError(null);
+    setSaved(null);
+    try {
+      setReport(await verifyChain());
+    } catch (err) {
+      fail(err);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function download(format: "json" | "csv") {
+    setExporting(format);
+    setError(null);
+    setSaved(null);
+    try {
+      // A ceiling rather than the whole chain, and the file says whether it hit
+      // it. A truncated export read as the whole log is somebody telling a
+      // regulator that this is everything.
+      const file = await exportChain({
+        format,
+        limit: 5000,
+        ...(severity ? { severity } : {}),
+      });
+      saveDocument(file);
+      setSaved(
+        file.truncated
+          ? `Saved ${file.filename}. It stopped at ${file.entryCount.toLocaleString()} entries, which is the ceiling, so it is not the whole chain.`
+          : `Saved ${file.filename}, ${file.entryCount.toLocaleString()} entries, verified intact.`,
+      );
+      if (!file.verification.ok) {
+        setReport({
+          ok: false,
+          entries: file.verification.entriesWalked,
+          firstSeq: file.firstSeq,
+          lastSeq: file.lastSeq,
+          head: null,
+          problems: file.verification.problems as ChainReport["problems"],
+        });
+      }
+    } catch (err) {
+      fail(err);
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  return (
+    <Card
+      className="mb-6"
+      title="The chain itself"
+      note="Every entry is hashed with the one before it. Verifying recomputes them; the export carries the hashes so somebody outside this company can do the same."
+      actions={
+        <>
+          <Button onClick={() => void verify()} busy={verifying}>
+            Verify
+          </Button>
+          <Button onClick={() => void download("json")} busy={exporting === "json"}>
+            Export JSON
+          </Button>
+          <Button onClick={() => void download("csv")} busy={exporting === "csv"}>
+            Export CSV
+          </Button>
+        </>
+      }
+    >
+      <div className="px-4 py-3.5">
+        {error ? (
+          <p role="alert" className="text-[13px] leading-6 text-fail">
+            {error}
+          </p>
+        ) : report === null ? (
+          <p className="max-w-[72ch] text-[13px] leading-6 text-muted">
+            {saved ??
+              (severity
+                ? `The export covers the ${severity} entries only, and says so inside the file. Verification always covers the whole range those entries span.`
+                : "Nothing has been checked yet. Verifying walks every entry and reports every break rather than the first, because an investigation wants the extent of the tampering.")}
+          </p>
+        ) : report.ok ? (
+          <p role="status" className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+            <Badge tone="pass">Intact</Badge>
+            <span>
+              {report.entries.toLocaleString()} entries hash to what they say they do, from{" "}
+              {(report.firstSeq ?? 0).toLocaleString()} to {(report.lastSeq ?? 0).toLocaleString()}.
+            </span>
+          </p>
+        ) : (
+          <div role="alert">
+            <p className="flex flex-wrap items-center gap-2 text-[13px] text-ink">
+              <Badge tone="fail">Broken</Badge>
+              <span>
+                {report.problems.length.toLocaleString()} of {report.entries.toLocaleString()}{" "}
+                entries do not check out. Every break is listed rather than the first, because the
+                first one only says where it started.
+              </span>
+            </p>
+            <ul className="mt-2 grid gap-1.5">
+              {report.problems.map((p) => (
+                <li key={`${p.seq}-${p.kind}`} className="max-w-[80ch] text-[12.5px] leading-5 text-muted">
+                  <span className="font-mono text-fail">
+                    {p.seq.toLocaleString()} {p.kind.replace(/_/g, " ")}
+                  </span>{" "}
+                  {p.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {saved && report !== null ? (
+          <p role="status" className="mt-2 text-[13px] text-muted">
+            {saved}
+          </p>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
