@@ -99,6 +99,7 @@ gate: _reports
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
+    run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -972,6 +973,14 @@ gatecheck:
 # pull request.
 execcheck:
     go run ./tools/execcheck .
+
+# No YAML key is defined twice in one mapping.
+#
+# Charts are rendered before they are read: a template is Go template source
+# that no YAML parser can take, and helm lint returns clean on a chart whose
+# service.yaml defines `type` twice.
+keycheck:
+    go run ./tools/keycheck .
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.
