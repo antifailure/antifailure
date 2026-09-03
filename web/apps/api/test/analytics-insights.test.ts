@@ -28,7 +28,7 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { sql } from 'drizzle-orm'
 import { available, seedOrg, startApi, type ApiHarness, type Org } from './harness.ts'
 import { CATALOG, FUNNEL_DEFINITIONS, funnelDefinition } from '../src/analytics/catalog.ts'
@@ -38,6 +38,7 @@ import {
   SUBJECT_DAYS_KEPT,
   recomputeInsights,
   stepExpression,
+  subjectKinds,
 } from '../src/analytics/insights.ts'
 import {
   actives,
@@ -179,6 +180,40 @@ describe('every declared funnel could actually be completed', () => {
       section.includes(`fewer than ${MIN_COHORT_FOR_A_RATE} organizations`),
       `the page does not say the suppression floor is ${MIN_COHORT_FOR_A_RATE}`,
     )
+  })
+
+  it('names exactly the subject kinds the migration will accept', async () => {
+    // THE DRIFT THIS CATCHES. SUBJECT_KINDS is a TypeScript list and the three
+    // insight tables each carry a CHECK that repeats it in SQL. Adding a third
+    // population to the list alone type checks, passes review, and then every
+    // insert for it is refused at runtime by a constraint nobody looked at, on
+    // a rollup that runs unattended. The failure surfaces as an insight table
+    // that silently stops gaining rows, which is indistinguishable from a
+    // product nobody is using.
+    //
+    // Read out of the migration by shape rather than by number, because the
+    // analytics migrations in this repository have been renumbered eight times
+    // and a test pinned to a filename fails for the wrong reason on the ninth.
+    const dir = new URL('../../../packages/db/migrations/', import.meta.url)
+    const name = (await readdir(dir)).find((f) => f.endsWith('_analytics_insights.sql'))
+    assert.ok(name, 'no analytics insights migration found to read the constraint out of')
+    const migration = await readFile(new URL(name, dir), 'utf8')
+
+    const checks = [...migration.matchAll(/subject_kind IN \(([^)]*)\)/g)].map((m) =>
+      m[1].split(',').map((v) => v.trim().replace(/^'|'$/g, '')),
+    )
+    // Three tables carry the population: the working set, the actives and the
+    // cohorts. If one of them ever stops declaring it, this asserts against a
+    // shorter list rather than quietly checking two.
+    assert.equal(checks.length, 3, `expected three subject_kind CHECKs, found ${checks.length}`)
+
+    for (const declared of checks) {
+      assert.deepEqual(
+        [...declared].sort(),
+        [...subjectKinds()].sort(),
+        `the migration accepts ${declared.join(', ')} and the code writes ${subjectKinds().join(', ')}`,
+      )
+    }
   })
 
   it('keeps the working set long enough for the grid it feeds', () => {

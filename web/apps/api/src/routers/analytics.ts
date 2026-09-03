@@ -28,7 +28,6 @@ import {
   CATALOG,
   DERIVED_FROM_FACTS,
   EVENT_NAMES,
-  FUNNELS,
   FUNNEL_DEFINITIONS,
   isEventName,
   type EventName,
@@ -39,6 +38,7 @@ import {
   catalogStatus,
   conversion,
   freshness,
+  funnelOrder,
   organizationFunnel,
   planMix,
   retention,
@@ -245,7 +245,7 @@ export const analyticsRouter = router({
     await requireOperator(c)
     return c.pool.withoutTenant(async (db) => ({
       provenance: await provenanceFor(c, 28),
-      funnels: FUNNELS.map((funnel) => ({
+      funnels: funnelOrder().map((funnel) => ({
         funnel,
         // The reason a funnel has no event of its own, when it has none.
         // Written next to it rather than left to a reader to infer, because a
