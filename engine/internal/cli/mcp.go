@@ -39,7 +39,12 @@ believes it is talking to, and a call naming a different one is refused rather
 than followed.
 
 Standard output carries the protocol and nothing else. Progress, warnings and
-errors go to standard error, where the client's log will show them.`),
+errors go to standard error, where the client's log will show them.
+
+A client configured by JSON runs af with ["-C", "/absolute/path", "mcp"],
+because most of them have nowhere to set a working directory.
+https://antifailure.dev/docs/reference/mcp has the entry for each client, and
+says why there is no hosted endpoint to point one at.`),
 		Args: cobra.NoArgs,
 		// The protocol owns standard output, so cobra must not write a usage
 		// block onto it when something fails. Errors reach standard error

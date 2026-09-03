@@ -14,6 +14,102 @@ It is started by an MCP client rather than typed by a person. It speaks the
 protocol on standard input and output, so running it in a terminal looks like
 it has hung; that is the protocol waiting for a client.
 
+## Connecting a client
+
+`af mcp` is a local process. A client starts it, talks to it over standard
+input and output, and stops it. There is no port to open, no URL to paste and
+no account to connect, so the whole of the configuration is a command and the
+directory to run it in.
+
+One server per checkout. The server binds the project it starts in and serves
+only that one, so a client working across three repositories configures three
+servers rather than one that switches.
+
+### Claude Code
+
+```sh
+cd /path/to/your/project
+claude mcp add antifailure -- af mcp
+```
+
+`--scope project` writes the entry to `.mcp.json` in the repository instead of
+your own settings, which is what you want when the rest of the team should get
+the same server from a checkout:
+
+```sh
+claude mcp add antifailure --scope project -- af mcp
+```
+
+### A client configured by JSON
+
+Claude Desktop, Cursor, Windsurf and the VS Code MCP extension all take the
+same shape, under whichever key that client uses for its server map:
+
+```json
+{
+  "mcpServers": {
+    "antifailure": {
+      "command": "af",
+      "args": ["-C", "/absolute/path/to/your/project", "mcp"]
+    }
+  }
+}
+```
+
+`-C` is the reason this works in a client that has nowhere to set a working
+directory. Without it the server binds whatever directory the client happened
+to launch from, which is usually the client's own installation and never your
+project, and the failure reads as a missing manifest rather than as a missing
+setting. Give it an absolute path: a client does not expand `~` and does not
+resolve a relative one against your shell.
+
+`af` must be on the `PATH` the client itself sees, which on macOS is not the
+`PATH` your shell has when the client was started from Finder. If the client
+reports that the command was not found, write the absolute path instead, and
+`command -v af` prints it.
+
+### Proving it connected
+
+The server writes nothing to standard output except protocol frames, so a
+terminal is the wrong place to look. The client's own log is the right one, and
+a connected server lists four tools: `rehearse_migration_safety`,
+`inspect_egress_firewall`, `get_rehearsal_run` and `cancel_rehearsal_run`.
+
+In Claude Code, `/mcp` lists the configured servers and their state.
+
+`project_id` is required on every call and it is the `name` field of your
+`antifailure.yaml`. The server states it in its handshake instructions and at
+the end of every tool description, so an agent reads it rather than guessing.
+
+## There is no hosted MCP endpoint
+
+This is worth saying plainly, because the rest of this product has a hosted
+control plane and it is reasonable to assume the MCP server has a URL there
+too.
+
+It does not, and the reason is the tenancy model rather than a missing feature.
+The server binds one checkout at startup, runs rehearsals against containers on
+the machine that started it, and keeps their results in that project's own
+state directory. It opens no connection to a control plane, presents no engine
+token and emits no event. A hosted endpoint would need a second tenancy model
+underneath it that nothing here implements, and an agent pointed at one would
+be rehearsing a checkout the server cannot see.
+
+So there is no fleet of MCP servers to list, no connection count and no per
+tenant adoption figure, and the operator portal says so rather than rendering a
+screen full of numbers nobody measured.
+
+**Self hosting the MCP server is the only shape there is, and it is what `af
+mcp` already does.** It runs on your machine, or on your build agent, against
+your checkout, under your credentials. Nothing about it reaches a hosted plane,
+including on the paid plans, so an air gapped repository has the same MCP
+server a connected one does.
+
+What the hosted plane does host is documented separately: see
+[the control plane](/docs/self-hosting/control-plane) for the piece that serves
+the dashboard, sign in and the pull request checks, and which the MCP server
+does not talk to.
+
 ## The division of authority
 
 The agent chooses the hypothesis. Antifailure chooses the safety controls.

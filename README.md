@@ -139,6 +139,12 @@ should serve, and it speaks the protocol on standard input and output, so
 running it in a terminal looks like it has hung. It needs no account, no
 control plane and no model key of its own.
 
+In Claude Code that is `claude mcp add antifailure -- af mcp`, run in the
+checkout. A client configured by JSON runs `af` with `["-C", "/absolute/path",
+"mcp"]`, because most of them have nowhere to set a working directory. See
+[the MCP reference](https://antifailure.dev/docs/reference/mcp) for the other
+clients, and for why there is no hosted endpoint to point one at.
+
 The part worth reading twice is what an agent cannot do with it. The agent
 chooses the hypothesis and Antifailure chooses the safety controls, and that is
 a property of the schemas rather than a convention the tools ask an agent to

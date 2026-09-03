@@ -43,9 +43,9 @@ var commandExamples = map[string]string{
 		"# Started by an MCP client, not typed. It speaks the protocol on\n" +
 		"# standard input and output, so running it in a terminal looks idle.\n" +
 		"af mcp\n" +
-		"# It serves exactly the checkout it starts in, so the client is\n" +
-		"# configured to run it there.\n" +
-		"af mcp",
+		"# It serves exactly the checkout it starts in. A client with nowhere\n" +
+		"# to set a working directory passes an absolute path instead.\n" +
+		"af -C /absolute/path/to/your/project mcp",
 	"af doctor": "af doctor\naf doctor -o json",
 	"af start": "" +
 		"# Where you are on the first run, and the one command that moves you on.\n" +

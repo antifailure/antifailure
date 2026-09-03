@@ -1185,6 +1185,11 @@ than followed.
 Standard output carries the protocol and nothing else. Progress, warnings and
 errors go to standard error, where the client's log will show them.
 
+A client configured by JSON runs af with ["-C", "/absolute/path", "mcp"],
+because most of them have nowhere to set a working directory.
+https://antifailure.dev/docs/reference/mcp has the entry for each client, and
+says why there is no hosted endpoint to point one at.
+
 ```
 af mcp
 ```
@@ -1193,9 +1198,9 @@ af mcp
 # Started by an MCP client, not typed. It speaks the protocol on
 # standard input and output, so running it in a terminal looks idle.
 af mcp
-# It serves exactly the checkout it starts in, so the client is
-# configured to run it there.
-af mcp
+# It serves exactly the checkout it starts in. A client with nowhere
+# to set a working directory passes an absolute path instead.
+af -C /absolute/path/to/your/project mcp
 ```
 
 ### `af model`
