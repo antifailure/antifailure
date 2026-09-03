@@ -289,8 +289,8 @@ the manifest in the repository, on the machine the environment is on. A control
 plane that could change what an environment runs would be a control plane that
 could change what it masks.
 
-Needs a token in AF_CONTROL_PLANE_TOKEN. Create one in the control plane under
-engine tokens.
+Needs a credential. Run af login, or set AF_CONTROL_PLANE_TOKEN to an engine
+token, which is what a build machine with nobody sitting at it uses.
 
 ```
 af env pull <environment> [flags]

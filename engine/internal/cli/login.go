@@ -409,7 +409,12 @@ a token is dead when it is not.`),
 			if note != "" {
 				e.Out.Println("")
 				e.Out.Printf("  %s\n", note)
-				e.Out.Println("  Revoke it in the control plane under Settings, tokens.")
+				// Named for the screen that actually lists tokens. This said
+				// "Settings, tokens" and Settings has never had any: somebody
+				// following it found an organization name and a billing
+				// contact, and the credential they had been told to revoke was
+				// on no screen at all until Command line existed.
+				e.Out.Println("  Revoke it in the control plane under Command line.")
 			}
 			return nil
 		},
