@@ -33,7 +33,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
-import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
+import { router, orgProcedure, audit, type OrgContext, adopted } from '../trpc.ts'
 import { DEFAULT_PLAN } from '../limits.ts'
 import {
   checkCostCapWithEntitlements,
@@ -432,6 +432,7 @@ export const createEnvironment = orgProcedure('environments.create')
         targetId: input.repository,
         detail: { ref: prepared.ref, workflow: input.workflow },
       })
+      await adopted(db, c, 'environment_requested')
     })
 
     return {
@@ -485,6 +486,7 @@ export const agentsRouter = router({
           targetId: target.envId,
           detail: { repository: target.repository, workflows: input.workflows ?? null },
         })
+        await adopted(db, c, 'agent_run')
       })
 
       return { dispatched: true, envId: target.envId, repository: target.repository, ref: target.ref }
@@ -528,6 +530,7 @@ export const loadRouter = router({
           targetId: target.envId,
           detail: { repository: target.repository, seconds: input.seconds ?? null, scale: input.scale ?? null },
         })
+        await adopted(db, c, 'load_run')
       })
 
       return { dispatched: true, envId: target.envId, repository: target.repository, ref: target.ref }

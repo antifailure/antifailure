@@ -39,7 +39,7 @@ is a process that fails in production rather than at deploy time.
 | `AF_GITHUB_APP_ID` | unset | The numeric App ID from the GitHub App's settings page. Needed together with the private key and the webhook secret; setting some and not others stops the process at startup rather than producing a half-working App. |
 | `AF_GITHUB_APP_PRIVATE_KEY` | unset | The PEM GitHub generated when the App's private key was created, or that PEM base64 encoded. Literal `\n` sequences are turned back into newlines, because most ways of getting a multi-line value into a container flatten it, and the resulting key fails with a message about DECODER routines that sends you somewhere else entirely. |
 | `AF_GITHUB_APP_WEBHOOK_SECRET` | unset | The webhook secret set on the App. Every delivery is verified against it before its body is parsed. Unset means `/webhooks/github` answers 503 rather than accepting unsigned deliveries. |
-| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action instead of a dead-end empty state. Any other origin or path stops the process at startup. |
+| `AF_GITHUB_APP_INSTALL_URL` | unset | The public `https://github.com/apps/<slug>/installations/new` address. When it is set, a person who signs in without an organization gets an **Install the GitHub App** action. When it is unset they are told the address has not been configured and are still offered **Check my GitHub membership**, which never depended on it. Either way the startup log says which. Any other origin or path, or a value that is not a URL, stops the process at startup. |
 | `AF_SIGNUP_URL` | unset | Where somebody `AF_SIGNIN_ALLOWLIST` refuses is sent instead. A refused sign-in renders a page rather than a JSON body, and when this is set that page carries one link to it. Unset is the self-hosted default and means the page offers no link: an operator running an allowlist has their own way of being asked, and pointing their users at somebody else's waitlist would be wrong. Must be an absolute `http` or `https` address, or the process stops at startup. |
 | `AF_GITHUB_API_BASE` | `https://api.github.com` | Where the GitHub API lives. For GitHub Enterprise Server, and for tests. |
 | `AF_MODEL_PRICES` | unset | What a model costs, as `model=input/output` in US dollars per million tokens, comma separated: `claude-sonnet-5=3/15,gpt-4.1=2/8`. Adds to the built-in defaults rather than replacing them. A model with no price is **refused** rather than charged nothing, because a request that spends money and adds nothing to the total is a spend cap that does not cap spending. A malformed entry stops the process at startup rather than being skipped, since a skipped entry is a model silently falling back to another price. |
@@ -95,6 +95,33 @@ the App on an organization, then choose **Check my GitHub membership**. The
 second OAuth exchange reads the installation GitHub just created and grants the
 membership. The first GitHub administrator to claim an empty organization
 becomes its owner under the rule below.
+
+When it is **unset**, that path still exists but nobody can start it from the
+console. The screen says the address has not been configured and offers **Check
+my GitHub membership** on its own, which is the right action for somebody who
+already belongs to a connected organization and the wrong one for somebody who
+does not. Unset is a supported state rather than a half configuration, because
+a self-hosted control plane may grant membership its own way and have no App to
+point at. It is not the right state for a plane with open sign-ups, and the
+startup log names it either way so an operator can tell which they have.
+
+### Getting the address
+
+It is the App's public installation page, and only a human with owner access to
+the GitHub organization that owns the App can produce it.
+
+1. Open the App's settings under the owning organization, at **Settings**, then
+   **Developer settings**, then **GitHub Apps**.
+2. If no App exists yet, create one. It needs the same App ID, private key and
+   webhook secret that `AF_GITHUB_APP_ID`, `AF_GITHUB_APP_PRIVATE_KEY` and
+   `AF_GITHUB_APP_WEBHOOK_SECRET` already document, so create it once and take
+   all four values in the same sitting.
+3. Set the App to **Any account** under Install App, not just the owning
+   account. An App only its owner can install is an App no customer can install.
+4. Read the slug out of the App's public page URL, `https://github.com/apps/<slug>`.
+   It is derived from the App name and is not always what you would guess.
+5. The value is that address with `/installations/new` on the end, and nothing
+   else. No query string and no fragment: both are refused at startup.
 
 On an enterprise-only hosted deployment that owner lands on Plan. Checkout is
 the only path that can grant the required plan; `billing.set` is refused, so an
@@ -411,3 +438,51 @@ head -1 events_2026_03.jsonl | jq -r .occurred_at
 # everything one environment did
 jq -c 'select(.env_id == "env-1234")' events_2026_03.jsonl
 ```
+
+## Analytics
+
+Off unless a surrogate secret is configured, and said out loud at startup either
+way. There is no fallback to a constant key: a constant key is a surrogate
+anybody can recompute, which is an organization identifier with extra steps.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AF_ANALYTICS_SURROGATE_SECRET` | unset | 64 hex characters, which is 32 bytes. The key organization surrogates are computed under. Unset records nothing at all, and the dashboard says so rather than showing an empty chart. A value of any other length stops the process at startup rather than on the first event. Generate one with `openssl rand -hex 32`. |
+| `AF_ANALYTICS_OPERATOR_ORG` | unset | The slug of the organization that operates this control plane. Its owners and admins may read the analytics dashboard; nobody else may, whatever permissions they hold in their own organization. Unset means nobody, and the route says which variable to set. |
+| `AF_ANALYTICS_RETENTION_DAYS` | unset | Delete raw analytics events older than this many days. The daily aggregates computed from them are kept, because a count of page views by channel has nothing in it that identifies anybody. Unset keeps the raw events forever, which is the default because retention is an operator's decision. |
+| `AF_SITE_ORIGIN` | unset | The origin the marketing site is served from, for the one endpoint a browser calls cross origin. Unset refuses every beacon rather than reflecting whatever `Origin` arrives, which is what a permissive default would do. |
+
+### What is recorded, and what is not
+
+The analytics stream is a closed schema. An event whose name is not in the
+catalog is refused and counted, and so is a payload field the catalog does not
+declare. There is no free-text field of any kind, so a repository name, a branch,
+a query string or a page URL cannot reach the store even by mistake.
+
+The organization is recorded as a keyed hash rather than as an identifier. The
+store can count organizations and follow one through a funnel, and it cannot
+name one without the key.
+
+The application role holds `INSERT` on the stream and no `SELECT`. Only the
+rollup, which runs as the schema owner, ever reads it, and only daily aggregates
+come back out. A read attempted by the application raises `42501` rather than
+returning nothing, which is the difference between a mistake somebody sees and
+one somebody ships.
+
+### The marketing site's beacon
+
+The site sends one event per page a reader lands on, one when the waitlist
+dialog opens, and one when an address is submitted. It sets no cookie, loads no
+third-party script, and keeps its session identifier in `sessionStorage`, so it
+dies with the tab and two visits a day apart cannot be joined. It turns itself
+off for a reader who has set Global Privacy Control or Do Not Track.
+
+The referrer, the URL and the query string are turned into a bounded channel, a
+page shape and a campaign identifier **in the browser**, so the raw values never
+cross the network at all. That is a stronger claim than discarding them on
+arrival, and it is why the normalization lives in the page rather than in a
+server reading a `Referer` header.
+
+The endpoint is unauthenticated, because a shared secret in a static page is a
+secret everybody has. Its counts are therefore a floor and a shape rather than
+an audited total, which the dashboard says beside them.

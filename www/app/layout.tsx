@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { SiteJsonLd } from "@/lib/jsonld";
+import { PageViews } from "@/components/PageViews";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL, pageTitle } from "@/lib/site";
 
 const inter = Inter({
@@ -98,6 +99,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         {children}
+        {/* One page view per route, and nothing else. No cookie, no vendor, no
+            script from another origin. www/lib/analytics.ts is the whole of
+            what is sent and the whole of what is not. */}
+        <PageViews />
       </body>
     </html>
   );

@@ -46,6 +46,7 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,11 +78,22 @@ type builtSite struct {
 }
 
 func run(root string) (int, string) {
-	sites := discover(root)
-	if len(sites) == 0 {
-		return 1, "motioncheck: no built site found. Run `npm run build` in www " +
-			"(and console) first; this gate reads the render, not the source, " +
-			"and has nothing to say about an unbuilt tree.\n"
+	sites, missing := discover(root)
+	if len(sites) == 0 && missing == "" {
+		// No application at all, which is what an empty tree looks like. A gate
+		// that reads a render and finds no render has checked nothing, and
+		// reporting that as success is how a check that never ran becomes a
+		// check that always passes.
+		return 1, "motioncheck: no Next application found. Each one is a directory " +
+			"with a next.config file, and each needs `npm run build` before this " +
+			"gate has anything to read.\n"
+	}
+	if missing != "" {
+		return 1, fmt.Sprintf("motioncheck: %s is not built. Run `npm run build` in %s "+
+			"first; this gate reads the render, not the source, and has nothing to "+
+			"say about an unbuilt tree.\n\nIt names the application rather than "+
+			"skipping it, because skipping was how the console went unchecked.\n",
+			missing, missing)
 	}
 
 	var findings []string
@@ -150,20 +162,81 @@ func run(root string) (int, string) {
 // same pages twice, to .next/server/app and to out/ for a static export, so
 // only one is read: reporting a finding twice for one element reads as two
 // defects.
-func discover(root string) []builtSite {
+//
+// An application that is not built is an ERROR rather than a site to leave
+// out, and that is the whole point of this function returning a second value.
+// It used to append a site only when something was found on disk, so a missing
+// build removed the application from the run in silence. In CI the console was
+// installed and built AFTER this ran, so for as long as this check has claimed
+// to cover the console it has been reading nothing there and reporting success
+// over the files it did read. It said 42 built files instead of 64 and exited
+// zero. A gate that is green about a surface it never opened is worse than no
+// gate, because it is quoted.
+func discover(root string) ([]builtSite, string) {
 	var sites []builtSite
-	for _, app := range []string{"www", "console"} {
+	for _, app := range nextApps(root) {
 		s := builtSite{name: app}
 		s.css, _ = filepath.Glob(filepath.Join(root, app, ".next", "static", "chunks", "*.css"))
-		for _, depth := range []string{"*.html", filepath.Join("*", "*.html"), filepath.Join("*", "*", "*.html")} {
-			more, _ := filepath.Glob(filepath.Join(root, app, ".next", "server", "app", depth))
-			s.html = append(s.html, more...)
+		s.html = prerendered(filepath.Join(root, app, ".next", "server", "app"))
+		if len(s.css) == 0 && len(s.html) == 0 {
+			return nil, app
 		}
-		if len(s.css) > 0 || len(s.html) > 0 {
-			sites = append(sites, s)
+		sites = append(sites, s)
+	}
+	return sites, ""
+}
+
+// nextApps names every Next application in the tree, by looking for the config
+// file that makes one, rather than by holding a list.
+//
+// A list was the actual defect. This read `[]string{"www", "console"}` while
+// the console was not built when it ran, so the console was dropped in silence.
+// A hardcoded list has the same shape as that bug even after the silence is
+// fixed: it is a claim about the repository that nothing checks, and the day a
+// third application is added the gate keeps passing and stops meaning
+// anything. Reading the tree cannot go stale.
+func nextApps(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		for _, name := range []string{"next.config.ts", "next.config.js", "next.config.mjs"} {
+			if _, err := os.Stat(filepath.Join(root, e.Name(), name)); err == nil {
+				out = append(out, e.Name())
+				break
+			}
 		}
 	}
-	return sites
+	sort.Strings(out)
+	return out
+}
+
+// prerendered returns every .html under dir, at any depth.
+//
+// This was three fixed globs at one, two and three path segments, which was
+// correct for what existed when it was written and silently short by one the
+// moment a page nested deeper. The admin console nests four, as in
+// admin/customers/users/organization, so the fixed list would have walked past
+// the pages and reported a clean run over files it never opened. A walk cannot
+// go out of date when somebody adds a directory.
+func prerendered(dir string) []string {
+	var out []string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".html") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 var (

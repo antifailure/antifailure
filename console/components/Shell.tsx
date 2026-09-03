@@ -9,6 +9,7 @@ import {
   IconEnvironments,
   IconKeys,
   IconLoad,
+  IconAnalytics,
   IconMasking,
   IconMembers,
   IconNetwork,
@@ -59,6 +60,7 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
@@ -228,6 +230,15 @@ function SignIn({ session }: { session: Session }) {
  * installation, and until it does there is genuinely nothing here to show.
  * Saying so is the difference between a product that is waiting and one that
  * looks broken.
+ *
+ * The install address is optional, and BOTH ACTIONS USED TO BE HIDDEN WITH IT.
+ * That is how this screen became a dead end on two control planes at once: the
+ * copy told somebody to install the App and then recheck their membership, and
+ * the only button under it was Sign out. Checking membership is
+ * `/auth/github`, which never needed the install address for anything, so it is
+ * offered either way and becomes the primary action when there is nothing to
+ * install from. The copy changes with it, because prose that names an action
+ * the page cannot offer is the failure rather than a symptom of it.
  */
 function NoOrganization({ session }: { session: Session }) {
   return (
@@ -238,21 +249,25 @@ function NoOrganization({ session }: { session: Session }) {
         yet. Not an empty dashboard. Nothing.
       </Lede>
       <Lede>
-        Membership follows a GitHub App installation. Install it on the
-        organization you want to connect, then ask GitHub to check your
-        membership again.
+        {session.githubAppInstallUrl
+          ? "Membership follows a GitHub App installation. Install it on the organization you want to connect, then ask GitHub to check your membership again."
+          : "Membership follows a GitHub App installation, and this control plane has not been told where to install its App. If you already belong to a connected organization, check again below. If you do not, whoever runs this control plane has to give you the installation address."}
       </Lede>
-      {session.githubAppInstallUrl ? (
-        <div className="mt-6 space-y-3">
+      <div className="mt-6 space-y-3">
+        {session.githubAppInstallUrl ? (
           <LinkButton href={session.githubAppInstallUrl} full>
             <GitHubMark />
             Install the GitHub App
           </LinkButton>
-          <LinkButton href="/auth/github" full variant="secondary">
-            Check my GitHub membership
-          </LinkButton>
-        </div>
-      ) : null}
+        ) : null}
+        <LinkButton
+          href="/auth/github"
+          full
+          variant={session.githubAppInstallUrl ? "secondary" : "primary"}
+        >
+          Check my GitHub membership
+        </LinkButton>
+      </div>
       <div className="mt-6">
         <SignOutButton />
       </div>

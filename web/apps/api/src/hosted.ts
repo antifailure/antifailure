@@ -133,9 +133,35 @@ export const HOSTED_GATE_EXEMPT: ReadonlySet<string> = new Set([
  * read of its own, it belongs there rather than in a gated route.
  */
 
+/**
+ * Where a person with no organization is sent to install the GitHub App.
+ *
+ * UNSET IS A SUPPORTED STATE and not a half configuration, which is why this
+ * returns undefined rather than throwing on an empty value. Membership follows
+ * a GitHub App installation on the hosted plane, but a self-hosted plane may
+ * provision membership some other way and has no App of its own to point at.
+ * Refusing to start would break that installation for a screen it never shows.
+ *
+ * What unset must NOT do is leave the console telling somebody to install an
+ * App while offering no way to do it. See `NoOrganization` in
+ * `console/components/Shell.tsx`: the copy changes with this value, and the
+ * membership recheck is offered either way because it never depended on it.
+ *
+ * A malformed value IS refused, at start-up, because the alternative is a link
+ * pointing wherever an operator's typo pointed. The parse is guarded rather
+ * than left to throw: `new URL` on a string with no scheme raises `Invalid
+ * URL`, which names neither the variable nor the shape it wanted, and an
+ * operator reading that in a crash loop has to find this file to learn what
+ * was wrong.
+ */
 export function githubAppInstallUrlFrom(value: string | undefined | null): string | undefined {
   if (!value?.trim()) return undefined
-  const url = new URL(value)
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(INSTALL_URL_SHAPE)
+  }
   if (
     url.protocol !== 'https:' ||
     url.hostname !== 'github.com' ||
@@ -143,9 +169,11 @@ export function githubAppInstallUrlFrom(value: string | undefined | null): strin
     url.search ||
     url.hash
   ) {
-    throw new Error(
-      'AF_GITHUB_APP_INSTALL_URL must be an https://github.com/apps/<slug>/installations/new address.',
-    )
+    throw new Error(INSTALL_URL_SHAPE)
   }
   return url.toString()
 }
+
+/** One sentence, so a bad scheme and a bad shape cannot drift apart. */
+const INSTALL_URL_SHAPE =
+  'AF_GITHUB_APP_INSTALL_URL must be an https://github.com/apps/<slug>/installations/new address.'

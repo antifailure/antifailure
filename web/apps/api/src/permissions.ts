@@ -37,6 +37,7 @@ export const PERMISSIONS = [
   'workloads.view',
   'workloads.edit',
   'workloads.run',
+  'analytics.read',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
@@ -76,6 +77,10 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'workloads.edit':
     'Create a workload, add a version to one, archive one, and promote an exploration into a workflow.',
   'workloads.run': 'Start, cancel, and retry a workload run.',
+  'analytics.read':
+    'Read the analytics dashboard for this control plane installation. Granted here and ' +
+    'checked again against the organization that operates the installation, because this is ' +
+    'the one page that is not about the caller’s own organization.',
 }
 
 /**
@@ -119,6 +124,11 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
  * run permissions would have meant a role could start a browser workload and
  * not a load workload, which is a distinction about the engine's internals
  * rather than about anything an organization decides.
+ * Owner and admin hold analytics.read and member and viewer do not, and it is
+ * the only permission on this list where the grant is not the whole gate. The
+ * dashboard covers the installation rather than the organization, so it is
+ * ALSO confined to members of the organization that operates the installation,
+ * which a role table cannot express. See routers/analytics.ts.
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   owner: [...PERMISSIONS],
@@ -129,6 +139,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'audit.read', 'audit.export', 'runtimes.manage', 'tokens.manage',
     'organization.settings', 'sessions.manage', 'data.export', 'account.close',
     'workloads.view', 'workloads.edit', 'workloads.run',
+    'analytics.read',
   ],
   member: [
     'environments.view', 'environments.create', 'environments.teardown',

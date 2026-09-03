@@ -61,9 +61,10 @@ const SHEETS: Record<
   },
   privacy: {
     title: "Privacy Notice",
-    lead: "This marketing site takes a waitlist address. No production data is collected.",
+    lead: "This site takes a waitlist address and counts page views. No production data is collected.",
     points: [
       "A waitlist address is sent to a server and stored, so that the sentence next to the form is true. Your browser keeps a copy as a convenience, which clearing site data removes.",
+      "Page views are counted without a cookie and without any third party. A random identifier lives for one browsing session and cannot join two visits.",
       "When a control plane exists, production-derived state is processed inside the customer boundary by default.",
       "Passwords entered in this mock form are not stored.",
     ],

@@ -16,7 +16,7 @@
 import { test, describe, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org } from './harness.ts'
+import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org, testAnalytics } from './harness.ts'
 import {
   borrowKey,
   listBudgets,
@@ -55,7 +55,7 @@ describe('provider keys', { skip: (await available()) ? false : 'no Postgres at 
     await api.admin`DELETE FROM provider_budgets WHERE org_id = ${org.orgId}`
   })
 
-  const actor = { actorUserId: null, actorLabel: 'a test' }
+  const actor = { actorUserId: null, actorLabel: 'a test', analytics: testAnalytics() }
 
   // -------------------------------------------------------------------------
 

@@ -136,6 +136,17 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'org_id would claim a tenancy it does not have and would put this table into the ' +
           "loops below, which demand an isolation it is not supposed to have",
       ],
+      // The analytics tables carry a keyed hash of the organization rather than
+      // its id, and that is the whole point of them: see migrations/0032. An
+      // org_id here would make the stream joinable back to a customer, so the
+      // protection is the grant (INSERT and no SELECT on the stream) plus the
+      // policies, and there is deliberately nothing for tenant isolation to key
+      // on. The suite below proves the application cannot read the stream at
+      // all, which is stronger than isolating it per tenant.
+      ['analytics_events', 'carries a keyed surrogate, never an org_id; the application cannot read it'],
+      ['analytics_org_facts', 'keyed by the same surrogate, holding counts and dates and no identifier'],
+      ['analytics_daily', 'aggregate counts with no identifier of any kind in them'],
+      ['analytics_rollup_state', 'one row of bookkeeping about when the rollup last ran'],
     ])
 
     // Partitions are excluded because a partition is storage for its parent

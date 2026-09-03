@@ -11,6 +11,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  date,
   index,
   inet,
   integer,
@@ -19,6 +20,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   customType,
@@ -717,6 +719,71 @@ export const billingEvents = pgTable('billing_events', {
 })
 
 // ---------------------------------------------------------------------------
+// Analytics
+//
+// A closed stream, deliberately carrying no org_id. See migrations/0032: an
+// org_id would make these tables joinable back to a customer, which is the one
+// property the surrogate exists to remove. They are absent from
+// tenantScopedTables below for that reason and are named in the cross-tenant
+// suite's list of tables that are global on purpose.
+// ---------------------------------------------------------------------------
+
+export const analyticsEvents = pgTable('analytics_events', {
+  eventId: text('event_id').notNull(),
+  name: text('name').notNull(),
+  version: smallint('version').notNull().default(1),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  source: text('source').notNull(),
+  orgSurrogate: text('org_surrogate'),
+  sessionSurrogate: text('session_surrogate'),
+  actorKind: text('actor_kind').notNull(),
+  privacyBasis: text('privacy_basis').notNull(),
+  consentId: text('consent_id'),
+  payload: jsonb('payload').notNull().default({}),
+}, (t) => [
+  primaryKey({ columns: [t.eventId, t.occurredAt] }),
+  index('analytics_events_day_idx').on(t.occurredAt, t.name),
+])
+
+export const analyticsOrgFacts = pgTable('analytics_org_facts', {
+  orgSurrogate: text('org_surrogate').primaryKey(),
+  firstSeenOn: date('first_seen_on').notNull(),
+  lastActiveOn: date('last_active_on').notNull(),
+  firstEventOn: date('first_event_on'),
+  firstEnvironmentOn: date('first_environment_on'),
+  firstProvenRunOn: date('first_proven_run_on'),
+  firstPaidOn: date('first_paid_on'),
+  plan: text('plan'),
+  environmentsCreated: bigint('environments_created', { mode: 'number' }).notNull().default(0),
+  runsFinished: bigint('runs_finished', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('analytics_org_facts_first_seen_idx').on(t.firstSeenOn),
+  index('analytics_org_facts_last_active_idx').on(t.lastActiveOn),
+])
+
+export const analyticsDaily = pgTable('analytics_daily', {
+  day: date('day').notNull(),
+  name: text('name').notNull(),
+  dimA: text('dim_a').notNull().default(''),
+  dimB: text('dim_b').notNull().default(''),
+  events: bigint('events', { mode: 'number' }).notNull().default(0),
+  organizations: bigint('organizations', { mode: 'number' }).notNull().default(0),
+  sessions: bigint('sessions', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.day, t.name, t.dimA, t.dimB] }),
+  index('analytics_daily_day_idx').on(t.day, t.name),
+])
+
+export const analyticsRollupState = pgTable('analytics_rollup_state', {
+  id: boolean('id').primaryKey().default(true),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  settledAfter: date('settled_after'),
+})
+
+// ---------------------------------------------------------------------------
 // Running the organization
 //
 // See migrations/0022 for the isolation, which is the part that cannot be
@@ -1010,6 +1077,8 @@ export const runtimeCommands = pgTable('runtime_commands', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+
+// ---------------------------------------------------------------------------
 // The pull request lifecycle. See migrations/0021.
 // ---------------------------------------------------------------------------
 

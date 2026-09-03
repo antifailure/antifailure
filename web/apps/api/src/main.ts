@@ -22,6 +22,8 @@ import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { surrogateSecretFrom } from './analytics/record.ts'
+import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
@@ -207,6 +209,24 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+// Analytics. Off unless a surrogate secret is configured, and said out loud
+// either way, because "recording" and "not recording" are the two states an
+// operator most needs to be sure about and a dashboard of zeros looks the same
+// in both. Read at start-up so a secret of the wrong length stops the process
+// here rather than on the first event.
+const analyticsSecret = surrogateSecretFrom(process.env.AF_ANALYTICS_SURROGATE_SECRET)
+const analyticsOperatorOrgSlug = process.env.AF_ANALYTICS_OPERATOR_ORG ?? null
+console.log(
+  analyticsSecret
+    ? 'analytics is recording: AF_ANALYTICS_SURROGATE_SECRET is set'
+    : 'analytics is NOT recording: AF_ANALYTICS_SURROGATE_SECRET is not set',
+)
+console.log(
+  analyticsOperatorOrgSlug
+    ? `the analytics dashboard is readable by owners and admins of ${analyticsOperatorOrgSlug}`
+    : 'the analytics dashboard is readable by nobody: AF_ANALYTICS_OPERATOR_ORG is not set',
+)
+
 let hostedRequiredPlan
 let githubAppInstallUrl
 let signupUrl
@@ -253,6 +273,19 @@ console.log(
     : 'plans are not set by hand: billing.set is refused (AF_OPERATOR_SETS_PLAN is not set)',
 )
 
+// Said out loud for the same reason as its neighbours, and because this one was
+// unset on both control planes for weeks without anybody noticing. Nothing
+// fails when it is missing: sign-in works, the console renders, and the only
+// symptom is on a screen the operator does not see, shown to somebody who has
+// just arrived and has no organization yet. A configuration whose absence is
+// invisible from the inside is one the startup line has to name.
+console.log(
+  githubAppInstallUrl
+    ? `people with no organization are offered the GitHub App at ${githubAppInstallUrl}`
+    : 'people with no organization are NOT offered the GitHub App: AF_GITHUB_APP_INSTALL_URL is ' +
+        'not set. They can still ask GitHub to recheck their membership.',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
@@ -292,6 +325,11 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signupUrl,
   modelPrices,
   consoleBuild,
+  analyticsSecret,
+  analyticsOperatorOrgSlug,
+  // The one origin the site beacon may be called from. Unset refuses every
+  // beacon rather than reflecting whatever Origin arrives.
+  siteOrigin: process.env.AF_SITE_ORIGIN ?? null,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
@@ -308,6 +346,11 @@ if (maintenanceUrl) {
       adminUrl: maintenanceUrl,
       retentionMonths: retentionFromEnv(process.env),
       archiveDir: process.env.AF_EVENT_ARCHIVE_DIR,
+      // The analytics rollup rides the same pass, for the same reason and with
+      // the same credential: it reads a table the application role cannot read
+      // and writes one it can only select from. A second scheduler would be a
+      // second thing to notice had stopped.
+      analyticsRetentionDays: analyticsRetentionFromEnv(process.env),
       log: (line) => console.log(line),
     },
     systemClock,

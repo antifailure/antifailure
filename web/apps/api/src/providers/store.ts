@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import { appendAudit } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { Analytics } from '../analytics/record.ts'
 import {
   checkKeyShape,
   fingerprintOf,
@@ -119,6 +120,10 @@ export interface SaveInput {
   actorLabel: string
   /** Defaults to the console, which is where every call came from first. */
   origin?: Origin
+  /** Where the analytics event goes. In the same transaction as the key, for
+   *  the same reason the audit entry is: a funnel step recorded against a write
+   *  that rolled back is a step that did not happen. */
+  analytics: Analytics
 }
 
 /**
@@ -190,6 +195,16 @@ export async function saveKey(
         replacedFingerprint: previous?.fingerprint ?? null,
       },
       occurredAt: clock.now(),
+    })
+
+    await input.analytics.record(db, {
+      name: 'onboarding.provider_key_stored',
+      occurredAt: clock.now(),
+      orgId: input.orgId,
+      // The provider and whether it replaced one, and nothing else. Not the
+      // fingerprint, which the audit entry carries deliberately and which has
+      // no business in a store that is kept for years to draw graphs from.
+      payload: { provider: input.provider, replaced: previous !== null },
     })
 
     return {
@@ -382,6 +397,8 @@ export async function setBudget(
     actorLabel: string
     actorUserId: string | null
     origin?: Origin
+    /** In the same transaction as the cap, for the reason appendAudit is. */
+    analytics: Analytics
   },
 ): Promise<Budget> {
   if (!(input.capUsd >= 0)) throw new ProviderKeyError('A cap cannot be negative.')
@@ -404,6 +421,16 @@ export async function setBudget(
       origin: input.origin ?? 'web',
       detail: { provider: input.provider, capUsd: input.capUsd, period },
       occurredAt: clock.now(),
+    })
+
+    await input.analytics.record(db, {
+      name: 'adoption.feature_used',
+      occurredAt: clock.now(),
+      orgId: input.orgId,
+      // The feature, not the number. What an organization caps its spend at is
+      // between them and their invoice, and an analytics store kept for years
+      // is not where it belongs. The audit entry two statements up carries it.
+      payload: { feature: 'provider_budget_set' },
     })
 
     const budget = await readBudget(db, input.orgId, input.provider, period)

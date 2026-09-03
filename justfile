@@ -68,6 +68,7 @@ gate: _reports
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
     run "lint findings keep their ids"   just lintcheck
+    run "the event stream keeps its shape" just eventcheck
     run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
@@ -460,6 +461,15 @@ errcheck:
 lintcheck:
     go run ./tools/lintcheck .
 
+# No event type has been taken away and the envelope still has its fields.
+#
+# The catalog gains a type most weeks and that is compatible. Losing one is not,
+# and nothing was watching for it: the schema is generated from the Go type and
+# the catalog, so deleting a type or a field regenerates cleanly and the diff is
+# green. engine/internal/events/stream.register.json is what version 1 promised,
+# and this refuses to let any of it go.
+eventcheck:
+    go run ./tools/eventcheck .
 # The Go packages version 1 promised, and the ones it deliberately did not.
 # Also the leak that makes the difference meaningless: a stable signature
 # naming a type an outside caller has no way to write.
@@ -537,7 +547,8 @@ modecheck:
 # lands beside the component's own class rather than replacing it, and the
 # cascade picks whichever Tailwind emitted last. The site header marked the
 # current page with text-black over a text-black/70 default, lost, and marked
-# nothing at all. Reads the built HTML, so it needs a built www.
+# nothing at all. Reads the built HTML, so it needs a built www AND a built
+# console, and it refuses rather than skipping when either is missing.
 classcheck:
     go run ./tools/classcheck .
 
@@ -547,7 +558,10 @@ classcheck:
 # read globals.css on the same day, both saw the one infinite rule left in it,
 # and both called it harmless because nothing in that file used it. It was
 # rendered on the front page by HeroFilm.tsx. The source says which rules
-# exist; only the render says which land on an element. Needs a built www.
+# exist; only the render says which land on an element. Needs a built www AND
+# a built console, and it refuses rather than skipping when either is missing,
+# because skipping is how the console went unchecked for the whole life of
+# this gate.
 motioncheck:
     go run ./tools/motioncheck .
 
@@ -1070,6 +1084,7 @@ _generated:
     (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    go run ./tools/eventcheck -freeze .
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     # The OpenAPI artifact is generated too, and its generator is TypeScript
@@ -1093,6 +1108,7 @@ _generated:
       schemas/mockpack-vectors.json \
       schemas/webhook-vectors.json \
       schemas/events.v1.json \
+      engine/internal/events/stream.register.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
       docs/src/content/docs/guides/dashboard.md \
@@ -1113,6 +1129,7 @@ generate:
     cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    go run ./tools/eventcheck -freeze .
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
 

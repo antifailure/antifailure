@@ -26,6 +26,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "organization.settings", "organization.delete", "sessions.manage",
     "data.export", "account.close",
     "workloads.view", "workloads.edit", "workloads.run",
+    "analytics.read",
   ],
   admin: [
     "environments.view", "environments.create", "environments.teardown",
@@ -34,6 +35,7 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     "audit.read", "audit.export", "runtimes.manage", "tokens.manage",
     "organization.settings", "sessions.manage", "data.export", "account.close",
     "workloads.view", "workloads.edit", "workloads.run",
+    "analytics.read",
   ],
   member: [
     "environments.view", "environments.create", "environments.teardown",
