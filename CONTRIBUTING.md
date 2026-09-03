@@ -94,6 +94,38 @@ filled in:
 3. Security considerations, or an explicit "none, and here is why".
 4. Evidence: pasted command output, not a paraphrase.
 
+### Read the diff, not the message
+
+Review the whole diff of a pull request, including the files the message does
+not mention. No gate catches a commit whose message describes one thing and
+whose diff does another, and it is worth knowing why rather than waiting for
+somebody to build one.
+
+`ff893073` is the case. Its subject and its entire message are about a Postgres
+test port. It also removed 317 lines across twelve unrelated files: a runbook
+step, four Terraform resources, a role assignment, a comment explaining a
+failure, and a resource group from a document that counts them. Nine pull
+requests were needed to put it back, eight days later, and every one of them
+started with a person reading the diff.
+
+The reason no consistency check sees this class is that it was a COHERENT
+revert. It moved every side of every coupling at once: the runbook step and the
+module comment that justified it, the step numbering and every reference to it,
+the count of resource groups and the group being counted. Internal consistency
+is exactly what a clean revert preserves, so a gate that compares two artifacts
+against each other stays green over it by construction. That is not a gap
+somebody can close with a better cross reference check, and building one is
+time spent on a check that cannot fire.
+
+The two shapes that ARE detectable are both useless as gates here. A commit
+touching many files fires on every honest refactor, and a commit touching code
+and documentation together fires on the correct habit this guide asks for. A
+gate muted for noise reads as coverage while catching nothing, which is worse
+than no gate.
+
+So this one is a review practice and it stays one. If the message accounts for
+part of the diff, ask about the rest before approving.
+
 ## The changelog
 
 Every change to something a user can see adds a fragment under `.changes/`.
