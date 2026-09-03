@@ -431,13 +431,57 @@ come back out. A read attempted by the application raises `42501` rather than
 returning nothing, which is the difference between a mistake somebody sees and
 one somebody ships.
 
+### What the dashboard can answer
+
+Three questions need to follow one subject across days or across events, and a
+daily count cannot. The rollup computes them into tables of counts:
+
+| Question | How it is computed | What bounds it |
+| --- | --- | --- |
+| How many distinct organizations or sessions were active over a window | A working set of one row per subject per event per day, then a distinct count over 1, 7 and 28 days | The working set is kept for 98 days |
+| How many completed a declared sequence of steps, in order and inside a window | The raw stream at full precision, once per subject, stored as how far each got | The widest funnel window plus the rollup lookback |
+| Of the organizations first seen in a week, how many came back each week after | The working set against the first-seen date in the facts table | 12 cohort weeks |
+
+The funnels are declared in the catalog rather than built in the interface, and
+that is deliberate. A funnel builder would need the application to be able to
+run an arbitrary query against rows that carry a subject surrogate, which is the
+capability the grants above exist to withhold. The application holds no `SELECT`
+on the working set at all: it reads counts, and the tables it can read contain
+no identifier of any kind.
+
+A retention cell over fewer than 5 organizations is shown as a count rather
+than as a percentage. A rate over three subjects moves by a third when one of
+them opens a laptop.
+
 ### The marketing site's beacon
 
-The site sends one event per page a reader lands on, one when the waitlist
-dialog opens, and one when an address is submitted. It sets no cookie, loads no
+The site sends one event per page a reader lands on, one when the sign-up screen
+is reached, and one when an address is submitted. It sets no cookie, loads no
 third-party script, and keeps its session identifier in `sessionStorage`, so it
-dies with the tab and two visits a day apart cannot be joined. It turns itself
-off for a reader who has set Global Privacy Control or Do Not Track.
+dies with the tab and two visits a day apart cannot be joined. A session also
+ends after thirty minutes idle and after twenty four hours whatever happens, so
+a tab left open over a weekend is several sessions rather than one identifier
+held for three days.
+
+Events are queued and sent in batches of up to twenty, flushed every three
+seconds and on the way out of the page through `sendBeacon`. A request that
+fails with a server error or a network failure is retried with a capped,
+jittered backoff; one refused with a `4xx` is not, because a refusal does not
+become true on the third attempt. A retry cannot double count: the event
+identifier and timestamp are stamped once when the event happens and resent
+unchanged, so the second copy collides on the primary key and is recorded as a
+duplicate.
+
+It turns itself off for a reader who has set Global Privacy Control or Do Not
+Track, for a browser whose user agent names a crawler, and for a driven browser.
+The user agent is read in the page and never sent, so the crawler filter only
+sees crawlers that execute JavaScript: these counts are a floor and a shape
+rather than an audited total, and the dashboard says so beside them.
+
+Opening any page with `?af-analytics=off` switches measurement off for that
+browser until it is switched back on with `?af-analytics=on`. That is the only
+value the beacon keeps beyond the tab, it is a single flag, and it is never
+sent anywhere.
 
 The referrer, the URL and the query string are turned into a bounded channel, a
 page shape and a campaign identifier **in the browser**, so the raw values never

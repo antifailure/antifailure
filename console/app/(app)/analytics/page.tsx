@@ -41,6 +41,15 @@ import {
  * quoted as though it were audited.
  */
 
+/** What to add to a funnel's note about how far back it is final. Written next
+ *  to the number rather than in a footnote: a week that is still gaining
+ *  conversions reads as a worse funnel than it is. */
+function provenanceNote(finalBefore: string | null): string {
+  return finalBefore === null
+    ? ""
+    : ` Weeks from ${finalBefore} onwards can still gain conversions.`;
+}
+
 const WINDOWS = [
   { days: 7, label: "Last 7 days" },
   { days: 28, label: "Last 28 days" },
@@ -61,6 +70,47 @@ interface Provenance {
   lastRolledUpAt: string | null;
   settledAfter: string | null;
   recording: boolean;
+  /** The three insight shapes settle at different rates, so each panel says
+   *  which of these applies to it rather than sharing one line. */
+  funnelsFinalBefore: string | null;
+  cohortsCompleteThrough: string | null;
+  subjectDaysKept: number | null;
+}
+
+interface ConversionStep {
+  step: string;
+  meaning: string;
+  subjects: number;
+  ofPrevious: number | null;
+}
+
+interface Conversion {
+  id: string;
+  title: string;
+  subject: string;
+  windowDays: number;
+  windowReason: string;
+  fromWeek: string;
+  toWeek: string;
+  steps: ConversionStep[];
+  empty: boolean;
+}
+
+interface CohortRow {
+  cohortWeek: string;
+  size: number;
+  weeks: number[];
+  enough: boolean;
+}
+
+interface Insights {
+  activeOrganizations: { day: string; subjects: number }[];
+  activeSessions: { day: string; subjects: number }[];
+  activeWindows: { organizations: number; sessions: number };
+  conversions: Conversion[];
+  cohorts: { rows: CohortRow[]; width: number; empty: boolean };
+  minCohortForARate: number;
+  windowsKept: readonly number[];
 }
 
 interface Overview {
@@ -79,6 +129,7 @@ interface Overview {
   adoption: Breakdown[];
   validation: Breakdown[];
   environments: Breakdown[];
+  insights: Insights;
 }
 
 interface CatalogRow {
@@ -278,6 +329,140 @@ function Analytics() {
                 )}
               </Card>
             </div>
+
+            {/* The three numbers a daily count cannot produce. Each says what
+                makes it different from the panel above it, because two numbers
+                that look like the same measurement and are not is how somebody
+                quotes the wrong one. */}
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card
+                title="Distinct organizations"
+                note={`One point per day, counting every organization active in the preceding ${data.insights.activeWindows.organizations} days. Not the sum of the daily counts: an organization active on two days is one organization.`}
+              >
+                {data.insights.activeOrganizations.every((p) => p.subjects === 0) ? (
+                  <Empty title="Nothing active in this window">
+                    An organization counts as active on any day one of its events arrived. This
+                    stays empty until an engine reports.
+                  </Empty>
+                ) : (
+                  <div className="px-4 py-4">
+                    <DayColumns
+                      label={`Distinct organizations, ${data.insights.activeWindows.organizations} day window`}
+                      points={data.insights.activeOrganizations.map((p) => ({
+                        day: p.day,
+                        events: p.subjects,
+                      }))}
+                    />
+                  </div>
+                )}
+              </Card>
+
+              <Card
+                title="Distinct sessions"
+                note={`One point per day, counting every browsing session seen in the preceding ${data.insights.activeWindows.sessions} days. A session ends after thirty minutes idle and after a day whatever happens.`}
+              >
+                {data.insights.activeSessions.every((p) => p.subjects === 0) ? (
+                  <Empty title="No sessions in this window">
+                    The site beacon counts a session when somebody opens a page. This stays empty
+                    until the marketing site is being read.
+                  </Empty>
+                ) : (
+                  <div className="px-4 py-4">
+                    <DayColumns
+                      label={`Distinct sessions, ${data.insights.activeWindows.sessions} day window`}
+                      points={data.insights.activeSessions.map((p) => ({
+                        day: p.day,
+                        events: p.subjects,
+                      }))}
+                    />
+                  </div>
+                )}
+              </Card>
+            </div>
+
+            {data.insights.conversions.map((funnel) => (
+              <Card
+                key={funnel.id}
+                title={funnel.title}
+                note={`Counted over ${funnel.subject === "session" ? "browsing sessions" : "organizations"} that took the first step between ${funnel.fromWeek} and ${funnel.toWeek}. Every step after the first has to happen in order and within ${funnel.windowDays} ${funnel.windowDays === 1 ? "day" : "days"} of it. ${funnel.windowReason}${provenanceNote(data.provenance.funnelsFinalBefore)}`}
+              >
+                {funnel.empty ? (
+                  <Empty title="Nobody entered this funnel">
+                    Nothing took the first step in this window, so there is no conversion to
+                    report. The steps below would fill in from the top.
+                  </Empty>
+                ) : (
+                  <div className="space-y-4 px-4 py-4">
+                    {funnel.steps.map((step, index) => (
+                      <Meter
+                        key={step.step}
+                        label={
+                          <span>
+                            <span className="block">{step.meaning}</span>
+                            <span className="block text-xs text-black/50">{step.step}</span>
+                          </span>
+                        }
+                        value={step.subjects}
+                        max={funnel.steps[0]?.subjects ?? 0}
+                        note={
+                          step.ofPrevious === null
+                            ? undefined
+                            : `${Math.round(step.ofPrevious * 100)} percent of the step before`
+                        }
+                        tone={index === funnel.steps.length - 1 ? "accent" : "neutral"}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))}
+
+            <Card
+              title="Organizations that came back"
+              note={`Of the organizations first seen in each week, how many did anything in the weeks after. A row is read across. ${data.provenance.subjectDaysKept === null ? "" : `The grid reaches back ${Math.floor(data.provenance.subjectDaysKept / 7)} weeks, which is how long the rows it is computed from are kept.`}${data.provenance.cohortsCompleteThrough === null ? "" : ` Cohorts after ${data.provenance.cohortsCompleteThrough} are still taking members.`}`}
+            >
+              {data.insights.cohorts.empty ? (
+                <Empty title="No cohort has any members yet">
+                  A cohort is the week an organization was first seen. This fills in as soon as
+                  one organization has been seen for a week.
+                </Empty>
+              ) : (
+                <TableWrap>
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>Week</Th>
+                        <Th>Organizations</Th>
+                        {Array.from({ length: data.insights.cohorts.width - 1 }, (_, i) => (
+                          <Th key={i}>{`+${i + 1}`}</Th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.insights.cohorts.rows.map((row) => (
+                        <tr key={row.cohortWeek}>
+                          <Td>{row.cohortWeek}</Td>
+                          <Td>{row.size.toLocaleString()}</Td>
+                          {row.weeks.slice(1).map((cell, i) => (
+                            <Td key={i}>
+                              {/* A count, and a rate only when the cohort is
+                                  big enough for one to mean anything. A
+                                  percentage over three organizations moves by
+                                  thirty three points when one opens a laptop. */}
+                              {row.size === 0
+                                ? ""
+                                : row.enough
+                                  ? `${Math.round((cell / row.size) * 100)}%`
+                                  : `${cell} of ${row.size}`}
+                            </Td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </TableWrap>
+              )}
+            </Card>
 
             <div className="grid gap-6 lg:grid-cols-2">
               <Card title="Features used" note="One count per capability, never what was changed.">

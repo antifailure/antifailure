@@ -781,7 +781,62 @@ export const analyticsRollupState = pgTable('analytics_rollup_state', {
   id: boolean('id').primaryKey().default(true),
   lastRunAt: timestamp('last_run_at', { withTimezone: true }),
   settledAfter: date('settled_after'),
+  // The three insight shapes settle at different rates, so they carry their own
+  // freshness. See migrations/0030.
+  funnelsFinalBefore: date('funnels_final_before'),
+  cohortsCompleteThrough: date('cohorts_complete_through'),
+  subjectDaysKept: smallint('subject_days_kept'),
 })
+
+// The rollup's own working set: one row per subject per event per day, holding
+// the surrogate that analytics_daily throws away. Granted to nobody, so the
+// application cannot follow a subject even though this declares the shape. See
+// migrations/0030 for why that is the whole design.
+export const analyticsSubjectDays = pgTable('analytics_subject_days', {
+  subjectKind: text('subject_kind').notNull(),
+  subject: text('subject').notNull(),
+  name: text('name').notNull(),
+  day: date('day').notNull(),
+  events: bigint('events', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.subjectKind, t.subject, t.name, t.day] }),
+  index('analytics_subject_days_window_idx').on(t.subjectKind, t.day, t.subject),
+  index('analytics_subject_days_event_window_idx').on(t.subjectKind, t.name, t.day, t.subject),
+])
+
+export const analyticsActives = pgTable('analytics_actives', {
+  day: date('day').notNull(),
+  windowDays: smallint('window_days').notNull(),
+  subjectKind: text('subject_kind').notNull(),
+  name: text('name').notNull().default(''),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.day, t.windowDays, t.subjectKind, t.name] }),
+  index('analytics_actives_day_idx').on(t.day, t.subjectKind, t.windowDays),
+])
+
+export const analyticsRetentionCohorts = pgTable('analytics_retention_cohorts', {
+  subjectKind: text('subject_kind').notNull(),
+  cohortWeek: date('cohort_week').notNull(),
+  weeksLater: smallint('weeks_later').notNull(),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.subjectKind, t.cohortWeek, t.weeksLater] }),
+])
+
+export const analyticsFunnelWeeks = pgTable('analytics_funnel_weeks', {
+  funnel: text('funnel').notNull(),
+  enteredWeek: date('entered_week').notNull(),
+  stepsCompleted: smallint('steps_completed').notNull(),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.funnel, t.enteredWeek, t.stepsCompleted] }),
+  index('analytics_funnel_weeks_window_idx').on(t.funnel, t.enteredWeek, t.stepsCompleted),
+])
 
 // ---------------------------------------------------------------------------
 // Running the organization

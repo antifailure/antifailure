@@ -111,6 +111,10 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ['analytics_org_facts', 'keyed by the same surrogate, holding counts and dates and no identifier'],
       ['analytics_daily', 'aggregate counts with no identifier of any kind in them'],
       ['analytics_rollup_state', 'one row of bookkeeping about when the rollup last ran'],
+      ['analytics_subject_days', 'the rollup working set, keyed by the same surrogate and granted to nobody'],
+      ['analytics_actives', 'distinct counts over a window, with no identifier in them'],
+      ['analytics_retention_cohorts', 'a cohort grid of counts, with no identifier in it'],
+      ['analytics_funnel_weeks', 'counts of how far subjects got, with no identifier in them'],
     ])
 
     // Partitions are excluded because a partition is storage for its parent
