@@ -1,0 +1,165 @@
+name: Sign-up
+
+# The front door, checked from outside, every day.
+#
+# This replaces the waitlist probe, and it exists for the same reason that one
+# did. A two day outage went unnoticed because api/ was never passed to the
+# publish step: every deploy uploaded a site with no API, every path under /api
+# answered 500, and the form told people something had gone wrong on our side
+# while they believed they were on a list that did not have them. CI was green
+# throughout. The deploy was green throughout. Nothing was wrong with any file
+# in the repository. The only thing that could have told anybody was a request.
+#
+# The waitlist is gone and the same argument now points at something larger.
+# Sign-up is a GitHub exchange against the control plane, and every way it can
+# be shut is a CONFIGURATION rather than a fault:
+#
+#   AF_SIGNIN_ALLOWLIST naming anybody closes the door to everybody else. The
+#   production tfvars named two people for months, and the process said so in
+#   its own start-up log, and nobody read the log.
+#
+#   AF_SELF_SERVE_SIGNUP unset means somebody may sign in and lands in no
+#   organization, which is a working sign-in leading to an empty screen.
+#
+# Neither shows up in /readyz, in a deploy, or in CI. The origin is healthy and
+# the responses are correct; the product is simply shut. So the check reads the
+# two facts off the answer the console itself reads, from outside, with no
+# credential.
+#
+# WHY NOT ON THE STATUS PAGE. deploy/status/targets.json probes the sign-in
+# redirect and that row is customer facing. These two assertions go red the
+# moment somebody deliberately closes signups, which is a decision rather than
+# an outage, and publishing a decision as an incident is how a status page stops
+# being believed. The audience for this is us.
+#
+# Separate from CI and on a schedule for the reason links.yml gives: this is a
+# property of the live deployment rather than of a change, and a pull request
+# must not be refused because Azure is having a bad afternoon.
+
+on:
+  schedule:
+    # 07:00 UTC daily, an hour after the link check so two scheduled jobs are
+    # not competing for the same runner minute. The same slot the waitlist
+    # probe held.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signup-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: somebody can still sign up
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # Same guard as deploy.yml. A fork running this on a schedule would probe
+    # somebody else's production control plane.
+    if: ${{ github.repository == 'antifailure/antifailure' }}
+
+    steps:
+      - name: The control plane says the door is open
+        run: |
+          set -uo pipefail
+          plane=https://app.antifailure.dev
+
+          status=$(curl -sS -m 20 -o /tmp/session.json -w '%{http_code}' "$plane/auth/session" || echo 000)
+          if [ "$status" != "200" ]; then
+            echo "::error::GET /auth/session returned $status. The control plane is not answering."
+            head -c 500 /tmp/session.json || true
+            exit 1
+          fi
+
+          # Read off the same document the console reads to decide what to
+          # render, so this cannot be true here and false in a browser.
+          if ! grep -q '"signupsOpen":true' /tmp/session.json; then
+            echo "::error::SIGN-UP IS CLOSED ON PRODUCTION. /auth/session does not report signupsOpen."
+            echo "::error::AF_SIGNIN_ALLOWLIST names somebody, so every GitHub account not on that"
+            echo "::error::list is turned away at the callback, after authorising the application."
+            echo "::error::It is set from signin_allowlist in infra/terraform/stacks/control-plane."
+            echo "session: $(cat /tmp/session.json)"
+            exit 1
+          fi
+
+          if ! grep -q '"selfServeSignup":true' /tmp/session.json; then
+            echo "::error::SIGNING UP LEADS NOWHERE. Sign-in is open and AF_SELF_SERVE_SIGNUP is not"
+            echo "::error::set, so a new person authenticates, belongs to no organization, and reaches"
+            echo "::error::the empty state. The sign-in works and the product does not."
+            echo "session: $(cat /tmp/session.json)"
+            exit 1
+          fi
+
+          if ! grep -q '"github"' /tmp/session.json; then
+            echo "::error::/auth/session lists no GitHub sign-in method, which is the only one the"
+            echo "::error::sign-up page offers. Nobody can start an exchange."
+            echo "session: $(cat /tmp/session.json)"
+            exit 1
+          fi
+          echo "the control plane reports signupsOpen, selfServeSignup, and a GitHub method"
+
+      - name: Pressing the button starts an exchange
+        run: |
+          set -uo pipefail
+          plane=https://app.antifailure.dev
+
+          # Deliberately not followed. Following the hop would make GitHub's
+          # availability the subject, and a probe that failed because github.com
+          # was slow would be reporting somebody else's outage under our name.
+          status=$(curl -sS -m 20 -o /dev/null -D /tmp/head.txt -w '%{http_code}' "$plane/auth/github" || echo 000)
+          location=$(sed -n 's/^[Ll]ocation:[[:space:]]*//p' /tmp/head.txt | tr -d '\r' | head -1)
+
+          if [ "$status" != "302" ]; then
+            echo "::error::GET /auth/github returned $status, expected a 302 to GitHub."
+            cat /tmp/head.txt || true
+            exit 1
+          fi
+          case "$location" in
+            https://github.com/login/oauth/authorize\?*) ;;
+            *)
+              echo "::error::the sign-in redirect points at ${location:-nowhere} rather than GitHub's"
+              echo "::error::authorize endpoint. AF_GITHUB_CLIENT_ID or AF_GITHUB_REDIRECT_URI is wrong."
+              exit 1
+              ;;
+          esac
+
+          # The state parameter is what makes the callback unreplayable, and it
+          # is written to the database before the redirect is sent. A redirect
+          # carrying no state is a sign-in that will fail on the way back, which
+          # is a failure nobody sees until somebody tries to use the product.
+          case "$location" in
+            *state=*) ;;
+            *)
+              echo "::error::the sign-in redirect carries no state parameter, so every callback"
+              echo "::error::returning from it will be refused as invalid."
+              exit 1
+              ;;
+          esac
+          echo "starting a sign-in redirects to GitHub with a state value"
+
+      - name: The sign-up page offers that door
+        run: |
+          set -uo pipefail
+          site=https://antifailure.dev
+
+          status=$(curl -sSL -m 20 -o /tmp/signup.html -w '%{http_code}' "$site/signup" || echo 000)
+          if [ "$status" != "200" ]; then
+            echo "::error::GET /signup returned $status."
+            exit 1
+          fi
+          # The marketing page and the control plane are two deployments on two
+          # hosts, and the link between them is a string in the site's bundle.
+          # Nothing else checks that it still points at a control plane that
+          # exists: this is the one assertion that fails when the site is
+          # rebuilt against the wrong origin.
+          if ! grep -qF 'https://app.antifailure.dev/auth/github' /tmp/signup.html; then
+            echo "::error::THE SIGN-UP PAGE HAS NO WAY IN. /signup renders without a link to"
+            echo "::error::https://app.antifailure.dev/auth/github, so the primary call to action"
+            echo "::error::on the page goes nowhere. CONTROL_PLANE_URL in www/lib/site.ts is what"
+            echo "::error::builds it."
+            exit 1
+          fi
+          echo "/signup renders and links at the control plane's GitHub exchange"

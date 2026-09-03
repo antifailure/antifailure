@@ -1226,11 +1226,28 @@ const orgRouter = router({
 })
 
 const tokensRouter = router({
+  /**
+   * Every token this organization holds, of both kinds.
+   *
+   * `kind` and `expires_at` are selected because the console shows the two
+   * kinds side by side and they are not the same thing to a reader: an
+   * `engine` token is a secret somebody pasted into CI and it does not expire,
+   * a `cli` token is a terminal a person signed in through the device grant
+   * and it dies after ninety days. A list that called both "token" and gave
+   * neither an expiry would make revoking your own laptop look like revoking a
+   * build machine.
+   *
+   * Deliberately unfiltered by kind, unlike `/v1/tokens`, which serves
+   * `af token` and sees `engine` rows only so that a command about CI cannot
+   * revoke the credential the person running it is holding. Here the whole
+   * point is the opposite: this is the only place a person can see which
+   * terminals are signed in to their account and take one away.
+   */
   list: orgProcedure('tokens.manage').query(async ({ ctx }) => {
     const c = ctx as OrgContext
     return c.pool.withTenant(c.tenant, async (db) =>
       db.execute(sql`
-        SELECT id, name, prefix, created_at, last_used_at, revoked_at
+        SELECT id, name, prefix, kind, created_at, last_used_at, revoked_at, expires_at
         FROM engine_tokens ORDER BY created_at DESC`),
     )
   }),

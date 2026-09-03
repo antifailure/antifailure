@@ -217,7 +217,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 <span className="text-sm leading-none tracking-extra-tight">GitHub</span>
               </a>
               {/* There is no Discord. The link that used to sit here was
-                  labelled Discord and went to the waitlist form, which is a
+                  labelled Discord and went to the sign-up form, which is a
                   broken promise in the header of every page. */}
               {/* HeaderLink rather than next/link. The documentation is built
                   by Astro and merged into the published site afterwards, so
@@ -234,18 +234,24 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 <span className="text-sm leading-none tracking-extra-tight">Docs</span>
               </HeaderLink>
             </div>
-            {/* The filled action in the header of every page used to be
-                "Request access", which is an invitation wall. The engine is
-                MIT licensed and installs with one command, so the action a
-                visitor can actually take is the one that leads. Somebody who
-                has been invited signs in beside it, and /signin carries the
-                waitlist form for somebody who has not. */}
+            {/* The filled action was "Request access" once, which is an
+                invitation wall, and then "Install the engine", which was the
+                right answer while the only other door was a waitlist: the
+                engine is MIT licensed and installs with one command, so it was
+                the action a visitor could actually take.
+
+                Creating an account is now an action a visitor can actually
+                take too. It is a GitHub sign-in, it needs no card and no
+                invitation, and it ends in an organization on the free plan. So
+                it leads, and installing the engine is one click away in the
+                hero, in the nav, and on the sign-up page itself, which says in
+                as many words that the engine needs none of this. */}
             <div className="flex gap-x-3.5">
               <Button href="/signin" theme="outlined" size="xxs">
                 Sign in
               </Button>
-              <Button href="/docs/getting-started/quickstart" theme="filled" size="xxs">
-                Install the engine
+              <Button href="/signup" theme="filled" size="xxs">
+                Start free
               </Button>
             </div>
           </div>
@@ -470,16 +476,16 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                 </Link>
               ))}
             </div>
+            {/* The same pair as the wide header, in the same order, because a
+                phone menu that offers a different primary action from the one
+                above 1280 is two products wearing one name. "Install the
+                engine" is a link in the menu above this. */}
             <div className="mt-8 flex gap-3">
               <Button href="/signin" theme="outlined" className="flex-1">
                 Sign in
               </Button>
-              <Button
-                href="/docs/getting-started/quickstart"
-                theme="filled"
-                className="flex-1"
-              >
-                Install the engine
+              <Button href="/signup" theme="filled" className="flex-1">
+                Start free
               </Button>
             </div>
           </div>

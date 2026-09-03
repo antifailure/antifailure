@@ -80,6 +80,7 @@ gate: _reports
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
+    run "documented config can be set"   just wirecheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "the mode lists are the real one" just modecheck
@@ -920,6 +921,21 @@ constcheck:
 # `go run ./tools/inputcheck -update .` records it in the snapshot.
 inputcheck:
     go run ./tools/inputcheck .
+
+# A documented variable can actually be DELIVERED by the supported deploy path.
+#
+# The reference documented 45 variables the hosted control plane reads and the
+# Terraform module that is the only route onto that container could set 16.
+# `just varcheck` above and web/apps/api/test/config-docs.test.ts both proved
+# every one of the 45 was DOCUMENTED, and stayed green the whole time, because
+# they answer a nearby question: a variable that is documented, read by the
+# application, and unreachable by every apply satisfies both of them exactly.
+#
+# For every variable the reference documents, either an env block in the module
+# sets it or tools/docs/wiring-exemptions.tsv says why it cannot, and a row
+# that has stopped being needed is reported so the file cannot rot.
+wirecheck:
+    go run ./tools/wirecheck .
 
 # This justfile runs what CI runs.
 gatecheck:

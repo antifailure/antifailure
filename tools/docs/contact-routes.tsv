@@ -32,9 +32,7 @@
 .githooks/pre-commit	potatogreenbean204@gmail.com	not-a-route	the wrong git identity this hook exists to refuse. It is compared against, never offered to anybody, and a commit carrying it is rejected before it is written.
 .github/workflows/ci.yml	potatogreenbean204@gmail.com	not-a-route	the same wrong git identity, checked again in CI for commits that reached the remote without the hook.
 .github/workflows/status.yml	status@antifailure.dev	records-a-defect	quoted in the comment explaining why the status commits no longer carry it. The workflow now commits as GitHub's Actions no-reply identity.
-.github/workflows/waitlist.yml	waitlist-probe@antifailure.dev	not-a-route	the synthetic row this probe writes into the waitlist table every morning to prove a signup still reaches storage. It is a value posted to an API, and it is deliberately an address nothing can deliver to.
 CODE_OF_CONDUCT.md	conduct@antifailure.dev	records-a-defect	quoted in the enforcement section as the address that used to be there, immediately followed by the DNS reason it never worked and by the routes that do.
-api/README.md	waitlist-probe@antifailure.dev	not-a-route	the same synthetic row, documented so that whoever reads the table does not count it as a signup. The paragraph ends by saying not to email it.
 console/app/(app)/members/page.tsx	someone@yourcompany.com	not-a-route	the placeholder inside the invite field. It is grey text in an empty input, replaced by whatever the operator types.
 console/app/(app)/settings/page.tsx	accounts@yourcompany.com	not-a-route	the placeholder inside the billing contact field, replaced by whatever the operator types.
 docs/plan/STATUS.md	virrsanghavi@gmail.com	not-a-route	quoted out of a Microsoft Entra ID provisioning log as evidence that a real directory read a real user back through the SCIM filter endpoint. It is a log line, not somewhere to write.
@@ -57,7 +55,6 @@ tools/preview/seed.ts	peter.novak@preview.local	not-a-route	the same seeded set,
 tools/preview/seed.ts	mira.solberg@preview.local	not-a-route	the same seeded set, holding read_only.
 tools/preview/seed.ts	oskar.wojcik@preview.local	not-a-route	the same seeded set, the one seeded suspended so the portal has a suspended operator to show.
 tools/preview/seed.ts	lena.fischer@preview.local	not-a-route	the same seeded set, the one seeded never provisioned so the portal has that state to show.
-www/components/AuthScreen.tsx	you@company.com	not-a-route	the placeholder inside the sign-in field.
 www/components/home/visuals/TwinLifecycleScene.tsx	ada@corp.io	not-a-route	a row of invented customer data in the animated lifecycle film, shown being masked. The film is captioned as a shaped example.
 www/components/home/visuals/TwinLifecycleScene.tsx	user_00418@mask.local	not-a-route	what the same film shows that row becoming after masking. A generated value at a domain that does not resolve, which is the output the masker actually produces.
 www/components/home/visuals/headerMinis.tsx	ada@corp.io	not-a-route	the same invented row, in the small header animation that reuses the film's data.

@@ -180,10 +180,21 @@ variable "database_extensions" {
 
 # No default. See the module's variable of the same name: an unset allowlist
 # means the control plane accepts any GitHub account, and a default is a value
-# somebody gets by forgetting.
+# somebody gets by forgetting. Null is the deliberate way to say everybody, and
+# it is a different value from the empty list, which says nobody.
 variable "signin_allowlist" {
   type        = list(string)
-  description = "GitHub logins that may sign in. Empty means nobody."
+  nullable    = true
+  description = "GitHub logins that may sign in. Empty means nobody, null means anybody."
+}
+
+# Whether a sign-in that lands in no organization creates one. See the module's
+# variable of the same name: without it a new person authenticates and reaches
+# the console's empty state, which is a working sign-in and no product.
+variable "self_serve_signup" {
+  type        = bool
+  default     = false
+  description = "Whether signing up gives somebody their own organization on the free plan."
 }
 
 # Where the people that list turns away are sent. See the module's variable of
@@ -302,4 +313,138 @@ variable "alert_sms_number" {
   type      = string
   default   = ""
   sensitive = true
+}
+
+# ---------------------------------------------------------------------------
+# The application configuration this stack could not reach.
+#
+# One pass-through per module input, so that a tfvars file is still the whole
+# configuration of an installation. See the block comment in
+# modules/control-plane/variables.tf for what was missing and why nothing
+# caught it; tools/wirecheck is what catches it now.
+#
+# The DEFAULTS here are the module's, restated rather than omitted, because
+# tools/inputcheck refuses an input that arrives without one: a required input
+# refuses a tfvars file that was complete the day before.
+#
+# NO SECRET VALUE IS AN INPUT ON THIS LIST. The Stripe key, the Stripe webhook
+# secret and the Resend key are read out of Key Vault by the module; the
+# operator credential and the analytics surrogate secret are generated there.
+# What a tfvars file carries is the NAME of a vault secret and the switch that
+# turns a feature on, never the credential itself. This repository plans on
+# every pull request into a step summary that is world readable.
+# ---------------------------------------------------------------------------
+
+variable "operator_portal_enabled" {
+  type        = bool
+  default     = false
+  description = "Generate an operator credential and wire AF_ADMIN_DATABASE_URL. Off means this installation has no operator portal."
+}
+
+variable "admin_pool_max" {
+  type        = number
+  default     = 4
+  description = "Connections in the operator pool, counted against the database beside the application's."
+}
+
+variable "analytics_enabled" {
+  type        = bool
+  default     = false
+  description = "Generate a surrogate secret so the analytics stream records."
+}
+
+variable "analytics_operator_org" {
+  type        = string
+  default     = ""
+  description = "Slug of the organization whose owners and admins may read the analytics dashboard. Empty means nobody."
+}
+
+variable "analytics_retention_days" {
+  type        = number
+  default     = null
+  description = "Delete raw analytics events older than this many days. Null keeps them forever."
+}
+
+variable "site_origin" {
+  type        = string
+  default     = ""
+  description = "The origin the marketing site is served from. Empty refuses every beacon."
+}
+
+variable "github_app_install_url" {
+  type        = string
+  default     = ""
+  description = "The public https://github.com/apps/<slug>/installations/new address. Empty offers no install action."
+}
+
+variable "github_api_base" {
+  type        = string
+  default     = ""
+  description = "Where the GitHub API lives, for GitHub Enterprise Server. Empty uses https://api.github.com."
+}
+
+variable "mail_from" {
+  type        = string
+  default     = ""
+  description = "The From address on sign-in links and invitations. Empty turns mail off entirely."
+}
+
+variable "public_url" {
+  type        = string
+  default     = ""
+  description = "The origin a browser reaches this deployment on. Required when mail_from is set."
+}
+
+variable "lead_notify_email" {
+  type        = string
+  default     = ""
+  description = "Where an enterprise lead is announced. Empty records leads and mails nobody. Requires mail_from."
+}
+
+variable "resend_api_key_secret_name" {
+  type        = string
+  default     = "resend-api-key"
+  description = "The Key Vault secret holding the Resend API key."
+}
+
+variable "stripe_price_team" {
+  type        = string
+  default     = ""
+  description = "The Stripe price the team plan is sold at. Empty turns billing off entirely."
+}
+
+variable "stripe_secret_key_secret_name" {
+  type        = string
+  default     = "stripe-secret-key"
+  description = "The Key Vault secret holding the Stripe API key."
+}
+
+variable "stripe_webhook_secret_secret_name" {
+  type        = string
+  default     = "stripe-webhook-secret"
+  description = "The Key Vault secret holding the Stripe webhook signing secret."
+}
+
+variable "hosted_required_plan" {
+  type        = string
+  default     = ""
+  description = "Set to enterprise on a plane sold only to enterprise organizations. Empty serves every plan."
+}
+
+variable "operator_sets_plan" {
+  type        = bool
+  default     = false
+  description = "Allow billing.set on an installation that takes no payment."
+}
+
+variable "model_prices" {
+  type        = string
+  default     = ""
+  description = "Model prices as model=input/output in US dollars per million tokens, comma separated."
+}
+
+variable "product_name" {
+  type        = string
+  default     = ""
+  description = "The product name in a sign-in link's subject line. Empty uses Antifailure."
 }

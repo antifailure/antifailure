@@ -4,15 +4,20 @@
 //
 // The codes used to be written out at each throw site. Nothing listed them,
 // nothing checked them, and `GET /api` did not mention that they existed, so a
-// caller receiving `waitlist_unavailable` had no way to find out what it meant
-// from the host that sent it. The engine and control plane have had that
-// property enforced for a long time by tools/errcheck; this side had nothing.
+// caller receiving one had no way to find out what it meant from the host that
+// sent it. The engine and control plane have had that property enforced for a
+// long time by tools/errcheck; this side had nothing.
 //
-// The scan below is the part that matters. Asserting that the four codes in the
+// The scan below is the part that matters. Asserting that the codes in the
 // catalog are in the catalog proves nothing. Reading the source for code
 // literals and failing on one that is not in the catalog is what stops the next
 // emitter from going back to writing its own, and it is what makes the claim
 // "every code this app returns is published" true rather than aspirational.
+//
+// The second test is the one that just did some work. Removing the waitlist
+// left three catalog entries nothing could return, and it named all three
+// rather than letting them stay published at GET /api as descriptions of
+// situations this app cannot be in.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -98,12 +103,12 @@ test("an unknown code throws rather than answering with an empty message", () =>
 });
 
 test("a body carries the code, the message and the resolution the catalog holds", () => {
-  const answer = failure("invalid_email");
-  assert.equal(answer.status, 400);
+  const answer = failure("endpoint_not_found");
+  assert.equal(answer.status, 404);
   assert.deepEqual(answer.body, {
     ok: false,
-    code: "invalid_email",
-    message: CATALOG.invalid_email.message,
-    resolution: CATALOG.invalid_email.resolution,
+    code: "endpoint_not_found",
+    message: CATALOG.endpoint_not_found.message,
+    resolution: CATALOG.endpoint_not_found.resolution,
   });
 });

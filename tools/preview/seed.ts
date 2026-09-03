@@ -233,6 +233,15 @@ async function main(): Promise<void> {
     await seedFlags(admin)
     line(`${FLAGS.length} feature flags, which are also this installation's kill switches`)
 
+    const credentials = await seedCredentials(admin)
+    line(
+      `${credentials} further credentials: a cli token, an oidc token behind its binding, ` +
+        'one revoked and one expired',
+    )
+
+    const deliveries = await seedDeliveries(admin)
+    line(`${deliveries} webhook deliveries, one of which matched no organization`)
+
     const switched = await seedPlatformControls(admin)
     line(
       switched === null
@@ -388,6 +397,109 @@ async function seedFlags(admin: Sql): Promise<void> {
         ON CONFLICT DO NOTHING`
     }
   }
+}
+
+/**
+ * The credentials a page has to draw more than one branch for.
+ *
+ * seedStaging writes live `engine` tokens and nothing else, and a page that
+ * distinguishes live from expired from revoked, and an organization's engine
+ * token from a person's cli token from a workflow's oidc token, renders one
+ * branch out of nine against that. Asked for by the lane building API Keys,
+ * who found a revoke button being offered on a credential the authenticator
+ * already refuses.
+ *
+ * The three CHECK constraints are the shape of the thing rather than an
+ * obstacle to it. A cli token must carry a user, an oidc token must carry an
+ * expiry, and an oidc token must carry a binding, which is why the binding is
+ * written first and the token points at it: revoking a binding has to be able
+ * to reach the credentials it produced.
+ */
+async function seedCredentials(admin: Sql): Promise<number> {
+  const [org] = await admin<{ id: string }[]>`
+    SELECT id FROM organizations WHERE slug = 'antifailure' LIMIT 1`
+  if (!org) return 0
+  const [user] = await admin<{ id: string }[]>`
+    SELECT user_id AS id FROM members WHERE org_id = ${org.id} ORDER BY created_at LIMIT 1`
+  if (!user) return 0
+
+  const day = 86_400_000
+  const ago = (days: number) => new Date(Date.now() - days * day)
+  const ahead = (days: number) => new Date(Date.now() + days * day)
+
+  const [binding] = await admin<{ id: string }[]>`
+    INSERT INTO oidc_repository_bindings (org_id, repository, created_by, created_at, last_used_at)
+    VALUES (${org.id}, 'antifailure/checkout', ${user.id}, ${ago(60)}, ${ago(1)})
+    ON CONFLICT DO NOTHING
+    RETURNING id`
+  const [live] = await admin<{ id: string }[]>`
+    SELECT id FROM oidc_repository_bindings WHERE repository = 'antifailure/checkout' LIMIT 1`
+  const bindingId = binding?.id ?? live?.id
+  if (!bindingId) return 0
+
+  // name, kind, prefix, user, binding, created, last used, expires, revoked
+  const rows: [string, string, string, string | null, string | null, Date, Date | null, Date | null, Date | null][] = [
+    ['grace on her laptop', 'cli', 'afc_ur41', user.id, null, ago(40), ago(2), null, null],
+    ['checkout workflow', 'oidc', 'afo_9k2p', null, bindingId, ago(9), ago(1), ahead(1), null],
+    ['an expired workflow token', 'oidc', 'afo_3xd7', null, bindingId, ago(30), ago(28), ago(27), null],
+    ['a laptop that was lost', 'cli', 'afc_7q1w', user.id, null, ago(120), ago(96), null, ago(95)],
+    ['a rotated engine token', 'engine', 'afe_5m8z', null, null, ago(200), ago(150), null, ago(149)],
+  ]
+
+  let made = 0
+  for (const [name, kind, prefix, userId, binding_id, created, lastUsed, expires, revoked] of rows) {
+    const [row] = await admin<{ id: string }[]>`
+      INSERT INTO engine_tokens
+        (org_id, name, kind, token_hash, prefix, user_id, binding_id,
+         created_at, last_used_at, expires_at, revoked_at)
+      VALUES (${org.id}, ${name}, ${kind},
+              decode(md5(${`${prefix}${name}`}) || md5(${name}), 'hex'), ${prefix},
+              ${userId}, ${binding_id}, ${created}, ${lastUsed}, ${expires}, ${revoked})
+      ON CONFLICT DO NOTHING
+      RETURNING id`
+    if (row) made += 1
+  }
+  return made
+}
+
+/**
+ * The webhook ledger, including a delivery that matched nobody.
+ *
+ * org_id is nullable because a delivery about an account this installation has
+ * never seen resolves to no organization, and that row is precisely the one an
+ * operator goes looking for when a customer reports their events go nowhere. A
+ * seed where every delivery resolved would never draw that branch, so this
+ * writes one that does not.
+ */
+async function seedDeliveries(admin: Sql): Promise<number> {
+  const orgs = await admin<{ id: string; slug: string }[]>`
+    SELECT id, slug FROM organizations ORDER BY created_at LIMIT 3`
+  if (orgs.length === 0) return 0
+
+  const minute = 60_000
+  const rows: [string, string | null, string | null, string, string | null, number, boolean, string | null][] = [
+    ['d0f1a2b3-0001', orgs[0]!.id, orgs[0]!.slug, 'pull_request', 'opened', 4, true, 'environment created'],
+    ['d0f1a2b3-0002', orgs[0]!.id, orgs[0]!.slug, 'pull_request', 'closed', 9, true, 'environment torn down'],
+    ['d0f1a2b3-0003', orgs[1]?.id ?? null, orgs[1]?.slug ?? null, 'push', null, 17, true, 'no environment for this branch'],
+    ['d0f1a2b3-0004', orgs[2]?.id ?? null, orgs[2]?.slug ?? null, 'installation', 'created', 40, true, 'installation recorded'],
+    // The one that matters. Never resolved, and never will be.
+    ['d0f1a2b3-0005', null, 'somebody-elses-org', 'pull_request', 'opened', 55, false, null],
+    ['d0f1a2b3-0006', null, 'a-fork-nobody-installed', 'push', null, 90, true, 'no organization holds this installation'],
+  ]
+
+  let made = 0
+  for (const [id, orgId, login, event, action, minutesAgo, handled, outcome] of rows) {
+    const received = new Date(Date.now() - minutesAgo * minute)
+    const [row] = await admin<{ delivery_id: string }[]>`
+      INSERT INTO github_deliveries
+        (delivery_id, org_id, account_login, event, action, received_at, handled_at, outcome)
+      VALUES (${id}, ${orgId}, ${login}, ${event}, ${action}, ${received},
+              ${handled ? new Date(received.getTime() + 900) : null}, ${outcome})
+      ON CONFLICT (delivery_id) DO NOTHING
+      RETURNING delivery_id`
+    if (row) made += 1
+  }
+  return made
 }
 
 /**

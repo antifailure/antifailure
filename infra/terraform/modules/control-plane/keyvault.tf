@@ -158,15 +158,43 @@ resource "random_bytes" "provider_key_secret" {
   length = 32
 }
 
+# The key organization surrogates are computed under, 32 bytes as 64 hex
+# characters.
+#
+# Generated here for the same reason the sealing secret is: a surrogate anybody
+# can recompute is an organization identifier with extra steps, so the value
+# must not pass through a person, a workflow, or a tfvars file.
+#
+# keepers is empty on purpose, and the consequence is different from the sealing
+# secret's but just as permanent. Regenerating this does not stop anything from
+# working -- it re-keys every surrogate, so the same organization becomes a
+# different one, and every funnel that crosses the change silently splits in
+# two. There is no analytics story that starts with "the infrastructure changed
+# the key without being asked".
+resource "random_bytes" "analytics_surrogate_secret" {
+  count = var.analytics_enabled ? 1 : 0
+  # 32 bytes, which is what surrogateSecretFrom() requires exactly. The
+  # application wants them as 64 hex characters and stops at startup on any
+  # other length, so .hex is the attribute rather than .base64.
+  length = 32
+}
+
 locals {
   # provider-key-secret is owned rather than seeded: Terraform generates it, so
   # a difference between configuration and vault is drift to correct, which is
   # the definition of owned above.
+  #
+  # admin-database-url and analytics-surrogate-secret are owned on the same
+  # test: Terraform generated the password and the key material inside them.
   owned_secrets = merge({
     "database-url"           = local.app_url
     "migration-database-url" = local.migration_url
     }, var.provider_key_secret_enabled ? {
     "provider-key-secret" = random_bytes.provider_key_secret[0].base64
+    } : {}, var.operator_portal_enabled ? {
+    "admin-database-url" = local.operator_url
+    } : {}, var.analytics_enabled ? {
+    "analytics-surrogate-secret" = random_bytes.analytics_surrogate_secret[0].hex
   } : {})
   seeded_secrets = {
     "github-client-id"     = var.github_client_id
@@ -204,6 +232,42 @@ data "azurerm_key_vault_secret" "github_app_private_key" {
 data "azurerm_key_vault_secret" "github_app_webhook_secret" {
   count        = var.github_app_id == "" ? 0 : 1
   name         = var.github_app_webhook_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+# Stripe's two credentials and Resend's one, read rather than written, and the
+# reason is the same one the GitHub App's key gets.
+#
+# THESE ARE NOT SEEDED EITHER, and the difference from github-client-secret
+# above is worth stating because it looks like the same case. A seeded secret is
+# written once as a placeholder and then owned by the operator, which means
+# there is a window where the vault holds a placeholder and the application is
+# running with it. For an OAuth secret that window is a sign-in that fails. For
+# a Stripe key it is billing reporting itself as ON at startup while every
+# charge is refused by Stripe, which is exactly the "partially configured"
+# state the application prints a warning about -- reached by the tool that was
+# supposed to configure it.
+#
+# So there is no placeholder and no tfvars input for the VALUE. A person puts
+# the real secret in the vault, then sets the switch that turns the feature on;
+# a plan with the switch on and no secret in the vault fails on these data
+# sources, naming the secret, which is a truthful refusal rather than a deploy
+# that comes up broken. self-hosting/azure.md has the two commands in order.
+data "azurerm_key_vault_secret" "stripe_secret_key" {
+  count        = var.stripe_price_team == "" ? 0 : 1
+  name         = var.stripe_secret_key_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+data "azurerm_key_vault_secret" "stripe_webhook_secret" {
+  count        = var.stripe_price_team == "" ? 0 : 1
+  name         = var.stripe_webhook_secret_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+data "azurerm_key_vault_secret" "resend_api_key" {
+  count        = var.mail_from == "" ? 0 : 1
+  name         = var.resend_api_key_secret_name
   key_vault_id = azurerm_key_vault.this.id
 }
 

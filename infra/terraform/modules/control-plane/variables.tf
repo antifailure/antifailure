@@ -219,25 +219,54 @@ variable "github_redirect_uri" { type = string }
 # So there is no default. A plan cannot be produced without somebody deciding
 # who may sign in.
 #
-# An EMPTY list is a real answer and means nobody, which is what to set on an
-# instance nobody should be signing in to yet. It is not the same as unset.
+# THREE ANSWERS, NOT TWO, because the application has three states and this used
+# to be able to express two of them. A list names those accounts. An EMPTY list
+# means nobody, which is what to set on an instance nobody should be signing in
+# to yet. And NULL means everybody, which is the state a product with self serve
+# signup is in and which had no representation here at all: `join(",", [])` is
+# the empty string, and the application reads an empty string as "set, and names
+# nobody", so the most open intent and the most closed one produced the same
+# deployment. See app.tf for the block, which is careful about exactly this.
 variable "signin_allowlist" {
   type        = list(string)
-  description = "GitHub logins that may sign in. Empty means nobody. There is no value that means everybody."
+  nullable    = true
+  description = "GitHub logins that may sign in. Empty means nobody, null means anybody. There is no default."
 }
 
 # Where a refused person is sent instead.
 #
 # The allowlist decides who gets in. This decides what the ones it turns away
 # see, and it is the difference between a closed door and a closed door with a
-# note on it. Empty is the right answer for any installation that does not run
-# a waitlist: the refusal page then names who to ask rather than inventing a
-# link. Our own instances point at the request page on the marketing site,
-# which is the list the visitor was standing one click away from.
+# note on it. Empty is the right answer for an installation whose operator has
+# their own way of being asked: the refusal page then names who to ask rather
+# than inventing a link. Our own instances point at the contact page on the
+# marketing site, which reaches a person.
+#
+# On a plane where signin_allowlist is null this is never rendered, because
+# nobody is refused. It is set anyway, so that closing signups later is one
+# decision rather than two.
 variable "signup_url" {
   type        = string
   default     = ""
   description = "Where somebody the allowlist refuses is sent to ask for access. Empty means the refusal page offers no link."
+}
+
+# Whether somebody who signs in with no organization is given one.
+#
+# The other half of the sentence the allowlist starts. That decides who may sign
+# in; this decides whether there is anything on the other side of the door.
+# Without it a new person authenticates, belongs to nothing, and reaches the
+# console's empty state, which is a working sign-in and a product that appears
+# broken.
+#
+# Defaults to false, which is what the application defaults to and for the
+# reason auth/provision.ts gives: what it grants is a tenant with real quotas
+# and real compute against them, so forgetting the variable has to close the
+# door rather than open it. Antifailure's own planes set it to true.
+variable "self_serve_signup" {
+  type        = bool
+  default     = false
+  description = "Whether a sign-in that lands in no organization creates one, on the free plan, owned by that person."
 }
 
 # The secret that seals customers' provider keys, 32 bytes.
@@ -345,4 +374,229 @@ variable "dns_zone_resource_group" {
   type        = string
   default     = ""
   description = "The resource group holding the zone, which is NOT this stack's group: antifailure.dev lives in af-web with the marketing site. The identity applying this stack needs DNS Zone Contributor there, and this module deliberately does not create that grant."
+}
+
+# ---------------------------------------------------------------------------
+# THE CONFIGURATION THE APPLICATION READS AND THIS MODULE COULD NOT SET.
+#
+# docs/reference/control-plane.md documents 45 variables the control plane
+# process reads. Before this block the module could set 16 of them, and nothing
+# anywhere said so: the reference is complete, the application is complete, and
+# the wire between them had 29 strands missing. Every symptom of that reads as a
+# broken feature rather than as an unset variable -- the operator portal
+# answering PRECONDITION_FAILED on all 23 of its routes, no sign-in link and no
+# invitation able to leave the building, billing off with a real Stripe price
+# sitting behind Team, the marketing site's beacon refused cross origin with a
+# bare network error, the analytics stream recording nothing, and the two
+# buttons that went missing from the "No organization yet" screen.
+#
+# tools/wirecheck is the gate that will not let it happen again, and
+# tools/docs/wiring-exemptions.tsv is where a variable that genuinely cannot be
+# set here says why. Adding a variable to the reference now fails a build until
+# one of those two things is true.
+#
+# EVERY VARIABLE BELOW IS OPTIONAL WITH A DEFAULT, and that is a promise rather
+# than a preference: tools/inputcheck refuses a new input arriving without one,
+# because a required input refuses a tfvars file that was complete the day
+# before.
+#
+# UNSET VERSUS EMPTY IS DECIDED PER VARIABLE AND EACH DECISION IS WRITTEN DOWN
+# AT THE env BLOCK IN app.tf that carries it. The rule is not "dynamic block
+# unless awkward". It is: read what the application does with unset and what it
+# does with empty, and pick the block that cannot turn one into the other.
+# AF_SIGNIN_ALLOWLIST above is the precedent and the reason -- unset means
+# everybody there and empty means nobody, so a dynamic block that vanished on
+# empty would deploy the least restrictive reading of the most restrictive
+# intent. Nothing added below inverts that way; the one that comes closest is
+# AF_ADMIN_POOL_MAX, where unset means four and empty parses as a pool of zero,
+# and it is never emitted empty.
+# ---------------------------------------------------------------------------
+
+# The operator portal, off by default.
+#
+# ON means this module generates a password for `antifailure_admin`, keeps it in
+# Key Vault, and hands it to the application as AF_ADMIN_DATABASE_URL and to the
+# bootstrap job, which is the thing that gives that role a login at all.
+#
+# The role itself is NOT created here and could not be: it is created by
+# migration 0023 with BYPASSRLS and granted its privileges by 0029, 0030 and
+# 0031, and Terraform cannot reach this server -- there is no public endpoint
+# and a plan running in CI is not inside the VNet. That is the same reason the
+# application's own role is created by the bootstrap job rather than by a
+# postgresql provider block.
+#
+# OFF is a real answer and the right default for a single team running this for
+# themselves: the application says so at startup and every /admin route answers
+# PRECONDITION_FAILED naming the variable, rather than rendering an empty portal
+# that reads like a platform with no customers on it.
+variable "operator_portal_enabled" {
+  type        = bool
+  default     = false
+  description = "Generate an operator credential and wire AF_ADMIN_DATABASE_URL. Off means this installation has no operator portal."
+}
+
+# Connections in the operator pool.
+#
+# Counted against the database the same way the application's pool is: see the
+# precondition in app.tf, which now includes this number. A pool that fits on
+# its own and does not fit beside the application is a 503 at the next peak.
+variable "admin_pool_max" {
+  type        = number
+  default     = 4
+  description = "Connections in the operator pool. Small on purpose: it serves a handful of operators, not customer traffic."
+}
+
+# Analytics, off by default.
+#
+# The surrogate secret is GENERATED here rather than typed, like the provider
+# sealing secret and for the same reason: nobody and no workflow should ever
+# hold it. Regenerating it re-keys every organization surrogate, which silently
+# breaks every funnel that crosses the change, so it is created once and kept.
+variable "analytics_enabled" {
+  type        = bool
+  default     = false
+  description = "Generate a surrogate secret so the analytics stream records. Off records nothing and the dashboard says so."
+}
+
+variable "analytics_operator_org" {
+  type        = string
+  default     = ""
+  description = "Slug of the organization whose owners and admins may read the analytics dashboard. Empty means nobody."
+}
+
+variable "analytics_retention_days" {
+  type        = number
+  default     = null
+  description = "Delete raw analytics events older than this many days. Null keeps them forever, because retention is an operator's decision."
+}
+
+# The one origin the marketing site's beacon may be called from.
+#
+# Empty refuses every beacon, which is what unset does in the application too,
+# so this cannot be set wrong in the dangerous direction: there is no value here
+# that reflects whatever Origin arrives.
+variable "site_origin" {
+  type        = string
+  default     = ""
+  description = "The origin the marketing site is served from. Empty refuses every beacon."
+}
+
+# Where a person with no organization installs the GitHub App.
+#
+# The variable whose absence hid both buttons on the "No organization yet"
+# screen. The application validates it and stops at startup on anything that is
+# not an https://github.com/apps/<slug>/installations/new address, so empty is
+# the only safe way to say "not configured".
+variable "github_app_install_url" {
+  type        = string
+  default     = ""
+  description = "The public https://github.com/apps/<slug>/installations/new address. Empty offers no install action."
+}
+
+variable "github_api_base" {
+  type        = string
+  default     = ""
+  description = "Where the GitHub API lives, for GitHub Enterprise Server. Empty uses https://api.github.com."
+}
+
+# Signing in with a link, and inviting somebody who is not in your GitHub
+# organization. Off by default.
+#
+# mail_from is the switch, the way github_app_id is the switch for the App, and
+# for the same reason: the application refuses a half-configured mailer at
+# startup, so a block that could emit two of the three would stop the container
+# rather than degrade. Set it and public_url becomes required by a precondition
+# in app.tf, and the Resend key is READ from the vault rather than passed
+# through a tfvars file.
+variable "mail_from" {
+  type        = string
+  default     = ""
+  description = "The From address on sign-in links and invitations. Empty turns mail off entirely."
+}
+
+variable "public_url" {
+  type        = string
+  default     = ""
+  description = "The origin a browser reaches this deployment on, which is where a sign-in link points. Required when mail_from is set."
+}
+
+# Where an enterprise lead is announced.
+#
+# Needs a mailer, and the application says so at startup rather than failing:
+# set with no mailer it prints that this deployment believes it is announcing
+# leads and CANNOT, which is its own state and a worse one than either end. The
+# precondition in app.tf refuses that combination at plan time so the module
+# cannot produce it. Leads are recorded either way and read with
+# `af-control-plane-backup leads`.
+variable "lead_notify_email" {
+  type        = string
+  default     = ""
+  description = "Where an enterprise lead is announced. Empty records leads and mails nobody. Requires mail_from."
+}
+
+variable "resend_api_key_secret_name" {
+  type        = string
+  default     = "resend-api-key"
+  description = "The Key Vault secret holding the Resend API key. Put it there yourself; Terraform never sees the value."
+}
+
+# Billing. Off by default, and the Team price is the switch.
+#
+# THERE IS NO enterprise PRICE AND THERE IS NOT MEANT TO BE. Enterprise is
+# arranged with a person, so AF_STRIPE_PRICE_ENTERPRISE is deliberately unset
+# and this module has no input for it. A plan with no price is a plan that is
+# not sold here; checkout refuses it by name and points at the contact route.
+# Adding a default that made an absent price look present would sell something
+# nobody can buy.
+variable "stripe_price_team" {
+  type        = string
+  default     = ""
+  description = "The Stripe price the team plan is sold at. Empty turns billing off entirely."
+}
+
+variable "stripe_secret_key_secret_name" {
+  type        = string
+  default     = "stripe-secret-key"
+  description = "The Key Vault secret holding the Stripe API key. Put it there yourself; Terraform never sees the value."
+}
+
+variable "stripe_webhook_secret_secret_name" {
+  type        = string
+  default     = "stripe-webhook-secret"
+  description = "The Key Vault secret holding the Stripe webhook signing secret. Put it there yourself; Terraform never sees the value."
+}
+
+# The plan gate on a control plane sold only to enterprise organizations.
+#
+# Any value other than `enterprise` stops the process, and so does setting it
+# while billing is off, because no customer could then satisfy the gate. Both
+# are caught by a precondition in app.tf so they fail a plan in review rather
+# than a container at 3am.
+variable "hosted_required_plan" {
+  type        = string
+  default     = ""
+  description = "Set to enterprise on a plane sold only to enterprise organizations. Empty serves every plan."
+}
+
+# Whoever runs this plane also decides each organization's plan.
+#
+# Refused by the application at startup on an installation that takes payment,
+# because a plan that can be granted by hand is not a plan anybody has to buy.
+# The precondition in app.tf refuses the same combination at plan time.
+variable "operator_sets_plan" {
+  type        = bool
+  default     = false
+  description = "Allow billing.set on an installation that takes no payment. Refused together with any Stripe configuration."
+}
+
+variable "model_prices" {
+  type        = string
+  default     = ""
+  description = "Model prices as model=input/output in US dollars per million tokens, comma separated. Adds to the built-in defaults."
+}
+
+variable "product_name" {
+  type        = string
+  default     = ""
+  description = "The product name in a sign-in link's subject line, for a white-labelled deployment. Empty uses Antifailure."
 }

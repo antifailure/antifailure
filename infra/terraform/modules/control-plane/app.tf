@@ -89,7 +89,10 @@ resource "azurerm_container_app_job" "bootstrap" {
 
 
   dynamic "secret" {
-    for_each = toset(["database-url", "migration-database-url"])
+    for_each = toset(concat(
+      ["database-url", "migration-database-url"],
+      var.operator_portal_enabled ? ["admin-database-url"] : [],
+    ))
     content {
       name                = secret.value
       identity            = azurerm_user_assigned_identity.app.id
@@ -112,6 +115,28 @@ resource "azurerm_container_app_job" "bootstrap" {
       env {
         name        = "AF_MIGRATION_DATABASE_URL"
         secret_name = "migration-database-url"
+      }
+
+      # The operator credential reaches this job so the job can CREATE it.
+      #
+      # A dynamic block rather than always set, and here the two readings are
+      # not close: the bootstrap treats unset as "this installation has no
+      # operator portal" and an empty string as a URL it cannot parse, which
+      # stops the job and therefore the deploy. There is no intent an empty
+      # value here would express.
+      #
+      # `antifailure_admin` is created NOLOGIN with no password by the
+      # migrations, exactly as `antifailure_app` is, and nothing else in this
+      # repository ever gives it one. Without this the application's
+      # AF_ADMIN_DATABASE_URL would name a role no client can authenticate as,
+      # and createAdminPool is awaited at start-up, so the whole control plane
+      # would refuse to start rather than merely lose its portal.
+      dynamic "env" {
+        for_each = var.operator_portal_enabled ? [1] : []
+        content {
+          name        = "AF_ADMIN_DATABASE_URL"
+          secret_name = "admin-database-url"
+        }
       }
     }
   }
@@ -252,6 +277,8 @@ resource "azurerm_container_app" "this" {
     for_each = toset(concat(
       ["database-url", "github-client-id", "github-client-secret", "github-redirect-uri"],
       var.provider_key_secret_enabled ? ["provider-key-secret"] : [],
+      var.operator_portal_enabled ? ["admin-database-url"] : [],
+      var.analytics_enabled ? ["analytics-surrogate-secret"] : [],
     ))
     content {
       name                = secret.value
@@ -260,12 +287,24 @@ resource "azurerm_container_app" "this" {
     }
   }
 
-  # The App's two secrets, which this module reads rather than writes.
+  # The App's two secrets, which this module reads rather than writes, and the
+  # three credentials Stripe and Resend mint, which it reads for the same
+  # reason: a resource that manages a value it cannot produce is a resource that
+  # will one day set it to the empty string.
   dynamic "secret" {
-    for_each = var.github_app_id == "" ? {} : {
-      "github-app-private-key"    = data.azurerm_key_vault_secret.github_app_private_key[0].versionless_id
-      "github-app-webhook-secret" = data.azurerm_key_vault_secret.github_app_webhook_secret[0].versionless_id
-    }
+    for_each = merge(
+      var.github_app_id == "" ? {} : {
+        "github-app-private-key"    = data.azurerm_key_vault_secret.github_app_private_key[0].versionless_id
+        "github-app-webhook-secret" = data.azurerm_key_vault_secret.github_app_webhook_secret[0].versionless_id
+      },
+      var.stripe_price_team == "" ? {} : {
+        "stripe-secret-key"     = data.azurerm_key_vault_secret.stripe_secret_key[0].versionless_id
+        "stripe-webhook-secret" = data.azurerm_key_vault_secret.stripe_webhook_secret[0].versionless_id
+      },
+      var.mail_from == "" ? {} : {
+        "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
+      },
+    )
     content {
       name                = secret.key
       identity            = azurerm_user_assigned_identity.app.id
@@ -334,28 +373,45 @@ resource "azurerm_container_app" "this" {
         }
       }
 
-      # Who may sign in. ALWAYS set, including when the list is empty.
+      # Who may sign in. Set for every value of the variable EXCEPT null.
       #
-      # The distinction is the whole feature: the application reads an unset
-      # variable as "open to every GitHub account" and an empty one as "nobody".
-      # So this is not a dynamic block that disappears when the list is empty --
-      # that would turn the most restrictive intent into the least restrictive
-      # deployment, which is how this went wrong the first time.
-      env {
-        name  = "AF_SIGNIN_ALLOWLIST"
-        value = join(",", var.signin_allowlist)
+      # Read the condition carefully, because the obvious simplification of it
+      # is the bug this deployment already shipped once. The application reads
+      # an unset variable as "open to every GitHub account" and an EMPTY one as
+      # "nobody". So a dynamic block keyed on the list being empty would turn
+      # the most restrictive intent into the least restrictive deployment.
+      #
+      # It is keyed on null instead, which is a different value from an empty
+      # list in Terraform and is the only way to say "everybody" here. An empty
+      # list still renders `AF_SIGNIN_ALLOWLIST=""` and still closes the plane
+      # to everyone, exactly as before.
+      dynamic "env" {
+        for_each = var.signin_allowlist == null ? [] : [1]
+        content {
+          name  = "AF_SIGNIN_ALLOWLIST"
+          value = join(",", var.signin_allowlist)
+        }
       }
 
-      # The other half of the same decision. Unset means the refusal page has
-      # nowhere to send anybody, which is correct for an installation with no
-      # waitlist and wrong for ours, so it is a dynamic block rather than
-      # always set: an empty string here would be a link to nothing.
+      # What the ones it turns away see. Unset means the refusal page has
+      # nowhere to send anybody, which is correct for an installation whose
+      # operator has their own way of being asked, so it is a dynamic block
+      # rather than always set: an empty string here would be a link to nothing.
       dynamic "env" {
         for_each = var.signup_url == "" ? [] : [var.signup_url]
         content {
           name  = "AF_SIGNUP_URL"
           value = env.value
         }
+      }
+
+      # Whether signing in ends somewhere. Always set, both ways, because the
+      # value a reader of the revision needs is the answer rather than the
+      # absence of a question, and the application's "1 or 0 or unset" grammar
+      # accepts an explicit 0.
+      env {
+        name  = "AF_SELF_SERVE_SIGNUP"
+        value = var.self_serve_signup ? "1" : "0"
       }
 
       dynamic "env" {
@@ -389,6 +445,251 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "AF_GITHUB_APP_WEBHOOK_SECRET"
           secret_name = "github-app-webhook-secret"
+        }
+      }
+
+      # -------------------------------------------------------------------
+      # THE OPERATOR PORTAL.
+      #
+      # A separate credential rather than a privilege on the application's own
+      # role: `antifailure_admin` holds BYPASSRLS, and BYPASSRLS is an
+      # ATTRIBUTE, which membership does not carry. That is what makes the wall
+      # hold. The application role cannot be granted its way across it.
+      #
+      # Both blocks are dynamic on the same switch and they are the clearest
+      # case in this file where empty is not a quieter version of unset. Unset
+      # means "no operator portal", which the application says at startup and
+      # every /admin route repeats by name. An empty AF_ADMIN_DATABASE_URL is a
+      # connection string with no host, and the pool is awaited at start-up, so
+      # it would stop the container. An empty AF_ADMIN_POOL_MAX is worse than
+      # either, and it is the reason this pair is called out: the application
+      # reads it as `Number(value ?? 4)`, so unset is four and empty is
+      # Number('') -- a pool of ZERO, which is a portal that hangs on its first
+      # query rather than one that says it is not configured.
+      dynamic "env" {
+        for_each = var.operator_portal_enabled ? [1] : []
+        content {
+          name        = "AF_ADMIN_DATABASE_URL"
+          secret_name = "admin-database-url"
+        }
+      }
+      dynamic "env" {
+        for_each = var.operator_portal_enabled ? [var.admin_pool_max] : []
+        content {
+          name  = "AF_ADMIN_POOL_MAX"
+          value = tostring(env.value)
+        }
+      }
+
+      # -------------------------------------------------------------------
+      # ANALYTICS.
+      #
+      # The secret is dynamic on its own switch because unset is a real and
+      # supported answer -- "recording nothing", said out loud at startup -- and
+      # an empty value is not: the application requires exactly 64 hex
+      # characters and stops at startup on any other length.
+      dynamic "env" {
+        for_each = var.analytics_enabled ? [1] : []
+        content {
+          name        = "AF_ANALYTICS_SURROGATE_SECRET"
+          secret_name = "analytics-surrogate-secret"
+        }
+      }
+
+      # Who may READ the dashboard, which is a separate decision from whether
+      # anything is recorded: an installation can record without granting the
+      # dashboard to anybody. Dynamic, and safe in the direction that matters,
+      # because unset and empty BOTH mean nobody here. There is no value that
+      # opens it.
+      dynamic "env" {
+        for_each = var.analytics_operator_org == "" ? [] : [var.analytics_operator_org]
+        content {
+          name  = "AF_ANALYTICS_OPERATOR_ORG"
+          value = env.value
+        }
+      }
+
+      # How long raw analytics events are kept. Null keeps them forever, which
+      # is the default because retention is an operator's decision, and an empty
+      # string is not a number of days -- the rollup refuses it by name.
+      dynamic "env" {
+        for_each = var.analytics_retention_days == null ? [] : [var.analytics_retention_days]
+        content {
+          name  = "AF_ANALYTICS_RETENTION_DAYS"
+          value = tostring(env.value)
+        }
+      }
+
+      # The one origin the marketing site's beacon may be called from.
+      #
+      # Dynamic, and this one is worth checking rather than assuming, because it
+      # is a CORS decision and the dangerous default would be permissive. It is
+      # not: the application compares the arriving Origin against this value and
+      # refuses when it is falsy, so unset and empty both refuse every beacon
+      # and neither reflects whatever Origin arrives. Absent is the safe end.
+      dynamic "env" {
+        for_each = var.site_origin == "" ? [] : [var.site_origin]
+        content {
+          name  = "AF_SITE_ORIGIN"
+          value = env.value
+        }
+      }
+
+      # -------------------------------------------------------------------
+      # The GitHub App's public install address, which is a different variable
+      # from the App itself and is why it was missed.
+      #
+      # Its absence is what hid both actions on the "No organization yet"
+      # screen. Dynamic, because the application validates the address and stops
+      # at startup on anything that is not an
+      # https://github.com/apps/<slug>/installations/new URL, so an empty string
+      # would take the container down rather than turn a button off. Unset is
+      # the supported "not configured": the person is told so and is still
+      # offered "Check my GitHub membership", which never depended on it.
+      dynamic "env" {
+        for_each = var.github_app_install_url == "" ? [] : [var.github_app_install_url]
+        content {
+          name  = "AF_GITHUB_APP_INSTALL_URL"
+          value = env.value
+        }
+      }
+
+      # Where the GitHub API lives, for GitHub Enterprise Server. Dynamic
+      # because the application passes this straight through as the API base
+      # when it is set: an empty string would be a base URL that resolves
+      # nowhere, where unset is the documented https://api.github.com.
+      dynamic "env" {
+        for_each = var.github_api_base == "" ? [] : [var.github_api_base]
+        content {
+          name  = "AF_GITHUB_API_BASE"
+          value = env.value
+        }
+      }
+
+      # -------------------------------------------------------------------
+      # SIGNING IN WITH A LINK, and inviting somebody who is not in your GitHub
+      # organization. Both of these are the same three variables.
+      #
+      # All three on one switch, deliberately, and it is the same shape the
+      # GitHub App's three blocks have above and for the same reason: the
+      # application exits at startup when it can see one or two of them, because
+      # two of three is a link that goes nowhere or mail that cannot be sent.
+      # A block that could emit AF_MAIL_FROM without AF_PUBLIC_URL would not
+      # degrade, it would stop the container. The precondition below refuses
+      # that combination at PLAN time instead, where it is a review comment.
+      dynamic "env" {
+        for_each = var.mail_from == "" ? [] : [1]
+        content {
+          name        = "AF_RESEND_API_KEY"
+          secret_name = "resend-api-key"
+        }
+      }
+      dynamic "env" {
+        for_each = var.mail_from == "" ? [] : [var.mail_from]
+        content {
+          name  = "AF_MAIL_FROM"
+          value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.mail_from == "" ? [] : [var.public_url]
+        content {
+          name  = "AF_PUBLIC_URL"
+          value = env.value
+        }
+      }
+
+      # Where an enterprise lead is announced.
+      #
+      # Dynamic on its own value rather than on the mail switch, and the
+      # difference matters. Gating it on mail_from would silently DROP an
+      # address somebody set, leaving them with "nobody is mailed" and no
+      # explanation. The precondition below refuses the combination instead, so
+      # the address is either delivered with a mailer behind it or the plan says
+      # why not.
+      dynamic "env" {
+        for_each = var.lead_notify_email == "" ? [] : [var.lead_notify_email]
+        content {
+          name  = "AF_LEAD_NOTIFY_EMAIL"
+          value = env.value
+        }
+      }
+
+      # The name in a sign-in link's subject line, for a white-labelled
+      # deployment. Dynamic; the application already treats an empty string as
+      # unset, and a subject line addressed from nothing is not an intent.
+      dynamic "env" {
+        for_each = var.product_name == "" ? [] : [var.product_name]
+        content {
+          name  = "AF_PRODUCT_NAME"
+          value = env.value
+        }
+      }
+
+      # -------------------------------------------------------------------
+      # BILLING, on one switch for the same reason mail is.
+      #
+      # There is no AF_STRIPE_PRICE_ENTERPRISE block and there is not meant to
+      # be one. Enterprise is arranged with a person, so no Stripe price exists
+      # behind it; a plan with no price is not a misconfiguration, and checkout
+      # refuses that plan by name rather than reaching Stripe with an empty
+      # price id.
+      dynamic "env" {
+        for_each = var.stripe_price_team == "" ? [] : [1]
+        content {
+          name        = "AF_STRIPE_SECRET_KEY"
+          secret_name = "stripe-secret-key"
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_price_team == "" ? [] : [1]
+        content {
+          name        = "AF_STRIPE_WEBHOOK_SECRET"
+          secret_name = "stripe-webhook-secret"
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_price_team == "" ? [] : [var.stripe_price_team]
+        content {
+          name  = "AF_STRIPE_PRICE_TEAM"
+          value = env.value
+        }
+      }
+
+      # The plan gate on a control plane sold only to enterprise organizations.
+      # Dynamic because any value other than `enterprise` stops the process, and
+      # an empty string is one of those values.
+      dynamic "env" {
+        for_each = var.hosted_required_plan == "" ? [] : [var.hosted_required_plan]
+        content {
+          name  = "AF_HOSTED_REQUIRED_PLAN"
+          value = env.value
+        }
+      }
+
+      # Whoever runs this plane also decides each organization's plan.
+      #
+      # Dynamic, and this is the one place a bool could plausibly have been
+      # emitted as "0" instead. It is not, because unset and "0" mean exactly
+      # the same thing to the application -- both parse to false -- so an
+      # always-set block would buy nothing and would put a variable in the
+      # template that the precondition below has to reason about anyway.
+      dynamic "env" {
+        for_each = var.operator_sets_plan ? [1] : []
+        content {
+          name  = "AF_OPERATOR_SETS_PLAN"
+          value = "1"
+        }
+      }
+
+      # Model prices, added to the built-in defaults rather than replacing them.
+      # Dynamic; the application treats blank as "use the defaults", so an empty
+      # block would say the same thing at more length.
+      dynamic "env" {
+        for_each = var.model_prices == "" ? [] : [var.model_prices]
+        content {
+          name  = "AF_MODEL_PRICES"
+          value = env.value
         }
       }
 
@@ -461,7 +762,51 @@ resource "azurerm_container_app" "this" {
         local.usable_connections == 0 ||
         local.peak_app_connections + local.tool_connections <= local.usable_connections
       )
-      error_message = "This app can open ${local.peak_app_connections} connections (max_replicas ${var.max_replicas} plus one rollback revision at min_replicas ${var.min_replicas}, each holding a pool of ${var.pool_max}) and ${var.database_sku} hands an ordinary role only ${local.usable_connections}, with ${local.tool_connections} of those spoken for by the bootstrap job, the maintenance job, break-glass and backup. Lower pool_max, lower max_replicas, or move to a SKU with more max_connections."
+      error_message = "This app can open ${local.peak_app_connections} connections (max_replicas ${var.max_replicas} plus one rollback revision at min_replicas ${var.min_replicas}, each holding ${local.per_replica_connections}: a pool of ${var.pool_max}${var.operator_portal_enabled ? " and an operator pool of ${var.admin_pool_max}" : ""}) and ${var.database_sku} hands an ordinary role only ${local.usable_connections}, with ${local.tool_connections} of those spoken for by the bootstrap job, the maintenance job, break-glass and backup. Lower pool_max${var.operator_portal_enabled ? " or admin_pool_max" : ""}, lower max_replicas, or move to a SKU with more max_connections."
+    }
+
+    # THE CONTRADICTIONS THE APPLICATION EXITS ON, CAUGHT AT PLAN TIME INSTEAD.
+    #
+    # Each of the three below is already refused by the control plane at
+    # start-up, with `process.exit(2)` and a message naming the variables. That
+    # is the right behaviour and it is not enough here, because of the cost this
+    # file's lifecycle block spells out just above: a template change creates a
+    # revision at ZERO percent traffic. So a tfvars file carrying one of these
+    # combinations applies cleanly, terraform reports success, the new revision
+    # crash-loops where nobody is looking, and production keeps serving the old
+    # build until somebody deploys and the deploy gate finally fails.
+    #
+    # A configuration that cannot start should be a review comment on a pull
+    # request, which is exactly the argument the connection arithmetic above
+    # makes for itself.
+
+    # Mail is three variables and the application refuses two of them.
+    precondition {
+      condition     = var.mail_from == "" || var.public_url != ""
+      error_message = "mail_from is set and public_url is empty, so this deployment would set AF_MAIL_FROM and AF_RESEND_API_KEY without AF_PUBLIC_URL. The control plane exits at start-up on a half-configured mailer, because two of the three is a link that goes nowhere or mail that cannot be sent. Set public_url to the origin a browser reaches this deployment on, or clear mail_from to turn the path off."
+    }
+
+    # A lead notification nobody receives.
+    #
+    # Not a start-up refusal in the application, which records the lead and
+    # prints that the address CANNOT be told. That is the right runtime
+    # behaviour and it is a poor deploy-time one: the sentence scrolls past in a
+    # log and the deployment goes on believing it announces leads.
+    precondition {
+      condition     = var.lead_notify_email == "" || var.mail_from != ""
+      error_message = "lead_notify_email is set and mail_from is empty, so this deployment would name an address it has no mailer to reach. Enterprise leads are still recorded and readable with `af-control-plane-backup leads`; set mail_from to announce them, or clear lead_notify_email."
+    }
+
+    # A plan gate nobody can satisfy.
+    precondition {
+      condition     = contains(["", "enterprise"], var.hosted_required_plan) && (var.hosted_required_plan == "" || var.stripe_price_team != "")
+      error_message = "hosted_required_plan is ${jsonencode(var.hosted_required_plan)}. It must be `enterprise` or empty, and setting it requires billing, which means stripe_price_team and the two Stripe secrets in the vault. The control plane exits at start-up on either mistake: an organization on a plane with a gate it cannot buy its way past is locked out of the product."
+    }
+
+    # A plan that can be granted by hand is not a plan anybody has to buy.
+    precondition {
+      condition     = !var.operator_sets_plan || (var.stripe_price_team == "" && var.hosted_required_plan == "")
+      error_message = "operator_sets_plan is true on an installation that takes payment. A plan that can be granted by hand is not a plan anybody has to buy, and the control plane exits at start-up on the combination. Unset it, or clear stripe_price_team and hosted_required_plan."
     }
   }
 

@@ -35,6 +35,8 @@ export interface BillingState {
     plan: string
     status: string
     priceId: string | null
+    /** What Stripe reported. A record of what was billed, never a grant: no
+     *  entitlement reads it. See stripe.ts:StripeSubscription.quantity. */
     quantity: number
     currentPeriodStart: string | null
     currentPeriodEnd: string | null

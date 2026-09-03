@@ -128,10 +128,20 @@ func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestra
 	}
 
 	r := redact.New()
+	// What this run reports to, when somebody has signed this terminal in.
+	//
+	// Read here rather than inside the orchestrator for the reason the field's
+	// own comment gives: nothing under env or telemetry may open a credential
+	// store. Read on every lifecycle command rather than only on af up, because
+	// af test and af down emit events about the same environment and a run that
+	// appeared in the console and then stopped reporting is worse than one that
+	// never appeared.
+	cpURL, cpToken := signedInControlPlane(env2)
 	o, err := env.New(env.Options{
 		Root: root, Manifest: m, Branch: branch, Clock: env2.Clock,
 		Repository: currentRepository(env2, root), PullRequest: currentPullRequest(env2),
 		Rebuild: rebuild, Redactor: r, Verbose: env2.Out.Verbose, Getenv: env2.Getenv,
+		ControlPlaneURL: cpURL, ControlPlaneToken: cpToken,
 		Progress: func(line string) {
 			// Progress is prose, not data, so it is suppressed in JSON mode
 			// rather than interleaved into a document a script is parsing,

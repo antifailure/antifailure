@@ -142,7 +142,7 @@ export function PrivacyPage() {
               ],
               [
                 "This site",
-                "One waitlist address per person, stored on a server so that the sentence next to the form is true, with the time it was first and last submitted. There is no way to read the list back through the site.",
+                "Nothing, until you use the contact form. That writes your name, work email, company, an optional seat count and your message into the control plane's own database, with the page it came from and the time. The role that serves public requests can insert into that table and cannot read it back, so no request to this site can ever return somebody else's contact details.",
               ],
             ]}
           />
@@ -303,7 +303,15 @@ export function TermsPage() {
               ],
               [
                 "Accounts",
-                "Installing the GitHub App creates an organization in the hosted control plane, on the plan the schema gives a new one. Nothing can be run in that organization until somebody signs in to it, and sign-in can be restricted to named accounts. Nothing here is sold and no card is taken, so these terms are not a paid-service agreement.",
+                "Anybody can create one. Signing in with GitHub creates an organization on the free plan, owned by that account, and installing the GitHub App creates or adopts one the same way. The free plan's limits are enforced against it: reaching one refuses the next creation and tears nothing down.",
+              ],
+              [
+                "Paying",
+                "A paid plan is bought through Stripe's own hosted checkout and managed in Stripe's customer portal. No card ever reaches this product. These terms are not a paid-service agreement: the contracting entity, the governing law and the liability cap are all still blank below, and a contract with no party to it is not one. A purchase is governed by whatever is agreed in writing at the time.",
+              ],
+              [
+                "The enterprise edition",
+                "The source under ee/ is public to read and audit. Running it in production requires a written agreement with Antifailure and a valid licence, which is arranged through the contact form. Its licence used to accept this page as that agreement; it no longer names it, because this page says it is not one.",
               ],
               [
                 "Availability",
@@ -421,7 +429,7 @@ export function TermsPage() {
       </PageSection>
       <PageSection>
         <CounselNotice>
-          This page states product limits so that waitlist visitors are not sold a zero-failure
+          This page states product limits so that nobody signing up is sold a zero-failure
           guarantee. It is not a substitute for a counsel-reviewed agreement, and it is not an order
           form.
         </CounselNotice>
@@ -739,7 +747,7 @@ export function DpaPage() {
               ],
               [
                 "We control",
-                "The waitlist address a visitor gives this site, and our own operational records about running the service.",
+                "The account and session records signing in creates, what somebody leaves on the contact form, and our own operational records about running the service.",
               ],
               [
                 "Purpose limitation",
@@ -1197,8 +1205,8 @@ export function DataRetentionPage() {
                 "Removal is an endpoint you can call, not a request you have to send us, and it stops the key working immediately. It marks the record revoked rather than deleting the row, so the encrypted value remains until the row is removed with the organization. Rotating a key does the same to the one it replaces.",
               ],
               [
-                "Waitlist addresses",
-                "Until the waitlist is closed or you ask for removal, which is carried out by hand: nothing in the site reads the list back and there is no removal endpoint. Signing up twice updates one row rather than adding a second. Your browser also keeps a copy of the address you submitted, which clearing site data removes.",
+                "Contact form messages",
+                "Kept until you ask for removal, which is carried out by hand: the role serving public requests holds insert and no select on that table, so there is deliberately no endpoint that reads one back or deletes one. An operator reads the queue on a separate credential and marks each one handled, which is how a request for removal reaches somebody.",
               ],
               [
                 "Database backups",

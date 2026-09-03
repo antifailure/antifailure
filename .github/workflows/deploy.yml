@@ -89,15 +89,18 @@ jobs:
         working-directory: www
 
       - name: Install the site API
-        # The waitlist function. This step is the whole reason the sign-up form
-        # on antifailure.dev worked for two days and then stopped: the publish
-        # below passed neither api_location nor an api build, so every deploy
-        # from here uploaded a site with no API, and Static Web Apps removed
-        # the managed function the first hand deploy had put there. Every path
-        # under /api answered 500 from that moment, and www/lib/waitlist.ts
-        # turns a 500 into "Something went wrong on our side", so every address
-        # anybody typed went nowhere and the form said so in a way that read
-        # like our fault, which it was.
+        # This step is the whole reason /api on antifailure.dev worked for two
+        # days and then stopped: the publish below passed neither api_location
+        # nor an api build, so every deploy from here uploaded a site with no
+        # API, and Static Web Apps removed the managed function the first hand
+        # deploy had put there. Every path under /api answered 500 from that
+        # moment, the sign-up form of the day turned that into "Something went
+        # wrong on our side", and every address anybody typed went nowhere while
+        # the page said so in a way that read like our fault, which it was.
+        #
+        # The form is gone and the function is not. It answers /api and every
+        # path under it, which is how somebody pointing a machine at this host
+        # is told where the product's API actually lives.
         #
         # npm ci rather than letting the platform's builder run npm install:
         # the lockfile is the point, and the same install runs in CI.
@@ -170,10 +173,11 @@ jobs:
         # days, with a green deploy every time.
         #
         # Two requests, and neither one writes anything. GET /api must return
-        # the index, which proves the function app started. POST /api/waitlist
-        # with a body that is not an address must return 400, which proves the
-        # route reaches the waitlist function and that it validates before it
-        # touches storage. A real address would put a row in the real table.
+        # the index, which proves the function app started. A path under it
+        # that nothing serves must return this app's own 404 body rather than
+        # the platform's, which proves the request reached our code: a managed
+        # function that is missing entirely produces a 404 too, from the CDN,
+        # and the two are indistinguishable from the status line alone.
         if: ${{ env.TOKEN != '' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
@@ -196,23 +200,46 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q '/api/waitlist' /tmp/api-index.json; then
-            echo "::error::GET /api answered 200 but does not list the waitlist endpoint."
+          if ! grep -q 'app.antifailure.dev' /tmp/api-index.json; then
+            echo "::error::GET /api answered 200 without naming the product API's origin, so this"
+            echo "::error::is not the body api/index/index.js serves."
             head -c 500 /tmp/api-index.json
             exit 1
           fi
 
-          reject=$(curl -sS -m 15 -o /tmp/api-reject.json -w '%{http_code}' \
-            -X POST -H 'content-type: application/json' \
-            -d '{"email":"not-an-address","source":"deploy-check"}' \
-            "$site/api/waitlist" || echo 000)
-          if [ "$reject" != "400" ]; then
-            echo "::error::POST /api/waitlist with an invalid address returned $reject, expected 400."
-            head -c 500 /tmp/api-reject.json || true
+          missing=$(curl -sS -m 15 -o /tmp/api-404.json -w '%{http_code}' \
+            "$site/api/nothing-serves-this" || echo 000)
+          if [ "$missing" != "404" ]; then
+            echo "::error::GET /api/nothing-serves-this returned $missing, expected 404."
+            head -c 500 /tmp/api-404.json || true
+            exit 1
+          fi
+          # Read the field, do not pattern match the serialization.
+          #
+          # This was `grep -q '"code":"endpoint_not_found"'` and it could never
+          # match, because the function pretty prints and the body carries
+          # `"code": "endpoint_not_found"` with a space after the colon. So the
+          # step failed on a deploy where the function was answering correctly,
+          # and the sentence it printed described a missing function app. An
+          # assertion that cannot succeed is indistinguishable from a real
+          # failure, and this one turned main red while telling whoever read it
+          # to go and look at the wrong thing.
+          #
+          # `jq -e` still fails on a body that is not JSON, on one with no
+          # `code`, and on one whose code is a different value, so nothing is
+          # weakened by no longer caring where the whitespace falls. Checked
+          # both ways against the live body before this was written: the old
+          # pattern matched zero times, and `jq` reported true for the real
+          # value and false for a wrong one.
+          if ! jq -e '.code == "endpoint_not_found"' /tmp/api-404.json >/dev/null 2>&1; then
+            echo "::error::the 404 under /api did not come from this function app. A managed function"
+            echo "::error::that is missing altogether also 404s, from the CDN, with an empty body, so"
+            echo "::error::the status line alone cannot tell a working app from an absent one."
+            head -c 500 /tmp/api-404.json || true
             exit 1
           fi
 
-          echo "GET /api is 200 and lists the waitlist; POST /api/waitlist rejects junk with 400"
+          echo "GET /api is 200 and names the product API; an unrouted path is this app's own 404"
 
       - name: Every hostname presents a valid certificate
         # A publish is not a reachable site, and this is the part of the site

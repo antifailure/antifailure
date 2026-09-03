@@ -46,9 +46,15 @@ export interface BillingSummarySeats {
 export interface BillingSummarySubscription {
   plan: string
   status: string
-  /** Seats the price multiplies, which is not the same number as `seats.used`
-   *  and routinely disagrees with it between a member leaving and the next
-   *  invoice. */
+  /**
+   * What Stripe reported as the subscription item's quantity.
+   *
+   * Shown so an operator can see what was billed. It is NOT a seat allowance
+   * and it is not what `seats` above is computed from: nothing this control
+   * plane sells has a quantity, checkout sends none, and `seats.limit` comes
+   * from the plan. A subscription bought before that change can carry any
+   * number here, and it still entitles exactly what its plan entitles.
+   */
   quantity: number
   currentPeriodEnd: Date | null
   cancelAtPeriodEnd: boolean

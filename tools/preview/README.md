@@ -41,6 +41,23 @@ eleven operators including one suspended and one never provisioned, ten feature
 flags across all three states with one killed, and sixty operator audit entries
 appended through the real chain so the log verifies rather than merely existing.
 
+## Seed the states the pages branch on
+
+Rows are not enough. A page that distinguishes a live credential from an
+expired one from a revoked one renders one branch out of many against a seed of
+live credentials, and a screenshot of it passes review while showing none of the
+thinking in it. So the seeder writes the STATES: suspended organizations beside
+active ones, an operator who has never been provisioned beside one who has, a
+flag that was killed beside one that is merely off, an expired token and a
+revoked token, and a webhook delivery that matched no organization, which is the
+row an operator goes looking for when a customer says their events go nowhere.
+
+The other half of that rule is not seeding what the product does not write.
+There are no MCP servers and no outbound webhook subscriptions here, because
+this product registers neither, and the pages that say so are stating a finding.
+A seeder that invented rows for them would make exactly the pages that refuse to
+draw invented data start drawing it, in the one place a reviewer looks.
+
 ## Nothing in the tree carries a credential
 
 The seeded operator is `operator@preview.local`. Its password is **generated for

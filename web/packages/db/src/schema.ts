@@ -669,7 +669,22 @@ export const subscriptions = pgTable('subscriptions', {
   /** The plan this entitles, which is what moves organizations.plan. */
   plan: text('plan').notNull(),
   priceId: text('price_id'),
-  /** Seats. The only number a price multiplies. */
+  /**
+   * What Stripe reported as the subscription item's quantity. A RECORD, never
+   * a grant.
+   *
+   * The comment in migrations/0020_billing.sql calls this "the seat count" and
+   * cannot be corrected there, because a migration that already ran is
+   * digested and editing one breaks every database that applied it. This is the
+   * correction. Nothing this control plane sells has a quantity: checkout sends
+   * Stripe none, and how many members a plan may hold is a per plan constant in
+   * apps/api/src/entitlements.ts. The column is kept because Stripe puts a
+   * quantity on every subscription object, and an operator reconciling an
+   * invoice needs to see what was billed. It is displayed by the admin money
+   * screen, the billing summary and the organization export, and read by no
+   * entitlement or quota; apps/api/test/entitlements.test.ts fails if one
+   * starts.
+   */
   quantity: integer('quantity').notNull().default(1),
   status: text('status').notNull(),
   currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
@@ -1462,3 +1477,40 @@ export const tenantScopedTables = [
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const
+
+/* ---------------------------------------------------------------------------
+ * Somebody asking to buy (0035)
+ *
+ * No org_id, and deliberately absent from tenantScopedTables: a lead is written
+ * by somebody who has no organization and may never have one, which is the
+ * whole reason the route exists.
+ *
+ * Typed here even though the application can only INSERT into it. The typed
+ * schema is what the drift test compares against the migrations, and a table
+ * left untyped is a table where a renamed column produces a query that fails at
+ * runtime on the one path nobody exercises. The reader is the operator CLI, on
+ * a privileged connection; see migration 0035 for why the serving role holds no
+ * SELECT on this table at all.
+ * ------------------------------------------------------------------------ */
+
+export const enterpriseLeads = pgTable('enterprise_leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  company: text('company').notNull(),
+  /** Null when the person did not say. Zero is refused by a constraint, so
+   *  "unknown" has one representation rather than two. */
+  seats: integer('seats'),
+  message: text('message').notNull(),
+  /** Which page it came from. */
+  source: text('source').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The queue. Unhandled and handled-last-week look identical without these,
+   *  and the practical consequence is answering one person twice and another
+   *  never. */
+  handledAt: timestamp('handled_at', { withTimezone: true }),
+  handledBy: uuid('handled_by'),
+  handledNote: text('handled_note'),
+})

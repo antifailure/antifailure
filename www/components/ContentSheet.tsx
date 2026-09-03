@@ -14,7 +14,7 @@ export type SheetId =
 
 const SHEETS: Record<
   SheetId,
-  { title: string; lead: string; points: string[]; cta?: "cli" | "waitlist" | "migration" }
+  { title: string; lead: string; points: string[]; cta?: "cli" | "signup" | "migration" }
 > = {
   pricing: {
     title: "Design-partner access",
@@ -22,10 +22,10 @@ const SHEETS: Record<
     points: [
       "Give us one deployment your team is nervous about. We create an isolated production-shaped test and show what staging missed.",
       "The pilot centers on an actual upcoming migration, not a generic demo.",
-      "Open-core later: a free local engine on your infrastructure, then usage for environment minutes when a hosted control plane exists.",
+      "Open core: the local engine is MIT licensed and runs on your infrastructure, and the hosted control plane has a free plan anybody can sign up to.",
       "Unlimited free hosted compute is not the model. Production data stays in your boundary.",
     ],
-    cta: "waitlist",
+    cta: "signup",
   },
   community: {
     title: "Open-source surface",
@@ -33,7 +33,7 @@ const SHEETS: Record<
     points: [
       "Planned open-source surface: customer agent, local CLI, Postgres adapter, sanitization, egress gateway, simulators, cleanup controller.",
       "The installer is one command and the engine runs entirely on your machine.",
-      "The hosted control plane is invitation only. Request access if you want it to connect a repository.",
+      "The hosted control plane is open: sign up with GitHub and land in your own organization on the free plan.",
     ],
     cta: "cli",
   },
@@ -57,16 +57,17 @@ const SHEETS: Record<
       "Unknown outbound destinations, unresolved secrets, or missing isolation block the run.",
       "Cleanup is a safety property: every resource journaled as it is made, replayed in reverse, counted afterwards.",
     ],
-    cta: "waitlist",
+    cta: "signup",
   },
   privacy: {
     title: "Privacy Notice",
-    lead: "This site takes a waitlist address and counts page views. No production data is collected.",
+    lead: "This site collects nothing until you use the contact form, and it counts page views. No production data is collected here at all.",
     points: [
-      "A waitlist address is sent to a server and stored, so that the sentence next to the form is true. Your browser keeps a copy as a convenience, which clearing site data removes.",
+      "Signing up happens on the control plane, not here. It stores your GitHub account id, login, name, avatar and verified email address, and a session record with your address and browser.",
+      "The contact form on /contact writes your name, work email, company, seats and message into the product database, where a person reads it. It is never sold and never added to a newsletter.",
       "Page views are counted without a cookie and without any third party. A random identifier lives for one browsing session and cannot join two visits.",
-      "When a control plane exists, production-derived state is processed inside the customer boundary by default.",
-      "Passwords entered in this mock form are not stored.",
+      "Nothing on this site asks for a password. There is no password anywhere in this product: signing in is a GitHub exchange.",
+      "Production-derived state is processed inside the customer boundary by default.",
     ],
   },
   terms: {
@@ -134,12 +135,12 @@ export function ContentSheet({
             <CopyCli variant="light" />
           </div>
         ) : null}
-        {sheet.cta === "waitlist" ? (
+        {sheet.cta === "signup" ? (
           <a
             href="/signup"
-            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
+            className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-black text-[13px] font-medium text-white"
           >
-            Request access
+            Create an account
           </a>
         ) : null}
         {sheet.cta === "migration" ? (

@@ -397,6 +397,17 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     grounds: 'different-credential',
     reason: 'The same arrangement for billing deliveries from Stripe, verified the same way and handled once.',
   },
+  'POST /v1/leads': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason:
+      'The enterprise contact form on the marketing site posts it. It is the one route here a cross origin browser may call, it takes no credential and returns an id, and nothing integrates with it.',
+  },
+  'OPTIONS /v1/leads': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The preflight for the route above. A browser sends it; nothing calls it.',
+  },
   'GET /exports/deletion': {
     audience: 'excluded',
     grounds: 'different-credential',

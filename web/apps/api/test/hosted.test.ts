@@ -139,6 +139,45 @@ describe('starting up with the gate set', {
     assert.match(out, /AF_HOSTED_REQUIRED_PLAN is set but billing is off/)
   })
 
+  it('refuses to start when the gated plan has no price, which billing being on does not cover', async () => {
+    // The same contradiction as the test above, reached through the door that
+    // opened when AF_STRIPE_PRICE_ENTERPRISE stopped being required.
+    //
+    // Billing is ON here: the secret key, the webhook secret and the Team price
+    // are all set, which is the live shape. What is missing is a price for the
+    // plan the gate demands, so every organization would be refused everything
+    // until it held a plan this process has no way to sell it. The check above
+    // asks "is billing on" and answers yes, so it cannot see this.
+    const { code, out } = await start({
+      AF_HOSTED_REQUIRED_PLAN: 'enterprise',
+      AF_STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_not_a_real_secret',
+      AF_STRIPE_PRICE_TEAM: 'price_team_not_real',
+    })
+    assert.equal(code, 2, `expected a refusal, got ${code}: ${out}`)
+    assert.match(out, /no Stripe price for that plan/)
+    assert.match(out, /AF_STRIPE_PRICE_ENTERPRISE/, 'the refusal does not name the variable to set')
+    // And it is NOT the older refusal, which would mean billing was off and
+    // this test proved nothing about the new condition.
+    assert.doesNotMatch(out, /but billing is off/)
+  })
+
+  it('starts when the gated plan does have a price', async () => {
+    // The positive control. Without it the test above passes just as well on a
+    // process that refuses every configuration.
+    const { code, out } = await start({
+      AF_HOSTED_REQUIRED_PLAN: 'enterprise',
+      AF_STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_not_a_real_secret',
+      AF_STRIPE_PRICE_TEAM: 'price_team_not_real',
+      AF_STRIPE_PRICE_ENTERPRISE: 'price_enterprise_not_real',
+    })
+    // Killed by the timeout rather than exiting, because it got past every
+    // refusal and started listening. `code: null` is what that looks like here.
+    assert.equal(code, null, `the process refused a valid configuration: ${out}`)
+    assert.doesNotMatch(out, /no Stripe price for that plan/)
+  })
+
   it('refuses to start when plans are set by hand on a plane that takes money', async () => {
     // The contradiction, refused where it cannot be reached around. A route
     // that grants a plan and a checkout that sells the same plan on one
@@ -242,7 +281,6 @@ describe('enterprise-only hosted access', { skip: hasDatabase ? false : 'no Post
   it('leaves Stripe checkout reachable because it is how the gate is resolved', async () => {
     const wrongPlan = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'team',
-      seats: 1,
       successUrl: 'https://app.test/plan?checkout=success',
       cancelUrl: 'https://app.test/plan',
     })
@@ -250,7 +288,6 @@ describe('enterprise-only hosted access', { skip: hasDatabase ? false : 'no Post
 
     const checkout = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'enterprise',
-      seats: 1,
       successUrl: 'https://app.test/plan?checkout=success',
       cancelUrl: 'https://app.test/plan',
     })

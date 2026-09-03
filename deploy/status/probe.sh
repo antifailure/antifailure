@@ -36,11 +36,21 @@
 #           gate.
 #
 # The markers are chosen to be structural rather than editorial. `/_next/static/`
-# and `/docs/_astro/` are build output paths, `/api/waitlist` is the route the
-# deploy gate already asserts, and `#!/bin/sh` is the installer's shebang.
-# None of them moves when somebody rewrites a headline, because a marker that
-# tracks copy turns a prose edit into a false outage, and a false outage is
-# the one thing this page must never publish.
+# and `/docs/_astro/` are build output paths, `https://app.antifailure.dev` is
+# the product API origin the site API publishes, and `#!/bin/sh` is the
+# installer's shebang. None of them moves when somebody rewrites a headline,
+# because a marker that tracks copy turns a prose edit into a false outage, and
+# a false outage is the one thing this page must never publish.
+#
+# WHAT THIS PAGE DELIBERATELY DOES NOT CHECK: whether sign-up is open. A control
+# plane serving traffic perfectly can answer 403 to a sign-in, with a correct
+# page saying why, and /readyz is green either way, so it looks like a gap worth
+# a third check kind. It is not a gap in THIS page. Sign-up being closed is a
+# DECISION rather than an outage, and publishing a decision as an incident is
+# how a status page stops being believed. .github/workflows/signup.yml checks it
+# every morning against `signupsOpen` and `selfServeSignup` on /auth/session,
+# which is more than a redirect could ever have told anybody, and it fails to us
+# rather than to a customer.
 
 set -uo pipefail
 

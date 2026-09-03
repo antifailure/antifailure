@@ -1161,6 +1161,21 @@ jobs:
         # compatible and only asks for the snapshot to record it.
         run: go run ./tools/inputcheck .
 
+      - name: A documented variable can be delivered by the supported deploy
+        # The reference documented 45 variables the hosted control plane reads
+        # and the Terraform module that is the only route onto that container
+        # could set 16. The other 29 had no way to be set at all, and every
+        # symptom of that reads as a broken feature rather than an unset
+        # variable: 23 operator routes refusing for want of a database
+        # credential, no sign-in link and no invitation able to be sent, billing
+        # off with a real Stripe price behind Team, the site's beacon refused
+        # cross origin, analytics recording nothing, and both buttons missing
+        # from the "No organization yet" screen. varcheck and
+        # config-docs.test.ts were green throughout and could not have been
+        # anything else: both prove a variable is DOCUMENTED, and a variable
+        # that is documented, read, and unreachable by every apply passes both.
+        run: go run ./tools/wirecheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the

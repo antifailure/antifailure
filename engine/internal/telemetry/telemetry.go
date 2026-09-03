@@ -81,8 +81,20 @@ type Options struct {
 	Getenv func(string) string
 	// Version is the engine version, reported as a trace attribute.
 	Version string
-	// ControlPlaneURL overrides AF_CONTROL_PLANE_URL, for tests.
+	// ControlPlaneURL overrides AF_CONTROL_PLANE_URL, for tests and for a
+	// caller that already knows which control plane the credential below
+	// belongs to.
 	ControlPlaneURL string
+	// ControlPlaneToken is the credential af login stored on this machine, or
+	// "" when nobody has signed this terminal in.
+	//
+	// PASSED IN RATHER THAN READ HERE, and that is the whole reason it is a
+	// field. This package must not open a credential store: it is the package
+	// that writes support bundles and event logs, and a token it could read is
+	// a token it could spill into one. The CLI knows where the credential lives
+	// and hands over the value, which keeps the rule that nothing under
+	// telemetry or controlplane touches a secret on disk.
+	ControlPlaneToken string
 	// TraceExporter replaces the OTLP exporter, for tests.
 	TraceExporter sdktrace.SpanExporter
 	// OnWarning receives the reasons a consumer could not be attached. Nil
@@ -193,14 +205,22 @@ func Attach(ctx context.Context, bus *events.Bus, opts Options) (*Telemetry, err
 // No token is not a failure. Most runs are on a laptop with no control plane at
 // all, and the engine is designed so that everything works without one.
 //
-// Where the token comes from is the whole reason this function has two sources.
-// The environment is first, because a user who has set one has said what they
-// want and a self hosted installation has no runner to ask. Failing that, a job
-// running in GitHub Actions can prove what it is and trade that proof for a
-// short lived credential, which is what makes a hosted control plane work with
-// no secret in the repository at all. Before that existed this function reached
-// the empty token on every CI run in the world, returned here, and built no
-// sink: forty event types went to the local log and nowhere else.
+// Where the token comes from is the whole reason this function has three
+// sources. The environment is first, because a user who has set one has said
+// what they want and a self hosted installation has no runner to ask. Then the
+// credential af login stored, which is how a person who signed this terminal in
+// gets their own runs into their own console without exporting anything. Then a
+// job running in GitHub Actions, which can prove what it is and trade that proof
+// for a short lived credential, and is what makes a hosted control plane work
+// with no secret in the repository at all. Before that existed this function
+// reached the empty token on every CI run in the world, returned here, and built
+// no sink: forty event types went to the local log and nowhere else.
+//
+// The stored credential was missing for as long as af login existed. Somebody
+// signed a terminal in, ran af up, and watched an empty environments list,
+// because the only thing that ever read that credential was af env pull. A
+// sign-in that connects nothing is the same shape of failure as the sink with
+// no token: everything looks configured and no event arrives.
 func (t *Telemetry) attachControlPlane(
 	ctx context.Context, bus *events.Bus, opts Options, c clock.Clock, getenv func(string) string,
 ) error {
@@ -229,6 +249,13 @@ func (t *Telemetry) attachControlPlane(
 	var renew func(context.Context) (string, error)
 
 	token := controlplane.TokenFromEnvironment(lookup)
+	if token == "" {
+		// The credential af login stored, handed over by the CLI. Whoever sets
+		// it sets ControlPlaneURL with it, to the origin the credential was
+		// stored under, so a terminal signed in to a self hosted plane reports
+		// there rather than to the hosted default an empty address resolves to.
+		token = opts.ControlPlaneToken
+	}
 	// An address is what says this repository uses a control plane at all.
 	//
 	// Only for the minted path, and the asymmetry is the point. Setting a token

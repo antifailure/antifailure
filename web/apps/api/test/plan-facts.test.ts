@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url'
 
 import { PLAN_QUOTAS, DEFAULT_PLAN } from '../src/limits.ts'
 import { PLAN_COST_CAPS } from '../src/costs.ts'
+import { ENTITLEMENTS } from '../src/entitlements.ts'
 
 /**
  * The published file is READ AS TEXT rather than imported, for the reason
@@ -97,5 +98,77 @@ describe('the free plan numbers the site publishes', () => {
           'wire the quota into a path that can refuse, or take the number off the page.',
       )
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The member numbers the site publishes.
+//
+// THE CLASS THIS EXISTS FOR is the one above, pointed at the number that
+// replaced a purchase. Checkout took a seat count between one and a thousand,
+// multiplied a Stripe price by it, and entitled nothing: how many people an
+// organization may hold is `ENTITLEMENTS.seats.byPlan` and always was. The seat
+// input is gone, so the page has to answer the question the picker used to
+// imply, and the moment the page answers it in prose it can be wrong.
+// ---------------------------------------------------------------------------
+
+/** The `value` of one entry in PLAN_MEMBERS, by plan name. */
+function publishedMembers(plan: string): number | null {
+  const block = facts.match(/export const PLAN_MEMBERS[\s\S]*?\n\};/m)
+  if (!block) return null
+  const found = block[0].match(new RegExp(`\\n  ${plan}: (\\d+),`))
+  return found ? Number(found[1]) : null
+}
+
+describe('the member limits the site publishes', () => {
+  it('parses at all, so the assertions below are about the file', () => {
+    // The same negative control the free numbers get, and for the same reason:
+    // a parser that stops matching reads as an empty set, and every assertion
+    // over an empty set passes.
+    for (const plan of ['free', 'team', 'enterprise']) {
+      assert.notEqual(
+        publishedMembers(plan),
+        null,
+        `www/lib/plan-facts.ts no longer parses PLAN_MEMBERS for ${plan}. Fix the parser ` +
+          'here rather than deleting the assertion.',
+      )
+    }
+    assert.equal(publishedMembers('noSuchPlan'), null, 'the parser matches anything, so it proves nothing')
+  })
+
+  it('publishes the seat limit the control plane actually refuses at', () => {
+    // routers/enterprise.ts:seatVerdict refuses the next invitation over this,
+    // counting members plus invitations that are still open.
+    const byPlan = ENTITLEMENTS.seats!.byPlan as Record<string, number>
+    for (const [plan, limit] of Object.entries(byPlan)) {
+      assert.equal(
+        publishedMembers(plan),
+        limit,
+        `the site publishes ${publishedMembers(plan)} members for ${plan} and the control ` +
+          `plane refuses at ${limit}.`,
+      )
+    }
+  })
+
+  it('publishes a number for every plan that has one, and none that it invents', () => {
+    // Both directions. A plan added to the catalogue and not to the page leaves
+    // a reader guessing; a plan on the page that the catalogue has never heard
+    // of is a number nothing enforces, which is the defect this whole file
+    // exists for pointing the other way.
+    const catalogue = Object.keys(ENTITLEMENTS.seats!.byPlan as Record<string, number>).sort()
+    const onPage = (facts.match(/export const PLAN_MEMBERS[\s\S]*?\n\};/m)?.[0] ?? '')
+      .split('\n')
+      .map((line) => line.match(/^  (\w+): \d+,/)?.[1])
+      .filter((name): name is string => Boolean(name))
+      .sort()
+    assert.deepEqual(onPage, catalogue)
+  })
+
+  it('is what the seat refusal message would name, so the page and the refusal agree', () => {
+    // The sentence a customer meets when they reach the limit names the number.
+    // If the page named a different one, the reader who planned around the page
+    // meets a refusal that contradicts it, which is the expensive way to find
+    // out a page is stale.
+    assert.equal(publishedMembers(DEFAULT_PLAN), (ENTITLEMENTS.seats!.byPlan as Record<string, number>)[DEFAULT_PLAN])
   })
 })
