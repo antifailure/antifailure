@@ -9,6 +9,7 @@ import {
   IconEnvironments,
   IconKeys,
   IconLoad,
+  IconAnalytics,
   IconMasking,
   IconMembers,
   IconNetwork,
@@ -59,6 +60,7 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 

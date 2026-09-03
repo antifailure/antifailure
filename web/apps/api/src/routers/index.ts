@@ -9,7 +9,7 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import { verifyAuditChain, type Db } from '@antifailure/db'
 import { PolicyEngine, type Egress, type EgressRule, type Mode } from '@antifailure/policy'
-import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext } from '../trpc.ts'
+import { router, publicProcedure, orgProcedure, audit, registerRouter, type OrgContext, adopted } from '../trpc.ts'
 import {
   accountRouter,
   deletionRouter,
@@ -38,6 +38,7 @@ import { workloadsRouter } from './workloads.ts'
 import { expireOverdueCommands } from '../workloads/commands.ts'
 import { billingRouter } from './billing.ts'
 import { subscriptionsRouter } from './subscriptions.ts'
+import { analyticsRouter } from './analytics.ts'
 import { adminRouter } from '../admin/router.ts'
 
 const uuid = z.string().uuid()
@@ -282,6 +283,7 @@ const environmentsRouter = router({
             route: run?.workflow_run_id ? 'the workflow run that built it' : 'none',
           },
         })
+        await adopted(db, c, 'environment_torn_down')
         return {
           environment,
           // Empty when a live request already existed, which is the second
@@ -618,6 +620,7 @@ const networkRouter = router({
           targetId: input.repository,
           detail: { host: input.host, mode: input.mode },
         })
+        await adopted(db, c, 'network_rule_changed')
         // Inert until approved. Returning the id is the whole point of the
         // shape: the caller has something to hand to `network.approve`, and a
         // proposal that cannot be named is a proposal nobody can act on.
@@ -696,6 +699,7 @@ const networkRouter = router({
           targetId: rule.repository ?? c.actor.orgId,
           detail: { host: rule.host, mode: rule.mode, ruleId: rule.id },
         })
+        await adopted(db, c, 'network_rule_approved')
         return { approved: true, host: rule.host, mode: rule.mode }
       })
     }),
@@ -812,6 +816,7 @@ const maskingRouter = router({
           targetId: input.repository,
           detail: { table: input.table, column: input.column, transform: input.transform },
         })
+        await adopted(db, c, 'masking_rule_changed')
         // Deliberately not applied anywhere. A masking rule takes effect by
         // being committed to the repository and read by the engine, so the
         // control plane's job ends at opening a pull request. There is no path
@@ -839,6 +844,7 @@ const maskingRouter = router({
           targetId: input.repository,
           detail: { table: input.table, column: input.column },
         })
+        await adopted(db, c, 'masking_rule_approved')
         return { approved: true }
       })
     }),
@@ -899,6 +905,7 @@ const auditRouter = router({
           targetId: c.actor.orgId,
           detail: { format: input.format, entries: rows.length },
         })
+        await adopted(db, c, 'audit_exported')
         return { format: input.format, entries: rows.length, rows }
       })
     }),
@@ -952,12 +959,45 @@ const membersRouter = router({
       })
     }
     try {
-      return await syncMembership(c.pool, c.clock, c.github, {
+      const report = await syncMembership(c.pool, c.clock, c.github, {
         orgId: c.actor.orgId,
         installationId: Number(installation.installation_id),
         orgLogin: installation.account_login,
         actorLabel: c.actor.label,
       })
+
+      // One event per member added, not one per sync. "How do organizations
+      // grow" is a question about people, and a sync that adds six is six
+      // people arriving, which a single event would flatten to one.
+      //
+      // The role comes back out of the database rather than from the report,
+      // because syncMembership maps GitHub's two roles onto this application's
+      // four and the mapping is its decision, not this route's. Reading it back
+      // means the chart shows what was actually written.
+      if (report.added.length > 0) {
+        // Read whole and filtered here rather than with a WHERE over the list.
+        // A JavaScript array interpolated into a tag is a TUPLE to Postgres,
+        // not an array, so `= ANY(${logins})` compiled to `= ANY(($1, $2))`
+        // and every sync answered 500. The membership of one organization is
+        // small and this route has already read it once, so filtering in
+        // memory costs nothing and cannot get the shape wrong.
+        const added = new Set(report.added.map((l) => l.toLowerCase()))
+        await c.pool.withTenant(c.tenant, async (db) => {
+          const members = await db.execute<{ role: string; login: string }>(sql`
+            SELECT m.role, lower(u.github_login) AS login
+            FROM members m JOIN users u ON u.id = m.user_id`)
+          for (const row of members) {
+            if (!added.has(row.login)) continue
+            await c.analytics.record(db, {
+              name: 'identity.member_joined',
+              occurredAt: c.clock.now(),
+              orgId: c.actor.orgId,
+              payload: { role: row.role },
+            })
+          }
+        })
+      }
+      return report
     } catch (error) {
       // Two refusals that are answers rather than faults, and both used to
       // arrive as a 500 that reads as a bug in this control plane.
@@ -1264,6 +1304,7 @@ export const appRouter = router({
   exports: exportsRouter,
   deletion: deletionRouter,
   account: accountRouter,
+  analytics: analyticsRouter,
 })
 
 export type AppRouter = typeof appRouter

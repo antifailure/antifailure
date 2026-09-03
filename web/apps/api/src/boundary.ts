@@ -411,6 +411,28 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     grounds: 'operator-facing',
     reason: 'Serves the document itself. A document describing the route that serves it is circular, and the address is in reference/api.md where a person looking for it will be.',
   },
+
+  // ---------------------------------------------------------------------
+  // The marketing site's beacon.
+  // ---------------------------------------------------------------------
+  // Classified `console-transport` because that is the nearest of the seven
+  // grounds and none of them was written with this route in mind. The ground's
+  // own definition names the console; the property it is really about is that
+  // the caller is a page this repository ships, so there is no second client
+  // to generate one for. That holds here: the caller is www/lib/analytics.ts,
+  // the origin check bounds the route to the site's own origin, and both ends
+  // move in this repository. If a reader disagrees, the honest fix is an
+  // eighth ground rather than a looser reading of this one.
+  'OPTIONS /v1/site/events': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'The CORS preflight for the beacon below. A browser sends it; nothing calls it, and there is no operation to describe.',
+  },
+  'POST /v1/site/events': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'Where the marketing site posts page views. The caller is JavaScript this repository ships, the origin check refuses anything else from a browser, and the wire shape is free to change with the page that produces it.',
+  },
 }
 
 /**

@@ -22,6 +22,8 @@ import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { surrogateSecretFrom } from './analytics/record.ts'
+import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
@@ -207,6 +209,24 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+// Analytics. Off unless a surrogate secret is configured, and said out loud
+// either way, because "recording" and "not recording" are the two states an
+// operator most needs to be sure about and a dashboard of zeros looks the same
+// in both. Read at start-up so a secret of the wrong length stops the process
+// here rather than on the first event.
+const analyticsSecret = surrogateSecretFrom(process.env.AF_ANALYTICS_SURROGATE_SECRET)
+const analyticsOperatorOrgSlug = process.env.AF_ANALYTICS_OPERATOR_ORG ?? null
+console.log(
+  analyticsSecret
+    ? 'analytics is recording: AF_ANALYTICS_SURROGATE_SECRET is set'
+    : 'analytics is NOT recording: AF_ANALYTICS_SURROGATE_SECRET is not set',
+)
+console.log(
+  analyticsOperatorOrgSlug
+    ? `the analytics dashboard is readable by owners and admins of ${analyticsOperatorOrgSlug}`
+    : 'the analytics dashboard is readable by nobody: AF_ANALYTICS_OPERATOR_ORG is not set',
+)
+
 let hostedRequiredPlan
 let githubAppInstallUrl
 let signupUrl
@@ -305,6 +325,11 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signupUrl,
   modelPrices,
   consoleBuild,
+  analyticsSecret,
+  analyticsOperatorOrgSlug,
+  // The one origin the site beacon may be called from. Unset refuses every
+  // beacon rather than reflecting whatever Origin arrives.
+  siteOrigin: process.env.AF_SITE_ORIGIN ?? null,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
@@ -321,6 +346,11 @@ if (maintenanceUrl) {
       adminUrl: maintenanceUrl,
       retentionMonths: retentionFromEnv(process.env),
       archiveDir: process.env.AF_EVENT_ARCHIVE_DIR,
+      // The analytics rollup rides the same pass, for the same reason and with
+      // the same credential: it reads a table the application role cannot read
+      // and writes one it can only select from. A second scheduler would be a
+      // second thing to notice had stopped.
+      analyticsRetentionDays: analyticsRetentionFromEnv(process.env),
       log: (line) => console.log(line),
     },
     systemClock,

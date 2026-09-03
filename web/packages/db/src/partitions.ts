@@ -16,9 +16,60 @@
 
 import type postgres from 'postgres'
 
-/** The table this manages. Named once so a second partitioned table is a
- *  parameter rather than a copy of this file. */
-export const PARTITIONED_TABLE = 'events'
+/**
+ * A partitioned table this manages, and the policy its partitions carry.
+ *
+ * The policy travels with the table because a partition created without one is
+ * a copy of the table with nothing protecting it, and the two tables here want
+ * opposite rules: `events` confines a partition to one tenant, and
+ * `analytics_events` confines it to being written and never read. Naming both
+ * in one place is what stops the second table from becoming a copy of this
+ * file with two words changed.
+ */
+export interface PartitionedTable {
+  name: string
+  policy: {
+    name: string
+    /** The rows a statement may see. Composed by this module, never by a
+     *  caller: it is spliced into DDL. */
+    using: string | null
+    /** The rows a statement may write. */
+    withCheck: string | null
+    /** Which statements the policy covers. */
+    forCommand: 'ALL' | 'INSERT' | 'SELECT'
+  }
+}
+
+/** The engine's event stream, isolated per tenant. */
+export const EVENTS: PartitionedTable = {
+  name: 'events',
+  policy: {
+    name: 'tenant_isolation',
+    using: 'org_id = current_org()',
+    withCheck: 'org_id = current_org()',
+    forCommand: 'ALL',
+  },
+}
+
+/**
+ * The analytics stream, which the application writes and never reads.
+ *
+ * There is no SELECT grant on it, so a read already raises 42501 rather than
+ * returning zero rows. This is the second lock: a GRANT added later by somebody
+ * who did not read migrations/0032 still cannot open a read.
+ */
+export const ANALYTICS_EVENTS: PartitionedTable = {
+  name: 'analytics_events',
+  policy: {
+    name: 'analytics_stream_is_write_only',
+    using: null,
+    withCheck: 'true',
+    forCommand: 'INSERT',
+  },
+}
+
+/** The table this manages when a caller names none. */
+export const PARTITIONED_TABLE = EVENTS.name
 
 export interface PartitionPlan {
   /** Months to create, oldest first, as 'YYYY-MM-01' boundaries. */
@@ -36,6 +87,8 @@ export interface PartitionOptions {
   retentionMonths?: number
   /** Overridden by tests. Production passes nothing and gets the real clock. */
   now?: Date
+  /** Which partitioned table to manage. Defaults to the engine's events. */
+  table?: PartitionedTable
 }
 
 export interface PartitionState {
@@ -105,13 +158,14 @@ export function plan(
   opts: PartitionOptions & { now: Date },
 ): PartitionPlan {
   const ahead = opts.monthsAhead ?? MONTHS_AHEAD
+  const table = (opts.table ?? EVENTS).name
   const current = monthStart(opts.now)
   const have = new Set(existing.filter((p) => !p.isDefault).map((p) => p.name))
 
   const create: string[] = []
   for (let i = 0; i <= ahead; i++) {
     const month = addMonths(current, i)
-    if (!have.has(partitionName(month))) create.push(month.toISOString())
+    if (!have.has(partitionName(month, table))) create.push(month.toISOString())
   }
 
   const drop: string[] = []
@@ -150,7 +204,8 @@ export async function apply(
   sql: postgres.Sql,
   opts: PartitionOptions = {},
 ): Promise<ApplyResult> {
-  const table = PARTITIONED_TABLE
+  const target = opts.table ?? EVENTS
+  const table = target.name
   const now = opts.now ?? new Date()
   const decided = plan(await currentPartitions(sql, table), { ...opts, now })
 
@@ -160,7 +215,7 @@ export async function apply(
     const to = addMonths(from, 1)
     const name = partitionName(from, table)
     try {
-      await createMonth(sql, table, name, from, to)
+      await createMonth(sql, target, name, from, to)
     } catch (err) {
       // IF NOT EXISTS is not accepted for a partition, and two managers
       // running at once is a normal thing during a rolling deploy. The loser
@@ -202,11 +257,12 @@ export async function apply(
  */
 async function createMonth(
   sql: postgres.Sql,
-  table: string,
+  target: PartitionedTable,
   name: string,
   from: Date,
   to: Date,
 ): Promise<void> {
+  const table = target.name
   const bounds = `FOR VALUES FROM ('${from.toISOString()}') TO ('${to.toISOString()}')`
   const dflt = `${table}_default`
 
@@ -217,7 +273,7 @@ async function createMonth(
 
   if (stranded.length === 0) {
     await sql.unsafe(`CREATE TABLE ${ident(name)} PARTITION OF ${ident(table)} ${bounds}`)
-    await protect(sql, name)
+    await protect(sql, target, name)
     return
   }
 
@@ -239,7 +295,7 @@ async function createMonth(
     await tx.unsafe(
       `ALTER TABLE ${ident(table)} ATTACH PARTITION ${ident(dflt)} DEFAULT`,
     )
-    await protect(tx, name)
+    await protect(tx, target, name)
   })
 }
 
@@ -252,13 +308,22 @@ async function createMonth(
  * so the isolation suite, which walks every table it finds, does not find one
  * without a policy.
  */
-async function protect(sql: postgres.Sql | postgres.TransactionSql, name: string): Promise<void> {
+async function protect(
+  sql: postgres.Sql | postgres.TransactionSql,
+  target: PartitionedTable,
+  name: string,
+): Promise<void> {
+  const { policy } = target
   await sql.unsafe(`ALTER TABLE ${ident(name)} ENABLE ROW LEVEL SECURITY`)
   await sql.unsafe(`ALTER TABLE ${ident(name)} FORCE ROW LEVEL SECURITY`)
+  // Composed from the descriptor above and never from anything a caller
+  // supplied. ident() covers the identifier; the predicate is a constant in
+  // this module, which is why it can be spliced at all.
   await sql.unsafe(
-    `CREATE POLICY tenant_isolation ON ${ident(name)} ` +
-      `FOR ALL TO antifailure_app ` +
-      `USING (org_id = current_org()) WITH CHECK (org_id = current_org())`,
+    `CREATE POLICY ${ident(policy.name)} ON ${ident(name)} ` +
+      `FOR ${policy.forCommand} TO antifailure_app` +
+      (policy.using === null ? '' : ` USING (${policy.using})`) +
+      (policy.withCheck === null ? '' : ` WITH CHECK (${policy.withCheck})`),
   )
 }
 
@@ -277,12 +342,12 @@ export interface PruneResult {
  */
 export async function pruneDefault(
   sql: postgres.Sql,
-  opts: { retentionMonths: number; now?: Date; limit?: number },
+  opts: { retentionMonths: number; now?: Date; limit?: number; table?: PartitionedTable },
 ): Promise<PruneResult> {
   const now = opts.now ?? new Date()
   const cutoff = addMonths(monthStart(now), -opts.retentionMonths)
   const limit = opts.limit ?? 10_000
-  const table = `${PARTITIONED_TABLE}_default`
+  const table = `${(opts.table ?? EVENTS).name}_default`
 
   const rows = await sql.unsafe(
     `DELETE FROM ${ident(table)} WHERE ctid IN (` +

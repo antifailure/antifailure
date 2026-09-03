@@ -5,6 +5,7 @@ import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
 import { CONTROL_PLANE_URL } from "@/lib/site";
 import { joinWaitlist, rememberedEmail } from "@/lib/waitlist";
+import { ctaEngaged, waitlistSubmitted } from "@/lib/analytics";
 
 function GitHubMark({ className }: { className?: string }) {
   return (
@@ -78,6 +79,17 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
   const [done, setDone] = useState<string | null>(null);
   const [already, setAlready] = useState(false);
 
+  // One engagement per time this screen is reached. It moved here when the
+  // waitlist dialog was replaced by a page: the producer lived in AuthModal,
+  // which no longer exists, and site.cta_engaged would otherwise be a
+  // catalogued event with no caller anywhere in the tree. In an effect on
+  // mount rather than on the links that lead here, for the same reason it was
+  // an effect before: several routes arrive at this screen and instrumenting
+  // each of them is one more place for the next one to be forgotten.
+  useEffect(() => {
+    ctaEngaged("waitlist_open");
+  }, []);
+
   useEffect(() => {
     const known = rememberedEmail();
     if (known) {
@@ -92,6 +104,9 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
     setBusy(true);
     setError("");
     const result = await joinWaitlist(email, mode);
+    // Same shape as the dialog: the outcome, attributed to the channel the
+    // session started on.
+    waitlistSubmitted(result.ok ? (result.alreadyJoined ? "already" : "joined") : "refused");
     setBusy(false);
     if (!result.ok) {
       setError(result.message);

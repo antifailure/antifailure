@@ -229,6 +229,8 @@ export interface ControlPlaneMetrics {
   environmentReadySeconds: Histogram
   environmentTransitions: Counter
   runVerdicts: Counter
+  analyticsEvents: Counter
+  analyticsRejections: Counter
 }
 
 export function createMetrics(version = 'dev'): ControlPlaneMetrics {
@@ -303,6 +305,32 @@ export function createMetrics(version = 'dev'): ControlPlaneMetrics {
     ),
     runVerdicts: registry.register(
       new Counter('af_run_verdicts_total', 'Agent verdicts recorded, by verdict.'),
+    ),
+
+    // Analytics records a number and must never break the thing it is
+    // measuring, so a failed insert is caught rather than thrown. These two
+    // counters are what stops that being silent: a producer that has started
+    // failing, or a producer sending something the catalog refuses, is a line
+    // on a graph rather than an absence, and an absence cannot be alerted on.
+    //
+    // The name label is bounded by the catalog. A name the catalog does not
+    // hold is reported as "unknown" rather than as itself, because a rejected
+    // name is by definition one nobody vetted and an unbounded label is how a
+    // metrics endpoint becomes the largest thing in the process.
+    analyticsEvents: registry.register(
+      new Counter(
+        'af_analytics_events_total',
+        'Analytics events by catalog name and outcome: recorded, duplicate, rejected, or failed. '
+        + 'A name that has never appeared here is a producer that has never run.',
+      ),
+    ),
+    analyticsRejections: registry.register(
+      new Counter(
+        'af_analytics_rejections_total',
+        'Analytics events refused, by which rule refused them. The closed schema is only a '
+        + 'guarantee if somebody can see it firing, and unknown_field is the one worth watching: '
+        + 'it means a producer started sending something nobody declared.',
+      ),
     ),
   }
   return metrics
