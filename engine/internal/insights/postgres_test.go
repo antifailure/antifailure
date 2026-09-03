@@ -379,12 +379,21 @@ func TestRehearse_TimesEveryStatementSeparately(t *testing.T) {
 	require.Greater(t, r.TotalMS, planted.MS,
 		"the whole rehearsal cannot be shorter than one statement inside it")
 
-	// The statements fit inside the window the applier ran in, and this is the
-	// ONLY assertion here that catches every duration being inflated by the
-	// same factor. Agent flaky-timing found that hole on the server side path
-	// and measured it: doubling every duration left every other assertion in
-	// their test green, floor and ceiling included, because doubling preserves
-	// order, distinctness and which statement is largest.
+	// The statements fit inside the window the applier ran in. What this line
+	// catches, and nothing else here does, is a fixed overhead charged to every
+	// statement: measured on this fixture, adding 200ms to each of the four
+	// durations leaves the floor, both ceilings, the distinctness check and the
+	// total below all green, and fails only here.
+	//
+	// A uniform multiplier is a different shape and it is worth being exact
+	// about which line earns it, because the answer differs between the two
+	// timing paths. Agent flaky-timing measured on the SERVER side path that
+	// doubling every duration left every assertion in THEIR test green. It does
+	// not reach this line here: the planted sleep is most of the window, so
+	// doubling it fails the total assertion above first. Measured limit, stated
+	// rather than papered over: a multiplier small enough to stay under that
+	// total, around 1.05 on this fixture, is caught by nothing in this test.
+	// The overhead shape above is what this assertion is worth having for.
 	//
 	// It holds by construction rather than by luck. TotalMS is wall clock
 	// measured in Go around Apply, and the SQL applier times each statement
