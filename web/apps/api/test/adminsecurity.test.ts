@@ -510,6 +510,28 @@ describe('security and governance', { skip: hasDb ? false : 'no database' }, () 
       assert.equal(entry!.detail.reason, 'a subject access request from counsel')
     })
 
+    test('a login that would be a path is not a file name', async () => {
+      // github_login carries no CHECK constraint in this schema, so it is a
+      // column another system populates and a file name is not the place to
+      // discover that. The browser sanitises a download attribute too; this is
+      // the layer that does not depend on which browser.
+      const login = `../../etc/pwn-${randomUUID().slice(0, 8)}`
+      const [row] = await h.admin<{ id: string }[]>`
+        INSERT INTO users (github_id, github_login, email, name)
+        VALUES (${Math.floor(Math.random() * 2_000_000_000)}, ${login},
+                ${`${randomUUID().slice(0, 8)}@example.test`}, 'Awkward')
+        RETURNING id`
+
+      const { caller } = await callerFor('security')
+      const result = await caller.admin.security.subjectExport({
+        userId: row!.id,
+        reason: 'a subject access request',
+      })
+      assert.ok(!result.filename.includes('/'), `the file name holds a path: ${result.filename}`)
+      assert.ok(!result.filename.startsWith('.'), 'the file name would be a hidden file')
+      assert.match(result.filename, /^subject-[A-Za-z0-9._-]+\.json$/)
+    })
+
     test('exporting somebody who does not exist records nothing', async () => {
       // The negative half. A refused action that still wrote an entry would
       // put a fabricated uuid in the log as a person somebody exported.

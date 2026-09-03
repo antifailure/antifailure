@@ -100,6 +100,14 @@ function num(value: unknown): number {
   return Number(value ?? 0)
 }
 
+/** A file name component, narrowed to letters, digits, dot, hyphen and
+ *  underscore. Anything else becomes a hyphen, and an empty result becomes a
+ *  word, because a file called `.json` is a hidden file on every unix. */
+function safeName(value: string): string {
+  const cleaned = value.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[.-]+/, '').slice(0, 64)
+  return cleaned.length > 0 ? cleaned : 'account'
+}
+
 /**
  * Turns one extra row into a cursor.
  *
@@ -1022,7 +1030,13 @@ export const securityRouter = router({
         )
 
         return {
-          filename: `subject-${found.user.github_login}.json`,
+          // The login is narrowed to what a file name may hold rather than
+          // interpolated. github_login carries no CHECK constraint in this
+          // schema, so it is a column somebody else's system populates, and a
+          // name is not the place to find out that assumption was wrong. The
+          // browser also sanitises a download attribute, which is a second
+          // layer rather than a reason to skip this one.
+          filename: `subject-${safeName(found.user.github_login)}.json`,
           contentType: 'application/json',
           subject: found.user.github_login,
           locations: map.length,
