@@ -56,13 +56,41 @@ KEEP_READING_DAYS=35
 KEEP_DAILY_DAYS=400
 STRIP_DAYS=90
 
-now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-NOW_EPOCH="$(date -u +%s)"
-GENERATED="$(now_iso)"
+# Time, as a dependency, the way the control plane already treats it.
+#
+# The clock is read exactly once, here, and the number is passed on to every
+# program below. Nothing else in this script or in page.jq asks what time it
+# is. That matters because almost every claim this page makes is a claim about
+# a moment: how long ago a check landed, whether a component has gone quiet,
+# which UTC day a reading belongs to, which fourteen days of incidents are
+# still shown, how far back the ninety day strip reaches.
+#
+# A suite that cannot pin the moment cannot test any of them. It has to build
+# its fixtures from the wall clock, and then a case saying "three checks on one
+# day, one of them failed" means three checks on one day when it runs at noon
+# and two days when it runs at half past midnight. It quietly becomes a
+# different case rather than failing, and the assertion that goes red is red
+# about the hour rather than about the renderer.
+#
+# So the clock is injectable, and render_test.sh pins it. Nothing in the
+# workflow sets this, and unset it is the system clock exactly as before.
+NOW_EPOCH="${STATUS_NOW_EPOCH:-$(date -u +%s)}"
+case "$NOW_EPOCH" in
+  '' | *[!0-9]*)
+    echo "render.sh: STATUS_NOW_EPOCH must be whole seconds since the epoch, not \"$NOW_EPOCH\"" >&2
+    exit 1
+    ;;
+esac
 
 for tool in jq date; do
   command -v "$tool" > /dev/null || { echo "render.sh needs $tool" >&2; exit 1; }
 done
+
+# Formatted by jq rather than by date, because turning an epoch back into a
+# stamp is `date -r` on a BSD userland and `date -d @` on a GNU one, and jq is
+# already a hard requirement one line above.
+GENERATED="$(jq -rn --argjson now "$NOW_EPOCH" '$now | todate')"
+
 [ -f "$TARGETS" ] || { echo "render.sh: no targets at $TARGETS" >&2; exit 1; }
 [ -f "$PAGE_JQ" ] || { echo "render.sh: no page program at $PAGE_JQ" >&2; exit 1; }
 [ -f "$FEED_JQ" ] || { echo "render.sh: no feed program at $FEED_JQ" >&2; exit 1; }
