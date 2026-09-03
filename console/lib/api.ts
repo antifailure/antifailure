@@ -93,12 +93,28 @@ export async function mutate<T>(path: string, input: unknown, csrf: string): Pro
  *  tRPC: the session, sign-out, device approval, and provider keys. */
 export async function rest<T>(
   path: string,
-  init: { method?: string; body?: unknown; csrf?: string } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    csrf?: string;
+    /**
+     * Extra headers, for a caller whose cross-site token is not this one.
+     *
+     * The operator portal is the only such caller and it exists because the two
+     * sessions are two sessions: a different cookie, a different table, and a
+     * different header name, `x-antifailure-admin-csrf`. Adding this hook is
+     * how the operator client sends its own token WITHOUT a second copy of the
+     * fetch, the error shape and the credentials mode, which is the drift this
+     * module exists to prevent. See adminMutate in lib/admin.ts.
+     */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  if (init.headers) Object.assign(headers, init.headers);
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",

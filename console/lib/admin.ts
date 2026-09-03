@@ -19,6 +19,7 @@
 
 import { createContext, useContext } from "react";
 import { query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { createAdminCsrf } from "@/lib/admin-csrf";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -162,18 +163,41 @@ export function useAdminAudit(severity: string) {
   );
 }
 
+/*
+ * The operator's cross-site token.
+ *
+ * The rule lives in lib/admin-csrf.ts, which imports nothing, because this file
+ * imports React and a path alias and therefore cannot be executed by the
+ * console's test runner. That is not a detail: the reason every operator
+ * mutation was refused for as long as it was is that the one piece of this
+ * client with a rule in it sat in the one file nothing could run. See the
+ * header of that module.
+ */
+const csrf = createAdminCsrf(async () => {
+  const session = await rest<{ signedIn: boolean; csrfToken?: string | null }>(
+    "/v1/admin/session",
+  );
+  return session.csrfToken ?? null;
+});
+
 /**
  * A tRPC mutation on the operator router.
  *
- * NO CSRF TOKEN, and that is a decision rather than an omission. The product's
- * console sends one because its session cookie is SameSite=Lax, which a
- * cross-site top-level POST still carries. The operator cookie is
- * SameSite=Strict, so a browser sends it on NO cross-site request of any kind
- * and there is nothing for a token to add. If that cookie's SameSite is ever
- * loosened, this is the line that has to grow a token.
+ * THIS SENDS A CSRF TOKEN, and the comment that used to stand here explaining
+ * why it did not was wrong in a way nothing caught. It argued that the operator
+ * cookie is SameSite=Strict, so a browser sends it on no cross-site request and
+ * a token adds nothing. The reasoning is sound and the server does not agree:
+ * server.ts refuses every non-GET under /trpc/ that carries a resolving
+ * af_admin_session cookie without a matching x-antifailure-admin-csrf, and
+ * admincsrf.test.ts has asserted exactly that in three ways the whole time. So
+ * suspendTenant and resumeTenant were answered 403 on every call.
+ *
+ * The lesson is the one this repository keeps relearning: a client side
+ * argument about what a server requires is a claim, and the server is the only
+ * thing that can settle it.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return rest<T>(`/trpc/${path}`, { method: "POST", body: input });
+  return csrf.send((headers) => rest<T>(`/trpc/${path}`, { method: "POST", body: input, headers }));
 }
 
 export async function suspendTenant(orgId: string, reason: string) {

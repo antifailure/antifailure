@@ -36,7 +36,7 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 18,
+    atLeast: 48,
   })
 })
 
