@@ -53,10 +53,10 @@ import {
  * be deleted from the catalog instead.
  */
 const AWAITING_A_ROUTE: Partial<Record<AdminPermission, string>> = {
-  // Held by owner and security, described, granted, and guarding nothing since
-  // 0029. The Security lane is building the export route behind it. When that
-  // lands, this line is deleted rather than edited.
-  'admin.audit.export': 'the Security lane, which is building the export route',
+  // Empty, and that is the state to keep it in. admin.audit.export was the one
+  // entry, held by owner and security and guarding nothing since 0029. The
+  // Security lane built the route, auditChainRoutes is spread into the audit
+  // router, and the line went the moment it landed rather than being edited.
 }
 
 /**
