@@ -75,4 +75,7 @@ terms above rather than under MIT.
 
 ## Questions
 
-Email licensing@antifailure.dev.
+The routes that resolve are listed at https://antifailure.dev/contact. A licensing
+question that is not commercially sensitive belongs in GitHub Discussions, and
+anything commercial belongs in a call booked on that page. There is no address
+to write to: the antifailure.dev domain has no mail exchanger.

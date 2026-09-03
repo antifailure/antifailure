@@ -338,7 +338,7 @@ jobs:
           # publishes anyway, green. That is the one failure this pipeline is
           # not allowed to have: a release short an asset looks finished, and
           # nobody goes looking for a file they were never told was missing.
-          # Read out of the action's own src/main.ts at the pinned commit, where
+          # Read out of the action's own src/run.ts at the pinned commit, where
           # an unmatched pattern is a console.warn unless this is set.
           fail_on_unmatched_files: true
           # Deliberately off. The generated notes are the merged pull request

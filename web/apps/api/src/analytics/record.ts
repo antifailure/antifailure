@@ -372,7 +372,7 @@ export function createAnalytics(options: AnalyticsOptions): Analytics {
       if (!enabled) return { status: 'disabled' }
       try {
         // withoutTenant, because none of these tables carries an org_id and
-        // there is nothing for a tenant setting to key on. See migrations/0031.
+        // there is nothing for a tenant setting to key on. See migrations/0032.
         return await pool.withoutTenant((db) => one(db, event))
       } catch (err) {
         counters.events.inc({ name: safeName(event.name), outcome: 'failed' })

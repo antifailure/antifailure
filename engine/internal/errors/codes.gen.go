@@ -924,7 +924,7 @@ var catalog = map[Code]Entry{
 		Code:      AFEE004,
 		Area:      "EE",
 		Message:   "The license covers {seats} seats and they are all in use.",
-		NextStep:  "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.",
+		NextStep:  "Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.",
 		Docs:      "enterprise/licensing",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,

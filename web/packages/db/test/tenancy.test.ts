@@ -128,7 +128,7 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           "loops below, which demand an isolation it is not supposed to have",
       ],
       // The analytics tables carry a keyed hash of the organization rather than
-      // its id, and that is the whole point of them: see migrations/0031. An
+      // its id, and that is the whole point of them: see migrations/0032. An
       // org_id here would make the stream joinable back to a customer, so the
       // protection is the grant (INSERT and no SELECT on the stream) plus the
       // policies, and there is deliberately nothing for tenant isolation to key

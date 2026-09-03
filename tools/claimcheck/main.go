@@ -740,6 +740,16 @@ func mentionsAt(root, commit, needle, under string) bool {
 var siteTrees = []string{
 	"www", "docs/src/content/docs", "docs/src/pages", "docs/adr",
 	"README.md", "ee/README.md", "CONTRIBUTING.md", "SECURITY.md",
+	// The error catalogue and the code generated from it. Not a website, and
+	// the most customer facing prose in the repository all the same: an error's
+	// next step is read at the moment somebody is already blocked, which is the
+	// worst moment for it to name something that does not work. It arrived here
+	// carrying an email address on a domain with no mail exchanger.
+	"engine/internal/errors",
+	// The enterprise licence text, the verifier's own warning strings, and the
+	// seat refusal the control plane raises. Same sentence in four places,
+	// three of them outside anything this used to read.
+	"ee/LICENSE.md", "ee/engine/license", "ee/web/sso/src",
 }
 
 // siteClaim is one sentence the site must not make, and the code that settles
@@ -836,6 +846,27 @@ var siteClaims = []siteClaim{
 			"review will find every gap on the list, so a reviewer checking the address " +
 			"our own README gives them disproved it in thirty seconds and then had cause " +
 			"to doubt every other line on a page whose only asset is that it can be checked",
+	},
+	{
+		name:      "an address on a domain that receives no mail",
+		forbidden: regexp.MustCompile(`[A-Za-z0-9._%+-]+@antifailure\.dev`),
+		premise:   [2]string{"www/components/pages/company/Contact.tsx", "has no mail exchanger"},
+		reason: "antifailure.dev publishes no MX record and its SPF policy is `v=spf1 -all`, so " +
+			"every address on it is a promise nobody can keep. Eight of them shipped, and the " +
+			"expensive ones were not on the website: AF-EE-004 told a customer who had just hit " +
+			"their seat limit to email licensing@, the enterprise licence text gave the same " +
+			"address for any question, and SECURITY.md gave security@ to a researcher holding a " +
+			"finding. Every one of those is read at the moment somebody is trying to pay, or is " +
+			"blocked, or is doing us a favour, which is the moment a dead route costs the most. " +
+			"THIS COULD NOT HAVE BEEN A RULE BEFORE, and the premise beside it is why: whether a " +
+			"domain accepts mail is settled by DNS, a build gate that queried DNS would not be " +
+			"hermetic and would fail offline, and until the contact page was written nothing in " +
+			"the tree recorded the answer. Contact.tsx now states it, which is what makes it " +
+			"checkable here. If a mailbox is ever set up, that callout goes, this premise lapses, " +
+			"and this gate fails rather than going on refusing an address that has become real. " +
+			"Name the route the contact page names instead: GitHub private vulnerability " +
+			"reporting for a security finding, Discussions for a question, and " +
+			"https://antifailure.dev/contact for anything commercial",
 	},
 	{
 		name:      "a documentation page count nothing counted",
@@ -959,7 +990,11 @@ func siteFiles(root string) ([]string, error) {
 			continue
 		}
 		switch filepath.Ext(f) {
-		case ".ts", ".tsx", ".md", ".mdx", ".mjs", ".js", ".json", ".txt":
+		case ".ts", ".tsx", ".md", ".mdx", ".mjs", ".js", ".json", ".txt",
+			// Added with the error catalogue and the licence verifier. A
+			// sentence a customer reads is a sentence a customer reads
+			// whichever kind of file it was typed into.
+			".yaml", ".yml", ".go":
 		default:
 			continue
 		}

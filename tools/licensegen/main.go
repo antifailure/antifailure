@@ -63,6 +63,11 @@ licensegen issues and inspects Antifailure enterprise licenses.
                       length of one command.
   inspect             Decode a license without verifying it, for support.
 
+The runbook is docs/src/content/docs/enterprise/issuing-licenses.md. Read it
+before issuing anything: this program cannot tell you whether the key id you
+gave matches the key you signed with, and a mismatch produces a license the
+customer is told has been tampered with.
+
 `)+"\n")
 }
 
@@ -99,13 +104,52 @@ build that trusts only the newest key cannot verify any license already issued.
 // request is the YAML-shaped input for issuing, accepted as JSON so that this
 // tool needs no dependencies.
 type request struct {
-	Org       string   `json:"org"`
-	Plan      string   `json:"plan"`
-	Features  []string `json:"features"`
-	Seats     int      `json:"seats"`
-	Months    int      `json:"months"`
-	GraceDays int      `json:"grace_days"`
-	Trial     bool     `json:"trial"`
+	Org      string   `json:"org"`
+	Plan     string   `json:"plan"`
+	Features []string `json:"features"`
+	// Seats is a pointer so that an absent field is distinguishable from zero.
+	// Zero means unlimited to the verifier, so a request that simply forgot the
+	// field used to sign an unlimited license and say nothing. That is the one
+	// mistake here with a price attached, and it is the one the old int could
+	// not see.
+	Seats     *int `json:"seats"`
+	Months    int  `json:"months"`
+	GraceDays int  `json:"grace_days"`
+	Trial     bool `json:"trial"`
+}
+
+// knownFeatures is the closed set a license may name.
+//
+// A COPY of ee/engine/license's Feature constants, and the copy is deliberate:
+// this tool is MIT and that package is not, so importing it would put
+// enterprise-licensed code in the dependency graph of the MIT tools module.
+// The copy is held to the original by TestKnownFeaturesMatchTheVerifier, which
+// parses license.go and fails if the two sets differ, so adding a feature there
+// and forgetting it here stops the build rather than producing a license that
+// grants nothing.
+//
+// Checked HERE rather than in the verifier, and that is not where you would
+// first look. The verifier has to tolerate a feature it has never heard of: a
+// license issued for a newer release names features an older binary does not
+// carry, and refusing the whole license over one would turn every upgrade
+// ordering into an outage. So the verifier is permissive by necessity, which
+// leaves issue time as the only place the set can be closed at all. Until this
+// existed it was closed nowhere: `"features": ["ssoo"]` signed cleanly, parsed
+// cleanly, reported the license active, and granted nothing, with no error at
+// either end and a customer on the community behaviour they did not buy.
+var knownFeatures = []string{
+	"air_gapped",
+	"audit_stream",
+	"billing",
+	"compliance_packs",
+	"enterprise_dashboard",
+	"enterprise_secrets",
+	"multi_runtime",
+	"policy_enforcement",
+	"rbac",
+	"scim",
+	"sso",
+	"support_access",
 }
 
 func issue(args []string) error {
@@ -152,6 +196,17 @@ func issue(args []string) error {
 	if req.Org == "" {
 		return errors.New("the request names no organization, and a license that names none works everywhere")
 	}
+	if req.Seats == nil {
+		return errors.New(
+			"the request sets no seat count. Zero means unlimited to the verifier, so this has to " +
+				"be said rather than defaulted: write \"seats\": 0 for unlimited")
+	}
+	if *req.Seats < 0 {
+		return fmt.Errorf("the request asks for %d seats", *req.Seats)
+	}
+	if err := checkFeatures(req.Features); err != nil {
+		return err
+	}
 	if req.Months <= 0 {
 		req.Months = 12
 	}
@@ -169,7 +224,7 @@ func issue(args []string) error {
 		"org":        req.Org,
 		"plan":       req.Plan,
 		"features":   req.Features,
-		"seats":      req.Seats,
+		"seats":      *req.Seats,
 		"issued_at":  issuedAt.Format(time.RFC3339Nano),
 		"expires_at": issuedAt.AddDate(0, req.Months, 0).Format(time.RFC3339Nano),
 		"kid":        *keyID,
@@ -187,10 +242,64 @@ func issue(args []string) error {
 	}
 	signature := ed25519.Sign(priv, payload)
 
+	// The receipt goes to standard error so that the key on standard output is
+	// still the only thing a pipe carries.
+	//
+	// It prints the PUBLIC key belonging to the private key that just signed,
+	// because -key-id is a label this program cannot check. Sign with one key
+	// and label it as another and the verifier looks the label up, finds a
+	// different key, and reports the license as tampered with, which the
+	// documentation quite reasonably tells the customer means their token was
+	// truncated in transit. Comparing this line against the key list the
+	// verifier was built with is the only thing that catches it, and it has to
+	// be done before the key is sent.
+	fmt.Fprintf(os.Stderr, "signed %s for %s: %d seats, %d months, features %s\n",
+		*id, req.Org, *req.Seats, req.Months, describeFeatures(req.Features))
+	fmt.Fprintf(os.Stderr,
+		"key id %s must name this public key in the verifier: %s\n",
+		*keyID, base64.RawURLEncoding.EncodeToString(priv.Public().(ed25519.PublicKey)))
+
 	fmt.Printf("aflic_%s.%s\n",
 		base64.RawURLEncoding.EncodeToString(payload),
 		base64.RawURLEncoding.EncodeToString(signature))
 	return nil
+}
+
+// checkFeatures refuses a feature the verifier will not act on.
+func checkFeatures(features []string) error {
+	known := make(map[string]bool, len(knownFeatures))
+	for _, f := range knownFeatures {
+		known[f] = true
+	}
+	var unknown []string
+	seen := map[string]bool{}
+	for _, f := range features {
+		switch {
+		case known[f] && !seen[f]:
+			seen[f] = true
+		case known[f]:
+			return fmt.Errorf("the request names %q twice", f)
+		default:
+			unknown = append(unknown, f)
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf(
+			"the request names %s, which the engine does not carry, so a license "+
+				"carrying it would verify and permit nothing. The set is: %s",
+			strings.Join(unknown, ", "), strings.Join(knownFeatures, ", "))
+	}
+	return nil
+}
+
+// describeFeatures renders the feature list for the receipt.
+func describeFeatures(features []string) string {
+	if len(features) == 0 {
+		// Said in words, because an empty list on a paid license is a mistake
+		// that looks like a formatting artefact when it prints as nothing.
+		return "NONE, so this license permits no enterprise feature"
+	}
+	return strings.Join(features, ", ")
 }
 
 func inspect(args []string) error {
