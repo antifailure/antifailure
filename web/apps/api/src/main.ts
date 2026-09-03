@@ -28,7 +28,7 @@ import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
-import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { PRICE_ENV, RealStripeClient, stripeConfigFrom } from './billing/index.ts'
 import {
   githubAppInstallUrlFrom,
   hostedRequiredPlanFrom,
@@ -258,10 +258,18 @@ if (hostedRequiredPlan && !stripe.config) {
 // in the same place and for the same reason rather than discovered by the first
 // customer who cannot get in.
 if (hostedRequiredPlan && stripe.config && !stripe.config.prices[hostedRequiredPlan]) {
+  // The variable is NAMED from PRICE_ENV rather than built out of the plan.
+  //
+  // This line originally wrote a prefix and appended the uppercased plan, which
+  // put a truncated fragment in the source and nothing else. config-docs.test.ts
+  // scans for AF_ names and reported that fragment as a variable read and not
+  // documented, which is true and unfixable from the reference: it is not a
+  // name anybody can set. A closed map is the only shape that keeps the set of
+  // settings this process reads enumerable.
   console.error(
     `AF_HOSTED_REQUIRED_PLAN is ${hostedRequiredPlan} and there is no Stripe price for that ` +
-      `plan, so no organization could ever satisfy the gate. Set AF_STRIPE_PRICE_` +
-      `${hostedRequiredPlan.toUpperCase()}, or unset AF_HOSTED_REQUIRED_PLAN.`,
+      `plan, so no organization could ever satisfy the gate. Set ${PRICE_ENV[hostedRequiredPlan]}, ` +
+      'or unset AF_HOSTED_REQUIRED_PLAN.',
   )
   process.exit(2)
 }

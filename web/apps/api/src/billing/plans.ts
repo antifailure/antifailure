@@ -19,6 +19,32 @@ export const PLANS: readonly string[] = Object.keys(PLAN_QUOTAS)
 export type PaidPlan = 'team' | 'enterprise'
 export const PAID_PLANS: readonly PaidPlan[] = ['team', 'enterprise']
 
+/**
+ * The environment variable each paid plan's price is read from.
+ *
+ * ONE FULL LITERAL PER PLAN, never a prefix concatenated with an uppercased
+ * plan name.
+ *
+ * A name assembled at run time is not enumerable. Nothing can list the settings
+ * this process reads, which is the property `test/config-docs.test.ts` exists
+ * to hold and the property an operator needs, and its scanner can only see the
+ * literal fragment that is actually in the source. A message that built a name
+ * that way turned that test red, reporting a truncated prefix as an
+ * undocumented variable, which is a name nobody can set.
+ *
+ * Note that a comment is source too: writing the concatenation out as an
+ * example here would put the same truncated fragment back in the scan.
+ *
+ * It is also how a typo becomes silence: a built name for a plan that does not
+ * correspond to any variable reads as unset rather than failing, so the plan is
+ * quietly unsellable. A `Record<PaidPlan, string>` makes a missing entry a
+ * compile error instead.
+ */
+export const PRICE_ENV: Record<PaidPlan, string> = {
+  team: 'AF_STRIPE_PRICE_TEAM',
+  enterprise: 'AF_STRIPE_PRICE_ENTERPRISE',
+}
+
 export interface StripeConfig {
   /** The API key. Server side only: this never reaches a browser and never
    *  appears in a response. */
@@ -60,8 +86,8 @@ export function stripeConfigFrom(env: Record<string, string | undefined>): {
 } {
   const secretKey = env.AF_STRIPE_SECRET_KEY ?? ''
   const webhookSecret = env.AF_STRIPE_WEBHOOK_SECRET ?? ''
-  const team = env.AF_STRIPE_PRICE_TEAM ?? ''
-  const enterprise = env.AF_STRIPE_PRICE_ENTERPRISE ?? ''
+  const team = env[PRICE_ENV.team] ?? ''
+  const enterprise = env[PRICE_ENV.enterprise] ?? ''
 
   // AF_STRIPE_PRICE_ENTERPRISE IS NOT REQUIRED, and leaving it out of this
   // list is a fix rather than a relaxation.
@@ -81,7 +107,7 @@ export function stripeConfigFrom(env: Record<string, string | undefined>): {
   const required = [
     ['AF_STRIPE_SECRET_KEY', secretKey],
     ['AF_STRIPE_WEBHOOK_SECRET', webhookSecret],
-    ['AF_STRIPE_PRICE_TEAM', team],
+    [PRICE_ENV.team, team],
   ] as const
   const missing = required.filter(([, value]) => !value).map(([name]) => name)
 

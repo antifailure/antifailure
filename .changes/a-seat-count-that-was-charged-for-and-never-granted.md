@@ -115,3 +115,18 @@ The refusal a buyer meets on a plan with no price is written as a route rather
 than a failure: it says the plan is agreed with a person, why, where to ask, and
 that nothing was charged. A test asserts those words, and asserts the sentence
 never reads as an outage.
+
+A start-up refusal named a price variable by writing a prefix and appending the
+uppercased plan. That put a truncated fragment in the source and nothing else,
+so `config-docs.test.ts`, which holds the configuration reference against the
+variables the process reads, reported that fragment as read and undocumented.
+It was right and the reference could not have fixed it: a name assembled at run
+time is not a name anybody can set, and nothing can enumerate the settings a
+process reads if it builds them. The variable for each paid plan is a full
+literal in a closed map now, so a plan with no entry is a compile error rather
+than a lookup that quietly returns undefined.
+
+That suite gained two assertions for the same class: no variable name in the
+source ends in an underscore, which is the signature of a concatenated name, and
+every paid plan's price variable is a complete name. Each was checked by making
+the break it guards.
