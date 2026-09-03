@@ -18,8 +18,8 @@
  */
 
 import { createContext, useContext } from "react";
-import { query, rest, useApi, usePages, type ApiError } from "@/lib/api";
-import { createAdminCsrf } from "@/lib/admin-csrf";
+import { mutate, query, rest, useApi, usePages, type ApiError } from "@/lib/api";
+import { ADMIN_CSRF_HEADER, createAdminCsrf } from "@/lib/admin-csrf";
 
 /** Every permission string the platform catalog defines. Kept as a plain string
  *  rather than a union mirrored from the server: a union here would have to be
@@ -197,7 +197,16 @@ const csrf = createAdminCsrf(async () => {
  * thing that can settle it.
  */
 export async function adminMutate<T>(path: string, input: unknown): Promise<T> {
-  return csrf.send((headers) => rest<T>(`/trpc/${path}`, { method: "POST", body: input, headers }));
+  // `mutate` rather than `rest`, and that is not a stylistic choice. A tRPC
+  // response is an envelope and the answer is at `result.data`; `rest` returns
+  // the body as it arrives. This function used to call `rest` for a `/trpc/`
+  // path, so every operator mutation resolved to the envelope and every field a
+  // caller read off it was undefined. Creating an operator wrote the row, wrote
+  // the audit entry, and left the panel showing its own form, so the obvious
+  // next move was to press the button again.
+  return csrf.send((headers) =>
+    mutate<T>(path, input, headers[ADMIN_CSRF_HEADER] ?? "", ADMIN_CSRF_HEADER),
+  );
 }
 
 export async function suspendTenant(orgId: string, reason: string) {
