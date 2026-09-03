@@ -695,6 +695,26 @@ var exemptFromGate = map[string]string{
 		"against, and `just test-web` covers that inside `gate`: the migrations " +
 		"run and the suites read what they wrote.",
 
+	"tool tfsecignores": "" +
+		"It needs a scanner this repository does not carry. tools/tfsecignores " +
+		"asks tfsec what is failing with every inline suppression disabled, so " +
+		"that an ignore which no longer suppresses anything can be told from one " +
+		"that does, and tfsec is a pinned release asset infra.yml downloads and " +
+		"checksums rather than a dependency in tools/go.mod. A laptop with no " +
+		"tfsec on it would have to fetch one, and `just gate` has to work on a " +
+		"plane. " +
+		"What IS a function of the tree is every decision the tool makes about a " +
+		"directive, and `go test ./tools/tfsecignores` covers it inside `gate`: " +
+		"an ignore with no expiry is refused, an ignore with no reason written " +
+		"above it is refused, an expired one fails, one that suppressed nothing " +
+		"fails, a rule that merely PASSED is not counted as suppressed, a " +
+		"suppression in one file does not cover an ignore in another, a scanner " +
+		"that printed nothing is an error rather than an empty result, and a " +
+		"positive control asserts a live ignore IS accepted so that a checker " +
+		"which refuses everything cannot pass the suite. " +
+		"It runs on every pull request touching infra/ in infra.yml, in the step " +
+		"before the scan it governs.",
+
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +

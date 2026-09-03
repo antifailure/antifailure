@@ -28,6 +28,7 @@ on:
       - 'infra/**'
       - 'tools/azguard/**'
       - 'tools/cost/**'
+      - 'tools/tfsecignores/**'
       - '.github/workflows/infra.yml'
   push:
     branches: [main]
@@ -35,6 +36,7 @@ on:
       - 'infra/**'
       - 'tools/azguard/**'
       - 'tools/cost/**'
+      - 'tools/tfsecignores/**'
 
 permissions:
   contents: read
@@ -86,6 +88,22 @@ jobs:
       # tfsec reads the configuration and needs no credentials, so it runs on
       # every pull request including one from a fork.
       #
+      # IT BLOCKS, and it did not until the findings were dealt with. Both
+      # halves of that matter. `--soft-fail` was the right setting while the
+      # step was broken and it is the reason eight findings sat unseen once it
+      # was fixed: a scanner whose output nobody has to act on becomes a scanner
+      # nobody reads. Every finding in this tree is now either fixed or carries
+      # an inline decision with an expiry, so there is nothing left for a soft
+      # failure to be soft about.
+      #
+      # It is also what makes those expiries mean anything. tfsec stops
+      # honouring an ignore on its date and reports the finding again; under
+      # `--soft-fail` that produces a green run and tells nobody, so every date
+      # in infra/terraform would be decorative. The version pinned above is
+      # archived upstream in favour of Trivy, so its ruleset does not move,
+      # which removes the usual cost of a blocking scanner: a branch that was
+      # green cannot go red because somebody else shipped a new rule.
+      #
       # INSTALLED BY HAND RATHER THAN BY THE ACTION, and the reason is the whole
       # of this block. aquasecurity/tfsec-action downloads tfsec by asking the
       # GitHub releases API which version is `latest`, and that request returned
@@ -110,7 +128,7 @@ jobs:
       # published one for that release. A mismatch fails the step, because a
       # scanner downloaded over the network with no integrity check is a worse
       # thing to run than no scanner.
-      - name: tfsec
+      - name: Install tfsec
         env:
           TFSEC_VERSION: v1.28.14
           TFSEC_SHA256: a32d0799bbefababaa4fcd814da9f4d251cd932789590b99d1d5fcb89ace6f68
@@ -124,10 +142,33 @@ jobs:
           }
           chmod +x /tmp/tfsec
           /tmp/tfsec --version
-          # --soft-fail is the same decision the action carried: findings are
-          # reported and do not break the build. What is no longer soft is the
-          # scanner failing to run.
-          /tmp/tfsec infra/terraform --soft-fail
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      # THE RULE TFSEC HAS NO VERSION OF, AND IT RUNS BEFORE THE SCAN ON PURPOSE.
+      #
+      # A finding that cannot be fixed is recorded inline as
+      # `#tfsec:ignore:<rule>:exp:<date>` with the reasoning in prose beside it,
+      # which is the shape .govulncheck.yaml uses for the Go half. tfsec
+      # enforces the date and nothing else: it accepts a directive with no
+      # expiry at all, and it says nothing whatever about one that no longer
+      # suppresses anything. A suppression left behind after the finding is
+      # fixed reads as protection that is not there, and it hides the fact that
+      # the real finding moved or changed shape.
+      #
+      # Before the scan, because the two failures need telling apart. When an
+      # ignore lapses, tfsec reports the original finding and gives no hint that
+      # a decision expired, which sends the reader looking for a change nobody
+      # made. This step says "the decision to accept this expired on such a
+      # date" first, and the scan never runs.
+      - name: tfsec ignores are still true
+        run: GOTOOLCHAIN=local go run ./tools/tfsecignores -tfsec /tmp/tfsec .
+
+      - name: tfsec
+        run: /tmp/tfsec infra/terraform
 
   plan:
     name: plan

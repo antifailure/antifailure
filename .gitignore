@@ -170,6 +170,7 @@ runner/artifacts/
 /statuscheck
 /surfacecheck
 /tagsync
+/tfsecignores
 /varcheck
 /vulncheck
 /walkthrough
