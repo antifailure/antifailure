@@ -281,8 +281,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		log, buildErr, err = b.attempt(ctx, req, opts, extra, false)
 	}
 	if err != nil {
-		return res, aferrors.Wrap(err, aferrors.AFBLD001,
-			"service", req.Service, "duration", b.clock.Since(started).Round(time.Second).String())
+		return res, startFailure(err, req)
 	}
 
 	res.Log = log
@@ -291,6 +290,20 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
 	}
 	return res, nil
+}
+
+// startFailure reports a build that never started, which is not the same
+// failure as a build that ran and lost.
+//
+// The daemon refused the request, so there is no stream, no log, and nothing
+// in Result to show. AF-BLD-001 says to read the build log above; on this path
+// there is no build log above, and the sentence sends the reader looking for
+// output that was never produced. The daemon's own message is the entire
+// diagnosis, and until this it was reachable only under -v, so the code that
+// carries it puts it in the message where it is read by default.
+func startFailure(err error, req Request) error {
+	return aferrors.Wrap(err, aferrors.AFBLD006,
+		"service", req.Service, "detail", err.Error())
 }
 
 // buildFailure names build.context when the build ran from the repository root

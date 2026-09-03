@@ -180,6 +180,101 @@ func TestBuildFailure_NamesTheContextWhenTheDockerfileIsNotAtItsRoot(t *testing.
 	}
 }
 
+// A build the daemon refused outright and a build that ran and failed are two
+// different failures, and until this they returned the same code and the same
+// instruction. "Read the build log above" is true of the second and false of
+// the first: nothing ran, so nothing was written, and the reader is sent to
+// look for output that does not exist while the daemon's own sentence, which
+// is the whole diagnosis, sits under -v where they will not see it.
+//
+// Asserted on the next step rather than on the code, because the code is only
+// the mechanism. What was wrong was the sentence a stuck user reads.
+func TestStartAndBuildFailures_OnlyTheOneWithALogSendsTheReaderToIt(t *testing.T) {
+	t.Parallel()
+	req := Request{Service: "api", DockerfilePath: "Dockerfile"}
+	daemon := errors.New("Error response from daemon: Cannot locate specified " +
+		"Dockerfile: deploy/docker/control-plane.Dockerfile")
+
+	started := coded(t, buildFailure(daemon, req, "12s"))
+	require.Equal(t, aferrors.AFBLD001, started.Code())
+	require.Contains(t, started.NextStep(), "build log above",
+		"this build ran, so there is a log and the reader should read it")
+
+	never := coded(t, startFailure(daemon, req))
+	require.Equal(t, aferrors.AFBLD006, never.Code())
+	require.NotContains(t, never.NextStep(), "build log above",
+		"nothing ran, so there is no log; naming one is the dead end this closes")
+	require.Contains(t, never.Message(), "Cannot locate specified Dockerfile",
+		"the daemon's sentence is the only account of the failure, so it is in "+
+			"the message, which prints without -v, and not only in the cause, "+
+			"which does not")
+	require.Contains(t, never.Message(), "api", "the message names the service")
+}
+
+func coded(t *testing.T, err error) *aferrors.Error {
+	t.Helper()
+	var e *aferrors.Error
+	require.True(t, aferrors.As(err, &e))
+	return e
+}
+
+// The end to end form of the case above, against a real daemon.
+//
+// On the legacy builder a Dockerfile the context does not carry is refused by
+// the daemon before the build begins, which is the failure reported from
+// 'af up': the call returns an error, no stream is opened, and Result.Log
+// stays empty. Forced onto that builder rather than left to the daemon's
+// preference, because BuildKit reports the same input through the stream
+// instead, where a log genuinely exists and AF-BLD-001 is honest. Which of the
+// two a machine takes is what this is separating, so it cannot be left to the
+// machine.
+func TestDockerBuilder_ARefusedBuildCarriesTheDaemonsReasonAndNoLog(t *testing.T) {
+	b := requireLegacyBuilder(t)
+	c := contextFor(t, map[string]string{
+		"Dockerfile": "FROM alpine:3.20\nCMD [\"true\"]\n",
+	})
+
+	res, err := buildAndClean(t, b, Request{
+		Service: "api", Context: c, EnvID: "env-build-13",
+		DockerfilePath: "deploy/docker/control-plane.Dockerfile",
+	})
+	require.Error(t, err)
+
+	e := coded(t, err)
+	require.Equal(t, aferrors.AFBLD006, e.Code())
+	require.Empty(t, res.Log,
+		"nothing ran, which is exactly why the reader cannot be sent to a log")
+	require.Contains(t, e.Message(), "Cannot locate specified Dockerfile",
+		"the daemon named the file it could not find, and that is the diagnosis")
+	require.NotContains(t, e.NextStep(), "build log above")
+}
+
+// requireLegacyBuilder is requireBuilder against the pre BuildKit builder.
+// DOCKER_BUILDKIT=0 is the documented escape hatch and wantsBuildKit reads it
+// through the injected Getenv, so nothing in the process environment changes.
+func requireLegacyBuilder(t *testing.T) *DockerBuilder {
+	t.Helper()
+	if os.Getenv("AF_SKIP_DOCKER") != "" {
+		t.Skip("skipped: AF_SKIP_DOCKER is set")
+	}
+	b, err := NewDockerBuilder(DockerOptions{
+		Clock:  clock.New(),
+		Getenv: func(string) string { return "0" },
+	})
+	if err != nil {
+		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := b.cli.Ping(ctx); err != nil {
+		_ = b.Close()
+		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
+	}
+	require.False(t, b.buildKit, "DOCKER_BUILDKIT=0 selects the legacy builder")
+	t.Cleanup(func() { _ = b.Close() })
+	return b
+}
+
 func TestDockerBuilder_ReportsAnUnusableDockerfile(t *testing.T) {
 	b := requireBuilder(t)
 	c := contextFor(t, map[string]string{"Dockerfile": "THIS IS NOT A DOCKERFILE\n"})

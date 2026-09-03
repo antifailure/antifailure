@@ -238,6 +238,18 @@ The build for service {service} failed after {duration}, and its Dockerfile is {
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-BLD-006
+
+The build for service {service} never started: {detail}
+
+**What to do.** That sentence is the daemon's own and it is the whole account of the failure. Nothing was built and nothing was printed, because the request was refused before the first step ran. If it names a Dockerfile, the path is resolved inside the build context, so check that the file is under build.context and is not excluded by .dockerignore.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build) |
+
 ### AF-BLD-010
 
 No build strategy could be detected for {service}.

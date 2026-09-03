@@ -45,6 +45,8 @@ const (
 	// Dockerfile is {dockerfile} inside a build context rooted at the
 	// repository.
 	AFBLD005 Code = "AF-BLD-005"
+	// The build for service {service} never started: {detail}
+	AFBLD006 Code = "AF-BLD-006"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -554,6 +556,15 @@ var catalog = map[Code]Entry{
 		Message:   "The build for service {service} failed after {duration}, and its Dockerfile is {dockerfile} inside a build context rooted at the repository.",
 		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
 		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
+	AFBLD006: {
+		Code:      AFBLD006,
+		Area:      "BLD",
+		Message:   "The build for service {service} never started: {detail}",
+		NextStep:  "That sentence is the daemon's own and it is the whole account of the failure. Nothing was built and nothing was printed, because the request was refused before the first step ran. If it names a Dockerfile, the path is resolved inside the build context, so check that the file is under build.context and is not excluded by .dockerignore.",
+		Docs:      "guides/build",
 		Retryable: false,
 		ExitCode:  ExitFailure,
 	},

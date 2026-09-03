@@ -429,6 +429,13 @@ errors:
     docs: reference/manifest
     retryable: false
     exit_code: 1
+  - code: AF-BLD-006
+    area: BLD
+    message: "The build for service {service} never started: {detail}"
+    next_step: "That sentence is the daemon's own and it is the whole account of the failure. Nothing was built and nothing was printed, because the request was refused before the first step ran. If it names a Dockerfile, the path is resolved inside the build context, so check that the file is under build.context and is not excluded by .dockerignore."
+    docs: guides/build
+    retryable: false
+    exit_code: 1
   - code: AF-BLD-002
     area: BLD
     message: "The Dockerfile for {service} is not valid at line {line}: {detail}"
