@@ -1,8 +1,8 @@
-variable "name" {
+variable "resource_group_name" {
   type        = string
   description = "Resource group name. Must start with af-: see ISOLATION.md."
   validation {
-    condition     = startswith(var.name, "af-")
+    condition     = startswith(var.resource_group_name, "af-")
     error_message = "Antifailure only creates resource groups prefixed af-."
   }
 }
@@ -23,7 +23,7 @@ variable "tags" {
   description = "Extra tags. project=antifailure is always added and cannot be overridden away."
 }
 
-variable "log_analytics" {
+variable "log_analytics_enabled" {
   type    = bool
   default = true
 }

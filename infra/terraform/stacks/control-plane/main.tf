@@ -75,9 +75,9 @@ provider "azurerm" {
 module "foundation" {
   source = "../../modules/foundation"
 
-  name        = var.resource_group_name
-  location    = var.location
-  environment = "cp"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  environment         = "cp"
 
   monthly_budget_usd    = var.monthly_budget_usd
   budget_contact_emails = var.budget_contact_emails

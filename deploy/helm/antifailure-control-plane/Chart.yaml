@@ -6,8 +6,17 @@ type: application
 # The chart version moves when the chart changes. appVersion follows the
 # application image and is what `image.tag` defaults to, so a chart installed
 # without an explicit tag runs the application this chart was written against
-# rather than whatever `latest` happens to be that day.
-version: 0.1.1
+# rather than whatever `latest` happens to be that day. The two are separate
+# numbers and will diverge again; they agree here by coincidence.
+#
+# 1.0.0, and the digit that matters is the first one. A chart at 0.x says in
+# the only language its ecosystem has that its values may be rearranged at any
+# time, and that sentence was true: the v1.0.0 release notes named these values
+# as free to change in a minor release. They are not any more. A key in
+# values.yaml keeps its name, its type, and whether it is required for the whole
+# of chart 1.x, tools/inputcheck holds this chart to that, and 0.1.1 would now
+# be telling an operator the opposite of what is true.
+version: 1.0.0
 appVersion: "v1.0.0"
 
 home: https://antifailure.dev
