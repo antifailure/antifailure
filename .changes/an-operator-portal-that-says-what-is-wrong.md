@@ -22,12 +22,3 @@ System Configuration reports what the running control plane actually resolved ra
 its environment intended: which capabilities are configured, the name of the variable behind
 each, the schema version this database is on, and whether any installation switch is engaged.
 No credential value appears on it.
-
-# fixed
-
-Operator mutations returned the response envelope instead of the answer. The operator client
-sent tRPC paths through the plain JSON transport, which returns the body as it arrives, so
-every field a caller read off a mutation was undefined. Creating an operator wrote the row and
-its audit entry and left the panel showing its own form, so the obvious next move was to press
-the button again. Where a tRPC answer lives is now one function that the console's own tests
-can execute.

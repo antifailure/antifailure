@@ -200,11 +200,14 @@ export default function AdminOverviewPage() {
         </Card>
       ) : (
         // items-start, so a card ends where its content ends. Grid items
-          // stretch to the tallest in their row by default, and the groups have
-          // three entries and five, so Customers was drawn as tall as Product
-          // with two hundred pixels of nothing inside it. That reads as a
-          // section that failed to load rather than as a short one.
-          <div className="mt-3 grid items-start gap-5 lg:grid-cols-2">
+        // stretch to the tallest in their row by default, and the groups have
+        // three entries and five, so Customers was drawn as tall as Product
+        // with two hundred pixels of nothing inside it. That reads as a
+        // section that failed to load rather than as a short one.
+        //
+        // mt-3 is the administration lane's, separating the directory from the
+        // statement above it that this page now leads with.
+        <div className="mt-3 grid items-start gap-5 lg:grid-cols-2">
           {groups.map((group) => (
             <Card key={group.slug} title={group.label}>
               <ul>

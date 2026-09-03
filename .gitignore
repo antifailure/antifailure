@@ -256,3 +256,7 @@ examples/*/report.md
 # for lands a 60MB static binary, and the first `git add -A` after a run of the
 # negative control staged it.
 relpack-*
+
+# A throwaway control plane an agent stands up to drive the console in a real
+# browser. Never committed: it seeds an operator with a known password.
+web/apps/api/zzserve.ts
