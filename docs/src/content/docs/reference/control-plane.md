@@ -558,7 +558,7 @@ them opens a laptop.
 ### The marketing site's beacon
 
 The site sends one event per page a reader lands on, one when the sign-up screen
-is reached, and one when an address is submitted. It sets no cookie, loads no
+is reached, and one when somebody asks to be contacted. It sets no cookie, loads no
 third-party script, and keeps its session identifier in `sessionStorage`, so it
 dies with the tab and two visits a day apart cannot be joined. A session also
 ends after thirty minutes idle and after twenty four hours whatever happens, so

@@ -135,6 +135,65 @@ describe('every analytics event has a producer', () => {
     })
   }
 
+  it('every site producer has a caller on a page, not only a definition', async () => {
+    // THE HOLE THE CASE ABOVE LEAVES, and it opened for real.
+    //
+    // That case passes when the event NAME appears in a producer file. The name
+    // appears inside the function that emits it, so a producer function with
+    // zero callers anywhere satisfies it while emitting nothing. The waitlist
+    // was removed from the site and `waitlistSubmitted` kept its definition,
+    // its export, its re-export and its catalog entry, and every gate here
+    // stayed green over an event the site could no longer produce.
+    //
+    // A function is not a producer. A function something CALLS is a producer.
+    // So this reads beacon.ts for the exported functions that emit a catalogued
+    // event, and asks the pages and components whether anything calls them.
+    const beacon = sources.get(siteBeacon)!
+    const pages = [
+      ...(await filesUnder(path.join(repoRoot, 'www', 'app'), '.tsx')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'app'), '.ts')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'components'), '.tsx')),
+      ...(await filesUnder(path.join(repoRoot, 'www', 'components'), '.ts')),
+      // lib/ too, minus the beacon itself. usePageViews is a hook in
+      // lib/analytics.ts and PageViews.tsx calls the hook, not the producer, so
+      // a caller set of pages alone reports the site's most-fired event as
+      // dead. A re-export is not a call: `export { x } from` has no
+      // parenthesis after the name, so the pattern below still cannot be
+      // answered by the line that merely forwards it.
+      ...(await filesUnder(path.join(repoRoot, 'www', 'lib'), '.ts')).filter(
+        (f) => f !== siteBeacon,
+      ),
+    ]
+    const callers = new Map<string, string>()
+    for (const file of pages) callers.set(file, await readFile(file, 'utf8'))
+    assert.ok(callers.size > 20, `only ${callers.size} page files were read, so this proves nothing`)
+
+    // Each exported function and the text up to the next one, which is enough
+    // to say which event names it emits without parsing TypeScript.
+    const blocks = [...beacon.matchAll(/export function (\w+)\(/g)]
+    assert.ok(blocks.length > 3, 'no exported functions found in the beacon, so nothing was checked')
+
+    const orphaned: string[] = []
+    for (let i = 0; i < blocks.length; i += 1) {
+      const fn = blocks[i]![1]!
+      const from = blocks[i]!.index!
+      const to = i + 1 < blocks.length ? blocks[i + 1]!.index! : beacon.length
+      const body = beacon.slice(from, to)
+      const emits = EVENT_NAMES.filter((n) => body.includes(`'${n}'`) || body.includes(`"${n}"`))
+      if (emits.length === 0) continue
+      const called = [...callers.values()].some((text) => new RegExp(`\\b${fn}\\(`).test(text))
+      if (!called) orphaned.push(`${fn} emits ${emits.join(', ')} and nothing on the site calls it`)
+    }
+
+    assert.deepEqual(
+      orphaned,
+      [],
+      'a catalogued event has a producer function with no caller. It will read zero forever, ' +
+        'which is indistinguishable from a quiet week. Call it from the thing that should ' +
+        'produce it, or take the event out of the catalog.',
+    )
+  })
+
   it('names a producer file that exists, for every event', async () => {
     // The `producer` sentence is what a reader follows when a number looks
     // wrong. A sentence naming a file that was renamed a month ago sends them

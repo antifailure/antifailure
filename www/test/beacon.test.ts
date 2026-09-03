@@ -535,10 +535,10 @@ describe('the session is computed rather than left to the tab', () => {
     const beacon = await loadBeacon()
     beacon.pageViewed('home')
     h.now += 60_000
-    beacon.waitlistSubmitted('joined')
+    beacon.leadSubmitted('recorded')
     advance(4000)
     await settle()
-    const submitted = events().find((e) => e.name === 'site.waitlist_submitted')!
+    const submitted = events().find((e) => e.name === 'site.lead_submitted')!
     assert.equal(submitted.payload.source, 'ai', 'the submission lost the channel it arrived on')
     assert.equal(submitted.payload.landing, 'home')
   })

@@ -148,6 +148,11 @@ export const SITE_ROUTES = [
   'blog',
   'blog_post',
   'legal',
+  // The page the only form on the site is on, and therefore the one page the
+  // acquisition funnel ends on. It classified as `other` until the form moved
+  // there, which made "views of the page that converts" a question the
+  // dashboard could not answer about the page it most needed to.
+  'contact',
   'signin',
   'signup',
   'other',
@@ -231,16 +236,22 @@ export const CATALOG = {
     session: 'required',
   },
 
-  'site.waitlist_submitted': {
+  'site.lead_submitted': {
     funnel: 'acquisition',
     version: 1,
     source: 'site',
     actorKind: 'visitor',
     privacyBasis: 'legitimate_interest',
     answers:
-      'Which channel and which landing page produce a waitlist address, which is ' +
-      'the join between acquisition and identity.',
-    producer: 'www/lib/beacon.ts, after the waitlist endpoint answers',
+      'Which channel and which landing page produce somebody asking to be ' +
+      'contacted, which is the join between acquisition and identity.',
+    // RENAMED FROM site.waitlist_submitted, because the waitlist is gone. The
+    // form that replaced it posts a lead at POST /v1/leads, and an event still
+    // called waitlist_submitted would have put a name in the data that nothing
+    // in the product answers to. The old name was left with no caller at all
+    // when the waitlist went, which every gate here read as fine, and that is
+    // what the caller case in analytics-producers.test.ts now catches.
+    producer: 'www/lib/beacon.ts, after the leads endpoint answers',
     payload: {
       /** The channel and page the SESSION started on, not this page. That is
        *  what makes attribution answer "what brought them here" rather than
@@ -248,7 +259,12 @@ export const CATALOG = {
       source: { kind: 'enum', values: VISIT_SOURCES },
       landing: { kind: 'enum', values: SITE_ROUTES },
       campaign: { kind: 'id', pattern: CAMPAIGN_PATTERN, maxLength: 32 },
-      outcome: { kind: 'enum', values: ['joined', 'already', 'refused'] as const },
+      /** What the endpoint did, which the form renders two different sentences
+       *  from. `notified` means a mailer told somebody; `recorded` means the
+       *  lead is in the database and a person reads the queue. Both are
+       *  conversions and the difference is the deployment's, not the reader's,
+       *  so they are separate values rather than one. */
+      outcome: { kind: 'enum', values: ['notified', 'recorded', 'refused'] as const },
     },
     dimensions: ['source', 'landing'],
     organization: 'never',
@@ -629,9 +645,9 @@ export interface FunnelDefinition {
 export const FUNNEL_DEFINITIONS: readonly FunnelDefinition[] = [
   {
     id: 'acquisition',
-    title: 'Visit to waitlist',
+    title: 'Visit to lead',
     subject: 'session',
-    // A session cannot outlive a day: www/lib/analytics.ts caps it at twenty
+    // A session cannot outlive a day: www/lib/beacon.ts caps it at twenty
     // four hours and ends it after thirty minutes idle. So a window wider than
     // a day could never change an answer, and a narrower one would cut off a
     // reader who left the tab open over lunch.
@@ -649,12 +665,12 @@ export const FUNNEL_DEFINITIONS: readonly FunnelDefinition[] = [
         meaning: 'Reached the sign-up screen, from wherever they were.',
       },
       {
-        event: 'site.waitlist_submitted',
-        // `refused` is excluded on purpose. An address the endpoint would not
+        event: 'site.lead_submitted',
+        // `refused` is excluded on purpose. A submission the endpoint would not
         // take is not a conversion, and counting it as one would make the last
         // step move whenever the validation rules changed.
-        where: { field: 'outcome', values: ['joined', 'already'] },
-        meaning: 'Left an address that the waitlist accepted.',
+        where: { field: 'outcome', values: ['notified', 'recorded'] },
+        meaning: 'Asked to be contacted, and the endpoint took it.',
       },
     ],
   },

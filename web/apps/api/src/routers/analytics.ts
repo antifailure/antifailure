@@ -166,7 +166,7 @@ export const analyticsRouter = router({
         acquisition: {
           bySource: await breakdown(db, 'site.page_viewed', 'a', days, today),
           byLanding: await breakdown(db, 'site.page_viewed', 'b', days, today),
-          waitlistBySource: await breakdown(db, 'site.waitlist_submitted', 'a', days, today),
+          leadsBySource: await breakdown(db, 'site.lead_submitted', 'a', days, today),
           views: await series(db, 'site.page_viewed', days, today),
         },
         organizations: {

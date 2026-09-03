@@ -19,6 +19,7 @@ export {
   SESSION_MAX_LENGTH_MS,
   campaignFor,
   ctaEngaged,
+  leadSubmitted,
   measurementStatus,
   pageViewed,
   retryDelay,
@@ -26,7 +27,6 @@ export {
   sessionEnded,
   setMeasurement,
   sourceFor,
-  waitlistSubmitted,
 } from "./beacon";
 export type {
   Cta,

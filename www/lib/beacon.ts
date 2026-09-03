@@ -178,6 +178,7 @@ export type SiteRoute =
   | "blog"
   | "blog_post"
   | "legal"
+  | "contact"
   | "signin"
   | "signup"
   | "other";
@@ -233,6 +234,7 @@ export function routeIdFor(pathname: string): SiteRoute {
   if (path === "/pricing") return "pricing";
   if (path === "/blog") return "blog";
   if (path.startsWith("/blog/")) return "blog_post";
+  if (path === "/contact") return "contact";
   if (path === "/signin") return "signin";
   if (path === "/signup") return "signup";
   if (["/privacy", "/terms", "/dpa", "/subprocessors", "/data-retention", "/sla"].includes(path)) {
@@ -941,15 +943,19 @@ export function ctaEngaged(cta: Cta): void {
 }
 
 /**
- * A waitlist submission, carrying the channel the SESSION started on.
+ * Somebody asked to be contacted, carrying the channel the SESSION started on.
  *
  * That is the whole point of this event and it is why attribution is held for
  * the session rather than read per page. A visitor arrives from a search
- * result, reads three pages, and signs up on the pricing page; taking the
+ * result, reads three pages, and submits on the pricing page; taking the
  * referrer at submission time would attribute every one of those to
  * `internal`, and the acquisition funnel would report that nothing works.
+ *
+ * `notified` means the deployment had a mailer and somebody was told;
+ * `recorded` means the lead is in the database and a person reads the queue.
+ * The form renders a different sentence for each, so the event says which too.
  */
-export function waitlistSubmitted(outcome: "joined" | "already" | "refused"): void {
+export function leadSubmitted(outcome: "notified" | "recorded" | "refused"): void {
   if (!measurementAllowed()) return;
   const now = Date.now();
   const s = session(now);
@@ -961,7 +967,7 @@ export function waitlistSubmitted(outcome: "joined" | "already" | "refused"): vo
   if (s.attribution.campaign) payload.campaign = s.attribution.campaign;
   enqueue({
     id: randomId(),
-    name: "site.waitlist_submitted",
+    name: "site.lead_submitted",
     at: new Date(now).toISOString(),
     session: s.id,
     payload,

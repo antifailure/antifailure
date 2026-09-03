@@ -118,7 +118,7 @@ interface Overview {
   acquisition: {
     bySource: Breakdown[];
     byLanding: Breakdown[];
-    waitlistBySource: Breakdown[];
+    leadsBySource: Breakdown[];
     views: { day: string; events: number; organizations: number; sessions: number }[];
   };
   organizations: {
@@ -235,9 +235,9 @@ function Analytics() {
                     />
                   </div>
                   <Group
-                    heading="Waitlist submissions, by the channel that brought them"
+                    heading="Contact requests, by the channel that brought them"
                     caption="Attributed to where the browsing session started, not to the page holding the form."
-                    rows={data.acquisition.waitlistBySource}
+                    rows={data.acquisition.leadsBySource}
                   />
                 </div>
               )}

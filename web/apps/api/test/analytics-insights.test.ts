@@ -142,7 +142,7 @@ describe('every declared funnel could actually be completed', () => {
       steps: [
         { event: 'site.page_viewed' as const, meaning: 'first' },
         {
-          event: 'site.waitlist_submitted' as const,
+          event: 'site.lead_submitted' as const,
           where: { field: 'outcome', values: ["joined') OR true --"] },
           meaning: 'second',
         },
@@ -455,8 +455,8 @@ describe('the insight rollup', { skip: hasDatabase ? false : 'no Postgres at AF_
     await write('session', s, 'site.cta_engaged', '2026-07-06T09:05:00Z', {
       cta: 'waitlist_open', route: 'home',
     })
-    await write('session', s, 'site.waitlist_submitted', '2026-07-06T09:06:00Z', {
-      source: 'search', landing: 'home', outcome: 'joined',
+    await write('session', s, 'site.lead_submitted', '2026-07-06T09:06:00Z', {
+      source: 'search', landing: 'home', outcome: 'recorded',
     })
     const depths = await depthsForWeek(new Date('2026-07-06T23:00:00Z'), '2026-07-06')
     assert.equal(depths.get(3), 1, 'a session that did every step in order was not counted')
@@ -510,8 +510,8 @@ describe('the insight rollup', { skip: hasDatabase ? false : 'no Postgres at AF_
     await write('session', s, 'site.cta_engaged', '2026-07-23T09:10:00Z', {
       cta: 'waitlist_open', route: 'pricing',
     })
-    await write('session', s, 'site.waitlist_submitted', '2026-07-23T09:11:00Z', {
-      source: 'search', landing: 'home', outcome: 'joined',
+    await write('session', s, 'site.lead_submitted', '2026-07-23T09:11:00Z', {
+      source: 'search', landing: 'home', outcome: 'recorded',
     })
     await roll(daysBetween('2026-07-20', '2026-07-24'), new Date('2026-07-24T23:00:00Z'))
     const depths = await readDepths('2026-07-20')
@@ -531,7 +531,7 @@ describe('the insight rollup', { skip: hasDatabase ? false : 'no Postgres at AF_
       cta: 'waitlist_open', route: 'home',
     })
     // An address the waitlist would not take is not a conversion.
-    await write('session', s, 'site.waitlist_submitted', '2026-07-27T09:02:00Z', {
+    await write('session', s, 'site.lead_submitted', '2026-07-27T09:02:00Z', {
       source: 'search', landing: 'home', outcome: 'refused',
     })
     await roll(daysBetween('2026-07-27', '2026-07-28'), new Date('2026-07-28T23:00:00Z'))
@@ -618,8 +618,8 @@ describe('the insight rollup', { skip: hasDatabase ? false : 'no Postgres at AF_
     for (const [name, at, payload] of [
       ['site.page_viewed', '2026-08-17T09:00:00Z', { route: 'home', source: 'search', entry: true }],
       ['site.cta_engaged', '2026-08-17T09:01:00Z', { cta: 'waitlist_open', route: 'home' }],
-      ['site.waitlist_submitted', '2026-08-17T09:02:00Z', {
-        source: 'search', landing: 'home', outcome: 'joined',
+      ['site.lead_submitted', '2026-08-17T09:02:00Z', {
+        source: 'search', landing: 'home', outcome: 'recorded',
       }],
     ] as [string, string, Record<string, unknown>][]) {
       const outcome = await h.pool.withoutTenant((db) =>
