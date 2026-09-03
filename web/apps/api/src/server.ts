@@ -155,8 +155,11 @@ import { openApiDocument } from './openapi.ts'
 import { createAnalytics, type Analytics } from './analytics/record.ts'
 import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
-import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
+import {
+  limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
+} from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import { apiNotFound } from './notfound.ts'
 import { engagedReason } from './admin/controls.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
@@ -538,15 +541,57 @@ export function createServer(options: ServerOptions) {
   })
 
   app.use('*', async (c, next) => {
-    const limit = limitFor(c.req.method, new URL(c.req.url).pathname)
+    const path = new URL(c.req.url).pathname
+    const limit = limitFor(c.req.method, path)
     if (!limit) {
+      // Two different things arrive here, and until this line they were
+      // answered identically.
+      //
+      // A path the router has no route for is a typo in somebody's URL. It was
+      // answered 500, which told every monitor and load balancer watching the
+      // deployed control plane that the server was broken because a client
+      // asked for something that never existed. It is a 404, and Hono's own
+      // not-found handler already knows how to say so.
+      //
+      // A route that EXISTS with no declared limit is the hole this gate was
+      // built to catch, and it stays a refusal. Which of the two this is comes
+      // from the router itself rather than from a second list of paths, so
+      // there is nothing to keep in step. See servedRoute.
+      const route = servedRoute(app, c.req.method, path)
+      if (!route) return c.notFound()
+
       // Deliberately loud. The alternative is a quiet default, and a quiet
       // default means nobody ever notices the endpoint is unbounded.
+      //
+      // Loud in the LOG, though, not in the body. The body used to carry
+      // "Add it to ENDPOINT_LIMITS with the reason for the number", which is an
+      // instruction to a maintainer of this codebase served to anybody who can
+      // reach the port. It described this server's own gate design to a
+      // stranger and told the one person who could act on it nothing, because
+      // maintainers read logs and not other people's 500 bodies. So the
+      // sentence moves to the log line, where it names the catalog key to add,
+      // and the caller gets the same answer every other control plane failure
+      // gives: a code, a resolution, and the id that ties the two together.
+      //
+      // The route pattern is logged rather than the path: it comes from this
+      // server's route table, so it cannot carry a caller's string into a log,
+      // and it is already the key ENDPOINT_LIMITS would hold it under.
+      const requestId = c.get('requestId') ?? 'unassigned'
+      console.error('endpoint has no declared rate limit, refused', {
+        requestId,
+        route,
+        fix: 'Add it to ENDPOINT_LIMITS in web/apps/api/src/limits.ts, with the reason for the number.',
+      })
       return c.json(
         {
-          error:
-            'This endpoint has no declared rate limit, so the server refuses to serve it. ' +
-            'Add it to ENDPOINT_LIMITS with the reason for the number.',
+          error: {
+            code: CONTROL_PLANE_FAILURE,
+            message: 'The control plane could not complete this request.',
+            resolution:
+              'Retry once. If it fails again, quote the requestId below: it is the only thing ' +
+              'that ties this answer to a log line.',
+          },
+          requestId,
         },
         500,
       )
@@ -2975,6 +3020,17 @@ export function createServer(options: ServerOptions) {
       },
     }),
   )
+
+  // What answers a path with no route, when the console is not mounted to
+  // answer it with a page. Registered before mountConsole rather than after,
+  // because Hono holds ONE not-found handler and the last call wins: the
+  // console's handler has to be able to replace this, and it answers exactly
+  // this for the paths the API owns.
+  //
+  // Without it, an API-only deployment answered Hono's default, which is plain
+  // text, for the one response a caller finding its way around is most likely
+  // to get.
+  app.notFound(apiNotFound)
 
   // The console, last, so that every API route above wins a path collision.
   // Mounted on this app rather than a second one: the session cookie the

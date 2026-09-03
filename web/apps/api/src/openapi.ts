@@ -542,8 +542,10 @@ export function openApiDocument(): Record<string, unknown> {
   // A repository is `owner/name` and a slash is a path separator, so a single
   // `{binding}` segment cannot match one. Before the second path existed,
   // `DELETE /v1/oidc/bindings/acme/app` matched no route at all and was
-  // answered by the "this endpoint has no declared rate limit" refusal, which
-  // is the loudest possible way to say a revocation is unreachable. Somebody
+  // answered by the "this endpoint has no declared rate limit" refusal. A path
+  // with no route answers 404 now, which is correct and is quieter, so the
+  // second path matters more than it did and not less: nothing shouts on its
+  // behalf any more if it goes away again. Somebody
   // holding the repository name, which is what the list shows and what a
   // person has in front of them during an incident, must not have to go and
   // find a uuid first.
