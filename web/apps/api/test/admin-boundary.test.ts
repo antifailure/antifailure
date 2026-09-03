@@ -444,6 +444,48 @@ describe('cross-site request forgery on the operator surface', () => {
       )
     })
 
+    test('the configured base URL is compared as an ORIGIN, not as text', () => {
+      // The bug this pins refused every operator mutation on a stock
+      // deployment. The second argument is `options.appBaseUrl`, a BASE URL,
+      // and the Origin header is an origin: no path, no trailing slash, ever.
+      // Comparing them as text agreed only when the base URL happened to be
+      // spelled exactly as an origin, so the three ordinary spellings below all
+      // answered "This operator request came from another site", which is a
+      // sentence that sends whoever reads it looking for an attacker.
+      //
+      // The unset case is the one that matters most: antifailure.yaml
+      // deliberately leaves AF_APP_BASE_URL unset because the address is
+      // allocated at run time, so the shipped configuration was the broken one.
+      const browser = { origin: 'https://app.example', secFetchSite: 'same-origin' }
+      assert.equal(looksSameOrigin(browser, 'https://app.example'), true, 'bare origin')
+      assert.equal(looksSameOrigin(browser, 'https://app.example/'), true, 'trailing slash')
+      assert.equal(looksSameOrigin(browser, 'https://app.example/console'), true, 'a sub path')
+      assert.equal(looksSameOrigin(browser, ''), true, 'AF_APP_BASE_URL unset, the default')
+    })
+
+    test('a different site is still refused however the base URL is spelled', () => {
+      // The half that must not have been loosened by the fix above. Every
+      // spelling that now ACCEPTS the real origin has to keep refusing another
+      // one, or the fix traded a broken portal for an open one.
+      for (const base of [
+        'https://app.example',
+        'https://app.example/',
+        'https://app.example/console',
+      ]) {
+        assert.equal(
+          looksSameOrigin({ origin: 'https://evil.example', secFetchSite: 'same-origin' }, base),
+          false,
+          `a cross-site origin was accepted against ${base}`,
+        )
+      }
+    })
+
+    test('an origin that is not a URL is refused rather than waved through', () => {
+      // Not a browser, and the deployment did say what to expect, so there is
+      // no reason to guess in its favour.
+      assert.equal(looksSameOrigin({ origin: 'not a url' }, 'https://app.example'), false)
+    })
+
     test('a request with neither header passes, which is why it cannot be the only check', () => {
       // Stated as a test rather than a comment because it is the property that
       // makes this insufficient alone: something between the browser and this

@@ -1,32 +1,72 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Badge,
-  Card,
-  CellLink,
-  Empty,
-  Loaded,
-  Row,
-  Table,
-  TableSkeleton,
-  TableWrap,
-  Td,
-  Th,
-  When,
-  inputClass,
-} from "@/components/ui";
-import { AdminPage } from "@/components/admin/primitives";
+import { Card, Loaded, TableSkeleton, When } from "@/components/ui";
 import { More } from "@/components/pagination";
-import { useTenants } from "@/lib/admin";
+import {
+  AdminPage,
+  DataTable,
+  EmptyList,
+  FilterBar,
+  StatusChip,
+  type Column,
+} from "@/components/admin/primitives";
+import { useTenants, type Tenant } from "@/lib/admin";
 
 /**
  * Every organization on the installation.
  *
- * This is the portal's front page because it is the question support work
- * actually starts from: somebody names an account, and everything else is
- * reached from there.
+ * The portal's first list, and the one every other section copies, so it is
+ * built out of the shared primitives rather than out of a table of its own.
+ * That is not tidiness: the version this replaced fired a fresh cross tenant
+ * query on every KEYSTROKE in the search box, because the field was wired
+ * straight to the fetch. `FilterBar` submits, so an operator gets to finish
+ * typing an account name before the table moves under them, and the
+ * installation gets one query instead of one per character.
  */
+
+const columns: Column<Tenant>[] = [
+  {
+    key: "organization",
+    header: "Organization",
+    cell: (t) => (
+      <>
+        <span className="block truncate font-medium text-ink">{t.name}</span>
+        <span className="block truncate font-mono text-[12px] text-muted">{t.slug}</span>
+      </>
+    ),
+  },
+  { key: "plan", header: "Plan", cell: (t) => t.plan },
+  // numeric is the console's right align plus tabular figures, so the digits
+  // line up down the column and two accounts can be compared without reading
+  // them one at a time.
+  { key: "members", header: "Members", numeric: true, cell: (t) => t.members.toLocaleString() },
+  {
+    key: "environments",
+    header: "Environments",
+    numeric: true,
+    cell: (t) => t.environments.toLocaleString(),
+  },
+  { key: "created", header: "Created", cell: (t) => <When value={t.createdAt} /> },
+  {
+    key: "state",
+    header: "State",
+    cell: (t) => (
+      <>
+        <StatusChip value={t.suspended ? "suspended" : "active"} />
+        {t.suspendedReason ? (
+          // break-words because a reason is whatever an operator pasted, and an
+          // unbreakable token here would widen the whole table rather than this
+          // one cell.
+          <span className="mt-1 block max-w-[36ch] break-words text-[12px] text-muted">
+            {t.suspendedReason}
+          </span>
+        ) : null}
+      </>
+    ),
+  },
+];
+
 export default function AdminTenantsPage() {
   const [search, setSearch] = useState("");
   const state = useTenants(search);
@@ -35,98 +75,37 @@ export default function AdminTenantsPage() {
     <AdminPage
       href="/admin/customers/users"
       lede="Every organization on this installation. Counts are live rather than billed figures."
-      actions={
-        <label className="flex min-w-0 items-center gap-2">
-          {/* A real label rather than a placeholder standing in for one, so the
-              field still says what it is once somebody has typed in it. */}
-          <span className="sr-only">Search tenants</span>
-          <input
-            className={`${inputClass} w-[min(280px,60vw)]`}
-            type="search"
-            value={search}
-            placeholder="Search by name or slug"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-      }
     >
       <Card>
+        <FilterBar
+          search={{
+            value: search,
+            onChange: setSearch,
+            label: "Search organizations by name or slug",
+            placeholder: "Search by name or slug",
+          }}
+        />
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
-          {(rows) =>
-            rows.length === 0 ? (
-              <Empty title={search ? "No tenant matches that" : "No organizations yet"}>
-                {search
-                  ? "Nothing on this installation has that name or slug. Clear the search to see every tenant."
-                  : "Nobody has created an organization on this installation. The first sign-in that creates one will show up here."}
-              </Empty>
-            ) : (
-              <TableWrap>
-                <Table>
-                  <thead>
-                    <tr>
-                      <Th>Organization</Th>
-                      <Th>Plan</Th>
-                      {/* numeric, which is the console's own right-align plus
-                          tabular figures, so the digits line up down the column
-                          and two accounts can be compared without reading them. */}
-                      <Th numeric>Members</Th>
-                      <Th numeric>Environments</Th>
-                      <Th>Created</Th>
-                      <Th>State</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((t) => (
-                      <Row key={t.id}>
-                        {/* No label on this one: it names the row, and leads
-                            the stacked record on a phone by itself.
-
-                            A link on the NAME rather than a whole clickable
-                            row: a row that navigates on click has no keyboard
-                            equivalent and no address to copy, and CellLink is
-                            already 44px tall under a thumb. */}
-                        <Td>
-                          <CellLink href={`/admin/customers/users/organization?org=${encodeURIComponent(t.slug)}`}>
-                            <span className="block truncate font-medium text-ink">{t.name}</span>
-                          </CellLink>
-                          <span className="block truncate font-mono text-[12px] text-muted">
-                            {t.slug}
-                          </span>
-                        </Td>
-                        <Td label="Plan">{t.plan}</Td>
-                        <Td label="Members" numeric>
-                          {t.members.toLocaleString()}
-                        </Td>
-                        <Td label="Environments" numeric>
-                          {t.environments.toLocaleString()}
-                        </Td>
-                        <Td label="Created">
-                          <When value={t.createdAt} />
-                        </Td>
-                        <Td label="State">
-                          {t.suspended ? (
-                            <Badge tone="fail">suspended</Badge>
-                          ) : (
-                            <Badge tone="pass">active</Badge>
-                          )}
-                          {t.suspendedReason ? (
-                            // break-words for the same reason as the detail
-                            // card: a reason is whatever an operator pasted,
-                            // and an unbreakable token here widens the whole
-                            // table rather than just this cell.
-                            <span className="mt-1 block max-w-[36ch] break-words text-[12px] text-muted">
-                              {t.suspendedReason}
-                            </span>
-                          ) : null}
-                        </Td>
-                      </Row>
-                    ))}
-                  </tbody>
-                </Table>
-                {/* Always rendered, in both states. "All 24 organizations." is
-                    the only place this screen ever says the list is complete,
-                    and a footer that hid itself at the end could only ever say
-                    the opposite. */}
+          {(rows) => (
+            <DataTable
+              columns={columns}
+              rows={rows}
+              keyOf={(t) => t.id}
+              // The link is on the row's NAME rather than the whole row: a row
+              // that navigates on click has no keyboard equivalent and no
+              // address to copy.
+              href={(t) => `/admin/customers/users/organization?org=${encodeURIComponent(t.slug)}`}
+              empty={
+                <EmptyList title={search ? "No organization matches that" : "No organizations yet"}>
+                  {search
+                    ? "Nothing on this installation has that name or slug. Clear the search to see every organization."
+                    : "Nobody has created an organization on this installation. The first sign-in that creates one will show up here."}
+                </EmptyList>
+              }
+              // Rendered in BOTH states. "All 24 organizations." is the only
+              // place this screen ever says the list is complete, and a footer
+              // that hid itself at the end could only say the opposite.
+              footer={
                 <More
                   shown={rows.length}
                   noun={{ one: "organization", many: "organizations" }}
@@ -135,9 +114,9 @@ export default function AdminTenantsPage() {
                   error={state.moreError}
                   onMore={state.more}
                 />
-              </TableWrap>
-            )
-          }
+              }
+            />
+          )}
         </Loaded>
       </Card>
     </AdminPage>

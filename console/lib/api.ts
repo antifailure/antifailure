@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { unwrapTrpc } from "@/lib/trpc-envelope";
+
 /**
  * Where the API is.
  *
@@ -72,37 +74,19 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return unwrapTrpc<T>(await res.json());
 }
 
-/**
- * A tRPC mutation. Needs the CSRF token from the session.
- *
- * `header` exists because the operator portal is a second session with a second
- * token under a second name, `x-antifailure-admin-csrf`. It sends through HERE
- * rather than through `rest` for a reason that cost an afternoon: `rest` speaks
- * to plain JSON endpoints and returns the body as it arrives, while a tRPC
- * response is an envelope and the answer is at `result.data`. The operator
- * client used to call `rest` for a `/trpc/` path, so every operator mutation
- * resolved to `{result: {data: ...}}` and every field the caller read off it
- * was undefined. Nothing noticed, because until now nothing read one.
- */
-export async function mutate<T>(
-  path: string,
-  input: unknown,
-  csrf: string,
-  header: string = CSRF_HEADER,
-): Promise<T> {
+/** A tRPC mutation. Needs the CSRF token from the session. */
+export async function mutate<T>(path: string, input: unknown, csrf: string): Promise<T> {
   const res = await fetch(`${BASE}/trpc/${path}`, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "content-type": "application/json", [header]: csrf },
+    headers: { "content-type": "application/json", [CSRF_HEADER]: csrf },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return unwrapTrpc<T>(await res.json());
 }
 
 /** A plain JSON endpoint on the control plane, for the few things that are not
@@ -112,13 +96,26 @@ export async function rest<T>(
   init: {
     method?: string;
     body?: unknown;
+    /** The TENANT token, sent as x-antifailure-csrf. */
     csrf?: string;
+    /**
+     * Anything else the caller has to send.
+     *
+     * The operator portal's own token goes here, because it is a DIFFERENT
+     * header: the guard for `af_admin_session` reads
+     * `x-antifailure-admin-csrf` and never looks at `csrf` above. Passing the
+     * operator token as `csrf` would send it under the tenant name and be
+     * refused exactly as if nothing had been sent, which is a failure with no
+     * symptom in the request. See adminMutate in lib/admin.ts.
+     */
+    headers?: Record<string, string>;
   } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  Object.assign(headers, init.headers ?? {});
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",

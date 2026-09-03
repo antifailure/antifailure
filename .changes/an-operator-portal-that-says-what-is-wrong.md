@@ -25,8 +25,9 @@ No credential value appears on it.
 
 # fixed
 
-Every operator mutation the console sent was refused with 403. The client argued in a comment
-that the operator cookie being SameSite=Strict made a cross-site token unnecessary; the control
-plane requires `x-antifailure-admin-csrf` on every operator write and has asserted that in three
-ways the whole time. Suspending and resuming an organization from the portal could not have
-worked. The token is now fetched, cached, sent, and refreshed once on a refusal.
+Operator mutations returned the response envelope instead of the answer. The operator client
+sent tRPC paths through the plain JSON transport, which returns the body as it arrives, so
+every field a caller read off a mutation was undefined. Creating an operator wrote the row and
+its audit entry and left the panel showing its own form, so the obvious next move was to press
+the button again. Where a tRPC answer lives is now one function that the console's own tests
+can execute.

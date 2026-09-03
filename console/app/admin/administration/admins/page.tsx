@@ -1,25 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Badge,
   Button,
   Card,
   CardSkeleton,
   Confirm,
-  Empty,
   Field,
   Loaded,
-  Table,
   TableSkeleton,
-  TableWrap,
-  Td,
-  Th,
   When,
   inputClass,
   selectClass,
 } from "@/components/ui";
-import { AdminPage, Drawer, Facts } from "@/components/admin/primitives";
+import {
+  AdminPage,
+  DataTable,
+  Drawer,
+  EmptyList,
+  Facts,
+  StatusChip,
+  type Column,
+} from "@/components/admin/primitives";
 import { ApiError } from "@/lib/api";
 import { operatorMay, useAdminContext, useOperators, type Operator } from "@/lib/admin";
 import {
@@ -61,20 +65,50 @@ import {
  * behind it.
  */
 export default function AdministrationAdminsPage() {
+  // useSearchParams needs a Suspense boundary under `output: "export"`, the
+  // same way the organization detail page wraps itself. Without it the build
+  // refuses the route rather than failing at runtime.
+  return (
+    <Suspense
+      fallback={
+        <AdminPage href="/admin/administration/admins">
+          <Card>
+            <TableSkeleton rows={4} cols={5} />
+          </Card>
+        </AdminPage>
+      }
+    >
+      <Admins />
+    </Suspense>
+  );
+}
+
+function Admins() {
   const { me } = useAdminContext();
   const mayWrite = operatorMay(me, "admin.operators.write");
 
   const operators = useOperators();
   const catalog = useAdminCatalog();
 
-  const [open, setOpen] = useState<Operator | null>(null);
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
 
-  // The drawer holds the row it was opened on, so a reload underneath it does
-  // not swap the record out from under the reader. Re-read from the fresh list
-  // by id so the panel still updates when a write lands.
-  const selected = open ? (operators.data?.find((o) => o.id === open.id) ?? open) : null;
+  /*
+   * THE OPEN RECORD IS IN THE URL, NOT IN STATE.
+   *
+   * The console is a static export, so there are no dynamic segments and a
+   * detail view is `?id=<id>`. Putting it in the query string rather than in
+   * `useState` is what makes the panel linkable: an operator investigating an
+   * account can send the address to somebody else, and the back button closes
+   * the panel instead of leaving the page. `replace` rather than `push`, so
+   * opening and closing three accounts does not bury the previous page under
+   * three history entries.
+   */
+  const params = useSearchParams();
+  const router = useRouter();
+  const openId = params.get("id");
+  const selected = openId ? (operators.data?.find((o) => o.id === openId) ?? null) : null;
+  const close = () => router.replace("/admin/administration/admins");
 
   return (
     <AdminPage
@@ -99,10 +133,10 @@ export default function AdministrationAdminsPage() {
                 // Reachable in principle and alarming in practice: you are
                 // reading this page, so at least one operator exists. Saying so
                 // is more useful than an empty table that reads like a bug.
-                <Empty title="No operator accounts">
+                <EmptyList title="No operator accounts">
                   This installation has no operator accounts, which cannot be true if you are
                   reading this page. Check that the portal is pointed at the database you expect.
-                </Empty>
+                </EmptyList>
               ) : (
                 <>
                   <OperatorSearch
@@ -111,14 +145,7 @@ export default function AdministrationAdminsPage() {
                     shown={rows.length}
                     total={all.length}
                   />
-                  {rows.length === 0 ? (
-                    <Empty title="No operator matches that">
-                      Nothing in the {all.length} accounts on this installation matches
-                      &ldquo;{search}&rdquo;. The search covers the name, the address and the role.
-                    </Empty>
-                  ) : (
-                    <OperatorTable rows={rows} onOpen={setOpen} />
-                  )}
+                  <OperatorTable rows={rows} />
                 </>
               );
             }}
@@ -141,7 +168,7 @@ export default function AdministrationAdminsPage() {
           me={me?.adminUserId ?? null}
           roles={catalog.data?.roles.map((r) => r.name) ?? []}
           mayWrite={mayWrite}
-          onClose={() => setOpen(null)}
+          onClose={close}
           onChanged={() => operators.reload()}
         />
       ) : null}
@@ -216,74 +243,76 @@ function OperatorSearch({
   );
 }
 
-function OperatorTable({
-  rows,
-  onOpen,
-}: {
-  rows: Operator[];
-  onOpen: (o: Operator) => void;
-}) {
+/**
+ * The directory, built out of the portal's own DataTable.
+ *
+ * `href` rather than a click handler, which is what gives each row one
+ * focusable, announced, Enter-activated target. A row that is only clickable is
+ * invisible to a keyboard, and a button here would open a panel nobody could
+ * link to.
+ *
+ * No `onSort`, deliberately. admin.operators.list takes no ordering argument,
+ * so a sortable header would have to reorder the rows in the browser, and
+ * DataTable refuses to offer a sort it cannot actually perform.
+ */
+function OperatorTable({ rows }: { rows: Operator[] }) {
+  const columns: Column<Operator>[] = [
+    {
+      key: "operator",
+      header: "Operator",
+      cell: (o) => (
+        <span className="min-w-0">
+          <span className="block truncate font-medium text-ink">{o.name}</span>
+          <span className="block truncate text-[12px] text-muted">{o.email}</span>
+        </span>
+      ),
+    },
+    {
+      key: "role",
+      header: "Role",
+      cell: (o) => (
+        <>
+          {/* Underscores are a database convention and not a word. The role
+              reads as English here and the value is unchanged underneath. */}
+          {o.role.replace(/_/g, " ")}
+          {o.isRoot ? (
+            <span className="mt-1 block text-[12px] text-muted">
+              The root operator, which cannot be deleted, demoted or suspended
+            </span>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "signin",
+      header: "Can sign in",
+      cell: (o) => (o.provisioned ? "Yes" : <span className="text-muted">Not provisioned</span>),
+    },
+    {
+      key: "last",
+      header: "Last signed in",
+      cell: (o) =>
+        o.lastSignedInAt ? <When value={o.lastSignedInAt} /> : <span className="text-muted">Never</span>,
+    },
+    {
+      key: "state",
+      header: "State",
+      cell: (o) => <StatusChip value={o.suspended ? "suspended" : "active"} />,
+    },
+  ];
+
   return (
-    <TableWrap>
-      <Table>
-        <thead>
-          <tr>
-            <Th>Operator</Th>
-            <Th>Role</Th>
-            <Th>Can sign in</Th>
-            <Th>Last signed in</Th>
-            <Th>State</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((o) => (
-            <tr key={o.id}>
-              <Td>
-                {/* A real button, not a clickable row. One focusable,
-                    announced, Enter-activated target per row, and a row that is
-                    only clickable is invisible to a keyboard. */}
-                <button
-                  type="button"
-                  onClick={() => onOpen(o)}
-                  className="-mx-1 -my-2 block min-h-11 w-full px-1 py-2 text-left underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
-                >
-                  <span className="block truncate font-medium text-ink">{o.name}</span>
-                  <span className="block truncate text-[12px] text-muted">{o.email}</span>
-                </button>
-              </Td>
-              <Td label="Role">
-                {/* Underscores are a database convention and not a word. The
-                    role reads as English here and the value is unchanged
-                    underneath. */}
-                {o.role.replace(/_/g, " ")}
-                {o.isRoot ? (
-                  <span className="mt-1 block text-[12px] text-muted">
-                    The root operator, which cannot be deleted, demoted or suspended
-                  </span>
-                ) : null}
-              </Td>
-              <Td label="Can sign in">
-                {o.provisioned ? "Yes" : <span className="text-muted">Not provisioned</span>}
-              </Td>
-              <Td label="Last signed in">
-                {o.lastSignedInAt ? (
-                  <When value={o.lastSignedInAt} />
-                ) : (
-                  <span className="text-muted">Never</span>
-                )}
-              </Td>
-              <Td label="State">
-                {o.suspended ? (
-                  <Badge tone="fail">suspended</Badge>
-                ) : (
-                  <Badge tone="pass">active</Badge>
-                )}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </TableWrap>
+    <DataTable
+      columns={columns}
+      rows={rows}
+      keyOf={(o) => o.id}
+      href={(o) => `/admin/administration/admins?id=${encodeURIComponent(o.id)}`}
+      empty={
+        <EmptyList title="No operator matches that">
+          The search covers the name, the address and the role.
+        </EmptyList>
+      }
+    />
   );
 }
 
@@ -648,11 +677,11 @@ function PermissionCatalog({ catalog }: { catalog: AdminCatalog }) {
       </div>
 
       {shown.length === 0 ? (
-        <Empty title="That role holds nothing">
+        <EmptyList title="That role holds nothing">
           Every built in role holds at least admin.portal.access, so a role with no permissions
           means the catalog and the role table disagree. That is a bug rather than a
           configuration.
-        </Empty>
+        </EmptyList>
       ) : (
         <ul>
           {shown.map((p) => (
