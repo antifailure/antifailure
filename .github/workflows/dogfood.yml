@@ -343,6 +343,47 @@ jobs:
       matrix:
         manifest: ['.', examples/django-api, examples/go-api, examples/next-app]
 
+    # The database the '.' leg copies its golden from.
+    #
+    # The same service the control plane job above carries, for the same
+    # reason and with the same limit on what it may hold. Synthesised rather
+    # than restored from production: a control plane that copies a real
+    # customer's database into a public CI runner would be the single worst
+    # thing this repository could do, and what the masking rules are about is
+    # the shape rather than the rows.
+    #
+    # It is here and not only there because a job level `env:` does not reach
+    # another job. The nightly had neither the service nor the variable, so its
+    # '.' leg ran the repository's own manifest, which names
+    # AF_STAGING_DATABASE_URL as its source, against nothing at all: the golden
+    # refresh refused with AF-DB-016 and `af ci` then had no golden to branch,
+    # so the one leg that exists to prove this control plane dogfoods itself
+    # had never once done it.
+    #
+    # The three example legs need none of this. Not one of them sets
+    # database.source_url_env, so their goldens are built with no source, which
+    # the engine does without complaint and reports as "from no production
+    # database, so it holds no rows". Giving them a source they never ask for
+    # would be cargo cult. Kept honest by
+    # TestEveryLegCanReachTheSourceItsManifestNames in tools/dogfood, which
+    # reads the manifests rather than this list and so narrows or widens with
+    # them.
+    services:
+      staging:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: staging
+          POSTGRES_DB: antifailure
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -354,6 +395,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - run: go build -o bin/af ./engine/cmd/af
 
@@ -409,6 +452,50 @@ jobs:
             echo "::error::$MANIFEST/antifailure.yaml does not exist, so this leg has nothing to run"
             exit 1
           fi
+
+      - name: Does this leg copy a source database
+        # Asked of the manifest rather than of the matrix, so that the two
+        # steps below narrow and widen with the corpus instead of with a name
+        # somebody remembered to update. Today exactly one leg answers yes.
+        #
+        # A leg that names a source and never seeds it is the quiet version of
+        # the failure this whole change is about: the refresh would find the
+        # service, copy an empty schema, publish a golden with nothing in it
+        # and exit 0, and the workflows that read the golden would fail with no
+        # sign of why. So the answer here decides both the install and the
+        # seed, and neither is keyed on a manifest path.
+        id: source
+        env:
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          set -euo pipefail
+          if grep -qE '^[[:space:]]*source_url_env:' "$MANIFEST/antifailure.yaml"; then
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+            echo "$MANIFEST names a source database, so it gets one"
+          else
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+            echo "$MANIFEST names no source, so its golden is built from nothing and holds no rows"
+          fi
+
+      - name: Install what shapes the staging database
+        if: steps.source.outputs.needed == 'true'
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - name: Shape the staging database
+        # The same script the control plane job runs, for the same reason:
+        # migrations and then a deterministic seed, both from one script,
+        # because a seed against a schema it did not create fails on the first
+        # column somebody added.
+        #
+        # Without it the service is an empty Postgres and the golden copied
+        # from it is an empty golden, which is worse than the AF-DB-016 this
+        # replaces: that one at least said so.
+        if: steps.source.outputs.needed == 'true'
+        run: npm run seed --workspace @antifailure/db
+        working-directory: web
+        env:
+          AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
 
       - name: The pipeline, with load
         # --refresh-golden, because there is no golden here to find otherwise.
