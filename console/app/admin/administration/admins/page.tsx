@@ -164,6 +164,12 @@ function Admins() {
 
       {selected ? (
         <OperatorDrawer
+          // Keyed by the account, so changing `?id=` swaps the panel rather
+          // than reusing it. The role select and the confirmation state are
+          // component state, and without this a URL that moved from one
+          // operator to another would show the previous one's role beside the
+          // new one's name.
+          key={selected.id}
           operator={selected}
           me={me?.adminUserId ?? null}
           roles={catalog.data?.roles.map((r) => r.name) ?? []}
