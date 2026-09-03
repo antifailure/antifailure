@@ -13,7 +13,7 @@ and the marketing domain is the one people try first.
 
 The marketing site and this documentation. It is a static export, so almost
 everything on it is a file. The one exception is `/api`, which is a Static Web
-Apps managed function with a single endpoint behind it.
+Apps managed function that accepts nothing.
 
 | Method | Path | What it does |
 | --- | --- | --- |
@@ -21,24 +21,21 @@ Apps managed function with a single endpoint behind it.
 | `GET` | `/openapi.json` | The control plane's OpenAPI 3.1 document, published at the apex address. |
 | `GET` | `/errors.v1.json` | The versioned error catalog: code, message, recovery, whether retrying is safe, documentation and exit status. |
 | `GET` | `/lint-findings.v1.json` | The versioned migration lint catalogue: the identifier of each finding, which does not change between releases, and the rule name and title, which do. |
-| `POST` | `/api/waitlist` | Adds one email address to the design partner waitlist. |
 
-`POST /api/waitlist` takes `{"email": "...", "source": "..."}` and answers
-`200` with `{"ok": true, "alreadyJoined": false}`. Signing up twice is not an
-error: the row is keyed on a hash of the address, so the second attempt answers
-`200` with `alreadyJoined` set to `true`. A body that is not an address is
-`400`, more than five attempts a minute from one address or one caller is
-`429`, and a storage failure is `503`. Every failure carries a stable `code`, a
-human `message`, and a `resolution` an agent or the sign-up form can act on.
+`GET /api` publishes an empty `endpoints` array, which is the honest shape
+rather than a missing field: the question somebody typing that address is asking
+is what this host offers a machine, and the answer is nothing, plus where the
+product's API lives.
 
-There is no endpoint that reads the waitlist back, and there will not be one.
-An anonymous endpoint that can enumerate its own signups is how a waitlist
-becomes a leaked mailing list. The list is read with the Azure CLI by somebody
-who already has access to the account.
+There was a `POST /api/waitlist` here. It stored one address per person in a
+table with no read path, and mailed nobody, on a domain that publishes no mail
+exchanger and an SPF policy authorizing no outbound sender. Signing up is a
+GitHub exchange against the control plane now, and asking to buy is
+`POST /v1/leads` on the control plane, both listed below.
 
-Any other path under `/api` answers `404` with a body saying so. That is the
-whole surface. The source is `api/` in the repository, and it is a helper for
-one form on the marketing site rather than a product.
+Any other path under `/api` answers `404` with a body saying so, carrying a
+stable `code`, a human `message` and a `resolution`. That is the whole surface.
+The source is `api/` in the repository.
 
 ## app.antifailure.dev
 
@@ -70,6 +67,7 @@ below that take no session either.
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |
 | `/auth/*` | varies | GitHub sign in for a browser, and the device flow `af login` uses. |
 | `GET /exports/deletion` | the token in the link, and nothing else | Downloads the export of an organization that has been deleted. |
+| `POST /v1/leads` | none | The enterprise contact form on the marketing site. The only route here that answers a cross-origin browser, allowed for one exact origin from `AF_SITE_ORIGIN` and carrying no credentials. Writes a row the serving role can insert into and cannot read back; an operator reads the queue with `af-control-plane-backup leads`. |
 | `POST /webhooks/github` | HMAC signature | Deliveries from the GitHub App. No session and no token: the body's signature is the credential, and an unsigned delivery is refused. |
 | `POST /webhooks/stripe` | HMAC signature | Billing deliveries, verified the same way. |
 | `POST /byok/anthropic/v1/messages` | engine or CLI token, in that provider's own header | The budgeted model proxy. See [Model keys](/docs/guides/model-keys). |
