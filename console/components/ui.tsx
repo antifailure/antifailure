@@ -179,9 +179,23 @@ export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="scroll-x w-full">{children}</div>;
 }
 
-export function Table({ children }: { children: ReactNode }) {
+export function Table({
+  children,
+  className = "sm:min-w-[520px]",
+}: {
+  children: ReactNode;
+  /**
+   * The minimum width, which decides whether the wrapper scrolls or the
+   * columns squeeze. 520 suits the four and five column tables it was written
+   * for. A wider one has to say so: when the columns' own minimum widths add
+   * up to more than this, the browser does not scroll, it overflows the last
+   * cell out of the table box, and a button in that cell paints past the last
+   * rule and flush against the card edge.
+   */
+  className?: string;
+}) {
   return (
-    <table className="af-table w-full border-collapse text-left text-[13px] sm:min-w-[520px]">
+    <table className={`af-table w-full border-collapse text-left text-[13px] ${className}`}>
       {children}
     </table>
   );

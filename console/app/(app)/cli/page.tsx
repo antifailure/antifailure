@@ -245,11 +245,15 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
             </Empty>
           ) : (
             <TableWrap>
-              <Table>
+              {/* Five columns, one of them a button. The kind rides under the
+                  name rather than taking a column of its own, which is what the
+                  members table does with a login and a display name: six
+                  columns did not fit at a tablet width, and the one that got
+                  squeezed was the one holding Revoke. */}
+              <Table className="sm:min-w-[600px]">
                 <thead>
                   <tr>
                     <Th>Name</Th>
-                    <Th>Kind</Th>
                     <Th>Prefix</Th>
                     <Th>Last used</Th>
                     <Th>State</Th>
@@ -267,8 +271,12 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
                       new Date(t.expires_at as string).getTime() <= Date.now();
                     return (
                       <Row key={t.id}>
-                        <Td>{t.name}</Td>
-                        <Td label="Kind">{t.kind === "cli" ? "terminal" : "engine token"}</Td>
+                        <Td>
+                          <span className="block text-ink">{t.name}</span>
+                          <span className="block text-[12px] text-dim">
+                            {t.kind === "cli" ? "terminal" : "engine token"}
+                          </span>
+                        </Td>
                         <Td label="Prefix" mono>
                           {t.prefix}
                         </Td>
@@ -284,7 +292,7 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
                             <Badge tone="pass">live</Badge>
                           )}
                         </Td>
-                        <Td label="">
+                        <Td className="w-px whitespace-nowrap">
                           {revoked || expired ? null : (
                             <Button
                               variant="danger"
