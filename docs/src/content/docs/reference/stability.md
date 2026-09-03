@@ -104,6 +104,7 @@ on, and the rule name is what a person should read.
 `tools/lintcheck` refuses a rule with no identifier, an identifier for a rule
 that no longer exists, and an identifier that has left the catalogue since it
 was registered.
+
 ### The self-hosting configuration
 
 Every key in the Helm chart's `values.yaml`, and every variable and output in
