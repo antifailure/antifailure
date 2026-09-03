@@ -136,9 +136,9 @@ function SignIn({ origin }: { origin: string | null }) {
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
           It prints an eight character code and opens this control plane in a
           browser. Check that the code on the screen is the code in your
-          terminal, approve it, and the token arrives in the terminal over TLS
-          and goes straight into the operating system&rsquo;s credential store.
-          It is never shown to anybody and never reaches a shell history file.
+          terminal, approve it, and the token goes from here straight into the
+          operating system&rsquo;s credential store. Nobody is ever shown it, no
+          clipboard carries it, and it never reaches a shell history file.
         </p>
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
           The token can read environments and runs and write events, and nothing
