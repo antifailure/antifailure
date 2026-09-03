@@ -260,7 +260,3 @@ examples/*/report.md
 # for lands a 60MB static binary, and the first `git add -A` after a run of the
 # negative control staged it.
 relpack-*
-
-# The local preview harness. tools/preview/up.sh writes its log, its pid and
-# its screenshots here; nothing in it is a source file.
-/.preview/

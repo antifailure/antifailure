@@ -18,7 +18,8 @@ tools/preview/shots.sh       # every operator page at 320 and 1440
 tools/preview/down.sh        # stop it and remove its database
 ```
 
-`up.sh` prints the address and the sign-in when it finishes. It takes a few
+`up.sh` prints the address, and the operator password it generated for this run,
+when it finishes. It takes a few
 minutes the first time, mostly `npm ci` and the console build. Afterwards
 `AF_PREVIEW_SKIP_BUILD=1 tools/preview/up.sh` reuses the export and takes about
 a minute.
@@ -40,20 +41,36 @@ eleven operators including one suspended and one never provisioned, ten feature
 flags across all three states with one killed, and sixty operator audit entries
 appended through the real chain so the log verifies rather than merely existing.
 
-## The credential is local only
+## Nothing in the tree carries a credential
 
-The seeded operator is `operator@preview.local` with the password
-`preview-only-not-a-secret`. It is written down in `seed.ts`, printed by `up.sh`
-and committed to this repository on purpose, because a password every agent has
-to be told separately is a password nobody uses. What makes writing it down safe
-is that both scripts refuse to run against anything but localhost: `up.sh`
-checks `AF_PREVIEW_HOST` and `seed.ts` checks the hostname of the database URL
-and exits naming the host. This is not the operator bootstrap a real deployment
-needs and must never be mistaken for one.
+The seeded operator is `operator@preview.local`. Its password is **generated for
+each run** from a cryptographic random source, printed once by `up.sh`, and
+written only to a state directory outside the working tree so `shots.sh` can
+sign in without being handed it. The two Postgres role passwords and the
+container's own superuser password are made the same way. Run `up.sh` again and
+they are all different.
+
+There is no password anywhere in this repository, and no default for the
+variables that carry them: `seed.ts` and `shots.mjs` name the missing variable
+and stop. That is deliberate rather than tidy. A file in the tree that creates a
+credential is a default credential however plainly it is labelled, this product
+ships none anywhere, and `admin_users` is the production shaped table. A comment
+saying a password is only for localhost controls where it runs; it does not
+change what the file is, and a grep of this repository for a plausible operator
+password would have found one.
+
+Both scripts still refuse a database that is not on this machine, `up.sh` on
+`AF_PREVIEW_HOST` and `seed.ts` on the hostname of the database URL, each
+exiting and naming the host. That guard is worth keeping, because this seeder
+truncates every tenant table. It is simply no longer the thing carrying the
+argument.
+
+This is not the operator bootstrap a real deployment needs and must never be
+mistaken for one.
 
 ## The screenshots
 
-`shots.sh` writes `.preview/shots/<route>@<width>.png` for every entry in
+`shots.sh` writes `<state>/shots/<route>@<width>.png` for every entry in
 `console/lib/admin-nav.ts`, which is the file the portal's own navigation is
 built from, so a section added by any lane is photographed the next time this
 runs. On a branch where that file does not exist yet it is read from
@@ -75,8 +92,16 @@ Overflow is measured with `document.scrollWidth` against `window.innerWidth`
 inside the page, over the DevTools protocol, rather than from the pixel width of
 a file. The browser is the headless Chromium already in the Playwright cache;
 set `AF_PREVIEW_CHROME` to use another. A page taller than 6000 pixels is
-photographed down to that and its true height is recorded in
-`.preview/shots/shots.json`.
+photographed down to that and its true height is recorded in `shots.json` beside
+the pictures.
+
+## Where it puts things
+
+Everything this harness writes lives in `$TMPDIR/af-preview-<hash of the
+checkout path>`: the log, the pid, the generated passwords, the URL and the
+screenshots. `up.sh` prints that path. Nothing lands in the working tree, which
+is why there is no ignore rule for it and why a stray `git add -A` cannot pick
+up a credential this wrote.
 
 ## Knobs
 
@@ -88,7 +113,9 @@ photographed down to that and its true height is recorded in
 | `AF_PREVIEW_SCALE` | `3`, the multiplier on the tenant seeder |
 | `AF_PREVIEW_SKIP_BUILD` | unset, `1` keeps the existing export |
 | `AF_PREVIEW_WIDTHS` | `320,1440` |
-| `AF_PREVIEW_URL` | read from `.preview/url` |
+| `AF_PREVIEW_URL` | read from the state directory |
+| `AF_PREVIEW_PASSWORD` | read from the state directory |
+| `AF_PREVIEW_STATE` | `$TMPDIR/af-preview-<hash of the checkout path>` |
 
 The database and both ports are derived from the checkout's path so that six
 worktrees can run this at once. Sharing one would mean sharing a schema, and two

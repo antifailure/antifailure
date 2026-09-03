@@ -31,11 +31,25 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '..', '..')
 
-const base = process.env.AF_PREVIEW_URL ?? 'http://127.0.0.1:8100'
-const outDir = process.env.AF_PREVIEW_SHOTS ?? path.join(root, '.preview', 'shots')
+/**
+ * Reads a variable or names it and stops.
+ *
+ * The password has no default and never will. A fallback here would be a
+ * credential living in the repository, which is what shots.sh reading it out of
+ * a state directory outside the tree exists to avoid.
+ */
+function required(name) {
+  const value = process.env[name]
+  if (value) return value
+  console.error(`${name} is not set. Run tools/preview/shots.sh, which sets it.`)
+  process.exit(2)
+}
+
+const base = required('AF_PREVIEW_URL')
+const outDir = required('AF_PREVIEW_SHOTS')
 const widths = (process.env.AF_PREVIEW_WIDTHS ?? '320,1440').split(',').map((w) => Number(w.trim()))
-const email = process.env.AF_PREVIEW_EMAIL ?? 'operator@preview.local'
-const password = process.env.AF_PREVIEW_PASSWORD ?? 'preview-only-not-a-secret'
+const email = required('AF_PREVIEW_EMAIL')
+const password = required('AF_PREVIEW_PASSWORD')
 
 // ---------------------------------------------------------------------------
 // The routes
