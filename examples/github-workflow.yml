@@ -209,22 +209,41 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          # EVERY FAILURE HERE IS SURVIVED, AND THAT IS THE SHAPE OF THIS
+          # SCRIPT. The observability of a run is not the run: a control plane
+          # that is down, or a repository nobody has connected, must not turn a
+          # working check into a red job.
+          #
+          # `:-` on both runner variables rather than a bare read. Under
+          # `set -u` a bare read of an unset one ends the step, and on a pull
+          # request from a FORK GitHub sets NEITHER of them. That would make the
+          # one case this has to handle gracefully, an outside contributor who
+          # can fix nothing, the one case that goes red.
+          request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          if [ -z "$request_token" ] || [ -z "$request_url" ]; then
+            echo "This job was granted no workflow identity, so it cannot introduce itself."
+            echo "On a pull request from a fork GitHub withholds one, which is deliberate."
+            exit 0
+          fi
+
           # The audience matters. Without one GitHub mints an identity for your
           # organization's URL, which every workflow in it can obtain, and a
           # credential any workflow can get is not a credential.
-          identity=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=antifailure-control-plane" |
-            jq -r '.value // empty')
+          # `|| true` on the pipeline, because `set -o pipefail` would
+          # otherwise end the job on a curl that could not connect.
+          identity=$(curl -sS -H "Authorization: Bearer $request_token" \
+            "${request_url}&audience=antifailure-control-plane" |
+            jq -r '.value // empty' || true)
           if [ -z "$identity" ]; then
             echo "GitHub would not mint a workflow identity for this job."
-            echo "On a pull request from a fork it never will, which is deliberate."
             exit 0
           fi
           token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
             -H "Authorization: Bearer ${identity}" \
             -H 'content-type: application/json' \
             -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
-            jq -r '.token // empty')
+            jq -r '.token // empty' || true)
           if [ -z "$token" ]; then
             echo "The control plane issued no callback credential for ${HEAD_SHA}."
             echo "This run reports through the comment below instead."

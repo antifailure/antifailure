@@ -788,6 +788,35 @@ func TestAJobThatRunsTheCheckCanReportIt(t *testing.T) {
 			t.Errorf("job %q runs the whole product and posts to /v1/pr/report nowhere, so the "+
 				"result reaches a comment and the check hears nothing", name)
 		}
+
+		// AND THE FORK CASE, WHICH IS THE ONE THAT MUST NOT GO RED.
+		//
+		// GitHub withholds the workflow identity from a pull request opened
+		// from a fork, on purpose, and sets neither runner variable. A step
+		// under `set -u` that reads one of them bare aborts with "unbound
+		// variable" and exit 1, so the single case that has to degrade
+		// gracefully, an outside contributor who can fix nothing, would be the
+		// one case that fails. The step reads them through `:-` and says so
+		// instead. Proved rather than assumed: bash exits 1 on the bare read
+		// and 0 on the guarded one.
+		for _, st := range job.Steps {
+			if !strings.Contains(st.Run, "/v1/pr/callback-token") {
+				continue
+			}
+			if !strings.Contains(st.Run, "set -u") && !strings.Contains(st.Run, "set -euo") {
+				continue
+			}
+			for _, v := range []string{
+				"ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL",
+			} {
+				if strings.Contains(st.Run, "${"+v+"}") {
+					t.Errorf("job %q reads ${%s} bare under set -u, so a pull request from a "+
+						"fork, where GitHub sets neither, ends the step with an unbound "+
+						"variable and a red check nobody outside this repository can fix. "+
+						"Read it as ${%s:-} and say what happened", name, v, v)
+				}
+			}
+		}
 	}
 	if checked == 0 {
 		t.Error("no job in dogfood.yml runs the harness in pull request mode, so this test " +
