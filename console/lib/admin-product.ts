@@ -251,7 +251,7 @@ export interface AgentRunDetail {
   artifacts: RunArtifact[];
 }
 
-export interface LoadRunResult extends Record<string, unknown> {
+interface LoadRunResult extends Record<string, unknown> {
   kind: string;
   recordedAt: string;
 }
@@ -495,7 +495,7 @@ export interface FlagTarget {
   created_at: string;
 }
 
-export interface FlagsAnswer {
+interface FlagsAnswer {
   flags: FeatureFlag[];
   targets: FlagTarget[];
 }
@@ -506,7 +506,7 @@ export function useFlags() {
 
 /** The grant that moved a limit, as the server resolves it. Mirrors OverrideRef
  *  in src/entitlements.ts, with its two dates serialized. */
-export interface EntitlementOverride {
+interface EntitlementOverride {
   id: string;
   scope: "global" | "organization" | "project" | "user";
   reason: string;
@@ -534,7 +534,7 @@ export interface OrgEntitlement {
   override: EntitlementOverride | null;
 }
 
-export interface OrgEntitlements {
+interface OrgEntitlements {
   org: { id: string; slug: string; plan: string };
   entitlements: OrgEntitlement[];
 }

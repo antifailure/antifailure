@@ -26,7 +26,11 @@ export type RunStanding = "running" | "passed" | "failed" | "cancelled" | "unkno
  *  into a table whose column set is true of none of the three. */
 export type RunKind = "agent" | "load" | "check";
 
-export type ChipTone = "pass" | "fail" | "warn" | "neutral";
+/** Not exported: `Badge`'s own Tone is what a page annotates with, and a
+ *  second exported name for the same four words is a second thing to keep
+ *  in step. This one exists so the function below has a return type worth
+ *  reading. */
+type ChipTone = "pass" | "fail" | "warn" | "neutral";
 
 /**
  * The tone a standing gets, in one place.
@@ -87,7 +91,7 @@ function coarse(ms: number): string {
 /** One measurement, in the shape the console's Metric component takes. Declared
  *  structurally rather than imported, so this file keeps its promise of holding
  *  no import that reaches React. */
-export interface Measurement {
+interface Measurement {
   label: string;
   /** Null means nobody measured it, which Metric renders as "Not measured".
    *  It is not zero, and the distinction is the whole reason it is nullable. */
@@ -113,6 +117,8 @@ export interface Measurement {
  * A kind this build does not know returns nothing at all, rather than guessing
  * at the fields by name.
  */
+/** Returns the shape `MetricRow` takes, structurally rather than by importing
+ *  its type, which is what keeps this file free of React. */
 export function metricsFor(result: Record<string, unknown> | null): Measurement[] {
   if (!result) return [];
   const n = (key: string): number | null => {

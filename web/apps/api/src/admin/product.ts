@@ -82,12 +82,12 @@ const page = z.object({
  * `passed` is the exit-code-zero-over-nothing defect this repository has
  * already shipped once. It gets its own word.
  */
-export type RunStanding = 'running' | 'passed' | 'failed' | 'cancelled' | 'unknown'
+type RunStanding = 'running' | 'passed' | 'failed' | 'cancelled' | 'unknown'
 
 /** The three families of run this product has. They are different objects with
  *  different columns, so the console filters between them rather than merging
  *  them into a table whose column set is true of none of the three. */
-export type RunKind = 'agent' | 'load' | 'check'
+type RunKind = 'agent' | 'load' | 'check'
 
 /**
  * One row of the runs list, whichever family it came from.
@@ -96,8 +96,20 @@ export type RunKind = 'agent' | 'load' | 'check'
  * it belongs to, what code it ran against, when, how it ended and why. Anything
  * that is true of one family only lives on the detail route instead, which is
  * why this is a flat interface rather than a union with three optional halves.
+ *
+ * NOT `RunRow`. `workloads/store.ts` already exports a `RunRow` that is a
+ * different shape entirely, and two interfaces of one name in one codebase is a
+ * five minute detour every time somebody greps for either.
+ *
+ * EXPORTED FOR A REASON, and the reason is not that anybody imports it. It
+ * appears in the inferred type of `productRouter`, so `adminRouter` and
+ * `appRouter` cannot be named without it: making it local fails the typecheck
+ * with TS4023 rather than merely being untidy. The console declares its own
+ * copy of the same shape, because there is no shared type package between the
+ * API and the console and a cross-package import would be the wrong way to
+ * make one.
  */
-export interface RunRow {
+export interface RunListRow {
   kind: RunKind
   id: string
   orgId: string
@@ -774,7 +786,7 @@ const runsRouter = router({
           rows,
           input.limit,
           (r) => encodeCursor([iso(r.created_at), r.id]),
-          (r): RunRow => ({
+          (r): RunListRow => ({
             kind: 'agent',
             id: r.id,
             orgId: r.org_id,
@@ -839,7 +851,7 @@ const runsRouter = router({
           rows,
           input.limit,
           (r) => encodeCursor([iso(r.requested_at), r.id]),
-          (r): RunRow => ({
+          (r): RunListRow => ({
             kind: 'load',
             id: r.id,
             orgId: r.org_id,
@@ -897,7 +909,7 @@ const runsRouter = router({
         rows,
         input.limit,
         (r) => encodeCursor([iso(r.queued_at), r.id]),
-        (r): RunRow => ({
+        (r): RunListRow => ({
           kind: 'check',
           id: r.id,
           orgId: r.org_id,

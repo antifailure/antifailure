@@ -370,7 +370,10 @@ const ARTIFACT_COLUMNS = [
  * ---------------------------------------------------------------------- */
 
 function LoadRun({ run }: { run: LoadRunDetail }) {
-  const result = run.result as Record<string, unknown> | null;
+  // The typed field rather than a cast back to Record. The cast was there
+  // because metricsFor takes the loose shape, and casting a typed value to
+  // the type it already has is how a field quietly stops being checked.
+  const result = run.result;
   const errorReasons = Object.entries(
     (result?.error_reasons as Record<string, number> | undefined) ?? {},
   );
