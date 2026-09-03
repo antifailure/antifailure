@@ -147,6 +147,7 @@ module "control_plane" {
   mail_from                  = var.mail_from
   public_url                 = var.public_url
   resend_api_key_secret_name = var.resend_api_key_secret_name
+  lead_notify_email          = var.lead_notify_email
   product_name               = var.product_name
 
   stripe_price_team                 = var.stripe_price_team

@@ -599,6 +599,22 @@ resource "azurerm_container_app" "this" {
         }
       }
 
+      # Where an enterprise lead is announced.
+      #
+      # Dynamic on its own value rather than on the mail switch, and the
+      # difference matters. Gating it on mail_from would silently DROP an
+      # address somebody set, leaving them with "nobody is mailed" and no
+      # explanation. The precondition below refuses the combination instead, so
+      # the address is either delivered with a mailer behind it or the plan says
+      # why not.
+      dynamic "env" {
+        for_each = var.lead_notify_email == "" ? [] : [var.lead_notify_email]
+        content {
+          name  = "AF_LEAD_NOTIFY_EMAIL"
+          value = env.value
+        }
+      }
+
       # The name in a sign-in link's subject line, for a white-labelled
       # deployment. Dynamic; the application already treats an empty string as
       # unset, and a subject line addressed from nothing is not an intent.
@@ -768,6 +784,17 @@ resource "azurerm_container_app" "this" {
     precondition {
       condition     = var.mail_from == "" || var.public_url != ""
       error_message = "mail_from is set and public_url is empty, so this deployment would set AF_MAIL_FROM and AF_RESEND_API_KEY without AF_PUBLIC_URL. The control plane exits at start-up on a half-configured mailer, because two of the three is a link that goes nowhere or mail that cannot be sent. Set public_url to the origin a browser reaches this deployment on, or clear mail_from to turn the path off."
+    }
+
+    # A lead notification nobody receives.
+    #
+    # Not a start-up refusal in the application, which records the lead and
+    # prints that the address CANNOT be told. That is the right runtime
+    # behaviour and it is a poor deploy-time one: the sentence scrolls past in a
+    # log and the deployment goes on believing it announces leads.
+    precondition {
+      condition     = var.lead_notify_email == "" || var.mail_from != ""
+      error_message = "lead_notify_email is set and mail_from is empty, so this deployment would name an address it has no mailer to reach. Enterprise leads are still recorded and readable with `af-control-plane-backup leads`; set mail_from to announce them, or clear lead_notify_email."
     }
 
     # A plan gate nobody can satisfy.

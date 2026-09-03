@@ -3,6 +3,7 @@
 # Words this project uses that no general dictionary has.
 # line diff a reviewer can read, and so the list stays sorted.
 BYPASSRLS
+DMARC
 PKCE
 Procfile
 SCIM

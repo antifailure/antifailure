@@ -183,6 +183,7 @@ terraform:modules/control-plane	variable	image_repository	string	optional
 terraform:modules/control-plane	variable	image_tag	string	optional
 terraform:modules/control-plane	variable	key_vault_name	string	optional
 terraform:modules/control-plane	variable	key_vault_purge_protection	bool	optional
+terraform:modules/control-plane	variable	lead_notify_email	string	optional
 terraform:modules/control-plane	variable	location	string	required
 terraform:modules/control-plane	variable	log_analytics_id	string	optional
 terraform:modules/control-plane	variable	mail_from	string	optional
@@ -268,6 +269,7 @@ terraform:stacks/control-plane	variable	image_digest	string	optional
 terraform:stacks/control-plane	variable	image_repository	string	optional
 terraform:stacks/control-plane	variable	image_tag	string	optional
 terraform:stacks/control-plane	variable	key_vault_name	string	optional
+terraform:stacks/control-plane	variable	lead_notify_email	string	optional
 terraform:stacks/control-plane	variable	location	string	optional
 terraform:stacks/control-plane	variable	log_retention_days	number	optional
 terraform:stacks/control-plane	variable	mail_from	string	optional

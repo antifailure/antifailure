@@ -50,11 +50,32 @@
 // process on purpose, because migrations racing across replicas at start-up is
 // a worse way to apply a schema than a job that runs once.
 //
-// WHAT IT DOES NOT CLAIM. That a variable CAN be set is not that it IS set on
-// any particular installation: that is a tfvars file's decision and this tool
-// never reads one, deliberately, because a tfvars file is the operator's and
-// lives in their repository. The claim is narrower and it is the one that was
-// false: there exists a supported way to set it.
+// WHAT IT DOES NOT PROVE, AND THIS PARAGRAPH IS NOT A DISCLAIMER. It is the
+// same mistake this tool was written about, aimed at this tool.
+//
+// It proves a variable can be DELIVERED. It does not prove the feature works.
+// Those are different sentences and the distance between them is exactly where
+// the last finding lived: varcheck and config-docs.test.ts proved a variable
+// was DOCUMENTED, everybody read them as proving it was USABLE, and twenty nine
+// unreachable variables sat under two green checks for months.
+//
+// The live example is mail. This gate will go green on AF_MAIL_FROM and
+// AF_RESEND_API_KEY the moment the module can set them, and mail sent from
+// antifailure.dev is still rejected by every receiver that honours DMARC: the
+// domain publishes `v=spf1 -all`, which authorises no sender, a DMARC policy of
+// p=reject with strict alignment, and a Resend DKIM record whose empty `p=` is
+// a REVOKED key. Nothing in this repository can see that and nothing in this
+// repository should pretend to. It is DNS, and self-hosting/azure.md names it
+// as the step before AF_MAIL_FROM is worth setting.
+//
+// Nor is "can be set" the same as "is set". Whether a particular installation
+// sets a variable is a tfvars file's decision, and this tool never reads one,
+// deliberately: a tfvars file is the operator's and lives in their repository.
+//
+// So the claim is narrow, and it is the one that was false: for every variable
+// the reference documents, a supported deploy path exists that can deliver it.
+// Read it as anything wider and this gate becomes the third one answering a
+// nearby question.
 //
 // It also reads the module and not the stack. The stack passes inputs through
 // to the module, and the module is what owns the container template, so the
@@ -77,14 +98,30 @@ const (
 	modulePath     = "infra/terraform/modules/control-plane"
 	exemptionsPath = "tools/docs/wiring-exemptions.tsv"
 
-	// The one section of the reference whose variables are not the control
-	// plane's to receive. The page says so itself, in the section body: an
-	// engine token is issued and verified by the control plane and never read
-	// from its own environment, and "setting it on the control plane process
-	// does nothing at all". Reading the document's own statement is better than
-	// copying it into a TSV, and if the section is ever removed those variables
-	// become ordinary and need rows like everything else.
-	engineSection = "Set on the engine, not here"
+	// HOW THE PAGE SAYS "THIS ONE IS NOT SET HERE", read off the table itself.
+	//
+	// Some variables on this page are not the control plane's environment to
+	// carry. AF_CONTROL_PLANE_TOKEN is issued and verified by the control plane
+	// and never read from its own environment; AF_ADMIN_BOOTSTRAP_PASSWORD is
+	// typed into the shell that runs a command and the serving process never
+	// reads it. The page declares both the same way: their tables carry a
+	// "Where it is set" column instead of a "Default" one, and the cell answers
+	// it -- "On the engine, or in a CI job", "In the shell that runs the
+	// command".
+	//
+	// Keyed on that column rather than on the section titles, and the reason is
+	// not tidiness. This gate first read the titles, and the very next thing
+	// that happened was a new section, "Read by a command, not by the server",
+	// arriving on main with a variable under it. The gate went red, correctly,
+	// but a rule that needs a new constant for every heading somebody writes is
+	// a rule that will one day be widened by whoever is in a hurry. The column
+	// is the page's own statement about the row, it travels with the table, and
+	// a section written in that shape tomorrow needs nothing added here.
+	//
+	// It fails in the safe direction. Rename the column and these variables
+	// become ordinary and demand an env block or a row, which is loud. There is
+	// no spelling of it that makes a variable disappear from the gate quietly.
+	notSetHereColumn = "Where it is set"
 
 	// A FLOOR, because a parser that stops matching looks exactly like a
 	// codebase with nothing to find. Both numbers are far below what the two
@@ -246,14 +283,17 @@ func documentedVariables(root string) (map[string]string, error) {
 		return nil, err
 	}
 	out := map[string]string{}
-	inEngineSection := false
+	// Reset at every heading, so the shape of one table never leaks into the
+	// next: a section that opens with no table of its own must not inherit the
+	// previous section's answer.
+	inNotSetHereTable := false
 	for i, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.HasPrefix(line, "#") {
-			inEngineSection = strings.Contains(line, engineSection)
+			inNotSetHereTable = false
 			continue
 		}
-		if inEngineSection || !strings.HasPrefix(strings.TrimSpace(line), "|") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			continue
 		}
 		if tableSeparator.MatchString(strings.TrimSpace(line)) {
@@ -264,6 +304,14 @@ func documentedVariables(root string) (map[string]string, error) {
 			continue
 		}
 		first := strings.TrimSpace(cells[0])
+		// A header row, which is where the table declares its own shape.
+		if first == "Variable" {
+			inNotSetHereTable = len(cells) > 1 && strings.TrimSpace(cells[1]) == notSetHereColumn
+			continue
+		}
+		if inNotSetHereTable {
+			continue
+		}
 		// Backticked and nothing else, so that a cell of prose that happens to
 		// begin with a variable name is not read as a definition.
 		if !strings.HasPrefix(first, "`") || !strings.HasSuffix(first, "`") {

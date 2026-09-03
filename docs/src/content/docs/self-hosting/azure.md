@@ -269,8 +269,48 @@ az keyvault secret set --vault-name "$VAULT" -n stripe-webhook-secret --value "$
 
 # Signing in with a link, and inviting somebody who is not in your GitHub
 # organization. mail_from is the switch and public_url is then required.
+# READ THE DNS SECTION BELOW FIRST: a verified key is not a domain that can send.
 az keyvault secret set --vault-name "$VAULT" -n resend-api-key --value "$RESEND_API_KEY"
 ```
+
+#### Mail needs DNS before it needs a key
+
+Setting `mail_from` and putting a Resend key in the vault does not make mail
+arrive. The domain has to be able to send, and that is DNS, which is not in this
+repository and no `terraform apply` will fix it. Check before you set the
+variable, because the failure is silent at the sender:
+
+```sh
+dig +short MX example.com
+dig +short TXT example.com                    # the SPF record
+dig +short TXT _dmarc.example.com
+dig +short TXT resend._domainkey.example.com  # the DKIM key Resend published
+```
+
+`antifailure.dev` today answers with no MX, `v=spf1 -all`, a DMARC policy of
+`p=reject; sp=reject; adkim=s; aspf=s`, and `v=DKIM1; p=` on the Resend selector.
+Read in order: nothing receives mail for the domain, **no** sender is authorised
+to send as it, receivers are told to reject anything that fails alignment, and
+the DKIM key is **revoked** rather than merely absent, since an empty `p=` is
+how a key is withdrawn. Somebody set Resend up for this domain and then revoked
+it. Mail sent as anything at that domain fails SPF, fails DKIM, and is rejected
+outright by every receiver that honours DMARC, which is all the large ones.
+
+So the order for mail is: fix the DNS, verify the domain in Resend, then set
+`mail_from`. Until then leave it empty. Nothing breaks in the meantime and it is
+worth knowing exactly what still works, because it is more than it sounds:
+
+- **Sign-in is unaffected.** GitHub is the front door and is always offered; the
+  mailed link is an additional method for a preview environment or an isolated
+  network, and its route is not registered at all when mail is not set up, so
+  there is no button that fails on press.
+- **Invitations work by copy and paste.** The link is returned to the inviter
+  and shown on screen whether or not mail is configured, because an invitation
+  that existed only as an email would silently do nothing on a self-hosted plane
+  with no mailer. A send that fails does not fail the invitation either.
+- **Enterprise leads are still recorded**, and are read with
+  `af-control-plane-backup leads`. `lead_notify_email` is what announces them,
+  and the module refuses a plan that sets it without `mail_from`.
 
 Then the switches, in a tfvars file:
 
@@ -282,8 +322,9 @@ analytics_enabled      = true               # generates the surrogate secret
 analytics_operator_org = "your-org-slug"    # who may read the dashboard
 site_origin            = "https://example.com"
 
-mail_from  = "no-reply@example.com"
-public_url = "https://cp.example.com"
+mail_from         = "no-reply@example.com"   # only once the DNS below is right
+public_url        = "https://cp.example.com"
+lead_notify_email = "sales@example.com"
 
 stripe_price_team = "price_..."
 

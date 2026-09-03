@@ -150,27 +150,96 @@ func TestOnlyTheFirstCellOfARowDefinesAVariable(t *testing.T) {
 	}
 }
 
-// The one section whose variables the control plane never reads from its own
-// environment. The page states it; this reads the statement rather than keeping
-// a second copy of it in a TSV.
-func TestSkipsTheSectionTheReferenceSaysIsNotSetHere(t *testing.T) {
-	page := oneRow + "\n## " + engineSection + "\n\n| Variable | Where | What |\n| --- | --- | --- |\n" +
-		"| `AF_ON_THE_ENGINE` | On the engine | Not read here. |\n" +
+// A table that declares its variables are set somewhere else.
+//
+// The page says it with the column, not with the heading: a "Where it is set"
+// column in place of a "Default" one, and a cell that answers it. Two sections
+// are written that way today and the second arrived AFTER this gate did, which
+// is the argument for reading the column rather than a list of titles.
+func TestSkipsATableThatSaysTheVariableIsSetElsewhere(t *testing.T) {
+	notHere := func(heading, name, where string) string {
+		return "\n## " + heading + "\n\n| Variable | " + notSetHereColumn + " | What it is |\n" +
+			"| --- | --- | --- |\n| `" + name + "` | " + where + " | Not read here. |\n"
+	}
+	page := oneRow +
+		notHere("Set on the engine, not here", "AF_ON_THE_ENGINE", "On the engine, or in a CI job") +
+		notHere("Read by a command, not by the server", "AF_IN_A_SHELL", "In the shell that runs the command") +
 		"\n## Analytics\n\n| Variable | Default | What |\n| --- | --- | --- |\n" +
 		"| `AF_AFTER_THE_SECTION` | unset | Read here again. |\n"
+
 	documented, err := documentedVariables(tree(t, page, "", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if where := documented["AF_ON_THE_ENGINE"]; where != "" {
-		t.Fatalf("a variable under %q was read as one this module must set, at %s", engineSection, where)
+	for _, name := range []string{"AF_ON_THE_ENGINE", "AF_IN_A_SHELL"} {
+		if where := documented[name]; where != "" {
+			t.Errorf("%s sits under a %q column and was still demanded of the module, at %s",
+				name, notSetHereColumn, where)
+		}
 	}
-	// The section ENDS at the next heading. A skip that ran to the end of the
-	// file would swallow the analytics table, which is where AF_SITE_ORIGIN and
-	// the surrogate secret live -- five of the variables this gate was written
-	// for.
+	// The skip ENDS with the table. One that ran to the end of the file would
+	// swallow the analytics table, which is where AF_SITE_ORIGIN and the
+	// surrogate secret live: five of the variables this gate was written for.
 	if documented["AF_AFTER_THE_SECTION"] == "" {
-		t.Fatal("the skip did not stop at the next heading, so every later table was ignored")
+		t.Error("the skip did not end with the table, so every later one was ignored")
+	}
+	// And the row that opened the page is still there, so the skip did not
+	// start early either.
+	if documented["AF_WANTED"] == "" {
+		t.Error("an ordinary table before the skipped one was ignored")
+	}
+}
+
+// A "Default" table is an ordinary one however it is worded, and each case below
+// is a DIFFERENT way a looser reading would wrongly skip one. They are separate
+// because a substring test over the whole line passes the first and fails the
+// second, so one of them alone would report a rule it is not testing.
+func TestATableWithADefaultColumnIsNeverSkipped(t *testing.T) {
+	for _, tc := range []struct{ name, page string }{
+		{"the phrase appears in a data cell", "## Optional\n\n" +
+			"| Variable | Default | What it does |\n| --- | --- | --- |\n" +
+			"| `AF_WANTED` | unset | Where it is set is discussed at length here. |\n"},
+		// The one that separates "the header's SECOND CELL is the column" from
+		// "the header LINE mentions the words somewhere".
+		{"the phrase appears in another header cell", "## Optional\n\n" +
+			"| Variable | Default | Where it is set, and why that matters |\n| --- | --- | --- |\n" +
+			"| `AF_WANTED` | unset | Something. |\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			documented, err := documentedVariables(tree(t, tc.page, "", ""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if documented["AF_WANTED"] == "" {
+				t.Fatal("an ordinary table was skipped, so a variable nothing can set would pass unseen")
+			}
+		})
+	}
+}
+
+// A HEADING ALWAYS RESETS THE SHAPE, and this is the case that proves the reset
+// is load-bearing rather than decoration.
+//
+// A well-formed table declares itself in its header row, so on a tidy page the
+// reset never decides anything. On a page somebody has edited badly -- a
+// section whose header row was dropped -- it decides everything: without it the
+// rows inherit the PREVIOUS table's "not set here" and the variables in them
+// vanish from the gate silently, which is the one failure this whole tool
+// exists to make impossible. With it they are read, and an unsettable one is
+// reported loudly.
+func TestAHeadingResetsTheTableShape(t *testing.T) {
+	page := "\n## Set on the engine, not here\n\n| Variable | " + notSetHereColumn + " | What it is |\n" +
+		"| --- | --- | --- |\n| `AF_ON_THE_ENGINE` | On the engine | Not read here. |\n" +
+		"\n## Optional\n\n| `AF_WANTED` | unset | A row whose header row somebody deleted. |\n"
+	documented, err := documentedVariables(tree(t, page, "", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if documented["AF_ON_THE_ENGINE"] != "" {
+		t.Error("the not-set-here table was read after all")
+	}
+	if documented["AF_WANTED"] == "" {
+		t.Fatal("a row under a later heading inherited the previous table's shape and was skipped silently")
 	}
 }
 

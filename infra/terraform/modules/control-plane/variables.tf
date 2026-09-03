@@ -520,6 +520,20 @@ variable "public_url" {
   description = "The origin a browser reaches this deployment on, which is where a sign-in link points. Required when mail_from is set."
 }
 
+# Where an enterprise lead is announced.
+#
+# Needs a mailer, and the application says so at startup rather than failing:
+# set with no mailer it prints that this deployment believes it is announcing
+# leads and CANNOT, which is its own state and a worse one than either end. The
+# precondition in app.tf refuses that combination at plan time so the module
+# cannot produce it. Leads are recorded either way and read with
+# `af-control-plane-backup leads`.
+variable "lead_notify_email" {
+  type        = string
+  default     = ""
+  description = "Where an enterprise lead is announced. Empty records leads and mails nobody. Requires mail_from."
+}
+
 variable "resend_api_key_secret_name" {
   type        = string
   default     = "resend-api-key"
