@@ -87,8 +87,8 @@ const (
 	AFDB005 Code = "AF-DB-005"
 	// The provider's concurrent branch limit ({limit}) is reached.
 	AFDB006 Code = "AF-DB-006"
-	// Extension {extension} is required by the golden and is not available
-	// on the target.
+	// The source database uses the extension {extension}, and the Postgres
+	// the golden is built in does not carry it.
 	AFDB007 Code = "AF-DB-007"
 	// The database provider {provider} at {endpoint} rejected the
 	// configured credential.
@@ -114,6 +114,14 @@ const (
 	// database.source_url_env names {variable}, and no configured source
 	// has a value for it.
 	AFDB016 Code = "AF-DB-016"
+	// The role in the connection string cannot read all of the source
+	// database: {detail}
+	AFDB017 Code = "AF-DB-017"
+	// Row level security stops pg_dump from reading the source as this
+	// role: {detail}
+	AFDB018 Code = "AF-DB-018"
+	// {program} stopped while copying the source database: {detail}
+	AFDB019 Code = "AF-DB-019"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -122,6 +130,11 @@ const (
 	// No table that looks like a users table was found, so there is
 	// nowhere to create the personas that sign in.
 	AFDB022 Code = "AF-DB-022"
+	// The source database answered and refused the connection: {detail}
+	AFDB023 Code = "AF-DB-023"
+	// The value of the variable named by database.source_url_env is not a
+	// connection string: {detail}
+	AFDB024 Code = "AF-DB-024"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -691,11 +704,11 @@ var catalog = map[Code]Entry{
 	AFDB007: {
 		Code:      AFDB007,
 		Area:      "DB",
-		Message:   "Extension {extension} is required by the golden and is not available on the target.",
-		NextStep:  "Install {extension} on the target, or remove its use from the schema before refreshing.",
-		Docs:      "providers/overview",
+		Message:   "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.",
+		NextStep:  "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.",
+		Docs:      "concepts/goldens",
 		Retryable: false,
-		ExitCode:  ExitProvider,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB008: {
 		Code:      AFDB008,
@@ -778,6 +791,33 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
+	AFDB017: {
+		Code:      AFDB017,
+		Area:      "DB",
+		Message:   "The role in the connection string cannot read all of the source database: {detail}",
+		NextStep:  "Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB018: {
+		Code:      AFDB018,
+		Area:      "DB",
+		Message:   "Row level security stops pg_dump from reading the source as this role: {detail}",
+		NextStep:  "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB019: {
+		Code:      AFDB019,
+		Area:      "DB",
+		Message:   "{program} stopped while copying the source database: {detail}",
+		NextStep:  "Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
+	},
 	AFDB020: {
 		Code:      AFDB020,
 		Area:      "DB",
@@ -802,6 +842,24 @@ var catalog = map[Code]Entry{
 		Message:   "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
 		NextStep:  "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
 		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB023: {
+		Code:      AFDB023,
+		Area:      "DB",
+		Message:   "The source database answered and refused the connection: {detail}",
+		NextStep:  "Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB024: {
+		Code:      AFDB024,
+		Area:      "DB",
+		Message:   "The value of the variable named by database.source_url_env is not a connection string: {detail}",
+		NextStep:  "Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.",
+		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
