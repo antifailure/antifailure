@@ -190,11 +190,11 @@ const emailSignIn = emailSignInFromEnv()
 // exactly like working software. A deployment with a lead route and no notifier
 // records leads nobody is told about; a deployment with no site origin serves a
 // form that a browser refuses to submit and reports as a network error.
-const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN)
+const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN) ?? null
 console.log(
   siteOrigin
-    ? `enterprise leads may be posted from ${siteOrigin}`
-    : 'AF_SITE_ORIGIN is not set: no other origin may post an enterprise lead, so a form on the marketing site cannot submit',
+    ? `the marketing site at ${siteOrigin} may post analytics beacons and enterprise leads`
+    : 'AF_SITE_ORIGIN is not set: no other origin may post a beacon or an enterprise lead, so a form on the marketing site cannot submit',
 )
 const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
 console.log(leads.summary)
@@ -338,7 +338,6 @@ const { app, ingestLimiter, authLimiter } = createServer({
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   selfServeSignup,
-  ...(siteOrigin ? { siteOrigin } : {}),
   leadNotifier: leads.notifier,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
@@ -358,9 +357,12 @@ const { app, ingestLimiter, authLimiter } = createServer({
   consoleBuild,
   analyticsSecret,
   analyticsOperatorOrgSlug,
-  // The one origin the site beacon may be called from. Unset refuses every
-  // beacon rather than reflecting whatever Origin arrives.
-  siteOrigin: process.env.AF_SITE_ORIGIN ?? null,
+  // The one origin the marketing site may call from, read and validated above
+  // rather than taken raw from the environment: siteOriginFrom refuses a value
+  // carrying a path, which could never match an Origin header and would allow
+  // nobody while looking configured. Unset refuses every beacon and every lead
+  // rather than reflecting whatever Origin arrives.
+  siteOrigin,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })

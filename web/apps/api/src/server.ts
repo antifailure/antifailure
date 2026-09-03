@@ -199,11 +199,6 @@ export interface ServerOptions {
    *  free plan, owned by them. Default false; see auth/provision.ts for why
    *  that direction and not the other. */
   selfServeSignup?: boolean
-  /** The one browser origin allowed to post an enterprise lead cross origin,
-   *  as a whole origin and never a pattern. Absent means none: the route still
-   *  answers curl and a browser on this origin, and no other page can use it.
-   *  See POST /v1/leads for why this is the only CORS on the server. */
-  siteOrigin?: string
   /** Where a recorded lead is announced. Absent means it is recorded and
    *  nobody is told, which the response says out loud. */
   leadNotifier?: LeadNotifier | null
@@ -302,9 +297,18 @@ export interface ServerOptions {
    */
   analyticsOperatorOrgSlug?: string | null
   /**
-   * Where the marketing site is served from, for the one endpoint the browser
-   * calls cross-origin. Null refuses every beacon rather than reflecting
+   * Where the marketing site is served from, for the endpoints a browser on it
+   * calls cross-origin. Null refuses every one of them rather than reflecting
    * whatever Origin arrives, which is what a permissive default would do.
+   *
+   * TWO ROUTES READ THIS and they arrived a week apart: the analytics beacon
+   * and POST /v1/leads. One value rather than two, because two variables naming
+   * the same origin is two chances for a deployment to allow the marketing site
+   * to do one of those things and not the other, which would present as the
+   * contact form failing with a network error on a site whose analytics work.
+   * It is validated once in main.ts by siteOriginFrom, which refuses a value
+   * carrying a path: a browser sends only scheme, host and port, so such a
+   * value could never match and would allow nobody while looking configured.
    */
   siteOrigin?: string | null
 }

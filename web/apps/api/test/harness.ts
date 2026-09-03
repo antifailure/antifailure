@@ -109,9 +109,6 @@ export interface StartApiOptions {
    *  which is the server's default, so every suite written before self serve
    *  signup existed keeps testing the behaviour it was written against. */
   selfServeSignup?: boolean
-  /** The one browser origin allowed to post an enterprise lead. Undefined is
-   *  none, which is the server's default. */
-  siteOrigin?: string
   /** Where a recorded lead is announced. Undefined means nowhere, which is the
    *  state our own production is in and has its own suite. */
   leadNotifier?: LeadNotifier | null
@@ -146,7 +143,10 @@ export interface StartApiOptions {
   /** The organization allowed to read the dashboard, by slug. Undefined means
    *  none, which is the production default until an operator names one. */
   analyticsOperatorOrgSlug?: string | null
-  /** Where the marketing site is served from, for the beacon's origin check. */
+  /** Where the marketing site is served from. One value for both routes a
+   *  browser on it calls cross-origin: the analytics beacon and POST /v1/leads.
+   *  Defaults to a fixed test origin rather than none, so a suite that does not
+   *  care gets a working one. */
   siteOrigin?: string | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
@@ -267,7 +267,6 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     selfServeSignup: options.selfServeSignup ?? false,
-    ...(options.siteOrigin ? { siteOrigin: options.siteOrigin } : {}),
     leadNotifier: options.leadNotifier ?? null,
     sealingKey: options.sealingKey ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
