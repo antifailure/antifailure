@@ -307,25 +307,6 @@ manifest or pipeline does.
   always promised that an exploration cannot fail your build, and the promise
   held for `af explore` and broke for the path the console drives. A run that
   measured nothing at all is still blocked and still exits non zero.
-- **Five Terraform variables were renamed, and this is the last release in
-  which that is allowed.** The line above promises these names for the whole of
-  version 1, so the ones that were wrong had to be fixed before the promise
-  started rather than lived with until a 2.0. The foundation module's `name` is
-  `resource_group_name`, because that is what its own description called it and
-  what the stack already passed to it, while `name` on the control plane module
-  a few lines away means a four character resource prefix. Its `log_analytics`
-  is `log_analytics_enabled`, because it is a switch and it sat one line from an
-  output called `log_analytics_id` that is a different thing. The alerting
-  module's `connection_percent` is `database_connection_percent`, joining the
-  two database thresholds it belongs beside. The control plane module's
-  `golden_replication` and `golden_soft_delete_days` are `goldens_replication`
-  and `goldens_soft_delete_days`, so that all three variables of one family
-  share one prefix. If you set any of them, rename them in the same commit as
-  the upgrade: a tfvars file naming the old one is not refused, it is ignored,
-  and the apply reports success.
-- The Helm chart is version 1.0.0 rather than 0.1.1. Nothing about installing it
-  changes. A chart at 0.x says in the only language its ecosystem has that its
-  values may be rearranged at any time, which was true and is not any more.
 
 <!-- relnotes:omit -->
 
