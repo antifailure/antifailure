@@ -578,7 +578,7 @@ export function eventsIn(funnel: Funnel): EventName[] {
 // surrogate, and the application cannot read them; only the rollup can, and the
 // rollup computes what this file declares. A builder would need the application
 // to be able to run an arbitrary query against subject level rows, which is the
-// exact capability migrations 0029 and 0030 exist to withhold.
+// exact capability the two analytics migrations exist to withhold.
 //
 // So a new question costs a declaration here and a rollup pass, and in exchange
 // nobody can ask the store to single anybody out. This repository has made that

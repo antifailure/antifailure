@@ -69,8 +69,8 @@ export const RETENTION_WEEKS = 12
  *
  * These rows carry a surrogate, so this is a retention policy and not a cache
  * size. It is deliberately far shorter than the aggregates it feeds, which is
- * the same shape as 0029's rule: the rows that carry a surrogate go, and the
- * counts computed from them stay.
+ * the same shape as the rule on the raw stream: the rows that carry a surrogate
+ * go, and the counts computed from them stay.
  */
 export const SUBJECT_DAYS_KEPT = RETENTION_WEEKS * 7 + 14
 

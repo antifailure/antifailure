@@ -1,7 +1,7 @@
 -- The three insights a daily count cannot produce, and the one table they are
 -- all computed from.
 --
--- WHAT 0029 CAN ANSWER, AND WHERE IT STOPS.
+-- WHAT THE ANALYTICS MIGRATION CAN ANSWER, AND WHERE IT STOPS.
 --
 -- analytics_daily holds a count per day, per event, per two declared
 -- dimensions. That answers "how many page views yesterday, by channel" exactly,
@@ -33,8 +33,8 @@
 -- wrong. The obvious shape is to keep a subject level table and let the
 -- dashboard query it, because then any insight can be written later without a
 -- migration. That would hand the application the ability to follow one
--- organization through a funnel by hand, which is precisely the ability 0029
--- exists to withhold, and it would withhold it only by the dashboard choosing
+-- organization through a funnel by hand, which is precisely the ability the
+-- analytics migration exists to withhold, and it would withhold it only by the dashboard choosing
 -- not to write that query.
 --
 -- So analytics_subject_days below is granted to NOBODY. It is the rollup's own
@@ -291,7 +291,7 @@ $$;
 -- ---------------------------------------------------------------------------
 -- What the rollup has computed, and how far back it is trustworthy
 --
--- The state row from 0029 says when the DAILY rollup last ran. These three
+-- The state row analytics_rollup_state says when the DAILY rollup last ran. These three
 -- questions settle differently and a dashboard that showed one freshness for
 -- all of them would be wrong about two: a funnel with a thirty day window
 -- cannot be final for a week that ended yesterday, and a retention grid's last
@@ -327,7 +327,7 @@ GRANT SELECT ON analytics_funnel_weeks TO antifailure_app;
 -- Isolation
 --
 -- Row-level security on all four, and on the working set it is the second lock
--- behind the absent grant, for the same reason 0029 puts an insert-only policy
+-- behind the absent grant, for the same reason analytics_events carries an insert-only policy
 -- on a stream nobody can select from: a GRANT added later by somebody who did
 -- not read this file still returns nothing.
 --

@@ -9,7 +9,8 @@
 //
 // The one exception is analytics_org_facts, which the application does read and
 // which is keyed by a surrogate. Nothing here selects that column: every query
-// over it is an aggregate, and 0029 explains why the table is shaped that way.
+// over it is an aggregate, and the analytics migration explains why the table
+// is shaped that way.
 //
 // A NUMBER WITH NO SOURCE DOES NOT GO ON THE PAGE, so every shape returned here
 // carries enough to say where it came from: the window it covers, whether the
