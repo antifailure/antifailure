@@ -21,6 +21,15 @@ real ones: `AF_VERSION` and `AF_COMMIT` are stamped into the image at build
 time, `AF_MIGRATE` is absent from the serving process on purpose, and Enterprise
 has no Stripe price because it is arranged with a person.
 
+What it proves is narrow on purpose: a supported deploy path can DELIVER the
+variable. Not that the feature works. Mail is the live example and the guide now
+says so, because `antifailure.dev` publishes `v=spf1 -all`, a DMARC policy of
+`p=reject` with strict alignment, and a revoked Resend DKIM key, so the module
+can carry the mail configuration and the domain still cannot send. Nothing that
+was working stopped: sign-in is GitHub and the mailed link is an extra method,
+invitations return their link to the inviter whether or not mail is configured,
+and enterprise leads are recorded either way.
+
 `tools/wirecheck` is the gate. Two checks already covered this ground and both
 answered a nearby question: `tools/varcheck` and `config-docs.test.ts` prove a
 variable is DOCUMENTED, and a variable that is documented, read by the

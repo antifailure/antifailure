@@ -19,10 +19,18 @@
 # secret and the App install address are every one of them things somebody
 # running this is meant to set, and there was nothing true to write for them.
 #
-# AF_CONTROL_PLANE_TOKEN is deliberately absent from this file. The reference
-# already carries it under its own heading, "Set on the engine, not here", and
-# says that setting it on the control plane process does nothing at all.
-# wirecheck reads that section rather than a row restating it.
+# A ROW HERE MEANS "THE MODULE CANNOT SET IT", NOT "THE FEATURE DOES NOT WORK",
+# and the absence of a row means only that the module CAN set it. Neither says
+# anything about whether the feature functions once it is set. Mail is the live
+# example: AF_MAIL_FROM and AF_RESEND_API_KEY have no row because the module
+# carries them, and mail from antifailure.dev is still rejected by every
+# receiver honouring DMARC until its DNS is fixed. This file is about delivery.
+#
+# AF_CONTROL_PLANE_TOKEN and AF_ADMIN_BOOTSTRAP_PASSWORD are deliberately absent
+# from this file. The reference already says where each one is set, in a table
+# whose second column is "Where it is set" rather than "Default": on the engine
+# or in a CI job for the first, in the shell that runs the command for the
+# second. wirecheck reads that column rather than a row restating it.
 
 AF_VERSION	stamped into the image at build time by the release pipeline and reported by /readyz. A value set here would not change the build; it would make the endpoint lie about which one is running.
 AF_COMMIT	stamped into the image at build time, exactly as AF_VERSION is, and reported by the same endpoint for the same purpose.

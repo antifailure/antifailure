@@ -395,6 +395,12 @@ variable "public_url" {
   description = "The origin a browser reaches this deployment on. Required when mail_from is set."
 }
 
+variable "lead_notify_email" {
+  type        = string
+  default     = ""
+  description = "Where an enterprise lead is announced. Empty records leads and mails nobody. Requires mail_from."
+}
+
 variable "resend_api_key_secret_name" {
   type        = string
   default     = "resend-api-key"
