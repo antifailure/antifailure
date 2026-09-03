@@ -22,11 +22,3 @@ System Configuration reports what the running control plane actually resolved ra
 its environment intended: which capabilities are configured, the name of the variable behind
 each, the schema version this database is on, and whether any installation switch is engaged.
 No credential value appears on it.
-
-# fixed
-
-Every operator mutation the console sent was refused with 403. The client argued in a comment
-that the operator cookie being SameSite=Strict made a cross-site token unnecessary; the control
-plane requires `x-antifailure-admin-csrf` on every operator write and has asserted that in three
-ways the whole time. Suspending and resuming an organization from the portal could not have
-worked. The token is now fetched, cached, sent, and refreshed once on a refusal.
