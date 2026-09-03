@@ -36,7 +36,15 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 48,
+    // 59 routes, taken by RUNNING the walk rather than by counting call sites
+    // or by taking the highest of four lanes' guesses. Four branches edited
+    // this integer to 22, 29, 48 and 50 while the tree grew under all of them,
+    // and every one of those numbers was right when it was written. The floor
+    // has to move with the tree or it stops being a floor: an atLeast a
+    // SHRINKING router still clears is an assertion that has quietly stopped
+    // checking whether routes moved out of this tree, which is the one thing it
+    // exists for.
+    atLeast: 59,
   })
 })
 

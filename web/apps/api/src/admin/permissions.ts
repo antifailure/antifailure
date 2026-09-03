@@ -76,6 +76,31 @@ export const ADMIN_PERMISSIONS = [
   // none of them should be able to pause it.
   'admin.emergency.read',
   'admin.emergency.engage',
+
+  // The developer platform: what customers connect to this installation, and
+  // the credentials that can act as one of them.
+  //
+  // Read on repositories is one permission rather than two because a pull
+  // request cannot be read usefully without the repository it is on, and a
+  // split there produces a role that can see a number and not what it is a
+  // number of.
+  'admin.repos.read',
+
+  // Credentials. Read and revoke are separate, and the split is the same one
+  // billing makes: everybody who answers "which key is this" should be able to
+  // answer it, and revoking a customer's credential stops their pipeline
+  // within seconds, which is an incident decision rather than a support one.
+  'admin.keys.read',
+  'admin.keys.revoke',
+
+  // What arrives here from GitHub and from Stripe, and whether it was handled.
+  'admin.webhooks.read',
+
+  // The MCP page, which reads no customer data at all. It is guarded because
+  // every route in this tree is guarded, not because what it returns is
+  // sensitive: it describes the engine's own tool surface and states that this
+  // control plane holds no MCP record.
+  'admin.mcp.read',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -104,9 +129,18 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.entitlements': 'money',
   'admin.flags': 'money',
   'admin.infra': 'infra',
-  'admin.deploys': 'infra',
-  'admin.webhooks': 'infra',
-  'admin.keys': 'infra',
+  'admin.deploys': 'the developer platform',
+  // Moved from infra to the developer platform, which is where the API Keys and
+  // Integrations & Webhooks sections live and where these two are now
+  // implemented. w-admin-infra implemented admin.infra.* and admin.emergency.*
+  // and neither of these, so nothing was taken from a lane that was using it.
+  'admin.webhooks': 'the developer platform',
+  'admin.keys': 'the developer platform',
+  // Repositories and pull requests, and the MCP surface. New prefixes rather
+  // than borrowed ones: admin.deploys does not describe a pull request, and a
+  // permission filed under a name that does not fit it is one nobody can find.
+  'admin.repos': 'the developer platform',
+  'admin.mcp': 'the developer platform',
   'admin.logs': 'infra',
   'admin.security': 'infra',
   'admin.emergency': 'infra',
@@ -147,6 +181,20 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
     'See whether maintenance mode, new sign-ups, or new runs are paused, and why.',
   'admin.emergency.engage':
     'Pause or resume the whole installation: maintenance mode, new sign-ups, and new runs.',
+  'admin.repos.read':
+    'See every repository connected to this installation, its pull requests, and the check ' +
+    'generations behind them.',
+  'admin.keys.read':
+    'See every credential that can act as a customer: its name, its prefix, what created it and ' +
+    'when it was last used. Never its value, which is stored only as a hash.',
+  'admin.keys.revoke':
+    'Stop a credential working, and revoke a GitHub OIDC repository binding along with every ' +
+    'token it has minted.',
+  'admin.webhooks.read':
+    'See the GitHub App installations and the deliveries that arrived from GitHub and Stripe, ' +
+    'including the ones that were never handled.',
+  'admin.mcp.read':
+    'See what this control plane records about the MCP server, and the tools the engine serves.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -221,6 +269,8 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // permission rather than on rank: ordering roles and comparing ranks is how
     // a permission model stops being a table and starts being an assumption.
     'admin.emergency.read', 'admin.emergency.engage',
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -235,6 +285,13 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // debugging "their runs will not start" must be able to discover that runs
     // are frozen; pausing the installation is a different decision.
     'admin.emergency.read',
+    // The repositories, the deliveries and the credentials, because "their
+    // checks are not running" is an infrastructure question and the answer is
+    // usually a delivery that never arrived or a credential that stopped
+    // working. Revoke as well as read: a leaked engine token is an incident and
+    // the pager holder is who reaches it first.
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -248,6 +305,11 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.billing.read', 'admin.entitlements.read',
     'admin.flags.read', 'admin.flags.write',
     'admin.infra.read', 'admin.emergency.read',
+    // Credentials are security's surface more than anybody's: a key that
+    // appeared in a public repository is the report they receive, and revoking
+    // it is the first thing they do about it.
+    'admin.repos.read', 'admin.webhooks.read', 'admin.mcp.read',
+    'admin.keys.read', 'admin.keys.revoke',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -266,9 +328,23 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // Support answers "why was I charged this" every day and must never be the
     // rota that can refund. Read without write is the whole point of the split.
     'admin.billing.read', 'admin.entitlements.read', 'admin.flags.read',
+    // Read across the whole developer platform and revoke on none of it. This
+    // is the rota that answers "why did our check not run", which needs the
+    // repository, the delivery and whether the key is still live, and it is
+    // emphatically not the rota that should be able to stop a customer's
+    // pipeline while answering.
+    'admin.repos.read', 'admin.keys.read', 'admin.webhooks.read', 'admin.mcp.read',
   ],
   analytics: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
-  read_only: ['admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read'],
+  read_only: [
+    'admin.portal.access', 'admin.audit.read', 'admin.tenants.read', 'admin.users.read',
+    // The auditor's read of the developer platform. Every one of these is a
+    // read, and the credential list holds no secret: only the prefix, which is
+    // what the customer's own console shows them. A role that can see which
+    // credentials exist and cannot touch one is exactly the role an auditor
+    // should be given.
+    'admin.repos.read', 'admin.keys.read', 'admin.webhooks.read', 'admin.mcp.read',
+  ],
 }
 
 export function adminRoleHas(role: AdminRole, permission: AdminPermission): boolean {
