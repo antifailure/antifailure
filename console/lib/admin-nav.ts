@@ -256,15 +256,17 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "Logs & Error Explorer",
         href: "/admin/operations/logs",
         Icon: IconLogs,
-        permission: "admin.infra.read",
-        summary: "Search the platform's own logs, and the errors it has grouped for you.",
+        permission: "admin.logs.read",
+        summary:
+          "What is failing across every tenant, and what is arriving from the engines.",
       },
       {
         label: "Email & Notifications",
         href: "/admin/operations/email",
         Icon: IconEmail,
-        permission: "admin.infra.read",
-        summary: "What the product sent, what bounced, and what is still waiting to go out.",
+        permission: "admin.email.read",
+        summary:
+          "Whether this installation can send email, and every sign-in link it has issued.",
       },
       {
         label: "Incidents & Kill Switches",

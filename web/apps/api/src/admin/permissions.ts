@@ -132,6 +132,14 @@ export const ADMIN_PERMISSIONS = [
   // counting runs and twins is its job, and reading somebody's column names
   // is not.
   'admin.product.data.read',
+  // Failures across every tenant, and the event stream by shape. Read only,
+  // and there is deliberately no write half: nothing on that page changes
+  // anything, so a write permission would guard no route.
+  'admin.logs.read',
+  // Whether this installation can send email, and what it has tried to send.
+  // Separate from admin.logs.read because it reaches addresses, which is
+  // personal data, and because the roles that need one rarely need the other.
+  'admin.email.read',
 ] as const
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number]
@@ -181,6 +189,10 @@ export const RESERVED_PREFIXES: Record<string, string> = {
   'admin.security': 'infra',
   'admin.emergency': 'infra',
   'admin.product': 'product',
+  // Same lane as admin.logs. Claimed here rather than left unlisted, because
+  // an unlisted prefix is one two agents can both reach for and neither will
+  // see the other take.
+  'admin.email': 'infra',
 }
 
 export const ADMIN_ROLES = [
@@ -238,6 +250,12 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
   'admin.product.data.read':
     'See a customer\'s golden data versions and the masking rules applied to them, including ' +
     'which columns a scan flagged and nobody has confirmed.',
+  'admin.logs.read':
+    'See failing runs grouped by failure code across every organization, which workflows are ' +
+    'failing, and the event stream by type, timing and shape. Event payloads are never returned.',
+  'admin.email.read':
+    'See whether this installation can send email at all, and every sign-in link it has issued ' +
+    'recently with the address it was issued to and whether it was used.',
   'admin.billing.read':
     'See a customer\'s Stripe customer, subscription, invoices, charges, payment methods and ' +
     'credit balance, and the record of every administrative money action taken on the account.',
@@ -325,6 +343,7 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     'admin.support.read', 'admin.support.write',
     'admin.impersonation.read', 'admin.impersonation.start',
     'admin.product.read', 'admin.product.data.read',
+    'admin.logs.read', 'admin.email.read',
   ],
   infrastructure: [
     'admin.portal.access', 'admin.audit.read',
@@ -356,6 +375,10 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // that gets "their environment came up empty", and the answer to that is
     // whether the golden version it was built from was ever verified.
     'admin.product.read', 'admin.product.data.read',
+    // The failure explorer and the mail surface. "Their runs will not start"
+    // and "the sign-in link never arrived" are both infrastructure questions
+    // before they are anybody else's, and neither is answerable without these.
+    'admin.logs.read', 'admin.email.read',
   ],
   security: [
     'admin.portal.access', 'admin.audit.read', 'admin.audit.export',
@@ -384,6 +407,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // unconfirmed rule is a column a scan believes holds personal data, on a
     // copy somebody is running tests against.
     'admin.product.read', 'admin.product.data.read',
+    // Sign-in links carry an address, an IP and a user agent, and an account
+    // takeover investigation starts by reading exactly those three.
+    'admin.logs.read', 'admin.email.read',
   ],
   billing: [
     'admin.portal.access', 'admin.audit.read',
@@ -415,6 +441,9 @@ export const ADMIN_ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[
     // two questions support is asked about the product, and the second one is
     // answered by a masking rule.
     'admin.product.read', 'admin.product.data.read',
+    // The two questions support is actually asked: why did this run fail, and
+    // why has this person not received their sign-in link. Both are reads.
+    'admin.logs.read', 'admin.email.read',
     // The role these four permissions exist for. Support is the rota that
     // answers "it does not work for me", and it cannot answer that from the
     // outside. This is the one role below owner and super_admin that can step
