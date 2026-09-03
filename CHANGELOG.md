@@ -83,8 +83,6 @@ Explicitly not stable, and free to change in a minor release:
   a clearer name exists, and a release may find something an earlier one passed.
   That is the product working, and it is why the identifier above is what to
   match on.
-- Lint rule names and their findings, which move as the rules improve. The
-  stable identifier for a finding is its rule name within a release.
 
 ### The boundary is now checked rather than described
 
