@@ -387,7 +387,10 @@ func Check(rel, body string, rows []*row) []finding {
 			out = append(out, finding{
 				path: rel, num: num, address: found,
 				problem: "the row says " + verdictReceives + ", and " + domain + " cannot receive mail: " + why,
-				fix:     "publish a route that resolves instead, and say plainly in the file that there is no mailbox",
+				fix: "publish a route that resolves instead, and say plainly in the file that there is no " +
+					"mailbox. If the domain has since been given an MX record and a mailbox somebody reads, " +
+					"take it out of deadDomains in this tool and put the dig output in the commit, so the " +
+					"next person can see what was checked and when",
 			})
 			continue
 		}
