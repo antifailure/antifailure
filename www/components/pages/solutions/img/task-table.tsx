@@ -39,10 +39,16 @@ function TonePill({
     >
       <span
         className={cn(
-          "size-1.5 shrink-0 rounded-full",
+          "size-1.5 shrink-0",
+          // A ternary rather than an override, because both set border-radius
+          // and writing them side by side emits both: rounded-full won and the
+          // blocked marker was a circle like the other two. The square is the
+          // point, it is what tells BLOCK apart from PASS without relying on
+          // the red.
+          tone === "BLOCK" ? "rounded-[1px]" : "rounded-full",
           tone === "PASS" && "bg-[#33bf00]",
           tone === "WARN" && "bg-[#8A6A12]",
-          tone === "BLOCK" && "rounded-[1px] bg-[#C43D3D]",
+          tone === "BLOCK" && "bg-[#C43D3D]",
         )}
         aria-hidden
       />

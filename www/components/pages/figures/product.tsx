@@ -155,13 +155,18 @@ function WellFigure({
   return (
     <SageWell
       className={cn(
-        "w-full self-start !min-h-0 !px-4 !py-5 md:!px-5 md:!py-6",
-        compact && "!px-3 !py-4 md:!px-4 md:!py-5",
+        "w-full self-start !min-h-0",
+        // One padding scale is emitted, never two. Written side by side these
+        // set the same properties, so the compact variant did not replace the
+        // default, it just hoped to be later in the sheet.
+        compact
+          ? "!px-3 !py-4 md:!px-4 md:!py-5"
+          : "!px-4 !py-5 md:!px-5 md:!py-6",
       )}
     >
       <FloatWindow className="w-full overflow-hidden">
         <FigChrome id={id} tab={tab} rail={rail} tabs={tabs} />
-        <div className={cn("p-3.5 sm:p-4", compact && "!p-3 sm:!p-3.5")}>{children}</div>
+        <div className={cn(compact ? "p-3 sm:p-3.5" : "p-3.5 sm:p-4")}>{children}</div>
       </FloatWindow>
     </SageWell>
   );
