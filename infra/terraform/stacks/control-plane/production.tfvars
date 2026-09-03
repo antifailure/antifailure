@@ -203,19 +203,62 @@ self_serve_signup = true
 # somebody turned away actually needs.
 signup_url = "https://antifailure.dev/contact"
 
-# EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
+# SET ONLY AFTER THE PRODUCTION GITHUB APP EXISTS. SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the
 # private key are the credentials that let a delivery write rows, so sharing
 # them means a staging compromise writes into production's tenants. Installation
 # ids differ per App and github_installations keys on them.
 #
-# The module reads the App's two secrets from Key Vault with a data source,
-# because GitHub mints the private key once and Terraform can neither create nor
-# recreate it. So setting this id before those secrets are in the production
-# vault fails at PLAN, which is the correct order and not a bug. The checklist
-# in the production guide has the steps in the order that works.
-github_app_id = ""
+# GitHub mints the private key once and shows it once, so Terraform can neither
+# create the App's two secrets nor recreate them. A person puts both in the
+# vault and the module addresses them by id.
+#
+# SETTING THIS BEFORE THOSE SECRETS EXIST NOW FAILS AT APPLY RATHER THAN AT
+# PLAN. That is a deliberate trade, and on THIS plane it costs nothing, because
+# the check it replaces has never once run here.
+#
+# The module used to read both secrets with a `data "azurerm_key_vault_secret"`,
+# which asserted they existed. Asserting existence requires READING, and the
+# identity that runs the production plan holds Contributor on the resource group
+# and nothing at all on this vault. So the read failed on PERMISSION before it
+# could ever report on EXISTENCE. What was given up on production is an
+# intention this deployment's own permission model has never permitted, not a
+# check that worked.
+#
+# DO NOT RESTORE THE DATA SOURCE TO GET THE CHECK BACK. It does not come back.
+# The wall is the grant, and the grant has no per secret scope: it would open
+# every secret in this vault, this one included, to an identity that a pull
+# request can reach and whose workflow a pull request can edit in the same
+# commit. keyvault.tf carries the whole argument.
+#
+# STAGING IS THE HONEST COST, and it is worth stating because it is easy to
+# assume otherwise. staging.tfvars sets github_app_id too, both environments
+# share this module, and staging's plan identity CAN read staging's vault. So
+# staging did have a working plan time existence check and this removes it. A
+# missing secret there now surfaces at apply with Azure naming the secret, which
+# is a later moment than plan and not a dangerous one, on the environment where
+# somebody is experimenting anyway.
+#
+# The checklist in the production guide still has the steps in the order that
+# works.
+#
+# App 4775259, slug `antifailure`, installed on the antifailure organization as
+# installation 157834739. The OAuth App that signs people in is a separate
+# registration and its client id and secret are the seeded vault entries, not
+# this value: an App id is not a credential and unlocks nothing, which is why it
+# sits here rather than arriving as a TF_VAR_.
+#
+# The App this names is CONFIGURED AND SERVING. Read off the running container
+# rather than remembered: afcpprod-app carries AF_GITHUB_APP_ID=4775259 and both
+# vault secrets exist. Emptying this line does not remove the App; it removes
+# all three environment variables from the container app on the next apply, and
+# with them the installation webhook, which is the only path by which an
+# organization comes into being. That failure presents as a customer signing in
+# to an empty screen, so it reads as a product bug rather than a configuration
+# one. See ci.tf for the commit that emptied it and for what a plan gate can and
+# cannot catch.
+github_app_id = "4775259"
 
 # One identity applies this stack, and it is the same person as staging, so the
 # grant is pinned rather than following whoever is calling. See staging.tfvars

@@ -293,10 +293,7 @@ resource "azurerm_container_app" "this" {
   # will one day set it to the empty string.
   dynamic "secret" {
     for_each = merge(
-      var.github_app_id == "" ? {} : {
-        "github-app-private-key"    = data.azurerm_key_vault_secret.github_app_private_key[0].versionless_id
-        "github-app-webhook-secret" = data.azurerm_key_vault_secret.github_app_webhook_secret[0].versionless_id
-      },
+      local.github_app_secret_ids,
       var.stripe_price_team == "" ? {} : {
         "stripe-secret-key"     = data.azurerm_key_vault_secret.stripe_secret_key[0].versionless_id
         "stripe-webhook-secret" = data.azurerm_key_vault_secret.stripe_webhook_secret[0].versionless_id
