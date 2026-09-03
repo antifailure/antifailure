@@ -1,0 +1,36 @@
+# Variables docs/reference/control-plane.md documents and the Terraform module
+# in infra/terraform/modules/control-plane cannot set, with the reason each one
+# is allowed to stay that way.
+#
+# Two tab separated fields: the variable, and why the supported deploy path
+# cannot deliver it. A reason is required, because an exemption with no
+# argument behind it cannot be told apart from somebody silencing a finding
+# they did not understand. An exemption that stops being needed is reported, so
+# this list cannot rot: figurecheck's equivalent had five stale rows found in
+# one evening, which is only possible because staleness fails.
+#
+# THE REASON HAS TO BE TRUE, and that is the whole mechanism. A value stamped
+# into the image at build time can say so. A value another process injects at
+# run time can say so. A variable an operator is expected to set on a hosted
+# installation cannot be given a truthful reason here, and the answer is then
+# to add an env block rather than to invent one. The twenty nine that this gate
+# was written for could not all have had rows: the operator database
+# credential, the Stripe configuration, the mail configuration, the analytics
+# secret and the App install address are every one of them things somebody
+# running this is meant to set, and there was nothing true to write for them.
+#
+# AF_CONTROL_PLANE_TOKEN is deliberately absent from this file. The reference
+# already carries it under its own heading, "Set on the engine, not here", and
+# says that setting it on the control plane process does nothing at all.
+# wirecheck reads that section rather than a row restating it.
+
+AF_VERSION	stamped into the image at build time by the release pipeline and reported by /readyz. A value set here would not change the build; it would make the endpoint lie about which one is running.
+AF_COMMIT	stamped into the image at build time, exactly as AF_VERSION is, and reported by the same endpoint for the same purpose.
+AF_MIGRATE	migrations are applied by the bootstrap job, which runs once and completes before the app rolls. This variable applies them at start-up instead, which on a Container App means every replica racing the same schema change. app.tf says so at the resource: the serving process holds no credential that can run DDL and this variable is absent on purpose.
+AF_ENV_URL	injected by Antifailure inside a preview environment: the address of the environment's first web service, allocated at run time. Nothing written in a manifest or a tfvars file can be right, which is why AF_PUBLIC_URL is the one a deployment sets and this is the fallback.
+AF_INSECURE_COOKIES	refused by this module on purpose rather than merely unset. TLS terminates at the Container Apps ingress and allow_insecure_connections is false, so an installation that set this would be sending session cookies without the Secure attribute over a public route. app.tf states it at the ingress block.
+AF_CONSOLE_DIR	the published image carries the console at the default path and nothing needs setting. It exists for somebody who builds console/ themselves, which is not a hosted installation of the published image.
+AF_STRIPE_PRICE_ENTERPRISE	there is no Stripe price behind Enterprise and there is not meant to be one. Enterprise is arranged with a person, so the plan is not sold self-serve; a module input for it would either be permanently empty or would make an absent price look present, and checkout refuses that plan by name instead.
+AF_STRIPE_API_BASE	where the Stripe API lives, overridden only by tests pointing at the engine's own Stripe mock pack. A hosted installation talks to Stripe, and a module input for this would be a way to point production's payments at something that is not Stripe.
+AF_RESEND_BASE_URL	where the mail API lives, overridden only to point at a local capture during development. A hosted installation sends real mail through Resend.
+AF_EVENT_ARCHIVE_DIR	a filesystem path, and this module mounts no volume on the maintenance job. A directory here would be the replica's own ephemeral storage, which is destroyed when the job ends, so the retention sweep would drop partitions whose archive did not survive being written. Setting it needs a storage mount this module does not create.
