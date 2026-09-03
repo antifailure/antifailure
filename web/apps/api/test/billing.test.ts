@@ -337,6 +337,93 @@ describe('the configuration', () => {
     assert.ok(config)
     assert.equal(config.prices.team, 'price_1')
   })
+
+  // -------------------------------------------------------------------------
+  // A plan with no price, which is a supported state and used to be an outage.
+  //
+  // AF_STRIPE_PRICE_ENTERPRISE was the fourth REQUIRED variable, so a
+  // deployment that set the secret key, the webhook secret and the Team price
+  // and nothing else landed in the "partially configured" branch: config came
+  // back null, billing was entirely OFF, and the Team price that does exist
+  // could not be sold either. That is the exact shape this product sells in.
+  // Team has a recurring price somebody can buy on their own; Enterprise is
+  // arranged with a person and has no price at all.
+  //
+  // Measured before the change, by calling this function: secret + webhook +
+  // TEAM gave `config: null` and "billing is OFF and partially configured:
+  // AF_STRIPE_PRICE_ENTERPRISE not set".
+  // -------------------------------------------------------------------------
+
+  it('is ON with no Enterprise price, because Enterprise is arranged with a person', () => {
+    const { config, summary } = stripeConfigFrom({
+      AF_STRIPE_SECRET_KEY: 'sk_test',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      AF_STRIPE_PRICE_TEAM: 'price_1',
+    })
+    assert.ok(
+      config,
+      'billing is off with no Enterprise price, so the Team price that exists cannot be sold either',
+    )
+    assert.equal(config.prices.team, 'price_1')
+    // Absent, not empty. An empty string would compare equal to another empty
+    // string in planForPrice and hand somebody the largest plan.
+    assert.equal(config.prices.enterprise, undefined)
+    // The startup line has to name both halves, or the first Enterprise
+    // refusal reads like an outage to whoever is on call.
+    assert.match(summary, /billing is on/)
+    assert.match(summary, /team sold self-serve/)
+    assert.match(summary, /enterprise has no price/)
+  })
+
+  it('is still OFF when a genuinely required variable is missing', () => {
+    // The relaxation above must not have relaxed the other three. Each one is
+    // dropped on its own, because a check that only ever tests the whole set
+    // cannot tell which member it is actually enforcing.
+    for (const dropped of [
+      'AF_STRIPE_SECRET_KEY',
+      'AF_STRIPE_WEBHOOK_SECRET',
+      'AF_STRIPE_PRICE_TEAM',
+    ]) {
+      const env: Record<string, string> = {
+        AF_STRIPE_SECRET_KEY: 'sk_test',
+        AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        AF_STRIPE_PRICE_TEAM: 'price_1',
+      }
+      delete env[dropped]
+      const { config, summary } = stripeConfigFrom(env)
+      assert.equal(config, null, `billing came on without ${dropped}`)
+      assert.match(summary, /partially configured/)
+      assert.match(summary, new RegExp(dropped))
+    }
+  })
+
+  it('calls an installation that set only the Enterprise price half configured, not untouched', () => {
+    // "Nothing set at all" is the self-hosted default and is fine. It is
+    // decided by the required list plus the optional one, so setting only the
+    // optional variable is not mistaken for having set nothing.
+    const { config, summary } = stripeConfigFrom({ AF_STRIPE_PRICE_ENTERPRISE: 'price_2' })
+    assert.equal(config, null)
+    assert.match(summary, /partially configured/)
+  })
+
+  it('a plan with no price matches no subscription, whatever Stripe sent', () => {
+    // The one that would be silent. `config.prices.enterprise` is undefined, and
+    // a subscription with no items has a null price id: an unguarded lookup
+    // compares undefined against undefined, matches, and moves somebody onto
+    // the largest plan for nothing.
+    const { config } = stripeConfigFrom({
+      AF_STRIPE_SECRET_KEY: 'sk_test',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      AF_STRIPE_PRICE_TEAM: 'price_1',
+    })
+    assert.ok(config)
+    assert.equal(planForPrice(config, null), null)
+    assert.equal(planForPrice(config, ''), null)
+    assert.equal(planForPrice(config, 'price_nobody_configured'), null)
+    // And the plan that DOES have a price still resolves, so this is not
+    // passing by refusing everything.
+    assert.equal(planForPrice(config, 'price_1'), 'team')
+  })
 })
 
 describe('the subscription collection boundary', () => {
@@ -1224,6 +1311,89 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
     assert.equal(errorCode(body), 'PRECONDITION_FAILED')
+  })
+
+  it('checkout on a plan with no price says it is arranged with a person, and calls no Stripe', async () => {
+    // END TO END, through the route, against a control plane configured the way
+    // the live one is: a Team price and no Enterprise price.
+    //
+    // Before this, `prices.enterprise` was an empty string and it went to
+    // Stripe as `line_items[0][price]=`. Stripe answers a generic
+    // invalid_request_error, which reaches the buyer as "could not open a
+    // checkout page": a wall with no explanation, on the plan with the largest
+    // cheque behind it. The refusal now happens before any call is made, which
+    // is asserted rather than assumed.
+    const noEnterprise = await stripeAgainstMockPack({
+      prices: { team: 'price_team_afmock' },
+    })
+    const called: string[] = []
+    const pack = noEnterprise.config.fetch!
+    noEnterprise.config.fetch = async (input, init) => {
+      called.push(new URL(input instanceof Request ? input.url : String(input)).pathname)
+      return pack(input, init)
+    }
+    const solo = await startApi({ stripe: noEnterprise.billing })
+    const soloOrg = await seedOrg(solo.admin, 'noentprice')
+    const soloOwner = await signInAs(solo, soloOrg, 'owner')
+    // A customer already attached, with an id of this run's own.
+    //
+    // Two reasons. It keeps the Stripe calls below down to the one this test is
+    // about, so "nothing reached Stripe" means the refusal and not the absence
+    // of a customer. And the mock pack mints `cus_mock00000000000001` for the
+    // first customer of every pack instance, while stripe_customer_id is unique
+    // across the whole table, so a second harness creating a customer collides
+    // with the one the outer suite already made.
+    const soloCustomer = `cus_noent${randomUUID().slice(0, 8).replaceAll('-', '')}`
+    await solo.admin`
+      INSERT INTO billing_customers (org_id, stripe_customer_id, email)
+      VALUES (${soloOrg.orgId}, ${soloCustomer}, 'billing@example.test')`
+
+    const refused = await callProcedure(solo, soloOwner, 'subscriptions.checkout', 'mutation', {
+      plan: 'enterprise',
+      successUrl: 'https://app.test/ok',
+      cancelUrl: 'https://app.test/no',
+    })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED', JSON.stringify(refused.body))
+    // The MESSAGE, not the envelope. The tRPC error body is
+    // `{"error":{"message":...}}`, so asserting over the whole thing means the
+    // word "error" is always present and the tone check below can never fail.
+    const said = (refused.body as { error: { message: string } }).error.message
+    assert.ok(said.length > 40, `the refusal has no message to read: ${JSON.stringify(refused.body)}`)
+    // The words are asserted because the WORDING is the feature here. This
+    // refusal lands on somebody trying to buy the largest plan, and the worst
+    // outcome is that they read it as an outage and leave. It has to say what
+    // happens next and who does it.
+    assert.match(said, /agreed with a person rather than bought here/)
+    assert.match(said, /antifailure\.dev\/contact/, 'the refusal does not say where to go instead')
+    assert.match(said, /somebody will arrange it/, 'the refusal does not say anybody will act on it')
+    assert.match(said, /Nothing was charged/)
+    // And it never reads as a failure of the system.
+    assert.doesNotMatch(said, /error|failed|unavailable|not configured/i, said)
+
+    // NOTHING REACHED STRIPE. A refusal that first created a customer would
+    // leave a customer behind at Stripe for somebody who cannot buy anything.
+    // Length rather than deepEqual against a literal: node's deepEqual narrows
+    // its first argument to the type of the second, so comparing against `[]`
+    // makes `called` a never[] and the assertion below stops compiling.
+    assert.equal(called.length, 0, `Stripe was called before the refusal: ${called.join(', ')}`)
+
+    // And the plan that DOES have a price still sells, so this is not passing
+    // by refusing everything.
+    const bought = await callProcedure(solo, soloOwner, 'subscriptions.checkout', 'mutation', {
+      plan: 'team',
+      successUrl: 'https://app.test/ok',
+      cancelUrl: 'https://app.test/no',
+    })
+    assert.equal(bought.status, 200, JSON.stringify(bought.body))
+    assert.ok(
+      called.includes('/v1/checkout/sessions'),
+      'the Team checkout did not reach Stripe either, so the assertion above proves nothing',
+    )
+
+    await solo.admin`DELETE FROM subscriptions WHERE org_id = ${soloOrg.orgId}`
+    await solo.admin`DELETE FROM billing_customers WHERE org_id = ${soloOrg.orgId}`
+    await dropOrg(solo.admin, soloOrg.orgId)
+    await solo.close()
   })
 
   it('the portal opens for a customer that exists and refuses for one that does not', async () => {

@@ -90,7 +90,13 @@ interface BillingState {
     expYear: number | null;
   } | null;
   configured: boolean;
+  /** Paid plans this control plane can actually sell, meaning a Stripe price is
+   *  configured for them. A plan absent here must not get a checkout button. */
   plans: string[];
+  /** Paid plans that exist and are agreed with a person rather than bought
+   *  here. Optional, so a console built against an older control plane renders
+   *  the plain "Not offered here" instead of undefined. */
+  arrangedPlans?: string[];
   hostedRequiredPlan: string | null;
 }
 
@@ -392,7 +398,11 @@ function Billing() {
                             <span className="text-dim">Current</span>
                         ) : data.billing.configured ? (
                           <span className="text-dim">
-                            {data.billing.plans.includes(p.name) ? "Use checkout" : "Not offered here"}
+                            {data.billing.plans.includes(p.name)
+                              ? "Use checkout"
+                              : data.billing.arrangedPlans?.includes(p.name)
+                                ? "Arranged with us"
+                                : "Not offered here"}
                           </span>
                         ) : data.quota.operatorSetsPlan ? (
                           <Button busy={busy === `choose-${p.name}`} onClick={() => choose(p.name)}>

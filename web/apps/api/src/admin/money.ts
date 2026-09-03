@@ -432,6 +432,22 @@ export async function changePlan(
     throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.plan} is not a plan with a price.` })
   }
   const priceId = ctx.stripe.config.prices[input.plan]
+  // A paid plan with no price cannot be moved TO, and the refusal names why.
+  //
+  // `PAID_PLANS` says a plan exists; the price map says whether this
+  // installation sells it. Enterprise is arranged with a person and has no
+  // Stripe price, so an operator asking to move a subscription onto it would
+  // otherwise send Stripe an empty price id and replace a paying subscription's
+  // item with nothing.
+  if (!priceId) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `This control plane has no Stripe price for the ${input.plan} plan, so a subscription ` +
+        'cannot be moved onto it here. Set one up at Stripe and configure it, or change the ' +
+        'plan directly. Nothing was changed.',
+    })
+  }
   // The kill switch before the read, not just before the write. During a
   // payments incident the useful behaviour is to stop touching the provider at
   // all, and a refusal that first spends a round trip on a read is a refusal

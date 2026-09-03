@@ -242,7 +242,26 @@ try {
 }
 if (hostedRequiredPlan && !stripe.config) {
   console.error(
-    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Set AF_STRIPE_SECRET_KEY, ' +
+      'AF_STRIPE_WEBHOOK_SECRET and AF_STRIPE_PRICE_TEAM so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+// The same contradiction reached through a second door, which opened when
+// AF_STRIPE_PRICE_ENTERPRISE stopped being required.
+//
+// The check above asks whether billing is on. Billing can now be on while the
+// gated plan itself has no price: set AF_HOSTED_REQUIRED_PLAN=enterprise with a
+// Team price and no Enterprise price and every organization is refused
+// everything until it holds a plan that this process has no way to sell it.
+// That is exactly the state the check above exists to prevent, so it is refused
+// in the same place and for the same reason rather than discovered by the first
+// customer who cannot get in.
+if (hostedRequiredPlan && stripe.config && !stripe.config.prices[hostedRequiredPlan]) {
+  console.error(
+    `AF_HOSTED_REQUIRED_PLAN is ${hostedRequiredPlan} and there is no Stripe price for that ` +
+      `plan, so no organization could ever satisfy the gate. Set AF_STRIPE_PRICE_` +
+      `${hostedRequiredPlan.toUpperCase()}, or unset AF_HOSTED_REQUIRED_PLAN.`,
   )
   process.exit(2)
 }

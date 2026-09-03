@@ -61,3 +61,57 @@ The numbers come from `www/lib/plan-facts.ts` and
 `web/apps/api/test/plan-facts.test.ts` fails the build if they stop matching
 `ENTITLEMENTS.seats.byPlan`, the same way the free plan's three numbers are held
 against the quota table.
+
+# fixed
+
+A control plane that sold one plan self-serve and one by arrangement took no
+money at all.
+
+`AF_STRIPE_PRICE_ENTERPRISE` was a required variable. A deployment that set the
+Stripe secret key, the webhook secret and `AF_STRIPE_PRICE_TEAM` and nothing
+else landed in the "partially configured" branch: `stripeConfigFrom` returned no
+configuration, billing was entirely **off**, every billing route answered
+PRECONDITION_FAILED, and the Team price that did exist could not be sold either.
+The startup line called it an operator error. That is the shape this product
+actually sells in, because Enterprise is agreed with a person and has no Stripe
+price at all.
+
+Measured by calling the function rather than by reading it: secret key, webhook
+secret and Team price gave `config: null` and "billing is OFF and partially
+configured: AF_STRIPE_PRICE_ENTERPRISE not set". It gives a configuration now,
+and a startup line that names both halves, "team sold self-serve, enterprise has
+no price and is arranged with a person", so the first Enterprise refusal does
+not read like an outage to whoever is on call.
+
+The three that are genuinely required are still required, each proved by
+dropping it on its own. `AF_STRIPE_PRICE_ENTERPRISE` set by itself is still
+reported as half configured rather than as untouched.
+
+Checkout for a plan with no price is refused before Stripe is called, with a
+sentence saying the plan is arranged with a person and where to ask, rather than
+sending Stripe an empty price identifier and returning a generic "could not open
+a checkout page" to the buyer with the largest cheque. Nothing reaches Stripe on
+that path, which is asserted rather than assumed. The admin plan change refuses
+the same way rather than replacing a paying subscription's item with nothing.
+
+Two smaller things fell out of it. A plan with no price can no longer match a
+subscription that carries no price identifier: the lookup compared `undefined`
+against `undefined`, matched, and would have moved somebody onto the largest
+plan for nothing. And `AF_HOSTED_REQUIRED_PLAN` now stops the process when it
+names a plan with no price, which is the contradiction its existing billing-off
+check already exists to prevent, reached through the door this change opened.
+
+Three messages that named `AF_STRIPE_PRICE_ENTERPRISE` as something to go and
+set were corrected, because on an installation that agrees Enterprise with a
+person it is correctly unset forever and each of them sent somebody to fix a
+thing that was not broken. The billing precondition names the three variables
+that are actually required. The deletion path's refusal overstated it twice
+over: it named all four while the only Stripe call on that path is
+`cancelSubscription`, which needs the secret key and no price at all, so it now
+says which variable the cancellation itself uses and which two make the
+configuration resolve. And the console no longer offers a plan it cannot sell.
+
+The refusal a buyer meets on a plan with no price is written as a route rather
+than a failure: it says the plan is agreed with a person, why, where to ask, and
+that nothing was charged. A test asserts those words, and asserts the sentence
+never reads as an outage.
