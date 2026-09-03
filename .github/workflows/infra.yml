@@ -206,6 +206,11 @@ jobs:
           else
             echo "remote_state=false" >> "$GITHUB_OUTPUT"
             echo "::warning title=Planning from empty state::AZURE_TFSTATE_RG and AZURE_TFSTATE_ACCOUNT are not both set, so this plan started from an empty state. Every resource reads as a create and THIS PLAN CANNOT REPORT A DESTROY."
+            # And the other half of what an empty state cannot see, said here
+            # rather than left as a step that quietly did not run. The
+            # production check needs a known value to reject and an empty state
+            # has none, so it is skipped rather than reporting a false pass.
+            echo "::warning title=Production not checked::The production plan is skipped without a state backend, so nothing here checked whether production can be planned at all."
           fi
 
       - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
