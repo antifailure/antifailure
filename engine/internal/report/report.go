@@ -23,7 +23,19 @@ type Run struct {
 	Commit      string
 	Golden      string
 	Workflows   []Workflow
-	Invariants  []Invariant
+	// Declared is how many workflows the manifest asked for, which is not the
+	// same number as len(Workflows) and was being read as though it were.
+	//
+	// Workflows holds results. A run whose environment died before the
+	// workflows were reached has none, and so does a manifest that declares
+	// none, and the gate told both of them "the manifest declares no
+	// workflows". The verdict was right in both cases and the reason was false
+	// in one, which sends somebody to edit a manifest that was never the
+	// problem. It sent somebody there: three example legs of this repository's
+	// own nightly were read as declaring no workflows when each declares one,
+	// and the runner they could not find was the actual cause.
+	Declared   int
+	Invariants []Invariant
 	// Findings are what the run noticed about the change that is not a
 	// workflow or an invariant: migration locks, rewrites, lint, plans, query
 	// counts, an unknown destination, unmasked data, a resource left behind.

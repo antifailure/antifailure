@@ -392,6 +392,65 @@ func TestWorkflowsUnverified_NoWorkflowsAtAllIsAlsoAFinding(t *testing.T) {
 	f := workflowsUnverifiedFinding(report.Run{}, defaultGate())
 	require.NotNil(t, f)
 	require.Contains(t, f.Title, "No workflows ran")
+	require.Contains(t, f.Detail, "declares no workflows",
+		"a manifest with no workflows is the one case where saying so is true")
+}
+
+// A run that never reached the workflows it does declare is told a different
+// reason from a manifest that declares none.
+//
+// The two states arrived here identically, because both have no results, and
+// both were told "the manifest declares no workflows". For the second that is
+// false. Three legs of this repository's own nightly reported it, each of the
+// three manifests declares a workflow, and the cause in all three was a runner
+// the engine could not find. The verdict was right and the reason sent a
+// reader to edit a manifest that was never the problem.
+//
+// Asserted as two separate requires because one assertion could not tell which
+// half broke: a detail that says both things, or a detail that says neither,
+// are different defects.
+func TestWorkflowsUnverified_DeclaredButNoneRanIsNotAMissingManifest(t *testing.T) {
+	f := workflowsUnverifiedFinding(report.Run{Declared: 3}, defaultGate())
+	require.NotNil(t, f)
+	require.NotContains(t, f.Detail, "declares no workflows",
+		"the manifest declares three, and saying it declares none sends the reader "+
+			"to edit the one file that is not the problem")
+	require.Contains(t, f.Detail, "declares 3 workflows",
+		"the reason has to say what the manifest actually asked for")
+}
+
+// The reason names the run rather than the manifest, and so does the fix.
+//
+// A reader who is told the manifest is not the thing to change and then given
+// a fix that says "add a workflow to the manifest" has been told both things
+// at once, which is the original defect with an extra step.
+func TestWorkflowsUnverified_DeclaredButNoneRanPointsAwayFromTheManifest(t *testing.T) {
+	f := workflowsUnverifiedFinding(report.Run{Declared: 1}, defaultGate())
+	require.NotNil(t, f)
+	require.Contains(t, f.Detail, "not the thing to change")
+	require.NotContains(t, f.Fix, "Add a workflow",
+		"the fix must not send the reader to the manifest either")
+}
+
+// One declared workflow reads as one, not as "1 workflows".
+func TestWorkflowsUnverified_DeclaredCountReadsAsProse(t *testing.T) {
+	f := workflowsUnverifiedFinding(report.Run{Declared: 1}, defaultGate())
+	require.NotNil(t, f)
+	require.Contains(t, f.Detail, "declares 1 workflow and")
+}
+
+// Results that exist but reached no verdict are a third state, and keep the
+// wording they had. The run did reach the application and proved nothing about
+// it, which is neither of the two above.
+func TestWorkflowsUnverified_BlockedResultsKeepTheirOwnReason(t *testing.T) {
+	run := report.Run{Declared: 2, Workflows: []report.Workflow{
+		{Name: "sign-in", Verdict: report.VerdictBlocked},
+		{Name: "place-an-order", Verdict: report.VerdictBlocked},
+	}}
+	f := workflowsUnverifiedFinding(run, defaultGate())
+	require.NotNil(t, f)
+	require.Contains(t, f.Detail, "Every workflow was blocked")
+	require.NotContains(t, f.Detail, "declares no workflows")
 }
 
 // One verdict about the application is enough to clear it.

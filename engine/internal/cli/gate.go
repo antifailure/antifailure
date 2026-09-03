@@ -73,6 +73,21 @@ func egressFinding(e *report.Egress, p report.Policy) *report.Finding {
 // Counted from the workflows rather than from the count of results, so a
 // manifest that declares none lands here too. That is the same failure wearing
 // a different hat: nothing was tested either way.
+//
+// Three states reach here and they used to be described by two sentences, one
+// of which was a guess. A manifest with no workflows and a run that never
+// reached the workflows it does declare both arrive with no results, and the
+// detail told both of them "the manifest declares no workflows". For the
+// second that is false, and a false reason is worse than a vague one: it sends
+// somebody to add workflows to a manifest that already has them while the real
+// cause, an environment or a runner that never came up, goes unread. It sent
+// somebody there. Three legs of this repository's own nightly reported it,
+// each of the three manifests declares a workflow, and the cause in all three
+// was AF-AGT-004 warned about earlier in the same output.
+//
+// So the manifest's own count is carried on the run and the two are told
+// apart by it rather than by the absence of results, which is evidence for
+// neither.
 func workflowsUnverifiedFinding(run report.Run, p report.Policy) *report.Finding {
 	if p.WorkflowsUnverified == report.LevelIgnore {
 		return nil
@@ -83,17 +98,33 @@ func workflowsUnverifiedFinding(run report.Run, p report.Policy) *report.Finding
 	title := "No workflow reached a verdict about the application."
 	detail := "Every workflow was blocked or proved nothing either way, so this run " +
 		"says nothing about whether the application works."
+	fix := "Read the workflow rows for what stopped each one. If the project has no " +
+		"workflows yet, set policy.workflows_unverified to warn so the choice is " +
+		"recorded rather than assumed."
 	if len(run.Workflows) == 0 {
 		title = "No workflows ran, so nothing about the application was checked."
-		detail = "The manifest declares no workflows, so there was nothing to carry through."
+		switch {
+		case run.Declared > 0:
+			detail = fmt.Sprintf(
+				"The manifest declares %s and none of them produced a result, so the "+
+					"run stopped before the application was reached. The manifest is "+
+					"not the thing to change.",
+				plural(run.Declared, "workflow", "workflows"))
+			fix = "Read the errors above this line for what stopped the run before the " +
+				"workflows. An environment that did not come up and a runner that " +
+				"could not be found both land here."
+		default:
+			detail = "The manifest declares no workflows, so there was nothing to carry through."
+			fix = "Add a workflow to the manifest. If the project has no workflows yet, " +
+				"set policy.workflows_unverified to warn so the choice is recorded " +
+				"rather than assumed."
+		}
 	}
 	return &report.Finding{
 		Rule: ruleWorkflowsUnverified, Level: p.WorkflowsUnverified,
 		Count: len(run.Workflows), Where: "the workflows",
 		Title: title, Detail: detail,
-		Fix: "Read the workflow rows for what stopped each one. If the project has no " +
-			"workflows yet, set policy.workflows_unverified to warn so the choice is " +
-			"recorded rather than assumed.",
+		Fix: fix,
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 )
 
 // The runner is a separate program in a separate language, and installing it
@@ -29,12 +30,12 @@ import (
 // speaks to it is a failure nobody can read.
 
 // RunnerHome is where the runner is installed.
+//
+// The target and the search that has to find it afterwards are one fact, so
+// they are kept in one place. This used to be spelled out here and again in
+// the orchestrator, which is how the two searches came to disagree.
 func RunnerHome() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".antifailure", "runner"), nil
+	return runnerpath.Home()
 }
 
 // RunnerCheckJSON is the machine readable result of af runner check.
@@ -567,20 +568,13 @@ func checksJSON(results []runnerCheck) []RunnerCheckItemJSON {
 }
 
 // runnerSource finds the runner to copy.
+//
+// The candidate list is shared with the one `af ci` uses, minus this command's
+// own target. See engine/internal/runnerpath for why they are one list.
 func runnerSource(e *Env, from string) (string, error) {
 	candidates := []string{from}
 	if from == "" {
-		candidates = nil
-		// At and above the working directory, for a checkout.
-		candidates = append(candidates, checkoutRunners(e.WorkDir)...)
-		// Beside the binary, for an installed release, which ships the runner
-		// next to it rather than fetching it.
-		if self, err := os.Executable(); err == nil {
-			dir := filepath.Dir(self)
-			candidates = append(candidates,
-				filepath.Join(dir, "runner"),
-				filepath.Join(dir, "..", "share", "antifailure", "runner"))
-		}
+		candidates = runnerpath.ToInstallFrom(e.WorkDir)
 	}
 	for _, c := range candidates {
 		if c == "" {
@@ -592,50 +586,6 @@ func runnerSource(e *Env, from string) (string, error) {
 	}
 	return "", aferrors.Coded(aferrors.AFAGT004,
 		"detail", "no runner source was found; looked in "+strings.Join(candidates, ", "))
-}
-
-// checkoutRunners lists the runner directories at and above dir, stopping at
-// the checkout dir sits in.
-//
-// This ascends because the working directory is not reliably the root of the
-// checkout, and looking exactly one level up quietly assumed it was. Running
-// `af runner install` from examples/go-api searched examples/go-api/runner and
-// examples/runner, then reported that no runner source existed, while the
-// runner it wanted sat at the top of the very checkout it was running inside.
-// Anyone who keeps a project in a subdirectory met the same wall, and the
-// error told them to install a runner they already had.
-//
-// The ascent stops at the directory holding .git rather than walking to the
-// filesystem root. A walk to the root would eventually find an unrelated
-// ~/runner belonging to something else and copy that, which is a worse failure
-// than the one this fixes: it succeeds, and the wrong runner is only visible
-// later as a test that will not run.
-//
-// Outside any checkout there is no root to stop at, so only the two nearest
-// directories are offered. That is exactly the pair this searched before, so
-// the case that already worked still works, and the error message does not
-// list every directory up to / and bury the two that matter.
-func checkoutRunners(dir string) []string {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		abs = dir
-	}
-	var found []string
-	for d := abs; ; {
-		found = append(found, filepath.Join(d, "runner"))
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			return found
-		}
-		parent := filepath.Dir(d)
-		if parent == d {
-			break
-		}
-		d = parent
-	}
-	if len(found) > 2 {
-		found = found[:2]
-	}
-	return found
 }
 
 // copyTree copies the runner's source, and nothing it can rebuild.
