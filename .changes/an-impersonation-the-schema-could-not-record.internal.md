@@ -17,7 +17,7 @@ out. Between them the two made an operator impersonation unrepresentable. And
 one of the four leaves the shape the CHECK refuses, so deleting the referenced
 row failed on a table nobody was looking at.
 
-Migration 0032 repoints the key at `admin_users`, moves the "this is an
+Migration 0033 repoints the key at `admin_users`, moves the "this is an
 impersonation" predicate onto `impersonation_audit_seq`, which is the one
 column no cascade can null and the one that must exist before the row does, and
 adds the foreign key into the audit chain that makes that structural.
