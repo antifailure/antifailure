@@ -36,7 +36,15 @@ describe('every operator route declares a permission', () => {
     name: 'appRouter',
     router: appRouter,
     prefix: 'admin.',
-    atLeast: 18,
+    // Raised by four when the Customers lane added admin.customers.notes.list,
+    // .add, .retract and admin.customers.impersonation.list. This number is the
+    // one coordination point between six lanes: it is a FLOOR rather than a
+    // count, and each lane raises it by exactly what it added, so a lane whose
+    // routes fall out of the tree makes it fail rather than passing quietly.
+    // Its own lane's suite counts that lane's routes exactly, which is the
+    // check this one cannot make: see the note on MINE in adminrouters.test.ts
+    // and in admincustomers.test.ts.
+    atLeast: 22,
   })
 })
 

@@ -72,8 +72,16 @@ describe('the operator permission catalog', () => {
   test('the least privileged role cannot write anything', () => {
     // The check a reviewer actually wants to make, made once here rather than
     // by reading down a column and hoping.
+    //
+    // `start` and `engage` are in the list because not every dangerous verb is
+    // spelled `write`. `admin.impersonation.start` creates a session as a
+    // customer and `admin.emergency.engage` stops the installation, and a
+    // pattern that only knew the word `write` would have let read_only hold
+    // either one while still passing. The rule this expresses is about what a
+    // permission DOES, so the list grows whenever the catalog learns a new verb
+    // for doing something.
     const writes = ADMIN_ROLE_PERMISSIONS.read_only.filter((p) =>
-      /\.(write|revoke|suspend|plan|export)$/.test(p),
+      /\.(write|revoke|suspend|plan|export|start|engage|teardown)$/.test(p),
     )
     assert.deepEqual(writes, [], `read_only holds write permissions: ${writes}`)
   })

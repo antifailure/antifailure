@@ -597,7 +597,19 @@ export function DataTable<T>({
                       {i === 0 && href ? (
                         <Link
                           href={href(row)}
-                          className="-mx-1 -my-2 inline-flex min-h-11 items-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
+                          // flex-col, not the row `items-center` this had.
+                          //
+                          // The first cell of a list in this portal is two
+                          // lines: the thing's name and its identifier under
+                          // it, which is what every one of these tables needs
+                          // to show and what CellLink in ui.tsx is used for
+                          // everywhere else. An inline-flex ROW makes those two
+                          // block spans flex ITEMS, so they sit side by side
+                          // and render as "Brightlinebrightline". Column with
+                          // items-start lays them out as written, and
+                          // justify-center keeps a one line cell vertically
+                          // centred in the 44px target it still is.
+                          className="-mx-1 -my-2 inline-flex min-h-11 flex-col items-start justify-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
                         >
                           {c.cell(row)}
                         </Link>

@@ -93,10 +93,27 @@ export async function mutate<T>(path: string, input: unknown, csrf: string): Pro
  *  tRPC: the session, sign-out, device approval, and provider keys. */
 export async function rest<T>(
   path: string,
-  init: { method?: string; body?: unknown; csrf?: string } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    csrf?: string;
+    /**
+     * Anything else the caller has to send.
+     *
+     * It exists for the OPERATOR portal, which authenticates with a different
+     * cookie and presents a differently named forgery token,
+     * `x-antifailure-admin-csrf`. Its client reuses this transport for the
+     * reason lib/admin.ts states at length: a second fetch wrapper is a second
+     * place for the error shape, the credentials mode and the header names to
+     * drift. `csrf` stays a named option rather than becoming a header entry,
+     * because the product's own token is sent from a dozen call sites and none
+     * of them should be spelling a header name.
+     */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
-  const headers: Record<string, string> = { accept: "application/json" };
+  const headers: Record<string, string> = { accept: "application/json", ...init.headers };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
   const res = await fetch(`${BASE}${path}`, {

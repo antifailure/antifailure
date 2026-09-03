@@ -78,7 +78,7 @@ const page = z.object({
  */
 const SAFE_COLUMNS = {
   organizations: ['id', 'slug', 'name', 'plan', 'created_at', 'suspended_at', 'suspended_reason'],
-  users: ['id', 'github_login', 'email', 'name', 'created_at'],
+  users: ['id', 'github_login', 'email', 'name', 'created_at', 'suspended_at', 'suspended_reason'],
   sessions: ['id', 'user_id', 'org_id', 'created_at', 'last_seen_at', 'expires_at', 'revoked_at', 'ip', 'user_agent'],
   admin_users: ['id', 'email', 'name', 'role', 'is_root', 'suspended_at', 'last_signed_in_at', 'created_at'],
 } as const
@@ -365,9 +365,12 @@ export const adminRouter = router({
             email: string
             name: string | null
             created_at: Date | string
+            suspended_at: Date | string | null
+            suspended_reason: string | null
             orgs: string
           }>(sql`
             SELECT u.id, u.github_login, u.email, u.name, u.created_at,
+                   u.suspended_at, u.suspended_reason,
                    (SELECT count(*) FROM members m WHERE m.user_id = u.id) AS orgs
             FROM users u
             WHERE (${input.query ?? null}::text IS NULL
@@ -383,6 +386,15 @@ export const adminRouter = router({
           email: r.email,
           name: r.name,
           createdAt: iso(r.created_at),
+          // Suspension, on the LIST rather than only on the write that causes
+          // it. Without these two the console could suspend an account and
+          // then render it beside every other one with nothing to tell them
+          // apart, so an operator asking "did that work" had no screen that
+          // could answer. Same two columns the organization list already
+          // carries, and named the same way, because two vocabularies for one
+          // idea is how a check ends up reading the wrong one.
+          suspended: r.suspended_at !== null,
+          suspendedReason: r.suspended_reason,
           organizations: Number(r.orgs),
         }))
       }),
