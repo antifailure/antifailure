@@ -802,14 +802,3 @@ function checkField(field: FieldSpec, value: unknown): string | number | boolean
 export function isEventName(name: string): name is EventName {
   return Object.hasOwn(CATALOG, name)
 }
-
-/**
- * The two dimension values a row rolls up under.
- *
- * The empty string for an absent dimension rather than null, because the daily
- * table's primary key has to distinguish rows and null is not equal to itself.
- */
-export function dimensionsOf(name: EventName, payload: ValidPayload): [string, string] {
-  const dims = CATALOG[name].dimensions
-  return [String(payload[dims[0] ?? ''] ?? ''), String(payload[dims[1] ?? ''] ?? '')]
-}
