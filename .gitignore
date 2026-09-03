@@ -194,6 +194,12 @@ local_backend_override.tf
 # documented steps left an untracked file holding the state storage account name
 # for the next `git add -A` to commit. The claim and the rule agree now.
 backend*.hcl
+# The plan step writes plan.tfplan, plan.json and plan.txt into the stack
+# directory. *.tfplan covers the first and a plan.json rule above covers the
+# second; plan.txt was covered by nothing. It is `terraform show -no-color`
+# output rather than the raw variable values, so it is the smaller of the two
+# risks, and it is still a file nobody meant to offer to `git add -A`.
+plan.txt
 *.auto.tfvars
 
 # Assembled deploy output: www/out + docs/dist + the apex files, built by
