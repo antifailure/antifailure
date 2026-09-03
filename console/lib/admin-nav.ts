@@ -150,29 +150,36 @@ export const ADMIN_NAV: AdminNavGroup[] = [
         label: "Production Twins",
         href: "/admin/product/twins",
         Icon: IconTwins,
-        permission: "admin.infra.read",
+        permission: "admin.product.read",
         summary: "Every twin running on this installation, who owns it, and what it costs to keep.",
       },
       {
         label: "Runs & Jobs",
         href: "/admin/product/runs",
         Icon: IconRuns,
-        permission: "admin.infra.read",
+        permission: "admin.product.read",
         summary: "Work in flight and work that failed, across every organization at once.",
       },
       {
         label: "Safe State & Databases",
         href: "/admin/product/safe-state",
         Icon: IconDatabase,
-        permission: "admin.infra.read",
+        permission: "admin.product.data.read",
+        // REWRITTEN WHEN THE SECTION WAS BUILT, and the old line is worth
+        // recording because it was the honest mistake this navigation is most
+        // likely to make again. It read "the database snapshots a twin can be
+        // returned to, and whether restoring one has been proven", and there is
+        // no snapshot table, no restore history and no record of a customer's
+        // live database anywhere in the schema. This summary is the page's lede,
+        // so a promise made here is a promise made on the page.
         summary:
-          "The database snapshots a twin can be returned to, and whether restoring one has been proven.",
+          "Golden data versions per repository, the masking rules applied to them, and the columns a scan flagged that nobody confirmed.",
       },
       {
         label: "Branches & Environments",
         href: "/admin/product/branches",
         Icon: IconBranches,
-        permission: "admin.infra.read",
+        permission: "admin.product.read",
         summary: "Environments per branch, how long they have stood, and what is holding them open.",
       },
       {
