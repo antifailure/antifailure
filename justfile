@@ -75,6 +75,7 @@ gate: _reports
     run "documented paths exist"         just claimcheck
     run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
+    run "runbook numbers agree"          just runbookcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
@@ -863,6 +864,17 @@ varcheck:
 # pages, and On-call came before Standing up production.
 sidebarcheck:
     go run ./tools/sidebarcheck .
+
+# A numbered runbook still numbers itself.
+#
+# Step headings are visible while editing and cross references to them are
+# not, so inserting or removing a step renumbers one and silently invalidates
+# the other, and the operator who follows the stale one lands on the wrong
+# step of a production stand-up. It reads the numbers only: a step deleted and
+# every later step renumbered to close the hole is internally consistent and
+# passes, which is recorded in the tool rather than hoped about.
+runbookcheck:
+    go run ./tools/runbookcheck .
 
 # STATUS.md keeps the rule it states about itself.
 #

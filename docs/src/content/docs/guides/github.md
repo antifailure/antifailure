@@ -337,7 +337,7 @@ says so against the setting, so the manifest and the command agree.
 
 ## What the App must be granted
 
-[Standing up production](/docs/self-hosting/production#8-create-the-production-github-app)
+[Standing up production](/docs/self-hosting/production#9-create-the-production-github-app)
 carries the permission and event lists, with what each one is for and why the
 rest are refused. It is one list rather than two so that they cannot drift.
 

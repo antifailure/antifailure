@@ -1112,6 +1112,14 @@ jobs:
         # and On-call came before Standing up production.
         run: go run ./tools/sidebarcheck .
 
+      - name: A numbered runbook still numbers itself
+        # Step headings are visible while editing and the cross references to
+        # them are not, four hundred lines away in prose, so inserting or
+        # removing a step renumbers one and silently invalidates the other.
+        # It reads the numbers only: a step deleted and every later step
+        # renumbered to close the hole is consistent and passes.
+        run: go run ./tools/runbookcheck .
+
       - name: Every variable the product names at a user is documented
         # af license install tells a paying customer to set AF_LICENSE_KEY and
         # AF_ORG, then points them at the licensing page, and that page named
