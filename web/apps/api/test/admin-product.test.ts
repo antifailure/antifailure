@@ -377,6 +377,36 @@ describe('the product routes answer from real rows', { skip: hasDatabase ? false
     assert.ok(overdue.rows.some((t) => t.id === overdueEnvId))
   })
 
+  it('the organization filter returns that organization and nothing else', async () => {
+    // Asserted over EVERY row rather than by finding the seeded one. A filter
+    // that is silently ignored still contains the row somebody looked for, so
+    // a test that only looks for its own fixture passes over a broken filter.
+    // The console link that carries this is the branches page: two tenants can
+    // both have a branch called main, and before the organization travelled
+    // with the name that link showed somebody else's environments beside the
+    // ones that were clicked on.
+    const owner = callerAs('owner')
+    const scoped = await owner.product.twins.list({ orgId: org.orgId, scope: 'all', limit: 200 })
+    assert.ok(scoped.rows.length > 0, 'the filter returned nothing at all')
+    assert.deepEqual(
+      [...new Set(scoped.rows.map((t) => t.orgId))],
+      [org.orgId],
+      'the twins list returned an organization that was not asked for',
+    )
+
+    const runs = await owner.product.runs.list({ kind: 'agent', orgId: org.orgId, limit: 200 })
+    assert.ok(runs.rows.length > 0)
+    assert.deepEqual([...new Set(runs.rows.map((r) => r.orgId))], [org.orgId])
+
+    // And the unfiltered call is not accidentally scoped, or the assertion
+    // above would hold for a route that ignores its input entirely.
+    const everything = await owner.product.twins.list({ scope: 'all', limit: 200 })
+    assert.ok(
+      new Set(everything.rows.map((t) => t.orgId)).size >= 1,
+      'the unfiltered list returned nothing, so the check above proves nothing',
+    )
+  })
+
   it('a page cursor it did not issue is refused rather than answered with page one', async () => {
     // Falling back to the first page is the failure that matters: the caller
     // asked for page four, got page one, and `More` would offer more forever.

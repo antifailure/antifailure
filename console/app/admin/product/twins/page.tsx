@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Badge, Button, Card, Loaded, Page, TableSkeleton, When } from "@/components/ui";
+import { Badge, Button, Card, LinkButton, Loaded, Page, TableSkeleton, When } from "@/components/ui";
 import { AdminPage, DataTable, EmptyList, FilterBar, StatusChip } from "@/components/admin/primitives";
 import { More } from "@/components/pagination";
 import { useTwins, type Twin, type TwinScope } from "@/lib/admin-product";
@@ -46,13 +46,32 @@ function TwinsView() {
   // name in it. Seeded rather than controlled by the address: once the reader
   // types, the box is theirs, and a filter that snaps back to what the last
   // link said is a filter that fights whoever is using it.
+  //
+  // `org` is NOT seeded, it is applied. Two tenants can both have a branch
+  // called main, so a link that carried only the name showed somebody else's
+  // environments beside the ones that were clicked on. The organization is a
+  // fact about where the reader came from rather than a filter they chose, so
+  // it stays until they leave, and the strip below says it is on.
   const params = useSearchParams();
+  const orgId = params.get("org");
+  const orgSlug = params.get("slug");
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [scope, setScope] = useState<TwinScope>(params.get("q") ? "all" : "live");
-  const state = useTwins({ scope, search });
+  const state = useTwins({ scope, search, orgId });
 
   return (
     <AdminPage href="/admin/product/twins">
+      {orgId ? (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-card px-4 py-3">
+          <p className="text-[12.5px] leading-5 text-ink">
+            Showing one organization only. Everything below belongs to{" "}
+            <span className="font-mono text-[12px]">{orgSlug ?? orgId.slice(0, 8)}</span>.
+          </p>
+          <LinkButton href="/admin/product/twins" variant="secondary">
+            Show every twin
+          </LinkButton>
+        </div>
+      ) : null}
       <Card>
         <FilterBar
           search={{

@@ -220,7 +220,13 @@ const COLUMNS: Column<BranchRow>[] = [
     cell: (b) => (
       <span className="block">
         <Link
-          href={`/admin/product/twins?q=${encodeURIComponent(b.branch)}`}
+          // The organization travels with the branch name. Two tenants can
+          // both have a branch called main, and a link carrying only the name
+          // showed somebody else's environments beside the ones clicked on.
+          href={
+            `/admin/product/twins?org=${encodeURIComponent(b.orgId)}` +
+            `&slug=${encodeURIComponent(b.orgSlug)}&q=${encodeURIComponent(b.branch)}`
+          }
           className="inline-flex min-h-11 items-center justify-end underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
         >
           <span className="whitespace-nowrap">

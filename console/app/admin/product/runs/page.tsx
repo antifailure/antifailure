@@ -60,19 +60,30 @@ function RunsView() {
   // not choose on this screen, so the page says so out loud rather than showing
   // a short list that looks like the whole installation.
   const environmentId = params.get("environmentId");
+  const orgId = params.get("org");
+  const orgSlug = params.get("slug");
 
   const [kind, setKind] = useState<RunKind>("agent");
   const [search, setSearch] = useState("");
   const [failedOnly, setFailedOnly] = useState(false);
-  const state = useRuns({ kind, search, failedOnly, environmentId });
+  const state = useRuns({ kind, search, failedOnly, environmentId, orgId });
 
   return (
     <AdminPage href="/admin/product/runs">
-      {environmentId ? (
+      {environmentId || orgId ? (
         <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-card px-4 py-3">
           <p className="text-[12.5px] leading-5 text-ink">
-            Showing runs on one twin only. Everything below is scoped to environment{" "}
-            <span className="font-mono text-[12px]">{environmentId.slice(0, 8)}</span>.
+            {environmentId ? (
+              <>
+                Showing runs on one twin only. Everything below is scoped to environment{" "}
+                <span className="font-mono text-[12px]">{environmentId.slice(0, 8)}</span>.
+              </>
+            ) : (
+              <>
+                Showing one organization only. Everything below belongs to{" "}
+                <span className="font-mono text-[12px]">{orgSlug ?? orgId!.slice(0, 8)}</span>.
+              </>
+            )}
           </p>
           <LinkButton href="/admin/product/runs" variant="secondary">
             Show every run

@@ -345,9 +345,14 @@ export function useRuns(options: {
   kind: RunKind;
   search: string;
   failedOnly: boolean;
+  /** One twin, reached from the twin page. Stricter than orgId and applied
+   *  alongside it, because an environment belongs to exactly one tenant. */
   environmentId?: string | null;
+  /** One organization, reached from a twin when the question widens from
+   *  "why did this one fail" to "is the whole tenant failing". */
+  orgId?: string | null;
 }) {
-  const { kind, search, failedOnly, environmentId } = options;
+  const { kind, search, failedOnly, environmentId, orgId } = options;
   return usePages<RunRow>(
     async (cursor) => {
       const p = await query<AdminPage<RunRow>>("admin.product.runs.list", {
@@ -356,11 +361,12 @@ export function useRuns(options: {
         failedOnly,
         ...(search ? { query: search } : {}),
         ...(environmentId ? { environmentId } : {}),
+        ...(orgId ? { orgId } : {}),
         ...(cursor === null ? {} : { cursor }),
       });
       return { rows: p.rows, next: p.nextCursor };
     },
-    [kind, search, String(failedOnly), environmentId ?? ""],
+    [kind, search, String(failedOnly), environmentId ?? "", orgId ?? ""],
   );
 }
 

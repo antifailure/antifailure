@@ -185,11 +185,23 @@ function TwinBody({ twin }: { twin: TwinDetail }) {
       title={twin.envId}
       lede={`${twin.repository} on ${twin.branch}, owned by ${twin.orgSlug}.`}
       actions={
-        <LinkButton
-          href={`/admin/product/runs?environmentId=${encodeURIComponent(twin.id)}`}
-        >
-          Every run on this twin
-        </LinkButton>
+        // Two links because the question widens. "Why did this one fail" is
+        // answered on the twin; "is the whole tenant failing" is the next
+        // thing somebody asks and is a different query.
+        <span className="flex flex-wrap items-center gap-2">
+          <LinkButton
+            variant="secondary"
+            href={
+              `/admin/product/runs?org=${encodeURIComponent(twin.orgId)}` +
+              `&slug=${encodeURIComponent(twin.orgSlug)}`
+            }
+          >
+            Every run for {twin.orgSlug}
+          </LinkButton>
+          <LinkButton href={`/admin/product/runs?environmentId=${encodeURIComponent(twin.id)}`}>
+            Every run on this twin
+          </LinkButton>
+        </span>
       }
     >
       <div className="space-y-6">
