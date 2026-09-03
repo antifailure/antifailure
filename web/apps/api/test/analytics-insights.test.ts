@@ -200,7 +200,7 @@ describe('every declared funnel could actually be completed', () => {
     const migration = await readFile(new URL(name, dir), 'utf8')
 
     const checks = [...migration.matchAll(/subject_kind IN \(([^)]*)\)/g)].map((m) =>
-      m[1].split(',').map((v) => v.trim().replace(/^'|'$/g, '')),
+      (m[1] ?? '').split(',').map((v) => v.trim().replace(/^'|'$/g, '')),
     )
     // Three tables carry the population: the working set, the actives and the
     // cohorts. If one of them ever stops declaring it, this asserts against a
