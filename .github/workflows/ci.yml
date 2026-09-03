@@ -1176,6 +1176,21 @@ jobs:
         # that is documented, read, and unreachable by every apply passes both.
         run: go run ./tools/wirecheck .
 
+      - name: No file carries an unfinished merge
+        # One reached main and stayed there through a release being prepared:
+        # literal `<<<<<<< HEAD`, `=======` and `>>>>>>>` around six rows of the
+        # control plane's configuration table, two of them the same variable
+        # described twice.
+        #
+        # Every gate was green about it. Markdown does not fail to parse.
+        # prosecheck reads punctuation. varcheck and config-docs.test.ts ask
+        # whether a variable is DOCUMENTED, and a row inside a conflict block
+        # reads as documented to all three. The only job that went red, the one
+        # above this, went red for a CONSEQUENCE: it reported a variable as
+        # documented with no way to set it, which sent two people to look at
+        # Terraform. The cause was four lines of git output in a table.
+        run: go run ./tools/conflictcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the

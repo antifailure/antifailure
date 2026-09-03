@@ -131,6 +131,7 @@ runner/artifacts/
 /cigate
 /claimcheck
 /classcheck
+/conflictcheck
 /constcheck
 /contactcheck
 /cost

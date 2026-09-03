@@ -81,6 +81,7 @@ gate: _reports
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "the mode lists are the real one" just modecheck
@@ -936,6 +937,15 @@ inputcheck:
 # that has stopped being needed is reported so the file cannot rot.
 wirecheck:
     go run ./tools/wirecheck .
+
+# No file in the tree carries a merge conflict marker.
+#
+# One reached main inside a documentation table and every other gate was green
+# about it, because markdown does not fail to parse and a row inside a conflict
+# block still reads as documented to everything that asks whether a variable is
+# documented.
+conflictcheck:
+    go run ./tools/conflictcheck .
 
 # This justfile runs what CI runs.
 gatecheck:
