@@ -70,18 +70,19 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
   const res = await fetch(`${BASE}/trpc/${path}${qs}`, {
     credentials: "same-origin",
     // NEVER FROM A CACHE, and this is a correctness fix rather than a
-    // precaution. Every read this function makes is live tenant or operator
-    // state behind a session, and the control plane sends no cache-control on
-    // /trpc, so the default fetch mode lets the browser reuse a response it
-    // already has. The symptom is specific and awful: suspend an account from
-    // the panel beside the list, the write commits, the list reloads, one
+    // precaution. Every read this makes is live tenant or operator state behind
+    // a session, and the control plane sends no cache-control on /trpc, so the
+    // default fetch mode lets the browser reuse a response it already has.
+    // Nothing noticed while no screen both listed something and changed it. The
+    // operator portal does: suspend an account from the panel beside the list,
+    // the write commits, the audit entry is written, the list reloads, one
     // request goes out, and the row still says active. An operator reads that
-    // as "the button did nothing" and presses it again.
+    // as the button having done nothing and presses it again.
     //
-    // On the read side there is nothing to lose. These responses are per
-    // session, none of them is shared, and none is large enough for a cache to
-    // be worth the chance of showing somebody last minute's answer about a
-    // customer they are in the middle of changing.
+    // There is nothing to lose on this side. Every response is per session,
+    // none is shared between people, and none is large enough for a cache to be
+    // worth showing somebody last minute's answer about a customer they are in
+    // the middle of changing.
     cache: "no-store",
     headers: { accept: "application/json" },
   });
@@ -147,7 +148,7 @@ export async function rest<T>(
   } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
-  const headers: Record<string, string> = { accept: "application/json", ...init.headers };
+  const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
   Object.assign(headers, init.headers ?? {});

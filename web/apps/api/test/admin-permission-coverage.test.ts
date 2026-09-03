@@ -85,8 +85,19 @@ function httpGuardedPermissions(): Set<string> {
   for (const file of readdirSync(dir)) {
     if (!file.endsWith('.ts')) continue
     const source = readFileSync(new URL(file, dir), 'utf8')
-    for (const m of source.matchAll(/adminRoleHas\([^,]+,\s*'(admin\.[a-z.]+)'\)/g)) {
+    // Both spellings, because the first version of this read only a quoted
+    // literal and the customers lane then hoisted its permission into a
+    // constant, at which point the walk stopped seeing an enforcement that had
+    // not moved. A check that a refactor can blind is a check that reports
+    // green for a reason unrelated to the thing it guards.
+    for (const m of source.matchAll(/adminRoleHas\([^,]+,\s*'(admin\.[a-z.]+)'\s*\)/g)) {
       found.add(m[1]!)
+    }
+    for (const m of source.matchAll(/adminRoleHas\([^,]+,\s*([A-Z][A-Z0-9_]*)\s*\)/g)) {
+      const bound = source.match(
+        new RegExp(`(?:const|let)\\s+${m[1]}\\s*(?::[^=]+)?=\\s*'(admin\\.[a-z.]+)'`),
+      )
+      if (bound) found.add(bound[1]!)
     }
   }
   return found

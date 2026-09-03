@@ -96,6 +96,18 @@ type SubjectType = (typeof SUBJECT_TYPES)[number]
  * one. Past that the operator starts another and says why again, which is the
  * behaviour worth having rather than a session that quietly lasts a month.
  */
+/**
+ * The permission the start route enforces.
+ *
+ * A named export rather than a string literal at the call site, because this is
+ * the one operator permission that is NOT enforced by `adminProcedure`, so the
+ * check that every catalogued permission guards something cannot find it by
+ * walking the router. That test imports this constant instead of keeping a
+ * hand-written list, which means renaming the permission moves both ends at
+ * once and deleting the check below makes the test fail rather than pass.
+ */
+export const IMPERSONATION_START_PERMISSION = 'admin.impersonation.start'
+
 const IMPERSONATION_MIN_MINUTES = 5
 const IMPERSONATION_MAX_MINUTES = 60
 const IMPERSONATION_DEFAULT_MINUTES = 30
@@ -465,7 +477,7 @@ export function registerImpersonationRoutes(
       )
     }
 
-    if (!adminRoleHas(operator.role, 'admin.impersonation.start')) {
+    if (!adminRoleHas(operator.role, IMPERSONATION_START_PERMISSION)) {
       return c.json(
         {
           error:
