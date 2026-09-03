@@ -23,27 +23,33 @@ directory to run it in.
 
 One server per checkout. The server binds the project it starts in and serves
 only that one, so a client working across three repositories configures three
-servers rather than one that switches.
+servers rather than one that switches between them.
 
-### Claude Code
+### The agents with a command for it
+
+Run these in the checkout you want served. Each writes the entry to its own
+configuration for you.
 
 ```sh
-cd /path/to/your/project
 claude mcp add antifailure -- af mcp
+codex mcp add antifailure -- af mcp
+gemini mcp add antifailure af mcp
 ```
 
-`--scope project` writes the entry to `.mcp.json` in the repository instead of
-your own settings, which is what you want when the rest of the team should get
-the same server from a checkout:
+Claude Code takes `--scope project`, which writes `.mcp.json` in the repository
+instead of your own settings. That is the one to use when everybody working in
+the checkout should get the server from the checkout:
 
 ```sh
 claude mcp add antifailure --scope project -- af mcp
 ```
 
-### A client configured by JSON
+### The agents configured by JSON
 
-Claude Desktop, Cursor, Windsurf and the VS Code MCP extension all take the
-same shape, under whichever key that client uses for its server map:
+Cursor, Windsurf, VS Code, Cline, Continue, Claude Desktop and the JetBrains
+AI Assistant all take the same object, under whichever key that client uses for
+its server map. It is `mcpServers` almost everywhere and `servers` in VS Code's
+own `mcp.json`.
 
 ```json
 {
@@ -56,16 +62,32 @@ same shape, under whichever key that client uses for its server map:
 }
 ```
 
-`-C` is the reason this works in a client that has nowhere to set a working
-directory. Without it the server binds whatever directory the client happened
-to launch from, which is usually the client's own installation and never your
-project, and the failure reads as a missing manifest rather than as a missing
-setting. Give it an absolute path: a client does not expand `~` and does not
-resolve a relative one against your shell.
+Zed is the one with a different shape. It calls them context servers and nests
+the command:
 
-`af` must be on the `PATH` the client itself sees, which on macOS is not the
-`PATH` your shell has when the client was started from Finder. If the client
-reports that the command was not found, write the absolute path instead, and
+```json
+{
+  "context_servers": {
+    "antifailure": {
+      "command": { "path": "af", "args": ["-C", "/absolute/path", "mcp"] },
+      "settings": {}
+    }
+  }
+}
+```
+
+### The two settings people get wrong
+
+**Pass `-C` with an absolute path.** A client configured by JSON usually has
+nowhere to set a working directory, so without it the server binds whatever
+directory the client happened to launch from. That is the client's own
+installation and never your project, and the failure reads as a missing
+manifest rather than as a missing setting. Absolute, because a client does not
+expand a tilde and does not resolve a relative path against your shell.
+
+**Check the `PATH` the client sees.** On macOS an application started from the
+Dock or Finder does not get the `PATH` your shell has, so `af` can be installed
+and still not be found. Write the absolute path instead when that happens, and
 `command -v af` prints it.
 
 ### Proving it connected
@@ -81,28 +103,61 @@ In Claude Code, `/mcp` lists the configured servers and their state.
 `antifailure.yaml`. The server states it in its handshake instructions and at
 the end of every tool description, so an agent reads it rather than guessing.
 
-## There is no hosted MCP endpoint
+## claude.ai and chatgpt.com
 
-This is worth saying plainly, because the rest of this product has a hosted
-control plane and it is reasonable to assume the MCP server has a URL there
-too.
+Neither can run `af mcp`, and the reason is the transport rather than the
+product. A browser cannot start a process on your machine, so both connect only
+to a **remote** server: an HTTPS URL speaking Streamable HTTP. `af mcp` speaks
+standard input and output to a process the client started.
 
-It does not, and the reason is the tenancy model rather than a missing feature.
+So there is no URL to paste into either one, and the connector dialog in both
+will keep asking for one.
+
+**What actually bridges it, and what it costs.** A stdio server can be put
+behind an HTTP endpoint by a gateway, and
+[supergateway](https://www.npmjs.com/package/supergateway) is the usual one:
+
+```sh
+npx -y supergateway --stdio "af -C /absolute/path mcp" --port 8000
+```
+
+Read the next paragraph before you expose that port.
+
+**This is a real security decision and not a configuration step.** The MCP
+server rehearses migrations, which means it starts containers, restores
+production shaped data into them and reads your checkout. Everything it can do,
+whoever reaches that port can do. A tunnel to it with no authentication in
+front is remote code execution on the machine running it, offered to the
+internet. If you do this, put authentication in front of the gateway, bind it
+to an interface you control, and treat the host as one that is exposed, because
+it is.
+
+**The honest recommendation is to use a coding agent instead.** Every client in
+the section above runs the server locally, under your user, reachable by
+nothing else, and needs none of this. The rehearsal tools are built for the
+place code is written rather than for a chat window, and the agents that write
+code all speak the transport the server already speaks.
+
+## Why we do not host one for you
+
+The rest of this product has a hosted control plane, so expecting the MCP
+server to have a URL there is a reasonable expectation to arrive with. It does
+not have one, and the reason is the tenancy model rather than a feature nobody
+got to yet.
+
 The server binds one checkout at startup, runs rehearsals against containers on
 the machine that started it, and keeps their results in that project's own
 state directory. It opens no connection to a control plane, presents no engine
 token and emits no event. A hosted endpoint would need a second tenancy model
 underneath it that nothing here implements, and an agent pointed at one would
-be rehearsing a checkout the server cannot see.
+be rehearsing a checkout the server cannot see. That is also why the operator
+portal reports no fleet of MCP servers, no connection count and no per tenant
+adoption figure: none of those numbers exists to be measured.
 
-So there is no fleet of MCP servers to list, no connection count and no per
-tenant adoption figure, and the operator portal says so rather than rendering a
-screen full of numbers nobody measured.
-
-**Self hosting the MCP server is the only shape there is, and it is what `af
-mcp` already does.** It runs on your machine, or on your build agent, against
-your checkout, under your credentials. Nothing about it reaches a hosted plane,
-including on the paid plans, so an air gapped repository has the same MCP
+**Self hosting the MCP server is the only shape there is, and `af mcp` is
+already it.** It runs on your machine, or on your build agent, against your
+checkout, under your credentials. Nothing about it reaches a hosted plane,
+including on the paid plans, so an air gapped repository gets the same MCP
 server a connected one does.
 
 What the hosted plane does host is documented separately: see
