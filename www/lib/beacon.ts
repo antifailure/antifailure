@@ -322,6 +322,21 @@ export function setMeasurement(on: boolean): void {
     // wrong direction, so the query switch below also sets the in-memory flag.
   }
   if (!on) memoryOptOut = true;
+  // THE DECISION IS CACHED, SO CLEARING IT IS PART OF RECORDING THE CHOICE.
+  //
+  // measurementAllowed answers once per page and then remembers, because it
+  // reads storage and a reader cannot become a crawler part way through a
+  // visit. An opt out is the one thing that CAN change part way through a
+  // visit, and this site navigates on the client, so the control that calls
+  // this does not reload the module. Without this line the preference is
+  // written, the control appears to work, and the beacon keeps sending until
+  // the tab is closed.
+  measuring = null;
+  // And what was already captured goes with it. The queue holds events for up
+  // to three seconds, so an opt out usually lands with unsent events in hand,
+  // and sending them because they were captured a moment before the reader
+  // objected is the disclosure the control was pressed to prevent.
+  if (!on) discardCapture();
 }
 
 /** Set by the query switch when storage refused the write, so an opt out is at
@@ -591,6 +606,22 @@ function enqueue(event: Wire): void {
   if (queue.length > MAX_QUEUED) queue = queue.slice(queue.length - MAX_QUEUED);
   attachListeners();
   scheduleFlush(FLUSH_INTERVAL_MS);
+}
+
+/**
+ * Throws away everything captured and not yet sent, and cancels the flush.
+ *
+ * Declared beside the queue rather than beside setMeasurement because it is the
+ * queue's own invariant. A function declaration rather than an expression, so
+ * that setMeasurement, which is defined above the queue, can call it.
+ */
+function discardCapture(): void {
+  queue = [];
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  attempts = 0;
 }
 
 function scheduleFlush(afterMs: number): void {

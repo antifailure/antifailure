@@ -300,6 +300,49 @@ describe('the beacon decides whether to measure at all', () => {
     assert.equal(h.local.get('af.analytics.optout.v1'), 'off')
   })
 
+  it('stops measuring the moment the reader opts out, not on the next page load', async () => {
+    // THE ORDERING THIS IS ABOUT: opt out AFTER capture has already started.
+    // setMeasurement is exported, in its own words, "so a control on the
+    // privacy page can call it". This site navigates on the client, so pressing
+    // that control does not reload the module: the reader stays on the same
+    // beacon instance that has already decided it is measuring. If the decision
+    // is cached and never invalidated, the control appears to work, writes the
+    // preference, and the beacon keeps sending until the tab is closed.
+    //
+    // The existing opt out case cannot see this. It opts out on a fresh module
+    // and then loads a SECOND one, which is a page reload, and a reload is the
+    // one path where the cache is rebuilt anyway.
+    const beacon = await loadBeacon()
+    beacon.pageViewed('home')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 1, 'the reader was being measured before opting out')
+
+    beacon.setMeasurement(false)
+    beacon.pageViewed('pricing')
+    beacon.ctaEngaged('waitlist_open')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 1, 'the beacon kept sending after the reader opted out')
+  })
+
+  it('does not send what was already queued when the reader opts out', async () => {
+    // The queue holds events for up to three seconds, so an opt out lands on a
+    // beacon with unsent events in hand more often than not. Sending them
+    // because they were captured a moment before the reader objected is the
+    // same disclosure the opt out was pressed to prevent.
+    const beacon = await loadBeacon()
+    beacon.pageViewed('home')
+    // Deliberately no advance: the flush timer has not fired, so the event is
+    // still in the queue rather than on the wire.
+    assert.equal(h.sent.length, 0, 'the event should still be queued')
+
+    beacon.setMeasurement(false)
+    advance(10_000)
+    await settle()
+    assert.equal(h.sent.length, 0, 'the queue was flushed after the reader opted out')
+  })
+
   it('takes the opt out from a link, so excluding a colleague needs no install', async () => {
     install({ href: 'https://antifailure.dev/?af-analytics=off' })
     const beacon = await loadBeacon()
