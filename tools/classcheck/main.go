@@ -32,10 +32,26 @@
 // lost. So the order is not something to reason about. It is something to read
 // out of the emitted stylesheet, which is what this does.
 //
-// WHAT IT READS. The built site, not the source, and that is deliberate. The
-// question is not which classes a file mentions, it is which classes land on
-// one element together, and only the renderer knows that. www prerenders to
-// static HTML, so the answer is on disk after a build with no browser needed.
+// WHAT IT READS. The built application, not the source, and that is
+// deliberate. The question is not which classes a file mentions, it is which
+// classes land on one element together, and only the renderer knows that. Both
+// www and console are `output: "export"`, so they prerender to static HTML and
+// the answer is on disk after a build with no browser needed.
+//
+// BOTH APPLICATIONS, and each against its own stylesheet. This read www alone
+// for its first life, which was a gate scoped to the smaller of the two
+// surfaces. console does not import `cn` at all, so it looked exempt; it is
+// not. It concatenates in template literals instead, and
+// `${inputClass} mt-0 w-full` has exactly the hazard `cn` has, because the
+// interpolated string can already carry a margin and the cascade, not the
+// order of the literal, decides which margin lands. An admin console of
+// twenty two pages was about to be written on that pattern with nothing
+// looking.
+//
+// The rules of one application are never compared against the HTML of the
+// other. A rule's position is only meaningful inside the sheet it came from,
+// so merging two builds into one map would compare offsets across files and
+// answer a question nobody asked.
 //
 // WHAT IT COMPARES. Only unconditional utilities: a rule whose selector is a
 // bare class, outside any @media, with no pseudo-class. A hover, focus or
@@ -54,6 +70,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -77,6 +94,58 @@ type exemption struct {
 	used   bool
 }
 
+// nextApps names every Next application in the tree, by looking for the config
+// file that makes one, rather than by holding a list.
+//
+// A list would have the same shape as the bug this change closes: a claim
+// about the repository that nothing checks. The day a third application is
+// added, a list keeps the gate passing and stops it meaning anything. Reading
+// the tree cannot go stale.
+func nextApps(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		for _, name := range []string{"next.config.ts", "next.config.js", "next.config.mjs"} {
+			if _, err := os.Stat(filepath.Join(root, e.Name(), name)); err == nil {
+				out = append(out, e.Name())
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// prerendered returns every .html under dir, at any depth.
+//
+// This used to be three fixed globs at one, two and three path segments, which
+// was correct for the site it was written against and silently wrong for
+// anything deeper. The admin console nests four segments, as in
+// admin/customers/users/organization, so a fixed depth list would have walked
+// past the pages this gate was extended to cover and reported a clean run over
+// files it never opened. A walk cannot go out of date when somebody adds a
+// directory.
+func prerendered(dir string) []string {
+	var out []string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".html") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out
+}
+
 func main() {
 	root := "."
 	if len(os.Args) > 1 {
@@ -90,32 +159,6 @@ func main() {
 func run(root string) (int, string) {
 	var b strings.Builder
 
-	cssFiles, _ := filepath.Glob(filepath.Join(root, "www", ".next", "static", "chunks", "*.css"))
-	htmlFiles, _ := filepath.Glob(filepath.Join(root, "www", ".next", "server", "app", "*.html"))
-	more, _ := filepath.Glob(filepath.Join(root, "www", ".next", "server", "app", "*", "*.html"))
-	htmlFiles = append(htmlFiles, more...)
-	more, _ = filepath.Glob(filepath.Join(root, "www", ".next", "server", "app", "*", "*", "*.html"))
-	htmlFiles = append(htmlFiles, more...)
-
-	if len(cssFiles) == 0 || len(htmlFiles) == 0 {
-		fmt.Fprintf(&b, "classcheck: no built site under www/.next. Build it first:\n\n    (cd www && npm run build)\n\n")
-		return 1, b.String()
-	}
-
-	rules := map[string]rule{}
-	for _, f := range cssFiles {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			fmt.Fprintf(&b, "classcheck: %s: %v\n", f, err)
-			return 1, b.String()
-		}
-		for k, v := range parseCSS(string(src)) {
-			if _, seen := rules[k]; !seen {
-				rules[k] = v
-			}
-		}
-	}
-
 	exemptPath := filepath.Join(root, "tools", "docs", "classcheck-exemptions.tsv")
 	exempt, err := readExemptions(exemptPath)
 	if err != nil {
@@ -128,57 +171,89 @@ func run(root string) (int, string) {
 	}
 	var findings []finding
 	elements := 0
+	files := 0
 
-	for _, f := range htmlFiles {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			fmt.Fprintf(&b, "classcheck: %s: %v\n", f, err)
+	found := nextApps(root)
+	if len(found) == 0 {
+		fmt.Fprintf(&b, "classcheck: no Next application found. Each one is a directory with a next.config file, and each needs `npm run build` before this gate has anything to read.\n")
+		return 1, b.String()
+	}
+
+	for _, app := range found {
+		cssFiles, _ := filepath.Glob(filepath.Join(root, app, ".next", "static", "chunks", "*.css"))
+		htmlFiles := prerendered(filepath.Join(root, app, ".next", "server", "app"))
+
+		if len(cssFiles) == 0 || len(htmlFiles) == 0 {
+			fmt.Fprintf(&b, "classcheck: no built application under %s/.next. Build it first:\n\n    (cd %s && npm run build)\n\n", app, app)
 			return 1, b.String()
 		}
-		for _, attr := range classAttrs(string(src)) {
-			elements++
-			toks := strings.Fields(attr)
-			byProp := map[string][]int{}
-			for idx, tok := range toks {
-				r, ok := rules[tok]
-				if !ok {
-					continue
-				}
-				byProp[r.prop] = append(byProp[r.prop], idx)
+		files += len(htmlFiles)
+
+		rules := map[string]rule{}
+		for _, f := range cssFiles {
+			src, err := os.ReadFile(f)
+			if err != nil {
+				fmt.Fprintf(&b, "classcheck: %s: %v\n", f, err)
+				return 1, b.String()
 			}
-			for prop, idxs := range byProp {
-				if len(idxs) < 2 {
-					continue
+			for k, v := range parseCSS(string(src)) {
+				if _, seen := rules[k]; !seen {
+					rules[k] = v
 				}
-				// `cn` joins its arguments in order and React writes the
-				// attribute verbatim, so a component's own classes come first
-				// and a call site's override comes last. The class written LAST
-				// is the one whose author meant it to apply.
-				//
-				// A default losing to an override is how overriding is supposed
-				// to look and is not reported: an earlier version of this gate
-				// flagged all 119 of those on this site and would have been
-				// muted within a day. Only the inverse is a defect, where a
-				// class written last loses to one written before it, so the
-				// author's intent is on the element and does nothing.
-				last := idxs[len(idxs)-1]
-				winner := idxs[0]
-				for _, k := range idxs[1:] {
-					if rules[toks[k]].at > rules[toks[winner]].at {
-						winner = k
+			}
+		}
+
+		for _, f := range htmlFiles {
+			src, err := os.ReadFile(f)
+			if err != nil {
+				fmt.Fprintf(&b, "classcheck: %s: %v\n", f, err)
+				return 1, b.String()
+			}
+			for _, attr := range classAttrs(string(src)) {
+				elements++
+				toks := strings.Fields(attr)
+				byProp := map[string][]int{}
+				for idx, tok := range toks {
+					r, ok := rules[tok]
+					if !ok {
+						continue
 					}
+					byProp[r.prop] = append(byProp[r.prop], idx)
 				}
-				// A strict comparison, so the same class written twice on one
-				// element is redundant rather than dead and is not reported.
-				if rules[toks[winner]].at <= rules[toks[last]].at {
-					continue
+				for prop, idxs := range byProp {
+					if len(idxs) < 2 {
+						continue
+					}
+					// `cn` joins its arguments in order and React writes the
+					// attribute verbatim, so a component's own classes come first
+					// and a call site's override comes last. The class written LAST
+					// is the one whose author meant it to apply.
+					//
+					// A default losing to an override is how overriding is supposed
+					// to look and is not reported: an earlier version of this gate
+					// flagged all 119 of those on this site and would have been
+					// muted within a day. Only the inverse is a defect, where a
+					// class written last loses to one written before it, so the
+					// author's intent is on the element and does nothing.
+					last := idxs[len(idxs)-1]
+					winner := idxs[0]
+					for _, k := range idxs[1:] {
+						if rules[toks[k]].at > rules[toks[winner]].at {
+							winner = k
+						}
+					}
+					// A strict comparison, so the same class written twice on one
+					// element is redundant rather than dead and is not reported.
+					if rules[toks[winner]].at <= rules[toks[last]].at {
+						continue
+					}
+					if markExempt(exempt, toks[last], toks[winner]) {
+						continue
+					}
+					findings = append(findings, finding{
+						file: rel(root, f), dead: toks[last], winner: toks[winner], prop: prop, sample: sample(attr),
+					})
 				}
-				if markExempt(exempt, toks[last], toks[winner]) {
-					continue
-				}
-				findings = append(findings, finding{
-					file: rel(root, f), dead: toks[last], winner: toks[winner], prop: prop, sample: sample(attr),
-				})
 			}
 		}
 	}
@@ -216,14 +291,14 @@ func run(root string) (int, string) {
 			fmt.Fprintf(&b, "%s\n    exempted but nothing matches it any more, so delete the row\n", s)
 		}
 		fmt.Fprintf(&b, "\nclasscheck: %d files, %d elements, %d classes that never apply, %d stale exemptions\n",
-			len(htmlFiles), elements, shown, len(stale))
+			files, elements, shown, len(stale))
 		fmt.Fprintf(&b, "\nA class written beside another that sets the same property does not replace it.\n")
 		fmt.Fprintf(&b, "Choose one with a ternary so only one is ever emitted, or give the component a\n")
 		fmt.Fprintf(&b, "prop for the variant. Reaching for a value that happens to win is not a fix.\n")
 		return 1, b.String()
 	}
 
-	fmt.Fprintf(&b, "classcheck: %d files, %d elements, 0 classes that never apply\n", len(htmlFiles), elements)
+	fmt.Fprintf(&b, "classcheck: %d files, %d elements, 0 classes that never apply\n", files, elements)
 	return 0, b.String()
 }
 
@@ -399,12 +474,47 @@ func plainClass(sel string) (string, bool) {
 	return name.String(), true
 }
 
+// interesting is the set of properties a conflict is judged on.
+//
+// It began as colour only, because all four defects that motivated this gate
+// were colours. That scope was narrower than the rule it enforces. Nothing
+// about a class losing to a neighbour is specific to colour: a height written
+// last and beaten by a height written first is the same defect with the same
+// cause and the same invisibility in review.
+//
+// The reason to widen it now is that the console does not import `cn` at all,
+// so it looked exempt from this whole class of bug. It is not. It composes in
+// template literals, and `${inputClass} mt-0 w-full` carries exactly the same
+// hazard, because the interpolated string can already set a margin and the
+// cascade, not the order of the literal, decides which one lands. An admin
+// console of twenty two pages was about to be written on that pattern.
+//
+// Widening it was measured before it was done rather than after. Across both
+// built applications, 61 files and 16661 elements, the whole list below adds
+// exactly one finding, and that finding is a real one. So this is not a
+// tradeoff between coverage and noise; the noise was hypothetical.
 var interesting = map[string]bool{
 	"color":            true,
 	"background-color": true,
 	"border-color":     true,
 	"fill":             true,
 	"stroke":           true,
+	"padding":          true,
+	"margin":           true,
+	"display":          true,
+	"width":            true,
+	"height":           true,
+	"text-align":       true,
+	"font-weight":      true,
+	"font-size":        true,
+	"position":         true,
+	"flex-direction":   true,
+	"justify-content":  true,
+	"align-items":      true,
+	"gap":              true,
+	"border-radius":    true,
+	"opacity":          true,
+	"overflow":         true,
 }
 
 func props(body string) []string {
