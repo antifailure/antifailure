@@ -164,6 +164,7 @@ runner/artifacts/
 /relnotes
 /relpack
 /reltar
+/runbookcheck
 /sbomcheck
 /scanrepo
 /schemadoc
