@@ -256,9 +256,11 @@ export interface ServerOptions {
    *  no organization yet. */
   githubAppInstallUrl?: string
   /** Where somebody this installation will not admit is sent instead, which on
-   *  the hosted planes is the marketing site's request page. Undefined is the
-   *  self-hosted default and means the refusal page offers no link, because
-   *  pointing an operator's users at the vendor's waitlist would be wrong. */
+   *  the hosted planes is the marketing site's contact page, where a form
+   *  reaches a person. Undefined is the self-hosted default and means the
+   *  refusal page offers no link, because pointing an operator's users at the
+   *  vendor's contact form would be wrong: an operator running an allowlist has
+   *  their own way of being asked. */
   signupUrl?: string
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
@@ -853,11 +855,18 @@ export function createServer(options: ServerOptions) {
    */
   function wayOut(): { actions: ProblemAction[]; sentence: string } {
     if (options.signupUrl) {
+      // NOT "we will tell you when it opens", which is what this said while
+      // there was a waitlist behind the link. Two things were wrong with it and
+      // only one has changed. The list is gone, so there is nothing to be told
+      // about; and the domain that link points at publishes no mail exchanger
+      // and an SPF policy authorizing no sender, so nothing could have told
+      // anybody anything even when there was. The link now goes to a form that
+      // writes a row a person reads, and the sentence says that and no more.
       return {
-        actions: [{ href: options.signupUrl, label: 'Join the waitlist' }],
+        actions: [{ href: options.signupUrl, label: 'Ask for access' }],
         sentence:
-          'Leave an address on the waitlist and we will tell you when it opens. The engine ' +
-          'itself is open source, runs on your own machine, and needs no account at all.',
+          'Tell us who you are on that page and somebody will read it. The engine itself is ' +
+          'open source, runs on your own machine, and needs no account at all.',
       }
     }
     return {

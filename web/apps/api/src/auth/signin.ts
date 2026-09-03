@@ -73,9 +73,13 @@ export class SignInError extends Error {
  *
  * Unset is the self-hosted default and means there is nowhere: an operator who
  * runs an allowlist has their own way of being asked, and inventing a link to
- * the vendor's waitlist on their deployment would be wrong. The hosted planes
- * set it to the marketing site's request page, which is the list the visitor
- * was standing one click away from when they pressed Continue with GitHub.
+ * the vendor's contact form on their deployment would be wrong. The hosted
+ * planes set it to the marketing site's contact page, where a form writes a row
+ * a person reads.
+ *
+ * On a plane with no allowlist this is never rendered, because nobody is
+ * refused. It is still worth setting, so that closing sign-ups later is one
+ * decision rather than two.
  */
 export function signupUrlFrom(value: string | undefined | null): string | undefined {
   if (!value?.trim()) return undefined
