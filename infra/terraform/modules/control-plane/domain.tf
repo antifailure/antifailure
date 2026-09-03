@@ -1,24 +1,15 @@
 # app.antifailure.dev, and everything Terraform can own of it.
 #
-# Four resources in one order that works and several that do not, and THE ORDER
-# HERE IS NOT THE OBVIOUS ONE. Azure will not issue a managed certificate for a
-# name it cannot prove you control, and it proves control by resolving DNS, so
-# the records have to exist and be correct first. What is not obvious, and what
-# cost this an apply, is that Azure ALSO refuses to issue the certificate until
-# the hostname is already bound to an app in the environment:
-#
-#   RequireCustomHostnameInEnvironment: Creating managed certificate requires
-#   hostname 'app.antifailure.dev' added as a custom hostname to a container
-#   app or route in environment 'afcpprod-env'
-#
-# So the binding cannot reference the certificate, because the certificate
-# cannot exist until the binding does. Expressing it the other way round is a
-# dependency cycle, not a fix.
+# Four resources in one order that works and several that do not. Azure will not
+# issue a managed certificate for a name it cannot prove you control, and it
+# proves control by resolving DNS, so the records have to exist and be correct
+# before the certificate is asked for, and the certificate has to exist before
+# the binding can reference it.
 #
 #   CNAME <sub>        ->  the container app's default FQDN
 #   TXT   asuid.<sub>  ->  the app's custom_domain_verification_id
-#   custom domain binding on the app, with NO certificate
-#   managed certificate for the full name, which Azure then binds ITSELF
+#   managed certificate for the full name
+#   custom domain binding on the app, referencing that certificate
 #
 # THE TXT RECORD IS NOT OPTIONAL AND IS THE PART PEOPLE MISS. A CNAME alone
 # proves that a name points at an Azure endpoint, not that it points at YOUR
@@ -84,47 +75,7 @@ resource "azurerm_dns_txt_record" "asuid" {
   tags = var.tags
 }
 
-# The binding, as a separate resource rather than an ingress block, and it comes
-# BEFORE the certificate.
-#
-# azurerm_container_app's ingress carries a custom_domain list, and using both
-# it and this resource makes the two fight: every apply would see the binding
-# this resource created as an unexpected value inside the app's ingress and
-# propose to remove it. app.tf therefore ignores that attribute, and this is the
-# one place a custom domain is declared.
-#
-# NO CERTIFICATE HERE, AND THAT IS THE WHOLE POINT. The provider documents it:
-# "Omit this value if you wish to use an Azure Managed certificate." The
-# hostname is added first with no TLS, the certificate is requested against a
-# hostname that now exists, and Azure attaches it to this binding itself once it
-# has issued. Naming the certificate here instead is what produced
-# RequireCustomHostnameInEnvironment at the top of this file.
-resource "azurerm_container_app_custom_domain" "app" {
-  count = local.custom_domain_enabled ? 1 : 0
-
-  name             = var.custom_domain
-  container_app_id = azurerm_container_app.this.id
-
-  # Azure validates ownership when the hostname is ADDED, not only when the
-  # certificate is issued, so both records have to be in place before this. The
-  # CNAME alone is not enough; asuid carries the verification id that ties the
-  # name to this specific app.
-  depends_on = [
-    azurerm_dns_cname_record.app,
-    azurerm_dns_txt_record.asuid,
-  ]
-
-  lifecycle {
-    # Azure writes both of these when the managed certificate below is issued,
-    # asynchronously and outside any apply. Both are ForceNew, so without this a
-    # plan run after issuance proposes to REPLACE the binding, and replacing it
-    # takes the name off the app for as long as the recreate takes. The provider
-    # says to do exactly this for an Azure managed certificate.
-    ignore_changes = [certificate_binding_type, container_app_environment_certificate_id]
-  }
-}
-
-# The certificate Azure issues, renews and binds for free.
+# The certificate Azure issues and renews for free.
 #
 # Not a certificate this repository holds. There is no private key here, nothing
 # to rotate, and nothing that expires because somebody left. What can go wrong
@@ -144,8 +95,27 @@ resource "azurerm_container_app_environment_managed_certificate" "app" {
 
   tags = var.tags
 
-  # The binding, not the DNS records. It depends on them in turn, so the records
-  # are still ordered ahead of this, and naming the binding is what encodes the
-  # requirement Azure actually enforces.
-  depends_on = [azurerm_container_app_custom_domain.app]
+  # Both records, not just the CNAME. Azure reads them in the same validation
+  # and a certificate request that arrives before the TXT record exists fails
+  # with a message about domain ownership rather than about DNS.
+  depends_on = [
+    azurerm_dns_cname_record.app,
+    azurerm_dns_txt_record.asuid,
+  ]
+}
+
+# The binding, as a separate resource rather than an ingress block.
+#
+# azurerm_container_app's ingress carries a custom_domain list, and using both
+# it and this resource makes the two fight: every apply would see the binding
+# this resource created as an unexpected value inside the app's ingress and
+# propose to remove it. app.tf therefore ignores that attribute, and this is the
+# one place a custom domain is declared.
+resource "azurerm_container_app_custom_domain" "app" {
+  count = local.custom_domain_enabled ? 1 : 0
+
+  name                                     = var.custom_domain
+  container_app_id                         = azurerm_container_app.this.id
+  container_app_environment_certificate_id = azurerm_container_app_environment_managed_certificate.app[0].id
+  certificate_binding_type                 = "SniEnabled"
 }
