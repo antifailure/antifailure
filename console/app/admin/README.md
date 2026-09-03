@@ -86,6 +86,13 @@ The console is a **static export**, so there are no dynamic route segments. A
 detail page is a sibling route reading a query string: see
 `customers/users/organization/page.tsx`.
 
+Column headings can be as long as they need to be. Below the phone breakpoint a
+table becomes a stacked record and the heading sits beside its value, and the
+heading column is a subgrid sized to the longest heading in that record, capped
+at 45% of the width, wrapping past that. It used to be a fixed 10.5ch track that
+a longer heading ran straight into, so `ENVIRONMENTS` collided with its own
+value at 320px. Do not shorten a heading to work around that; it is fixed.
+
 ## Writing the routes
 
 ```ts
