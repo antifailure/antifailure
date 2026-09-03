@@ -15,7 +15,13 @@ import {
   When,
   inputClass,
 } from "@/components/ui";
+import { DataTable, EmptyList, type Column } from "@/components/admin/primitives";
 import { operatorMay, resumeTenant, suspendTenant, useAdminContext, useTenant } from "@/lib/admin";
+import {
+  setTenantPlan,
+  useTenantDetail,
+  type TenantMember,
+} from "@/lib/admin-customers";
 import type { ApiError } from "@/lib/api";
 
 /**
@@ -216,6 +222,7 @@ function Detail() {
             }
           >
             <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+              <div className="grid min-w-0 gap-5">
               <Card title="Account">
                 <dl className="grid gap-0">
                   <Fact label="Members" value={tenant.members.toLocaleString()} numeric />
@@ -233,6 +240,12 @@ function Detail() {
                 </dl>
               </Card>
 
+              {/* The people, which the list route cannot answer: it returns a
+                  member COUNT, and a count with no names answers none of the
+                  questions somebody opens an organization to ask. */}
+              <Members orgId={tenant.id} />
+              </div>
+
               <Card title="Operator actions">
                 <div className="px-4 py-4">
                   {tenant.suspended ? (
@@ -248,6 +261,12 @@ function Detail() {
                     orgId={tenant.id}
                     name={tenant.name}
                     suspended={tenant.suspended}
+                    onChanged={state.reload}
+                  />
+                  <PlanControls
+                    orgId={tenant.id}
+                    name={tenant.name}
+                    plan={tenant.plan}
                     onChanged={state.reload}
                   />
                 </div>
@@ -311,5 +330,155 @@ export default function AdminTenantPage() {
     <Suspense fallback={<Page title="Tenant"><TableSkeleton rows={3} cols={2} /></Page>}>
       <Detail />
     </Suspense>
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * Who is in it
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The organization's people.
+ *
+ * Its own read rather than a field on the list route, because the list is a
+ * page of every organization on the installation and joining every member of
+ * every one of them to answer a question about one is the wrong query. The
+ * detail route already returns them and nothing called it.
+ */
+function Members({ orgId }: { orgId: string }) {
+  const state = useTenantDetail(orgId);
+  const columns: Column<TenantMember>[] = [
+    {
+      key: "person",
+      header: "Person",
+      cell: (m) => (
+        <>
+          <span className="block truncate font-medium text-ink">{m.name || m.githubLogin}</span>
+          <span className="block truncate font-mono text-[12px] text-muted">{m.githubLogin}</span>
+        </>
+      ),
+    },
+    { key: "email", header: "Email", cell: (m) => <span className="break-all">{m.email}</span> },
+    { key: "role", header: "Role", cell: (m) => m.role },
+  ];
+
+  return (
+    <Card title="People">
+      <Loaded state={state} skeleton={<TableSkeleton rows={4} cols={3} />}>
+        {(detail) =>
+          detail === null ? (
+            <EmptyList title="Not loaded">This organization could not be read.</EmptyList>
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={detail.members}
+              keyOf={(m) => m.userId}
+              empty={
+                <EmptyList title="Nobody is in this organization">
+                  Every member has been removed, or it was created and never joined. It still holds
+                  its environments and its billing.
+                </EmptyList>
+              }
+            />
+          )
+        }
+      </Loaded>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * The plan
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Changing what an organization is on.
+ *
+ * SEPARATE FROM BILLING, and the copy says so, because they are two different
+ * facts and confusing them is the mistake this control invites. This writes the
+ * plan COLUMN, which is what quotas and hosted access are derived from. It does
+ * not tell the payment provider anything: a customer moved here without a
+ * matching subscription change gets the new limits and the old invoice.
+ */
+function PlanControls({
+  orgId,
+  name,
+  plan,
+  onChanged,
+}: {
+  orgId: string;
+  name: string;
+  plan: string;
+  onChanged: () => void;
+}) {
+  const { me } = useAdminContext();
+  const [asking, setAsking] = useState(false);
+  const [next, setNext] = useState(plan);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!operatorMay(me, "admin.tenants.plan")) return null;
+
+  return (
+    <div className="mt-4 border-t border-rule pt-4">
+      <p className="mb-3 text-[13px] leading-6 text-muted">
+        The plan column is what quotas and hosted access are derived from. Changing it here does
+        not change anything at the payment provider.
+      </p>
+      <Button onClick={() => setAsking(true)}>Change the plan</Button>
+
+      <Confirm
+        open={asking}
+        title={`Change the plan on ${name}?`}
+        confirmLabel="Change the plan"
+        busy={busy}
+        error={error}
+        onCancel={() => {
+          setAsking(false);
+          setError(null);
+        }}
+        onConfirm={() => {
+          setBusy(true);
+          setError(null);
+          void setTenantPlan(orgId, next.trim(), reason)
+            .then(() => {
+              setAsking(false);
+              setReason("");
+              onChanged();
+            })
+            .catch((err: ApiError) => setError(err.message))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <p className="text-[13px] leading-6 text-muted">
+          They are on <span className="font-medium text-ink">{plan}</span> now. The change takes
+          effect on their next request, and the before and after are both recorded.
+        </p>
+        <div className="mt-4 grid gap-4">
+          <Field
+            label="New plan"
+            hint="Free text, because the set of plans is a deployment's own and this console is built once for all of them."
+          >
+            <input
+              className={inputClass}
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              maxLength={64}
+              required
+            />
+          </Field>
+          <Field label="Reason" hint="Recorded in both audit logs beside the old plan and the new one.">
+            <input
+              className={inputClass}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              required
+            />
+          </Field>
+        </div>
+      </Confirm>
+    </div>
   );
 }

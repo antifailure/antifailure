@@ -11,7 +11,8 @@
  * other lane also imports.
  */
 
-import { mutate, query, useApi } from "@/lib/api";
+import { query, useApi } from "@/lib/api";
+import { adminMutate } from "@/lib/admin";
 
 /** Minor units, as the provider counts them, beside their currency.
  *
@@ -87,8 +88,61 @@ export interface AdminOperation {
   finished_at: string | null;
 }
 
+/**
+ * What this deployment believes it sold, from its OWN tables.
+ *
+ * Beside the Stripe reads rather than instead of them, and the two answer
+ * different questions. `plan` here is the column entitlement checks actually
+ * run against; `subscription.plan` is what the provider last confirmed, and the
+ * two differ while a change is in flight or after a failed payment. Seats and
+ * hand written grants exist before anybody has checked out, which is the half
+ * of the answer a support call is usually about.
+ *
+ * The route has always returned this and this file did not declare it, so no
+ * screen could read it. A field the client type omits is not a smaller API, it
+ * is an invisible one.
+ */
+export interface AdminBillingSummary {
+  orgId: string;
+  slug: string;
+  plan: string;
+  seats: {
+    /** Members plus invitations still open, which is what a seat check counts.
+     *  An invitation nobody has accepted still holds a seat. */
+    used: number;
+    members: number;
+    openInvitations: number;
+    /** Null where the plan and the overrides set no limit at all. Not zero,
+     *  which reads as "no seats allowed". */
+    limit: number | null;
+    atLimit: boolean;
+  };
+  subscription: {
+    plan: string;
+    status: string;
+    quantity: number;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    canceledAt: string | null;
+  } | null;
+  overrides: {
+    feature: string;
+    scope: "global" | "organization" | "project" | "user";
+    value: unknown;
+    /** What the plan alone would have said, so a screen can show the
+     *  difference rather than only the result. */
+    planValue: unknown;
+    reason: string;
+    ticket: string | null;
+    grantedBy: string;
+    grantedAt: string;
+    expiresAt: string | null;
+  }[];
+}
+
 export interface AdminBilling {
   org: { id: string; slug: string; plan: string };
+  summary: AdminBillingSummary;
   takesPayment: boolean;
   customer: {
     id: string;
@@ -134,10 +188,25 @@ export interface MoneyResult {
   providerObjectId: string | null;
 }
 
+/**
+ * One operator money action.
+ *
+ * THROUGH adminMutate, NOT `mutate`. It used to call the latter, which sends
+ * `x-antifailure-csrf`, the header the PRODUCT's session uses. Every route this
+ * function reaches is behind the OPERATOR cookie, and the server demands
+ * `x-antifailure-admin-csrf` on those: `server.ts` refuses any non-GET /trpc/*
+ * request carrying a live `af_admin_session` unless it matches. So every call
+ * this made was refused with a 403 about a header, and it had no callers to
+ * notice. Fixing the operator client alone would not have fixed this, because
+ * this was the one operator write that did not go through it.
+ *
+ * The csrf argument is gone rather than ignored. adminMutate fetches the token
+ * from `GET /v1/admin/session` and refreshes it once on the refusal that names
+ * the header, so a caller holding a stale one has nothing useful to pass.
+ */
 export async function moneyAction<T extends MoneyResult>(
   path: string,
   input: Record<string, unknown>,
-  csrf: string,
 ): Promise<T> {
-  return mutate<T>(path, input, csrf);
+  return adminMutate<T>(path, input);
 }
