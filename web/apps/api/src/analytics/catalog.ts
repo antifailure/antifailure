@@ -195,7 +195,7 @@ export const CATALOG = {
     // built, nothing is shared, and the identifier dies with the tab.
     privacyBasis: 'legitimate_interest',
     answers: 'Which pages people land on, and which channel sent them.',
-    producer: 'www/lib/analytics.ts, from the site beacon on every page view',
+    producer: 'www/lib/beacon.ts, from the site beacon on every page view',
     payload: {
       route: { kind: 'enum', values: SITE_ROUTES },
       source: { kind: 'enum', values: VISIT_SOURCES },
@@ -216,7 +216,7 @@ export const CATALOG = {
     actorKind: 'visitor',
     privacyBasis: 'legitimate_interest',
     answers: 'Which call to action people press, and on which page.',
-    producer: 'www/lib/analytics.ts, from the waitlist dialog and the primary buttons',
+    producer: 'www/lib/beacon.ts, from the sign-up screen the primary buttons lead to',
     payload: {
       // One value, because there is one producer. The docs, GitHub and install
       // buttons are server-rendered links with no click handler, and declaring
@@ -240,7 +240,7 @@ export const CATALOG = {
     answers:
       'Which channel and which landing page produce a waitlist address, which is ' +
       'the join between acquisition and identity.',
-    producer: 'www/lib/analytics.ts, after the waitlist endpoint answers',
+    producer: 'www/lib/beacon.ts, after the waitlist endpoint answers',
     payload: {
       /** The channel and page the SESSION started on, not this page. That is
        *  what makes attribution answer "what brought them here" rather than

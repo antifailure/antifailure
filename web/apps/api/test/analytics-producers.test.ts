@@ -48,7 +48,18 @@ import { PLAN_QUOTAS } from '../src/limits.ts'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.join(here, '..', '..', '..', '..')
 const apiSrc = path.join(here, '..', 'src')
-const siteAnalytics = path.join(repoRoot, 'www', 'lib', 'analytics.ts')
+// The beacon, in the file it now lives in. It was analytics.ts until the queue,
+// the session rules and the endpoint moved out so that a test runner could load
+// them; analytics.ts is a React hook and a set of re-exports now, and a scan
+// pointed at it found no producer for site.cta_engaged. bots.ts is read too, so
+// a string the crawler filter compares against cannot be mistaken for one the
+// beacon sends.
+const siteBeacon = path.join(repoRoot, 'www', 'lib', 'beacon.ts')
+const siteFiles = [
+  siteBeacon,
+  path.join(repoRoot, 'www', 'lib', 'analytics.ts'),
+  path.join(repoRoot, 'www', 'lib', 'bots.ts'),
+]
 
 async function filesUnder(dir: string, ext = '.ts'): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
@@ -81,7 +92,7 @@ async function filesUnder(dir: string, ext = '.ts'): Promise<string[]> {
  */
 async function producerSources(): Promise<Map<string, string>> {
   const analyticsDir = path.join(apiSrc, 'analytics') + path.sep
-  const files = [...(await filesUnder(apiSrc)), siteAnalytics].filter(
+  const files = [...(await filesUnder(apiSrc)), ...siteFiles].filter(
     (f) => !f.startsWith(analyticsDir),
   )
   const out = new Map<string, string>()
@@ -98,7 +109,7 @@ describe('every analytics event has a producer', () => {
     // empty map. This is the negative control on the instrument.
     assert.ok(sources.size > 20, `only ${sources.size} source files were read`)
     assert.ok(
-      [...sources.keys()].some((f) => f.endsWith(path.join('www', 'lib', 'analytics.ts'))),
+      [...sources.keys()].some((f) => f.endsWith(path.join('www', 'lib', 'beacon.ts'))),
       'the site beacon source was not read, so no site.* event could be found',
     )
     assert.ok(
@@ -146,7 +157,25 @@ describe('every analytics event has a producer', () => {
 })
 
 describe('the catalog and the site agree', () => {
-  const site = sources.get(siteAnalytics)!
+  const site = sources.get(siteBeacon)!
+
+  /**
+   * One exported function's body, so a scrape of its return values is about
+   * that function.
+   *
+   * The scrape used to run over the whole file, which worked while the file was
+   * only the beacon's vocabulary. When the queue moved in beside it, `sent`,
+   * `retry`, `stop`, `idle` and `expired` all started reading as route ids the
+   * catalog does not declare, and the gate failed for a reason that had nothing
+   * to do with routes. A scrape whose scope is the file rather than the thing
+   * it is about drifts the moment the file gains a neighbour.
+   */
+  function bodyOf(name: string): string {
+    const start = site.indexOf(`export function ${name}(`)
+    assert.notEqual(start, -1, `${name} is not exported from the beacon any more`)
+    const next = site.indexOf('\nexport ', start + 1)
+    return site.slice(start, next === -1 ? site.length : next)
+  }
 
   it('declares the same page shapes the site can produce', () => {
     // Two lists that must agree, in two npm projects that cannot import from
@@ -154,7 +183,7 @@ describe('the catalog and the site agree', () => {
     // starts arriving as `other`, which looks like readers landing nowhere.
     const declared = new Set(SITE_ROUTES as readonly string[])
     const inSite = new Set(
-      [...site.matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!).filter((v) => v !== 'direct'),
+      [...bodyOf('routeIdFor').matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!),
     )
     const onlyInSite = [...inSite].filter((v) => !declared.has(v) && !isVisitSource(v))
     assert.deepEqual(
@@ -169,14 +198,14 @@ describe('the catalog and the site agree', () => {
     // reader's URL bar holds is the host's decision, not this site's, and the
     // first version of routeIdFor handled only the first, so every page under a
     // plain file server arrived as `other`.
-    assert.match(site, /replace\(\/\\\.html\$\/, ""\)/,
+    assert.match(bodyOf('routeIdFor'), /replace\(\/\\\.html\$\/, ""\)/,
       'routeIdFor no longer strips a trailing .html, so a static host that serves files ' +
       'classifies every page as other')
   })
 
   it('declares every channel the site can derive', () => {
     const declared = new Set(VISIT_SOURCES as readonly string[])
-    const returned = [...site.matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!)
+    const returned = [...bodyOf('sourceFor').matchAll(/return "([a-z_]+)";/g)].map((m) => m[1]!)
     const onlyInSite = returned.filter((v) => isVisitSource(v) && !declared.has(v))
     assert.deepEqual(onlyInSite, [])
   })
