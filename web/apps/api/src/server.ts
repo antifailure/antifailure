@@ -155,6 +155,7 @@ import { openApiDocument } from './openapi.ts'
 import { createAnalytics, type Analytics } from './analytics/record.ts'
 import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
+import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
 import {
   limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
@@ -198,6 +199,14 @@ export interface ServerOptions {
    *  free plan, owned by them. Default false; see auth/provision.ts for why
    *  that direction and not the other. */
   selfServeSignup?: boolean
+  /** The one browser origin allowed to post an enterprise lead cross origin,
+   *  as a whole origin and never a pattern. Absent means none: the route still
+   *  answers curl and a browser on this origin, and no other page can use it.
+   *  See POST /v1/leads for why this is the only CORS on the server. */
+  siteOrigin?: string
+  /** Where a recorded lead is announced. Absent means it is recorded and
+   *  nobody is told, which the response says out loud. */
+  leadNotifier?: LeadNotifier | null
   /** Set false to serve the API alone, without the console. */
   console?: boolean
   /** The exported console, located at start-up. Absent means the API is served
@@ -1576,6 +1585,121 @@ export function createServer(options: ServerOptions) {
       if (err instanceof InvitationError) return c.json({ error: err.message }, 400)
       throw err
     }
+  })
+
+  /* -------------------------------------------------------------------------
+   * Somebody asking to buy
+   *
+   * THE ONE ROUTE ON THIS SERVER THAT ANSWERS A CROSS ORIGIN BROWSER, and every
+   * line of the CORS handling below is narrower than it has to be because of
+   * what the rest of this process holds.
+   *
+   * The form is on the marketing site, which is a different origin from this
+   * one: antifailure.dev is a static export on one host and this control plane
+   * is on another. The alternative to letting that origin post here was to put
+   * the form on this host, which means sending a prospect off the marketing
+   * site to a bare application domain to type their name, and that is a worse
+   * product for a security property this route does not actually need.
+   *
+   * Why it does not need it. The allowed origin is one exact string from the
+   * environment and never `*`. `Access-Control-Allow-Credentials` is deliberately
+   * ABSENT, so a browser will not attach the session cookie and this endpoint
+   * can never act as somebody: it does not read a session and would not find one
+   * if it looked. The response body is an id and two booleans. And the route is
+   * INSERT-only at the database level, by grant rather than by policy, so the
+   * whole of what a cross origin caller can make this connection do is add a
+   * row that nothing on this role can read back. See migration 0031.
+   *
+   * That makes cross-site forgery uninteresting rather than merely unlikely:
+   * there is nothing to forge on somebody's behalf, and anybody can already do
+   * exactly this with curl. What CORS is buying here is the ability to show a
+   * person an error message on the page they are standing on instead of
+   * navigating them away from it.
+   * ---------------------------------------------------------------------- */
+
+  /** Says which origin may post, and nothing else. Returns whether a header was
+   *  set, so the OPTIONS handler can refuse plainly rather than answering a
+   *  preflight it has no intention of honouring. */
+  function allowLeadOrigin(c: Context): boolean {
+    const allowed = options.siteOrigin
+    if (!allowed) return false
+    // Exact match on the whole origin, never a suffix test. `endsWith` on a
+    // domain is how `evil-antifailure.dev` gets allowed, and it is the mistake
+    // that is invisible in review because the string looks right.
+    if (c.req.header('origin') !== allowed) return false
+    c.header('access-control-allow-origin', allowed)
+    // Two different caches key on this and both matter: without it a proxy can
+    // serve the response it built for one origin to a request from another.
+    c.header('vary', 'origin')
+    return true
+  }
+
+  app.options('/v1/leads', (c) => {
+    if (!allowLeadOrigin(c)) return c.body(null, 403)
+    c.header('access-control-allow-methods', 'POST, OPTIONS')
+    c.header('access-control-allow-headers', 'content-type')
+    c.header('access-control-max-age', '600')
+    return c.body(null, 204)
+  })
+
+  app.post('/v1/leads', async (c) => {
+    // The same bucket as the sign-in routes, because this has the same shape:
+    // an unauthenticated caller with no credential to key on, and a write.
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    // The CORS header goes on the refusal too. Without it the browser reports a
+    // CORS failure instead of the 429, and the page shows "could not reach the
+    // server" for a request the server answered perfectly.
+    allowLeadOrigin(c)
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = (await c.req.json()) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+
+    const checked = validateLead({
+      email: String(body.email ?? ''),
+      name: String(body.name ?? ''),
+      company: String(body.company ?? ''),
+      seats: body.seats === undefined || body.seats === null ? null : Number(body.seats),
+      message: String(body.message ?? ''),
+      source: String(body.source ?? 'contact'),
+      ip: clientAddress(c.req.header('x-forwarded-for')),
+      userAgent: c.req.header('user-agent') ?? null,
+    })
+    if ('error' in checked) return c.json({ error: checked.error }, 400)
+
+    const { id } = await recordLead(options.pool, clock, checked.lead)
+
+    // Sent after the row, and its failure is not the caller's problem. The
+    // obligation this route has to the person on the page is that what they
+    // typed is written down somewhere a person will read; the mail is how that
+    // person finds out sooner. A provider outage must not turn a recorded lead
+    // into an error that makes them type it all again.
+    let notified = false
+    if (options.leadNotifier) {
+      const message = leadMessage({
+        product: options.leadNotifier.productName ?? 'Antifailure',
+        lead: checked.lead,
+        id,
+      })
+      try {
+        await options.leadNotifier.mailer.send({ to: options.leadNotifier.to, ...message })
+        notified = true
+      } catch (err) {
+        console.error('a lead was recorded and the notification could not be sent', err)
+      }
+    }
+
+    // `notified` is in the response on purpose, and the page reads it. A
+    // deployment with no mailer answers false, the page says somebody will read
+    // it rather than that somebody has been told, and the missing configuration
+    // is visible on the screen instead of comfortable in a log.
+    return c.json({ ok: true, id, notified }, 201)
   })
 
   /**

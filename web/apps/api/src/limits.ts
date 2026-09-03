@@ -126,6 +126,20 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Pressing accept, once, and possibly twice because the first press looked like it did nothing. Same shape as approving a terminal login and the same number.',
   },
+  // Somebody asking to buy. Bounded like a sign-in rather than like a read,
+  // because it is the same shape: an unauthenticated caller with no credential
+  // to key on, making a write, on a route a loop would otherwise fill a table
+  // through. One a second sustained is far above a person typing a form, and
+  // ten at once covers somebody who pressed the button twice and a preflight
+  // beside it.
+  'POST /v1/leads': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Filling in a contact form is a human action, once. The row is written by an anonymous caller, so the address is the only key there is, and the burst covers a double press and a retry.',
+  },
+  'OPTIONS /v1/leads': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'The preflight the browser sends before the POST above. Deliberately looser than the POST it precedes: a preflight refused by a rate limit reads in the browser as a CORS failure rather than as a rate limit, which is the least debuggable answer this server can give.',
+  },
   'GET /exports/deletion': {
     rate: 1, burst: 5, key: 'ip',
     reason: 'Downloading a copy of a deleted organization. The response is the whole export, so this is the most expensive unauthenticated response the server has; five at once covers a browser retrying a large download and nothing about a person needs more.',

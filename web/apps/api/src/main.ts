@@ -16,6 +16,8 @@ import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
+import { leadNotifierFrom } from './enterprise/leads.ts'
+import { siteOriginFrom } from './siteorigin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -181,6 +183,22 @@ function emailSignInFromEnv(): EmailSignInConfig | undefined {
 
 const emailSignIn = emailSignInFromEnv()
 
+// Where somebody asking to buy is announced, and where the page that asks them
+// is allowed to post from.
+//
+// Both are said out loud at start-up, because both are absences that look
+// exactly like working software. A deployment with a lead route and no notifier
+// records leads nobody is told about; a deployment with no site origin serves a
+// form that a browser refuses to submit and reports as a network error.
+const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN)
+console.log(
+  siteOrigin
+    ? `enterprise leads may be posted from ${siteOrigin}`
+    : 'AF_SITE_ORIGIN is not set: no other origin may post an enterprise lead, so a form on the marketing site cannot submit',
+)
+const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
+console.log(leads.summary)
+
 // Said out loud at startup, every time. Whether an instance is open to the
 // world is not something anybody should have to infer from a deployment
 // template, and a closed instance that quietly opened is the failure that has
@@ -320,6 +338,8 @@ const { app, ingestLimiter, authLimiter } = createServer({
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   selfServeSignup,
+  ...(siteOrigin ? { siteOrigin } : {}),
+  leadNotifier: leads.notifier,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
   // The webhook's way of invalidating a cached token. Bound to the same

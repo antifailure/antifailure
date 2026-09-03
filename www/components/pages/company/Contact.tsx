@@ -11,6 +11,7 @@ import {
 } from "@/components/pages/kit";
 import { CONTACT_POINTS, REPO_URL } from "@/lib/site";
 import { CalBooking } from "./CalBooking";
+import { EnterpriseForm } from "./EnterpriseForm";
 
 const CONTACT_DETAILS = {
   security: {
@@ -31,11 +32,11 @@ const CONTACT_DETAILS = {
     link: "Browse discussions",
     action: "Start a discussion",
   },
-  waitlist: {
-    body: "There is no generally available hosted control plane. The existing waitlist is the verified route for teams that want to hear when there is a hosted environment to connect to a repository.",
-    href: "/docs/getting-started/quickstart",
-    link: "Use the engine today",
-    action: "Join the waitlist",
+  signup: {
+    body: "Anybody can create an account and start on the free plan with a GitHub sign-in. No card, no invitation, and no waiting: you land in your own organization and the free plan's limits are enforced against it from the first environment.",
+    href: "/pricing",
+    link: "What the free plan holds",
+    action: "Create an account",
   },
 } as const;
 
@@ -79,7 +80,7 @@ export function ContactPage() {
         path="/contact"
         eyebrow="Contact"
         title="Use the route that matches the question."
-        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page, and hosted-product interest goes through the existing waitlist. The project does not currently publish a working email channel."
+        lead="Antifailure uses GitHub for private vulnerability reports, public product work, and community discussion. A call can be booked on this page and it is the only route that reaches a person on a known day. Buying for a team is the form below, which writes a row a person reads. Creating an account needs none of this."
         actions={
           <>
             <Button href="#book" theme="filled">
@@ -116,6 +117,37 @@ export function ContactPage() {
           </Prose>
           <div className="mt-12 max-w-[1040px] max-xl:mt-10">
             <CalBooking />
+          </div>
+        </div>
+      </PageSection>
+
+      {/* Second, after the calendar and before the four written routes. It is
+          the route with an outcome the others do not have: a call needs a slot
+          that suits both people, and this needs nothing but the form.
+
+          It exists because the site's only commercial route used to be a
+          waitlist, which stored an address in a place nothing could read and
+          mailed nobody on a domain that authorizes no sender. What is different
+          is not the form, it is where the row goes and who can see it. */}
+      <PageSection tone="panel">
+        <div id="enterprise" className="scroll-mt-24">
+          <PageHeading
+            kicker="Buying for a team"
+            title="<strong>Seats, single sign-on, a security review, a contract.</strong> Tell us which of those you need."
+          />
+          <Prose className="mt-8">
+            <p>
+              Use this if you need seats and roles for people who are not in one
+              GitHub organization, single sign-on, an agreement to sign, or an
+              answer about where data is processed. It writes a row in the
+              product database that a person reads, oldest first, rather than an
+              address on a list. You do not need it to start: creating an{" "}
+              <a href="/signup">account</a> is a GitHub sign-in and the free
+              plan needs no card.
+            </p>
+          </Prose>
+          <div className="mt-10 max-w-[720px]">
+            <EnterpriseForm />
           </div>
         </div>
       </PageSection>

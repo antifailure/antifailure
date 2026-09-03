@@ -80,8 +80,12 @@ const TRAINING_AND_DATASET = [
   "Omgili",
 ];
 
-/** Never worth indexing: a waitlist form, and Next's build manifests. */
-const DISALLOW = ["/signin", "/signup", "/_next/static/chunks/", "/api/"];
+/** Never worth indexing: a button for people who already have an account, and
+ *  Next's build manifests. /signup is NOT here any more. It used to be a
+ *  waitlist with nothing to rank for; it now describes what creating an account
+ *  does on a product anybody can create one on, which is the page somebody
+ *  searching for this product by name is looking for. */
+const DISALLOW = ["/signin", "/_next/static/chunks/", "/api/"];
 
 export default function robots(): MetadataRoute.Robots {
   return {

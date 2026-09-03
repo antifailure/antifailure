@@ -42,7 +42,7 @@ export const SUBPROCESSORS: Subprocessor[] = [
       "Azure Container Apps, Azure Database for PostgreSQL, Azure Key Vault, Azure Blob Storage, Azure Table Storage, Azure Log Analytics, Azure Static Web Apps",
     purpose:
       "Runs the hosted control plane and this site, and stores everything the control plane holds.",
-    data: "Account name and email, GitHub identifiers, session records including IP address and browser user agent, organization and repository metadata, policy, run events, audit entries, and waitlist addresses.",
+    data: "Account name and email, GitHub identifiers, session records including IP address and browser user agent, organization and repository metadata, policy, run events, audit entries, and the name, work email, company and message somebody leaves on the contact form.",
     location:
       "United States, Azure Central US. The region is enforced by a validation rule in the infrastructure code, so a deployment to another region fails at plan time rather than moving data quietly.",
     engagement: "always",

@@ -147,10 +147,10 @@ export const CONTACT_POINTS = [
     contactType: "community support",
   },
   {
-    id: "waitlist",
-    label: "Hosted product interest",
+    id: "signup",
+    label: "Create an account",
     url: "/signup",
-    contactType: "early access",
+    contactType: "sales",
   },
 ] as const;
 
