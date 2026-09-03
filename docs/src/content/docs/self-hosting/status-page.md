@@ -72,7 +72,6 @@ there because it can fail while the others are fine.
 | Documentation | `antifailure.dev/docs` | Every error the engine prints ends in a link to a page here. A publish that drops the subtree breaks all of them. |
 | CLI installer | `antifailure.dev/install.sh` | What `curl` is piped from. It is placed by the site assembly, and two copies of that assembly had already drifted to the point that neither placed it. |
 | Site API | `antifailure.dev/api` | A managed function, not a static file. It can be present and refuse every request, and did, for two days, behind a green deploy each time. |
-| Sign-up | `app.antifailure.dev/auth/github` | The front door, and the one target checked with a `redirect` rather than a body marker: a control plane serving traffic perfectly can refuse to start a sign-in, and `/readyz` is green either way. The probe deliberately does not follow the hop to GitHub, because that would make GitHub's availability the subject and publish somebody else's outage under this name. |
 | Control plane, staging | `app.dev.antifailure.dev/readyz` | Where `main` lands first. Listed as pre-production, because it is not a customer surface and should never be read as one. |
 
 The first two share a process and the next four share a Static Web App, so an
