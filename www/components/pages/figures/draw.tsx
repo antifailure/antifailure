@@ -58,21 +58,24 @@ function BoxedLabel({
 
 export function IsoStack({
   planes,
+  compact,
 }: {
   planes: { label: string; accent?: boolean }[];
+  compact?: boolean;
 }) {
   const ph = 28;
   const skew = 32;
   const planeW = 220;
-  const gap = 50;
+  const gap = compact ? 34 : 50;
   const stackH = ph + (planes.length - 1) * gap;
-  const top = Math.round((VB_H - stackH) / 2);
+  const vbH = compact ? stackH + 28 : VB_H;
+  const top = compact ? 14 : Math.round((VB_H - stackH) / 2);
   const labelX = 16;
   const labelColW = 112;
   const originX = labelX + labelColW + 20;
   return (
     <DrawWell>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+      <svg viewBox={`0 0 ${VB_W} ${vbH}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
         {planes.map((plane, i) => {
           const y = top + i * gap;
           const x = originX + i * 8;
@@ -121,13 +124,13 @@ export function IsoStack({
 export function IsoRings() {
   return (
     <DrawWell>
-      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-        <ellipse cx="210" cy="140" rx="148" ry="56" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1" strokeDasharray="5 5" />
-        <ellipse cx="210" cy="140" rx="96" ry="36" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
-        <ellipse cx="210" cy="140" rx="42" ry="16" fill="rgba(51,191,0,0.12)" stroke="#33bf00" strokeWidth="1.2" />
-        <rect x="204" y="134" width="12" height="12" fill="#111" />
-        <BoxedLabel x={210 - labelWidth("PROD") / 2} y={44} text="PROD" />
-        <BoxedLabel x={210 - labelWidth("TWIN") / 2} y={220} text="TWIN" accent />
+      <svg viewBox={`0 0 ${VB_W} 176`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <ellipse cx="210" cy="88" rx="148" ry="42" fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1" strokeDasharray="5 5" />
+        <ellipse cx="210" cy="88" rx="96" ry="28" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+        <ellipse cx="210" cy="88" rx="42" ry="13" fill="rgba(51,191,0,0.12)" stroke="#33bf00" strokeWidth="1.2" />
+        <rect x="204" y="82" width="12" height="12" fill="#285D49" />
+        <BoxedLabel x={210 - labelWidth("PROD") / 2} y={10} text="PROD" />
+        <BoxedLabel x={210 - labelWidth("TWIN") / 2} y={150} text="TWIN" accent />
       </svg>
     </DrawWell>
   );
@@ -180,7 +183,7 @@ export function DiamondSchematic({
         <path d="M204 134 L216 146 M216 134 L204 146" stroke="rgba(0,0,0,0.45)" strokeWidth="1.2" />
         {placements.map((p) => (
           <g key={p.item.label}>
-            <circle cx={p.x} cy={p.y} r="4" fill="#111" />
+            <circle cx={p.x} cy={p.y} r="4" fill="#285D49" />
             <BoxedLabel x={p.labelX} y={p.labelY} text={p.item.label} />
             {p.item.cmd ? (
               <text

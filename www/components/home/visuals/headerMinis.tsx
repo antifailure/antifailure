@@ -26,7 +26,6 @@ const MINI_CSS = `
 .mini-scramble::after { content: "m***@twin"; }
 .mini-packet { transform: translate(28px, 0); }
 .mini-fw-block,
-.mini-report-block,
 .mini-high {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -39,7 +38,6 @@ const MINI_CSS = `
   transform: scaleY(1);
 }
 .mini-lock { transform-origin: 0 50%; transform-box: fill-box; transform: scaleX(1); }
-.mini-pip { fill: #dc2626; stroke: #dc2626; }
 .mini-bar { transform-origin: 0 50%; transform-box: fill-box; transform: scaleX(1); }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -48,11 +46,9 @@ const MINI_CSS = `
   .group:hover .mini-scramble::after { animation: mini-scramble 720ms steps(1, end) both; }
   .group:hover .mini-packet { animation: mini-packet 880ms ${EASE} both; }
   .group:hover .mini-fw-block,
-  .group:hover .mini-report-block,
   .group:hover .mini-high { animation: mini-stamp 720ms ${EASE} both; }
   .group:hover .mini-fader { animation: mini-fader 820ms ${EASE} both; }
   .group:hover .mini-lock { animation: mini-lock 900ms ${EASE} both; }
-  .group:hover .mini-pip { animation: mini-pip 720ms ${EASE} both; }
   .group:hover .mini-hit { animation: mini-hit 820ms ${EASE} both; }
   .group:hover .mini-bar {
     animation: mini-bar 820ms ${EASE} both;
@@ -90,10 +86,6 @@ const MINI_CSS = `
 @keyframes mini-lock {
   0%, 100% { transform: scaleX(1); }
   42% { transform: scaleX(0.76); }
-}
-@keyframes mini-pip {
-  0%, 100% { fill: #dc2626; stroke: #dc2626; }
-  40% { fill: ${CREAM}; stroke: #9a9a9a; }
 }
 @keyframes mini-hit {
   0%, 100% { opacity: 1; }
@@ -233,46 +225,6 @@ function MigrationMini() {
   );
 }
 
-function SafetyReportMini() {
-  return (
-    <Svg>
-      <circle className="mini-pip" cx="16" cy="32" r="4.5" fill="none" strokeWidth="1.5" />
-      <text x="26" y="27" fill="rgba(0,0,0,0.4)" fontFamily={SANS} fontSize="6">
-        check
-      </text>
-      <text x="26" y="41" fill={INK} fontFamily={SANS} fontSize="7">
-        lock
-      </text>
-      <g className="mini-report-block">
-        <rect x="60" y="25" width="24" height="14" fill={CREAM} stroke="#dc2626" strokeWidth="1" />
-        <text x="72" y="35" textAnchor="middle" fill="#b91c1c" fontFamily={SANS} fontSize="6.5">
-          BLOCK
-        </text>
-      </g>
-    </Svg>
-  );
-}
-
-function ArchitectureMini() {
-  return (
-    <Svg>
-      <rect x="10" y="10" width="34" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
-      <rect x="52" y="10" width="34" height="44" fill="none" stroke="rgba(0,0,0,0.16)" />
-      <line x1="48" y1="12" x2="48" y2="52" stroke={GREEN} strokeWidth="1.5" />
-      <text x="27" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
-        control
-      </text>
-      <text x="69" y="24" textAnchor="middle" fill="rgba(0,0,0,0.45)" fontFamily={SANS} fontSize="6">
-        data
-      </text>
-      <line x1="16" y1="32" x2="38" y2="32" stroke="rgba(0,0,0,0.14)" />
-      <line x1="16" y1="40" x2="34" y2="40" stroke="rgba(0,0,0,0.1)" />
-      <line x1="58" y1="32" x2="80" y2="32" stroke="rgba(0,0,0,0.14)" />
-      <line x1="58" y1="40" x2="76" y2="40" stroke="rgba(0,0,0,0.1)" />
-    </Svg>
-  );
-}
-
 const MINIS: Record<string, () => ReactNode> = {
   Overview: OverviewMini,
   "Isolated Twin": IsolatedTwinMini,
@@ -280,8 +232,6 @@ const MINIS: Record<string, () => ReactNode> = {
   "Side-Effect Firewall": FirewallMini,
   Load: WorkloadMini,
   "Migration Safety": MigrationMini,
-  "Safety Report": SafetyReportMini,
-  Architecture: ArchitectureMini,
 };
 
 export function ProductMiniStyles() {

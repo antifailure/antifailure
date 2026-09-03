@@ -1,5 +1,11 @@
 import { PageShell, RelatedGrid } from "@/components/pages/kit";
-import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
+import { FeatureRow, SplitHero } from "./well";
+import {
+  ExpandContractColumns,
+  LockHoldStrip,
+  LockWaitChain,
+  QueryPlanTree,
+} from "./devtools-plates";
 
 export function DevtoolsPage() {
   return (
@@ -13,20 +19,7 @@ export function DevtoolsPage() {
           "Measure the strongest lock held per table, how long it was held, whether another session was left waiting on it, and how the query plans moved.",
           "Start with Postgres volume, plans, and pools, then expand.",
         ]}
-        visual={
-          <DashChart
-            title="plan regression · events"
-            bars={[12, 18, 22, 40, 55, 70, 88, 82, 95, 90]}
-            popup={{
-              title: "events 12,403,881",
-              rows: [
-                ["baseline", "Index Scan 12ms"],
-                ["candidate", "Seq Scan 410ms"],
-                ["lock", "ACCESS SHARE 1.1s"],
-              ],
-            }}
-          />
-        }
+        visual={<QueryPlanTree />}
       />
 
       <FeatureRow
@@ -38,30 +31,7 @@ export function DevtoolsPage() {
           { title: "Query plans", body: "Plan regressions under production-shaped volume." },
           { title: "Pools", body: "Connection-pool exhaustion during migrate-and-serve." },
         ]}
-        visual={
-          <Notebook
-            overlaySide="right"
-            tab="ALTER subscriptions"
-            rail="NOTES"
-            rows={[
-              { id: "LCK", label: "ACCESS EXCLUSIVE on subscriptions", kind: "lock", status: "BLOCK", tone: "BLOCK", bar: 18 },
-              { id: "P99", label: "Checkout p99 820ms → 6.9s", kind: "p99", status: "REGRESS", tone: "BLOCK", bar: 22 },
-              { id: "POOL", label: "Pool pressure during migrate-and-serve", kind: "pool", status: "PRESSURE", tone: "WARN", bar: 46 },
-              { id: "PLAN", label: "Seq Scan events · 410ms", kind: "plan", status: "REGRESS", tone: "BLOCK", bar: 30 },
-              { id: "RB", label: "Old app cannot decode events.v2", kind: "rollback", status: "UNSAFE", tone: "BLOCK", bar: 14 },
-            ]}
-            overlay={{
-              title: "The finding",
-              checks: [
-                "Exclusive locks and rewrites that never show up on a laptop database.",
-                "Plan regressions under production-shaped volume.",
-                "Connection-pool exhaustion during migrate-and-serve.",
-                "Old instances cannot still read the new schema.",
-                "Publish what the twin reproduced. Do not pretend unsupported components are cloned.",
-              ],
-            }}
-          />
-        }
+        visual={<LockWaitChain />}
       />
 
       <FeatureRow
@@ -73,19 +43,7 @@ export function DevtoolsPage() {
           { title: "Postgres first", body: "Volume, plans, and pools, then expand." },
           { title: "Publish what the twin reproduced", body: "Do not pretend unsupported components are cloned." },
         ]}
-        visual={
-          <CircularMap
-            shift="left"
-            tabs={["EXPAND", "BACKFILL", "CONTRACT"]}
-            active="EXPAND"
-            rings={[
-              { label: "nullable", r: 40 },
-              { label: "batches", r: 32 },
-              { label: "dual-read", r: 36 },
-              { label: "constraint", r: 28 },
-            ]}
-          />
-        }
+        visual={<ExpandContractColumns />}
       />
 
       <FeatureRow
@@ -96,17 +54,7 @@ export function DevtoolsPage() {
           { title: "Schema coexistence", body: "Whether old instances can still read the new schema shows up here first." },
           { title: "Users notice p99 immediately", body: "Large tables plus frequent schema change." },
         ]}
-        visual={
-          <TaskTable
-            heading="Tasks · schema change"
-            rows={[
-              { task: "Apply migration", status: "BLOCK", tone: "BLOCK", who: "M", date: "27.4s" },
-              { task: "Checkout p99", status: "Regressed", tone: "BLOCK", who: "C", date: "6.9s" },
-              { task: "Pool pressure", status: "Under load", tone: "WARN", who: "P", date: "wait" },
-              { task: "Rollback", status: "Unsafe", tone: "BLOCK", who: "R", date: "no" },
-            ]}
-          />
-        }
+        visual={<LockHoldStrip />}
       />
 
       <RelatedGrid

@@ -1,5 +1,9 @@
 import { PageShell, RelatedGrid } from "@/components/pages/kit";
-import { CircularMap, DashChart, FeatureRow, Notebook, SplitHero, TaskTable } from "./well";
+import { FeatureRow, SplitHero } from "./well";
+import { CircularMap } from "./img/circular-map";
+import { DashChart } from "./img/dash-chart";
+import { Notebook } from "./img/notebook";
+import { TaskTable } from "./img/task-table";
 
 export function SaasPage() {
   return (

@@ -80,7 +80,7 @@ export function SafeStatePage() {
       <RelatedGrid
         items={[
           { href: "/product/firewall", title: "Side-Effect Firewall", description: "The twin cannot act on the real world." },
-          { href: "/product/architecture", title: "Architecture", description: "Control plane and customer data plane." },
+          { href: "/product/twins", title: "Isolated Twin", description: "Where the sanitized state is restored." },
           { href: "/product/migrations", title: "Migration Safety", description: "What a branch with production's shape shows." },
         ]}
       />
