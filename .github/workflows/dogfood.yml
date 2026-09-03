@@ -45,7 +45,14 @@ jobs:
     # different question, which is whether the product still works on somebody
     # else's shape, and that answer does not change between two commits an hour
     # apart. They run on the schedule below.
-    name: control plane
+    # NOT "control plane", which is what this was called and which ci.yml's
+    # test job is also called. Branch protection requires a CONTEXT NAME, so
+    # two workflows publishing the same one means either can block every pull
+    # request under the other's identity. That is not hypothetical: this job
+    # failing on an HTTP 409 blocked three pull requests whose ci.yml "control
+    # plane" job had passed, and the checks list showed "control plane fail"
+    # next to "control plane pass" with nothing to say which log to open.
+    name: dogfood, against the control plane
     runs-on: ubuntu-latest
 
     # `id-token: write` is the whole reason this check reported nothing for as

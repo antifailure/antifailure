@@ -14,6 +14,42 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.1.1
+
+A patch release, cut for one reason: two fixes that only take effect once the
+control plane serving this installation is the one running them. Both were
+merged into `main` days ago and neither could do anything from there, because
+merging deploys staging and only a tag deploys production.
+
+**The check on your pull requests could report that nothing was verified even
+when everything was.** The control plane bound its check to the FIRST
+`workflow_run` delivery it saw for a commit. This repository has seventeen
+workflows, so a fifty second security scan routinely decided the outcome of a
+check about a twenty minute test run, and the answer it gave was that nothing
+had reported. The binding is now to the run that actually carries the report.
+
+**A manifest in a subdirectory could never find the runner.** `af runner
+install` walked up to the checkout root to place the runner, and the
+orchestrator that later goes looking for it did not walk anywhere. Any project
+whose `antifailure.yaml` is not at the top of its repository installed a runner
+into one directory and then failed to find it from another. Both now use the
+same search, in `engine/internal/runnerpath`.
+
+<!-- relnotes:omit -->
+
+### Fixed
+
+- The pull request check bound to the first workflow run of a commit rather
+  than to the one carrying the report, so a short workflow could answer a
+  question about a long one (#212).
+- `af runner install` and the orchestrator searched for the runner differently,
+  so a manifest below the repository root installed a runner nothing could find
+  (#209).
+- The MCP reference documented every tool and never said how to connect a
+  client to any of them (#216).
+
+<!-- relnotes:end -->
+
 ## v1.1.0
 
 Three things happened in this release and they are worth separating.
