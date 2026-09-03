@@ -21,20 +21,25 @@ exists: ten errors is a lot on a quiet service and nothing on a busy one.
 
 ## Read this before tuning the threshold
 
-**An unknown path answers 500 rather than 404 today**, because the rate limit
-guard runs before routing and reports "no declared rate limit" for a path the
-router has never heard of. So every scanner probing `/wp-login.php` on a public
-name lands in this metric.
+**An unknown path answers 404, and it used to answer 500.** The rate limit guard
+runs before routing, so for a long time it could not tell a path the router has
+never heard of from a route that exists with no declared limit, and it answered
+both with a 500. Every scanner probing `/wp-login.php` on a public name landed
+in this metric.
 
-Measured on staging over 36 hours rather than guessed: 457 responses in the
-`2xx` category and **293 in `5xx`**. That is roughly eight an hour, well under
-ten in five minutes, so the alert has about fifteen times the headroom it needs.
-Production is on a name that will attract more scanning than staging's, so watch
-the first week before deciding the threshold is right.
+Measured on staging over 36 hours while that was still true: 457 responses in
+the `2xx` category and **293 in `5xx`**. That is roughly eight an hour, well
+under ten in five minutes, so the alert already had about fifteen times the
+headroom it needed, and almost all of that 293 was scanning rather than
+failure. Expect the `5xx` count to fall to close to nothing now that a probe
+gets a 404, which makes this alert far sharper than the measurement above
+suggests: treat a burst of it as real.
 
-The real fix is for an undeclared path to answer 404. Until it does, a burst of
-this alert with no customer complaining is worth checking against the route
-breakdown below before anybody is woken.
+The one case that still answers 500 is a route that **exists** and has no entry
+in `ENDPOINT_LIMITS`. That is deliberate, it is a bug in this server rather than
+in the caller, and the log line beside it names the route to declare. It cannot
+reach production without a test failing first, so seeing one means looking at
+the most recent deploy.
 
 ## What to look at
 
