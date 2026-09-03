@@ -23,6 +23,13 @@ have to add up to less than the window the applier ran in. Contention can only
 make a duration longer, so a busy machine cannot push the sleeping statement
 under its floor.
 
+Both of the sleeping statement's neighbours only add a nullable column, which
+is a catalogue write and nothing else. That is what makes the ceiling over them
+honest. The index build over 50,000 rows went last, because real work has no
+upper bound: it was measured at 454.9ms on a loaded machine against the tens of
+milliseconds it takes on an idle one, so a ceiling over it would have been the
+same defect in a new place.
+
 Between them those assertions catch one total copied onto every row, a
 duration charged to the neighbouring statement, a running total that grows
 down the list, a single statement reported for a whole file, and a duration
