@@ -9,6 +9,11 @@ sidebar:
 opens a browser, and waits while you approve it somewhere that already has a
 session.
 
+The console has the whole of this on one screen, under **Command line**: the
+install command, the sign-in command already carrying the address of the control
+plane you are looking at, and every terminal currently signed in to your
+organization.
+
 ```
 $ af login
 
@@ -107,17 +112,50 @@ working tree, so there is nothing for a commit or a support bundle to pick up.
 One entry per control plane, so signing in to staging does not sign you out of
 production.
 
+## What the credential is for
+
+Everything on this machine that talks to a control plane. `af up`, `af test`,
+`af ci` and `af workload` report their runs with it, which is what makes an
+environment appear under Environments in the console and its events under Runs.
+`af env pull`, `af token`, `af provider` and `af whoami` read and write your
+account with it.
+
+Signing in changes nothing about where the work happens. The engine still builds
+the environment on this machine, from the manifest in this repository, and the
+control plane still only receives a record of what happened.
+
 ## Where the token is read from
 
 In this order:
 
 1. `AF_CONTROL_PLANE_TOKEN` in the environment.
 2. The credential `af login` stored.
+3. A GitHub Actions workflow identity, exchanged for a short lived credential.
 
 The environment wins because exporting a token is somebody deliberately
 overriding what is on the machine, usually to debug or because they are in CI.
-CI should use an engine token in the environment and not `af login`: the device
-grant needs a person, by design.
+CI should use an engine token in the environment, or the workflow identity, and
+not `af login`: the device grant needs a person, by design.
+
+## When the credential cannot be stored
+
+The token is minted the moment somebody approves, before this machine has
+written it anywhere. If the write then fails, which on macOS means a keychain
+that will not take one, `af login` tells the control plane to revoke the token
+it has just been given and says so:
+
+```
+Error: store the credential: write to the keyring: the authorization was canceled
+
+       The token that had just been issued was revoked, so nothing was left
+       behind. Nothing is signed in
+```
+
+That matters because the alternative is a live ninety day credential nobody
+holds, nobody can see, and nobody can revoke, with another one beside it on
+every retry. If the revocation fails too, the message says the token is still
+live and where to go and revoke it: **Command line** in the console lists every
+terminal signed in to your organization and takes one away.
 
 ## Signing out
 

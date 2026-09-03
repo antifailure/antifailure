@@ -456,6 +456,95 @@ export const selectClass =
 export const inputClass =
   "mt-1.5 h-11 w-full rounded-md border border-rule bg-card px-2.5 text-[13px] text-ink outline-none placeholder:text-dim focus:border-rule-strong sm:h-9";
 
+/**
+ * Puts a string on the clipboard and says so.
+ *
+ * Three screens had written this by hand: the same two second timer, the same
+ * cleanup on unmount that two of them remembered, and the same swallowed
+ * rejection. The swallow is the part worth keeping and worth explaining, so it
+ * lives in one place: `navigator.clipboard` needs a secure origin, and a
+ * control plane reached over plain http on a LAN is a real way this console is
+ * used. Failing quietly there is correct, because the text beside the button
+ * is selectable either way and a red error about a convenience is worse than
+ * the convenience not happening.
+ */
+export function CopyButton({
+  value,
+  label = "Copy",
+  said,
+}: {
+  value: string;
+  /** What the button says at rest. It always says "Copied" afterwards. */
+  label?: string;
+  /** The whole sentence announced to a screen reader, since somebody who
+   *  cannot see the button change is otherwise told nothing at all. */
+  said?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  return (
+    <>
+      <Button
+        onClick={() => {
+          void navigator.clipboard
+            ?.writeText(value)
+            .then(() => {
+              setCopied(true);
+              if (timer.current) clearTimeout(timer.current);
+              timer.current = setTimeout(() => setCopied(false), 2000);
+            })
+            .catch(() => undefined);
+        }}
+      >
+        {copied ? "Copied" : label}
+      </Button>
+      {/* aria-live rather than a tooltip, so the confirmation reaches somebody
+          who is not looking at the button they just pressed. */}
+      <span aria-live="polite" className="sr-only">
+        {copied ? (said ?? "Copied to the clipboard") : ""}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A command to run somewhere else, with the button that copies it.
+ *
+ * overflow-x-auto by hand, NOT the shared `.scroll-x` helper. That class turns
+ * itself off below 640px, because the tables it was written for stop scrolling
+ * and stack instead at that width. A command does not stack, so borrowing the
+ * class clipped a long one dead at the card edge on a phone: no scrollbar, no
+ * ellipsis, just a sentence that stopped.
+ */
+export function CommandBlock({
+  command,
+  said,
+  label,
+}: {
+  command: string;
+  said?: string;
+  label?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink">
+        <code>{command}</code>
+      </pre>
+      <CopyButton
+        value={command}
+        label={label}
+        said={said ?? "Command copied to the clipboard"}
+      />
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------------------
  * The three states a screen is usually missing
  * ---------------------------------------------------------------------- */

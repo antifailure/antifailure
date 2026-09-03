@@ -94,6 +94,42 @@ func controlPlaneFor(e *Env, flag string) string {
 	return defaultControlPlane
 }
 
+// storedToken is the credential af login left for an origin, or "".
+//
+// WHY THIS IS A FUNCTION AND NOT THREE COPIES. Every caller wants the same
+// three things and one of them used to be forgotten: the origin resolved the
+// way af login resolves it, a credential looked up under exactly that origin,
+// and an expiry checked here so that an old credential is absent rather than a
+// 401 somebody goes and investigates.
+//
+// Expired returns "" rather than an error on purpose. Nothing that calls this
+// is failing: a run with no credential reports to nobody and is not broken,
+// which is what makes it safe to consult on every command.
+func storedToken(e *Env, origin string) string {
+	cred, err := e.CredentialStore().Load(auth.Normalise(origin))
+	if err != nil || cred.Expired(e.Clock.Now()) {
+		return ""
+	}
+	return cred.Token
+}
+
+// signedInControlPlane is the origin and token af login left, or two empty
+// strings.
+//
+// Both or neither, which is what every caller of it needs and is why it returns
+// a pair rather than a token somebody then has to find an address for. An
+// address with no token turns on the GitHub Actions identity exchange for runs
+// that never asked for a control plane; a token with no address goes to the
+// hosted instance whatever the credential was actually issued by.
+func signedInControlPlane(e *Env) (string, string) {
+	origin := auth.Normalise(controlPlaneFor(e, ""))
+	token := storedToken(e, origin)
+	if token == "" {
+		return "", ""
+	}
+	return origin, token
+}
+
 func newLoginCommand(e *Env) *cobra.Command {
 	var baseURL string
 	var noBrowser bool
@@ -207,7 +243,33 @@ Run af logout to remove it from this machine and revoke it everywhere.`),
 				cred.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second).UTC()
 			}
 			if err := store.Save(cred); err != nil {
-				return fmt.Errorf("store the credential: %w", err)
+				// The token exists on the server by now: it was minted the
+				// moment the poll returned, it is good for ninety days, and
+				// nothing on this machine is holding it any more. Returning
+				// here without this would leave a live credential nobody can
+				// see, use or revoke, and every retry of af login would leave
+				// another one beside it.
+				//
+				// The commonest way to reach this line is a macOS keychain
+				// that will not take a write, which is exactly the machine
+				// with no browser that the device grant is for: over ssh or
+				// under a launchd agent there is nobody to authorise the
+				// prompt and `security` reports that the authorization was
+				// cancelled.
+				//
+				// The revocation is best effort and its failure is reported
+				// rather than swallowed, because the remaining remedy is
+				// somebody revoking it in the console and they have to be told
+				// that it is there.
+				if rerr := client.Revoke(ctx, token.AccessToken); rerr != nil {
+					return fmt.Errorf(
+						"store the credential: %w\n\nThe token was issued and could not be "+
+							"withdrawn either (%v), so it is still live. Revoke it in the "+
+							"control plane under Command line", err, rerr)
+				}
+				return fmt.Errorf("store the credential: %w\n\n"+
+					"The token that had just been issued was revoked, so nothing was left "+
+					"behind. Nothing is signed in", err)
 			}
 
 			where := store.Location(cred.ControlPlane)

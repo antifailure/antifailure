@@ -121,15 +121,22 @@ type hostedReporter struct {
 // error here is a control plane that is configured and unusable, which is worth
 // saying out loud.
 func newHostedReporter(e *Env, stateDir, envID string) (*hostedReporter, error) {
+	origin := controlPlaneFor(e, "")
 	token := controlplane.TokenFromEnvironment(func(k string) (string, bool) {
 		v := e.Getenv(k)
 		return v, v != ""
 	})
 	if token == "" {
+		// The credential af login stored. Without this line a person who had
+		// signed this terminal in still reported their workload run to nobody,
+		// which is the same gap telemetry had.
+		token = storedToken(e, origin)
+	}
+	if token == "" {
 		return nil, nil
 	}
 	client, err := controlplane.New(controlplane.Options{
-		BaseURL:  controlPlaneFor(e, ""),
+		BaseURL:  origin,
 		Token:    token,
 		Clock:    e.Clock,
 		Redactor: e.Redactor,
