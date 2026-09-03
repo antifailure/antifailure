@@ -132,6 +132,7 @@ runner/artifacts/
 /claimcheck
 /classcheck
 /constcheck
+/contactcheck
 /cost
 /docscheck
 /dogfood

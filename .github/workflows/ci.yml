@@ -1180,6 +1180,18 @@ jobs:
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
 
+      - name: Every contact route this repository publishes resolves
+        # CODE_OF_CONDUCT.md named conduct@antifailure.dev as the route for
+        # a person reporting harassment, and the legal pages named
+        # security@antifailure.dev for a researcher. The domain has no mail
+        # exchanger, an SPF policy authorising no sender, a DMARC policy of
+        # reject and a revoked DKIM key, so both went to the same silence and
+        # neither sender could tell. The site had already been fixed and the
+        # repository had not. Every address in the tree now needs a row in
+        # tools/docs/contact-routes.tsv saying who reads it, and an address
+        # with no row fails, which is what catches a domain nobody has checked.
+        run: go run ./tools/contactcheck .
+
   # Alone, and deliberately so.
   #
   # This is the only step in this job, which is what makes its result mean what
