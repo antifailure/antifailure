@@ -19,6 +19,56 @@ export function hostedRequiredPlanFrom(value: string | undefined | null): Hosted
   )
 }
 
+/**
+ * Whether whoever runs this installation also decides each organization's plan.
+ *
+ * THE DEFAULT IS OFF, AND THAT IS THE WHOLE POINT. `billing.set` writes
+ * `organizations.plan`, which is the column every quota is read from, and the
+ * caller who reaches it is an org owner rather than the operator. On a plane
+ * one person runs for themselves those are the same person and the route is an
+ * administrative convenience, because that person can already write the column
+ * with psql. On a plane that serves anybody else they are not the same person,
+ * and the route is a signed-in stranger granting themselves the largest plan.
+ *
+ * Read that failure the other way round, because it decides the shape of this
+ * flag. The dangerous configuration is the one where nothing is configured:
+ * no Stripe, no plan gate, an operator who has not thought about billing yet.
+ * A flag meaning "this plane is hosted" would have to be REMEMBERED by exactly
+ * the operator who has not thought about it, so forgetting it would leave the
+ * hole open. This flag means the opposite, so forgetting it closes the hole and
+ * costs a self-hosted operator one variable they set once.
+ *
+ * It may not be combined with billing. See main.ts: a plan that can be granted
+ * by hand is not a plan anybody has to buy, and the process refuses to start
+ * rather than serving that contradiction.
+ */
+export function operatorSetsPlanFrom(value: string | undefined | null): boolean {
+  const raw = value?.trim().toLowerCase()
+  if (!raw || raw === '0' || raw === 'false') return false
+  if (raw === '1' || raw === 'true') return true
+  throw new Error(
+    `AF_OPERATOR_SETS_PLAN must be 1, 0 or unset; received ${JSON.stringify(value)}.`,
+  )
+}
+
+/**
+ * Why the plan cannot be written by hand, said to the person who asked.
+ *
+ * Two different readers and two different next steps. A customer on a plane
+ * that takes money is told where the plan comes from. An operator on a plane
+ * that takes none is told the variable that turns the route on, because they
+ * are the only person who could set it and the alternative is reading the
+ * source to find out the route exists at all.
+ */
+export function planSetRefusal(takesPayment: boolean): string {
+  return takesPayment
+    ? 'This installation derives paid plans from Stripe. Use checkout or the billing portal; ' +
+        'the plan cannot be set directly.'
+    : 'This control plane does not grant plans by hand. Set AF_OPERATOR_SETS_PLAN=1 if you run ' +
+        'it yourself and decide the plan yourself; a plane that serves anybody else should take ' +
+        'payment instead.'
+}
+
 export function hasHostedAccess(
   plan: string | null | undefined,
   required: HostedRequiredPlan | null,
@@ -83,9 +133,35 @@ export const HOSTED_GATE_EXEMPT: ReadonlySet<string> = new Set([
  * read of its own, it belongs there rather than in a gated route.
  */
 
+/**
+ * Where a person with no organization is sent to install the GitHub App.
+ *
+ * UNSET IS A SUPPORTED STATE and not a half configuration, which is why this
+ * returns undefined rather than throwing on an empty value. Membership follows
+ * a GitHub App installation on the hosted plane, but a self-hosted plane may
+ * provision membership some other way and has no App of its own to point at.
+ * Refusing to start would break that installation for a screen it never shows.
+ *
+ * What unset must NOT do is leave the console telling somebody to install an
+ * App while offering no way to do it. See `NoOrganization` in
+ * `console/components/Shell.tsx`: the copy changes with this value, and the
+ * membership recheck is offered either way because it never depended on it.
+ *
+ * A malformed value IS refused, at start-up, because the alternative is a link
+ * pointing wherever an operator's typo pointed. The parse is guarded rather
+ * than left to throw: `new URL` on a string with no scheme raises `Invalid
+ * URL`, which names neither the variable nor the shape it wanted, and an
+ * operator reading that in a crash loop has to find this file to learn what
+ * was wrong.
+ */
 export function githubAppInstallUrlFrom(value: string | undefined | null): string | undefined {
   if (!value?.trim()) return undefined
-  const url = new URL(value)
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(INSTALL_URL_SHAPE)
+  }
   if (
     url.protocol !== 'https:' ||
     url.hostname !== 'github.com' ||
@@ -93,9 +169,11 @@ export function githubAppInstallUrlFrom(value: string | undefined | null): strin
     url.search ||
     url.hash
   ) {
-    throw new Error(
-      'AF_GITHUB_APP_INSTALL_URL must be an https://github.com/apps/<slug>/installations/new address.',
-    )
+    throw new Error(INSTALL_URL_SHAPE)
   }
   return url.toString()
 }
+
+/** One sentence, so a bad scheme and a bad shape cannot drift apart. */
+const INSTALL_URL_SHAPE =
+  'AF_GITHUB_APP_INSTALL_URL must be an https://github.com/apps/<slug>/installations/new address.'

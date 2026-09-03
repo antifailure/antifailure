@@ -67,9 +67,13 @@ gate: _reports
     run "release notes exist for the tag" just relnotes
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
+    run "lint findings keep their ids"   just lintcheck
+    run "the event stream keeps its shape" just eventcheck
+    run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
@@ -89,6 +93,7 @@ gate: _reports
     run "prose stays readable"           just readability
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
+    run "every script can be executed"   just execcheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -445,6 +450,31 @@ fmt-check:
 errcheck:
     go run ./tools/errcheck .
 
+# Every lint finding has an identifier, and every identifier ever handed out is
+# still spoken for.
+#
+# The rule name is prose and moves as the rules sharpen. The number does not,
+# and this is what keeps that true: a rule with no entry, an entry for a rule
+# that is gone, and an identifier that has left the catalogue since it was
+# registered are all failures here.
+lintcheck:
+    go run ./tools/lintcheck .
+
+# No event type has been taken away and the envelope still has its fields.
+#
+# The catalog gains a type most weeks and that is compatible. Losing one is not,
+# and nothing was watching for it: the schema is generated from the Go type and
+# the catalog, so deleting a type or a field regenerates cleanly and the diff is
+# green. engine/internal/events/stream.register.json is what version 1 promised,
+# and this refuses to let any of it go.
+eventcheck:
+    go run ./tools/eventcheck .
+# The Go packages version 1 promised, and the ones it deliberately did not.
+# Also the leak that makes the difference meaningless: a stable signature
+# naming a type an outside caller has no way to write.
+surfacecheck:
+    go run ./tools/surfacecheck .
+
 # The release stamps version variables that exist, and stamps every one it
 # declares.
 ldcheck:
@@ -490,6 +520,9 @@ docexamples:
     cd engine && go test ./internal/cli -run TestEveryCommandInTheDocsExists -count=1
 
 # The punctuation this project does not use.
+licensecheck:
+    go run ./tools/licensecheck .
+
 prosecheck:
     go run ./tools/prosecheck .
 
@@ -513,7 +546,8 @@ modecheck:
 # lands beside the component's own class rather than replacing it, and the
 # cascade picks whichever Tailwind emitted last. The site header marked the
 # current page with text-black over a text-black/70 default, lost, and marked
-# nothing at all. Reads the built HTML, so it needs a built www.
+# nothing at all. Reads the built HTML, so it needs a built www AND a built
+# console, and it refuses rather than skipping when either is missing.
 classcheck:
     go run ./tools/classcheck .
 
@@ -523,7 +557,10 @@ classcheck:
 # read globals.css on the same day, both saw the one infinite rule left in it,
 # and both called it harmless because nothing in that file used it. It was
 # rendered on the front page by HeroFilm.tsx. The source says which rules
-# exist; only the render says which land on an element. Needs a built www.
+# exist; only the render says which land on an element. Needs a built www AND
+# a built console, and it refuses rather than skipping when either is missing,
+# because skipping is how the console went unchecked for the whole life of
+# this gate.
 motioncheck:
     go run ./tools/motioncheck .
 
@@ -845,6 +882,16 @@ constcheck:
 gatecheck:
     go run ./tools/gatecheck .
 
+# Every script something runs by path is one git records as executable.
+#
+# tools/site/check-tls.sh was committed at mode 100644 and both of its call
+# sites name it as a bare path, so it died with "Permission denied" and status
+# 126 the first time a push to main reached the deploy job. It had never run
+# anywhere, because the only step that runs it fires on a push and not on a
+# pull request.
+execcheck:
+    go run ./tools/execcheck .
+
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.
 typecheck:
@@ -1012,6 +1059,7 @@ _generated:
     #!/usr/bin/env bash
     set -euo pipefail
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
@@ -1020,6 +1068,7 @@ _generated:
     (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    go run ./tools/eventcheck -freeze .
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     # The OpenAPI artifact is generated too, and its generator is TypeScript
@@ -1034,11 +1083,16 @@ _generated:
       www/public/errors.v1.json \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
+      www/public/lint-findings.v1.json \
+      engine/internal/insights/findings.gen.go \
+      engine/internal/insights/findings.register.json \
+      docs/src/content/docs/reference/lint-findings.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/mockpack-vectors.json \
       schemas/webhook-vectors.json \
       schemas/events.v1.json \
+      engine/internal/events/stream.register.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
       docs/src/content/docs/guides/dashboard.md \
@@ -1048,6 +1102,7 @@ _generated:
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
@@ -1058,6 +1113,7 @@ generate:
     cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    go run ./tools/eventcheck -freeze .
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
 

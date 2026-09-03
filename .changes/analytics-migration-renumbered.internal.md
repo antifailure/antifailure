@@ -1,8 +1,11 @@
 # changed
 
-The analytics migration is `0029`. It has been renamed five times, every time
-because another branch landed ahead of it: from `0021`, `0024`, `0025`, `0026`
-and `0027`.
+The analytics migration is `0032`. It has been renamed seven times, every time
+because another branch landed ahead of it: from `0021`, `0024`, `0025`, `0026`,
+`0027`, `0029` and `0031`. The last of those was not a landing: `0031` is spent
+by a branch that has not merged yet, and the number was given up rather than
+claimed twice, because a duplicate is invisible to both branches until one of
+them merges and a gap is at least visible to the branch that has it.
 
 `migration-order` refuses a GAP as well as a duplicate, so a branch cannot hold
 a number open for another branch that has not landed. The reservation has to be

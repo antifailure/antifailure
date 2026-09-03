@@ -88,7 +88,12 @@ func (o *Orchestrator) observeDatabase(
 ) {
 	if o.opts.Manifest.Database != nil {
 		_, obs.Subset = o.subsetConfig()
-		obs.Empty = o.sourceURL().IsZero()
+		// A source that cannot be looked up is reported as no source rather
+		// than failing the whole report, which is what this command is for:
+		// saying what an environment reproduces, including the parts it does
+		// not know about.
+		source, _ := o.sourceURL(ctx)
+		obs.Empty = source.IsZero()
 	}
 
 	version, why, err := o.branchGolden(ctx, s)

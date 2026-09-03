@@ -323,7 +323,7 @@ export async function retention(db: Db, today: Date): Promise<Retention> {
 //
 // Each of these reads a table of COUNTS that the rollup materialized, never the
 // working set it computed them from, which the application holds no SELECT on.
-// See migrations/0030: that is a permission rather than a habit, so a query
+// See migrations/0033: that is a permission rather than a habit, so a query
 // added here later still cannot follow one subject.
 // ---------------------------------------------------------------------------
 

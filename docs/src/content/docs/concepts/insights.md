@@ -123,6 +123,13 @@ touches, because every one of these is harmless on an empty table. Each finding
 carries what will happen and what to write instead: a lint that says "unsafe"
 and stops is a lint people turn off.
 
+Every finding also carries an identifier, `LINT-004` and its kind, and the
+[lint findings reference](/docs/reference/lint-findings) lists all of them
+against the rule names they have today. Match on the identifier. It is assigned
+once and never changes, and the rule name beside it is prose: rules are renamed
+as they sharpen, and a name that cannot be improved is a rule that cannot be
+improved.
+
 | Rule | Why it matters | What to do instead |
 | --- | --- | --- |
 | **No `lock_timeout`** | A lock request that is not granted immediately queues, and every query arriving after it queues behind the request rather than behind the table. A four millisecond `ALTER TABLE` blocked behind one long transaction stops all traffic on that table for as long as that transaction runs. | `SET lock_timeout = '3s'` before the first statement, and have the deploy retry. The statement gives up instead of queueing, which turns a stalled table into a failed migration somebody runs again. |

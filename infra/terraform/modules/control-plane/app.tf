@@ -346,6 +346,18 @@ resource "azurerm_container_app" "this" {
         value = join(",", var.signin_allowlist)
       }
 
+      # The other half of the same decision. Unset means the refusal page has
+      # nowhere to send anybody, which is correct for an installation with no
+      # waitlist and wrong for ours, so it is a dynamic block rather than
+      # always set: an empty string here would be a link to nothing.
+      dynamic "env" {
+        for_each = var.signup_url == "" ? [] : [var.signup_url]
+        content {
+          name  = "AF_SIGNUP_URL"
+          value = env.value
+        }
+      }
+
       dynamic "env" {
         for_each = var.provider_key_secret_enabled ? [1] : []
         content {

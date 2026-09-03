@@ -71,15 +71,51 @@ TOOL_CONNECTIONS=4
 # image is still in the registry and the schema has moved on.
 # ---------------------------------------------------------------------------
 reap_superseded() {
-  local keep_new="$1" keep_previous="$2" reaped=0 revision
+  local keep_new="$1" keep_previous="$2" reaped=0 revision created born
 
-  say "reaping revisions superseded by $keep_new (keeping $keep_previous to roll back onto)"
+  # WHEN THIS DEPLOY'S REVISION WAS BORN, and why a name list is not enough.
+  #
+  # "Superseded" means older than the revision this deploy just made. It does
+  # NOT mean "everything except the two names I am holding", which is what this
+  # loop used to mean, and the difference is a revision belonging to somebody
+  # else's deploy that is running at the same time as this one.
+  #
+  # That is not hypothetical. On 2026-09-02 the v1.0.0 tag and the merge to main
+  # named the same commit, and cd.yml's concurrency group is keyed on the ref,
+  # so the tag run and the branch run deployed to this app together. The branch
+  # run finished first and reaped, at 17:55:03, a revision created at 17:54:32
+  # by the tag run: a container that had pulled its image, started, and printed
+  # "control plane listening on :8080" three seconds earlier. Its own log ends
+  # "SIGTERM: draining". The tag run then spent ninety seconds asking a dead
+  # address, was told "This Container App is stopped or does not exist", and
+  # reported the release as a boot failure. Nothing had failed to boot.
+  #
+  # So the age is read and compared. A revision created at or after ours belongs
+  # to a deploy we did not supersede and is left alone, whoever started it.
+  born="$(az containerapp revision show -n "$APP" -g "$RG" --revision "$keep_new" \
+    --query "properties.createdTime" -o tsv 2>/dev/null || true)"
+  if [ -z "$born" ] || [ "$born" = "None" ]; then
+    # Said out loud rather than reaping blind. Without our own timestamp there
+    # is no way to tell a superseded revision from a concurrent one, and
+    # deactivating the wrong one kills a deploy somebody is watching.
+    say "could not read when $keep_new was created: nothing is reaped, and the connection budget below is what decides whether that is safe"
+    return 0
+  fi
+
+  say "reaping revisions superseded by $keep_new (created $born, keeping $keep_previous to roll back onto)"
   # --query on the server rather than a client-side filter, so a listing that
   # grows to the hundred revisions Container Apps retains is still one page.
-  for revision in $(az containerapp revision list -n "$APP" -g "$RG" \
-    --query "[?properties.active].name" -o tsv 2>/dev/null || true); do
+  # Name and creation time together, because the decision needs both.
+  while read -r revision created; do
+    [ -z "$revision" ] && continue
     [ "$revision" = "$keep_new" ] && continue
     [ "$revision" = "$keep_previous" ] && continue
+    # Lexicographic on the ISO 8601 the API returns, which sorts correctly
+    # because every value carries the same offset and the same field widths.
+    if [ -z "$created" ] || [[ ! "$created" < "$born" ]]; then
+      echo "leaving $revision alone: created ${created:-unknown}, not older than $keep_new"
+      continue
+    fi
     # Deliberately tolerant. A revision that cannot be deactivated is a
     # connection this deploy did not reclaim, not a reason to fail a release
     # that is already serving; assert_connection_budget below is what decides
@@ -89,7 +125,8 @@ reap_superseded() {
     else
       echo "could not deactivate $revision; it is still holding its connections"
     fi
-  done
+  done < <(az containerapp revision list -n "$APP" -g "$RG" \
+    --query "[?properties.active].[name, properties.createdTime]" -o tsv 2>/dev/null || true)
   say "deactivated $reaped superseded revision(s)"
 }
 
@@ -261,6 +298,25 @@ for _ in $(seq 1 60); do
   esac
   sleep 5
 done
+
+# The budget running out is a verdict too, and this loop used to have no way to
+# say so. It breaks on Running and exits on Failed or Degraded, and every other
+# state fell out of the bottom silently after five minutes: Activating, Unknown,
+# Deactivating, or a revision that somebody else stopped while we waited. The
+# script then smoke tested an address with nothing behind it and reported a
+# health gate failure, which reads as "the build is broken" and is a different
+# claim from "the platform never gave us a running revision".
+#
+# The migration loop above already asserts after its own budget for exactly this
+# reason. This is the same assertion in the same shape.
+if [ "${STATE:-}" != "Running" ]; then
+  say "NEW REVISION NEVER REACHED Running (last state: ${STATE:-unknown}). Traffic never moved; $PREVIOUS is still serving."
+  echo "This is the platform's answer about the revision, not the application's"
+  echo "answer about itself. Read the revision in the portal and its container"
+  echo "logs before assuming the image is at fault."
+  az containerapp revision deactivate -n "$APP" -g "$RG" --revision "$NEW" -o none 2>/dev/null || true
+  exit 1
+fi
 
 REV_FQDN="$(az containerapp revision show -n "$APP" -g "$RG" --revision "$NEW" \
   --query "properties.fqdn" -o tsv 2>/dev/null || true)"

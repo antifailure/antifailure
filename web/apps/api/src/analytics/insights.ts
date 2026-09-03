@@ -7,7 +7,7 @@
 // retention cohort. That means reading rows that carry a surrogate, and the
 // application holds no SELECT on any of them. So the work happens here, on the
 // privileged connection the partition manager already uses, and what comes back
-// out is counts. See migrations/0030 for why that is a permission and not a
+// out is counts. See migrations/0033 for why that is a permission and not a
 // convention.
 //
 // WHY EVERY PASS RECOMPUTES RATHER THAN ACCUMULATES.
@@ -254,7 +254,7 @@ export async function recomputeRetention(
  *
  * Runs over the RAW stream rather than the working set, because a funnel needs
  * ordering within a day and the working set deliberately holds no time. See
- * migrations/0030 for why the working set does not carry one.
+ * migrations/0033 for why the working set does not carry one.
  *
  * WHY A SUBJECT WHOSE FIRST STEP FALLS OUTSIDE THE SCANNED RANGE IS DROPPED
  * RATHER THAN COUNTED. It is not a loss, it is what keeps the row from being

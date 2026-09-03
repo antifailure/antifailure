@@ -25,9 +25,53 @@
       "engineToken": {
         "type": "http",
         "scheme": "bearer"
+      },
+      "cliToken": {
+        "type": "http",
+        "scheme": "bearer"
       }
     },
     "schemas": {
+      "OidcBinding": {
+        "type": "object",
+        "description": "A repository claimed for workflow identity. `lastUsedAt` and `revokedAt` are null rather than absent, so a caller can tell \"never used\" from a field this version does not send.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "repository": {
+            "type": "string",
+            "example": "acme/app"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "repository",
+          "createdAt",
+          "lastUsedAt",
+          "revokedAt"
+        ],
+        "additionalProperties": false
+      },
       "Refusal": {
         "type": "object",
         "description": "A refusal from a hand-written route. `error` is one sentence for a person, and it names no internal path, table, or query.",
@@ -431,6 +475,14 @@
         "owner",
         "admin",
         "member"
+      ]
+    },
+    {
+      "name": "analytics.read",
+      "description": "Read the analytics dashboard for this control plane installation. Granted here and checked again against the organization that operates the installation, because this is the one page that is not about the caller’s own organization.",
+      "roles": [
+        "owner",
+        "admin"
       ]
     }
   ],
@@ -931,6 +983,441 @@
         "description": "Only the holder of the lease may acknowledge, and an acknowledgement that matches no row answers 409 rather than 200: an acknowledgement nobody applied is the silent nothing the durable command exists to end."
       }
     },
+    "/v1/oidc/bindings": {
+      "post": {
+        "security": [
+          {
+            "cliToken": []
+          }
+        ],
+        "tags": [
+          "Workflow identity"
+        ],
+        "operationId": "claimRepositoryBinding",
+        "summary": "Claim a repository for workflow identity",
+        "description": "Claims `owner/name` for this organization, so a workflow in it can exchange a GitHub identity token for an engine token. Needed when the App is not installed on the owner, which is the case the first exchange cannot resolve on its own.\n\nBehind the same permission as minting an engine token, because a claim grants a workflow the standing ability to mint one.\n\nNeeds a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`. OpenAPI cannot express a scope on a bearer scheme, so the requirement is stated here rather than in `security`, where only OAuth2 flows can carry scopes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string",
+                    "example": "acme/app"
+                  }
+                },
+                "required": [
+                  "repository"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The claim, as the list renders it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcBinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not JSON, or the repository is not `owner/name`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is not a valid CLI token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "This organization's plan does not include the hosted control plane.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not carry `tokens.manage`. The message names the command that fixes it, because a caller told only that they are forbidden goes looking for a role problem.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another organization already holds this repository. Nothing about the request is malformed, and sending it again unchanged will never work, which is why it is not a 400.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed for a reason the control plane did not expect. The body carries a correlation id; nothing about the request payload is logged or returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFailure"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "security": [
+          {
+            "cliToken": []
+          }
+        ],
+        "tags": [
+          "Workflow identity"
+        ],
+        "operationId": "listRepositoryBindings",
+        "summary": "List this organization's repository claims",
+        "description": "Every claim this organization holds, with the audience a workflow must ask GitHub for. The audience is returned rather than documented alone so a caller building a workflow file reads it from the server that will check it.\n\nNeeds a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.",
+        "responses": {
+          "200": {
+            "description": "The claims and the audience.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "audience": {
+                      "type": "string",
+                      "example": "antifailure-control-plane"
+                    },
+                    "bindings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OidcBinding"
+                      }
+                    }
+                  },
+                  "required": [
+                    "audience",
+                    "bindings"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is not a valid CLI token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "This organization's plan does not include the hosted control plane.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not carry `tokens.manage`. The message names the command that fixes it, because a caller told only that they are forbidden goes looking for a role problem.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed for a reason the control plane did not expect. The body carries a correlation id; nothing about the request payload is logged or returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oidc/bindings/{binding}": {
+      "delete": {
+        "security": [
+          {
+            "cliToken": []
+          }
+        ],
+        "tags": [
+          "Workflow identity"
+        ],
+        "operationId": "revokeRepositoryBindingById",
+        "summary": "Revoke a repository claim by id",
+        "description": "Revokes the claim and kills every engine token minted through it. The count of tokens killed is in the answer.\n\nNeeds a CLI token carrying `tokens.manage`, from `af login --scope tokens.manage`.",
+        "parameters": [
+          {
+            "name": "binding",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the revocation did.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "alreadyRevoked": {
+                      "type": "boolean",
+                      "description": "True when the claim was already revoked, so a retry is not an error."
+                    },
+                    "tokensRevoked": {
+                      "type": "integer",
+                      "description": "How many live engine tokens this killed. Named, because \"revoked\" on its own does not tell somebody in an incident whether the credentials already out there are dead."
+                    }
+                  },
+                  "required": [
+                    "revoked",
+                    "repository",
+                    "alreadyRevoked",
+                    "tokensRevoked"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is neither a uuid nor `owner/name`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is not a valid CLI token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "This organization's plan does not include the hosted control plane.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not carry `tokens.manage`. The message names the command that fixes it, because a caller told only that they are forbidden goes looking for a role problem.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No claim here has that id or repository. The same answer whether it belongs to another organization or does not exist, which is what every other lookup on this server does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed for a reason the control plane did not expect. The body carries a correlation id; nothing about the request payload is logged or returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oidc/bindings/{owner}/{name}": {
+      "delete": {
+        "security": [
+          {
+            "cliToken": []
+          }
+        ],
+        "tags": [
+          "Workflow identity"
+        ],
+        "operationId": "revokeRepositoryBindingByRepository",
+        "summary": "Revoke a repository claim by repository name",
+        "description": "The same operation as revoking by id, reachable with the name a person has in front of them. See the note above about why this is a second path rather than one segment.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the revocation did.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "alreadyRevoked": {
+                      "type": "boolean",
+                      "description": "True when the claim was already revoked, so a retry is not an error."
+                    },
+                    "tokensRevoked": {
+                      "type": "integer",
+                      "description": "How many live engine tokens this killed. Named, because \"revoked\" on its own does not tell somebody in an incident whether the credentials already out there are dead."
+                    }
+                  },
+                  "required": [
+                    "revoked",
+                    "repository",
+                    "alreadyRevoked",
+                    "tokensRevoked"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is neither a uuid nor `owner/name`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is not a valid CLI token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "This organization's plan does not include the hosted control plane.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not carry `tokens.manage`. The message names the command that fixes it, because a caller told only that they are forbidden goes looking for a role problem.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No claim here has that id or repository. The same answer whether it belongs to another organization or does not exist, which is what every other lookup on this server does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed for a reason the control plane did not expect. The body carries a correlation id; nothing about the request payload is logged or returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trpc/account.close": {
       "post": {
         "operationId": "trpc_account_close",
@@ -1180,6 +1667,272 @@
           },
           "403": {
             "description": "The role does not hold agents.run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/analytics.catalog": {
+      "get": {
+        "operationId": "trpc_analytics_catalog",
+        "summary": "analytics.catalog",
+        "description": "Requires the analytics.read permission, held by: owner, admin.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold analytics.read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/analytics.overview": {
+      "get": {
+        "operationId": "trpc_analytics_overview",
+        "summary": "analytics.overview",
+        "description": "Requires the analytics.read permission, held by: owner, admin.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "default": 28,
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 7
+                        },
+                        {
+                          "type": "number",
+                          "const": 28
+                        },
+                        {
+                          "type": "number",
+                          "const": 90
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold analytics.read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/trpc/analytics.series": {
+      "get": {
+        "operationId": "trpc_analytics_series",
+        "summary": "analytics.series",
+        "description": "Requires the analytics.read permission, held by: owner, admin.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": true,
+            "description": "JSON-encoded tRPC input. This route refuses a request without it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "default": 28,
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 7
+                        },
+                        {
+                          "type": "number",
+                          "const": 28
+                        },
+                        {
+                          "type": "number",
+                          "const": 90
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold analytics.read.",
             "content": {
               "application/json": {
                 "schema": {

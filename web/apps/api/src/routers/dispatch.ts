@@ -34,9 +34,15 @@ import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import type { Db } from '@antifailure/db'
 import { router, orgProcedure, audit, type OrgContext, adopted } from '../trpc.ts'
-import { checkQuota, DEFAULT_PLAN } from '../limits.ts'
-import { capsFor, checkCostCap, environmentHoursSince } from '../costs.ts'
+import { DEFAULT_PLAN } from '../limits.ts'
+import {
+  checkCostCapWithEntitlements,
+  checkQuotaWithEntitlements,
+  resolveEntitlements,
+} from '../entitlements.ts'
+import { environmentHoursSince } from '../costs.ts'
 import { GitHubError, blockerFor, type DispatchCause } from '../auth/github.ts'
+import { engagedReason } from '../admin/controls.ts'
 
 /**
  * The workflow file a dispatch targets.
@@ -97,6 +103,32 @@ export async function installationFor(c: OrgContext): Promise<Installation> {
  * reached the ingestion path. A verb that dispatched work during a suspension
  * would be the switch quietly not working.
  */
+/**
+ * Refuses while the installation's new-runs switch is engaged.
+ *
+ * Beside refuseWhileSuspended rather than inside it, because the two answer
+ * different questions and a caller has to be refused by either. Suspension is
+ * about ONE organization and is set by that organization's own admins; this is
+ * about the installation and is set by whoever operates it. Folding them into
+ * one check would make the message wrong for one of the two cases, and the
+ * message is the whole value of a refusal.
+ *
+ * Read on the tenant's own connection: the read policy on platform_controls is
+ * open to the application role precisely so that this is one indexed read on
+ * the hot path rather than a privileged connection nobody wants to open here.
+ */
+async function refuseWhileFrozen(c: OrgContext): Promise<void> {
+  const reason = await c.pool.withTenant(c.tenant, (db) => engagedReason(db, 'new_runs'))
+  if (reason !== null) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        `New runs and environments are paused on this installation: ${reason}. ` +
+        `Environments that are already running are untouched and can still be read.`,
+    })
+  }
+}
+
 export async function refuseWhileSuspended(c: OrgContext): Promise<void> {
   const reason = await c.pool.withTenant(c.tenant, async (db) => {
     const rows = await db.execute<{ suspended_reason: string | null }>(sql`
@@ -304,6 +336,7 @@ export const createEnvironment = orgProcedure('environments.create')
   )
   .mutation(async ({ ctx, input }) => {
     const c = ctx as OrgContext
+    await refuseWhileFrozen(c)
     await refuseWhileSuspended(c)
 
     const prepared = await c.pool.withTenant(c.tenant, async (db) => {
@@ -324,7 +357,28 @@ export const createEnvironment = orgProcedure('environments.create')
         FROM organizations o WHERE o.id = ${c.actor.orgId}`)
       const row = counts[0]
       const plan = row?.plan || DEFAULT_PLAN
-      const quota = checkQuota(plan, 'environments', Number(row?.environments ?? 0))
+
+      // The plan says what this organization gets; an override says what it was
+      // SOLD. Resolved here, inside the transaction that is already open, and
+      // in the same tenant scope, so the read costs one more statement rather
+      // than one more round trip and cannot see another tenant's grants.
+      //
+      // Both scopes that can apply to a creation are passed. The repository is
+      // the `project` scope, because capacity is routinely sold for one
+      // repository rather than for a whole organization, and the acting user is
+      // the `user` scope. Leaving either out would make a grant at that scope a
+      // row that changes nothing, which is the exact failure the catalogue's
+      // `enforcedAt` field exists to prevent.
+      const entitlements = await resolveEntitlements(db, c.clock.now(), {
+        orgId: c.actor.orgId,
+        plan,
+        userId: c.actor.userId,
+        repositoryId: repo.id,
+      })
+
+      const quota = checkQuotaWithEntitlements(
+        entitlements, 'environments', Number(row?.environments ?? 0),
+      )
       if (!quota.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: quota.reason })
       }
@@ -349,8 +403,13 @@ export const createEnvironment = orgProcedure('environments.create')
       // "unknown lifetime" is the most the plan would allow for one: reserving
       // less would let an unstated run slip past the daily cap that a stated
       // one of the same size is refused for.
-      const runHours = input.ttlHours ?? capsFor(plan).perRunHours
-      const cap = checkCostCap(plan, runHours, used)
+      //
+      // Read off the ENTITLEMENT rather than off the plan, because an
+      // organization sold a longer per-run cap must have its unstated runs
+      // reserved at the cap it actually holds. Reserving the plan's smaller
+      // number here would refuse a run that the next line was about to allow.
+      const runHours = input.ttlHours ?? entitlements.number('perRunHours')
+      const cap = checkCostCapWithEntitlements(entitlements, runHours, used)
       if (!cap.allowed) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: cap.reason })
       }
@@ -405,6 +464,7 @@ export const agentsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
+      await refuseWhileFrozen(c)
       await refuseWhileSuspended(c)
       const target = await c.pool.withTenant(c.tenant, (db) => targetFor(db, input.envId))
       const installation = await installationFor(c)
@@ -448,6 +508,7 @@ export const loadRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
+      await refuseWhileFrozen(c)
       await refuseWhileSuspended(c)
       const target = await c.pool.withTenant(c.tenant, (db) => targetFor(db, input.envId))
       const installation = await installationFor(c)

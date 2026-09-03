@@ -887,24 +887,80 @@ func TestRehearse_TimesEachStatementFromTheServerWhenTheApplierCannot(t *testing
 	// else ran the DDL and we did not see it go past. The server did, and the
 	// event trigger pair is how a Rails or Django migration still gets a
 	// duration per statement.
+	//
+	// The middle statement is told to sleep for a second, and that second is
+	// the only number here the machine does not get a vote on. What breaks
+	// silently in this path is not the size of a duration but where it lands:
+	// one statement's cost charged to its neighbour, one total copied onto
+	// every row, or a running total that grows down the list. Each of those
+	// moves the planted second somewhere it does not belong, and each of them
+	// survives a test that only compares two real statements to each other.
+	// That comparison is what used to be here, and it failed in CI on a pull
+	// request that changed no engine code at all: a contended runner spent
+	// 84ms adding a nullable column and 33ms building an index over 50,000
+	// rows, inverting an ordering that was never the claim.
+	const plantedSleepMS = 1000.0
 	r, err := insights.Rehearse(context.Background(), db.conn, db.watch, db.url,
 		insights.MigrationSet{Tool: insights.ToolRails},
 		&opaqueApplier{url: db.url, sql: []string{
 			"ALTER TABLE orders ADD COLUMN currency text",
+			// A statement whose duration is a fact rather than a measurement.
+			// The server cannot finish it sooner than the sleep however busy
+			// the machine is, so a floor under it is crossed only by the
+			// timing being wrong.
+			"CREATE MATERIALIZED VIEW slow_orders AS " +
+				"SELECT n FROM (SELECT 1 AS n, pg_sleep(1)) s",
 			"CREATE INDEX orders_status_idx ON orders (status)",
 		}},
 		insights.LargeTableRows)
 	require.NoError(t, err)
 	require.False(t, r.Failed, r.Error)
 
-	require.Len(t, r.Statements, 2,
+	require.Len(t, r.Statements, 3,
 		"the applier reported nothing, so every statement here came from the server")
 	require.Contains(t, r.Statements[0].SQL, "ADD COLUMN")
-	require.Contains(t, r.Statements[1].SQL, "CREATE INDEX")
-	require.Greater(t, r.Statements[1].MS, 0.0)
-	// Building an index over 50,000 rows is slower than adding a nullable
-	// column, and the ordering is the whole reason to report each separately.
-	require.Greater(t, r.Statements[1].MS, r.Statements[0].MS)
+	require.Contains(t, r.Statements[1].SQL, "MATERIALIZED VIEW")
+	require.Contains(t, r.Statements[2].SQL, "CREATE INDEX")
+
+	for i, s := range r.Statements {
+		require.Greaterf(t, s.MS, 0.0,
+			"statement %d took no time at all, which is what a duration read from the "+
+				"transaction's clock rather than the wall clock looks like", i+1)
+	}
+
+	// Timed separately means separate numbers. Two clock deltas measured to
+	// the microsecond do not land on the same value by chance, so a repeat is
+	// one number copied across rows rather than two statements that agreed.
+	require.NotEqual(t, r.Statements[0].MS, r.Statements[1].MS)
+	require.NotEqual(t, r.Statements[1].MS, r.Statements[2].MS)
+	require.NotEqual(t, r.Statements[0].MS, r.Statements[2].MS)
+
+	// The planted second landed on the statement that slept and on neither
+	// neighbour. Contention only ever makes a duration longer, so a slow
+	// machine cannot push the sleeping statement under its floor. The ceiling
+	// over the other two is half the sleep, six times the worst a catalogue
+	// only ALTER has been seen to take on the runner this test failed on.
+	require.Greater(t, r.Statements[1].MS, plantedSleepMS*0.9,
+		"the statement that slept for a second is not reported as taking about a second")
+	require.Less(t, r.Statements[0].MS, plantedSleepMS/2,
+		"adding a nullable column is catalogue work, so a duration near the sleeping "+
+			"statement's is that statement's time charged to the wrong row")
+	require.Less(t, r.Statements[2].MS, plantedSleepMS/2,
+		"building this index is not a second of work, so a duration near the sleeping "+
+			"statement's is that statement's time charged to the wrong row")
+
+	// And every duration is a slice of the one window the applier ran in
+	// rather than a copy of the whole of it. A running total, or the total
+	// repeated on every row, adds up to more than the window it happened in.
+	// The slack is for the two clocks involved, since the window is measured
+	// here and each statement is measured by the server.
+	var sum float64
+	for _, s := range r.Statements {
+		sum += s.MS
+	}
+	require.Less(t, sum, r.TotalMS+50,
+		"the statements add up to more than the whole run took, so at least one of them "+
+			"is carrying another statement's time")
 }
 
 func TestRehearse_ReportsARewriteEvenWhenTheApplierSawNothing(t *testing.T) {

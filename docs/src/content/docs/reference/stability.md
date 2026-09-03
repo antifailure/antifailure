@@ -55,15 +55,80 @@ you have not seen. A documented field will not be removed or change type.
 
 `engine/pkg/provider` declares the database and runtime interfaces, and it is
 meant to be implemented outside this repository: each ships with a conformance
-suite an implementation runs, so conformant is something a test says. Those
-interfaces and the conformance suite are stable, along with `engine/pkg/schema`,
-which they carry across the boundary.
+suite an implementation runs, so conformant is something a test says.
+
+Four packages are stable, and they are stable together because an interface is
+only as usable as the types its signatures name.
+
+| Package | What it is |
+| --- | --- |
+| `engine/pkg/provider` | The database and runtime interfaces themselves. |
+| `engine/pkg/schema` | The manifest types those interfaces carry across the boundary. |
+| `engine/pkg/secret` | The `Value` type that carries a credential without printing it. `Database.ConnString` returns one and `EnvSpec` holds several. |
+| `engine/conformance` | The suite that decides whether an implementation is conformant. |
+
+`engine/pkg/secret` is new in 1.0.0 and it is the fix for a promise that was
+not true. The type lived in `engine/internal/secrets` until the release, and
+`Database.ConnString` returned it, so writing that method outside this module
+was impossible: naming the return type needed an import the Go toolchain
+refuses by path. The interface compiled here, reviewed as correct, and would
+have failed on the first line of the first provider anybody wrote. Moving the
+type is the only change to these interfaces, it is source compatible inside the
+module because the old name is an alias, and `tools/surfacecheck` is what stops
+the next one happening quietly.
 
 ### The error codes
 
 A code in the [error reference](/docs/reference/errors) keeps its meaning. The
 code is the stable identifier for a refusal; the sentence printed beside it is
 not, and it is reworded whenever a clearer one exists. Match on the code.
+
+### The lint finding identifiers
+
+Every migration lint finding carries an identifier of the form `LINT-NNN`, and
+the [lint findings reference](/docs/reference/lint-findings) lists them. An
+identifier is assigned once and keeps its meaning. It is never reused, not even
+after the rule that earned it is deleted, because a number handed out twice is
+worse than one that changed: the first breaks a filter silently and the second
+breaks it loudly.
+
+What stays free to move is everything else about a finding, and deliberately
+so. The rule name, the title, the sentence saying what will happen and the
+suggested fix are prose. Rules are sharpened, split and renamed as they get
+better at their job, and a name that cannot be improved is a rule that cannot
+be improved. So the identifier is what a filter or a suppression should match
+on, and the rule name is what a person should read.
+
+`engine/internal/insights/lintcatalog.yaml` is the source of truth, and
+`findings.register.json` beside it records every identifier ever handed out.
+`tools/lintcheck` refuses a rule with no identifier, an identifier for a rule
+that no longer exists, and an identifier that has left the catalogue since it
+was registered.
+
+### The event stream
+
+The types in the [event envelope reference](/docs/reference/schemas/events-v1)
+and the envelope around them. A type is not removed and does not change what it
+means. A field of the envelope is not removed, does not change type, and does
+not become optional, and a field holding a closed set does not lose a value
+from it.
+
+Types are added as features land and fields may be added, so read the stream
+the way you read `--output json`: take what you want and ignore what you have
+not seen, rather than refusing an event carrying something new.
+
+Two things are deliberately outside that. The `data` object is the type
+specific payload, it is documented as an object and nothing further, and its
+keys move with the code that writes them. And some types on that page are
+reserved rather than live: the engine does not emit all of them yet, and
+`engine/internal/events/emitters_test.go` carries the reason for each one. A
+reserved type is stable in the sense above, and it may start being emitted in
+any release.
+
+`schemas/events.v1.json` is the published artifact,
+`engine/internal/events/stream.register.json` is what version 1 promised, and
+`tools/eventcheck` fails the build on a type that has gone, a field that has
+changed shape, and a type the engine can emit that nothing documents.
 
 ## Not stable
 
@@ -72,20 +137,58 @@ useful than a promise that quietly bends.
 
 - **The Helm chart's values and the Terraform module's variables.** The chart
   carries its own version, which is why it is not at 1.0.0 alongside the engine.
-- **The control plane's HTTP API.** It is how the console and the engine speak
-  to each other, not a published integration surface. The endpoints that are
-  published as an interface are named in the
-  [HTTP endpoints reference](/docs/reference/api).
-- **Every Go package except the two named above.** `engine/pkg/afcli`,
+- **Most of the control plane's HTTP API.** It is mostly how the console and
+  the engine speak to each other rather than a published integration surface,
+  and the part that is published is named rather than described. Every route
+  the router serves is classified in `web/apps/api/src/boundary.ts` as either
+  part of the published contract, which means it appears in
+  [the OpenAPI document](https://antifailure.dev/openapi.json), or as
+  deliberately excluded on one of seven recorded grounds, with a sentence
+  saying which case it is. A route that is neither fails the build. Before that
+  existed, a route missing from the document could equally mean "nobody outside
+  could call it" or "somebody forgot", and four live routes under
+  `/v1/oidc/bindings` were the second. The prose form of the same boundary is
+  the [HTTP endpoints reference](/docs/reference/api).
+- **Every Go package except the four named above.** `engine/pkg/afcli`,
   `engine/pkg/edition` and `engine/pkg/extension` are the sockets the enterprise
   binary plugs into and are deliberately narrow rather than a general embedding
-  API. Nothing outside this module can import `engine/internal` at all, which
-  is deliberate.
-- **Lint rule names and their findings.** Rules are added and sharpened, and a
-  release may find something in a migration an earlier one passed. That is the
-  product working. Within a release the rule name identifies the finding.
-- **The event stream's set of types.** Types are added as features land.
+  API. `engine/pkg/livekey` and `engine/chaos` are ours. Every importable
+  package is listed with its classification and a reason in
+  `engine/api/packages.txt`, and a new one that is listed nowhere fails the
+  build rather than arriving public by default. Nothing outside this module can
+  import `engine/internal` at all: the Go toolchain refuses an import of an
+  internal path from outside the subtree rooted at its parent, so that half
+  needs nothing from us and gets nothing.
+- **Lint rule names, and which findings a release reports.** A rule is renamed
+  when a clearer name exists, and a release may find something in a migration
+  an earlier one passed. That is the product working, and it is why the
+  identifier above is the thing to match on rather than the name.
 - **Anything under `docs/plan/`.** Working notes, not documentation.
+
+## What holds these lines
+
+Each of the two carve-outs above is checked rather than described, and both
+checks run in CI and in `just gate`.
+
+`tools/surfacecheck` reads the Go tree and refuses:
+
+- a Go module in the repository that nothing says anything about, and an
+  importable package inside a shipped one that nothing classifies;
+- a change to a stable package that version 1 does not allow, measured against
+  `engine/api/v1.0.0.txt`, which records the exported surface as it stood at
+  the tag. Adding an export passes. Removing one, changing a signature,
+  changing an exported constant's value, and adding a method to an interface
+  published for implementing do not;
+- an exported signature in a stable package naming a type from a package that
+  is not stable, which is the one that was already broken.
+
+`web/apps/api/test/route-boundary.test.ts` asks the control plane's router for
+its own route table and holds the answer against the published document both
+ways: a route classified as contract that the document does not carry fails,
+and a route classified as excluded that it does carry fails too. The check
+before it compared the published file to what the generator declares, which is
+the file against itself, so a route the generator never mentioned was missing
+from both sides and the comparison stayed green.
 
 ## Deprecation
 

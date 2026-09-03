@@ -24,6 +24,22 @@
 // long before the tag. An empty section is the failure worth naming separately:
 // a missing one is obvious the moment somebody looks, and an empty one reads as
 // done in the diff and publishes a release with a heading and nothing under it.
+//
+// A section may also mark part of itself as detail, between a
+// `<!-- relnotes:omit -->` line and a `<!-- relnotes:end -->` one. That part
+// stays in CHANGELOG.md, where a changelog file is a reference document people
+// search, and is replaced in the published notes by a pointer at the changelog
+// on the site. It exists because a release note and a changelog file are read
+// by different people for different reasons: v1.0.0's section ran to 66,831
+// bytes, of which 45,183 were the per change entries under Added and Fixed,
+// and the first thing somebody deciding whether to buy this reads should not
+// be a catalogue.
+//
+// The gate grows with the feature rather than being loosened by it. An
+// unbalanced marker fails, a second region in one section fails, an empty
+// region fails, and the emptiness check reads what would be PUBLISHED rather
+// than what is in the file, so wrapping a whole section and publishing a
+// heading with a link under it fails exactly as an empty section does.
 package main
 
 import (
@@ -33,6 +49,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -40,6 +57,41 @@ import (
 // somewhere in prose is not a section and matching it would split the file in
 // a place nobody meant.
 var heading = regexp.MustCompile(`^##\s+(v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.\-+]*)\s*$`)
+
+// The two markers bounding the detail a release note points at instead of
+// printing. An HTML comment, because it is invisible in every renderer that
+// shows CHANGELOG.md, and a whole line, because half a line of prose that
+// happens to contain the word should not move anything.
+var (
+	omitOpen  = regexp.MustCompile(`^<!--\s*relnotes:omit\s*-->$`)
+	omitClose = regexp.MustCompile(`^<!--\s*relnotes:end\s*-->$`)
+)
+
+// Where the omitted detail went.
+//
+// The address is spelled out rather than linked as markdown, so it stays
+// readable in a terminal reading the notes as text, which is where anybody
+// scripting a release sees them first.
+const pointer = `### The rest of this release, one entry per change
+
+Every change has its own entry, grouped by what kind of change it is and
+searchable: https://antifailure.dev/changelog
+
+Each was written when the change was made, by whoever made it, and is dated by
+the commit that landed it. The same entries are in CHANGELOG.md in this
+repository.
+`
+
+// A release's section, split into what is published and what is pointed at.
+type section struct {
+	// The body with the omitted region replaced, in place, by the pointer.
+	notes string
+	// The body with the omitted region removed and nothing put in its place.
+	// This is what the emptiness check reads, so a section that omits all of
+	// itself fails rather than publishing a heading and a link.
+	published string
+	omitted   bool
+}
 
 func main() {
 	root := flag.String("root", ".", "repository root")
@@ -77,24 +129,26 @@ func main() {
 		return
 	}
 
-	body, ok := sections[*tag]
+	release, ok := sections[*tag]
 	if !ok {
 		fail("%s has no section for %s.\n"+
 			"  Add `## %s` to it, with what changed under it, before pushing the tag.\n"+
 			"  The alternative is a release whose notes are the generated pull request list.",
 			*changelog, *tag, *tag)
 	}
-	if strings.TrimSpace(body) == "" {
-		fail("the %s section of %s is empty.\n"+
+	if strings.TrimSpace(release.published) == "" {
+		fail("the %s section of %s publishes nothing.\n"+
 			"  A heading with nothing under it publishes a release that says nothing, "+
-			"and reads as finished in the diff.", *tag, *changelog)
+			"and reads as finished in the diff.\n"+
+			"  A section every line of which sits inside `<!-- relnotes:omit -->` "+
+			"publishes a heading and a link, which is the same release.", *tag, *changelog)
 	}
 	if *repo == "" || *ref == "" {
 		fail("-repo and -ref are both needed to write the verification preamble, and " +
 			"notes without it tell somebody to trust a signature they are not shown how to check")
 	}
 
-	notes := preamble(*repo, *ref) + "\n" + strings.TrimSpace(body) + "\n"
+	notes := preamble(*repo, *ref) + "\n" + strings.TrimSpace(release.notes) + "\n"
 	if *out == "" {
 		fmt.Print(notes)
 		return
@@ -102,41 +156,81 @@ func main() {
 	if err := os.WriteFile(*out, []byte(notes), 0o600); err != nil {
 		fail("writing %s: %v", *out, err)
 	}
-	fmt.Printf("relnotes: %s, %d bytes, preamble included\n", *tag, len(notes))
+	where := "no detail omitted"
+	if release.omitted {
+		where = "detail pointed at the changelog"
+	}
+	fmt.Printf("relnotes: %s, %d bytes, preamble included, %s\n", *tag, len(notes), where)
 }
 
 // checkAll is what runs on a pull request.
-func checkAll(name string, sections map[string]string) {
+//
+// It reads what each section would PUBLISH rather than what it contains, so a
+// section whose every line has been marked as detail fails here rather than at
+// the tag. The markers themselves are checked in parse, which has already run
+// by the time this is called; a malformed one never reaches this function.
+func checkAll(name string, sections map[string]section) {
 	var empty []string
-	for tag, body := range sections {
-		if strings.TrimSpace(body) == "" {
+	omitting := 0
+	for tag, release := range sections {
+		if strings.TrimSpace(release.published) == "" {
 			empty = append(empty, tag)
+		}
+		if release.omitted {
+			omitting++
 		}
 	}
 	if len(empty) > 0 {
-		fail("these sections of %s have a heading and nothing under it: %s.\n"+
+		sort.Strings(empty)
+		fail("these sections of %s would publish nothing: %s.\n"+
 			"  A release cut against one of those publishes notes that say nothing.",
 			name, strings.Join(empty, ", "))
 	}
-	fmt.Printf("relnotes: every section in %s has something under it (%d checked)\n",
-		name, len(sections))
+	fmt.Printf("relnotes: every section in %s publishes something "+
+		"(%d checked, %d pointing detail at the changelog)\n", name, len(sections), omitting)
 }
 
-// parse splits the changelog into tag to body, refusing a repeated heading.
+// parse splits the changelog into tag to section, refusing a repeated heading.
 //
 // Repeated rather than merged, because two `## v1.0.0` headings mean somebody
 // wrote the second one not knowing the first existed, and merging them would
 // publish half of what they wrote in an order neither of them chose.
-func parse(source string) (map[string]string, error) {
-	sections := map[string]string{}
+func parse(source string) (map[string]section, error) {
+	sections := map[string]section{}
 	var current string
-	var body strings.Builder
+	// notes and published are built side by side rather than one being derived
+	// from the other, because the pointer has to land where the detail stood.
+	// A release whose omitted region sits between two published parts would
+	// otherwise print its link after the last of them, under the wrong
+	// heading.
+	var notes, published strings.Builder
+	omitting, omitted := false, false
+	openedAt := 0
+	regionLines := 0
+	line := 0
 
-	flush := func() {
+	fail := func(format string, args ...any) error {
+		return fmt.Errorf("in the %s section, "+format, append([]any{current}, args...)...)
+	}
+
+	flush := func() error {
 		if current != "" {
-			sections[current] = body.String()
+			if omitting {
+				return fail("the `<!-- relnotes:omit -->` on line %d is never closed.\n"+
+					"  Add `<!-- relnotes:end -->` where the detail ends, or take the open one out.\n"+
+					"  Unclosed, it would drop the rest of the section from the published notes.",
+					openedAt)
+			}
+			sections[current] = section{
+				notes:     notes.String(),
+				published: published.String(),
+				omitted:   omitted,
+			}
 		}
-		body.Reset()
+		notes.Reset()
+		published.Reset()
+		omitting, omitted = false, false
+		return nil
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(source))
@@ -145,37 +239,82 @@ func parse(source string) (map[string]string, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	fenced := false
 	for scanner.Scan() {
-		line := scanner.Text()
+		line++
+		text := scanner.Text()
+		trimmed := strings.TrimSpace(text)
 		// A ``` fence can contain anything, including a line that looks like a
 		// heading. Tracking the fence is what stops a code sample splitting the
-		// file somewhere nobody meant.
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+		// file somewhere nobody meant, and it covers the markers for the same
+		// reason: an example of one in a fence is documentation, not an
+		// instruction.
+		if strings.HasPrefix(trimmed, "```") {
 			fenced = !fenced
 		}
 		if !fenced {
-			if m := heading.FindStringSubmatch(line); m != nil {
+			if m := heading.FindStringSubmatch(text); m != nil {
 				// Recorded before the check, not after. The section in hand is
 				// only in the map once flush has run, so checking first meant a
 				// repeat was never seen and the second heading quietly replaced
 				// the first. Found by the test for it, which is the point of
 				// writing one that has been watched to fail.
-				flush()
+				if err := flush(); err != nil {
+					return nil, err
+				}
 				if _, seen := sections[m[1]]; seen {
 					return nil, fmt.Errorf("two sections are headed %s", m[1])
 				}
 				current = m[1]
 				continue
 			}
+			if current != "" && omitOpen.MatchString(trimmed) {
+				if omitting {
+					return nil, fail("`<!-- relnotes:omit -->` on line %d opens a "+
+						"region that is already open, from line %d.", line, openedAt)
+				}
+				if omitted {
+					return nil, fail("there is a second `<!-- relnotes:omit -->` on line %d.\n"+
+						"  One section points at the changelog once. Widen the first region "+
+						"rather than opening another, or the notes carry the same link twice.",
+						line)
+				}
+				omitting, openedAt, regionLines = true, line, 0
+				notes.WriteString(pointer)
+				continue
+			}
+			if current != "" && omitClose.MatchString(trimmed) {
+				if !omitting {
+					return nil, fail("`<!-- relnotes:end -->` on line %d closes nothing.\n"+
+						"  Every one of them needs a `<!-- relnotes:omit -->` above it.", line)
+				}
+				if regionLines == 0 {
+					return nil, fail("the region opened on line %d and closed on line %d is empty.\n"+
+						"  An empty one publishes the pointer at the changelog with nothing "+
+						"behind it, so take both markers out.", openedAt, line)
+				}
+				omitting, omitted = false, true
+				continue
+			}
 		}
-		if current != "" {
-			body.WriteString(line)
-			body.WriteByte('\n')
+		if current == "" {
+			continue
 		}
+		if omitting {
+			if trimmed != "" {
+				regionLines++
+			}
+			continue
+		}
+		notes.WriteString(text)
+		notes.WriteByte('\n')
+		published.WriteString(text)
+		published.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	flush()
+	if err := flush(); err != nil {
+		return nil, err
+	}
 	return sections, nil
 }
 

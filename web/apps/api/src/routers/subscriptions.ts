@@ -30,6 +30,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { sql } from 'drizzle-orm'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
+import { killSwitch, killedMessage } from '../flags.ts'
 import { attachCustomer, readBillingState, reconcile } from '../billing/store.ts'
 import { LIVE_STATUSES, PAID_PLANS, type PaidPlan } from '../billing/plans.ts'
 import { StripeError } from '../billing/stripe.ts'
@@ -63,6 +64,27 @@ function refused(err: unknown, what: string): TRPCError {
   return err instanceof TRPCError
     ? err
     : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Could not ${what}.`, cause: err })
+}
+
+/**
+ * Refuses when an operator has switched this capability off.
+ *
+ * A separate transaction rather than folded into the one below, because it has
+ * to answer before the checkout does anything at all, and because a kill switch
+ * that shares a transaction with the work it is guarding is a kill switch that
+ * cannot be read while that work is holding a lock.
+ */
+async function refuseWhenKilled(c: OrgContext, key: string, what: string): Promise<void> {
+  const killed = await c.pool.withTenant(c.tenant, async (db) =>
+    killSwitch(db, key, {
+      orgId: c.actor.orgId,
+      userId: c.actor.userId,
+      plan: c.actor.plan,
+    }),
+  )
+  if (killed) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: killedMessage(killed, what) })
+  }
 }
 
 export const subscriptionsRouter = router({
@@ -125,6 +147,11 @@ export const subscriptionsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const c = ctx as OrgContext
       const billing = billingOf(c)
+      // Before anything is sent to Stripe and before any row is read. The
+      // switch exists for the payments incident where the useful action is
+      // "stop taking new money in the next thirty seconds", and a check placed
+      // after the customer has been created at Stripe would stop it too late.
+      await refuseWhenKilled(c, 'billing.checkout', 'Starting a new subscription')
       if (c.hostedRequiredPlan && input.plan !== c.hostedRequiredPlan) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',

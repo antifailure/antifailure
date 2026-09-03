@@ -127,6 +127,7 @@ runner/artifacts/
 # TestNoCompiledBinaryIsTracked remains the backstop for when one lands anyway.
 /azguard
 /changecheck
+/cigate
 /claimcheck
 /classcheck
 /constcheck
@@ -135,12 +136,17 @@ runner/artifacts/
 /dogfood
 /errcheck
 /errgen
+/eventcheck
+/execcheck
 /figurecheck
 /gatecheck
 /installcheck
 /installsh
 /ldcheck
+/licensecheck
 /licensegen
+/lintcheck
+/lintgen
 /manifestcheck
 /modecheck
 /motioncheck
@@ -160,6 +166,7 @@ runner/artifacts/
 /sidebarcheck
 /site
 /statuscheck
+/surfacecheck
 /tagsync
 /varcheck
 /vulncheck
