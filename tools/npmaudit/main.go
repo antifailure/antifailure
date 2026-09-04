@@ -499,24 +499,31 @@ func decideAt(findings []*finding, locked, unlocked []string, pol *policy, out i
 	})
 
 	var problems []string
+	var writeErr error
+	report := func(format string, args ...any) {
+		if writeErr != nil {
+			return
+		}
+		_, writeErr = fmt.Fprintf(out, format, args...)
+	}
 
 	for _, k := range uncovered {
 		f := seen[k]
-		fmt.Fprintf(out, "ADVISORY   %s  %s  %s  in %s\n", k.id, k.pkg, f.Severity, strings.Join(sortedSet(projects[k]), ", "))
+		report("ADVISORY   %s  %s  %s  in %s\n", k.id, k.pkg, f.Severity, strings.Join(sortedSet(projects[k]), ", "))
 		if f.Title != "" {
-			fmt.Fprintf(out, "           %s\n", f.Title)
+			report("           %s\n", f.Title)
 		}
-		fmt.Fprintf(out, "           %s\n", f.URL)
+		report("           %s\n", f.URL)
 		problems = append(problems, fmt.Sprintf("%s affects %s and is not accepted in %s", k.id, k.pkg, policyFile))
 	}
 
 	for _, e := range expired {
-		fmt.Fprintf(out, "EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Package, e.Expires)
+		report("EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Package, e.Expires)
 		problems = append(problems, fmt.Sprintf("the decision to accept %s in %s expired on %s and needs rereading", e.ID, e.Package, e.Expires))
 	}
 
 	for _, e := range unused {
-		fmt.Fprintf(out, "STALE      %s  %s  matches nothing\n", e.ID, e.Package)
+		report("STALE      %s  %s  matches nothing\n", e.ID, e.Package)
 		problems = append(problems, fmt.Sprintf("%s in %s is accepted in %s but no lockfile carries it any more, so the entry is claiming to protect against something that is not there", e.ID, e.Package, policyFile))
 	}
 
@@ -524,13 +531,16 @@ func decideAt(findings []*finding, locked, unlocked []string, pol *policy, out i
 	// so a project without one is not covered by this gate and the summary must
 	// not read as though it were.
 	for _, project := range unlocked {
-		fmt.Fprintf(out, "UNCHECKED  %s has dependencies and no package-lock.json, so npm audit cannot speak for it\n", project)
+		report("UNCHECKED  %s has dependencies and no package-lock.json, so npm audit cannot speak for it\n", project)
 	}
 
 	covered := len(seen) - len(uncovered)
-	fmt.Fprintf(out, "\n%d lockfile(s) audited, %d not covered, %d advisories, %d accepted, %d unaccepted, %d expired, %d stale\n",
+	report("\n%d lockfile(s) audited, %d not covered, %d advisories, %d accepted, %d unaccepted, %d expired, %d stale\n",
 		len(locked), len(unlocked), len(seen), covered, len(uncovered), len(expired), len(unused))
 
+	if writeErr != nil {
+		return fmt.Errorf("write the npm audit report: %w", writeErr)
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "\n  "))
 	}
