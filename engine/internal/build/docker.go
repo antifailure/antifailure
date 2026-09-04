@@ -303,27 +303,13 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 func (b *DockerBuilder) startFailure(err error, req Request) error {
 	raw := err.Error()
 	code := aferrors.AFBLD007
-	switch {
-	case cerrdefs.IsInvalidArgument(err),
-		cerrdefs.IsNotFound(err),
-		cerrdefs.IsUnauthorized(err),
-		cerrdefs.IsPermissionDenied(err),
-		cerrdefs.IsNotImplemented(err),
-		strings.Contains(raw, "Cannot locate specified Dockerfile"):
+	if cerrdefs.IsInvalidArgument(err) ||
+		cerrdefs.IsNotFound(err) ||
+		cerrdefs.IsUnauthorized(err) ||
+		cerrdefs.IsPermissionDenied(err) ||
+		cerrdefs.IsNotImplemented(err) ||
+		strings.Contains(raw, "Cannot locate specified Dockerfile") {
 		code = aferrors.AFBLD006
-	case cerrdefs.IsCanceled(err),
-		cerrdefs.IsDeadlineExceeded(err),
-		client.IsErrConnectionFailed(err),
-		cerrdefs.IsUnavailable(err),
-		cerrdefs.IsResourceExhausted(err),
-		cerrdefs.IsInternal(err),
-		cerrdefs.IsUnknown(err),
-		cerrdefs.IsConflict(err):
-		code = aferrors.AFBLD007
-	default:
-		// An unknown failure before the response stream opened may be
-		// temporary. It is safer to permit a retry than to call it permanent.
-		code = aferrors.AFBLD007
 	}
 
 	detail := b.redactor.String(raw)

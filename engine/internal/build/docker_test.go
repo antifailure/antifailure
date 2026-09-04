@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -192,9 +193,38 @@ func coded(t *testing.T, err error) *aferrors.Error {
 	return e
 }
 
+type refusedRoundTripper struct{}
+
+func (refusedRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, refusedConnectionError()
+}
+
+func refusedConnectionError() net.Error {
+	return &net.OpError{
+		Op: "dial", Net: "tcp", Err: errors.New("connection refused"),
+	}
+}
+
+func dockerConnectionFailure(t *testing.T) error {
+	t.Helper()
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost("http://docker.invalid"),
+		dockerclient.WithHTTPClient(&http.Client{Transport: refusedRoundTripper{}}),
+		dockerclient.WithVersion("1.48"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+
+	_, err = cli.Ping(context.Background())
+	require.True(t, dockerclient.IsErrConnectionFailed(err),
+		"the fixture must exercise Docker's typed connection failure")
+	return err
+}
+
 func TestStartFailure_ClassifiesEveryImmediateDockerFailure(t *testing.T) {
 	t.Parallel()
 	b := &DockerBuilder{redactor: redact.New()}
+	connectionFailure := dockerConnectionFailure(t)
 	cases := []struct {
 		name      string
 		err       error
@@ -248,7 +278,7 @@ func TestStartFailure_ClassifiesEveryImmediateDockerFailure(t *testing.T) {
 		},
 		{
 			name:      "connection failed",
-			err:       dockerclient.ErrorConnectionFailed("unix:///var/run/docker.sock"),
+			err:       connectionFailure,
 			wantCode:  aferrors.AFBLD007,
 			retryable: true,
 		},
