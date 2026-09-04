@@ -13,6 +13,7 @@ class Provider {
   keys = new Map<string, string>()
   posts: string[] = []
   loseResponse = false
+  staleSubscriptionList = false
   waitForPosts = 0
   postWaiters: (() => void)[] = []
   beforeCustomer: ((id: string) => Promise<void>) | null = null
@@ -60,7 +61,7 @@ class Provider {
       return answer(session ?? { error: { message: 'missing' } }, session ? 200 : 404)
     }
     if (url.pathname === '/v1/subscriptions') {
-      return answer({ data: [...this.subscriptions.values()], has_more: false })
+      return answer({ data: this.staleSubscriptionList ? [] : [...this.subscriptions.values()], has_more: false })
     }
     if (url.pathname.startsWith('/v1/subscriptions/')) {
       const subscription = this.subscriptions.get(url.pathname.split('/').at(-1)!)
@@ -153,6 +154,15 @@ describe('a checkout is one purchase attempt', { skip: hasDatabase ? false : 'no
     assert.equal(new Set(provider.posts).size, 2)
   }))
 
+  it('a paused linked subscription cannot retire an attempt after a stale empty listing', () => fixture(async ({ checkout, provider, org }) => {
+    await checkout()
+    provider.subscriptions.set('sub_paused', { id: 'sub_paused', customer: `cus_${org.orgId}`, status: 'paused', items: { data: [] } })
+    provider.staleSubscriptionList = true
+    Object.assign([...provider.sessions.values()][0]!, { status: 'complete', url: null, subscription: 'sub_paused' })
+    const result = await checkout()
+    assert.deepEqual([errorCode(result.body), provider.posts.length], ['PRECONDITION_FAILED', 1])
+  }))
+
   it('a provider subscription with no local webhook refuses checkout', () => fixture(async ({ checkout, provider, org }) => {
     provider.subscriptions.set('sub_unreported', { id: 'sub_unreported', customer: `cus_${org.orgId}`, status: 'active' })
     const result = await checkout()
@@ -234,6 +244,11 @@ function clientWith(fetch: typeof globalThis.fetch) {
 }
 
 describe('provider state is verified before another purchase', () => {
+  it('a paused subscription still blocks another purchase because it can resume', async () => {
+    const client = clientWith(async () => new Response(JSON.stringify({ data: [{ id: 'sub_paused', customer: 'cus_test', status: 'paused' }], has_more: false })))
+    assert.equal(await client.hasBlockingSubscription('cus_test'), true)
+  })
+
   it('bounds the whole paginated lookup rather than only each request', async () => {
     const realNow = Date.now
     let time = 0

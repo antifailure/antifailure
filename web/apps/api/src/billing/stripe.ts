@@ -419,7 +419,8 @@ export class RealStripeClient implements StripeClient {
       if (idOf(body.customer) !== customerId) continue
       // Unknown states refuse a new purchase. This read authorizes a charge,
       // so a surprising provider state cannot be interpreted as no subscription.
-      if (!['canceled', 'incomplete_expired', 'paused'].includes(String(body.status))) return true
+      // Paused subscriptions can resume; they are not terminal purchases.
+      if (!['canceled', 'incomplete_expired'].includes(String(body.status))) return true
     }
     return false
   }

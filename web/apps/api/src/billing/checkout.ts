@@ -79,7 +79,7 @@ export async function checkoutOnce(
       if (previous.status === 'complete') {
         const subscription = previous.subscriptionId
           ? await billing.client.getSubscription(previous.subscriptionId) : null
-        if (subscription && subscription.customerId === input.customerId && subscription.id === previous.subscriptionId && ['canceled', 'incomplete_expired', 'paused'].includes(subscription.status)) {
+        if (subscription && subscription.customerId === input.customerId && subscription.id === previous.subscriptionId && ['canceled', 'incomplete_expired'].includes(subscription.status)) {
           replaceId = attempt.attempt_id
           continue
         }

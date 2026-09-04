@@ -14,7 +14,8 @@ parameters. Lost responses are recovered by paging through the customer's Stripe
 checkout sessions and matching the attempt metadata.
 
 An expired provider session permits a replacement. A completed session permits
-replacement only when its linked subscription is affirmatively ended. Missing
+replacement only when its linked subscription is affirmatively ended.
+Paused subscriptions can resume and do not authorize a second purchase. Missing
 webhooks do not permit a new purchase: the provider subscription collection is
 checked directly. Unknown or malformed states refuse rather than being treated
 as no subscription. A missing session or an unresolved attempt beyond 23 hours
@@ -36,3 +37,4 @@ Provider contracts:
 * https://docs.stripe.com/api/idempotent_requests
 * https://docs.stripe.com/api/checkout/sessions/list
 * https://docs.stripe.com/api/checkout/sessions/retrieve
+* https://docs.stripe.com/api/subscriptions/resume
