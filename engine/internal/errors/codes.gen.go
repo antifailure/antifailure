@@ -45,6 +45,12 @@ const (
 	// Dockerfile is {dockerfile} inside a build context rooted at the
 	// repository.
 	AFBLD005 Code = "AF-BLD-005"
+	// The Docker endpoint refused the build request for service {service}
+	// before opening a build log: {detail}
+	AFBLD006 Code = "AF-BLD-006"
+	// The build request for service {service} ended before a build log
+	// opened: {detail}
+	AFBLD007 Code = "AF-BLD-007"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -555,6 +561,24 @@ var catalog = map[Code]Entry{
 		NextStep:  "If the Dockerfile expects to be built from its own directory, which is what 'docker build {dir}' does, set build.context to {dir} for this service. Otherwise read the build log above; the first error line names the step that failed.",
 		Docs:      "reference/manifest",
 		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
+	AFBLD006: {
+		Code:      AFBLD006,
+		Area:      "BLD",
+		Message:   "The Docker endpoint refused the build request for service {service} before opening a build log: {detail}",
+		NextStep:  "Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
+	AFBLD007: {
+		Code:      AFBLD007,
+		Area:      "BLD",
+		Message:   "The build request for service {service} ended before a build log opened: {detail}",
+		NextStep:  "Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again.",
+		Docs:      "guides/build",
+		Retryable: true,
 		ExitCode:  ExitFailure,
 	},
 	AFBLD010: {

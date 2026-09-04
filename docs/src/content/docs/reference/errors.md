@@ -238,6 +238,30 @@ The build for service {service} failed after {duration}, and its Dockerfile is {
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
+### AF-BLD-006
+
+The Docker endpoint refused the build request for service {service} before opening a build log: {detail}
+
+**What to do.** Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/build](/docs/guides/build) |
+
+### AF-BLD-007
+
+The build request for service {service} ended before a build log opened: {detail}
+
+**What to do.** Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [guides/build](/docs/guides/build) |
+
 ### AF-BLD-010
 
 No build strategy could be detected for {service}.

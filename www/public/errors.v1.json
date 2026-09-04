@@ -190,6 +190,28 @@
       "planned": false
     },
     {
+      "code": "AF-BLD-006",
+      "area": "BLD",
+      "areaName": "Build",
+      "message": "The Docker endpoint refused the build request for service {service} before opening a build log: {detail}",
+      "resolution": "Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it.",
+      "docs": "https://antifailure.dev/docs/guides/build",
+      "retryable": false,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
+      "code": "AF-BLD-007",
+      "area": "BLD",
+      "areaName": "Build",
+      "message": "The build request for service {service} ended before a build log opened: {detail}",
+      "resolution": "Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again.",
+      "docs": "https://antifailure.dev/docs/guides/build",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-BLD-010",
       "area": "BLD",
       "areaName": "Build",

@@ -3,17 +3,23 @@ package build
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/image"
+	dockerclient "github.com/docker/docker/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/redact"
 )
 
 func requireBuilder(t *testing.T) *DockerBuilder {
@@ -178,6 +184,272 @@ func TestBuildFailure_NamesTheContextWhenTheDockerfileIsNotAtItsRoot(t *testing.
 			}
 		})
 	}
+}
+
+func coded(t *testing.T, err error) *aferrors.Error {
+	t.Helper()
+	var e *aferrors.Error
+	require.True(t, aferrors.As(err, &e))
+	return e
+}
+
+type refusedRoundTripper struct{}
+
+func (refusedRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, refusedConnectionError()
+}
+
+func refusedConnectionError() net.Error {
+	return &net.OpError{
+		Op: "dial", Net: "tcp", Err: errors.New("connection refused"),
+	}
+}
+
+func dockerConnectionFailure(t *testing.T) error {
+	t.Helper()
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost("http://docker.invalid"),
+		dockerclient.WithHTTPClient(&http.Client{Transport: refusedRoundTripper{}}),
+		dockerclient.WithVersion("1.48"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+
+	_, err = cli.Ping(context.Background())
+	require.True(t, dockerclient.IsErrConnectionFailed(err),
+		"the fixture must exercise Docker's typed connection failure")
+	return err
+}
+
+func TestStartFailure_ClassifiesEveryImmediateDockerFailure(t *testing.T) {
+	t.Parallel()
+	b := &DockerBuilder{redactor: redact.New()}
+	connectionFailure := dockerConnectionFailure(t)
+	cases := []struct {
+		name      string
+		err       error
+		wantCode  aferrors.Code
+		retryable bool
+		is        error
+	}{
+		{
+			name:     "invalid argument",
+			err:      cerrdefs.ErrInvalidArgument.WithMessage("the request is invalid"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "not found",
+			err:      cerrdefs.ErrNotFound.WithMessage("the endpoint was not found"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "unauthorized",
+			err:      cerrdefs.ErrUnauthenticated.WithMessage("the endpoint refused the credential"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "permission denied",
+			err:      cerrdefs.ErrPermissionDenied.WithMessage("the endpoint refused this operation"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "not implemented",
+			err:      cerrdefs.ErrNotImplemented.WithMessage("the endpoint does not implement builds"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "observed missing Dockerfile response",
+			err:      errors.New("Error response from daemon: Cannot locate specified Dockerfile: Dockerfile"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:      "cancelled",
+			err:       context.Canceled,
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+			is:        context.Canceled,
+		},
+		{
+			name:      "deadline exceeded",
+			err:       context.DeadlineExceeded,
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+			is:        context.DeadlineExceeded,
+		},
+		{
+			name:      "connection failed",
+			err:       connectionFailure,
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unavailable",
+			err:       cerrdefs.ErrUnavailable.WithMessage("the endpoint is unavailable"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "resource exhausted",
+			err:       cerrdefs.ErrResourceExhausted.WithMessage("the builder is at capacity"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "internal",
+			err:       cerrdefs.ErrInternal.WithMessage("the endpoint failed internally"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unknown",
+			err:       cerrdefs.ErrUnknown.WithMessage("the endpoint returned an unknown response"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "conflict",
+			err:       cerrdefs.ErrConflict.WithMessage("the builder is changing state"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unclassified",
+			err:       errors.New("the response stream did not open"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name: "permanent classification wins",
+			err: errors.Join(
+				cerrdefs.ErrInvalidArgument.WithMessage("the request is invalid"),
+				context.Canceled,
+			),
+			wantCode: aferrors.AFBLD006,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := b.startFailure(tc.err, Request{Service: "api"})
+			e := coded(t, got)
+			require.Equal(t, tc.wantCode, e.Code())
+			require.Equal(t, tc.retryable, e.Retryable())
+			require.Contains(t, e.NextStep(), "no build log exists")
+			require.NotContains(t, strings.ToLower(e.NextStep()), "read the build log")
+			if tc.is != nil {
+				require.ErrorIs(t, got, tc.is,
+					"sanitizing the cause must preserve cancellation identity")
+			}
+		})
+	}
+}
+
+func TestStartFailure_RedactsEveryExposedCopyOfTheCause(t *testing.T) {
+	t.Parallel()
+	const secret = "opaque-lilac-cabinet-94173"
+	r := redact.New()
+	require.True(t, r.Register(secret))
+	b := &DockerBuilder{redactor: r}
+
+	cases := []struct {
+		name string
+		err  error
+		code aferrors.Code
+	}{
+		{
+			name: "permanent refusal",
+			err: cerrdefs.ErrInvalidArgument.WithMessage(
+				"the invalid request carried " + secret,
+			),
+			code: aferrors.AFBLD006,
+		},
+		{
+			name: "temporary interruption",
+			err:  errors.New("the connection ended around " + secret),
+			code: aferrors.AFBLD007,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := b.startFailure(tc.err, Request{Service: "api"})
+			e := coded(t, got)
+			require.Equal(t, tc.code, e.Code())
+
+			cause := aferrors.Unwrap(e)
+			require.NotNil(t, cause)
+			surfaces := map[string]string{
+				"normal message":            e.Message(),
+				"full error and event text": e.Error(),
+				"verbose and JSON cause":    cause.Error(),
+			}
+			for name, rendered := range surfaces {
+				t.Run(name, func(t *testing.T) {
+					require.NotContains(t, rendered, secret, "%s exposed the original", name)
+				})
+			}
+
+			t.Run("cause cannot be unwrapped", func(t *testing.T) {
+				_, unwraps := cause.(interface{ Unwrap() error })
+				require.False(t, unwraps,
+					"the sanitized cause must not expose the original through Unwrap")
+			})
+		})
+	}
+}
+
+func TestDockerBuilder_AnImmediateHTTPRefusalHasNoBuildLog(t *testing.T) {
+	t.Parallel()
+	const detail = "the requested target stage does not exist"
+	requests := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"` + detail + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost(srv.URL),
+		dockerclient.WithHTTPClient(srv.Client()),
+		dockerclient.WithVersion("1.48"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+
+	b := &DockerBuilder{
+		cli: cli, clock: clock.New(), redactor: redact.New(), noCache: true,
+	}
+	res, err := b.Build(context.Background(), Request{
+		Service: "api",
+		Context: contextFor(t, map[string]string{
+			"Dockerfile": "FROM scratch\n",
+		}),
+		EnvID: "env-build-refused",
+	})
+	require.Error(t, err)
+	select {
+	case request := <-requests:
+		require.Equal(t, "POST /v1.48/build", request,
+			"Build must reach Docker's build endpoint for this to cover the live call site")
+	default:
+		t.Fatal("Build did not reach Docker's build endpoint")
+	}
+
+	e := coded(t, err)
+	t.Run("uses the immediate refusal code", func(t *testing.T) {
+		require.Equal(t, aferrors.AFBLD006, e.Code(),
+			"an error before the stream opens must not use AF-BLD-001")
+	})
+	t.Run("keeps useful endpoint detail", func(t *testing.T) {
+		require.Contains(t, e.Message(), detail,
+			"the endpoint's useful detail must print without verbose output")
+	})
+	t.Run("has no build log", func(t *testing.T) {
+		require.Empty(t, res.Log,
+			"Docker refused the request before opening the stream that carries a log")
+	})
 }
 
 func TestDockerBuilder_ReportsAnUnusableDockerfile(t *testing.T) {

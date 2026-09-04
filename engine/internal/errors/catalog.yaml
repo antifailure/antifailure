@@ -429,6 +429,20 @@ errors:
     docs: reference/manifest
     retryable: false
     exit_code: 1
+  - code: AF-BLD-006
+    area: BLD
+    message: "The Docker endpoint refused the build request for service {service} before opening a build log: {detail}"
+    next_step: "Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it."
+    docs: guides/build
+    retryable: false
+    exit_code: 1
+  - code: AF-BLD-007
+    area: BLD
+    message: "The build request for service {service} ended before a build log opened: {detail}"
+    next_step: "Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again."
+    docs: guides/build
+    retryable: true
+    exit_code: 1
   - code: AF-BLD-002
     area: BLD
     message: "The Dockerfile for {service} is not valid at line {line}: {detail}"
