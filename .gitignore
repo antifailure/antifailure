@@ -145,6 +145,7 @@ runner/artifacts/
 /gatecheck
 /installcheck
 /installsh
+/keycheck
 /ldcheck
 /licensecheck
 /licensegen

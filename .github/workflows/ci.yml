@@ -213,6 +213,22 @@ jobs:
         # tree that runs the script and a commit that does not.
         run: go run ./tools/execcheck .
 
+      - name: No YAML key is defined twice in one mapping
+        # examples/github-workflow.yml declared `seed` and `concurrency` twice
+        # each in its workflow_dispatch inputs. YAML keeps the last definition,
+        # so the first pair's descriptions were text nobody would ever see, in
+        # the file this product hands a new user as the worked example. Nothing
+        # failed: the workflow parsed, GitHub accepted it, and half the block
+        # was simply gone.
+        #
+        # The chart templates are rendered in three valid profiles rather than
+        # skipped, because they are Go template source that no YAML parser can
+        # read. `helm lint` was pointed at a chart whose service.yaml defined
+        # `type` twice and returned "0 chart(s) failed". Rendering is the only
+        # way anything looks inside them. Helm's source markers prove that the
+        # profiles reached every authored YAML template.
+        run: go run ./tools/keycheck .
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the

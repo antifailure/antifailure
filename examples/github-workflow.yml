@@ -88,23 +88,14 @@ on:
         description: Multiplier on production's rate. observed_load only.
         required: false
         default: ''
-      seed:
-        description: Makes two runs do the same thing. A number for load, free text for exploration.
-        required: false
-        default: ''
-      concurrency:
-        description: Ceiling on requests in flight. http_scenario only.
-        required: false
-        default: ''
       run_id:
         description: The control plane's identifier for this run. Leave it empty; the engine asks.
         required: false
         default: ''
       seed:
         description: >-
-          Replays the same schedule or the same wander. A whole number for
-          scenario and any string for explore, because that is what each
-          command's own --seed takes.
+          Makes load, scenario and explore repeat the same choices. Use a whole
+          number for load or scenario, and any string for explore.
         required: false
         default: ''
       concurrency:
