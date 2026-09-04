@@ -147,23 +147,23 @@ export function FeatureRow({
 }
 
 function HeroCopy({
-  eyebrow,
-  title,
   paragraphs,
 }: {
-  eyebrow: string;
-  title: string;
   paragraphs: string[];
 }) {
   return (
-    <>
-      <SectionLabel>{eyebrow}</SectionLabel>
-      <h1 className="mt-5 max-w-[520px] text-[44px] font-medium leading-[1.15] tracking-tighter text-black max-lg:text-[32px]">
-        {title}
-      </h1>
-      <div className="mt-8 max-w-[480px]">
-        {paragraphs.map((p) => (
-          <p key={p} className="mt-5 text-[17px] leading-7 text-gray-new-40 first:mt-0">
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="max-w-[520px] border-t border-black/12 pt-5">
+        {paragraphs.map((p, index) => (
+          <p
+            key={p}
+            className={cn(
+              "text-[16px] leading-7 tracking-extra-tight text-gray-new-40",
+              index === 0
+                ? "text-[19px] leading-[1.55] text-black"
+                : "mt-4 border-t border-black/[0.07] pt-4",
+            )}
+          >
             {p}
           </p>
         ))}
@@ -171,7 +171,7 @@ function HeroCopy({
       {/* The same pair as every other hero on the site, in the same order.
           This one offered only the invitation wall, so a solutions page pitched
           the product and then gave a visitor nothing they could do today. */}
-      <div className="mt-8 flex gap-x-5 max-sm:flex-col max-sm:gap-y-3 max-sm:[&_a]:w-full">
+      <div className="mt-8 flex flex-wrap gap-3 xl:mt-auto xl:pt-10 max-sm:flex-col max-sm:[&_a]:w-full">
         <Button href="/docs/getting-started/quickstart" theme="filled">
           Start the quickstart
         </Button>
@@ -179,13 +179,13 @@ function HeroCopy({
           Request hosted access
         </Button>
       </div>
-    </>
+    </div>
   );
 }
 
 function HeroVisual({ children }: { children: ReactNode }) {
   return (
-    <div className="max-h-[380px] min-h-0 overflow-hidden max-md:max-h-[300px] [&>*]:!min-h-0 [&>*]:max-h-full">
+    <div className="min-h-0 overflow-hidden rounded-[28px] [&>*]:!min-h-0 [&>*]:!max-h-none [&>*]:!rounded-[28px]">
       {children}
     </div>
   );
@@ -197,8 +197,6 @@ export function SplitHero({
   title,
   paragraphs,
   visual,
-  flip,
-  stack,
 }: {
   path: string;
   eyebrow: string;
@@ -209,29 +207,25 @@ export function SplitHero({
   stack?: boolean;
 }) {
   return (
-    <section className="pt-16 pb-8 safe-paddings max-lg:pt-12 max-md:pt-10 max-md:pb-6">
+    <section className="border-b border-black/12 pt-16 pb-20 safe-paddings max-lg:pt-12 max-lg:pb-16 max-md:pt-10 max-md:pb-12">
       <Container size="1600" className="page-measure">
         <PageJsonLd path={path} />
         <Breadcrumbs path={path} />
-        {stack ? (
-          <>
-            <div className="max-w-[640px]">
-              <HeroCopy eyebrow={eyebrow} title={title} paragraphs={paragraphs} />
-            </div>
-            <div className="mt-8 max-md:mt-6">
-              <HeroVisual>{visual}</HeroVisual>
-            </div>
-          </>
-        ) : (
-          <div className="grid grid-cols-12 items-start gap-x-16 gap-y-8 max-xl:grid-cols-1">
-            <div className={cn("col-span-5 max-xl:col-span-1", flip && "xl:col-start-8 xl:order-2")}>
-              <HeroCopy eyebrow={eyebrow} title={title} paragraphs={paragraphs} />
-            </div>
-            <div className={cn("col-span-7 max-xl:col-span-1", flip && "xl:col-start-1 xl:row-start-1")}>
-              <HeroVisual>{visual}</HeroVisual>
-            </div>
+        <div className="mt-8 max-md:mt-6">
+          <SectionLabel>{eyebrow}</SectionLabel>
+          <h1 className="mt-5 max-w-[1080px] text-balance text-[64px] font-normal leading-[1.02] tracking-tighter text-black max-xl:text-[56px] max-lg:text-[46px] max-md:text-[38px] max-sm:text-[34px]">
+            {title}
+          </h1>
+        </div>
+
+        <div className="mt-12 grid grid-cols-12 items-stretch gap-x-16 gap-y-10 max-xl:mt-10 max-xl:grid-cols-1 max-md:mt-8">
+          <div className="col-span-5 min-w-0 max-xl:order-2 max-xl:col-span-1">
+            <HeroCopy paragraphs={paragraphs} />
           </div>
-        )}
+          <div className="col-span-7 min-w-0 max-xl:order-1 max-xl:col-span-1">
+            <HeroVisual>{visual}</HeroVisual>
+          </div>
+        </div>
       </Container>
     </section>
   );

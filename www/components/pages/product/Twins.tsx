@@ -1,6 +1,6 @@
 import { PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { PTW01, PTW02, PTW03, PTW04, PTW05 } from "@/components/pages/figures/product";
+import { PTW01, PTW02, PTW03, PTW04, PTW05 } from "@/components/pages/figures/product-twins";
 import { MonoLabel, Node } from "@/components/home/visuals/primitives";
 
 /**

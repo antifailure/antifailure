@@ -1,6 +1,6 @@
 import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { PLD01, PLD02 } from "@/components/pages/figures/product";
+import { PLD01, PLD02 } from "@/components/pages/figures/product-load";
 
 const MANIFEST = `load:
   enabled: true

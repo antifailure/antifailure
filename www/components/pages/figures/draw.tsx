@@ -262,3 +262,94 @@ export function BypassSchematic() {
     </DrawWell>
   );
 }
+
+export function CycleSchematic({ nodes }: { nodes: string[] }) {
+  const steps = nodes.slice(0, 4);
+  const positions = [
+    { x: 210, y: 42 },
+    { x: 332, y: 140 },
+    { x: 210, y: 238 },
+    { x: 88, y: 140 },
+  ];
+
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <circle cx="210" cy="140" r="82" fill="rgba(51,191,0,0.035)" stroke="rgba(0,0,0,0.12)" />
+        <path
+          d="M210 58 C278 58 316 90 326 126 M326 154 C316 194 278 222 225 224 M195 224 C142 222 104 194 94 154 M94 126 C104 90 142 58 196 58"
+          fill="none"
+          stroke="rgba(0,0,0,0.34)"
+          strokeDasharray="3 4"
+        />
+        {steps.map((node, index) => {
+          const point = positions[index];
+          return (
+            <g key={node}>
+              <circle cx={point.x} cy={point.y} r="18" fill="white" stroke={index === 3 ? "#33bf00" : "rgba(0,0,0,0.36)"} />
+              <circle cx={point.x} cy={point.y} r="4" fill={index === 3 ? "#285D49" : "rgba(0,0,0,0.58)"} />
+              <BoxedLabel x={point.x - labelWidth(node) / 2} y={point.y + (index === 0 ? -38 : index === 2 ? 24 : -8)} text={node} accent={index === 3} />
+            </g>
+          );
+        })}
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function GatewaySchematic() {
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <BoxedLabel x={34} y={38} text="checkout twin" accent />
+        <rect x="40" y="70" width="116" height="86" rx="2" fill="rgba(51,191,0,0.08)" stroke="#33bf00" />
+        <path d="M156 112 H202" stroke="rgba(0,0,0,0.38)" strokeDasharray="3 4" />
+        <rect x="202" y="76" width="72" height="72" rx="2" fill="#fff" stroke="rgba(0,0,0,0.42)" />
+        <BoxedLabel x={202 + 36 - labelWidth("egress gateway") / 2} y={158} text="egress gateway" />
+        <path d="M274 96 H348" stroke="#33bf00" />
+        <path d="M274 128 H348" stroke="#C43D3D" strokeDasharray="4 4" />
+        <circle cx="360" cy="96" r="14" fill="rgba(51,191,0,0.1)" stroke="#33bf00" />
+        <circle cx="360" cy="128" r="14" fill="rgba(196,61,61,0.09)" stroke="#C43D3D" />
+        <text x="291" y="90" fill="#285D49" fontSize="9" fontFamily={MONO}>
+          ledger
+        </text>
+        <text x="291" y="122" fill="#C43D3D" fontSize="9" fontFamily={MONO}>
+          live api
+        </text>
+        <path d="M354 122 L366 134 M366 122 L354 134" stroke="#C43D3D" strokeWidth="1.2" />
+      </svg>
+    </DrawWell>
+  );
+}
+
+export function IsoWorkers() {
+  const lanes = [
+    { label: "orders", y: 70, x2: 294, tone: "#33bf00" },
+    { label: "match", y: 116, x2: 258, tone: "#8A6A12" },
+    { label: "notify", y: 162, x2: 314, tone: "#33bf00" },
+  ];
+
+  return (
+    <DrawWell>
+      <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="h-auto w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+        <BoxedLabel x={30} y={24} text="queue replay" accent />
+        <BoxedLabel x={284} y={24} text="workers" />
+        {lanes.map((lane, index) => (
+          <g key={lane.label}>
+            <rect x="34" y={lane.y - 16} width="92" height="32" fill="#fff" stroke="rgba(0,0,0,0.36)" />
+            <text x="48" y={lane.y + 3} fill="rgba(0,0,0,0.72)" fontSize="10" fontFamily={MONO}>
+              {lane.label}
+            </text>
+            <line x1="126" y1={lane.y} x2={lane.x2} y2={lane.y} stroke={lane.tone} strokeWidth="1.4" />
+            <path d={`M${lane.x2 - 8} ${lane.y - 6} L${lane.x2} ${lane.y} L${lane.x2 - 8} ${lane.y + 6}`} fill="none" stroke={lane.tone} />
+            <path
+              d={`M${292 + index * 10} ${lane.y - 18} L350 ${lane.y - 18} L370 ${lane.y} L312 ${lane.y} Z`}
+              fill={index === 1 ? "rgba(138,106,18,0.08)" : "rgba(51,191,0,0.08)"}
+              stroke={index === 1 ? "#8A6A12" : "#33bf00"}
+            />
+          </g>
+        ))}
+      </svg>
+    </DrawWell>
+  );
+}
