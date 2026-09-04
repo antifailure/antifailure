@@ -390,7 +390,7 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
                         <Td>
                           <span className="block text-ink">{t.name}</span>
                           <span className="block text-[12px] text-dim">
-                            {t.kind === "cli" ? "terminal" : "engine token"}
+                            {t.kind === "cli" ? "terminal" : t.kind === "mcp" ? "MCP client" : t.kind === "oidc" ? "workflow identity" : "engine token"}
                           </span>
                         </Td>
                         <Td label="Prefix" mono>

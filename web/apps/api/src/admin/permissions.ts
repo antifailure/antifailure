@@ -113,10 +113,8 @@ export const ADMIN_PERMISSIONS = [
   // What arrives here from GitHub and from Stripe, and whether it was handled.
   'admin.webhooks.read',
 
-  // The MCP page, which reads no customer data at all. It is guarded because
-  // every route in this tree is guarded, not because what it returns is
-  // sensitive: it describes the engine's own tool surface and states that this
-  // control plane holds no MCP record.
+  // Hosted MCP registrations and credential metadata across organizations.
+  // Revocation remains a separate credential permission.
   'admin.mcp.read',
   // The product itself: twins, the runs on them, and the branches they belong
   // to. One read covers all three because they are one object seen from three
@@ -277,7 +275,7 @@ export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
     'See the GitHub App installations and the deliveries that arrived from GitHub and Stripe, ' +
     'including the ones that were never handled.',
   'admin.mcp.read':
-    'See what this control plane records about the MCP server, and the tools the engine serves.',
+    'See hosted MCP clients, credential status, organizations, approving users and last authentication times.',
   'admin.product.read':
     'See every production twin on the installation, the agent runs, load runs and pull request ' +
     'checks against them, and the branches holding them open.',
