@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ROLE_PERMISSIONS, may, permissionVerdict } from "./roles.ts";
+import { ROLE_PERMISSIONS, may, mayReadAnalytics } from "./roles.ts";
 
 /*
  * The invariants the lapsed-exits screen is built on.
@@ -53,39 +53,16 @@ test("an unknown or absent role is refused rather than defaulted", () => {
   assert.equal(may("superuser", "billing.manage"), false);
 });
 
-test("a permission that gates a whole screen never reads loading as refused", () => {
-  // The defect this exists for, in one line: an OWNER opened /plan and was
-  // told "your role cannot see this" about billing.manage, which owners are
-  // the only holders of. The page called may() before the session resolved,
-  // read undefined as "does not hold it", and rendered a refusal.
-  assert.equal(permissionVerdict("loading", undefined, "billing.manage"), "loading");
-  assert.equal(permissionVerdict("loading", "owner", "billing.manage"), "loading");
-  // Even a role that genuinely lacks it is still "loading" while loading. The
-  // session in hand at that moment is not the one the answer must come from.
-  assert.equal(permissionVerdict("loading", "viewer", "billing.manage"), "loading");
-});
-
-test("a session that failed to load is unavailable rather than refused", () => {
-  // Separate answers because they send the reader to different places. A
-  // permission error tells somebody to find whoever can change their role; an
-  // unreachable control plane tells them to retry. Rendering the first when
-  // the second is true is the more expensive mistake.
-  assert.equal(permissionVerdict("error", undefined, "billing.manage"), "unavailable");
-  assert.equal(permissionVerdict("error", "owner", "billing.manage"), "unavailable");
-  // Ready and roleless is signed out, or signed in with no organization.
-  // Neither says anything about this permission.
-  assert.equal(permissionVerdict("ready", null, "billing.manage"), "unavailable");
-  assert.equal(permissionVerdict("ready", "", "billing.manage"), "unavailable");
-});
-
-test("a resolved session still decides the permission, both ways", () => {
-  // The positive control. A verdict function that never returns "allowed"
-  // would pass both tests above and break every gated screen.
-  assert.equal(permissionVerdict("ready", "owner", "billing.manage"), "allowed");
-  assert.equal(permissionVerdict("ready", "admin", "billing.manage"), "refused");
-  assert.equal(permissionVerdict("ready", "member", "billing.manage"), "refused");
-  assert.equal(permissionVerdict("ready", "owner", "analytics.read"), "allowed");
-  assert.equal(permissionVerdict("ready", "member", "analytics.read"), "refused");
-  // An unknown role is refused rather than defaulted, same as may().
-  assert.equal(permissionVerdict("ready", "superuser", "billing.manage"), "refused");
+test("analytics needs both the operator organization and a permitted role", () => {
+  assert.deepEqual(
+    [
+      mayReadAnalytics({ analyticsOperator: true, role: "owner" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "admin" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "member" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "viewer" }),
+      mayReadAnalytics({ analyticsOperator: false, role: "owner" }),
+      mayReadAnalytics({ role: "owner" }),
+    ],
+    [true, true, false, false, false, false],
+  );
 });

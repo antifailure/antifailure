@@ -575,6 +575,22 @@ describe(
         assert.equal(errorCode(after.body), 'UNAUTHORIZED')
       })
 
+      it('an administrator who removes themself gets a signed out session answer', async () => {
+        const admin = await signInAs(h, org, 'admin', 'selfremove')
+        const [row] = await h.admin<{ github_login: string }[]>`
+          SELECT github_login FROM users WHERE id = ${admin.userId}`
+
+        const removed = await callProcedure(h, admin, 'members.remove', 'mutation', {
+          githubLogin: row!.github_login,
+        })
+        const refreshed = await h.fetch('/auth/session', { headers: { cookie: admin.cookie } })
+        const session = (await refreshed.json()) as { signedIn: boolean }
+        assert.deepEqual(
+          [data<{ removed: boolean }>(removed.body).removed, session.signedIn],
+          [true, false],
+        )
+      })
+
       it('the last owner cannot be removed or demoted', async () => {
         const [row] = await h.admin<{ github_login: string }[]>`
           SELECT github_login FROM users WHERE id = ${owner.userId}`

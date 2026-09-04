@@ -1,32 +1,30 @@
 # fixed
 
-The operator's analytics dashboard was in every customer's sidebar, and an
-owner could be told their role could not see the plan.
+The Plan page no longer refuses an owner because its shared browser session
+still holds the role they had before a promotion.
 
-Two defects with one shape: a screen decided what to show from a question it
-had not finished asking.
+The production ordering was exact. On 2026-09-03 an active session began at
+04:50:45 UTC. The membership changed to owner at 12:22:59 UTC. The shared layout
+correctly preserved its already ready session state across navigation. When the
+Plan page opened, `billing.get`, `subscriptions.current` and
+`subscriptions.invoices` each read the current owner role from the database and
+succeeded. The page then replaced those results with a refusal based on the old
+client role.
 
-**Analytics.** The page counts arrivals across the WHOLE installation, and its
-own docstring calls it the operator's dashboard. The console gated it on
-`analytics.read`, which owners and admins of every organization hold, because
-it describes a kind of reading rather than a right over the installation. So it
-appeared in every tenant's navigation, and clicking it produced a refusal
-written for somebody else. On an installation that had never set
-`AF_ANALYTICS_OPERATOR_ORG`, which is every installation by default, it refused
-the operator too, so the entry led nowhere for anybody.
+The Plan page now leaves access to those three server procedures. The shared
+session refreshes after a successful role change, GitHub membership sync or
+member removal, and when the window regains focus or a hidden tab becomes
+visible. Only the newest response wins when those refreshes overlap. The
+session response cannot be stored in a browser or intermediary cache. If a
+refresh fails, the live shell keeps the last good answer and says that its
+controls may be out of date, with a retry beside it.
 
-The session now reports whether this organization operates the installation,
-and the entry appears only then. A boolean rather than the slug, because
-naming the operator to a tenant is a fact about somebody else.
+The mobile shell also returns keyboard focus to the menu button after its
+drawer closes, rather than leaving focus on a control that no longer exists.
 
-**The plan page, and two others.** `may()` answers "does this role hold this
-permission", and a role that has not loaded is not a role that holds nothing.
-Three pages called it before the session resolved and rendered a REFUSAL, so an
-owner opening the plan page was told their role could not see it, about a
-permission owners are the only holders of. A refusal is the worst thing to show
-while waiting, because it is the one message somebody acts on rather than waits
-through: they go looking for whoever can change their role.
-
-`permissionVerdict` returns four answers instead of two, and separates a
-session that failed to load from a role that was refused, because those send
-the reader to different places.
+The operator analytics dashboard is also absent from customer navigation. Its
+page and navigation now share one check that requires both the operator
+organization marker and the `analytics.read` permission. Owners and admins of
+the operator organization can open it. Members, viewers, customer owners and
+installations with no operator configured cannot. The session reports only the
+boolean marker, never another organization's slug.

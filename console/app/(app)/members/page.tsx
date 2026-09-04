@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import { may } from "@/lib/roles";
@@ -492,6 +492,10 @@ function Members() {
   const state = useApi<Member[]>(() => query("members.list"), []);
   const csrf = session.data?.csrfToken ?? "";
   const mayManage = may(session.data?.role, "members.manage");
+  const reloadMembership = useCallback(() => {
+    state.reload();
+    session.reload();
+  }, [session.reload, state.reload]);
 
   const [removing, setRemoving] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
@@ -510,7 +514,7 @@ function Members() {
       <div className="space-y-6">
         <Card
           title="People"
-          actions={mayManage ? <SyncFromGitHub csrf={csrf} onSynced={state.reload} /> : null}
+          actions={mayManage ? <SyncFromGitHub csrf={csrf} onSynced={reloadMembership} /> : null}
         >
           <Loaded state={state} skeleton={<TableSkeleton rows={4} cols={5} />}>
             {(rows) => {
@@ -567,7 +571,7 @@ function Members() {
                           </Td>
                           <Td label="Role">
                             {mayManage ? (
-                              <RolePicker member={m} csrf={csrf} onChanged={state.reload} />
+                              <RolePicker member={m} csrf={csrf} onChanged={reloadMembership} />
                             ) : (
                               <Badge>{m.role}</Badge>
                             )}
@@ -615,7 +619,7 @@ function Members() {
           try {
             await mutate("members.remove", { githubLogin: m.github_login }, csrf);
             setRemoving(null);
-            state.reload();
+            reloadMembership();
           } catch (err) {
             setRemoved((r) => {
               const next = new Set(r);

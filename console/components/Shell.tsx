@@ -22,7 +22,7 @@ import {
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
-import { may } from "@/lib/roles";
+import { may, mayReadAnalytics } from "@/lib/roles";
 import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
 
 /**
@@ -75,10 +75,9 @@ const NAV = [
  * variable unset, so did the operator. A navigation entry that always leads to
  * a refusal is worse than no entry.
  *
- * It is not gated on analytics.read. That permission is held by owners and
- * admins of every organization, because it describes a kind of reading rather
- * than a right over this installation. The session's `analyticsOperator` is
- * the only field that answers the question the menu is actually asking.
+ * `analyticsOperator` identifies the right organization, then analytics.read
+ * keeps members and viewers of that organization out. The same helper asks
+ * both questions here and on the page.
  */
 const OPERATOR_NAV = [
   { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
@@ -339,7 +338,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const session = useSessionContext();
   // Appended rather than merged into NAV, so the operator's one extra entry
   // sits at the end and the order every customer sees never moves.
-  const items = session.data?.analyticsOperator ? [...NAV, ...OPERATOR_NAV] : NAV;
+  const items = mayReadAnalytics(session.data) ? [...NAV, ...OPERATOR_NAV] : NAV;
   return (
     <ul className="space-y-0.5">
       {items.map(({ href, label, Icon }) => {
@@ -380,14 +379,36 @@ function Who({ session }: { session: Session }) {
   );
 }
 
+function SessionRefreshNotice({ page = false }: { page?: boolean }) {
+  const session = useSessionContext();
+  if (!session.refreshError) return null;
+  const notice = (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-[rgba(138,90,0,0.12)] px-4 py-3"
+    >
+      <p className="text-[12.5px] leading-5 text-ink">
+        Could not refresh your session. Controls may be out of date.
+      </p>
+      <Button onClick={session.reload}>Try again</Button>
+    </div>
+  );
+  return page ? (
+    <div className="mx-auto w-full max-w-[1120px] px-5 pt-5 sm:px-8 lg:px-10">
+      {notice}
+    </div>
+  ) : notice;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const session = useSessionContext();
   const pathname = usePathname();
   const [menu, setMenu] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
   const closer = useRef<HTMLButtonElement>(null);
 
-  // Escape closes the drawer, and while it is open the page behind it does not
-  // scroll. Both are the parts of a mobile menu that usually get skipped.
+  // Escape closes the drawer, the page behind it does not scroll, and focus
+  // returns to the control that opened it. All three belong to one interaction.
   useEffect(() => {
     if (!menu) return;
     const onKey = (e: KeyboardEvent) => {
@@ -400,6 +421,7 @@ export function Shell({ children }: { children: ReactNode }) {
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
+      opener.current?.focus();
     };
   }, [menu]);
 
@@ -450,6 +472,11 @@ export function Shell({ children }: { children: ReactNode }) {
           you leave rather than what you bought: take a copy of everything,
           sign a session out, delete the organization, and close your account.
         </Lede>
+        {session.refreshError ? (
+          <div className="mt-5">
+            <SessionRefreshNotice />
+          </div>
+        ) : null}
         <div className="mt-6 space-y-3">
           {mayBill ? (
             <LinkButton href="/plan" full>
@@ -530,7 +557,10 @@ export function Shell({ children }: { children: ReactNode }) {
             </span>
           </div>
         </header>
-        <main>{children}</main>
+        <main>
+          <SessionRefreshNotice page />
+          {children}
+        </main>
       </div>
     );
   }
@@ -560,6 +590,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </span>
         </Link>
         <button
+          ref={opener}
           type="button"
           onClick={() => setMenu(true)}
           aria-expanded={menu}
@@ -605,7 +636,10 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      <main className="min-w-0">{children}</main>
+      <main className="min-w-0">
+        <SessionRefreshNotice page />
+        {children}
+      </main>
     </div>
   );
 }

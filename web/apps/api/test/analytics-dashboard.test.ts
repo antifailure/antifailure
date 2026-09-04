@@ -56,6 +56,12 @@ describe(
       assert.equal(body.result.data.provenance.recording, true)
     })
 
+    it('lets an admin of the operator organization read it', async () => {
+      const session = await signInAs(h, operator, 'admin')
+      const res = await callProcedure(h, session, 'analytics.overview', 'query', { days: 28 })
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+    })
+
     it('refuses the OWNER of another organization, who holds every permission in their own', async () => {
       // The case the permission matrix cannot see, and the reason this file
       // exists. A permission check alone answers yes here.
@@ -79,8 +85,15 @@ describe(
       assert.equal(errorCode(res.body), 'FORBIDDEN')
     })
 
+    it('refuses a viewer of the operator organization, who lacks the permission', async () => {
+      const session = await signInAs(h, operator, 'viewer')
+      const res = await callProcedure(h, session, 'analytics.overview', 'query', { days: 28 })
+      assert.equal(errorCode(res.body), 'FORBIDDEN')
+    })
+
     it('tells the console whether THIS organization operates the installation', async () => {
-      // The field the navigation menu reads, and the defect it ends.
+      // One of the two fields the shared console helper reads. The other is
+      // role, because only owners and admins hold analytics.read.
       //
       // /analytics sat in every customer's sidebar because the console gated
       // it on analytics.read, which owners and admins of EVERY organization
@@ -96,7 +109,8 @@ describe(
 
       // The positive control above is what makes this line mean something: an
       // owner of another organization holds the same permission and the same
-      // role, and differs only in the one thing the field reports.
+      // role, and differs only in the installation relationship this field
+      // reports.
       const asCustomer = await signInAs(h, customer, 'owner')
       const theirs = await h.fetch('/auth/session', { headers: { cookie: asCustomer.cookie } })
       const theirsBody = (await theirs.json()) as { role: string; analyticsOperator?: boolean }

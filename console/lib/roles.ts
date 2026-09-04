@@ -51,36 +51,15 @@ export function may(role: string | null | undefined, permission: string): boolea
 }
 
 /**
- * What a screen should render when a permission decides the whole screen.
+ * Whether the installation analytics link belongs in this session.
  *
- * WHY THIS IS NOT `may()` WITH AN `if`. `may()` answers one question, "does
- * this role hold this permission", and a role that has not arrived yet is not
- * a role that holds nothing: it is not known. Three pages asked `may()` before
- * the session resolved and rendered a REFUSAL, so an owner loading /plan was
- * told "your role cannot see this" about a permission owners are the only
- * holders of. The screenshot of that is what this function exists to prevent.
- *
- * A refusal is also the worst possible thing to render while loading, because
- * it is the one message a person acts on rather than waits through. Somebody
- * reads it and goes looking for who can change their role.
- *
- * The four answers are deliberately four. "unavailable" is separate from
- * "refused" because a session that failed to load says nothing about the role,
- * and a page that shows a permission error when the control plane is
- * unreachable sends the reader after the wrong problem.
+ * Both facts matter. `analyticsOperator` identifies the one organization that
+ * operates this installation, while `analytics.read` keeps members and viewers
+ * of that organization out. The server enforces both again. This helper keeps
+ * the page and both navigation rails from drifting into different questions.
  */
-export type PermissionVerdict = "loading" | "unavailable" | "allowed" | "refused";
-
-export function permissionVerdict(
-  status: "loading" | "ready" | "error",
-  role: string | null | undefined,
-  permission: string,
-): PermissionVerdict {
-  if (status === "loading") return "loading";
-  if (status === "error") return "unavailable";
-  // Ready, and still no role: signed out, or signed in with no organization.
-  // Neither is a refusal about this permission, and both are states the shell
-  // already renders around this page.
-  if (!role) return "unavailable";
-  return may(role, permission) ? "allowed" : "refused";
+export function mayReadAnalytics(
+  session: { analyticsOperator?: boolean; role?: string | null } | null | undefined,
+): boolean {
+  return session?.analyticsOperator === true && may(session.role, "analytics.read");
 }

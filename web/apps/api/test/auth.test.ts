@@ -12,7 +12,9 @@ import {
   ABSOLUTE_LIFETIME_MS, IDLE_TIMEOUT_MS, hashToken, issueSession, resolveSession,
   sessionCookie, readCookie, csrfTokenFor, csrfMatches, sweepSessions,
 } from '../src/auth/session.ts'
-import { safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
+import {
+  safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError, type SyncReport,
+} from '../src/auth/signin.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { GitHubError } from '../src/auth/github.ts'
@@ -122,6 +124,18 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
     assert.equal(body.signedIn, true)
     assert.equal(body.orgId, org.orgId)
     assert.equal(body.role, 'member')
+  })
+
+  it('does not let a browser cache a signed in or signed out session', async () => {
+    const signedIn = await signInAs(h, org, 'member', 'uncached')
+    const [withSession, withoutSession] = await Promise.all([
+      h.fetch('/auth/session', { headers: { cookie: signedIn.cookie } }),
+      h.fetch('/auth/session'),
+    ])
+    assert.deepEqual(
+      [withSession.headers.get('cache-control'), withoutSession.headers.get('cache-control')],
+      ['no-store', 'no-store'],
+    )
   })
 
   it('signs in behind a chain of proxies, where the forwarded header is a list', async () => {
@@ -810,6 +824,42 @@ describe('sessions', { skip: hasDatabase ? false : 'no Postgres' }, () => {
     }
   })
 
+  it('billing reads a promotion made after the browser cached its session', async () => {
+    // This is the production ordering. The browser had a ready member session
+    // before the role changed, then the shared layout kept that answer while
+    // the Plan page mounted. Every billing procedure read the new owner role
+    // from the database and succeeded. A client gate over the older answer was
+    // the only refusal in the path.
+    const owner = await signInAs(h, org, 'owner', 'promoter')
+    const promoted = await signInAs(h, org, 'member', 'promoted')
+    const [person] = await h.admin<{ github_login: string }[]>`
+      SELECT github_login FROM users WHERE id = ${promoted.userId}`
+
+    const cached = await h.fetch('/auth/session', { headers: { cookie: promoted.cookie } })
+    const cachedSession = (await cached.json()) as { role: string }
+    const changed = await callProcedure(h, owner, 'members.setRole', 'mutation', {
+      githubLogin: person!.github_login,
+      role: 'owner',
+    })
+    const procedureStatuses: number[] = []
+    for (const [path, input] of [
+      ['billing.get', {}],
+      ['subscriptions.current', {}],
+      ['subscriptions.invoices', { limit: 20 }],
+    ] as const) {
+      const response = await callProcedure(h, promoted, path, 'query', input)
+      procedureStatuses.push(response.status)
+    }
+
+    const refreshed = await h.fetch('/auth/session', { headers: { cookie: promoted.cookie } })
+    const refreshedSession = (await refreshed.json()) as { role: string }
+    assert.deepEqual(
+      [cachedSession.role, changed.status, ...procedureStatuses, refreshedSession.role],
+      ['member', 200, 200, 200, 200, 'owner'],
+      JSON.stringify(changed.body),
+    )
+  })
+
   // -------------------------------------------------------------------------
   // The sweeper, and the two clocks it has to satisfy at once.
   // -------------------------------------------------------------------------
@@ -1158,6 +1208,53 @@ describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgr
       (m) => m.github_login,
     )
     assert.ok(!logins2.includes(arrives.login), 'a member GitHub no longer reports is still listed')
+  })
+
+  it('a sync that removes its caller makes the next session read signed out', async () => {
+    const ownOrg = await seedOrg(h.admin, 'syncself')
+    try {
+      await installFor(ownOrg.orgId, ownOrg.slug)
+      await signInAs(h, ownOrg, 'owner', 'staysowner')
+      const actor = await signInAs(h, ownOrg, 'admin', 'syncedout')
+      const upstream = await signInAs(h, ownOrg, 'member', 'upstream')
+      const [person] = await h.admin<{ github_login: string }[]>`
+        SELECT github_login FROM users WHERE id = ${actor.userId}`
+      const [kept] = await h.admin<{
+        github_id: string
+        github_login: string
+        email: string
+        name: string | null
+        avatar_url: string | null
+      }[]>`
+        SELECT github_id, github_login, email, name, avatar_url
+        FROM users WHERE id = ${upstream.userId}`
+      await h.admin`
+        UPDATE members SET source = 'github'
+        WHERE org_id = ${ownOrg.orgId} AND user_id = ${actor.userId}`
+
+      h.github.setMembers(ownOrg.slug, [{
+        user: {
+          id: Number(kept!.github_id),
+          login: kept!.github_login,
+          email: kept!.email,
+          name: kept!.name,
+          avatarUrl: kept!.avatar_url,
+        },
+        role: 'member',
+      }])
+      const result = await callProcedure(h, actor, 'members.sync', 'mutation', {})
+      const report = (result.body as { result: { data: SyncReport } }).result.data
+
+      const refreshed = await h.fetch('/auth/session', { headers: { cookie: actor.cookie } })
+      const session = (await refreshed.json()) as { signedIn: boolean }
+      assert.deepEqual(
+        [result.status, report.removed.includes(person!.github_login), session.signedIn],
+        [200, true, false],
+        JSON.stringify(result.body),
+      )
+    } finally {
+      await dropOrg(h.admin, ownOrg.orgId)
+    }
   })
 
   it('an empty answer from GitHub is a refusal with a reason, not a 500', async () => {
