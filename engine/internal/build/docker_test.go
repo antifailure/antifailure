@@ -3,17 +3,22 @@ package build
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/image"
+	dockerclient "github.com/docker/docker/client"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/redact"
 )
 
 func requireBuilder(t *testing.T) *DockerBuilder {
@@ -180,37 +185,6 @@ func TestBuildFailure_NamesTheContextWhenTheDockerfileIsNotAtItsRoot(t *testing.
 	}
 }
 
-// A build the daemon refused outright and a build that ran and failed are two
-// different failures, and until this they returned the same code and the same
-// instruction. "Read the build log above" is true of the second and false of
-// the first: nothing ran, so nothing was written, and the reader is sent to
-// look for output that does not exist while the daemon's own sentence, which
-// is the whole diagnosis, sits under -v where they will not see it.
-//
-// Asserted on the next step rather than on the code, because the code is only
-// the mechanism. What was wrong was the sentence a stuck user reads.
-func TestStartAndBuildFailures_OnlyTheOneWithALogSendsTheReaderToIt(t *testing.T) {
-	t.Parallel()
-	req := Request{Service: "api", DockerfilePath: "Dockerfile"}
-	daemon := errors.New("Error response from daemon: Cannot locate specified " +
-		"Dockerfile: deploy/docker/control-plane.Dockerfile")
-
-	started := coded(t, buildFailure(daemon, req, "12s"))
-	require.Equal(t, aferrors.AFBLD001, started.Code())
-	require.Contains(t, started.NextStep(), "build log above",
-		"this build ran, so there is a log and the reader should read it")
-
-	never := coded(t, startFailure(daemon, req))
-	require.Equal(t, aferrors.AFBLD006, never.Code())
-	require.NotContains(t, never.NextStep(), "build log above",
-		"nothing ran, so there is no log; naming one is the dead end this closes")
-	require.Contains(t, never.Message(), "Cannot locate specified Dockerfile",
-		"the daemon's sentence is the only account of the failure, so it is in "+
-			"the message, which prints without -v, and not only in the cause, "+
-			"which does not")
-	require.Contains(t, never.Message(), "api", "the message names the service")
-}
-
 func coded(t *testing.T, err error) *aferrors.Error {
 	t.Helper()
 	var e *aferrors.Error
@@ -218,61 +192,234 @@ func coded(t *testing.T, err error) *aferrors.Error {
 	return e
 }
 
-// The end to end form of the case above, against a real daemon.
-//
-// On the legacy builder a Dockerfile the context does not carry is refused by
-// the daemon before the build begins, which is the failure reported from
-// 'af up': the call returns an error, no stream is opened, and Result.Log
-// stays empty. Forced onto that builder rather than left to the daemon's
-// preference, because BuildKit reports the same input through the stream
-// instead, where a log genuinely exists and AF-BLD-001 is honest. Which of the
-// two a machine takes is what this is separating, so it cannot be left to the
-// machine.
-func TestDockerBuilder_ARefusedBuildCarriesTheDaemonsReasonAndNoLog(t *testing.T) {
-	b := requireLegacyBuilder(t)
-	c := contextFor(t, map[string]string{
-		"Dockerfile": "FROM alpine:3.20\nCMD [\"true\"]\n",
-	})
+func TestStartFailure_ClassifiesEveryImmediateDockerFailure(t *testing.T) {
+	t.Parallel()
+	b := &DockerBuilder{redactor: redact.New()}
+	cases := []struct {
+		name      string
+		err       error
+		wantCode  aferrors.Code
+		retryable bool
+		is        error
+	}{
+		{
+			name:     "invalid argument",
+			err:      cerrdefs.ErrInvalidArgument.WithMessage("the request is invalid"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "not found",
+			err:      cerrdefs.ErrNotFound.WithMessage("the endpoint was not found"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "unauthorized",
+			err:      cerrdefs.ErrUnauthenticated.WithMessage("the endpoint refused the credential"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "permission denied",
+			err:      cerrdefs.ErrPermissionDenied.WithMessage("the endpoint refused this operation"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "not implemented",
+			err:      cerrdefs.ErrNotImplemented.WithMessage("the endpoint does not implement builds"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:     "observed missing Dockerfile response",
+			err:      errors.New("Error response from daemon: Cannot locate specified Dockerfile: Dockerfile"),
+			wantCode: aferrors.AFBLD006,
+		},
+		{
+			name:      "cancelled",
+			err:       context.Canceled,
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+			is:        context.Canceled,
+		},
+		{
+			name:      "deadline exceeded",
+			err:       context.DeadlineExceeded,
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+			is:        context.DeadlineExceeded,
+		},
+		{
+			name:      "connection failed",
+			err:       dockerclient.ErrorConnectionFailed("unix:///var/run/docker.sock"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unavailable",
+			err:       cerrdefs.ErrUnavailable.WithMessage("the endpoint is unavailable"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "resource exhausted",
+			err:       cerrdefs.ErrResourceExhausted.WithMessage("the builder is at capacity"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "internal",
+			err:       cerrdefs.ErrInternal.WithMessage("the endpoint failed internally"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unknown",
+			err:       cerrdefs.ErrUnknown.WithMessage("the endpoint returned an unknown response"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "conflict",
+			err:       cerrdefs.ErrConflict.WithMessage("the builder is changing state"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name:      "unclassified",
+			err:       errors.New("the response stream did not open"),
+			wantCode:  aferrors.AFBLD007,
+			retryable: true,
+		},
+		{
+			name: "permanent classification wins",
+			err: errors.Join(
+				cerrdefs.ErrInvalidArgument.WithMessage("the request is invalid"),
+				context.Canceled,
+			),
+			wantCode: aferrors.AFBLD006,
+		},
+	}
 
-	res, err := buildAndClean(t, b, Request{
-		Service: "api", Context: c, EnvID: "env-build-13",
-		DockerfilePath: "deploy/docker/control-plane.Dockerfile",
-	})
-	require.Error(t, err)
-
-	e := coded(t, err)
-	require.Equal(t, aferrors.AFBLD006, e.Code())
-	require.Empty(t, res.Log,
-		"nothing ran, which is exactly why the reader cannot be sent to a log")
-	require.Contains(t, e.Message(), "Cannot locate specified Dockerfile",
-		"the daemon named the file it could not find, and that is the diagnosis")
-	require.NotContains(t, e.NextStep(), "build log above")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := b.startFailure(tc.err, Request{Service: "api"})
+			e := coded(t, got)
+			require.Equal(t, tc.wantCode, e.Code())
+			require.Equal(t, tc.retryable, e.Retryable())
+			require.Contains(t, e.NextStep(), "no build log exists")
+			require.NotContains(t, strings.ToLower(e.NextStep()), "read the build log")
+			if tc.is != nil {
+				require.ErrorIs(t, got, tc.is,
+					"sanitizing the cause must preserve cancellation identity")
+			}
+		})
+	}
 }
 
-// requireLegacyBuilder is requireBuilder against the pre BuildKit builder.
-// DOCKER_BUILDKIT=0 is the documented escape hatch and wantsBuildKit reads it
-// through the injected Getenv, so nothing in the process environment changes.
-func requireLegacyBuilder(t *testing.T) *DockerBuilder {
-	t.Helper()
-	if os.Getenv("AF_SKIP_DOCKER") != "" {
-		t.Skip("skipped: AF_SKIP_DOCKER is set")
+func TestStartFailure_RedactsEveryExposedCopyOfTheCause(t *testing.T) {
+	t.Parallel()
+	const secret = "opaque-lilac-cabinet-94173"
+	r := redact.New()
+	require.True(t, r.Register(secret))
+	b := &DockerBuilder{redactor: r}
+
+	cases := []struct {
+		name string
+		err  error
+		code aferrors.Code
+	}{
+		{
+			name: "permanent refusal",
+			err: cerrdefs.ErrInvalidArgument.WithMessage(
+				"the invalid request carried " + secret,
+			),
+			code: aferrors.AFBLD006,
+		},
+		{
+			name: "temporary interruption",
+			err:  errors.New("the connection ended around " + secret),
+			code: aferrors.AFBLD007,
+		},
 	}
-	b, err := NewDockerBuilder(DockerOptions{
-		Clock:  clock.New(),
-		Getenv: func(string) string { return "0" },
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := b.startFailure(tc.err, Request{Service: "api"})
+			e := coded(t, got)
+			require.Equal(t, tc.code, e.Code())
+
+			cause := aferrors.Unwrap(e)
+			require.NotNil(t, cause)
+			surfaces := map[string]string{
+				"normal message":            e.Message(),
+				"full error and event text": e.Error(),
+				"verbose and JSON cause":    cause.Error(),
+			}
+			for name, rendered := range surfaces {
+				t.Run(name, func(t *testing.T) {
+					require.NotContains(t, rendered, secret, "%s exposed the original", name)
+				})
+			}
+
+			t.Run("cause cannot be unwrapped", func(t *testing.T) {
+				_, unwraps := cause.(interface{ Unwrap() error })
+				require.False(t, unwraps,
+					"the sanitized cause must not expose the original through Unwrap")
+			})
+		})
+	}
+}
+
+func TestDockerBuilder_AnImmediateHTTPRefusalHasNoBuildLog(t *testing.T) {
+	t.Parallel()
+	const detail = "the requested target stage does not exist"
+	requests := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"` + detail + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost(srv.URL),
+		dockerclient.WithHTTPClient(srv.Client()),
+		dockerclient.WithVersion("1.48"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cli.Close() })
+
+	b := &DockerBuilder{
+		cli: cli, clock: clock.New(), redactor: redact.New(), noCache: true,
+	}
+	res, err := b.Build(context.Background(), Request{
+		Service: "api",
+		Context: contextFor(t, map[string]string{
+			"Dockerfile": "FROM scratch\n",
+		}),
+		EnvID: "env-build-refused",
 	})
-	if err != nil {
-		t.Skipf("skipped: no Docker daemon is reachable: %v", err)
+	require.Error(t, err)
+	select {
+	case request := <-requests:
+		require.Equal(t, "POST /v1.48/build", request,
+			"Build must reach Docker's build endpoint for this to cover the live call site")
+	default:
+		t.Fatal("Build did not reach Docker's build endpoint")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, err := b.cli.Ping(ctx); err != nil {
-		_ = b.Close()
-		t.Skipf("skipped: the Docker daemon did not respond: %v", err)
-	}
-	require.False(t, b.buildKit, "DOCKER_BUILDKIT=0 selects the legacy builder")
-	t.Cleanup(func() { _ = b.Close() })
-	return b
+
+	e := coded(t, err)
+	t.Run("uses the immediate refusal code", func(t *testing.T) {
+		require.Equal(t, aferrors.AFBLD006, e.Code(),
+			"an error before the stream opens must not use AF-BLD-001")
+	})
+	t.Run("keeps useful endpoint detail", func(t *testing.T) {
+		require.Contains(t, e.Message(), detail,
+			"the endpoint's useful detail must print without verbose output")
+	})
+	t.Run("has no build log", func(t *testing.T) {
+		require.Empty(t, res.Log,
+			"Docker refused the request before opening the stream that carries a log")
+	})
 }
 
 func TestDockerBuilder_ReportsAnUnusableDockerfile(t *testing.T) {
