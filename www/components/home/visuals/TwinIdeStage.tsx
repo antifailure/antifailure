@@ -111,11 +111,11 @@ function MetricRow({
 function SafetyRing({ t, compact = false }: { t: number; compact?: boolean }) {
   const report = ease(span(t, 0.75, 0.96));
   const score = Math.round(72 - report * 44);
-  const size = compact ? "size-[108px]" : "size-[185px]";
+  const size = compact ? "size-[108px]" : "size-[164px]";
   const view = compact ? 120 : 200;
   const center = compact ? 60 : 100;
-  const radius = compact ? 45 : 76;
-  const stroke = compact ? 11 : 16;
+  const radius = compact ? 45 : 68;
+  const stroke = compact ? 11 : 14;
 
   return (
     <div className={cn("relative grid place-items-center", size)}>
@@ -134,12 +134,13 @@ function SafetyRing({ t, compact = false }: { t: number; compact?: boolean }) {
         />
       </svg>
       <div className="text-center">
-        <div className={cn("font-medium leading-none tracking-[-0.055em] text-black", compact ? "text-[30px]" : "text-[43px]")}>
-          {score}<span className={cn("text-black/42", compact ? "text-[14px]" : "text-[22px]")}>/100</span>
+        <div className={cn("font-medium leading-none tracking-[-0.055em] text-black", compact ? "text-[30px]" : "text-[39px]")}>
+          {score}<span className={cn("text-black/42", compact ? "text-[14px]" : "text-[20px]")}>/100</span>
         </div>
         <div
           className={cn(
-            "mx-auto mt-3 w-fit rounded-[7px] border px-3 py-1 text-[13px] font-medium tracking-tight",
+            "mx-auto w-fit rounded-[7px] border px-3 py-1 text-[13px] font-medium tracking-tight",
+            compact ? "mt-3" : "mt-2",
             report > 0.7 ? "border-[#bd584e]/24 bg-[#fff4f1] text-[#8f3f38]" : "border-[#668f5d]/22 bg-[#f3f8ef] text-[#3f7139]",
           )}
         >
@@ -156,13 +157,13 @@ function Timeline({ t, compact = false }: { t: number; compact?: boolean }) {
   const labels = compact ? ["PR", "Run", "Replay", "Report"] : ["Current release", "Candidate PR", "Checkout replay", "Report"];
 
   return (
-    <div className={compact ? "mt-7" : "mt-9"}>
+    <div className={compact ? "mt-7" : "mt-8"}>
       <div className={cn("flex items-center justify-between font-medium tracking-tight text-black/46", compact ? "text-[11px]" : "text-[14px]")}>
         {labels.map((label) => (
           <span key={label}>{label}</span>
         ))}
       </div>
-      <div className={cn("relative", compact ? "mt-4 h-8" : "mt-5 h-14")}>
+      <div className={cn("relative", compact ? "mt-4 h-8" : "mt-4 h-11")}>
         <div className={cn("absolute rounded-full bg-black/10", compact ? "inset-x-3 top-3 h-1" : "left-8 right-8 top-5 h-1")} />
         <div
           className={cn("absolute rounded-full bg-[#668f5d]", compact ? "left-3 top-3 h-1" : "left-8 top-5 h-1")}
