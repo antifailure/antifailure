@@ -5,6 +5,8 @@ import postgres from 'postgres'
 import { createAdminPool, createPool, migrate, type AdminPool, type Pool } from '@antifailure/db'
 import { createServer } from '../src/server.ts'
 import { FakeClock } from '../src/clock.ts'
+import type { Clock } from '../src/clock.ts'
+import { createAnalytics } from '../src/analytics/record.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { RecordingMailer } from '../src/auth/mail.ts'
 import { issueSession } from '../src/auth/session.ts'
@@ -14,6 +16,7 @@ import { RealStripeClient } from '../src/billing/stripe.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
 import type { HostedRequiredPlan } from '../src/hosted.ts'
+import type { LeadNotifier } from '../src/enterprise/leads.ts'
 import type { RepositoryApi } from '../src/github/api.ts'
 import { ActionsKeys } from '../src/github/oidc.ts'
 import { MockPack, loadPack } from './mockpack.ts'
@@ -67,6 +70,9 @@ export interface ApiHarness {
   /** The Hono app itself, so a test can read the routes it actually serves
    *  rather than a list of the routes somebody remembered to write down. */
   app: ReturnType<typeof createServer>['app']
+  /** The same recorder the server's own producers use, so a test asserts
+   *  against what shipped rather than against a second one it built. */
+  analytics: ReturnType<typeof createServer>['analytics']
   admin: postgres.Sql
   pool: Pool
   /**
@@ -99,6 +105,13 @@ export interface StartApiOptions {
   secureCookies?: boolean
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
+  /** Whether a sign-in with no organization creates one. Undefined is off,
+   *  which is the server's default, so every suite written before self serve
+   *  signup existed keeps testing the behaviour it was written against. */
+  selfServeSignup?: boolean
+  /** Where a recorded lead is announced. Undefined means nowhere, which is the
+   *  state our own production is in and has its own suite. */
+  leadNotifier?: LeadNotifier | null
   /** The secret that seals provider keys. Undefined means none is configured,
    *  which is a state the server has to serve rather than crash in, and there
    *  are tests for that. */
@@ -117,6 +130,24 @@ export interface StartApiOptions {
    *  server takes no money, which is the self-hosted default and has its own
    *  tests. */
   stripe?: Billing | null
+  /**
+   * The analytics surrogate key. Undefined gives every suite a working one, so
+   * that a producer added without a test is still exercised by the suites that
+   * happen to run through it, and a producer that has stopped recording shows
+   * up as a changed count somewhere rather than as nothing at all.
+   *
+   * Pass null for the suites that check what a control plane with analytics
+   * switched off does.
+   */
+  analyticsSecret?: Buffer | null
+  /** The organization allowed to read the dashboard, by slug. Undefined means
+   *  none, which is the production default until an operator names one. */
+  analyticsOperatorOrgSlug?: string | null
+  /** Where the marketing site is served from. One value for both routes a
+   *  browser on it calls cross-origin: the analytics beacon and POST /v1/leads.
+   *  Defaults to a fixed test origin rather than none, so a suite that does not
+   *  care gets a working one. */
+  siteOrigin?: string | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
   /** Whether this installation's operator sets plans by hand. Undefined is the
@@ -147,6 +178,34 @@ export interface StartApiOptions {
   /** Drops a cached installation token. Undefined means no App is configured,
    *  which is when there is no cache for the webhook to drop from. */
   forgetInstallationToken?: (installationId: number) => void
+}
+
+/**
+ * The analytics key every suite gets unless it asks for none.
+ *
+ * A fixed value rather than a random one, so that a surrogate computed in one
+ * test is the same value in another and a test can assert on the specific
+ * property that matters: that the surrogate is NOT the organization id.
+ */
+export const TEST_ANALYTICS_SECRET = Buffer.from(
+  '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+  'hex',
+)
+
+/**
+ * A recorder for a suite that calls a producer directly rather than through the
+ * server.
+ *
+ * The real one, with the real key. Not a stub: a stub would let a producer that
+ * writes a payload the catalog refuses pass every one of these suites, which is
+ * the exact defect the closed schema exists to make impossible.
+ */
+export function testAnalytics(clock: Clock = new FakeClock()) {
+  return createAnalytics({
+    secret: TEST_ANALYTICS_SECRET,
+    clock,
+    counters: { events: { inc() {} }, rejections: { inc() {} } },
+  })
 }
 
 export async function startApi(options: StartApiOptions = {}): Promise<ApiHarness> {
@@ -190,11 +249,15 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
   const clock = new FakeClock()
   const github = new FakeGitHub(clock)
   const mailer = new RecordingMailer()
-  const { app } = createServer({
+  const { app, analytics } = createServer({
     pool,
     adminPool,
     github,
     clock,
+    analyticsSecret:
+      options.analyticsSecret === undefined ? TEST_ANALYTICS_SECRET : options.analyticsSecret,
+    analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
+    siteOrigin: options.siteOrigin ?? 'https://www.test',
     // Configured, so the two routes exist and the catalog test covers them.
     // Nothing is sent: the mailer keeps what it was given.
     emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
@@ -203,6 +266,8 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     secureCookies: options.secureCookies ?? false,
     appBaseUrl: 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
+    selfServeSignup: options.selfServeSignup ?? false,
+    leadNotifier: options.leadNotifier ?? null,
     sealingKey: options.sealingKey ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
@@ -231,6 +296,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
 
   return {
     app,
+    analytics,
     admin,
     pool,
     adminPool,

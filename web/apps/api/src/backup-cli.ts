@@ -21,6 +21,12 @@ import { userInfo } from 'node:os'
 import { backup, rehearse, restore } from './backup.ts'
 import { breakGlass, parseRole, BreakGlassRefused } from './breakglass.ts'
 import { createOrganization, BootstrapRefused } from './bootstrap-org.ts'
+import {
+  bootstrapOperator,
+  setOperatorPassword,
+  OperatorBootstrapRefused,
+} from './admin/bootstrap.ts'
+import { listLeads, handleLead, LeadsRefused } from './enterprise/leadstore.ts'
 
 function usage(): never {
   console.error(`af-control-plane-backup <command>
@@ -60,6 +66,35 @@ function usage(): never {
             break-glass to make yourself the owner. Naming --github-login the
             account you will later install the App on lets that installation
             adopt this organization instead of creating a second one.
+
+  bootstrap-operator --url <admin connection string>
+            --email <address> --name <display name> [--dry-run]
+            Creates the FIRST operator on a control plane that has none, as the
+            permanent root operator. Without it the operator portal cannot be
+            signed into by anybody: operators are created by an operator, which
+            is a closed loop on an empty table. The password is read from
+            AF_ADMIN_BOOTSTRAP_PASSWORD, or from standard input when that is
+            not set, and never from an argument, because an argument is visible
+            in ps and lands in shell history.
+
+  set-operator-password --url <admin connection string>
+            --email <address> [--dry-run]
+            Gives a password to an operator that already exists. The portal's
+            own create-operator route writes the row with no password and says
+            to set one out of band; this is the out of band. It creates
+            nothing, and it revokes every session that operator is holding,
+            because a reset that leaves the old sessions alive resets nothing.
+            The password is read the same way.
+
+  leads     --url <admin connection string> [--all] [--limit <n>]
+            [--handle <id> --as <operator address> [--note <what you did>]]
+            Lists the enterprise leads somebody left on the contact form,
+            unanswered and oldest first, because the person who has been waiting
+            longest is the one about to give up. --all includes the ones already
+            dealt with. --handle marks one answered so a list stays a queue
+            rather than becoming a pile, and --as names the operator account
+            claiming it, because a record that named nobody would be a record of
+            nothing.
 
   break-glass --url <admin connection string>
             --org <slug or id> --github-login <login>
@@ -294,6 +329,102 @@ try {
       break
     }
 
+    case 'bootstrap-operator': {
+      const result = await bootstrapOperator({
+        adminUrl: required(argv, 'url'),
+        email: required(argv, 'email'),
+        name: required(argv, 'name'),
+        password: await readPassword(),
+        dryRun: argv.includes('--dry-run'),
+        operator: operatorName(),
+      })
+      console.log(`operator      ${result.email}`)
+      console.log(`name          ${result.name}`)
+      console.log(`role          ${result.role} (root)`)
+      if (!result.applied) {
+        console.log('')
+        console.log('DRY RUN. Nothing was written and no audit entry exists.')
+        console.log('Run it again without --dry-run to apply it.')
+        break
+      }
+      console.log(`audit entry   ${result.auditSeq}`)
+      console.log('')
+      console.log('This is the permanent root operator. It cannot be deleted, demoted or')
+      console.log('suspended by anybody, including itself, which the database enforces with')
+      console.log('triggers rather than only in the application. Sign in at /console/admin.')
+      break
+    }
+
+    case 'set-operator-password': {
+      const result = await setOperatorPassword({
+        adminUrl: required(argv, 'url'),
+        email: required(argv, 'email'),
+        password: await readPassword(),
+        dryRun: argv.includes('--dry-run'),
+        operator: operatorName(),
+      })
+      console.log(`operator      ${result.email}`)
+      console.log(`role          ${result.role}`)
+      console.log(`had a password ${result.hadPassword ? 'yes' : 'no'}`)
+      if (!result.applied) {
+        console.log('')
+        console.log('DRY RUN. Nothing was written and no audit entry exists.')
+        break
+      }
+      console.log(`audit entry   ${result.auditSeq}`)
+      if (result.hadPassword) {
+        console.log('')
+        console.log('A WORKING CREDENTIAL WAS REPLACED. Every session that operator held has')
+        console.log('been revoked, so anybody signed in as them is signed out now.')
+      }
+      break
+    }
+
+    case 'leads': {
+      const handle = flag(argv, 'handle')
+      if (handle) {
+        const result = await handleLead({
+          adminUrl: required(argv, 'url'),
+          id: handle,
+          as: required(argv, 'as'),
+          note: flag(argv, 'note'),
+          operator: operatorName(),
+        })
+        console.log(`lead          ${result.id}`)
+        console.log(`from          ${result.name} <${result.email}> at ${result.company}`)
+        console.log(`marked        handled`)
+        break
+      }
+
+      const leads = await listLeads({
+        adminUrl: required(argv, 'url'),
+        includeHandled: argv.includes('--all'),
+        limit: flag(argv, 'limit') ? Number(flag(argv, 'limit')) : undefined,
+      })
+      if (leads.length === 0) {
+        // An empty answer is two different facts and they need different next
+        // steps: nobody has asked, or the form is broken and nobody would know.
+        console.log(
+          argv.includes('--all')
+            ? 'No leads at all. Nobody has used the contact form, or it is not reaching this database.'
+            : 'No unanswered leads. Run it again with --all to see the ones already dealt with.',
+        )
+        break
+      }
+      for (const lead of leads) {
+        console.log(`${lead.createdAt.toISOString()}  ${lead.id}`)
+        console.log(`  ${lead.name} <${lead.email}> at ${lead.company}`)
+        console.log(`  seats ${lead.seats ?? 'not stated'}, from ${lead.source}`)
+        if (lead.handledAt) {
+          console.log(`  handled ${lead.handledAt.toISOString()}${lead.handledNote ? `: ${lead.handledNote}` : ''}`)
+        }
+        for (const line of lead.message.split('\n')) console.log(`  | ${line}`)
+        console.log('')
+      }
+      console.log(`${leads.length} lead${leads.length === 1 ? '' : 's'}.`)
+      break
+    }
+
     default:
       usage()
   }
@@ -301,12 +432,47 @@ try {
   // An argument the operator can fix is exit 2, the same as a missing flag,
   // rather than 1. At three in the morning the difference between "you typed
   // the wrong thing" and "the database refused" is most of the diagnosis.
-  if (err instanceof BreakGlassRefused || err instanceof BootstrapRefused) {
+  if (
+    err instanceof BreakGlassRefused ||
+    err instanceof BootstrapRefused ||
+    err instanceof OperatorBootstrapRefused ||
+    err instanceof LeadsRefused
+  ) {
     console.error(err.message)
     process.exit(2)
   }
   console.error(err instanceof Error ? err.message : String(err))
   process.exit(1)
+}
+
+/**
+ * The password, from the environment or from standard input, and never from an
+ * argument.
+ *
+ * An argument is visible in `ps` to every user on the machine, lands in the
+ * shell history file, and on a CI runner is printed by any step that echoes its
+ * own invocation. There is deliberately no --password flag to be tempted by.
+ *
+ * Standard input is read whole rather than a line at a time, and exactly one
+ * trailing newline is stripped, because `echo` adds one and a password that
+ * silently ends in a newline is one nobody can ever retype. Anything else that
+ * looks like stray whitespace is refused further in rather than trimmed away,
+ * so a person who meant to include a space is told rather than surprised.
+ */
+async function readPassword(): Promise<string> {
+  const fromEnv = process.env.AF_ADMIN_BOOTSTRAP_PASSWORD
+  if (fromEnv) return fromEnv
+  if (process.stdin.isTTY) {
+    console.error(
+      'No password. Set AF_ADMIN_BOOTSTRAP_PASSWORD, or pipe one in:\n' +
+        '  printf %s "$PASSWORD" | af-control-plane-backup bootstrap-operator ...\n' +
+        'It is deliberately not an argument: an argument is visible in ps and in shell history.',
+    )
+    process.exit(2)
+  }
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks).toString('utf8').replace(/\n$/, '')
 }
 
 /** Best effort. A container with no passwd entry is not a reason to refuse. */

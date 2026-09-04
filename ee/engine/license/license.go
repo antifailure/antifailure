@@ -41,9 +41,19 @@ import (
 
 // Feature is one thing a license may permit.
 //
-// A closed set rather than free-form strings, so that a typo in an issued
-// license is caught when the license is parsed rather than silently granting
-// nothing.
+// A closed set rather than free-form strings, and the set is closed AT ISSUE
+// TIME rather than here. This comment used to say the opposite, that a typo in
+// an issued license is caught when the license is parsed, and Parse has never
+// done that: `"features": ["ssoo"]` verifies, reports the license active, and
+// permits nothing, with no error at either end.
+//
+// Parse is right to be permissive and the fix belongs where it now is. A
+// license issued for a newer release names features an older binary has never
+// heard of, and refusing the whole license over one unknown name would turn
+// every ordering of upgrade and renewal into an outage for features the
+// customer did buy. So the verifier tolerates a name it does not know and
+// simply never permits it, and tools/licensegen refuses to sign one, which is
+// the only place the set can be closed without that cost.
 type Feature string
 
 const (
@@ -288,7 +298,7 @@ func (v *Verifier) Evaluate(claims Claims, ev Evaluation) Status {
 
 	if v.revoked[claims.ID] {
 		status.State = StateRevoked
-		status.Warning = "This license has been revoked. Contact licensing@antifailure.dev."
+		status.Warning = "This license has been revoked. Ask about it at https://antifailure.dev/contact."
 		return status
 	}
 

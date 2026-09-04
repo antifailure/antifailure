@@ -14,6 +14,7 @@ import {
   CellLink,
   Empty,
   Field,
+  LinkButton,
   Loaded,
   Page,
   Row,
@@ -223,9 +224,17 @@ function Create({ onRequested }: { onRequested: () => void }) {
       <Loaded state={repositories} skeleton={<TableSkeleton rows={1} cols={3} />}>
         {(repos) =>
           repos.length === 0 ? (
-            <Empty title="No repositories connected">
-              An environment belongs to a repository. One appears here when the
-              GitHub App reports an installation that includes it.
+            <Empty
+              title="No repositories connected"
+              action={
+                <LinkButton href="/cli" variant="secondary">
+                  Bring one up from a terminal
+                </LinkButton>
+              }
+            >
+              One appears here once the GitHub App reports an installation that
+              includes it. That is not the only way in: the engine brings an
+              environment up from the checkout you already have.
             </Empty>
           ) : (
             <form
@@ -509,9 +518,17 @@ function Environments() {
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>
             data.length === 0 ? (
-              <Empty title="No environments yet">
-                An environment appears here when the engine reports one, which
-                happens the first time a run starts on a connected repository.
+              <Empty
+                title="No environments yet"
+                action={
+                  <LinkButton href="/cli" variant="secondary">
+                    Start with the command line
+                  </LinkButton>
+                }
+              >
+                An environment appears here the first time an engine reports
+                one. Nothing has yet, which is what an organization looks like
+                before its first run, not something being wrong.
               </Empty>
             ) : (
               <>

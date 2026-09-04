@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trpcData } from "@/lib/wire";
 
 /**
  * Where the API is.
@@ -30,6 +31,11 @@ export interface Session {
    *  older control plane, which is read as GitHub alone rather than as none. */
   methods?: string[];
   signupsOpen?: boolean;
+  /** Whether signing in with no organization creates one. Absent from an older
+   *  control plane, which is read as off: that is what every deployment did
+   *  before it existed, and reading an absent field as "on" would tell somebody
+   *  a provisioning step failed when there was no step. */
+  selfServeSignup?: boolean;
   githubAppInstallUrl?: string;
   plan?: string | null;
   hostedRequiredPlan?: string | null;
@@ -69,36 +75,87 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
   const qs = input === undefined ? "" : `?input=${encodeURIComponent(JSON.stringify(input))}`;
   const res = await fetch(`${BASE}/trpc/${path}${qs}`, {
     credentials: "same-origin",
+    // NEVER FROM A CACHE, and this is a correctness fix rather than a
+    // precaution. Every read this makes is live tenant or operator state behind
+    // a session, and the control plane sends no cache-control on /trpc, so the
+    // default fetch mode lets the browser reuse a response it already has.
+    // Nothing noticed while no screen both listed something and changed it. The
+    // operator portal does: suspend an account from the panel beside the list,
+    // the write commits, the audit entry is written, the list reloads, one
+    // request goes out, and the row still says active. An operator reads that
+    // as the button having done nothing and presses it again.
+    //
+    // There is nothing to lose on this side. Every response is per session,
+    // none is shared between people, and none is large enough for a cache to be
+    // worth showing somebody last minute's answer about a customer they are in
+    // the middle of changing.
+    cache: "no-store",
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return trpcData<T>(await res.json());
 }
 
-/** A tRPC mutation. Needs the CSRF token from the session. */
-export async function mutate<T>(path: string, input: unknown, csrf: string): Promise<T> {
+/**
+ * A tRPC mutation. Needs the CSRF token from the session.
+ *
+ * `header` exists because the operator portal is a second session with a second
+ * token under a second name, `x-antifailure-admin-csrf`. It sends through HERE
+ * rather than through `rest` for a reason that cost an afternoon: `rest` speaks
+ * to plain JSON endpoints and returns the body as it arrives, while a tRPC
+ * response is an envelope and the answer is at `result.data`. The operator
+ * client used to call `rest` for a `/trpc/` path, so every operator mutation
+ * resolved to `{result: {data: ...}}` and every field the caller read off it
+ * was undefined. Nothing noticed, because until now nothing read one.
+ */
+export async function mutate<T>(
+  path: string,
+  input: unknown,
+  csrf: string,
+  header: string = CSRF_HEADER,
+): Promise<T> {
   const res = await fetch(`${BASE}/trpc/${path}`, {
     method: "POST",
     credentials: "same-origin",
-    headers: { "content-type": "application/json", [CSRF_HEADER]: csrf },
+    headers: { "content-type": "application/json", [header]: csrf },
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res);
-  const body = (await res.json()) as { result?: { data?: T } };
-  return body.result?.data as T;
+  return trpcData<T>(await res.json());
 }
 
 /** A plain JSON endpoint on the control plane, for the few things that are not
  *  tRPC: the session, sign-out, device approval, and provider keys. */
 export async function rest<T>(
   path: string,
-  init: { method?: string; body?: unknown; csrf?: string } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    /** The TENANT token, sent as x-antifailure-csrf. */
+    csrf?: string;
+    /**
+     * Anything else the caller has to send.
+     *
+     * The operator portal is the only such caller, and it needs this because
+     * the two sessions are two sessions: a different cookie, a different table,
+     * and a different header, `x-antifailure-admin-csrf`, which the guard for
+     * `af_admin_session` reads and which `csrf` above is never sent as. Passing
+     * the operator token as `csrf` would send it under the tenant name and be
+     * refused exactly as if nothing had been sent, a failure with no symptom in
+     * the request.
+     *
+     * A hook here rather than a second client, so the operator portal does not
+     * carry its own copy of the fetch, the error shape and the credentials
+     * mode, which is the drift this module exists to prevent.
+     */
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.csrf) headers[CSRF_HEADER] = init.csrf;
+  Object.assign(headers, init.headers ?? {});
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",

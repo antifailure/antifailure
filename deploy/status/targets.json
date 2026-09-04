@@ -45,12 +45,12 @@
   },
   {
     "id": "site-api",
-    "name": "Waitlist API",
+    "name": "Site API",
     "group": "Website and documentation",
-    "description": "The managed function behind the sign-up form.",
+    "description": "The managed function that answers /api on the marketing host.",
     "url": "https://antifailure.dev/api",
     "check": "http",
-    "expect_body": "/api/waitlist"
+    "expect_body": "https://app.antifailure.dev"
   },
   {
     "id": "staging",

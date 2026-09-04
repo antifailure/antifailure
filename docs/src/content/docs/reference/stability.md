@@ -83,13 +83,103 @@ A code in the [error reference](/docs/reference/errors) keeps its meaning. The
 code is the stable identifier for a refusal; the sentence printed beside it is
 not, and it is reworded whenever a clearer one exists. Match on the code.
 
+### The lint finding identifiers
+
+Every migration lint finding carries an identifier of the form `LINT-NNN`, and
+the [lint findings reference](/docs/reference/lint-findings) lists them. An
+identifier is assigned once and keeps its meaning. It is never reused, not even
+after the rule that earned it is deleted, because a number handed out twice is
+worse than one that changed: the first breaks a filter silently and the second
+breaks it loudly.
+
+What stays free to move is everything else about a finding, and deliberately
+so. The rule name, the title, the sentence saying what will happen and the
+suggested fix are prose. Rules are sharpened, split and renamed as they get
+better at their job, and a name that cannot be improved is a rule that cannot
+be improved. So the identifier is what a filter or a suppression should match
+on, and the rule name is what a person should read.
+
+`engine/internal/insights/lintcatalog.yaml` is the source of truth, and
+`findings.register.json` beside it records every identifier ever handed out.
+`tools/lintcheck` refuses a rule with no identifier, an identifier for a rule
+that no longer exists, and an identifier that has left the catalogue since it
+was registered.
+
+### The self-hosting configuration
+
+Every key in the Helm chart's `values.yaml`, and every variable and output in
+the Terraform under `infra/terraform`. Within version 1:
+
+- A key or a variable will not be removed or renamed.
+- Its type will not change.
+- An optional input will not become required, and a new input arrives with a
+  default rather than without one.
+
+The reason this is a promise and not a preference is that the values file and
+the tfvars file somebody self hosting writes are their configuration. They are
+written once, kept in that operator's own repository, and applied by that
+operator's own pipeline. A rename does not fail that pipeline loudly, it fails
+it silently: Helm accepts a key no template reads, and Terraform only warns
+about a variable nothing declares. The setting stops being in force and the
+apply still says it succeeded.
+
+Terraform outputs are on the list by name, because a runbook reads them.
+[Standing up on Azure](/docs/self-hosting/azure) pipes `backend_hcl` into a
+backend configuration and [rotating
+secrets](/docs/self-hosting/rotating-secrets) scopes a role assignment with
+`key_vault_id`, and an output missing under the name a command asks for prints
+nothing rather than failing.
+
+What is promised is the input, not the value it carries. Defaults move, and one
+of them has to: `image_tag` names the release being cut, and `tools/tagsync`
+exists to make sure it does.
+
+`tools/inputcheck` holds the tree to a snapshot of this surface taken at
+v1.0.0, so a rename fails in the pull request that proposes it rather than in
+somebody's upgrade.
+
+The chart carries its own version, and it is 1.0.0 for this reason. A chart at
+0.x says in the only language its ecosystem has that its values may be
+rearranged at any time.
+
+### The event stream
+
+The types in the [event envelope reference](/docs/reference/schemas/events-v1)
+and the envelope around them. A type is not removed and does not change what it
+means. A field of the envelope is not removed, does not change type, and does
+not become optional, and a field holding a closed set does not lose a value
+from it.
+
+Types are added as features land and fields may be added, so read the stream
+the way you read `--output json`: take what you want and ignore what you have
+not seen, rather than refusing an event carrying something new.
+
+Two things are deliberately outside that. The `data` object is the type
+specific payload, it is documented as an object and nothing further, and its
+keys move with the code that writes them. And some types on that page are
+reserved rather than live: the engine does not emit all of them yet, and
+`engine/internal/events/emitters_test.go` carries the reason for each one. A
+reserved type is stable in the sense above, and it may start being emitted in
+any release.
+
+`schemas/events.v1.json` is the published artifact,
+`engine/internal/events/stream.register.json` is what version 1 promised, and
+`tools/eventcheck` fails the build on a type that has gone, a field that has
+changed shape, and a type the engine can emit that nothing documents.
+
 ## Not stable
 
 These are free to change in a minor release, and saying so plainly is more
 useful than a promise that quietly bends.
 
-- **The Helm chart's values and the Terraform module's variables.** The chart
-  carries its own version, which is why it is not at 1.0.0 alongside the engine.
+- **The defaults and validation rules on the self-hosting inputs.** The names
+  and the types are promised above. A default moves with a release, and a
+  validation tightens as a cloud teaches us what it refuses at apply time that
+  it accepted at plan time. Set the values that matter to you rather than
+  inheriting them.
+- **What the Terraform actually creates.** The inputs are a contract; the
+  resources behind them are not. A module may reach the same outcome with
+  different resources, and the Azure guide says which changes force a replace.
 - **Most of the control plane's HTTP API.** It is mostly how the console and
   the engine speak to each other rather than a published integration surface,
   and the part that is published is named rather than described. Every route
@@ -112,10 +202,10 @@ useful than a promise that quietly bends.
   import `engine/internal` at all: the Go toolchain refuses an import of an
   internal path from outside the subtree rooted at its parent, so that half
   needs nothing from us and gets nothing.
-- **Lint rule names and their findings.** Rules are added and sharpened, and a
-  release may find something in a migration an earlier one passed. That is the
-  product working. Within a release the rule name identifies the finding.
-- **The event stream's set of types.** Types are added as features land.
+- **Lint rule names, and which findings a release reports.** A rule is renamed
+  when a clearer name exists, and a release may find something in a migration
+  an earlier one passed. That is the product working, and it is why the
+  identifier above is the thing to match on rather than the name.
 - **Anything under `docs/plan/`.** Working notes, not documentation.
 
 ## What holds these lines

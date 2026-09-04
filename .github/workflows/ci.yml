@@ -113,12 +113,14 @@ jobs:
         # can see that half of it, because it never reads the committed copy.
         run: |
           go run ./tools/errgen
+          go run ./tools/lintgen
           go run ./tools/proxysrc
           go run ./tools/schemadoc .
           go run ./tools/notices -out THIRD_PARTY_NOTICES.md
           (cd engine && go test ./internal/policy -update-vectors)
           (cd engine && go test ./internal/cli -update-reference)
           (cd engine && go test ./internal/events -update-schema)
+          go run ./tools/eventcheck -freeze .
           (cd engine && go test ./internal/masking -update-transforms)
           (cd engine && go test ./internal/hud -update-frames)
           git diff --exit-code
@@ -211,6 +213,22 @@ jobs:
         # tree that runs the script and a commit that does not.
         run: go run ./tools/execcheck .
 
+      - name: No YAML key is defined twice in one mapping
+        # examples/github-workflow.yml declared `seed` and `concurrency` twice
+        # each in its workflow_dispatch inputs. YAML keeps the last definition,
+        # so the first pair's descriptions were text nobody would ever see, in
+        # the file this product hands a new user as the worked example. Nothing
+        # failed: the workflow parsed, GitHub accepted it, and half the block
+        # was simply gone.
+        #
+        # The chart templates are rendered in three valid profiles rather than
+        # skipped, because they are Go template source that no YAML parser can
+        # read. `helm lint` was pointed at a chart whose service.yaml defined
+        # `type` twice and returned "0 chart(s) failed". Rendering is the only
+        # way anything looks inside them. Helm's source markers prove that the
+        # profiles reached every authored YAML template.
+        run: go run ./tools/keycheck .
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         # For the examples that are not Go. Pinned to the same major the
         # runtime images use, so the version that builds an example here is the
@@ -295,6 +313,22 @@ jobs:
         # documentation quietly stops being true.
         run: go run ./tools/errcheck .
 
+      - name: The lint findings keep their identifiers
+        # A finding's rule name is free to change, so something matching on one
+        # needs a thing that does not. Each finding carries a LINT number, and
+        # this refuses a rule with no number, a number for a rule that is gone,
+        # and above all a number that was handed out once and has since left the
+        # catalogue, which is the promise itself breaking.
+        run: go run ./tools/lintcheck .
+
+      - name: The event stream keeps the shape it promised
+        # "Types are added as features land" says what happens when the catalog
+        # grows and nothing about what happens when it shrinks. Both a deleted
+        # type and a field that left the envelope regenerate cleanly, because
+        # the schema is generated from the Go type and the catalog, so either
+        # would have produced a green diff and a consumer that stops working on
+        # the next upgrade.
+        run: go run ./tools/eventcheck .
       - name: The Go packages version 1 promised are the ones it still has
         # Two sentences of the release notes, held to the tree. The engine's
         # stable packages are engine/pkg/provider, engine/pkg/schema,
@@ -521,24 +555,6 @@ jobs:
         run: npm run build
         working-directory: www
 
-      - name: No class that never applies
-        # `cn` is a plain join rather than tailwind-merge, so a className passed
-        # to a component lands beside the component's own class and the cascade
-        # picks whichever Tailwind emitted last. The site header marked the
-        # current page with text-black over a text-black/70 default, lost, and
-        # marked nothing at all for as long as the header has existed. It reads
-        # the built HTML, so it runs here, after the build above.
-        run: go run ./tools/classcheck .
-
-      - name: No animation that never stops
-        # If a piece of UI animates on an infinite loop while the user does
-        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
-        # the source, because a rule existing is not an element carrying it:
-        # `.hero-scan` was read in the source twice and called harmless, and
-        # was scanning behind the front page headline the whole time. Runs
-        # here, after the build above.
-        run: go run ./tools/motioncheck .
-
       - name: The crawl surfaces the site claims to have
         # Sitemap, robots, canonicals, OpenGraph, structured data, the markdown
         # twins and the skip link. None of these break a build when they go
@@ -547,6 +563,17 @@ jobs:
         # that a route added without an entry in lib/routes.ts fails the pull
         # request that added it.
         run: npm run check:seo
+        working-directory: www
+
+      - name: The site beacon's own unit tests
+        # The beacon decides what is measured, how long a session lasts, when a
+        # failed request is retried and who is a crawler, and until these tests
+        # existed not one of those rules could be loaded by a runner at all: the
+        # file imported next/navigation, which does not resolve outside the
+        # bundler. www is not one of web/'s workspaces, so `npm test
+        # --workspaces` never reaches it and a test file here would otherwise be
+        # decoration, which is the same argument the console step below makes.
+        run: npm test
         working-directory: www
 
       - name: The site API
@@ -566,6 +593,20 @@ jobs:
         run: npm run build
         working-directory: docs
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        # Node 26 from here down, because console/ is not only checked here, it
+        # is BUILT INTO the control plane image, whose console stage is
+        # node:26-alpine. The build step below stands in for that image build,
+        # which is what its own comment says it is for, and a stand in that
+        # compiles on a different major is not standing in for anything.
+        #
+        # A second setup-node rather than raising the job's pin, because this
+        # job also tests api/, and api/ runs on Azure Static Web Apps at
+        # node:22, measured rather than inferred in tools/site/assemble.sh.
+        # Raising the pin would have widened that mismatch to fix this one.
+        with:
+          node-version: '26'
+
       - run: npm ci --no-audit --no-fund
         working-directory: console
 
@@ -583,10 +624,46 @@ jobs:
         # image asserts the directory is not empty. Building it here means a
         # type error in the console fails the pull request rather than the
         # image build twenty minutes later.
+        #
+        # Two render gates now sit BELOW this step rather than above it, and
+        # that order is load bearing. Both read the render rather than the
+        # source, both cover the console, and while they ran above this step
+        # they were reading a directory that did not exist yet. motioncheck
+        # dropped the unbuilt application in silence and reported success over
+        # www alone: 42 files read where the built tree has 64, exit zero. They
+        # refuse an unbuilt application now, so moving them back up fails
+        # loudly rather than quietly.
         run: npm run build
         working-directory: console
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: No class that never applies
+        # `cn` is a plain join rather than tailwind-merge, so a className passed
+        # to a component lands beside the component's own class and the cascade
+        # picks whichever Tailwind emitted last. The site header marked the
+        # current page with text-black over a text-black/70 default, lost, and
+        # marked nothing at all for as long as the header has existed. It reads
+        # the built HTML, so it runs here, after both builds above.
+        #
+        # It reads the console as well as www now. The console does not import
+        # `cn` at all, which made it look exempt; it composes in template
+        # literals instead, and `${inputClass} mt-0` has the same hazard for the
+        # same reason.
+        run: go run ./tools/classcheck .
+
+      - name: No animation that never stops
+        # If a piece of UI animates on an infinite loop while the user does
+        # nothing, it is wrong. Reads the built stylesheet and HTML rather than
+        # the source, because a rule existing is not an element carrying it:
+        # `.hero-scan` was read in the source twice and called harmless, and
+        # was scanning behind the front page headline the whole time. Runs
+        # here, after BOTH builds above.
+        #
+        # It has always claimed to cover the console and until now never read
+        # it once, because it ran before the console was built and skipped an
+        # application it could not find. It refuses one now instead.
+        run: go run ./tools/motioncheck .
 
       - name: The console exported the routes the control plane routes to
         # A static export writes one file per route. If a page stops exporting
@@ -600,6 +677,43 @@ jobs:
               missing=1
             fi
           done
+          exit $missing
+
+      - name: Every operator section the navigation lists was exported
+        # The list above is written out by hand, which is right for a dozen
+        # routes and wrong for the operator portal: it has twenty three
+        # sections, six people are adding to them, and a hand kept copy would
+        # be behind within a day. So this reads the navigation itself, which is
+        # the same file the rail is drawn from, and checks the export for every
+        # route it declares.
+        #
+        # The failure it exists for is the one the whole portal is built to
+        # avoid. A stray server-only import stops one page exporting, its route
+        # starts answering with the 404 page, and the rail keeps the entry: the
+        # reader clicks a section that is supposed to exist and gets nothing,
+        # which teaches them to distrust the other twenty two as well.
+        run: |
+          routes=$(grep -oE 'href: "/admin[^"]*"' console/lib/admin-nav.ts | cut -d'"' -f2)
+          count=$(printf '%s\n' "$routes" | grep -c .)
+          # A grep that stops matching returns nothing, and a loop over nothing
+          # passes every time. The count is what keeps this from going quietly
+          # green if the navigation is ever reformatted out from under it.
+          if [ "$count" -ne 23 ]; then
+            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 23"
+            exit 1
+          fi
+          missing=0
+          # read rather than `for route in $routes`, which depends on the shell
+          # splitting an unquoted expansion on newlines. bash does and zsh does
+          # not, so the `for` version passes locally by running its body once
+          # with every route in one variable, and only tells the truth in CI.
+          while IFS= read -r route; do
+            [ -n "$route" ] || continue
+            if [ ! -f "console/out${route}.html" ]; then
+              echo "::error::console/out${route}.html was not exported, so ${route} answers 404"
+              missing=1
+            fi
+          done <<< "$routes"
           exit $missing
 
       - name: Every documented error path has a page at the URL the engine prints
@@ -715,8 +829,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        # The same Node the runtime stage of control-plane.Dockerfile uses.
+        # web/apps/api is what that image runs, so this typecheck and these
+        # tests are the only thing standing between a type error and a running
+        # server, and they have to run on the version that will run it.
         with:
-          node-version: '24'
+          node-version: '26'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -1010,6 +1128,14 @@ jobs:
         # and On-call came before Standing up production.
         run: go run ./tools/sidebarcheck .
 
+      - name: A numbered runbook still numbers itself
+        # Step headings are visible while editing and the cross references to
+        # them are not, four hundred lines away in prose, so inserting or
+        # removing a step renumbers one and silently invalidates the other.
+        # It reads the numbers only: a step deleted and every later step
+        # renumbered to close the hole is consistent and passes.
+        run: go run ./tools/runbookcheck .
+
       - name: Every variable the product names at a user is documented
         # af license install tells a paying customer to set AF_LICENSE_KEY and
         # AF_ORG, then points them at the licensing page, and that page named
@@ -1047,6 +1173,48 @@ jobs:
         # happy user who never learns the feature exists.
         run: go run ./tools/constcheck .
 
+      - name: The self-hosting inputs are the ones v1.0.0 promised
+        # A self hoster writes a Helm values file and a tfvars file once and
+        # keeps them in their own repository. Until v1.0.0 the release notes
+        # said both surfaces were free to change in a minor release, and the
+        # cost of that sentence lands entirely on the operator: every upgrade
+        # becomes a hand migration, because nobody outside this repository can
+        # know whether pool_max still exists in the version they are taking.
+        # v1.0.0 promises the names, the types and which inputs are required,
+        # and this is what holds the tree to it. Adding an optional input stays
+        # compatible and only asks for the snapshot to record it.
+        run: go run ./tools/inputcheck .
+
+      - name: A documented variable can be delivered by the supported deploy
+        # The reference documented 45 variables the hosted control plane reads
+        # and the Terraform module that is the only route onto that container
+        # could set 16. The other 29 had no way to be set at all, and every
+        # symptom of that reads as a broken feature rather than an unset
+        # variable: 23 operator routes refusing for want of a database
+        # credential, no sign-in link and no invitation able to be sent, billing
+        # off with a real Stripe price behind Team, the site's beacon refused
+        # cross origin, analytics recording nothing, and both buttons missing
+        # from the "No organization yet" screen. varcheck and
+        # config-docs.test.ts were green throughout and could not have been
+        # anything else: both prove a variable is DOCUMENTED, and a variable
+        # that is documented, read, and unreachable by every apply passes both.
+        run: go run ./tools/wirecheck .
+
+      - name: No file carries an unfinished merge
+        # One reached main and stayed there through a release being prepared:
+        # literal `<<<<<<< HEAD`, `=======` and `>>>>>>>` around six rows of the
+        # control plane's configuration table, two of them the same variable
+        # described twice.
+        #
+        # Every gate was green about it. Markdown does not fail to parse.
+        # prosecheck reads punctuation. varcheck and config-docs.test.ts ask
+        # whether a variable is DOCUMENTED, and a row inside a conflict block
+        # reads as documented to all three. The only job that went red, the one
+        # above this, went red for a CONSEQUENCE: it reported a variable as
+        # documented with no way to set it, which sent two people to look at
+        # Terraform. The cause was four lines of git output in a table.
+        run: go run ./tools/conflictcheck .
+
       - name: The prose reads like a person wrote it
         # The build plan asks for vale with "a custom rule that flags em dashes
         # and double hyphens in prose". This is that rule. Em dashes are the
@@ -1076,6 +1244,18 @@ jobs:
         # schemas/manifest.v1.json, so this is a claim a machine can check
         # rather than one a reviewer has to notice.
         run: go run ./tools/modecheck .
+
+      - name: Every contact route this repository publishes resolves
+        # CODE_OF_CONDUCT.md named conduct@antifailure.dev as the route for
+        # a person reporting harassment, and the legal pages named
+        # security@antifailure.dev for a researcher. The domain has no mail
+        # exchanger, an SPF policy authorising no sender, a DMARC policy of
+        # reject and a revoked DKIM key, so both went to the same silence and
+        # neither sender could tell. The site had already been fixed and the
+        # repository had not. Every address in the tree now needs a row in
+        # tools/docs/contact-routes.tsv saying who reads it, and an address
+        # with no row fails, which is what catches a domain nobody has checked.
+        run: go run ./tools/contactcheck .
 
   # Alone, and deliberately so.
   #

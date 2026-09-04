@@ -267,8 +267,22 @@ async function recordRefusal(
  * log that records things that did not happen is as useless as one that misses
  * things that did.
  *
- * The customer's copy is not this function's decision and not the caller's. It
- * happens inside appendAdminAudit whenever subjectOrgId is set.
+ * The customer's copy happens inside appendAdminAudit whenever subjectOrgId is
+ * set, and that default is right for almost everything: an action taken ON a
+ * customer is one the customer is entitled to see.
+ *
+ * `tenantCopy` exists for the one family of entries where naming the
+ * organization and telling the organization are different questions. An
+ * operator's NOTE about a customer is not that customer's data: migration 0023
+ * says so in the table's own comment and backs it by giving the application no
+ * grant on the table at all, so copying "a note was written about you" into
+ * their audit log would leak the existence of a file they cannot read and were
+ * never meant to. The entry still carries subject_org_label, because the
+ * operator chain has to be searchable by account.
+ *
+ * Pass it only with that argument in hand. The default is the accountable one,
+ * and an action that changes a customer's account and hides itself from them is
+ * the thing this whole chain exists to prevent.
  */
 export async function adminAudit(
   db: Db,
@@ -281,6 +295,9 @@ export async function adminAudit(
     subjectOrgLabel?: string | null
     severity: 'info' | 'notice' | 'high' | 'critical'
     detail?: Record<string, unknown>
+    /** Defaults to true whenever subjectOrgId is set. See above before
+     *  setting it to false. */
+    tenantCopy?: boolean
   },
 ): Promise<void> {
   await appendAdminAudit(db, {

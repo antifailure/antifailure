@@ -1,9 +1,9 @@
 ---
 title: "Antifailure event schema"
-description: "One thing that happened, as it appears on the event stream."
+description: "One thing that happened, as it appears on the engine's event stream and in its NDJSON log."
 ---
 
-One thing that happened, as it appears on the event stream. The envelope is identical across the engine, the runner, and the control plane. Generated from the Go type and the event catalog by go test ./internal/events -update-schema.
+One thing that happened, as it appears on the engine's event stream and in its NDJSON log. This is the engine's envelope: the control plane receives a translated form, with different names for four of these fields and no counterpart for two of them. Within version 1 a type listed here is never removed and never changes meaning, and a field here is never removed, never changes type and never becomes optional. Both may gain new members, so ignore a type or a field you were not built to understand rather than refusing the event. Generated from the Go type and the event catalog by go test ./internal/events -update-schema.
 
 :::note
 This page is generated from `schemas/events.v1.json`. Edit the schema, then run `just generate`.

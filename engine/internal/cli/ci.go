@@ -93,6 +93,11 @@ change.`),
 			run := report.Run{
 				Environment: o.EnvID(), Branch: branchName(e, branch),
 				Commit: commitSHA(e), DocsBase: docsBase,
+				// Read from the manifest here, before anything can fail, so
+				// that a run which dies before the workflows still knows how
+				// many it was supposed to run. Reading it later would put it
+				// behind exactly the failures it exists to describe.
+				Declared: len(m.Workflows),
 			}
 			started := e.Clock.Now()
 			var migration []report.Finding

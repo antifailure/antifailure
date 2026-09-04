@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/db/pgcopy"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -246,6 +247,7 @@ func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 		checkKernelIsolation,
 		checkProxyEnvironment,
 		checkGit,
+		checkPostgresClient,
 		checkModelKey,
 		checkLeftoverEnvironments,
 	}
@@ -663,6 +665,44 @@ func checkModelKey(ctx context.Context, env *Env, _ Prober) CheckResult {
 	r.Status = CheckWarn
 	r.Detail = detail + ", never verified"
 	r.Remediation = "Run 'af model test'. It makes one cheap call and says exactly what is wrong when the key is revoked, out of credit, or pointed at a model the key cannot use."
+	return r
+}
+
+// checkPostgresClient reports the pg_dump this machine would copy a source with.
+//
+// Doctor's promise is that every problem it names is one you would otherwise
+// meet halfway through a run, and this was the clearest example of one it did
+// not look at. Copying production shells out to pg_dump and pg_restore. A
+// machine with neither, or with a client older than the server, fails at the
+// step that comes after everything else: the repository read, the manifest
+// written, the images built, and only then does the copy stop. pg_dump refuses
+// a server newer than itself and there is no flag for it, so the ceiling is
+// worth knowing before the twenty minutes rather than after.
+//
+// A warning rather than a failure, both ways. A project with database.seed and
+// no source never runs either binary, so a machine without them can still do
+// everything else, and this check has no manifest to tell the two apart: it
+// answers about the machine, which is what this command is.
+func checkPostgresClient(_ context.Context, _ *Env, _ Prober) CheckResult {
+	r := CheckResult{Name: "Postgres client"}
+	r.Remediation = "Install the client tools if this machine copies a production database: " +
+		"on macOS 'brew install libpq' or 'brew install postgresql@18', on Debian or Ubuntu " +
+		"'apt-get install postgresql-client-18'. A project that fills its golden with " +
+		"database.seed instead of copying a source needs neither."
+
+	path, major, err := pgcopy.ClientTools()
+	if err != nil {
+		r.Status = CheckWarn
+		r.Detail = "pg_dump and pg_restore are not on the path or anywhere this looked, " +
+			"so a source database cannot be copied"
+		return r
+	}
+	r.Status = CheckPass
+	// The ceiling rather than the version alone. "17.6" is a fact about the
+	// binary; "up to Postgres 17" is the thing that decides whether a refresh
+	// will work, and it is the sentence somebody on 18 needs to read.
+	r.Detail = fmt.Sprintf("pg_dump %d at %s, so it can copy a source up to Postgres %d",
+		major, path, major)
 	return r
 }
 

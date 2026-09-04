@@ -19,8 +19,9 @@ export interface Billing {
   config: StripeConfig
 }
 
-// main.ts, which reads the configuration and builds the client once.
-export { stripeConfigFrom } from './plans.ts'
+// main.ts, which reads the configuration and builds the client once, and names
+// the price variable for a plan it cannot sell when it refuses to start.
+export { PRICE_ENV, stripeConfigFrom } from './plans.ts'
 export { RealStripeClient } from './stripe.ts'
 
 // server.ts, which owns the one unauthenticated endpoint this feature has.

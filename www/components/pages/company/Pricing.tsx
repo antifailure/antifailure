@@ -2,11 +2,15 @@ import { Button } from "@/components/layout/Button";
 import { Chevron } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import {
+  Faq,
   PageHeading,
   PageHero,
   PageSection,
   PageShell,
+  Prose,
+  type FaqItem,
 } from "@/components/pages/kit";
+import { FREE_PLAN, members } from "@/lib/plan-facts";
 
 type PlanCta = {
   href: string;
@@ -31,14 +35,19 @@ const PLANS: Plan[] = [
     name: "Community",
     price: "$0",
     period: "local engine, forever",
-    tagline: "Open-source proving ground on your machine and your cloud.",
-    cta: { href: "/docs", label: "Inspect the surface", theme: "outlined" },
+    tagline: "The whole engine, on your machine and your cloud, with no account.",
+    // The filled action on this page, because it is the only plan on it a
+    // visitor can start without somebody else's permission. It used to be an
+    // outlined "Inspect the surface" while the invitation wall carried the
+    // filled button in the hero above.
+    cta: { href: "/docs/getting-started/quickstart", label: "Start the quickstart", theme: "filled" },
     includes: [
+      "MIT licensed, installed with one command",
       "Docker Compose and basic Postgres support",
+      "The MCP server, af mcp, for a coding agent",
       "Bring-your-own infrastructure and model keys",
-      "Community simulators and local reports",
       "Inspectable agent, sanitization, egress, and cleanup",
-      "No hosted compute. Your cloud, your credentials",
+      "No account and no key. Your cloud, your credentials",
     ],
   },
   {
@@ -50,20 +59,34 @@ const PLANS: Plan[] = [
     featured: true,
     cta: { href: "/contact#book", label: "Start a design partnership", theme: "green" },
     includes: [
-      "Base platform fee per organization",
+      "Flat platform fee per organization, not per person",
+      `Up to ${members("team")} members, counting invitations not yet accepted`,
       "Included run credits for deployment twins",
       "Usage for environment minutes, data volume, and workload execution",
       "Customer-cloud execution for margin and data exposure",
       "Pull-request checks and aggregated reports across repositories",
     ],
   },
+  // ONE band above Team, and it is called Enterprise.
+  //
+  // This card used to be "Growth + Enterprise", and the page named a Growth
+  // band that nothing behind it has ever had. The control plane sells exactly
+  // two paid plans: `PaidPlan = "team" | "enterprise"` in
+  // web/apps/api/src/billing/plans.ts, `PLAN_QUOTAS` in limits.ts knows free,
+  // team and enterprise, and the only two prices an operator can configure are
+  // AF_STRIPE_PRICE_TEAM and AF_STRIPE_PRICE_ENTERPRISE. A third name on a
+  // pricing page is a plan a reader can ask to buy and nobody can sell.
+  //
+  // No number moved. The monthly band and the annual figure are the ones that
+  // were already here; only the labels that called the monthly one "Growth"
+  // now say what it is.
   {
-    name: "Growth + Enterprise",
+    name: "Enterprise",
     badge: "Illustrative",
     price: "$2,000 to $8,000",
-    period: "per month · Growth band",
+    period: "per month · Enterprise band",
     secondary: {
-      label: "Enterprise",
+      label: "Annual contract",
       value: "$30,000 to $250,000+",
       hint: "annually · scale, governance, residency, fleet",
     },
@@ -71,6 +94,7 @@ const PLANS: Plan[] = [
     cta: { href: "/contact#book", label: "Talk to us", theme: "outlined" },
     includes: [
       "More repositories, volume, and peak workload",
+      `Up to ${members("enterprise")} members, counting invitations not yet accepted`,
       "Organization-wide release policy",
       "Governance, evidence retention, and residency",
       "Fleet management and premium connectors",
@@ -135,6 +159,98 @@ function PlanCard({ plan }: { plan: Plan }) {
   );
 }
 
+/**
+ * What free actually gives you, from the code that enforces it.
+ *
+ * These three numbers decide whether an organization's next environment is
+ * created and they were published nowhere a customer could read. The only way
+ * to learn the shape of the free plan was to reach a limit and read the
+ * refusal, which is a support ticket that a sentence prevents.
+ *
+ * The values come from lib/plan-facts.ts rather than from this file, and
+ * web/apps/api/test/plan-facts.test.ts fails the build if that file and the
+ * enforcement stop agreeing.
+ */
+function FreePlanFacts() {
+  return (
+    <ul className="mt-14 grid grid-cols-3 gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-10 max-md:mt-10">
+      {Object.entries(FREE_PLAN).map(([key, fact]) => (
+        <li key={key} className="min-w-0 border-t border-black/15 pt-6">
+          <div className="text-[14px] tracking-extra-tight text-gray-new-40">{fact.label}</div>
+          <div className="mt-4 font-title text-[36px] leading-none tracking-tighter text-black max-xl:text-[32px]">
+            {fact.value}
+          </div>
+          <div className="mt-2 text-[14px] tracking-extra-tight text-gray-new-40">{fact.unit}</div>
+          <p className="mt-5 text-[15px] leading-6 tracking-extra-tight text-black/80">
+            {fact.body}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * The questions a visitor actually arrives with, and the MCP one nobody had
+ * answered anywhere a customer looks.
+ *
+ * Answered here rather than in a paragraph because Faq carries the FAQPage
+ * markup from the same array, so each pair is individually quotable by an
+ * answer engine and the markup cannot disagree with the rendering.
+ */
+const PRICING_FAQ: FaqItem[] = [
+  {
+    question: "Is the MCP server free?",
+    answer:
+      "Yes, and it needs no account. The MCP server is part of the engine, which is MIT licensed, and your client starts it on your own machine with one command. It serves the rehearsal tools to a coding agent over standard input and output, so there is no hosted component behind it, no key, and no plan attached to it. The enterprise directory carries no MCP code at all.",
+  },
+  {
+    question: "Do I need an account to use Antifailure?",
+    answer:
+      "No. The quickstart goes from an empty machine to a running environment with no account and no sign-up. An account exists only for the hosted control plane, which coordinates environments across a team. Anybody can create one with a GitHub sign-in, and it needs no card and no invitation.",
+  },
+  {
+    question: "Is the engine really open source?",
+    answer:
+      "Yes, under the MIT license. Everything outside the ee directory is MIT, which is the engine, the command line interface, the masking, the egress gateway, the reports and the MCP server. The ee directory is public source under a separate enterprise license and running it needs a license key.",
+  },
+  {
+    // The question the page stopped answering when the seat picker went away.
+    //
+    // Checkout used to take a seat count and send it to Stripe as a per unit
+    // quantity, which multiplied the price and entitled nothing: the member
+    // limit is a constant per plan and always was. Removing the picker without
+    // publishing the constant would leave a reader with no way to find out how
+    // many people they get except by hitting the refusal.
+    //
+    // The three numbers come from lib/plan-facts.ts, held against the
+    // enforcement by web/apps/api/test/plan-facts.test.ts.
+    question: "How many people can be in my organization?",
+    answer:
+      `${members("free")} on the free plan, ${members("team")} on Team, and ${members("enterprise")} on Enterprise. ` +
+      "The count is members plus invitations that have been sent and not yet accepted, because an " +
+      "invitation nobody has accepted is still holding the place. There is nothing to buy here and no " +
+      "per person price: the plan decides the number, so an organization is never charged per head for " +
+      "a limit it already has. Reaching it refuses the next invitation, names what you are holding, and " +
+      "removes nobody.",
+  },
+  {
+    question: "What happens when a free limit is reached?",
+    answer:
+      "The next environment is refused, with a message naming the limit, what the organization is currently holding, and who can change it. Nothing that already exists is torn down. Taking somebody's running environment away because a number moved is not a behaviour this product has.",
+  },
+  {
+    question: "Can I run the control plane myself?",
+    answer:
+      "Yes. The control plane is in the same repository and the self-hosting documentation covers it. The three numbers above are the defaults it ships with, so an installation you run yourself enforces the same free plan unless its operator moves an organization to another plan or edits the numbers.",
+  },
+  {
+    question: "What is an environment-hour?",
+    answer:
+      "One environment, held for one hour. It is the unit the control plane can actually measure: every environment holds a database branch, a network and a container per service for as long as it exists, so the cost is close to linear in it. A cap in dollars would need a price list per runtime, per region and per service size, none of which a control plane has.",
+  },
+];
+
 export function PricingPage() {
   return (
     <PageShell>
@@ -142,22 +258,41 @@ export function PricingPage() {
         path="/pricing"
         eyebrow="Pricing"
         title="Operational value, not AI personalities."
-        lead="Community is the local engine and it works today. Team is a platform fee plus run usage. Growth and Enterprise add volume, policy, and governance. These bands are illustrative, not a quote."
+        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a flat platform fee per organization plus run usage. Enterprise adds volume, policy, and governance. Those bands are illustrative, not a quote."
         actions={
           <>
-            <Button href="/signup">Request access</Button>
-            <Button href="/docs" theme="outlined">
-              Read the docs
+            {/* The quickstart still leads, which is this page's own decision
+                and survives: the engine is MIT licensed, it installs with one
+                command, and it needs no account at all. What changes is the
+                label beside it. "Request hosted access" was true while the
+                hosted plane admitted an allowlist of two; anybody can create an
+                account now, so asking for access describes nothing. */}
+            <Button href="/docs/getting-started/quickstart">Start the quickstart</Button>
+            <Button href="/signup" theme="outlined">
+              Create an account
             </Button>
           </>
         }
       />
       <PageSection className="pt-0">
+        {/* This paragraph said the hosted control plane was invitation only and
+            that the access button led to a waitlist. Both stopped being true
+            when sign-up became a GitHub exchange anybody can complete, and a
+            pricing page that turns a reader away is the most expensive place on
+            a site to be out of date.
+
+            It deliberately does not describe the free plan's numbers. Those are
+            enforced by PLAN_QUOTAS and PLAN_COST_CAPS in the control plane, and
+            publishing them belongs in a band that is held to that code rather
+            than in a paragraph somebody retyped. */}
         <p className="mb-14 max-w-[720px] border-l border-black/15 pl-6 text-[16px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mb-10 max-md:pl-4">
-          The hosted control plane is deployed and invitation only while it is in development.
-          Today the engine runs in your own continuous integration, on your own compute, and the
-          access button leads to a waitlist unless you have been invited. Team and Enterprise are
-          open for design partners, and those two buttons book a call rather than take an address.
+          Community needs nothing from us. The engine is MIT licensed, it installs with one
+          command, and the quickstart runs on your own compute without an account. The hosted
+          control plane is open: signing up is a GitHub exchange with no card and no invitation,
+          and it lands you in your own organization on the free plan, whose limits are the ones
+          below and are enforced from the first environment. Team and Enterprise are open for
+          design partners, and those two buttons book a call or reach a person rather than take
+          an address.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (
@@ -166,6 +301,26 @@ export function PricingPage() {
             </li>
           ))}
         </ul>
+      </PageSection>
+      <PageSection tone="ruled">
+        <PageHeading
+          kicker="Free plan"
+          title="<strong>Three numbers decide what free gives you.</strong> These are the ones a control plane enforces, not a summary of them."
+        />
+        <Prose className="mt-8">
+          <p>
+            The engine itself has no quota. It is MIT licensed, it runs on your machine and in
+            your own continuous integration, and nothing in it counts environments or hours. The
+            three below are what a control plane enforces for an organization with no live
+            subscription, and they apply the same way whether that control plane is the hosted
+            one or one you run yourself.
+          </p>
+          <p className="mt-6">
+            Reaching any of them refuses the next environment and says so, naming the number and
+            what you are holding. Nothing that is already running is ever torn down.
+          </p>
+        </Prose>
+        <FreePlanFacts />
       </PageSection>
       <PageSection tone="ruled">
         <PageHeading
@@ -188,6 +343,13 @@ export function PricingPage() {
             </details>
           ))}
         </div>
+      </PageSection>
+      <PageSection tone="plain">
+        <PageHeading
+          kicker="Questions"
+          title="<strong>What free covers, in the words people ask it in.</strong> Including the one about MCP."
+        />
+        <Faq path="/pricing" items={PRICING_FAQ} />
       </PageSection>
     </PageShell>
   );

@@ -67,19 +67,26 @@ gate: _reports
     run "release notes exist for the tag" just relnotes
     run "version pins name real tags"    just tagsync
     run "error catalog and code agree"   just errcheck
+    run "lint findings keep their ids"   just lintcheck
+    run "the event stream keeps its shape" just eventcheck
     run "the stable Go surface holds"    just surfacecheck
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
     run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
+    run "runbook numbers agree"          just runbookcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
+    run "self-hosting inputs are stable" just inputcheck
+    run "documented config can be set"   just wirecheck
+    run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
     run "the mode lists are the real one" just modecheck
+    run "every contact route resolves"   just contactcheck
     run "no forbidden tokens in docs"    just forbidden
     run "spelling"                       just spell
     run "prose style"                    just vale
@@ -92,6 +99,7 @@ gate: _reports
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
+    run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
@@ -104,6 +112,7 @@ gate: _reports
     run "control plane"                  just test-web
     run "the site API"                   just test-site-api
     run "the console"                    just test-console
+    run "the site beacon"                just test-site-beacon
     run "runner"                         just test-runner
     run "edition boundary"               just edition
     run "enterprise"                     just test-ee
@@ -160,6 +169,7 @@ setup:
     need npm    ""        "ships with node"                                    npm --version
     need docker ""        "https://docs.docker.com/get-docker/"                docker --version
     need git    ""        "brew install git"                                   git --version
+    need helm   ""        "https://helm.sh/docs/intro/install/ , or: brew install helm" helm version
 
     echo
     echo "Documentation gates"
@@ -406,6 +416,21 @@ test-console:
     go run ./tools/installcheck . console || npm --prefix console ci --no-audit --no-fund
     npm --prefix console test
 
+# The marketing site's beacon.
+#
+# www/ is a separate npm project too, not one of web/'s workspaces, so the same
+# argument the console recipe makes applies here: `npm test --workspaces` never
+# reaches it and a test file there would be decoration. The beacon decides what
+# is measured, how long a session lasts, when a failed request is retried and
+# who is a crawler, and until this suite existed not one of those rules could be
+# loaded by a runner at all, because the file imported next/navigation.
+#
+# Before the build, as in CI, and for the same reason: seconds against minutes,
+# and a failure here is about the beacon rather than about Next.
+test-site-beacon:
+    go run ./tools/installcheck . www || npm --prefix www ci --no-audit --no-fund
+    npm --prefix www test
+
 # Fanned out over ee/web's workspaces rather than naming each package, so an
 # enterprise package added later is covered without editing this or CI. Naming
 # them by hand is how two of them ended up untested.
@@ -448,6 +473,25 @@ fmt-check:
 errcheck:
     go run ./tools/errcheck .
 
+# Every lint finding has an identifier, and every identifier ever handed out is
+# still spoken for.
+#
+# The rule name is prose and moves as the rules sharpen. The number does not,
+# and this is what keeps that true: a rule with no entry, an entry for a rule
+# that is gone, and an identifier that has left the catalogue since it was
+# registered are all failures here.
+lintcheck:
+    go run ./tools/lintcheck .
+
+# No event type has been taken away and the envelope still has its fields.
+#
+# The catalog gains a type most weeks and that is compatible. Losing one is not,
+# and nothing was watching for it: the schema is generated from the Go type and
+# the catalog, so deleting a type or a field regenerates cleanly and the diff is
+# green. engine/internal/events/stream.register.json is what version 1 promised,
+# and this refuses to let any of it go.
+eventcheck:
+    go run ./tools/eventcheck .
 # The Go packages version 1 promised, and the ones it deliberately did not.
 # Also the leak that makes the difference meaningless: a stable signature
 # naming a type an outside caller has no way to write.
@@ -518,6 +562,16 @@ figurecheck:
 modecheck:
     go run ./tools/modecheck .
 
+# No address published anywhere in this tree sends a reader into silence.
+#
+# CODE_OF_CONDUCT.md named conduct@antifailure.dev and the legal pages named
+# security@antifailure.dev. The domain has no mail exchanger, an SPF policy
+# authorising no sender and a revoked DKIM key, so a harassment report and a
+# security finding went to the same nowhere. Every address in the tree now
+# needs a row in tools/docs/contact-routes.tsv saying who reads it.
+contactcheck:
+    go run ./tools/contactcheck .
+
 # No class on a rendered element that another class on the same element beats,
 # so it is written, reviewed, and does nothing.
 #
@@ -525,7 +579,8 @@ modecheck:
 # lands beside the component's own class rather than replacing it, and the
 # cascade picks whichever Tailwind emitted last. The site header marked the
 # current page with text-black over a text-black/70 default, lost, and marked
-# nothing at all. Reads the built HTML, so it needs a built www.
+# nothing at all. Reads the built HTML, so it needs a built www AND a built
+# console, and it refuses rather than skipping when either is missing.
 classcheck:
     go run ./tools/classcheck .
 
@@ -535,7 +590,10 @@ classcheck:
 # read globals.css on the same day, both saw the one infinite rule left in it,
 # and both called it harmless because nothing in that file used it. It was
 # rendered on the front page by HeroFilm.tsx. The source says which rules
-# exist; only the render says which land on an element. Needs a built www.
+# exist; only the render says which land on an element. Needs a built www AND
+# a built console, and it refuses rather than skipping when either is missing,
+# because skipping is how the console went unchecked for the whole life of
+# this gate.
 motioncheck:
     go run ./tools/motioncheck .
 
@@ -809,6 +867,17 @@ varcheck:
 sidebarcheck:
     go run ./tools/sidebarcheck .
 
+# A numbered runbook still numbers itself.
+#
+# Step headings are visible while editing and cross references to them are
+# not, so inserting or removing a step renumbers one and silently invalidates
+# the other, and the operator who follows the stale one lands on the wrong
+# step of a production stand-up. It reads the numbers only: a step deleted and
+# every later step renumbered to close the hole is internally consistent and
+# passes, which is recorded in the tool rather than hoped about.
+runbookcheck:
+    go run ./tools/runbookcheck .
+
 # STATUS.md keeps the rule it states about itself.
 #
 # That file opens by saying every component carries one of a fixed set of
@@ -853,6 +922,45 @@ manifestcheck:
 constcheck:
     go run ./tools/constcheck .
 
+# The Helm values and the Terraform variables still say what v1.0.0 promised
+# they would say.
+#
+# A self hoster's values file and tfvars file ARE their configuration, kept in
+# their repository and applied by their pipeline. Until v1.0.0 the release
+# notes said both surfaces could be rearranged in a minor release, which makes
+# every upgrade a hand migration nobody can automate. The promise replaces
+# that sentence and this holds the tree to it: an input is not removed, not
+# renamed, does not change type, and does not become required.
+#
+# Adding an optional input is compatible and allowed. It fails here only until
+# `go run ./tools/inputcheck -update .` records it in the snapshot.
+inputcheck:
+    go run ./tools/inputcheck .
+
+# A documented variable can actually be DELIVERED by the supported deploy path.
+#
+# The reference documented 45 variables the hosted control plane reads and the
+# Terraform module that is the only route onto that container could set 16.
+# `just varcheck` above and web/apps/api/test/config-docs.test.ts both proved
+# every one of the 45 was DOCUMENTED, and stayed green the whole time, because
+# they answer a nearby question: a variable that is documented, read by the
+# application, and unreachable by every apply satisfies both of them exactly.
+#
+# For every variable the reference documents, either an env block in the module
+# sets it or tools/docs/wiring-exemptions.tsv says why it cannot, and a row
+# that has stopped being needed is reported so the file cannot rot.
+wirecheck:
+    go run ./tools/wirecheck .
+
+# No file in the tree carries a merge conflict marker.
+#
+# One reached main inside a documentation table and every other gate was green
+# about it, because markdown does not fail to parse and a row inside a conflict
+# block still reads as documented to everything that asks whether a variable is
+# documented.
+conflictcheck:
+    go run ./tools/conflictcheck .
+
 # This justfile runs what CI runs.
 gatecheck:
     go run ./tools/gatecheck .
@@ -866,6 +974,15 @@ gatecheck:
 # pull request.
 execcheck:
     go run ./tools/execcheck .
+
+# No YAML key is defined twice in one mapping.
+#
+# Charts are rendered through three valid profiles before they are read: a
+# template is Go template source that no YAML parser can take, and helm lint
+# returns clean on a chart whose service.yaml defines `type` twice. Helm's
+# source markers prove that every authored YAML template was reached.
+keycheck:
+    go run ./tools/keycheck .
 
 # The TypeScript that ships: the control plane packages, the agent runner, and
 # the console.
@@ -1034,6 +1151,7 @@ _generated:
     #!/usr/bin/env bash
     set -euo pipefail
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
@@ -1042,6 +1160,7 @@ _generated:
     (cd engine && go test ./internal/webhook -update-vectors)
     (cd engine && go test ./internal/cli -update-reference)
     (cd engine && go test ./internal/events -update-schema)
+    go run ./tools/eventcheck -freeze .
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
     # The OpenAPI artifact is generated too, and its generator is TypeScript
@@ -1056,11 +1175,16 @@ _generated:
       www/public/errors.v1.json \
       engine/internal/errors/codes.gen.go \
       docs/src/content/docs/reference/errors.md \
+      www/public/lint-findings.v1.json \
+      engine/internal/insights/findings.gen.go \
+      engine/internal/insights/findings.register.json \
+      docs/src/content/docs/reference/lint-findings.md \
       engine/internal/proxyimage/sources.gen.go \
       schemas/policy-vectors.json \
       schemas/mockpack-vectors.json \
       schemas/webhook-vectors.json \
       schemas/events.v1.json \
+      engine/internal/events/stream.register.json \
       docs/src/content/docs/reference/cli.md \
       docs/src/content/docs/reference/transforms.md \
       docs/src/content/docs/guides/dashboard.md \
@@ -1070,6 +1194,7 @@ _generated:
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen
+    go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
@@ -1080,6 +1205,7 @@ generate:
     cd engine && go test ./internal/webhook -update-vectors
     cd engine && go test ./internal/cli -update-reference
     cd engine && go test ./internal/events -update-schema
+    go run ./tools/eventcheck -freeze .
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
 

@@ -160,10 +160,13 @@ if (has("sitemap.xml")) {
   // sitemap, so it tracks the real page count rather than holding a page
   // hostage to a threshold.
   assert(urls >= 20, `sitemap lists ${urls} URLs`, urls < 20 ? "expected at least 20" : "");
-  assert(
-    !sitemap.includes("/signin") && !sitemap.includes("/signup"),
-    "sitemap excludes the noindex waitlist routes",
-  );
+  // /signin stays out and /signup is now IN, and both halves are asserted so
+  // that flipping either one by accident is loud. A sitemap that submits the
+  // sign-in button for indexing is spending crawl budget on a page with nothing
+  // to say; one that omits the sign-up page is hiding the page a person
+  // searching for the product by name wants.
+  assert(!sitemap.includes("/signin"), "sitemap excludes /signin, which is noindex");
+  assert(sitemap.includes("/signup"), "sitemap includes /signup, which is indexable");
   // The count above is a canary against a truncated sitemap and says nothing
   // about what the URLs in it are. A sitemap listing 32 URLs on a host the
   // pages do not canonicalise to passes it and is worse than no sitemap,
@@ -383,12 +386,13 @@ for (const file of pages) {
 //
 // The per-page loop above skips noindex pages, so it only ever asked whether
 // an indexable page had a twin. It could not see the opposite failure, which
-// is the one that shipped: /signin and /signup are deliberately noindex, the
-// twin generator deliberately refuses to write a twin for a noindex page, and
-// lib/seo.ts advertised one anyway. Two <link rel="alternate"> tags pointed at
-// https://antifailure.dev/signin.md and /signup.md, the host answered 404 for
+// is the one that shipped: /signin and /signup were both deliberately noindex,
+// the twin generator deliberately refuses to write a twin for a noindex page,
+// and lib/seo.ts advertised one anyway. Two <link rel="alternate"> tags pointed
+// at https://antifailure.dev/signin.md and /signup.md, the host answered 404 for
 // both, and the only thing that noticed was the external link checker, after
-// the build was green and merged.
+// the build was green and merged. /signup is indexable now and does have a twin;
+// /signin is still the case this guards.
 //
 // So this walks every built page, indexable or not, reads the address it
 // claims its markdown lives at, and asserts the build actually wrote that

@@ -18,13 +18,39 @@ With regard to the Antifailure software:
 
 This software and associated documentation files (the "Software") may only be
 used in production if you (and any entity that you represent) have agreed to,
-and are in compliance with, the Antifailure Terms of Service, available at
-https://antifailure.dev/terms, or a substantially similar written agreement
-between you and Antifailure (the "Enterprise Terms"), and otherwise have a
-valid Antifailure Enterprise subscription or license key for the correct
-number of seats, clusters, and features used ("Enterprise License"). Subject
-to the foregoing sentence, you are free to modify this Software and publish
-patches to it.
+and are in compliance with, a written agreement between you and Antifailure
+(the "Enterprise Terms"), and otherwise have a valid Antifailure Enterprise
+subscription or license key for the correct number of seats, clusters, and
+features used ("Enterprise License"). Subject to the foregoing sentence, you
+are free to modify this Software and publish patches to it.
+
+### Why this does not name a public terms page
+
+It did. This clause used to accept the Antifailure Terms of Service at
+https://antifailure.dev/terms "or a substantially similar written agreement",
+which named the self serve route first and a negotiated one second.
+
+The page at that address says, of itself, that it is not a paid-service
+agreement, and it leaves the contracting entity, the registered address, the
+governing law and the liability cap deliberately blank, because none of them
+has been decided. So the condition this clause imposed resolved, for anybody
+following the route it named first, to a document that states it is not the
+kind of document that could satisfy it. A reader could not comply by reading.
+
+Two ways to resolve that: make the page an agreement, or stop naming it. It is
+resolved the second way, because the first would mean publishing a contract
+with no contracting entity in it, which is not an agreement either, only one
+that hides its own gap better.
+
+Nothing about an existing negotiated agreement changes: that route was always
+here and was always the one that worked. What is removed is a route that ended
+at a page saying it was not one. If those blanks are ever filled and the page
+becomes a real agreement, this clause should name it again;
+`web/apps/api/test/legal-facts.test.ts` holds the two documents to each other
+and will say so.
+
+To agree terms, use the contact form at https://antifailure.dev/contact. It
+writes to a queue a person reads.
 
 You agree that Antifailure or its affiliates retain all right, title, and
 interest in and to all such modifications and patches, and all such
@@ -75,4 +101,9 @@ terms above rather than under MIT.
 
 ## Questions
 
-Email licensing@antifailure.dev.
+The routes that resolve are listed at https://antifailure.dev/contact. A licensing
+question that is not commercially sensitive belongs in GitHub Discussions, and
+anything commercial belongs in the form on that page, which writes a row a
+person reads. There is no address to write to: the antifailure.dev domain has no
+mail exchanger and an SPF policy of `v=spf1 -all`, which authorizes no sender in
+either direction.

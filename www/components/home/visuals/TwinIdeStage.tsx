@@ -129,8 +129,10 @@ function Gate({
       ) : (
         <span
           className={cn(
-            "size-2.5 rounded-full border bg-white transition-colors duration-500",
-            tone === "ok" ? "border-[#33bf00] bg-[#33bf00]" : "border-black/25",
+            "size-2.5 rounded-full border transition-colors duration-500",
+            tone === "ok"
+              ? "border-[#33bf00] bg-[#33bf00]"
+              : "border-black/25 bg-white",
           )}
           style={{ transitionTimingFunction: FILM }}
         />

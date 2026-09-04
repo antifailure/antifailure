@@ -12,7 +12,7 @@ resource "azurerm_storage_account" "goldens" {
   location            = var.location
 
   account_tier             = "Standard"
-  account_replication_type = var.golden_replication
+  account_replication_type = var.goldens_replication
   account_kind             = "StorageV2"
   access_tier              = "Hot"
 
@@ -35,8 +35,8 @@ resource "azurerm_storage_account" "goldens" {
 
   blob_properties {
     versioning_enabled = true
-    delete_retention_policy { days = var.golden_soft_delete_days }
-    container_delete_retention_policy { days = var.golden_soft_delete_days }
+    delete_retention_policy { days = var.goldens_soft_delete_days }
+    container_delete_retention_policy { days = var.goldens_soft_delete_days }
   }
 
   tags = var.tags

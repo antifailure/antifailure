@@ -9,7 +9,6 @@ import {
   Button,
   Card,
   Empty,
-  Field,
   Loaded,
   Page,
   Row,
@@ -19,7 +18,6 @@ import {
   Td,
   Th,
   When,
-  inputClass,
   toneFor,
 } from "@/components/ui";
 
@@ -92,7 +90,13 @@ interface BillingState {
     expYear: number | null;
   } | null;
   configured: boolean;
+  /** Paid plans this control plane can actually sell, meaning a Stripe price is
+   *  configured for them. A plan absent here must not get a checkout button. */
   plans: string[];
+  /** Paid plans that exist and are agreed with a person rather than bought
+   *  here. Optional, so a console built against an older control plane renders
+   *  the plain "Not offered here" instead of undefined. */
+  arrangedPlans?: string[];
   hostedRequiredPlan: string | null;
 }
 
@@ -134,7 +138,6 @@ function Billing() {
   const mayManage = may(session.data?.role, "billing.manage");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [seats, setSeats] = useState(1);
 
   if (!mayManage) {
     return (
@@ -172,7 +175,6 @@ function Billing() {
         "subscriptions.checkout",
         {
           plan,
-          seats,
           successUrl: `${window.location.origin}/plan?checkout=success`,
           cancelUrl: `${window.location.origin}/plan`,
         },
@@ -282,7 +284,12 @@ function Billing() {
                     <p className="mt-1 text-[13px] text-ink">{data.billing.subscription.plan}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.08em] text-dim">Seats</p>
+                    {/* What STRIPE reported, not a seat allowance. This said
+                        "Seats" beside the plan's own seat limit in the table
+                        below, so the two contradicted each other on any
+                        subscription bought before the seat count was removed
+                        from checkout. */}
+                    <p className="text-[11px] uppercase tracking-[0.08em] text-dim">Stripe quantity</p>
                     <p className="tnum mt-1 text-[13px] text-ink">{data.billing.subscription.quantity}</p>
                   </div>
                   <div>
@@ -314,19 +321,20 @@ function Billing() {
                 </div>
               ) : (
                 <div className="px-4 py-4">
-                  <div className="max-w-60">
-                    <Field label="Seats" hint="The quantity on the Stripe subscription.">
-                      <input
-                        className={inputClass}
-                        type="number"
-                        min={1}
-                        max={1000}
-                        step={1}
-                        value={seats}
-                        onChange={(event) => setSeats(Math.max(1, Number(event.target.value) || 1))}
-                      />
-                    </Field>
-                  </div>
+                  {/* NO SEAT PICKER, and its absence is the point.
+                      A number input between 1 and 1000 sat here and was sent to
+                      Stripe as the line item quantity, so the price multiplied
+                      by it. It entitled nothing: how many members an
+                      organization may hold is a constant per plan, shown in the
+                      limits table on this same page. Somebody who typed 200
+                      here paid two hundred times over for the fifty seats the
+                      Team plan gives everybody. What is sold is one hosted
+                      control plane per organization at a flat fee, so there is
+                      no quantity to choose. */}
+                  <p className="text-[12px] leading-5 text-dim">
+                    A plan is priced per organization, not per person. The limits
+                    above are what it allows, including how many members it holds.
+                  </p>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {data.billing.plans.map((plan, index) => (
                       <Button
@@ -390,7 +398,11 @@ function Billing() {
                             <span className="text-dim">Current</span>
                         ) : data.billing.configured ? (
                           <span className="text-dim">
-                            {data.billing.plans.includes(p.name) ? "Use checkout" : "Not offered here"}
+                            {data.billing.plans.includes(p.name)
+                              ? "Use checkout"
+                              : data.billing.arrangedPlans?.includes(p.name)
+                                ? "Arranged with us"
+                                : "Not offered here"}
                           </span>
                         ) : data.quota.operatorSetsPlan ? (
                           <Button busy={busy === `choose-${p.name}`} onClick={() => choose(p.name)}>

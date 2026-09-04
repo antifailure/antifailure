@@ -433,6 +433,52 @@ rules:
   # correct apart, and the pair was wrong.
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # The installation's own switches.
+  #
+  # `platform_controls` is configuration for this deployment rather than any
+  # customer's data, and its three columns want three different answers.
+  # ---------------------------------------------------------------------------
+
+  # The second column to make the plan refuse, and for exactly the reason
+  # `sso_connections.idp_entity_id` did: it is unique, an unclassified text
+  # column is emptied, and emptying a primary key sets every row to the same
+  # value and fails on the second one.
+  #
+  # The answer is different, though, and the difference is the point. A hash
+  # would keep uniqueness and break the product: the enforcement points match
+  # this column against a literal from the catalog in
+  # web/apps/api/src/admin/controls.ts, so `WHERE name = 'maintenance'` finds
+  # nothing and every switch reads as released on the copy. It is a fixed
+  # vocabulary of three words that names no person and no customer, which is
+  # the same reason `audit_entries.action` is preserved.
+  - table: platform_controls
+    column: name
+    transform: preserve
+    why: >-
+      a fixed vocabulary the application matches by literal value. Hashing it
+      keeps the unique constraint happy and makes every emergency switch read
+      as released on the masked copy; emptying it is refused outright because
+      the column is the primary key
+
+  # The same thing as organizations.suspended_by, one level up: who stopped
+  # something, which is a person.
+  - table: platform_controls
+    column: engaged_by
+    transform: name
+    why: "who paused the installation, which is a person"
+
+  # Read and deliberately emptied rather than left to fall through. An operator
+  # types this during an incident, so it is the one column here that can carry
+  # a customer's name, a ticket reference or a description of an outage, and
+  # none of that belongs in a copy anybody can branch from.
+  - table: platform_controls
+    column: reason
+    transform: nullify
+    why: >-
+      free text an operator typed during an incident. It can name a customer or
+      quote an outage, and the copy does not need it to behave correctly
+
   # The one that made the plan refuse.
   #
   # It is unique, and an unclassified text column is emptied, so the update

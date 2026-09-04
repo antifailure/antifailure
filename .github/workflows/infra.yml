@@ -28,6 +28,7 @@ on:
       - 'infra/**'
       - 'tools/azguard/**'
       - 'tools/cost/**'
+      - 'tools/tfsecignores/**'
       - '.github/workflows/infra.yml'
   push:
     branches: [main]
@@ -35,6 +36,7 @@ on:
       - 'infra/**'
       - 'tools/azguard/**'
       - 'tools/cost/**'
+      - 'tools/tfsecignores/**'
 
 permissions:
   contents: read
@@ -85,11 +87,88 @@ jobs:
 
       # tfsec reads the configuration and needs no credentials, so it runs on
       # every pull request including one from a fork.
-      - name: tfsec
-        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
+      #
+      # IT BLOCKS, and it did not until the findings were dealt with. Both
+      # halves of that matter. `--soft-fail` was the right setting while the
+      # step was broken and it is the reason eight findings sat unseen once it
+      # was fixed: a scanner whose output nobody has to act on becomes a scanner
+      # nobody reads. Every finding in this tree is now either fixed or carries
+      # an inline decision with an expiry, so there is nothing left for a soft
+      # failure to be soft about.
+      #
+      # It is also what makes those expiries mean anything. tfsec stops
+      # honouring an ignore on its date and reports the finding again; under
+      # `--soft-fail` that produces a green run and tells nobody, so every date
+      # in infra/terraform would be decorative. The version pinned above is
+      # archived upstream in favour of Trivy, so its ruleset does not move,
+      # which removes the usual cost of a blocking scanner: a branch that was
+      # green cannot go red because somebody else shipped a new rule.
+      #
+      # INSTALLED BY HAND RATHER THAN BY THE ACTION, and the reason is the whole
+      # of this block. aquasecurity/tfsec-action downloads tfsec by asking the
+      # GitHub releases API which version is `latest`, and that request returned
+      # HTTP 403 on every pull request touching this directory. The action's own
+      # error says "The request to the GitHub API was likely rate-limited. Set a
+      # GITHUB_TOKEN to prevent this", so a token was set, and the request still
+      # returned 403 with the token being sent. The advice in the message
+      # answers a nearby question: it explains one cause of a 403 from that
+      # endpoint and not the one we were getting, and following it produced a
+      # second red run that looked exactly like the first.
+      #
+      # `soft_fail` never covered this and could not. It decides what happens
+      # when tfsec FINDS something. This was tfsec never running at all, so the
+      # step failed before there was anything to soft fail: a red check,
+      # unrelated to the diff, green on a rerun. That is the shape that teaches
+      # people to rerun a red job without reading it, and it had already cost
+      # one lane an hour looking for a Terraform problem that did not exist.
+      #
+      # So the API is removed from the path. A release asset is served from a
+      # CDN and needs no token and no rate limit budget, the version is pinned
+      # the way every action here is pinned by SHA, and the checksum is the
+      # published one for that release. A mismatch fails the step, because a
+      # scanner downloaded over the network with no integrity check is a worse
+      # thing to run than no scanner.
+      - name: Install tfsec
+        env:
+          TFSEC_VERSION: v1.28.14
+          TFSEC_SHA256: a32d0799bbefababaa4fcd814da9f4d251cd932789590b99d1d5fcb89ace6f68
+        run: |
+          set -euo pipefail
+          url="https://github.com/aquasecurity/tfsec/releases/download/${TFSEC_VERSION}/tfsec-linux-amd64"
+          curl --fail --silent --show-error --location --retry 3 -o /tmp/tfsec "$url"
+          echo "${TFSEC_SHA256}  /tmp/tfsec" | sha256sum --check --status || {
+            echo "::error title=tfsec checksum::The download did not match the published checksum for ${TFSEC_VERSION}. Refusing to run it."
+            exit 1
+          }
+          chmod +x /tmp/tfsec
+          /tmp/tfsec --version
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          working_directory: infra/terraform
-          soft_fail: true
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      # THE RULE TFSEC HAS NO VERSION OF, AND IT RUNS BEFORE THE SCAN ON PURPOSE.
+      #
+      # A finding that cannot be fixed is recorded inline as
+      # `#tfsec:ignore:<rule>:exp:<date>` with the reasoning in prose beside it,
+      # which is the shape .govulncheck.yaml uses for the Go half. tfsec
+      # enforces the date and nothing else: it accepts a directive with no
+      # expiry at all, and it says nothing whatever about one that no longer
+      # suppresses anything. A suppression left behind after the finding is
+      # fixed reads as protection that is not there, and it hides the fact that
+      # the real finding moved or changed shape.
+      #
+      # Before the scan, because the two failures need telling apart. When an
+      # ignore lapses, tfsec reports the original finding and gives no hint that
+      # a decision expired, which sends the reader looking for a change nobody
+      # made. This step says "the decision to accept this expired on such a
+      # date" first, and the scan never runs.
+      - name: tfsec ignores are still true
+        run: GOTOOLCHAIN=local go run ./tools/tfsecignores -tfsec /tmp/tfsec .
+
+      - name: tfsec
+        run: /tmp/tfsec infra/terraform
 
   plan:
     name: plan
@@ -127,6 +206,11 @@ jobs:
           else
             echo "remote_state=false" >> "$GITHUB_OUTPUT"
             echo "::warning title=Planning from empty state::AZURE_TFSTATE_RG and AZURE_TFSTATE_ACCOUNT are not both set, so this plan started from an empty state. Every resource reads as a create and THIS PLAN CANNOT REPORT A DESTROY."
+            # And the other half of what an empty state cannot see, said here
+            # rather than left as a step that quietly did not run. The
+            # production check needs a known value to reject and an empty state
+            # has none, so it is skipped rather than reporting a false pass.
+            echo "::warning title=Production not checked::The production plan is skipped without a state backend, so nothing here checked whether production can be planned at all."
           fi
 
       - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
@@ -281,6 +365,26 @@ jobs:
             --pricing infra/pricing.yaml \
             --budget 300 | tee cost.txt
 
+      # WHAT THE SUMMARY BELOW SAYS, SAID IN AN EXIT CODE INSTEAD.
+      #
+      # The Summarise step already counts destroys and already bolds the count.
+      # That instinct was right and it could not fail: it writes a sentence into
+      # a job summary and asks a person to read it. Commit ff893073 deleted the
+      # Contributor grant that lets continuous deployment reach production, and
+      # every plan afterwards said "1 to destroy" into a green check.
+      #
+      # GATED ON remote_state, not on the credential. A plan from an empty
+      # state shows every resource as a create and cannot contain a destroy, so
+      # running this against one would be a green check that examined nothing.
+      # planguard refuses such a plan outright rather than passing it, and this
+      # condition keeps it from being asked in the first place.
+      - name: staging destroys nothing unacknowledged
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        run: |
+          GOTOOLCHAIN=local go run ./tools/planguard \
+            -plan infra/terraform/stacks/control-plane/plan.json \
+            -environment staging
+
       # The destroy count, called out on its own. A plan buried in a log is a
       # plan nobody reads; "3 to destroy" in the summary is one somebody asks
       # about.
@@ -318,3 +422,163 @@ jobs:
             cat "$GITHUB_WORKSPACE/cost.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # THE FOURTH MODE, AND THE ONE THIS JOB DID NOT HAVE.
+      #
+      # Every step above plans STAGING. Production is a second var-file against
+      # a second state blob and nothing planned it, so the one environment
+      # Terraform could not manage was the one nothing checked. That gap is
+      # quiet by construction: deploys go out through `az containerapp update`
+      # in deploy/cd/deploy.sh rather than through Terraform, so production kept
+      # shipping normally for days while its stack could not be planned at all.
+      # A stack that cannot be planned is a stack nobody can change, and the
+      # settings that were merged and could not be applied were the ones that
+      # turn the operator portal on.
+      #
+      # IT LOOKS AT THE EXIT STATUS AND AT NOTHING ELSE. It does not review the
+      # diff and must not be read as reviewing it, because the inputs here are
+      # not the inputs an apply would use: alert_emails is a placeholder, so
+      # this plan always proposes an in-place change to the action group's
+      # receiver that no apply would ever make. A plan run with different inputs
+      # is a plan about a different desired state, which is the same reason the
+      # staging block pins ci_principal_id. Whether the plan SUCCEEDS is the one
+      # thing that does not depend on those inputs, and it is the whole question
+      # being asked.
+      #
+      # WHY IT NEEDS THE REAL STATE, measured rather than assumed. The failure
+      # this catches is a provider argument validator refusing a value it can
+      # never accept. Terraform SKIPS a validator whose value is unknown, and
+      # from an empty state every id in the plan is unknown, so the empty-state
+      # mode above plans the identical broken configuration clean and exits
+      # zero. Only a plan holding the recorded state has a known value to
+      # refuse. That is why this is gated on remote_state and not on a
+      # credential alone, and it is why "plan production from empty state too"
+      # would have been a check that could not say no.
+      #
+      # WHAT IT COSTS IN PERMISSION: nothing new, and that was checked against
+      # Azure rather than inferred. The same federated credential, the same
+      # storage account and container, one more blob key. The Storage Blob Data
+      # Reader that stacks/tfstate grants this identity is scoped to the whole
+      # ACCOUNT, so the second blob is already readable by a grant that exists;
+      # no role is added for this step. -lock=false for the same reason the
+      # staging plan does not lock: a lease is a write, and stacks/tfstate
+      # deliberately grants this identity no write on the state.
+      # -refresh=false, and the only Azure call this plan makes is
+      # azurerm_client_config, which reads the caller's own identity and needs
+      # no role at all. No secret is read and no role on af-cp-prod-centralus
+      # is required.
+      #
+      # THE REASON FOR THAT CHANGED, AND THE OLD REASON WAS LOAD BEARING BY
+      # ACCIDENT. This used to hold because every azurerm_key_vault_secret data
+      # source was counted to zero under production.tfvars, which was true only
+      # because github_app_id had been emptied by a revert. The moment it was
+      # restored this step failed, on a vault read this identity is not granted
+      # and should not be: it is reachable from a pull_request federated
+      # credential, and the App private key signs as the installation on every
+      # customer repository. It holds now because the module CONSTRUCTS those
+      # secret ids instead of reading them. See modules/control-plane/keyvault.tf.
+      #
+      # -refresh=false does NOT suppress a data source. Terraform evaluates it
+      # on every plan, which is why the staging plan above still reads staging's
+      # vault, where this identity does hold Secrets Officer. Do not reintroduce
+      # a data source here believing the flag covers it.
+      #
+      # LAST IN THE JOB ON PURPOSE. It re-initialises the backend against the
+      # production state, and every step above reads files the staging plan
+      # wrote. Running it earlier would leave those steps describing one
+      # environment from a directory pointed at the other, which is the exact
+      # confusion infra/ISOLATION.md warns about in this shared stack directory.
+      - name: production can still be planned
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        working-directory: infra/terraform/stacks/control-plane
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_github_client_id: plan-only
+          TF_VAR_github_client_secret: plan-only
+          TF_VAR_github_redirect_uri: https://example.invalid/auth/callback
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          # Production refuses to plan with alerting on and no receiver, which
+          # is a deliberate validation and not something to work around: an
+          # action group with no receivers creates cleanly, attaches to every
+          # rule, reports healthy and tells nobody. A placeholder satisfies it
+          # so the check can reach the configuration behind it. Nothing is
+          # delivered to this address because nothing is applied from here.
+          TF_VAR_alert_emails: '["plan-only@example.invalid"]'
+        run: |
+          set -euo pipefail
+          terraform init -reconfigure -input=false \
+            -backend-config="resource_group_name=${{ secrets.AZURE_TFSTATE_RG }}" \
+            -backend-config="storage_account_name=${{ secrets.AZURE_TFSTATE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=control-plane-production.tfstate" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="use_oidc=true"
+          # THE PLAN IS WRITTEN OUT NOW, AND IT WAS NOT BEFORE. The reason
+          # given for not writing one was that `terraform show -json` on a plan
+          # file includes the values of sensitive input variables and this plan
+          # had no reader. It has one: tools/planguard, in the step below, and a
+          # plan with a reader is worth the file. Everything else about the
+          # original reasoning still holds and is kept, so both the plan and its
+          # JSON go to the runner's temp directory rather than into the stack,
+          # where they would be two more untracked files in a directory an
+          # operator also works in by hand. Neither is ever printed: planguard
+          # reads resource_changes and prior_state and deliberately does not
+          # touch the variables block.
+          log="$RUNNER_TEMP/production-plan.txt"
+          if terraform plan -input=false -lock=false -refresh=false \
+            -var-file=production.tfvars -no-color \
+            -out="$RUNNER_TEMP/production.tfplan" > "$log" 2>&1; then
+            terraform show -json "$RUNNER_TEMP/production.tfplan" > "$RUNNER_TEMP/production-plan.json"
+            echo "Production planned successfully. The diff above is staging's; this step read only the exit status." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=Production cannot be planned::terraform plan against production.tfvars and control-plane-production.tfstate failed. Until it passes, no change to this stack can be applied to production, including changes already merged. The failure is below."
+            {
+              echo
+              echo "### Production cannot be planned"
+              echo
+              echo 'This is not about the diff. `terraform plan -var-file=production.tfvars`'
+              echo 'exited non-zero, so production has no applyable plan at all.'
+              echo
+              echo '```'
+              tail -c 20000 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # THE SAME QUESTION, ASKED WHERE IT WAS NEVER ASKED AT ALL.
+      #
+      # The step above reads the exit status and says so: a plan that SUCCEEDS
+      # can still be a plan that removes something nobody meant to remove, and
+      # that is not a hypothetical here. This is the environment where it
+      # happened, and it went unseen for days for two compounding reasons:
+      # production could not be planned at all, and the destroy counter that
+      # does exist runs against staging and reports rather than fails.
+      #
+      # IT IS SAFE TO READ THIS DIFF EVEN THOUGH THE STEP ABOVE SAYS THE DIFF
+      # CANNOT BE TRUSTED, and the distinction is the reason this step is
+      # allowed to exist. The inputs here are not the inputs an apply would use:
+      # alert_emails is a placeholder and ci_principal_id arrives from a
+      # repository variable, so the ADDS and the IN PLACE CHANGES in this plan
+      # describe a desired state nobody will ever apply. Neither placeholder can
+      # manufacture a DESTROY. A destroy appears when state holds a managed
+      # resource that no configuration declares, and no value passed on the
+      # command line makes a resource stop being declared. Verified rather than
+      # assumed: the pull request that added this planned production both ways
+      # and the destroy set was identical.
+      #
+      # It is a separate step from the plan on purpose. "Production cannot be
+      # planned" and "production plans, and the plan removes something" are
+      # different failures with different fixes, and a reader should not have to
+      # work out which one a red check meant.
+      - name: production destroys nothing unacknowledged
+        if: steps.azure.outputs.ready == 'true' && steps.azure.outputs.remote_state == 'true'
+        run: |
+          GOTOOLCHAIN=local go run ./tools/planguard \
+            -plan "$RUNNER_TEMP/production-plan.json" \
+            -environment production

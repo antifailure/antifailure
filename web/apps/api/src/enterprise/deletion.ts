@@ -659,12 +659,23 @@ async function cancelSubscription(deps: DeletionDeps, orgId: string): Promise<bo
 
   if (live) {
     if (!deps.stripe) {
+      // Names the three variables this actually needs, and says which of them
+      // the cancellation itself uses.
+      //
+      // It used to name all four, AF_STRIPE_PRICE_ENTERPRISE included. That
+      // variable is optional now and on an installation that agrees Enterprise
+      // with a person it is correctly unset forever, so the sentence sent an
+      // operator who is mid-deletion to go and fix something that is not
+      // broken. Worse, it overstated the requirement twice over: the only call
+      // below is `cancelSubscription`, which needs the SECRET KEY and no price
+      // at all. The other two are named because they are what makes the whole
+      // configuration resolve, which is the condition being reported.
       throw new DeletionError(
         'This organization has a live subscription and this control plane is not configured to ' +
-          'talk to Stripe, so the subscription cannot be cancelled from here. Set ' +
-          'AF_STRIPE_SECRET_KEY, AF_STRIPE_WEBHOOK_SECRET, AF_STRIPE_PRICE_TEAM and ' +
-          'AF_STRIPE_PRICE_ENTERPRISE, or cancel it in Stripe, and then continue the deletion. ' +
-          'Nothing has been deleted.',
+          'talk to Stripe, so the subscription cannot be cancelled from here. Cancelling needs ' +
+          'AF_STRIPE_SECRET_KEY; billing turns on only when AF_STRIPE_WEBHOOK_SECRET and ' +
+          'AF_STRIPE_PRICE_TEAM are set with it. Set those three, or cancel the subscription in ' +
+          'Stripe, and then continue the deletion. Nothing has been deleted.',
       )
     }
     subscriptionId = live.stripe_subscription_id

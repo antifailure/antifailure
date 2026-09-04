@@ -96,6 +96,24 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
       [
+        'platform_controls',
+        'configuration for the installation rather than data belonging to a tenant, so there ' +
+          'is no org_id to key a policy on. Reading is open to the application role on purpose: ' +
+          'every request has to be able to learn that the installation is paused. Writing is ' +
+          'not granted to the application role at all, only to antifailure_admin, so a tenant ' +
+          'route that reached this table raises permission denied rather than writing nothing ' +
+          'and reporting success. See migrations/0031.',
+      ],
+      [
+        'enterprise_leads',
+        'somebody asking to buy, who has no organization and may never have one, which is the ' +
+          'whole reason the route exists. What confines the application role is a GRANT rather ' +
+          'than a policy: it holds INSERT and no SELECT, so the anonymous route that writes ' +
+          'here cannot read a row back even holding its id, and a query bug on a public path ' +
+          'cannot publish a prospect\'s contact details. Reading is antifailure_admin or the ' +
+          'migration role, through af-control-plane-backup leads. See migrations/0035.',
+      ],
+      [
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',
@@ -127,6 +145,21 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'org_id would claim a tenancy it does not have and would put this table into the ' +
           "loops below, which demand an isolation it is not supposed to have",
       ],
+      // The analytics tables carry a keyed hash of the organization rather than
+      // its id, and that is the whole point of them: see migrations/0032. An
+      // org_id here would make the stream joinable back to a customer, so the
+      // protection is the grant (INSERT and no SELECT on the stream) plus the
+      // policies, and there is deliberately nothing for tenant isolation to key
+      // on. The suite below proves the application cannot read the stream at
+      // all, which is stronger than isolating it per tenant.
+      ['analytics_events', 'carries a keyed surrogate, never an org_id; the application cannot read it'],
+      ['analytics_org_facts', 'keyed by the same surrogate, holding counts and dates and no identifier'],
+      ['analytics_daily', 'aggregate counts with no identifier of any kind in them'],
+      ['analytics_rollup_state', 'one row of bookkeeping about when the rollup last ran'],
+      ['analytics_subject_days', 'the rollup working set, keyed by the same surrogate and granted to nobody'],
+      ['analytics_actives', 'distinct counts over a window, with no identifier in them'],
+      ['analytics_retention_cohorts', 'a cohort grid of counts, with no identifier in it'],
+      ['analytics_funnel_weeks', 'counts of how far subjects got, with no identifier in them'],
     ])
 
     // Partitions are excluded because a partition is storage for its parent

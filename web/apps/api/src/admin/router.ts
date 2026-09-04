@@ -31,6 +31,19 @@ import { z } from 'zod'
 import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
+import { emergencyRouter, infraRouter } from './infra.ts'
+import { administrationRouter } from './administration.ts'
+import { customersRouter } from './customers.ts'
+import { operationsRouter } from './operations.ts'
+import { platformRouter } from './platform.ts'
+import { productRouter } from './product.ts'
+import { securityRouter } from './security.ts'
+// A second import line from the same module, deliberately. admin-namespaces
+// .test.ts matches `import { securityRouter } from './security.ts'` exactly, so
+// that a lane's mount and the file that owns it cannot be made to disagree by a
+// copy and paste. Widening that line to carry a second name would defeat the
+// check, so the audit chain routes come in on their own.
+import { auditChainRoutes } from './security.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
 import {
   adminBillingRouter,
@@ -71,7 +84,7 @@ const page = z.object({
  */
 const SAFE_COLUMNS = {
   organizations: ['id', 'slug', 'name', 'plan', 'created_at', 'suspended_at', 'suspended_reason'],
-  users: ['id', 'github_login', 'email', 'name', 'created_at'],
+  users: ['id', 'github_login', 'email', 'name', 'created_at', 'suspended_at', 'suspended_reason'],
   sessions: ['id', 'user_id', 'org_id', 'created_at', 'last_seen_at', 'expires_at', 'revoked_at', 'ip', 'user_agent'],
   admin_users: ['id', 'email', 'name', 'role', 'is_root', 'suspended_at', 'last_signed_in_at', 'created_at'],
 } as const
@@ -358,9 +371,12 @@ export const adminRouter = router({
             email: string
             name: string | null
             created_at: Date | string
+            suspended_at: Date | string | null
+            suspended_reason: string | null
             orgs: string
           }>(sql`
             SELECT u.id, u.github_login, u.email, u.name, u.created_at,
+                   u.suspended_at, u.suspended_reason,
                    (SELECT count(*) FROM members m WHERE m.user_id = u.id) AS orgs
             FROM users u
             WHERE (${input.query ?? null}::text IS NULL
@@ -376,6 +392,15 @@ export const adminRouter = router({
           email: r.email,
           name: r.name,
           createdAt: iso(r.created_at),
+          // Suspension, on the LIST rather than only on the write that causes
+          // it. Without these two the console could suspend an account and
+          // then render it beside every other one with nothing to tell them
+          // apart, so an operator asking "did that work" had no screen that
+          // could answer. Same two columns the organization list already
+          // carries, and named the same way, because two vocabularies for one
+          // idea is how a check ends up reading the wrong one.
+          suspended: r.suspended_at !== null,
+          suspendedReason: r.suspended_reason,
           organizations: Number(r.orgs),
         }))
       }),
@@ -800,12 +825,23 @@ export const adminRouter = router({
           occurredAt: iso(r.occurred_at),
         }))
       }),
+
+    // admin-security. Spread rather than mounted under a key of their own,
+    // because these two belong to admin.audit: the permission they declare is
+    // admin.audit.export, the console reaches them beside admin.audit.list, and
+    // a new key would file the chain's export somewhere other than the chain.
+    // They live in security.ts so that lane owns its own file, and the spread
+    // is a visible one line edit here rather than an invisible second mount.
+    ...auditChainRoutes,
   }),
 
   // ---------------------------------------------------------------------------
   // Other lanes spread in here.
   //
-  // admin-infra:  infra: infraRouter, emergency: emergencyRouter
+  // admin-infra:  spread in below.
+  infra: infraRouter,
+  emergency: emergencyRouter,
+
   // admin-money:  billing, entitlements, flags
   // admin-ops:    users detail, projects, impersonation, support, search
   //
@@ -818,6 +854,32 @@ export const adminRouter = router({
   entitlements: adminEntitlementsRouter,
   flags: adminFlagsRouter,
   // ---------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // The six navigation groups, one module each, mounted here and nowhere else.
+  //
+  // The portal's twenty two sections are built by six people at once, and this
+  // is the arrangement that lets them: a group owns one module under this
+  // directory and one directory under console/app/admin, so two of them cannot
+  // land in the same file. Every one of these is empty today and every one is
+  // mounted anyway, because a namespace that is reserved and NOT mounted is a
+  // namespace two lanes will claim.
+  //
+  // admin-namespaces.test.ts asserts all six are here, exactly once, and that
+  // each is the module that names it. That test is what makes this list a
+  // guarantee rather than a comment: the failure this file exists to prevent is
+  // a second `admin:` key that git does not report, and a mount that nothing
+  // enumerates has the same shape.
+  //
+  // The tenant, user, session, operator and audit routes above are NOT moved
+  // into them. Every path up there is one the console already calls, and
+  // renaming them for filing would break the portal to tidy a directory.
+  customers: customersRouter,
+  product: productRouter,
+  platform: platformRouter,
+  operations: operationsRouter,
+  security: securityRouter,
+  administration: administrationRouter,
 })
 
 /** Reads the organization or refuses, so an audit entry is never written about

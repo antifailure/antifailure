@@ -170,37 +170,123 @@ monthly_budget_usd = 450
 # Identity and access.
 # ---------------------------------------------------------------------------
 
-# The same two people. This is not a public sign-up and the enterprise SSO path
-# is a separate feature; adding somebody is an edit here and an apply, which is
-# deliberate, because an allowlist that can be edited in a portal is one nobody
-# can review.
-signin_allowlist = ["virsanghavi", "maksymrajszewski"]
+# OPEN. Anybody with a GitHub account may sign in.
+#
+# Null, and null is not the same value as the empty list: an empty list renders
+# AF_SIGNIN_ALLOWLIST="" and the application reads that as "set, and names
+# nobody", which closes the plane to everyone. See the module's app.tf, which is
+# careful about exactly this. Terraform will not let a plan be produced without
+# a value here at all, so opening the door is still a decision somebody wrote
+# down rather than one they forgot.
+#
+# It named two people until this change, alongside a waitlist form that stored
+# an address on a host with no way to mail anybody back. That was a closed
+# product with a queue nobody could be taken off. What replaces it is a sign-up
+# anybody can complete, defended by the things that make an open door safe
+# rather than by a list: GitHub has to report the address as verified before a
+# user row is written, every sign-in endpoint is rate limited by address in
+# src/limits.ts, and a refusal says the same sentence whoever asks, so the form
+# cannot be used to find out who has an account.
+#
+# Closing it again is one line: a list of logins here and an apply.
+signin_allowlist = null
 
-# Where the accounts that list does not name are sent. Without it a refused
-# visitor reads "ask an owner of this installation", which is the right answer
-# for somebody self-hosting and the wrong one for a person who arrived from the
-# marketing site and was one click away from the waitlist.
-signup_url = "https://antifailure.dev/signup"
+# Everybody who signs in gets their own organization on the free plan, owned by
+# them, whose quotas and cost caps are enforced against it. Without this a new
+# person authenticates and lands in nothing, which is the state this deployment
+# was in for every visitor who was not one of the two names above.
+self_serve_signup = true
 
-# EMPTY UNTIL THE PRODUCTION GITHUB APP EXISTS, AND SETTING IT EARLY FAILS.
+# Where a refused account is sent. Never rendered while the allowlist is null,
+# because nobody is refused; set anyway so that closing signups later is one
+# decision rather than two. The contact page reaches a person, which is what
+# somebody turned away actually needs.
+signup_url = "https://antifailure.dev/contact"
+
+# SET ONLY AFTER THE PRODUCTION GITHUB APP EXISTS. SETTING IT EARLY FAILS.
 #
 # Production needs its OWN App, not staging's: the webhook secret and the
 # private key are the credentials that let a delivery write rows, so sharing
 # them means a staging compromise writes into production's tenants. Installation
 # ids differ per App and github_installations keys on them.
 #
-# The module reads the App's two secrets from Key Vault with a data source,
-# because GitHub mints the private key once and Terraform can neither create nor
-# recreate it. So setting this id before those secrets are in the production
-# vault fails at PLAN, which is the correct order and not a bug. The checklist
-# in the production guide has the steps in the order that works.
-github_app_id = ""
+# GitHub mints the private key once and shows it once, so Terraform can neither
+# create the App's two secrets nor recreate them. A person puts both in the
+# vault and the module addresses them by id.
+#
+# SETTING THIS BEFORE THOSE SECRETS EXIST NOW FAILS AT APPLY RATHER THAN AT
+# PLAN. That is a deliberate trade, and on THIS plane it costs nothing, because
+# the check it replaces has never once run here.
+#
+# The module used to read both secrets with a `data "azurerm_key_vault_secret"`,
+# which asserted they existed. Asserting existence requires READING, and the
+# identity that runs the production plan holds Contributor on the resource group
+# and nothing at all on this vault. So the read failed on PERMISSION before it
+# could ever report on EXISTENCE. What was given up on production is an
+# intention this deployment's own permission model has never permitted, not a
+# check that worked.
+#
+# DO NOT RESTORE THE DATA SOURCE TO GET THE CHECK BACK. It does not come back.
+# The wall is the grant, and the grant has no per secret scope: it would open
+# every secret in this vault, this one included, to an identity that a pull
+# request can reach and whose workflow a pull request can edit in the same
+# commit. keyvault.tf carries the whole argument.
+#
+# STAGING IS THE HONEST COST, and it is worth stating because it is easy to
+# assume otherwise. staging.tfvars sets github_app_id too, both environments
+# share this module, and staging's plan identity CAN read staging's vault. So
+# staging did have a working plan time existence check and this removes it. A
+# missing secret there now surfaces at apply with Azure naming the secret, which
+# is a later moment than plan and not a dangerous one, on the environment where
+# somebody is experimenting anyway.
+#
+# The checklist in the production guide still has the steps in the order that
+# works.
+#
+# App 4775259, slug `antifailure`, installed on the antifailure organization as
+# installation 157834739. The OAuth App that signs people in is a separate
+# registration and its client id and secret are the seeded vault entries, not
+# this value: an App id is not a credential and unlocks nothing, which is why it
+# sits here rather than arriving as a TF_VAR_.
+#
+# The App this names is CONFIGURED AND SERVING. Read off the running container
+# rather than remembered: afcpprod-app carries AF_GITHUB_APP_ID=4775259 and both
+# vault secrets exist. Emptying this line does not remove the App; it removes
+# all three environment variables from the container app on the next apply, and
+# with them the installation webhook, which is the only path by which an
+# organization comes into being. That failure presents as a customer signing in
+# to an empty screen, so it reads as a product bug rather than a configuration
+# one. See ci.tf for the commit that emptied it and for what a plan gate can and
+# cannot catch.
+github_app_id = "4775259"
 
 # One identity applies this stack, and it is the same person as staging, so the
 # grant is pinned rather than following whoever is calling. See staging.tfvars
 # for why the module defaults this off.
 assign_deployer_secret_officer = true
 deployer_principal_id          = "3537595b-8059-4839-9cd8-04325c824291"
+
+# WITHOUT THIS, CONTINUOUS DEPLOYMENT CANNOT REACH PRODUCTION AT ALL.
+#
+# The object id of af-infra-ci, the Entra application GitHub Actions federates
+# into. cd.yml's production job updates the container app's image, starts the
+# bootstrap job and shifts ingress traffic; every one of those is a write and
+# the identity holds nothing on this group until this line grants it.
+#
+# An object id is not a secret. It identifies a principal and unlocks nothing,
+# which is why it sits here beside deployer_principal_id rather than arriving as
+# an environment variable. That placement is deliberate and is the difference
+# between this grant and staging's: a value passed as TF_VAR_ by the plan job
+# and NOT by the person who runs apply produces a plan that says "1 to add" on
+# every pull request forever, for a resource nobody ever creates. That is
+# exactly what ci_principal_id does today, and a plan that is never empty is one
+# people stop reading.
+#
+# The grant this line describes is live in Azure and recorded in
+# control-plane-production.tfstate. Deleting the line does not revoke it; it
+# turns it into an orphan that the next apply removes. See ci.tf for the commit
+# that did exactly that and for the gate that now refuses it.
+cd_principal_id = "f99916dc-1e11-4305-8e03-1e116a1e93e1"
 
 # ---------------------------------------------------------------------------
 # Alerting.
@@ -223,3 +309,41 @@ deployer_principal_id          = "3537595b-8059-4839-9cd8-04325c824291"
 # 14.72. Cutting to two locations would halve it and would also mean one
 # region's network problem could reach the two-failure threshold on its own.
 alerting_enabled = true
+
+# ---------------------------------------------------------------------------
+# The operator portal.
+# ---------------------------------------------------------------------------
+
+# ON. Twenty three operator routes and twenty two sections shipped in v1.1.0
+# and nothing on this plane could reach any of them: the switch generates the
+# credential and wires AF_ADMIN_DATABASE_URL, and with it unset the portal
+# answers "this installation has no operator database credential configured"
+# on every request.
+#
+# The connection arithmetic is a precondition in the module rather than a hope,
+# because createAdminPool runs inside the serving process and a pool that fits
+# on its own and not beside the application is a 503 at the next peak. This
+# database is GP_Standard_D2ds_v4 with 844 usable connections and the portal at
+# the default admin_pool_max takes the peak to 116, so it fits with room that is
+# not close.
+#
+# The credential is generated by the apply and written to the vault. Nobody
+# types it and no workflow holds it. It is a SEPARATE role from the one the
+# application uses, holding BYPASSRLS, which is what lets one operator read
+# across tenants and is exactly why it is not the application's role.
+#
+# Turning this on does not create an operator. admin_users rows are written
+# only by a route that needs an operator session, so a fresh database has
+# nobody who can create the first one. `af-control-plane-backup
+# bootstrap-operator` is what makes the portal reachable by a person, it reads
+# the password from the environment or standard input and never from an
+# argument, and it is a step somebody runs after this applies.
+operator_portal_enabled = true
+
+# Where the marketing site is served from, for the two endpoints a browser
+# calls cross origin: the contact form that writes a lead, and the analytics
+# beacon. Unset refuses every one of them rather than reflecting whatever
+# Origin arrives, which is the right default and the wrong answer for the plane
+# that antifailure.dev actually talks to. Unset here presents to a visitor as a
+# network error on the contact form with no explanation anywhere.
+site_origin = "https://antifailure.dev"

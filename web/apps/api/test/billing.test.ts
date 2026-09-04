@@ -20,8 +20,13 @@
 //   webhook then customer        the event that arrived before the row existed
 //   customer then no webhook     the delivery that never came, fixed by reconciling
 //   cancel while an upgrade is in flight
+//   downgrade while over the lower plan's seat limit
 //
-// The last two are the ones a happy-path suite never reaches.
+// The last three are the ones a happy-path suite never reaches. The downgrade
+// was added with the change that made a plan's seat number the only one there
+// is: checkout used to sell a per unit quantity that entitled nothing, so a
+// downgrade is now the only way an organization ends up holding more members
+// than its plan allows, and what happens then had never been asserted.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -332,6 +337,93 @@ describe('the configuration', () => {
     assert.ok(config)
     assert.equal(config.prices.team, 'price_1')
   })
+
+  // -------------------------------------------------------------------------
+  // A plan with no price, which is a supported state and used to be an outage.
+  //
+  // AF_STRIPE_PRICE_ENTERPRISE was the fourth REQUIRED variable, so a
+  // deployment that set the secret key, the webhook secret and the Team price
+  // and nothing else landed in the "partially configured" branch: config came
+  // back null, billing was entirely OFF, and the Team price that does exist
+  // could not be sold either. That is the exact shape this product sells in.
+  // Team has a recurring price somebody can buy on their own; Enterprise is
+  // arranged with a person and has no price at all.
+  //
+  // Measured before the change, by calling this function: secret + webhook +
+  // TEAM gave `config: null` and "billing is OFF and partially configured:
+  // AF_STRIPE_PRICE_ENTERPRISE not set".
+  // -------------------------------------------------------------------------
+
+  it('is ON with no Enterprise price, because Enterprise is arranged with a person', () => {
+    const { config, summary } = stripeConfigFrom({
+      AF_STRIPE_SECRET_KEY: 'sk_test',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      AF_STRIPE_PRICE_TEAM: 'price_1',
+    })
+    assert.ok(
+      config,
+      'billing is off with no Enterprise price, so the Team price that exists cannot be sold either',
+    )
+    assert.equal(config.prices.team, 'price_1')
+    // Absent, not empty. An empty string would compare equal to another empty
+    // string in planForPrice and hand somebody the largest plan.
+    assert.equal(config.prices.enterprise, undefined)
+    // The startup line has to name both halves, or the first Enterprise
+    // refusal reads like an outage to whoever is on call.
+    assert.match(summary, /billing is on/)
+    assert.match(summary, /team sold self-serve/)
+    assert.match(summary, /enterprise has no price/)
+  })
+
+  it('is still OFF when a genuinely required variable is missing', () => {
+    // The relaxation above must not have relaxed the other three. Each one is
+    // dropped on its own, because a check that only ever tests the whole set
+    // cannot tell which member it is actually enforcing.
+    for (const dropped of [
+      'AF_STRIPE_SECRET_KEY',
+      'AF_STRIPE_WEBHOOK_SECRET',
+      'AF_STRIPE_PRICE_TEAM',
+    ]) {
+      const env: Record<string, string> = {
+        AF_STRIPE_SECRET_KEY: 'sk_test',
+        AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        AF_STRIPE_PRICE_TEAM: 'price_1',
+      }
+      delete env[dropped]
+      const { config, summary } = stripeConfigFrom(env)
+      assert.equal(config, null, `billing came on without ${dropped}`)
+      assert.match(summary, /partially configured/)
+      assert.match(summary, new RegExp(dropped))
+    }
+  })
+
+  it('calls an installation that set only the Enterprise price half configured, not untouched', () => {
+    // "Nothing set at all" is the self-hosted default and is fine. It is
+    // decided by the required list plus the optional one, so setting only the
+    // optional variable is not mistaken for having set nothing.
+    const { config, summary } = stripeConfigFrom({ AF_STRIPE_PRICE_ENTERPRISE: 'price_2' })
+    assert.equal(config, null)
+    assert.match(summary, /partially configured/)
+  })
+
+  it('a plan with no price matches no subscription, whatever Stripe sent', () => {
+    // The one that would be silent. `config.prices.enterprise` is undefined, and
+    // a subscription with no items has a null price id: an unguarded lookup
+    // compares undefined against undefined, matches, and moves somebody onto
+    // the largest plan for nothing.
+    const { config } = stripeConfigFrom({
+      AF_STRIPE_SECRET_KEY: 'sk_test',
+      AF_STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      AF_STRIPE_PRICE_TEAM: 'price_1',
+    })
+    assert.ok(config)
+    assert.equal(planForPrice(config, null), null)
+    assert.equal(planForPrice(config, ''), null)
+    assert.equal(planForPrice(config, 'price_nobody_configured'), null)
+    // And the plan that DOES have a price still resolves, so this is not
+    // passing by refusing everything.
+    assert.equal(planForPrice(config, 'price_1'), 'team')
+  })
 })
 
 describe('the subscription collection boundary', () => {
@@ -375,9 +467,28 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   let org: Org
   let owner: SignedIn
   let viewer: SignedIn
+  const sentToStripe: { path: string; body: string }[] = []
+
+  /** The most recent request to a path, or undefined. */
+  function lastSent(path: string): { path: string; body: string } | undefined {
+    return [...sentToStripe].reverse().find((r) => r.path === path)
+  }
 
   before(async () => {
     const stripe = await stripeAgainstMockPack()
+    // Every request body that reaches Stripe, so a test can assert about a
+    // parameter that is supposed to be ABSENT. RealStripeClient reads
+    // config.fetch at call time, so wrapping it after the client is built is
+    // enough; the pack still answers, so nothing else in the suite changes.
+    const pack = stripe.config.fetch!
+    stripe.config.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      sentToStripe.push({
+        path: url.pathname,
+        body: typeof init?.body === 'string' ? init.body : '',
+      })
+      return pack(input, init)
+    }
     billing = stripe.billing
     h = await startApi({ stripe: stripe.billing })
     org = await seedOrg(h.admin, 'billing')
@@ -411,7 +522,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   }
 
   async function deliver(raw: string) {
-    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw))
+    return handleStripeDelivery(h.pool, h.clock, billing.config, eventOf(raw), h.analytics)
   }
 
   // -------------------------------------------------------------------------
@@ -572,7 +683,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     // The organization catches up. Attaching resolves what was waiting.
     const { attachCustomer } = await import('../src/billing/store.ts')
     const attached = await h.pool.withTenant({ orgId: o.orgId }, async (db) =>
-      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }),
+      attachCustomer(db, h.clock, billing.config, o.orgId, { id: customerId, email: null }, h.analytics),
     )
     assert.equal(attached.created, true)
     assert.equal(attached.resolved, 1, 'the waiting event was not replayed')
@@ -599,7 +710,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
 
     // A subscription exists at Stripe. The pack is Stripe here.
     const created = await billing.client.createCheckoutSession({
-      customerId, priceId: 'price_team_afmock', quantity: 1, orgId: o.orgId,
+      customerId, priceId: 'price_team_afmock', orgId: o.orgId,
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
     assert.ok(created.url.endsWith(created.id), 'the checkout url does not name its own session')
@@ -682,6 +793,94 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const [row] = await h.admin<{ status: string }[]>`
       SELECT status FROM subscriptions WHERE stripe_subscription_id = 'sub_inflight'`
     assert.equal(row!.status, 'canceled')
+
+    await dropOrg(h.admin, o.orgId)
+  })
+
+  it('ordering: a plan downgrade while the organization holds more than the lower plan allows', async () => {
+    // The ordering a happy-path suite never reaches, and the one that matters
+    // most now that seats come from the plan alone.
+    //
+    // An organization on `team` holds 50 seats. It downgrades, and the members
+    // it already has do not fit. Two things have to be true and they pull in
+    // opposite directions: NOTHING IS REMOVED, because taking somebody's
+    // colleague off their account over a plan change is not a behaviour this
+    // product has, and the NEXT invitation is refused, because the limit is
+    // real or it is decoration.
+    //
+    // This is also the case that made a purchased seat count indefensible. A
+    // quantity that entitled seats would have to be re-read on every downgrade
+    // and would disagree with the plan for as long as Stripe took to send the
+    // update. The plan constant has no such window.
+    const { org: o, customerId } = await freshOrg('downgrade')
+    await attach(o.orgId, customerId)
+    // A fresh subscription id per run. The fixed ids elsewhere in this file
+    // rely on ON DELETE CASCADE to clear the row when the organization is
+    // dropped, which only happens if the test PASSED: one failure leaves the
+    // row behind, and every later run then hits the watermark on a row it
+    // cannot see and fails somewhere else entirely.
+    const subId = `sub_down_${randomUUID().slice(0, 8)}`
+
+    const t0 = h.clock.now()
+    await deliver(
+      envelope(
+        'customer.subscription.created',
+        subscriptionObject({ id: subId, customer: customerId, priceId: 'price_team_afmock' }),
+        t0,
+      ),
+    )
+    assert.equal(await planOf(o.orgId), 'team')
+
+    // Six people, which fits inside team's fifty and not inside free's five.
+    const owner6 = await signInAs(h, o, 'owner')
+    for (let i = 0; i < 5; i += 1) {
+      const ok = await callProcedure(h, owner6, 'invitations.create', 'mutation', {
+        email: `down-${i}@example.test`, role: 'member',
+      })
+      assert.equal(errorCode(ok.body), null, `invitation ${i}: ${JSON.stringify(ok.body)}`)
+    }
+    const heldBefore = await h.admin<{ n: string }[]>`
+      SELECT (SELECT count(*) FROM members WHERE org_id = ${o.orgId})
+           + (SELECT count(*) FROM invitations
+               WHERE org_id = ${o.orgId} AND accepted_at IS NULL AND revoked_at IS NULL) AS n`
+    assert.equal(Number(heldBefore[0]!.n), 6, 'the organization is not over the lower plan yet')
+
+    // Stripe says the subscription is gone. The plan drops to free, whose
+    // limit is five, and six people are already inside it.
+    await deliver(
+      envelope(
+        'customer.subscription.deleted',
+        subscriptionObject({
+          id: subId, customer: customerId, status: 'canceled',
+          priceId: 'price_team_afmock', canceledAt: Math.floor(t0.getTime() / 1000) + 60,
+        }),
+        new Date(t0.getTime() + 60_000),
+      ),
+    )
+    assert.equal(await planOf(o.orgId), 'free', 'the downgrade did not land')
+
+    // NOTHING WAS REMOVED.
+    const heldAfter = await h.admin<{ n: string }[]>`
+      SELECT (SELECT count(*) FROM members WHERE org_id = ${o.orgId})
+           + (SELECT count(*) FROM invitations
+               WHERE org_id = ${o.orgId} AND accepted_at IS NULL AND revoked_at IS NULL) AS n`
+    assert.equal(
+      Number(heldAfter[0]!.n), 6,
+      'the downgrade removed a member or an invitation. A plan change must never do that.',
+    )
+
+    // AND THE NEXT ONE IS REFUSED, naming the plan rather than a number that
+    // came from a purchase.
+    const refused = await callProcedure(h, owner6, 'invitations.create', 'mutation', {
+      email: 'down-over@example.test', role: 'member',
+    })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED')
+    assert.match(
+      JSON.stringify(refused.body), /6 of 5 seats/,
+      'the refusal did not count what the organization is actually holding',
+    )
+    assert.match(JSON.stringify(refused.body), /the free plan allows/)
+    assert.match(JSON.stringify(refused.body), /Nobody was removed/)
 
     await dropOrg(h.admin, o.orgId)
   })
@@ -793,7 +992,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const spySession = await signInAs(spy, spyOrg, 'owner')
 
     const { status } = await callProcedure(spy, spySession, 'subscriptions.checkout', 'mutation', {
-      plan: 'team', seats: 1,
+      plan: 'team',
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
     assert.equal(status, 200)
@@ -998,7 +1197,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
 
   it('checkout creates a customer, opens a session, and sends the browser somewhere real', async () => {
     const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
-      plan: 'team', seats: 2,
+      plan: 'team',
       successUrl: 'https://app.test/billing/done',
       cancelUrl: 'https://app.test/billing',
     })
@@ -1021,6 +1220,101 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     assert.ok(entry, 'starting a purchase was not audited')
   })
 
+  // -------------------------------------------------------------------------
+  // The quantity checkout does not send.
+  //
+  // THE DEFECT. `subscriptions.checkout` took `seats` between one and a
+  // thousand and passed it to Stripe as `line_items[0][quantity]`, so the price
+  // multiplied by it. Nothing read it back: the seat limit is a per plan
+  // constant in entitlements.ts. An organization that bought 3 seats on `team`
+  // got 50, and one that bought 200 also got 50, at two hundred times the
+  // price. What this sells is one hosted control plane per organization, at a
+  // flat fee, so there is no number for a price to multiply.
+  //
+  // Asserted on the BODY THAT REACHED STRIPE rather than on the input schema,
+  // because the input schema is not what an invoice is computed from. A route
+  // that quietly defaulted the quantity to something would satisfy a schema
+  // assertion and still bill per unit.
+  // -------------------------------------------------------------------------
+
+  it('checkout sends Stripe no quantity, because nothing here is sold per unit', async () => {
+    const before = sentToStripe.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
+      plan: 'team',
+      successUrl: 'https://app.test/billing/done',
+      cancelUrl: 'https://app.test/billing',
+    })
+    assert.equal(status, 200, JSON.stringify(body))
+
+    const sent = lastSent('/v1/checkout/sessions')
+    // The negative control. Without it, a recorder that captured nothing would
+    // make the assertion below pass against an empty string forever.
+    assert.ok(sent, 'nothing was recorded for /v1/checkout/sessions, so this proves nothing')
+    assert.ok(sentToStripe.length > before, 'the recorder did not see this call')
+    const form = new URLSearchParams(sent.body)
+    assert.equal(
+      form.get('line_items[0][price]'), 'price_team_afmock',
+      'the recorded body is not the checkout session body, so the assertion below is vacuous',
+    )
+
+    assert.equal(
+      form.has('line_items[0][quantity]'), false,
+      'checkout sent Stripe a per unit quantity. The price multiplies by it and nothing ' +
+        'entitles anything from it, so this is a charge for something the buyer does not get.',
+    )
+  })
+
+  it('a caller that asks for two hundred seats is billed for none of them', async () => {
+    // The exact shape of the defect, driven from the outside. `seats` is gone
+    // from the validator, so zod strips it: the call succeeds and the number
+    // reaches neither Stripe nor the audit trail. Silently ignoring is the
+    // right direction to be wrong in here, because the alternative failure
+    // charges somebody.
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
+      plan: 'team',
+      seats: 200,
+      successUrl: 'https://app.test/billing/done',
+      cancelUrl: 'https://app.test/billing',
+    })
+    assert.equal(status, 200, JSON.stringify(body))
+
+    const sent = lastSent('/v1/checkout/sessions')
+    assert.ok(sent, 'nothing was recorded for /v1/checkout/sessions, so this proves nothing')
+    const form = new URLSearchParams(sent.body)
+    assert.equal(form.get('line_items[0][price]'), 'price_team_afmock')
+    assert.equal(
+      form.has('line_items[0][quantity]'), false,
+      'a seat count in the input reached Stripe as a quantity',
+    )
+    // Every VALUE, rather than a substring of the whole body.
+    //
+    // This was `sent.body.includes('200')`, and it went red on a pull request
+    // that changed one line of .gitignore. The body it printed carried no
+    // quantity at all and was exactly right; what it matched was the
+    // organization's own identifier, `1338f347-4154-445c-bac5-606e5200be24`,
+    // which happens to contain those three digits. The test generates that id
+    // and does not control it, so the assertion failed on a coin toss and would
+    // have gone on doing it forever.
+    //
+    // A check that fails for a reason no diff can explain is worse than one
+    // that is missing, because it teaches everybody to rerun a red job without
+    // reading it, and that habit is what lets a real failure through. Reading
+    // the values keeps everything the substring version was for: a 200 sent as
+    // any field's value still fails, including one nobody thought to name.
+    for (const [field, value] of form.entries()) {
+      assert.notEqual(value, '200', `the seat count reached Stripe as ${field}`)
+    }
+
+    // And the audit entry does not record a seat count either, because there
+    // is no longer any such thing to record.
+    const [entry] = await h.admin<{ detail: Record<string, unknown> }[]>`
+      SELECT detail FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'billing.checkout_started'
+      ORDER BY occurred_at DESC LIMIT 1`
+    assert.ok(entry, 'starting a purchase was not audited')
+    assert.equal('seats' in entry.detail, false, `the audit entry still records seats: ${JSON.stringify(entry.detail)}`)
+  })
+
   it('checkout refuses a second subscription while one is live', async () => {
     await h.admin`
       INSERT INTO subscriptions (
@@ -1030,10 +1324,93 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
               'team', 'active', now())`
 
     const { body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
-      plan: 'enterprise', seats: 1,
+      plan: 'enterprise',
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
     assert.equal(errorCode(body), 'PRECONDITION_FAILED')
+  })
+
+  it('checkout on a plan with no price says it is arranged with a person, and calls no Stripe', async () => {
+    // END TO END, through the route, against a control plane configured the way
+    // the live one is: a Team price and no Enterprise price.
+    //
+    // Before this, `prices.enterprise` was an empty string and it went to
+    // Stripe as `line_items[0][price]=`. Stripe answers a generic
+    // invalid_request_error, which reaches the buyer as "could not open a
+    // checkout page": a wall with no explanation, on the plan with the largest
+    // cheque behind it. The refusal now happens before any call is made, which
+    // is asserted rather than assumed.
+    const noEnterprise = await stripeAgainstMockPack({
+      prices: { team: 'price_team_afmock' },
+    })
+    const called: string[] = []
+    const pack = noEnterprise.config.fetch!
+    noEnterprise.config.fetch = async (input, init) => {
+      called.push(new URL(input instanceof Request ? input.url : String(input)).pathname)
+      return pack(input, init)
+    }
+    const solo = await startApi({ stripe: noEnterprise.billing })
+    const soloOrg = await seedOrg(solo.admin, 'noentprice')
+    const soloOwner = await signInAs(solo, soloOrg, 'owner')
+    // A customer already attached, with an id of this run's own.
+    //
+    // Two reasons. It keeps the Stripe calls below down to the one this test is
+    // about, so "nothing reached Stripe" means the refusal and not the absence
+    // of a customer. And the mock pack mints `cus_mock00000000000001` for the
+    // first customer of every pack instance, while stripe_customer_id is unique
+    // across the whole table, so a second harness creating a customer collides
+    // with the one the outer suite already made.
+    const soloCustomer = `cus_noent${randomUUID().slice(0, 8).replaceAll('-', '')}`
+    await solo.admin`
+      INSERT INTO billing_customers (org_id, stripe_customer_id, email)
+      VALUES (${soloOrg.orgId}, ${soloCustomer}, 'billing@example.test')`
+
+    const refused = await callProcedure(solo, soloOwner, 'subscriptions.checkout', 'mutation', {
+      plan: 'enterprise',
+      successUrl: 'https://app.test/ok',
+      cancelUrl: 'https://app.test/no',
+    })
+    assert.equal(errorCode(refused.body), 'PRECONDITION_FAILED', JSON.stringify(refused.body))
+    // The MESSAGE, not the envelope. The tRPC error body is
+    // `{"error":{"message":...}}`, so asserting over the whole thing means the
+    // word "error" is always present and the tone check below can never fail.
+    const said = (refused.body as { error: { message: string } }).error.message
+    assert.ok(said.length > 40, `the refusal has no message to read: ${JSON.stringify(refused.body)}`)
+    // The words are asserted because the WORDING is the feature here. This
+    // refusal lands on somebody trying to buy the largest plan, and the worst
+    // outcome is that they read it as an outage and leave. It has to say what
+    // happens next and who does it.
+    assert.match(said, /agreed with a person rather than bought here/)
+    assert.match(said, /antifailure\.dev\/contact/, 'the refusal does not say where to go instead')
+    assert.match(said, /somebody will arrange it/, 'the refusal does not say anybody will act on it')
+    assert.match(said, /Nothing was charged/)
+    // And it never reads as a failure of the system.
+    assert.doesNotMatch(said, /error|failed|unavailable|not configured/i, said)
+
+    // NOTHING REACHED STRIPE. A refusal that first created a customer would
+    // leave a customer behind at Stripe for somebody who cannot buy anything.
+    // Length rather than deepEqual against a literal: node's deepEqual narrows
+    // its first argument to the type of the second, so comparing against `[]`
+    // makes `called` a never[] and the assertion below stops compiling.
+    assert.equal(called.length, 0, `Stripe was called before the refusal: ${called.join(', ')}`)
+
+    // And the plan that DOES have a price still sells, so this is not passing
+    // by refusing everything.
+    const bought = await callProcedure(solo, soloOwner, 'subscriptions.checkout', 'mutation', {
+      plan: 'team',
+      successUrl: 'https://app.test/ok',
+      cancelUrl: 'https://app.test/no',
+    })
+    assert.equal(bought.status, 200, JSON.stringify(bought.body))
+    assert.ok(
+      called.includes('/v1/checkout/sessions'),
+      'the Team checkout did not reach Stripe either, so the assertion above proves nothing',
+    )
+
+    await solo.admin`DELETE FROM subscriptions WHERE org_id = ${soloOrg.orgId}`
+    await solo.admin`DELETE FROM billing_customers WHERE org_id = ${soloOrg.orgId}`
+    await dropOrg(solo.admin, soloOrg.orgId)
+    await solo.close()
   })
 
   it('the portal opens for a customer that exists and refuses for one that does not', async () => {
@@ -1135,7 +1512,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     assert.equal(data.configured, false)
 
     const charge = await callProcedure(plain, session, 'subscriptions.checkout', 'mutation', {
-      plan: 'team', seats: 1,
+      plan: 'team',
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
     })
     assert.equal(errorCode(charge.body), 'PRECONDITION_FAILED')

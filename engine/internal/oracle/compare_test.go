@@ -3,6 +3,7 @@ package oracle_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,15 +186,46 @@ func TestAStatusThatLeavesAnErrorClassIsMinor(t *testing.T) {
 	require.False(t, oracle.AtLeast(res.Findings, oracle.Critical))
 }
 
+// refusingURL returns an address that refuses a connection, and PROVES it does
+// before handing it back.
+//
+// Closing an httptest server frees its port, and on a loaded machine something
+// else can bind that port between the close and the probe. When that happened
+// on a CI runner the address answered, the driver recorded no transport
+// failure, and the assertion below read "[] should have 1 item(s)" for a
+// reason that had nothing to do with the code under test.
+//
+// So the precondition is checked rather than assumed: dial it, require the
+// dial to fail, and try a fresh port if somebody took this one. A test that
+// depends on a port being closed has to establish that, exactly as it would
+// establish any other fixture.
+func refusingURL(t *testing.T) string {
+	t.Helper()
+	for attempt := 0; attempt < 20; attempt++ {
+		server := httptest.NewServer(http.NotFoundHandler())
+		addr := server.Listener.Addr().String()
+		url := server.URL
+		server.Close()
+
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err != nil {
+			return url
+		}
+		// Somebody bound it in the gap. Close our accidental connection and
+		// take a different port rather than asserting against a live one.
+		_ = conn.Close()
+	}
+	t.Fatal("could not obtain a port that refuses connections after 20 attempts")
+	return ""
+}
+
 func TestASideThatDoesNotAnswerIsCritical(t *testing.T) {
 	baseline := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, `{"ok":true}`)
 	})
 	// Closed before the probe runs, so the connection is refused rather than
 	// slow. That is the shape of a candidate whose service crashed on start.
-	dead := httptest.NewServer(http.NotFoundHandler())
-	deadURL := dead.URL
-	dead.Close()
+	deadURL := refusingURL(t)
 
 	b := httptest.NewServer(baseline)
 	t.Cleanup(b.Close)

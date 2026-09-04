@@ -109,6 +109,16 @@ fails if it does not.
 	b.WriteString("## Global flags\n\nThese work on every command.\n\n")
 	writeFlagTable(&b, root.PersistentFlags())
 
+	// The root's own flags, which do not persist to subcommands and so are
+	// absent from the table above. This page's description promises every
+	// flag, and af --version is the one somebody types the moment an installer
+	// finishes, so it is the last flag that should be missing from it.
+	if local := root.LocalNonPersistentFlags(); local.HasAvailableFlags() {
+		b.WriteString("## Flags on `af` itself\n\n" +
+			"These work on `af` on its own rather than on a command under it.\n\n")
+		writeFlagTable(&b, local)
+	}
+
 	// Written here rather than in a hand maintained page, because these three
 	// decide the shape of every command's output and a reader looking for them
 	// looks at the command reference. They are read once, at the command

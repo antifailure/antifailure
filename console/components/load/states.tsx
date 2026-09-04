@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
-import { Bar, Button, Card, TableSkeleton } from "@/components/ui";
+import { Bar, Button, Card, CommandBlock, TableSkeleton } from "@/components/ui";
 
 /* -------------------------------------------------------------------------
  * Failure
@@ -199,16 +199,6 @@ export function PartialNotice({ reason }: { reason: "cancelled" | "timed_out" })
  * hung half outside the block over the paragraph beneath it.
  */
 export function Command({ command }: { command: string | null }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
   if (command === null) {
     return (
       <p className="px-4 py-4 text-[13px] leading-6 text-muted">
@@ -221,42 +211,7 @@ export function Command({ command }: { command: string | null }) {
 
   return (
     <div className="px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        {/* overflow-x-auto by hand, NOT the shared .scroll-x helper. That
-            class turns itself off below 640px (globals.css sets it to
-            overflow-x: visible there) because at that width the tables it was
-            written for stop scrolling and stack instead. A command block does
-            not stack, so borrowing the class clipped a long command dead at
-            the card edge on a phone: no scrollbar, no ellipsis, just a
-            sentence that stopped. */}
-        <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink">
-          <code>{command}</code>
-        </pre>
-        <Button
-          onClick={() => {
-            // Not every browser and not every context has the clipboard API:
-            // it needs a secure origin, and a control plane on plain http over
-            // a LAN is a real way this console gets used. Failing quietly and
-            // leaving the button saying "Copy" is correct, because the command
-            // is selectable text either way.
-            void navigator.clipboard
-              ?.writeText(command)
-              .then(() => {
-                setCopied(true);
-                if (timer.current) clearTimeout(timer.current);
-                timer.current = setTimeout(() => setCopied(false), 2000);
-              })
-              .catch(() => undefined);
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      {/* aria-live rather than a tooltip, so the confirmation reaches somebody
-          who is not looking at the button they just pressed. */}
-      <span aria-live="polite" className="sr-only">
-        {copied ? "Command copied to the clipboard" : ""}
-      </span>
+      <CommandBlock command={command} />
     </div>
   );
 }

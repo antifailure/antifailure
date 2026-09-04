@@ -70,13 +70,25 @@ key_vault_name = "afcp-kv-centralus"
 # GitHub logins, lower-cased on read. Adding somebody is a change here and an
 # apply, which is deliberate: an allowlist that can be edited in a portal is one
 # nobody can review.
+# Deliberately still a list, while production is null and open.
+#
+# Staging is where main lands before production and is not a customer surface,
+# so there is no reason for it to admit anybody. It also keeps the closed mode
+# exercised on a real deployment: a mode nothing runs is a mode nobody notices
+# breaking, and this is the one that has to keep working for every self-hosted
+# installation.
 signin_allowlist = ["virsanghavi", "maksymrajszewski"]
+
+# On for the two accounts above, which is what makes this a rehearsal of
+# production rather than a different product. Both settings apply to the same
+# sign-in: the list decides who reaches the door, this decides what is behind it.
+self_serve_signup = true
 
 # Where the accounts that list does not name are sent. Without it a refused
 # visitor reads "ask an owner of this installation", which is the right answer
 # for somebody self-hosting and the wrong one for a person who arrived from the
-# marketing site and was one click away from the waitlist.
-signup_url = "https://antifailure.dev/signup"
+# marketing site. The contact page reaches a person.
+signup_url = "https://antifailure.dev/contact"
 
 # The GitHub App.
 #
@@ -112,3 +124,20 @@ assign_deployer_secret_officer = true
 # the next identity to plan this stack proposes to replace it. This is the
 # object id the grant already names.
 deployer_principal_id = "3537595b-8059-4839-9cd8-04325c824291"
+
+# The operator portal, on, so the surface is exercised somewhere before a
+# person meets it in production.
+#
+# admin_pool_max is TWO here rather than the default four, and that number is
+# not a preference. This database is B1ms with 35 usable connections. Staging
+# needs 24 today; the portal at the default takes it to 40 and the module's own
+# precondition refuses the plan; at two it needs 32 and fits. The precondition
+# is the reason that arithmetic is visible at plan time rather than discovered
+# as a 503.
+operator_portal_enabled = true
+admin_pool_max          = 2
+
+# The same origin as production. Staging is not what antifailure.dev posts to,
+# so nothing depends on this here; it is set so the cross origin path is one
+# that has been exercised rather than one first tried in production.
+site_origin = "https://antifailure.dev"

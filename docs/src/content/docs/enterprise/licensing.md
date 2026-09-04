@@ -90,8 +90,8 @@ nothing has to be reinstalled.
 
 ```
 AF-EE-004 The license covers 25 seats and they are all in use.
-  Next: Remove an inactive member, or contact licensing@antifailure.dev to add
-  seats. No existing member was removed.
+  Next: Remove an inactive member, or ask for more seats at
+  https://antifailure.dev/contact. No existing member was removed.
 ```
 
 The last sentence is the important one. Reaching a seat limit refuses the

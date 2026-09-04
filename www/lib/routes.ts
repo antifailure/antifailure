@@ -333,9 +333,7 @@ export const ROUTES: readonly Route[] = [
     schemaType: "ContactPage",
   },
 
-  // Utility. Real pages, deliberately not in the index: a sign-in form and a
-  // waitlist have nothing to rank for, and indexing them spends crawl budget
-  // that belongs to the product pages.
+  // Sign-up and sign-in.
   //
   // These two entries said "Join the waitlist" and "There is no hosted control
   // plane yet" for as long as there was one. The pages themselves had already
@@ -344,26 +342,36 @@ export const ROUTES: readonly Route[] = [
   // while the page under them offered a working GitHub button. The title is the
   // one piece of copy a person reads before the page renders and the only piece
   // that survives being sent to somebody else, so it is the last place a stale
-  // claim should be allowed to sit. The description is served the same way, to
-  // every crawler and every link preview, while the visible page was already
-  // correct and nothing compared the two.
+  // claim should be allowed to sit.
+  //
+  // /signup IS INDEXABLE NOW, and that is a change rather than an oversight. It
+  // was excluded on the reasoning that "a sign-in form and a waitlist have
+  // nothing to rank for", which was true of both things that used to be here. A
+  // page describing what creating an account does, on a product anybody can
+  // create one on, is a page with something to rank for and the one a person
+  // searching for the product by name is looking for. Being indexable is also
+  // what gives it a markdown twin, which is what an assistant reads.
+  //
+  // /signin stays out. It is a button for people who already have an account,
+  // it says nothing a stranger wants, and indexing it spends crawl budget that
+  // belongs to the product pages.
+  {
+    path: "/signup",
+    title: pageTitle("Create an account"),
+    description:
+      "Sign up with GitHub and land in your own organization on the free plan. No card, no invitation, and no password. The engine is open source and runs on your own machine without an account at all.",
+    summary: "Create an account on the hosted control plane, on the free plan.",
+    section: "utility",
+    indexable: true,
+    priority: 0.8,
+    parent: "/",
+  },
   {
     path: "/signin",
     title: pageTitle("Sign in"),
     description:
-      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if your account has been invited.",
-    summary: "Sign in to the hosted control plane, or ask to be told when it opens.",
-    section: "utility",
-    indexable: false,
-    priority: 0.1,
-    parent: "/",
-  },
-  {
-    path: "/signup",
-    title: pageTitle("Request access"),
-    description:
-      "The hosted control plane is invitation only while it is in development. Sign in with GitHub if you have been invited, or leave an address and we will tell you when it opens. The engine is open source and runs on your own machine today.",
-    summary: "Ask for access to the hosted control plane. The engine needs none of it.",
+      "Sign in to the hosted control plane with the GitHub account you signed up with.",
+    summary: "Sign in to the hosted control plane.",
     section: "utility",
     indexable: false,
     priority: 0.1,

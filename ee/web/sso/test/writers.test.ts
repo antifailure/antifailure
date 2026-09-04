@@ -61,7 +61,23 @@ function isMigration(rel: string): boolean {
   return rel.includes('/migrations/')
 }
 
+/**
+ * Finds statements against one table.
+ *
+ * Word bounded and case insensitive, which is not decoration and is not what
+ * this used to be. `includes` was a substring test, so `INSERT INTO
+ * sso_connections` matched `INSERT INTO sso_connections_archive` and a rename
+ * would have reported a writer for a table that no longer existed. The readers
+ * test at the bottom of this file already carries that lesson in a comment,
+ * because a mutation caught it there; it was never carried back up here, where
+ * every other assertion in the file is made.
+ *
+ * Case insensitive for the same reason its sibling in web/packages/db is: SQL
+ * in this repository is written both ways, and a matcher that only sees one of
+ * them reports no writer for a table that has one.
+ */
 function sitesFor(table: string, verb: string): string[] {
+  const pattern = new RegExp(`\\b${verb.replace(/ /g, '\\s+')}\\s+${table}\\b`, 'i')
   const hits: string[] = []
   for (const f of files) {
     const rel = path.relative(repo, f).split(path.sep).join('/')
@@ -71,7 +87,7 @@ function sitesFor(table: string, verb: string): string[] {
     } catch {
       continue
     }
-    if (text.includes(`${verb} ${table}`)) hits.push(rel)
+    if (pattern.test(text)) hits.push(rel)
   }
   return hits
 }
@@ -83,6 +99,31 @@ describe('the enterprise tables a screen reads are written by nothing but fixtur
     assert.ok(
       files.some((f) => f.includes(`${path.sep}ee${path.sep}web${path.sep}sso${path.sep}src`)),
       'the walk did not reach ee/web/sso/src, so nothing below measured anything',
+    )
+  })
+
+  test('the matcher can find a statement it is known to be able to find', () => {
+    // THE PART THE WALK CHECK ABOVE DOES NOT COVER, and the difference matters.
+    // That one proves the file list reached ee/web/sso/src. This one proves
+    // `sitesFor` can match anything at all once it gets there, and every
+    // assertion below is of the form "no production writer was found".
+    //
+    // A matcher that stopped matching would report no writer for every table,
+    // which is what these tests already expect, so the file would go green
+    // while the very thing it watches for, an SSO connection gaining a real
+    // writer, had happened. The fixtures are the landmark: they exist, they
+    // are excluded from the answer by design, and their absence from this scan
+    // means the scan is blind rather than the tables being unwritten.
+    const seen = sitesFor('sso_connections', 'INSERT INTO')
+    assert.ok(
+      seen.length > 0,
+      'sitesFor found no INSERT INTO sso_connections anywhere, not even in the fixtures that ' +
+        'certainly contain one, so every expectation below passed by matching nothing',
+    )
+    assert.ok(
+      seen.some((f) => isFixture(f)),
+      `INSERT INTO sso_connections was found only at ${seen.join(', ')} and none of it was ` +
+        'recognised as a fixture, so the exclusion below is not doing anything',
     )
   })
 

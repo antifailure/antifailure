@@ -12,6 +12,8 @@
 // no account at all, which is the only key available on the sign-in path,
 // precisely because that is where an attacker without an account operates.
 
+import { TrieRouter } from 'hono/router/trie-router'
+
 import { extensionRoutes } from './extensions.ts'
 
 export type LimitKey = 'ip' | 'token' | 'org'
@@ -81,6 +83,14 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 2, burst: 10, key: 'ip',
     reason: 'Ending your own operator session. Cheap, idempotent, and refusing it would leave somebody signed in who is trying to sign out, so this is loose enough never to fire in practice.',
   },
+  'POST /v1/admin/impersonation/start': {
+    rate: 0.2, burst: 5, key: 'ip',
+    reason: 'Stepping into a customer account is a deliberate act that takes minutes and is preceded by somebody typing a reason. One every five seconds is far above honest use, and the burst covers an operator who mistyped the account twice before getting it right.',
+  },
+  'POST /v1/admin/impersonation/end': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'Getting back out. Deliberately looser than starting and looser than signing out, because a refusal here strands somebody inside a customer account, which is the one state this endpoint exists to leave.',
+  },
   'POST /auth/device/code': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Starting a terminal login is a human action. Ten at once covers somebody retrying in three shells; a sustained one per second does not.',
@@ -115,6 +125,20 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   'POST /auth/invitation/accept': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Pressing accept, once, and possibly twice because the first press looked like it did nothing. Same shape as approving a terminal login and the same number.',
+  },
+  // Somebody asking to buy. Bounded like a sign-in rather than like a read,
+  // because it is the same shape: an unauthenticated caller with no credential
+  // to key on, making a write, on a route a loop would otherwise fill a table
+  // through. One a second sustained is far above a person typing a form, and
+  // ten at once covers somebody who pressed the button twice and a preflight
+  // beside it.
+  'POST /v1/leads': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Filling in a contact form is a human action, once. The row is written by an anonymous caller, so the address is the only key there is, and the burst covers a double press and a retry.',
+  },
+  'OPTIONS /v1/leads': {
+    rate: 2, burst: 20, key: 'ip',
+    reason: 'The preflight the browser sends before the POST above. Deliberately looser than the POST it precedes: a preflight refused by a rate limit reads in the browser as a CORS failure rather than as a rate limit, which is the least debuggable answer this server can give.',
   },
   'GET /exports/deletion': {
     rate: 1, burst: 5, key: 'ip',
@@ -338,6 +362,26 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
     rate: 200, burst: 2000, key: 'token',
     reason: 'An engine that was offline sends its backlog at once. The burst absorbs a re-connect; the rate is what one busy CI account sustains.',
   },
+  // The site beacon. The only unauthenticated write on this server, so this
+  // limit is the only thing bounding it, and the number is chosen against what
+  // a reader actually produces rather than against what the endpoint can take.
+  //
+  // A person reading the site generates one event per page view and at most a
+  // few engagements, so a busy reader is well under one a second. Keyed by
+  // address because a visitor has no token and no organization, and that is
+  // exactly the population this key exists for.
+  //
+  // Deliberately generous on burst and tight on rate: an office or a university
+  // behind one address is a real thing, and a burst of sixty covers a class
+  // opening the site at once, while two a second sustained is not a person.
+  'POST /v1/site/events': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'A reader produces one event per page view. The burst covers many people behind one address; the sustained rate does not cover a script, which is the only defence this unauthenticated endpoint has.',
+  },
+  'OPTIONS /v1/site/events': {
+    rate: 2, burst: 60, key: 'ip',
+    reason: 'The preflight for the beacon, cached by the browser for a day. Same shape as the request it precedes, so a refused preflight and a refused post mean the same thing.',
+  },
   'GET /v1/environments/:envId': {
     rate: 10, burst: 60, key: 'token',
     reason: 'Polled by af env pull and by a CI step, not by a loop.',
@@ -413,7 +457,20 @@ export function bucketFor(limit: EndpointLimit, subject: LimitSubject): string {
  * because a pattern lets a new endpoint inherit a number chosen for something
  * cheaper.
  */
-export function limitFor(method: string, path: string): EndpointLimit | undefined {
+export function limitFor(requestMethod: string, path: string): EndpointLimit | undefined {
+  // A HEAD is resolved as the GET it will actually be dispatched as.
+  //
+  // Hono answers a HEAD by dispatching the request again as a GET and dropping
+  // the body, so the route a HEAD reaches is the GET route, and the number that
+  // route was given is the number that applies. The catalog is keyed by method
+  // and holds no HEAD entries, so without this every HEAD to an endpoint under
+  // a prefix the API owns resolved to nothing and was refused: on the deployed
+  // control plane `HEAD /v1/environments/af-1` answered 500 while the GET
+  // beside it answered normally. That is not the gate catching an unbounded
+  // endpoint, it is the gate failing to recognise a bounded one, and the
+  // refusal is worth nothing when the answer is already declared one line
+  // above.
+  const method = requestMethod === 'HEAD' ? 'GET' : requestMethod
   const exact = ENDPOINT_LIMITS[`${method} ${path}`]
   if (exact) return exact
   if (path.startsWith('/trpc/')) return ENDPOINT_LIMITS[`${method} /trpc/*`]
@@ -486,6 +543,86 @@ function matches(pattern: string, segments: string[]): boolean {
   const parts = pattern.split('/')
   if (parts.length !== segments.length) return false
   return parts.every((part, i) => part.startsWith(':') || part === segments[i])
+}
+
+// ---------------------------------------------------------------------------
+// Whether the server serves this path at all
+// ---------------------------------------------------------------------------
+
+/**
+ * Hono's own route table, which is all of Hono this needs.
+ *
+ * Declared structurally rather than importing `Hono`, so that nothing here
+ * depends on the framework beyond the router it already ships.
+ */
+export interface RouteTable {
+  readonly routes: readonly { readonly method: string; readonly path: string }[]
+}
+
+interface Probe {
+  /** How long the route table was when this was built. See servedRoute. */
+  size: number
+  router: TrieRouter<string>
+}
+
+const probes = new WeakMap<RouteTable, Probe>()
+
+/**
+ * The route this request would reach, as "METHOD /pattern", or null if the
+ * server has none.
+ *
+ * This exists because the rate limit gate runs in middleware, and middleware
+ * runs BEFORE routing. So the gate sees only a method and a path, and two
+ * completely different things look identical from there:
+ *
+ *   - a route that exists and nobody declared a limit for, which is the hole
+ *     the gate was built to catch and must stay a loud refusal; and
+ *   - a path that matches no route at all, which is a typo in somebody's URL
+ *     and is a 404.
+ *
+ * Answering both with 500 is what `GET /v1/health` did on the deployed control
+ * plane: no such endpoint has ever existed, and probing for one told every
+ * monitor and load balancer that the server was broken. It also made a real
+ * outage indistinguishable from a mistyped URL.
+ *
+ * The answer comes from the router rather than from a second list of paths,
+ * because a second list is a second thing to keep in step, and the copy that
+ * drifts is the one that decides whether the gate fires. A route registered
+ * with `app.use` is skipped: that is middleware, it matches `/*`, and a probe
+ * built from it would answer "yes, that exists" for every path on the server,
+ * which is precisely the 500 being fixed.
+ *
+ * A key is returned rather than a boolean because it is what the log line for
+ * an undeclared route has to name, and it is exactly the key that route's
+ * ENDPOINT_LIMITS entry is written under, so the fix is a copy and paste
+ * rather than a hunt. It is also built from this server's own route table
+ * rather than from the caller, which is what makes it safe to write to a log:
+ * a concrete path carries whatever a stranger put in the URL.
+ */
+export function servedRoute(
+  app: RouteTable,
+  requestMethod: string,
+  path: string,
+): string | null {
+  // Same substitution as limitFor, and for the same reason: Hono dispatches a
+  // HEAD as a GET, so asking the table for a HEAD route would answer "nothing
+  // here" for a path the server serves.
+  const method = requestMethod === 'HEAD' ? 'GET' : requestMethod
+  let probe = probes.get(app)
+  // Rebuilt when the table grows, so a route mounted after the first request
+  // is seen. Built lazily for the same reason: this middleware is installed
+  // before the routes it has to know about are registered.
+  if (!probe || probe.size !== app.routes.length) {
+    const router = new TrieRouter<string>()
+    for (const route of app.routes) {
+      if (route.method === 'ALL') continue
+      router.add(route.method, route.path, `${route.method} ${route.path}`)
+    }
+    probe = { size: app.routes.length, router }
+    probes.set(app, probe)
+  }
+  const [handlers] = probe.router.match(method, path)
+  return handlers.length > 0 ? (handlers[0]![0] as string) : null
 }
 
 // ---------------------------------------------------------------------------

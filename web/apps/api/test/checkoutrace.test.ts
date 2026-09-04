@@ -64,7 +64,7 @@ describe('two checkouts at the same instant', {
     return org
   }
 
-  const buy = { plan: 'enterprise', seats: 3, successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no' }
+  const buy = { plan: 'enterprise', successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no' }
 
   it('creates one customer for the organization, not one per request', async () => {
     posted = []

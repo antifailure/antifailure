@@ -33,6 +33,27 @@ resource "random_password" "app" {
   override_special = "-_"
 }
 
+# The operator portal's password, on the SAME footing as the two above.
+#
+# Generated here rather than typed, so no person and no workflow ever holds the
+# credential that reads across every tenant. It goes from the random provider
+# into Key Vault, into the bootstrap job which gives `antifailure_admin` a login
+# with it, and into the application's environment. The only copy outside the
+# vault is in Terraform state, which lives in a storage account with key access
+# disabled.
+#
+# THE ROLE IS NOT CREATED HERE, for the reason stated at the top of this file:
+# Terraform cannot reach this server. Migration 0023 creates `antifailure_admin`
+# NOLOGIN with BYPASSRLS and 0029, 0030 and 0031 grant it what the portal reads;
+# the bootstrap job, running inside the VNet from the same image, is what turns
+# it into an account that can log in.
+resource "random_password" "operator" {
+  count            = var.operator_portal_enabled ? 1 : 0
+  length           = 32
+  special          = true
+  override_special = "-_"
+}
+
 locals {
   # Burstable SKUs cannot do zone-redundant high availability. Caught here as a
   # precondition rather than discovered as a failed apply twenty minutes in.
@@ -104,7 +125,15 @@ locals {
   # those replicas is a process holding a pool of pool_max. Nothing anywhere
   # else in this stack multiplies these three numbers together, which is how
   # forty six of them accumulated on staging without anybody noticing.
-  peak_app_connections = (var.max_replicas + var.min_replicas) * var.pool_max
+  #
+  # THE OPERATOR POOL IS PART OF THE SAME SUM. createAdminPool runs inside the
+  # serving process, so every replica holding a pool of pool_max also holds one
+  # of admin_pool_max the moment the portal is switched on. Leaving it out would
+  # make this precondition pass on a shape the database cannot actually serve,
+  # which is the exact failure the whole block exists to catch: staging ran for
+  # weeks on a shape that only fit because the app never scaled.
+  per_replica_connections = var.pool_max + (var.operator_portal_enabled ? var.admin_pool_max : 0)
+  peak_app_connections    = (var.max_replicas + var.min_replicas) * local.per_replica_connections
 }
 
 resource "azurerm_postgresql_flexible_server" "this" {
@@ -146,7 +175,20 @@ resource "azurerm_postgresql_flexible_server" "this" {
     }
     # The password is generated and stored in Key Vault. Changing it here would
     # silently break the running application, which reads the old one.
-    ignore_changes = [administrator_password, zone]
+    #
+    # The two zones are ignored for the same reason as each other: Azure picks
+    # them and this configuration deliberately does not. `zone` was already here
+    # for the primary. standby_availability_zone is the same value for the HA
+    # replica, and without it every plan after the first apply reads
+    #
+    #   high_availability[0].standby_availability_zone: "2" -> null
+    #
+    # forever, because Azure assigned 2 and nothing here ever will. It is one
+    # in-place change on a plan that should be empty, and a plan that is never
+    # empty is one people stop reading, which is how a real change gets waved
+    # through. Pinning a zone instead would be worse: it would tie the standby
+    # to a zone that may not be the one Azure can actually place it in.
+    ignore_changes = [administrator_password, zone, high_availability[0].standby_availability_zone]
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
@@ -225,4 +267,20 @@ locals {
     local.pg_host,
     var.database_name,
   )
+
+  # The operator role's name is fixed by the migrations rather than by a
+  # variable, and that is deliberate. A GRANT cannot name a role that does not
+  # exist, so 0029, 0030 and 0031 hand their privileges to `antifailure_admin`
+  # by name; an installation that pointed this at some other role would get a
+  # credential that connects, holds no privileges, and reads nothing. The
+  # bootstrap job refuses that case by name rather than letting it deploy.
+  operator_role = "antifailure_admin"
+
+  operator_url = var.operator_portal_enabled ? format(
+    "postgres://%s:%s@%s:5432/%s?sslmode=require",
+    local.operator_role,
+    urlencode(random_password.operator[0].result),
+    local.pg_host,
+    var.database_name,
+  ) : ""
 }

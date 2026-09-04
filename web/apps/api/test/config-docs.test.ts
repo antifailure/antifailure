@@ -12,6 +12,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { PAID_PLANS, PRICE_ENV } from '../src/billing/plans.ts'
+
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.join(here, '..', 'src')
 const docPath = path.join(
@@ -64,6 +66,49 @@ describe('the control plane configuration reference', () => {
       [],
       `these variables are documented but nothing reads them:\n  ${stale.join('\n  ')}`,
     )
+  })
+
+  it('reads no variable whose name is assembled at run time', async () => {
+    // THE PROPERTY THE TWO TESTS ABOVE DEPEND ON, asserted directly.
+    //
+    // Both of them compare a set of names scraped from the source against a
+    // page. That only means anything while every name IS in the source. A read
+    // like `env['AF_STRIPE_PRICE_' + plan.toUpperCase()]` puts the prefix in
+    // the source and nothing else, so the scan reports a truncated fragment as
+    // a variable, the page can never document it because it is not a name
+    // anybody can set, and the real names may not appear at all.
+    //
+    // That happened: a start-up refusal named a price variable by appending an
+    // uppercased plan, and this suite failed on a fragment. The fix was a
+    // literal per plan in `billing/plans.ts:PRICE_ENV`, not a row in the
+    // reference. A trailing underscore is the signature, because a complete
+    // name never ends in one.
+    const truncated = [...(await readVariables())].filter((v) => v.endsWith('_')).sort()
+    assert.deepEqual(
+      truncated,
+      [],
+      `these look like variable names built by concatenation rather than written out:\n  ` +
+        `${truncated.join('\n  ')}\n` +
+        'Give each one a full literal, the way billing/plans.ts:PRICE_ENV does, so the set of ' +
+        'settings this process reads stays something a person can enumerate.',
+    )
+  })
+
+  it('names a price variable for every paid plan, in full', async () => {
+    // The closed list itself. `Record<PaidPlan, string>` makes a missing plan a
+    // compile error; this holds the shape of the values, so nobody satisfies
+    // the type with a fragment and puts the defect back.
+    for (const plan of PAID_PLANS) {
+      const name = PRICE_ENV[plan]
+      assert.ok(name, `no price variable is named for the ${plan} plan`)
+      assert.match(
+        name,
+        /^AF_STRIPE_PRICE_[A-Z]+$/,
+        `the price variable for ${plan} is not a complete name: ${name}`,
+      )
+    }
+    // And the map has nothing in it that is not a paid plan.
+    assert.deepEqual(Object.keys(PRICE_ENV).sort(), [...PAID_PLANS].sort())
   })
 
   it('finds variables at all, so a broken scan cannot pass quietly', async () => {

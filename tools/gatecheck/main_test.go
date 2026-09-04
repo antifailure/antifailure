@@ -1107,19 +1107,32 @@ func TestEveryWwwLibModuleIsImported(t *testing.T) {
 		t.Fatal("read no www source files, which means this check is looking in the wrong place")
 	}
 
-	checked := 0
+	// The third spelling, which cost a branch a red build. A module inside
+	// lib/ imports a sibling as "./bots", not "@/lib/bots" and not
+	// "../lib/bots", so a module used only by another module in lib/ read as
+	// dead here while being on every page.
+	//
+	// Reachability rather than a third needle, because "./x" alone would let
+	// two dead modules in lib/ that import each other keep one another alive,
+	// which is the loophole a name-matching version of this would have. A lib
+	// module is alive when something OUTSIDE lib/ names it, or when a lib
+	// module that is itself alive names it. Grown to a fixpoint, so a chain of
+	// any length works and a cycle with no way in stays dead.
+	stems := map[string]string{}
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || (!strings.HasSuffix(name, ".ts") && !strings.HasSuffix(name, ".tsx")) {
 			continue
 		}
+		stems[strings.TrimSuffix(strings.TrimSuffix(name, ".tsx"), ".ts")] = name
+	}
+
+	alive := liveLibModules(corpus, dir, stems)
+
+	checked := 0
+	for stem, name := range stems {
 		checked++
-		stem := strings.TrimSuffix(strings.TrimSuffix(name, ".tsx"), ".ts")
-		self := filepath.Join(dir, name)
-		// Both spellings the site uses: the "@/lib/x" alias and a relative
-		// "../lib/x". Matching on "lib/<stem>" covers each, and the quote or
-		// slash after it stops "lib/nav" from being answered by "lib/navbar".
-		if importedBy(corpus, self, stem) {
+		if alive[stem] {
 			continue
 		}
 		t.Errorf("www/lib/%s has no importer anywhere under www/. "+
@@ -1133,18 +1146,119 @@ func TestEveryWwwLibModuleIsImported(t *testing.T) {
 
 // importedBy reports whether any file other than the module itself names it in
 // an import specifier.
-func importedBy(corpus []string, self, stem string) bool {
-	needle := "lib/" + stem
-	for _, entry := range corpus {
-		path, body, _ := strings.Cut(entry, "\x00")
-		if path == self {
-			continue
+// Which modules in www/lib are reachable.
+//
+// Seeded from everything outside lib/, then grown through sibling imports to a
+// fixpoint. Its own function so the case below can drive it against a corpus
+// written by hand: a check that cannot be shown saying no about a case it was
+// widened for is a check nobody can trust afterwards.
+func liveLibModules(corpus []string, dir string, stems map[string]string) map[string]bool {
+	alive := map[string]bool{}
+	for stem := range stems {
+		if importedByOutside(corpus, dir, filepath.Join(dir, stems[stem]), stem) {
+			alive[stem] = true
 		}
-		for _, closer := range []string{`"`, `'`, "`"} {
-			if strings.Contains(body, needle+closer) {
-				return true
+	}
+	for grew := true; grew; {
+		grew = false
+		for stem := range stems {
+			if alive[stem] {
+				continue
+			}
+			for live := range alive {
+				if namesModule(fileIn(corpus, filepath.Join(dir, stems[live])), stem) {
+					alive[stem] = true
+					grew = true
+					break
+				}
 			}
 		}
 	}
+	return alive
+}
+
+// Whether anything OUTSIDE www/lib names this module, by either spelling the
+// rest of the site uses: the "@/lib/x" alias and a relative "../lib/x".
+// Matching on "lib/<stem>" covers each, and the quote after it stops "lib/nav"
+// from being answered by "lib/navbar".
+func importedByOutside(corpus []string, dir, self, stem string) bool {
+	for _, entry := range corpus {
+		path, body, _ := strings.Cut(entry, "\x00")
+		if path == self || filepath.Dir(path) == dir {
+			continue
+		}
+		if closed(body, "lib/"+stem) {
+			return true
+		}
+	}
 	return false
+}
+
+// Whether one lib module names another, by the sibling spelling or by the
+// alias. A file inside lib/ can write either.
+func namesModule(body, stem string) bool {
+	return closed(body, "./"+stem) || closed(body, "lib/"+stem)
+}
+
+// The needle followed by a closing quote, so a prefix cannot answer for a
+// longer name.
+func closed(body, needle string) bool {
+	for _, closer := range []string{`"`, `'`, "`"} {
+		if strings.Contains(body, needle+closer) {
+			return true
+		}
+	}
+	return false
+}
+
+func fileIn(corpus []string, want string) string {
+	for _, entry := range corpus {
+		path, body, _ := strings.Cut(entry, "\x00")
+		if path == want {
+			return body
+		}
+	}
+	return ""
+}
+
+// The reachability above, against a corpus small enough to read.
+//
+// THE CASE THAT WIDENED IT: a module in lib/ imported only by a sibling, as
+// "./bots". That is a third spelling, neither "@/lib/x" nor "../lib/x", and it
+// read as dead while being on every page.
+//
+// THE CASE THAT STOPS THE WIDENING GOING TOO FAR: two modules in lib/ that
+// import each other and nothing else. A version of this that simply added
+// "./x" as a third needle would call both of them alive, which is worse than
+// the false positive it fixed, because a check that cannot report the dead
+// code it was built for is a check that has quietly stopped running.
+func TestLibReachabilityCountsSiblingsButNotDeadCycles(t *testing.T) {
+	dir := filepath.Join("www", "lib")
+	file := func(p, body string) string { return p + "\x00" + body }
+
+	corpus := []string{
+		file(filepath.Join("www", "app", "page.tsx"), `import { x } from "@/lib/entry"`),
+		file(filepath.Join(dir, "entry.ts"), `import { s } from "./sibling"`),
+		file(filepath.Join(dir, "sibling.ts"), `import { d } from "./deeper"`),
+		file(filepath.Join(dir, "deeper.ts"), `export const d = 1`),
+		file(filepath.Join(dir, "ring-a.ts"), `import { b } from "./ring-b"`),
+		file(filepath.Join(dir, "ring-b.ts"), `import { a } from "./ring-a"`),
+		file(filepath.Join(dir, "orphan.ts"), `export const o = 1`),
+	}
+	stems := map[string]string{
+		"entry": "entry.ts", "sibling": "sibling.ts", "deeper": "deeper.ts",
+		"ring-a": "ring-a.ts", "ring-b": "ring-b.ts", "orphan": "orphan.ts",
+	}
+
+	alive := liveLibModules(corpus, dir, stems)
+	for _, stem := range []string{"entry", "sibling", "deeper"} {
+		if !alive[stem] {
+			t.Errorf("%s is reachable from the page and was reported dead", stem)
+		}
+	}
+	for _, stem := range []string{"ring-a", "ring-b", "orphan"} {
+		if alive[stem] {
+			t.Errorf("%s has no way in from outside lib/ and was reported alive", stem)
+		}
+	}
 }

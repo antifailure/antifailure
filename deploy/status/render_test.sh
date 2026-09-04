@@ -22,6 +22,34 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# The moment this suite runs at, pinned.
+#
+# Every case below is a statement about a moment, and read against the wall
+# clock those statements decay in two separate ways.
+#
+# One is the hour. "Three checks today, one of them failed" is built as three
+# readings at two hours, one hour and ten minutes ago, and that is one UTC day
+# at noon and two UTC days at half past midnight. The case does not fail when
+# the day splits under it, it becomes a different case: two days of one and two
+# checks, neither of them part passed, no bar drawn as partly failed and no
+# strip label saying one of three. The same split runs through the outage case,
+# where a pass and a fail an hour apart have to land on one day for the day to
+# be a partial one, and through the rounding case, whose four hours of readings
+# have to sit inside one day for the record to be one day deep.
+#
+# The other is the date. The incident fixtures carry real dates, and the page
+# shows a rolling fourteen days of incident history and calls a maintenance
+# window scheduled only while it is still in the future. A fixture dated
+# 2026-08-20 was inside the window when it was written and left it on
+# 2026-09-03, taking three assertions with it, and the September 20 maintenance
+# would have followed on September 21.
+#
+# So the clock is a fixture like any other. render.sh reads STATUS_NOW_EPOCH
+# when it is set, every timestamp below is measured from the same number, and
+# the suite gives the same answer at every hour of every day forever.
+NOW=1788264000   # 2026-09-01T12:00:00Z
+export STATUS_NOW_EPOCH="$NOW"
+
 pass=0
 fail=0
 current=""
@@ -67,12 +95,12 @@ run() { # run <out-dir> <readings> <scripts-dir>
   "$HERE/render.sh" "$1" "$2" "$3" > "$1/render.log" 2>&1
 }
 
-iso() { # iso <seconds-ago>
+iso() { # iso <seconds-ago>, measured from the pinned clock and not from now
   local ago="$1"
   if date -u -r 0 > /dev/null 2>&1; then
-    date -u -r "$(( $(date -u +%s) - ago ))" +%Y-%m-%dT%H:%M:%SZ   # BSD
+    date -u -r "$(( NOW - ago ))" +%Y-%m-%dT%H:%M:%SZ   # BSD
   else
-    date -u -d "@$(( $(date -u +%s) - ago ))" +%Y-%m-%dT%H:%M:%SZ  # GNU
+    date -u -d "@$(( NOW - ago ))" +%Y-%m-%dT%H:%M:%SZ  # GNU
   fi
 }
 
@@ -311,7 +339,7 @@ refute "no unreadable warning when nothing is unreadable" "$d/index.html" "could
 # the rounding decides the answer.
 case_start "799 of 800 checks passed: 99.875% must print as 99.8 and never as 99.9 or 100"
 d="$WORK/round"; mkdir -p "$d"; s="$(scripts round)"
-jq -nr --arg now "$(date -u +%s)" '
+jq -nr --arg now "$NOW" '
   [ range(0; 800)
     | { checked_at: (($now | tonumber) - 14400 + (. * 7) | todate),
         id: "control-plane-api", name: "control-plane-api", group: "g",
@@ -330,7 +358,7 @@ expect "and says how much record that figure covers" "$d/index.html" "day record
 # forever on a page whose record holds a year. It did exactly that.
 case_start "a rollup reaching back a year, with no raw readings that old"
 d="$WORK/window"; mkdir -p "$d"; s="$(scripts window)"
-jq -n --arg now "$(date -u +%s)" '
+jq -n --arg now "$NOW" '
   ($now | tonumber) as $n
   | { counted_through: {},
       days: [ range(1; 200) | { id: "control-plane-api",
@@ -345,7 +373,7 @@ expect "the figure itself is stated" "$d/index.html" "100% uptime"
 # ---------------------------------------------------------------------------
 case_start "the raw retention cap holds, and the rollup keeps the count it truncated"
 d="$WORK/cap"; mkdir -p "$d"; s="$(scripts cap)"
-jq -nr --arg now "$(date -u +%s)" '
+jq -nr --arg now "$NOW" '
   [ range(0; 1400)
     | { checked_at: (($now | tonumber) - 12600 + (. * 9) | todate),
         id: "control-plane-api", name: "control-plane-api", group: "g",

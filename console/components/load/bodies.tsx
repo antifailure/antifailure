@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Button, Empty, Field, inputClass } from "@/components/ui";
+import { useState, type ReactNode } from "react";
+import { Button, CopyButton, Empty, Field, inputClass } from "@/components/ui";
 import { Fact, Facts, KindMark } from "@/components/load/primitives";
 import {
   KIND_FACTS,
@@ -176,15 +176,6 @@ export function BodyView({ body, manifest = false }: { body: Body | null; manife
  * unverified and they need to know what was never pasted in.
  */
 export function ManifestBlock({ block, heading }: { block: string; heading?: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
   return (
     <div className="border-t border-rule px-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -197,24 +188,12 @@ export function ManifestBlock({ block, heading }: { block: string; heading?: str
             pasted into somebody's manifest stays there forever, and folding
             them into what this button copies would reverse that decision from
             the other end. They belong beside the block, once, on this screen. */}
-        <Button
-          onClick={() => {
-            void navigator.clipboard
-              ?.writeText(block)
-              .then(() => {
-                setCopied(true);
-                if (timer.current) clearTimeout(timer.current);
-                timer.current = setTimeout(() => setCopied(false), 2000);
-              })
-              .catch(() => undefined);
-          }}
-        >
-          {copied ? "Copied" : "Copy the block"}
-        </Button>
+        <CopyButton
+          value={block}
+          label="Copy the block"
+          said="Manifest block copied to the clipboard"
+        />
       </div>
-      <span aria-live="polite" className="sr-only">
-        {copied ? "Manifest block copied to the clipboard" : ""}
-      </span>
       <p className="mt-1 max-w-[74ch] text-[12.5px] leading-6 text-muted">
         This block has to be in the repository before anything can run this
         version. The control plane cannot put a file in your repository, and{" "}

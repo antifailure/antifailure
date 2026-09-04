@@ -114,11 +114,14 @@ export function ExpandContractColumns() {
                     >
                       <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-gray-new-40">{k}</dt>
                       <dd
+                        // The colour is one ternary, not a green laid over a
+                        // black. Both used to land and the cascade kept the
+                        // black, so a live value read the same as any other.
                         className={cn(
-                          "font-mono text-[12px] tracking-extra-tight text-black",
+                          "font-mono text-[12px] tracking-extra-tight",
                           warn &&
-                            "rounded-[4px] bg-[#f4edd6] px-1.5 py-px text-black shadow-[inset_2px_0_0_#8A6A12]",
-                          live && "text-[#285D49]",
+                            "rounded-[4px] bg-[#f4edd6] px-1.5 py-px shadow-[inset_2px_0_0_#8A6A12]",
+                          live ? "text-[#285D49]" : "text-black",
                         )}
                       >
                         {v}

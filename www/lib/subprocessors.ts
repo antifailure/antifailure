@@ -42,7 +42,7 @@ export const SUBPROCESSORS: Subprocessor[] = [
       "Azure Container Apps, Azure Database for PostgreSQL, Azure Key Vault, Azure Blob Storage, Azure Table Storage, Azure Log Analytics, Azure Static Web Apps",
     purpose:
       "Runs the hosted control plane and this site, and stores everything the control plane holds.",
-    data: "Account name and email, GitHub identifiers, session records including IP address and browser user agent, organization and repository metadata, policy, run events, audit entries, and waitlist addresses.",
+    data: "Account name and email, GitHub identifiers, session records including IP address and browser user agent, organization and repository metadata, policy, run events, audit entries, and the name, work email, company and message somebody leaves on the contact form.",
     location:
       "United States, Azure Central US. The region is enforced by a validation rule in the infrastructure code, so a deployment to another region fails at plan time rather than moving data quietly.",
     engagement: "always",
@@ -116,7 +116,7 @@ export const NOT_ENGAGED: [string, string][] = [
   ],
   [
     "Analytics and error tracking",
-    "This site loads no analytics and no third-party script. There is no Sentry, no Datadog, no PostHog, no Google Analytics. The control plane exposes metrics for an operator to scrape and exports nothing.",
+    "No third party sees anything. There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin. What it does do is count page views itself: a channel from a closed list, a page shape from a closed list, and a random identifier that lives in sessionStorage for one browsing session and cannot join two visits. That session ends after thirty minutes of inactivity and after a day whatever happens, so the identifier is shorter lived than the tab. The referrer, the URL and your browser identification are turned into those bounded values in your browser and never sent. There is no cookie. The counter turns itself off if you have set Global Privacy Control or Do Not Track, and one value does outlive the tab: if you switch measurement off, a single flag saying so is kept in this browser and is never sent anywhere. The control plane exposes metrics for an operator to scrape and exports nothing.",
   ],
   [
     "Other model providers",

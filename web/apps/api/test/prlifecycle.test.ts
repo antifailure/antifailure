@@ -380,11 +380,27 @@ describe(
       assert.ok(commentFor(11), 'a pull request with a queued check has no comment')
       assert.match(commentFor(11)!.body, new RegExp(`sha=${head}`))
 
+      // A run event alone moves nothing, and that is the fix for the defect
+      // that made this repository's own check say "Nothing was verified" on
+      // every pull request. Seventeen workflows run on a commit here and the
+      // App is delivered an event for all of them, so a handler that acts on
+      // the first one it sees is a handler acting on a stranger.
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5001))
+      assert.equal((await generation(head))?.state, 'queued')
+
+      // The run that is the check says so, by trading a workflow identity
+      // GitHub signed for a credential good for this commit. `run_id` in that
+      // identity is GitHub's own, so the binding cannot be claimed by a job
+      // that is not the job it says it is.
+      assert.ok(await callbackFor(head, 5001), 'a running check was issued no credential')
       assert.equal((await generation(head))?.state, 'running')
       assert.equal(checkFor(head)?.status, 'in_progress')
       // Bound, because cancelling this run is the only route into the runtime.
       assert.equal((await generation(head))?.workflow_run_id, '5001')
+
+      // And from here its own run events are heard, because it is now the run.
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 5001))
+      assert.equal((await generation(head))?.state, 'running')
     })
 
     // -----------------------------------------------------------------------
@@ -404,9 +420,14 @@ describe(
       await deliver('pull_request', pullRequestPayload('opened', 12, head))
       assert.equal((await generation(head))?.state, 'queued')
 
-      // And the run event that follows still binds, so nothing is lost by the
-      // early one having arrived first.
+      // And nothing is lost by the early one having arrived first: the run
+      // introduces itself when it reaches the step that does so, and binds
+      // then. It is the claim rather than the run event that binds, because
+      // the claim is the only one of the two that proves which run it is.
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5002))
+      assert.equal((await generation(head))?.state, 'queued')
+
+      assert.ok(await callbackFor(head, 5002))
       const now = await generation(head)
       assert.equal(now?.state, 'running')
       assert.equal(now?.workflow_run_id, '5002')
@@ -761,6 +782,11 @@ describe(
         conclusion: null,
         headSha: head,
       })
+      // The run introduces itself, which is what gives the control plane a run
+      // id to cancel. Cancelling that run is the only route it has into the
+      // runtime holding the environment, so a run that never said which run it
+      // was is a run whose environment nothing can reach.
+      assert.ok(await callbackFor(head, 5009))
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5009))
 
       await deliver('pull_request', pullRequestPayload('closed', 20, head, { state: 'closed' }))
@@ -810,6 +836,7 @@ describe(
         conclusion: null,
         headSha: head,
       })
+      assert.ok(await callbackFor(head, 5010))
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5010))
       await deliver('pull_request', pullRequestPayload('closed', 21, head, { state: 'closed' }))
 
@@ -843,8 +870,16 @@ describe(
       // run means the job exited zero, and `af ci` exits zero on a run that
       // verified nothing. Pull request 49 demonstrated six blocked workflows
       // inside a successful job.
+      //
+      // The run here is the check: it introduced itself, so this control plane
+      // knows whose silence this is. That distinction is the whole of the
+      // guard above it. A run that never introduced itself and exits green
+      // says nothing about the commit and is left to the deadline; THIS run
+      // said it was the check, ran, and came back with nothing, and that is a
+      // finding rather than a gap.
       const head = sha('missing-callback')
       await deliver('pull_request', pullRequestPayload('opened', 22, head))
+      assert.ok(await callbackFor(head, 5011))
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5011))
       await deliver('workflow_run', workflowRunPayload('completed', head, 5011, 'success'))
 
@@ -855,12 +890,69 @@ describe(
       assert.match(commentFor(22)!.body, /nothing was verified/i)
     })
 
+    it('a stranger\u2019s workflow run cannot end a check it never ran', async () => {
+      // THE DEFECT THAT MADE THIS REPOSITORY'S OWN CHECK SAY "Nothing was
+      // verified" ON EVERY PULL REQUEST IT HAS EVER HAD.
+      //
+      // A GitHub App is delivered `workflow_run` for EVERY workflow in the
+      // repository. This control plane used to bind the first delivery it saw
+      // for a commit and then let that run's completion decide the check. One
+      // workflow per repository gets away with it. On commit ada5644 of this
+      // repository, which has seventeen, the run that ended the generation was
+      // `Security`, green fifty seconds in, while the job running `af ci` was
+      // still building its database twenty minutes from an answer.
+      //
+      // So the check was completed and amber before the check had run, and it
+      // was amber for the honest reason that nothing had reported, which is
+      // why it read as true and went unfixed. The lie was not in the sentence.
+      // It was in having listened to a stranger.
+      const head = sha('stranger-run')
+      await deliver('pull_request', pullRequestPayload('opened', 60, head))
+
+      // Somebody else's workflow, start to finish, green. It is not the check.
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 7001))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7001, 'success'))
+
+      const afterStranger = await generation(head)
+      assert.equal(
+        afterStranger?.state,
+        'queued',
+        'a workflow run that never claimed this commit ended the check anyway',
+      )
+      assert.equal(afterStranger?.workflow_run_id, null, 'a stranger\u2019s run was bound')
+      assert.notEqual(checkFor(head)?.status, 'completed')
+
+      // The run that IS the check says so, the way a job says so: by trading a
+      // workflow identity for a credential good for this commit.
+      const token = (await callbackFor(head, 7002))!
+      assert.equal((await generation(head))?.workflow_run_id, '7002')
+      assert.equal((await generation(head))?.state, 'running')
+
+      // And now its own completion means something.
+      assert.equal((await report(token, head, ['pass'])).status, 200)
+      assert.equal((await generation(head))?.state, 'passed')
+      assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    it('a stranger\u2019s run that fails cannot block a check either', async () => {
+      // The same guard from the other side, because the failure direction is
+      // the one an outside contributor would see: a lint workflow that goes
+      // red on somebody's branch would have reported the change as blocked
+      // before Antifailure had looked at a line of it.
+      const head = sha('stranger-run-red')
+      await deliver('pull_request', pullRequestPayload('opened', 61, head))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7003, 'failure'))
+      assert.equal((await generation(head))?.state, 'queued')
+      assert.notEqual(checkFor(head)?.status, 'completed')
+    })
+
     it('a run that failed before reporting is blocked, not failed', async () => {
       // Blocked and failed are different claims. A job that died before the
       // check ran has found nothing about the change, and reporting it as a
       // failure of the change blames the author for our own gap.
       const head = sha('run-failed-early')
       await deliver('pull_request', pullRequestPayload('opened', 23, head))
+      assert.ok(await callbackFor(head, 5012))
       await deliver('workflow_run', workflowRunPayload('completed', head, 5012, 'failure'))
       assert.equal((await generation(head))?.state, 'blocked')
       assert.equal(checkFor(head)?.conclusion, 'action_required')
@@ -896,6 +988,7 @@ describe(
         const runId = shape === 'check_run' ? 5030 : 5031
         await deliver('pull_request', pullRequestPayload('opened', number, head))
         api.addWorkflowRun({ id: runId, repository, status: 'in_progress', conclusion: null, headSha: head })
+        assert.ok(await callbackFor(head, runId))
         await deliver('workflow_run', workflowRunPayload('in_progress', head, runId))
         await deliver('workflow_run', workflowRunPayload('completed', head, runId, 'failure'))
         assert.equal((await generation(head))?.state, 'blocked')
@@ -930,6 +1023,7 @@ describe(
     it('ordering: timeout, and the check says so rather than spinning', async () => {
       const head = sha('timeout')
       await deliver('pull_request', pullRequestPayload('opened', 25, head))
+      assert.ok(await callbackFor(head, 5014))
       await deliver('workflow_run', workflowRunPayload('in_progress', head, 5014))
       assert.equal((await generation(head))?.state, 'running')
 
