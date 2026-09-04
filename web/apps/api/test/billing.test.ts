@@ -1001,12 +1001,11 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     assert.ok(customerCall, 'no customer was created')
     assert.equal(customerCall.key, `af-customer-${spyOrg.orgId}`)
 
-    // And deliberately not on the checkout session: Stripe returns the same
-    // session for a repeated key, so an organization that cancelled and came
-    // back would be sent to a stale expired page forever.
+    // Checkout has a separate durable attempt key, retired only after Stripe
+    // confirms this session cannot create another purchase.
     const sessionCall = seen.find((c) => c.path === '/v1/checkout/sessions')
     assert.ok(sessionCall, 'no checkout session was opened')
-    assert.equal(sessionCall.key, null)
+    assert.match(sessionCall.key ?? '', /^af-checkout-[0-9a-f-]{36}$/)
 
     await dropOrg(spy.admin, spyOrg.orgId)
     await spy.close()

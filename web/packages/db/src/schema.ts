@@ -642,6 +642,18 @@ export const billingCustomers = pgTable('billing_customers', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+/** The current purchase attempt, preserved across browser and process retries. */
+export const billingCheckoutAttempts = pgTable('billing_checkout_attempts', {
+  orgId: uuid('org_id').primaryKey(),
+  attemptId: uuid('attempt_id').notNull().defaultRandom(),
+  stripeCustomerId: text('stripe_customer_id').notNull(),
+  priceId: text('price_id').notNull(),
+  successUrl: text('success_url').notNull(),
+  cancelUrl: text('cancel_url').notNull(),
+  stripeSessionId: text('stripe_session_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /** Metadata, never a card. A table of its own so that a verified delivery can
  *  write it without holding UPDATE on the column that says which organization
  *  a customer belongs to; see migrations/0020_billing.sql. */
@@ -1467,7 +1479,7 @@ export const tenantScopedTables = [
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
-  billingCustomers, paymentMethods, subscriptions, invoices, billingEvents,
+  billingCustomers, billingCheckoutAttempts, paymentMethods, subscriptions, invoices, billingEvents,
   invitations, billingContacts, organizationDeletions, organizationDeletionExports,
   workloads, workloadVersions, workloadRuns, workloadRunResults,
   workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,

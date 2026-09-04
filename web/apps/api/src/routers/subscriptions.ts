@@ -34,6 +34,7 @@ import { killSwitch, killedMessage } from '../flags.ts'
 import { attachCustomer, readBillingState, reconcile } from '../billing/store.ts'
 import { LIVE_STATUSES, PAID_PLANS, type PaidPlan } from '../billing/plans.ts'
 import { StripeError } from '../billing/stripe.ts'
+import { checkoutOnce } from '../billing/checkout.ts'
 
 /** The billing context, or a refusal that names the variables an operator has
  *  to set. A self-hosted installation takes no money and has to be able to run
@@ -262,16 +263,19 @@ export const subscriptionsRouter = router({
         customerId = attached.customerId
       }
 
-      const session = await billing.client
-        .createCheckoutSession({
+      const session = await checkoutOnce(c, billing, {
           customerId,
           priceId,
-          orgId: c.actor.orgId,
           successUrl: input.successUrl,
           cancelUrl: input.cancelUrl,
         })
         .catch((err: unknown) => {
-          throw refused(err, 'open a checkout page')
+          if (err instanceof TRPCError) throw err
+          throw new TRPCError({
+            code: 'BAD_GATEWAY',
+            message: 'Stripe did not confirm this checkout. Retry to resume the same purchase attempt.',
+            cause: err,
+          })
         })
 
       await c.pool.withTenant(c.tenant, async (db) => {
@@ -281,10 +285,10 @@ export const subscriptionsRouter = router({
           targetId: c.actor.orgId,
           // No card, no amount, no session secret. What an auditor needs is who
           // started buying what, and when.
-          detail: { plan: input.plan, session: session.id },
+          detail: { plan: input.plan, session: session.sessionId },
         })
       })
-      return { url: session.url, sessionId: session.id }
+      return session
     }),
 
   /** The hosted page where a plan, a card, or a cancellation is changed. */

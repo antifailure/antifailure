@@ -102,6 +102,15 @@ export interface StripeCheckoutSession {
   customerId: string | null
 }
 
+/** A retrieved session may be complete or expired, with no redirect URL. */
+export interface StripeCheckoutState {
+  id: string
+  url: string | null
+  status: 'open' | 'complete' | 'expired'
+  customerId: string
+  subscriptionId: string | null
+}
+
 export interface StripeInvoice {
   id: string
   customerId: string
@@ -200,7 +209,11 @@ export interface StripeClient {
     orgId: string
     successUrl: string
     cancelUrl: string
-  }): Promise<StripeCheckoutSession>
+  }, idempotencyKey?: string): Promise<StripeCheckoutSession>
+
+  getCheckoutSession(id: string): Promise<StripeCheckoutState | null>
+  findCheckoutAttempt(customerId: string, attemptKey: string): Promise<StripeCheckoutState | null>
+  hasBlockingSubscription(customerId: string): Promise<boolean>
 
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
   createPortalSession(input: { customerId: string; returnUrl: string }): Promise<{ url: string }>
@@ -351,9 +364,8 @@ export class RealStripeClient implements StripeClient {
     // two customers that both look real in the dashboard. Stripe returns the
     // first customer for a repeated key, so the retry converges instead.
     //
-    // Not used on the checkout session: Stripe returns the SAME session for a
-    // repeated key, so an organization that cancelled and came back would be
-    // sent to a stale expired page forever.
+    // Checkout has its own durable attempt key. It is retired only after the
+    // provider confirms the previous session can no longer create a purchase.
     return customerOf(await this.post('/v1/customers', body, `af-customer-${input.orgId}`))
   }
 
@@ -363,7 +375,7 @@ export class RealStripeClient implements StripeClient {
     orgId: string
     successUrl: string
     cancelUrl: string
-  }): Promise<StripeCheckoutSession> {
+  }, idempotencyKey?: string): Promise<StripeCheckoutSession> {
     const body = new URLSearchParams({
       mode: 'subscription',
       customer: input.customerId,
@@ -382,7 +394,58 @@ export class RealStripeClient implements StripeClient {
       'metadata[org_id]': input.orgId,
       'subscription_data[metadata][org_id]': input.orgId,
     })
-    return checkoutOf(await this.post('/v1/checkout/sessions', body))
+    if (idempotencyKey) body.set('metadata[checkout_attempt]', idempotencyKey)
+    return checkoutOf(await this.post('/v1/checkout/sessions', body, idempotencyKey))
+  }
+
+  async getCheckoutSession(id: string): Promise<StripeCheckoutState | null> {
+    const body = await this.get(`/v1/checkout/sessions/${encodeURIComponent(id)}`)
+    return body ? checkoutStateOf(body) : null
+  }
+
+  async findCheckoutAttempt(customerId: string, attemptKey: string): Promise<StripeCheckoutState | null> {
+    for await (const body of this.pages(`/v1/checkout/sessions?customer=${encodeURIComponent(customerId)}&limit=100`)) {
+      const metadata = body.metadata as Record<string, unknown> | null
+      if (metadata?.checkout_attempt === attemptKey && idOf(body.customer) === customerId) {
+        return checkoutStateOf(body)
+      }
+    }
+    return null
+  }
+
+  async hasBlockingSubscription(customerId: string): Promise<boolean> {
+    for await (const body of this.pages(`/v1/subscriptions?customer=${encodeURIComponent(customerId)}&status=all&limit=100`)) {
+      if (!idOf(body.customer)) throw new StripeError('Stripe returned a subscription with no customer. No new purchase was started.')
+      if (idOf(body.customer) !== customerId) continue
+      // Unknown states refuse a new purchase. This read authorizes a charge,
+      // so a surprising provider state cannot be interpreted as no subscription.
+      if (!['canceled', 'incomplete_expired', 'paused'].includes(String(body.status))) return true
+    }
+    return false
+  }
+
+  private async *pages(path: string): AsyncGenerator<Record<string, unknown>> {
+    let cursor: string | null = null
+    const deadline = Date.now() + 30_000
+    for (let page = 0; page < 100; page += 1) {
+      if (Date.now() >= deadline) throw new StripeError('Stripe billing verification took too long. No new purchase was started.')
+      const suffix = cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ''
+      const body = await this.get(path + suffix, Math.max(1, deadline - Date.now()))
+      if (!body || !Array.isArray(body.data) || typeof body.has_more !== 'boolean') {
+        throw new StripeError('Stripe did not return a complete billing collection. No new purchase was started.')
+      }
+      for (const row of body.data) {
+        if (!row || typeof row !== 'object' || !text(row.id)) {
+          throw new StripeError('Stripe returned an unreadable billing record. No new purchase was started.')
+        }
+        yield row as Record<string, unknown>
+      }
+      if (!body.has_more) return
+      const next = text(body.data.at(-1)?.id)
+      if (!next || next === cursor) throw new StripeError('Stripe billing pagination did not advance.')
+      cursor = next
+    }
+    throw new StripeError('Stripe billing history exceeded the verification budget. No new purchase was started.')
   }
 
   async createPortalSession(input: {
@@ -622,6 +685,7 @@ export class RealStripeClient implements StripeClient {
         ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
       },
       body: body.toString(),
+      signal: AbortSignal.timeout(30_000),
     })
     const parsed = await decode(res, path)
     if (!parsed) throw new StripeError(`Stripe answered ${path} with ${res.status} and no body.`)
@@ -629,8 +693,9 @@ export class RealStripeClient implements StripeClient {
   }
 
   /** Null for a 404, which several callers treat as an answer. */
-  private async get(path: string): Promise<Record<string, unknown> | null> {
+  private async get(path: string, timeoutMs = 30_000): Promise<Record<string, unknown> | null> {
     const res = await this.call()(new URL(path, this.base()), {
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         authorization: `Bearer ${this.config.secretKey}`,
         'stripe-version': STRIPE_API_VERSION,
@@ -729,6 +794,17 @@ function checkoutOf(body: Record<string, unknown>): StripeCheckoutSession {
     throw new StripeError('Stripe returned a checkout session with no address to send anybody to.')
   }
   return { id, url, status: text(body.status) ?? 'open', customerId: idOf(body.customer) }
+}
+
+function checkoutStateOf(body: Record<string, unknown>): StripeCheckoutState {
+  const id = text(body.id)
+  const customerId = idOf(body.customer)
+  const status = body.status
+  const url = text(body.url)
+  if (!id || !customerId || !['open', 'complete', 'expired'].includes(String(status)) || (status === 'open' && !url)) {
+    throw new StripeError('Stripe returned a checkout session whose state cannot be verified.')
+  }
+  return { id, customerId, status: status as StripeCheckoutState['status'], url, subscriptionId: idOf(body.subscription) }
 }
 
 export function subscriptionOf(body: Record<string, unknown>): StripeSubscription {
