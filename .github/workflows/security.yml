@@ -84,7 +84,7 @@ jobs:
   # The same question for the JavaScript, which nothing was asking.
   #
   # govulncheck reads Go modules and stops there. Every `npm ci` in ci.yml passes
-  # --no-audit, so the seven lockfiles here had no advisory check at all, and one
+  # --no-audit, so the eight lockfiles here had no advisory check at all, and one
   # of them builds the control plane that holds organizations, policy and
   # billing. This is the half of the repository exposed to the internet and it
   # was the half with no scanner.
@@ -110,7 +110,9 @@ jobs:
       # No `npm ci` anywhere above, deliberately. tools/npmaudit runs npm audit
       # with --package-lock-only, so the lockfile is the thing under review and
       # nothing has to be installed to review it. Installing first would make
-      # this job cost seven installs and would let a postinstall script run
+      # this job cost eight installs and would let a postinstall script run
       # before the scan that is meant to judge it.
       - name: Known advisories against the lockfiles
+        # Four audit workers, five minutes per project and eleven overall leave
+        # time for setup and a named failure before this job's fifteen minutes.
         run: go run ./tools/npmaudit .

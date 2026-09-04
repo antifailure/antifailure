@@ -34,6 +34,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -163,21 +164,84 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	var findings []*finding
-	for _, project := range locked {
-		found, err := auditProject(filepath.Join(root, project), project)
-		if err != nil {
-			return err
-		}
-		findings = append(findings, found...)
-	}
-
 	pol, err := loadPolicy(filepath.Join(root, policyFile))
+	if err != nil {
+		return err
+	}
+	findings, err := auditProjects(context.Background(), root, locked, out, defaultAuditBudget, auditProject)
 	if err != nil {
 		return err
 	}
 
 	return decide(findings, locked, unlocked, pol, out)
+}
+
+type auditBudget struct {
+	workers int
+	project time.Duration
+	total   time.Duration
+}
+
+// Two waves cover today's eight lockfiles in about ten minutes even if every npm
+// call stalls. The overall limit also covers future lockfiles. Both leave room
+// for setup, compilation and diagnostics inside Security's fifteen minute job.
+var defaultAuditBudget = auditBudget{workers: 4, project: 5 * time.Minute, total: 11 * time.Minute}
+
+type projectAudit func(context.Context, string, string) ([]*finding, error)
+
+// auditProjects writes each result as it arrives, including failures, and waits
+// for every project. An incomplete scan never reaches the policy summary: an
+// unknown result cannot make an acceptance look stale or a lockfile look clean.
+func auditProjects(parent context.Context, root string, projects []string, out io.Writer, budget auditBudget, audit projectAudit) ([]*finding, error) {
+	ctx, cancel := context.WithTimeout(parent, budget.total)
+	defer cancel()
+	if _, err := fmt.Fprintf(out, "Auditing %d lockfiles with %d workers, %s per project, %s overall\n", len(projects), budget.workers, budget.project, budget.total); err != nil {
+		return nil, fmt.Errorf("write audit progress: %w", err)
+	}
+	type result struct {
+		project string
+		elapsed time.Duration
+		found   []*finding
+		err     error
+	}
+	jobs := make(chan string, len(projects))
+	results := make(chan result, len(projects))
+	for _, project := range projects {
+		jobs <- project
+	}
+	close(jobs)
+	for range min(budget.workers, len(projects)) {
+		go func() {
+			for project := range jobs {
+				started := time.Now()
+				if err := ctx.Err(); err != nil {
+					results <- result{project: project, err: fmt.Errorf("not started: overall audit budget ended: %w", err)}
+					continue
+				}
+				projectCtx, stop := context.WithTimeout(ctx, budget.project)
+				found, err := audit(projectCtx, filepath.Join(root, project), project)
+				stop()
+				results <- result{project: project, elapsed: time.Since(started), found: found, err: err}
+			}
+		}()
+	}
+	var findings []*finding
+	var failures []error
+	for range projects {
+		r := <-results
+		status := fmt.Sprintf("AUDITED %s in %s, %d findings", r.project, r.elapsed.Round(time.Millisecond), len(r.found))
+		if r.err != nil {
+			failure := fmt.Errorf("%s after %s: %w", r.project, r.elapsed.Round(time.Millisecond), r.err)
+			failures = append(failures, failure)
+			status = "INCONCLUSIVE " + failure.Error()
+		}
+		if _, err := fmt.Fprintln(out, status); err != nil {
+			failures = append(failures, fmt.Errorf("write audit progress: %w", err))
+			cancel()
+		}
+		findings = append(findings, r.found...)
+	}
+	return findings, errors.Join(failures...)
 }
 
 // discoverProjects returns the directories holding a package-lock.json, and
@@ -301,13 +365,25 @@ func declaresDependencies(path string) (bool, error) {
 //
 // --package-lock-only so that node_modules does not have to be installed: the
 // lockfile is the thing under review, and requiring an install would make this
-// gate cost six installs and depend on which of them had been run.
-func auditProject(dir, project string) ([]*finding, error) {
-	cmd := exec.Command("npm", "audit", "--package-lock-only", "--json")
+// gate cost eight installs and depend on which of them had been run.
+func auditProject(ctx context.Context, dir, project string) ([]*finding, error) {
+	cmd := exec.CommandContext(ctx, "npm", "audit", "--package-lock-only", "--json")
 	cmd.Dir = dir
+	return executeAudit(ctx, cmd, project)
+}
+
+func executeAudit(ctx context.Context, cmd *exec.Cmd, project string) ([]*finding, error) {
+	// A child retaining stdout must not keep Wait alive after npm is killed.
+	cmd.WaitDelay = 2 * time.Second
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, runErr := cmd.Output()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%s: npm audit did not finish: %w\nprocess error: %s\nstderr: %s", project, err, fmt.Sprint(runErr), trim(stderr.String()))
+	}
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return nil, fmt.Errorf("%s: npm audit output did not close: %w\nstderr: %s", project, runErr, trim(stderr.String()))
+	}
 
 	// The exit code is deliberately not consulted. npm audit exits 1 when it
 	// finds an advisory, which is the case this gate exists to handle, and it
