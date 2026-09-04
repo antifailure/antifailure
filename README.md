@@ -139,6 +139,20 @@ should serve, and it speaks the protocol on standard input and output, so
 running it in a terminal looks like it has hung. It needs no account, no
 control plane and no model key of its own.
 
+Run either of these in the checkout:
+
+```sh
+claude mcp add antifailure -- af mcp
+codex mcp add antifailure -- af mcp
+```
+
+The [MCP reference](https://antifailure.dev/docs/reference/mcp) has the current
+configuration for Gemini CLI, Cursor, Windsurf, VS Code, Cline, Continue,
+Claude Desktop, the ChatGPT desktop app, JetBrains AI Assistant and Zed. In
+v1.1.1 the built in transport is local STDIO. Browser clients need an
+authenticated Streamable HTTP service, and Antifailure does not host that
+endpoint yet.
+
 The part worth reading twice is what an agent cannot do with it. The agent
 chooses the hypothesis and Antifailure chooses the safety controls, and that is
 a property of the schemas rather than a convention the tools ask an agent to

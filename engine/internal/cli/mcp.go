@@ -39,7 +39,12 @@ believes it is talking to, and a call naming a different one is refused rather
 than followed.
 
 Standard output carries the protocol and nothing else. Progress, warnings and
-errors go to standard error, where the client's log will show them.`),
+errors go to standard error, where the client's log will show them.
+
+Client setup differs by host. https://antifailure.dev/docs/reference/mcp has
+the current command or configuration for each supported local client. This
+release provides no hosted MCP URL. A browser client requires a separately
+operated and authenticated Streamable HTTP bridge.`),
 		Args: cobra.NoArgs,
 		// The protocol owns standard output, so cobra must not write a usage
 		// block onto it when something fails. Errors reach standard error

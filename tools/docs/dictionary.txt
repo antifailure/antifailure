@@ -1,15 +1,7 @@
 #
 # Kept as a file rather than inside cspell.json so that adding one is a one
-# Words this project uses that no general dictionary has.
 # line diff a reviewer can read, and so the list stays sorted.
-BYPASSRLS
-DMARC
-PKCE
-Procfile
-SCIM
-SIEM
-Sigstore
-TOTP
+# Words this project uses that no general dictionary has.
 antifailure
 autovacuum
 branchable
@@ -17,12 +9,14 @@ bubbletea
 buildpack
 buildpacks
 burstable
+BYPASSRLS
 cobra
 cspell
 dblab
 dbname
 dedupe
 depguard
+DMARC
 eastus
 Fulcio
 gitleaks
@@ -42,19 +36,26 @@ ndjson
 neon
 pgbouncer
 pgvector
+PKCE
 pooler
 postgres
+Procfile
 reprovision
+SCIM
 semgrep
+SIEM
 signups
+Sigstore
 starlight
 subsetted
 subsetter
 subsetting
 supabase
+supergateway
 syft
 testcontainers
 tfvars
+TOTP
 tripwire
 tripwires
 trufflehog

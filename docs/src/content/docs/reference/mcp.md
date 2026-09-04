@@ -14,6 +14,208 @@ It is started by an MCP client rather than typed by a person. It speaks the
 protocol on standard input and output, so running it in a terminal looks like
 it has hung; that is the protocol waiting for a client.
 
+## Connecting a local client
+
+In v1.1.1, `af mcp` is a local STDIO server. A client starts the process,
+talks to it over standard input and output, and stops it. The server binds the
+project it starts in and serves only that project, so the client must start it
+in the checkout or pass the checkout with `-C`.
+
+One running server process serves one checkout. Clients that launch a server
+from the current workspace can reuse one configuration across projects.
+Clients with a fixed launch directory need one entry per checkout.
+
+### Claude Code, Codex CLI and Gemini CLI
+
+Run the matching command in the checkout you want to serve:
+
+```sh
+claude mcp add antifailure -- af mcp
+codex mcp add antifailure -- af mcp
+gemini mcp add antifailure af mcp
+```
+
+[Claude Code](https://code.claude.com/docs/en/mcp) uses local scope by default.
+Project scope writes `.mcp.json` in the repository so the team can share the
+entry:
+
+```sh
+claude mcp add --scope project antifailure -- af mcp
+```
+
+[Codex](https://developers.openai.com/codex/mcp) writes CLI additions to
+`~/.codex/config.toml`. For a project entry with an explicit working directory,
+put this in `.codex/config.toml` in a trusted project:
+
+```toml
+[mcp_servers.antifailure]
+command = "af"
+args = ["mcp"]
+cwd = "/absolute/path/to/your/project"
+```
+
+The ChatGPT desktop app, Codex CLI and the Codex IDE extension share that
+configuration on the same Codex host. The desktop app can therefore start this
+local STDIO server. ChatGPT in a browser does not read this file.
+
+[Gemini CLI](https://geminicli.com/docs/tools/mcp-server/) writes project scope
+to `.gemini/settings.json` by default. Its STDIO entries also support a `cwd`
+field when you prefer configuration over running the command in the checkout.
+
+### Cursor, Windsurf, Claude Desktop and Cline
+
+These clients use an `mcpServers` object for a local process. Put the entry in
+the location its current documentation names:
+
+| Client | Configuration location |
+| --- | --- |
+| [Cursor](https://prod.cursor.com/docs/mcp) | `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` globally |
+| [Windsurf](https://docs.windsurf.com/windsurf/cascade/mcp) | `~/.codeium/windsurf/mcp_config.json` |
+| [Claude Desktop](https://py.sdk.modelcontextprotocol.io/get-started/real-host/#claude-desktop) | `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or `%APPDATA%\Claude\claude_desktop_config.json` on Windows |
+| [Cline](https://docs.cline.bot/mcp/mcp-overview) | MCP Servers, then Configure in the IDE, or `~/.cline/mcp.json` for Cline CLI |
+
+```json
+{
+  "mcpServers": {
+    "antifailure": {
+      "command": "af",
+      "args": ["-C", "/absolute/path/to/your/project", "mcp"]
+    }
+  }
+}
+```
+
+### VS Code
+
+[VS Code](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
+uses `servers` in `.vscode/mcp.json`. It supports `cwd` and expands the
+workspace variable, so the configuration can stay portable:
+
+```json
+{
+  "servers": {
+    "antifailure": {
+      "type": "stdio",
+      "command": "af",
+      "args": ["mcp"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
+```
+
+### Continue
+
+[Continue](https://docs.continue.dev/customize/deep-dives/mcp) uses a list in
+`config.yaml`. It also accepts JSON files copied into `.continue/mcpServers`,
+but the native YAML entry is:
+
+```yaml
+mcpServers:
+  - name: antifailure
+    command: af
+    args:
+      - -C
+      - /absolute/path/to/your/project
+      - mcp
+```
+
+### JetBrains AI Assistant
+
+In [JetBrains AI Assistant](https://www.jetbrains.com/help/ai-assistant/mcp.html),
+open Settings, Tools, AI Assistant, then Model Context Protocol. Add this JSON
+and set the dialog's Working directory field to the checkout:
+
+```json
+{
+  "mcpServers": {
+    "antifailure": {
+      "command": "af",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Zed
+
+[Zed](https://zed.dev/docs/ai/mcp) calls these context servers. Its `command`
+is a string, with `args` and `env` beside it:
+
+```json
+{
+  "context_servers": {
+    "antifailure": {
+      "command": "af",
+      "args": ["-C", "/absolute/path/to/your/project", "mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+### The two settings people get wrong
+
+**Set the checkout explicitly.** Use the client's `cwd` or Working directory
+setting where one is documented. Otherwise pass `-C` and an absolute path in
+the server arguments. Without either, the server binds whichever directory the
+client used to launch it, and the failure reads as a missing manifest rather
+than a missing setting.
+
+**Check the `PATH` the client sees.** On macOS an application started from the
+Dock or Finder does not get the `PATH` your shell has, so `af` can be installed
+and still not be found. Write the absolute path instead when that happens, and
+`command -v af` prints it.
+
+### Proving it connected
+
+The server writes nothing to standard output except protocol frames, so a
+terminal is the wrong place to look. The client's own log is the right one, and
+a connected server lists four tools: `rehearse_migration_safety`,
+`inspect_egress_firewall`, `get_rehearsal_run` and `cancel_rehearsal_run`.
+
+In Claude Code, `/mcp` lists the configured servers and their state.
+
+`project_id` is required on every call and it is the `name` field of your
+`antifailure.yaml`. The server states it in its handshake instructions and at
+the end of every tool description, so an agent reads it rather than guessing.
+
+## Browser clients and remote bridges
+
+Antifailure v1.1.1 does not provide a hosted MCP endpoint yet. `claude.ai` and
+ChatGPT in a browser cannot start `af mcp` on your machine. Claude custom
+connectors need a remote MCP URL, while ChatGPT web receives remote MCP tools
+through plugins and does not read local Codex configuration.
+
+A gateway can adapt this local STDIO server to Streamable HTTP. Current
+[Supergateway](https://github.com/supercorp-ai/supergateway) listens on every
+network interface and does not authenticate incoming clients. The command
+below demonstrates the transport conversion only. Run it inside an isolated
+network where port 8000 is unreachable until an authenticating HTTPS proxy is
+in front of it:
+
+```sh
+npx -y supergateway \
+  --stdio "af -C /absolute/path/to/your/project mcp" \
+  --outputTransport streamableHttp \
+  --port 8000
+```
+
+That creates the Streamable HTTP endpoint `http://localhost:8000/mcp`.
+Supergateway defaults a STDIO input to SSE when `--outputTransport` is omitted,
+so the shorter command does not create this endpoint.
+
+The command above is a transport adapter, not an authentication boundary. Do
+not publish or tunnel that endpoint as shown. A remote deployment also needs
+authorization for every caller and an isolated checkout and execution host for
+the project it serves. Anyone allowed through can invoke the rehearsal tools,
+which start containers, read the checkout and operate on production shaped
+data. Running that bridge is possible, but it is an operationally sensitive
+service rather than a safe copy and paste connection step.
+
+A hosted Antifailure endpoint is not part of v1.1.1. That is the current
+product state, not a permanent limit on the architecture.
+
 ## The division of authority
 
 The agent chooses the hypothesis. Antifailure chooses the safety controls.

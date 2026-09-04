@@ -1185,6 +1185,11 @@ than followed.
 Standard output carries the protocol and nothing else. Progress, warnings and
 errors go to standard error, where the client's log will show them.
 
+Client setup differs by host. https://antifailure.dev/docs/reference/mcp has
+the current command or configuration for each supported local client. This
+release provides no hosted MCP URL. A browser client requires a separately
+operated and authenticated Streamable HTTP bridge.
+
 ```
 af mcp
 ```
@@ -1194,7 +1199,8 @@ af mcp
 # standard input and output, so running it in a terminal looks idle.
 af mcp
 # It serves exactly the checkout it starts in, so the client is
-# configured to run it there.
+# configured to run it there. A client without a working directory
+# setting passes -C with the absolute checkout in its configuration.
 af mcp
 ```
 
