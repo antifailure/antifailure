@@ -62,3 +62,31 @@ export function usd(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "--";
   return value.toLocaleString(undefined, { style: "currency", currency: "USD" });
 }
+
+/**
+ * How long until an instant, in words.
+ *
+ * Beside `ago` rather than in the operator lane that needed it, because it is
+ * the same job pointing forwards and a second module would be a second answer
+ * to "under a minute". It takes the clock as an argument, which `ago` does not:
+ * this one is tested, and a formatter that reads the wall clock is a formatter
+ * whose test passes at whatever time it ran.
+ *
+ * The one case worth naming is zero. Flooring to minutes renders forty seconds
+ * as "0 minutes", which reads as expired and is not, so the answer closest to
+ * zero is the one that has to be words.
+ */
+export function until(instant: string | Date | null | undefined, now: Date): string {
+  if (instant === null || instant === undefined) return "unknown";
+  const ms = (instant instanceof Date ? instant : new Date(instant)).getTime() - now.getTime();
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes === 1) return "1 minute";
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (rest === 0) return hours === 1 ? "1 hour" : `${hours} hours`;
+  return `${hours}h ${rest}m`;
+}

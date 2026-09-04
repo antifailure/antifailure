@@ -60,6 +60,51 @@ type VersionInfo struct {
 	Platform  string `json:"platform"`
 }
 
+// versionInfo is what the running binary says it is.
+//
+// Asked of the running binary rather than read out of a package variable. The
+// variable was never stamped by any build, so the enterprise binary printed
+// "community edition" here while its own af license status printed
+// "enterprise", and the same command that tells an auditor what they are
+// running was the one that lied.
+//
+// cobra offers a built in --version that prints a template from a package
+// variable, and taking it would put that same defect in a second place, on the
+// spelling a person reaches for first. So --version is an ordinary flag on the
+// root command and both spellings land here.
+func versionInfo(ctx context.Context) VersionInfo {
+	declared, _ := declaredEdition(ctx)
+	return VersionInfo{
+		Version: Version, Commit: Commit, BuildDate: BuildDate,
+		Edition:  declared.Name,
+		Go:       runtime.Version(),
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+	}
+}
+
+// writeVersion renders that answer.
+//
+// One implementation, two spellings. af version is what the documentation
+// says and af --version is what somebody types the minute the installer
+// finishes, and a second renderer would be a second place for the edition, the
+// commit or the JSON shape to drift.
+func writeVersion(ctx context.Context, env *Env, short bool) error {
+	info := versionInfo(ctx)
+	if env.Out.Format == FormatJSON {
+		return env.Out.JSON(info)
+	}
+	if short {
+		env.Out.Raw(info.Version + "\n")
+		return nil
+	}
+	env.Out.Raw(fmt.Sprintf("antifailure %s (%s edition)\n", info.Version, info.Edition))
+	env.Out.Raw(fmt.Sprintf("  commit    %s\n", info.Commit))
+	env.Out.Raw(fmt.Sprintf("  built     %s\n", info.BuildDate))
+	env.Out.Raw(fmt.Sprintf("  go        %s\n", info.Go))
+	env.Out.Raw(fmt.Sprintf("  platform  %s\n", info.Platform))
+	return nil
+}
+
 func newVersionCommand(env *Env) *cobra.Command {
 	var short bool
 	cmd := &cobra.Command{
@@ -67,31 +112,7 @@ func newVersionCommand(env *Env) *cobra.Command {
 		Short: "Print the version, commit, and edition",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Asked of the running binary rather than read out of a package
-			// variable. The variable was never stamped by any build, so the
-			// enterprise binary printed "community edition" here while its own
-			// af license status printed "enterprise", and the same command that
-			// tells an auditor what they are running was the one that lied.
-			declared, _ := declaredEdition(cmd.Context())
-			info := VersionInfo{
-				Version: Version, Commit: Commit, BuildDate: BuildDate,
-				Edition:  declared.Name,
-				Go:       runtime.Version(),
-				Platform: runtime.GOOS + "/" + runtime.GOARCH,
-			}
-			if env.Out.Format == FormatJSON {
-				return env.Out.JSON(info)
-			}
-			if short {
-				env.Out.Raw(info.Version + "\n")
-				return nil
-			}
-			env.Out.Raw(fmt.Sprintf("antifailure %s (%s edition)\n", info.Version, info.Edition))
-			env.Out.Raw(fmt.Sprintf("  commit    %s\n", info.Commit))
-			env.Out.Raw(fmt.Sprintf("  built     %s\n", info.BuildDate))
-			env.Out.Raw(fmt.Sprintf("  go        %s\n", info.Go))
-			env.Out.Raw(fmt.Sprintf("  platform  %s\n", info.Platform))
-			return nil
+			return writeVersion(cmd.Context(), env, short)
 		},
 	}
 	cmd.Flags().BoolVar(&short, "short", false, "Print only the version number")

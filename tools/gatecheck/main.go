@@ -695,6 +695,26 @@ var exemptFromGate = map[string]string{
 		"against, and `just test-web` covers that inside `gate`: the migrations " +
 		"run and the suites read what they wrote.",
 
+	"tool tfsecignores": "" +
+		"It needs a scanner this repository does not carry. tools/tfsecignores " +
+		"asks tfsec what is failing with every inline suppression disabled, so " +
+		"that an ignore which no longer suppresses anything can be told from one " +
+		"that does, and tfsec is a pinned release asset infra.yml downloads and " +
+		"checksums rather than a dependency in tools/go.mod. A laptop with no " +
+		"tfsec on it would have to fetch one, and `just gate` has to work on a " +
+		"plane. " +
+		"What IS a function of the tree is every decision the tool makes about a " +
+		"directive, and `go test ./tools/tfsecignores` covers it inside `gate`: " +
+		"an ignore with no expiry is refused, an ignore with no reason written " +
+		"above it is refused, an expired one fails, one that suppressed nothing " +
+		"fails, a rule that merely PASSED is not counted as suppressed, a " +
+		"suppression in one file does not cover an ignore in another, a scanner " +
+		"that printed nothing is an error rather than an empty result, and a " +
+		"positive control asserts a live ignore IS accepted so that a checker " +
+		"which refuses everything cannot pass the suite. " +
+		"It runs on every pull request touching infra/ in infra.yml, in the step " +
+		"before the scan it governs.",
+
 	"tool cost": "" +
 		"Its input is not in the tree. tools/cost reads a Terraform plan, and a " +
 		"plan only exists after authenticating to Azure and resolving every " +
@@ -708,6 +728,27 @@ var exemptFromGate = map[string]string{
 		"than silently costed at zero. " +
 		"It runs on every pull request touching infra/ in infra.yml, against the " +
 		"plan produced there, with --budget so an over-budget plan fails.",
+
+	"tool planguard": "" +
+		"Its input is not in the tree, for the same reason tools/cost's is not. " +
+		"planguard reads a Terraform plan and the whole of its question is about " +
+		"what the RECORDED STATE holds that the configuration no longer declares, " +
+		"so it needs the real state blob and not merely a cloud account. It " +
+		"refuses a plan made without one rather than passing it, which is the " +
+		"point: a plan from an empty state shows every resource as a create and " +
+		"cannot contain a destroy, so a green result from a laptop would be a " +
+		"check that examined nothing. " +
+		"What IS a function of the tree is every rule it applies, and `go test " +
+		"./tools/planguard` covers each one inside `gate`: an unacknowledged " +
+		"destroy is refused, a replace counts as a destroy, an acknowledged one " +
+		"passes, an acknowledgement with no expiry or no reason is not a " +
+		"decision, an expired one has lapsed, one that matched nothing is stale, " +
+		"a plan with no managed resources in its prior state is refused rather " +
+		"than passed, and a plan it cannot parse is an error rather than an empty " +
+		"result. " +
+		"It runs on every pull request touching infra/ in infra.yml, against both " +
+		"the staging and the production plan produced there, and only when those " +
+		"plans were made against the real state.",
 }
 
 // workflowSet is the workflows that run on a pull request, kept with their

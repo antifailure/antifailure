@@ -41,6 +41,11 @@ import {
   resolveAdminSession,
 } from './admin/session.ts'
 import { actorOf } from './admin/trpc.ts'
+// Lifted out of this file when a second one needed it. `x-forwarded-for` is a
+// LIST with optional ports, and Postgres refuses every one of those shapes on
+// an inet column. See clientaddress.ts.
+import { clientAddress, clientIP } from './clientaddress.ts'
+import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
@@ -147,9 +152,16 @@ import {
   setBudget,
 } from './providers/store.ts'
 import { openApiDocument } from './openapi.ts'
+import { createAnalytics, type Analytics } from './analytics/record.ts'
+import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
-import { limitFor, bucketFor, ENDPOINT_LIMITS, type EndpointLimit } from './limits.ts'
+import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
+import {
+  limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
+} from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
+import { apiNotFound } from './notfound.ts'
+import { engagedReason } from './admin/controls.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
   hasHostedAccess,
@@ -183,6 +195,13 @@ export interface ServerOptions {
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
   signInAllowlist?: SignInAllowlist
+  /** Whether somebody who signs in with no organization is given one, on the
+   *  free plan, owned by them. Default false; see auth/provision.ts for why
+   *  that direction and not the other. */
+  selfServeSignup?: boolean
+  /** Where a recorded lead is announced. Absent means it is recorded and
+   *  nobody is told, which the response says out loud. */
+  leadNotifier?: LeadNotifier | null
   /** Set false to serve the API alone, without the console. */
   console?: boolean
   /** The exported console, located at start-up. Absent means the API is served
@@ -232,9 +251,11 @@ export interface ServerOptions {
    *  no organization yet. */
   githubAppInstallUrl?: string
   /** Where somebody this installation will not admit is sent instead, which on
-   *  the hosted planes is the marketing site's request page. Undefined is the
-   *  self-hosted default and means the refusal page offers no link, because
-   *  pointing an operator's users at the vendor's waitlist would be wrong. */
+   *  the hosted planes is the marketing site's contact page, where a form
+   *  reaches a person. Undefined is the self-hosted default and means the
+   *  refusal page offers no link, because pointing an operator's users at the
+   *  vendor's contact form would be wrong: an operator running an allowlist has
+   *  their own way of being asked. */
   signupUrl?: string
   /** What each model costs, for charging a budget. */
   modelPrices?: Record<string, Price>
@@ -250,6 +271,46 @@ export interface ServerOptions {
    *  gets its own, deliberately not module state: two servers in one process
    *  sharing counters means one test passes because of another. */
   metrics?: ControlPlaneMetrics
+  /**
+   * The key organization surrogates are computed under.
+   *
+   * Null turns analytics off: nothing is recorded, the site beacon answers that
+   * it is off, and the dashboard says so rather than showing an empty chart
+   * that looks like nobody came. There is deliberately no fallback to a
+   * constant, because a constant key is a surrogate anybody can recompute,
+   * which is an org_id with extra steps.
+   */
+  analyticsSecret?: Buffer | null
+  /**
+   * The organization whose members may read the analytics dashboard.
+   *
+   * The dashboard shows the whole installation: every organization's funnel, the
+   * plan mix, the acquisition channels. On a hosted control plane that is the
+   * operator's business and nobody else's, so a permission alone is not enough
+   * to gate it, because every organization has an owner and every owner holds
+   * every permission in their own organization.
+   *
+   * Null means nobody can read it, which is the safe default and is what a
+   * self-hosted installation gets until its operator names their own
+   * organization here. The route says which variable to set rather than
+   * answering an empty page.
+   */
+  analyticsOperatorOrgSlug?: string | null
+  /**
+   * Where the marketing site is served from, for the endpoints a browser on it
+   * calls cross-origin. Null refuses every one of them rather than reflecting
+   * whatever Origin arrives, which is what a permissive default would do.
+   *
+   * TWO ROUTES READ THIS and they arrived a week apart: the analytics beacon
+   * and POST /v1/leads. One value rather than two, because two variables naming
+   * the same origin is two chances for a deployment to allow the marketing site
+   * to do one of those things and not the other, which would present as the
+   * contact form failing with a network error on a site whose analytics work.
+   * It is validated once in main.ts by siteOriginFrom, which refuses a value
+   * carrying a path: a browser sends only scheme, host and port, so such a
+   * value could never match and would allow nobody while looking configured.
+   */
+  siteOrigin?: string | null
 }
 
 /**
@@ -288,6 +349,62 @@ export const GRANTABLE_SCOPES: readonly string[] = [
 ]
 
 
+
+/**
+ * The reason maintenance is engaged, or null.
+ *
+ * Named so that the catalog entry in admin/controls.ts can point at a real
+ * function and a test can assert the pointer is not stale. It reads on a
+ * connection with no tenant, which the read policy on platform_controls
+ * deliberately admits: every request has to be able to learn that the
+ * installation is paused, including requests that have no organization yet.
+ */
+
+/**
+ * The paths maintenance mode does not refuse.
+ *
+ * Exported, and read by a test that walks the routes the server actually
+ * serves, because the failure this list guards against is not a wrong entry.
+ * It is a route somebody adds later, outside every prefix here, that turns out
+ * to be the one an operator needs in order to turn maintenance off. That
+ * failure is invisible in code review and total in production.
+ */
+export const maintenanceExemptions = [
+  // Signing in. Refusing this means the operator who engaged maintenance
+  // cannot authenticate to release it, and the only way back is a deploy or a
+  // psql session. That is the canonical way a maintenance mode becomes the
+  // incident it was meant to contain.
+  '/auth/',
+  // Operator sign-in, wherever the admin portal ends up putting it. See the
+  // comment at the middleware for why this prefix is not optional.
+  //
+  // BOTH spellings, and the second is not hypothetical: the portal landed
+  // sign-in at POST /v1/admin/signin, outside `/admin/`, and the route-table
+  // test caught it by name. That is the lockout this list exists to prevent,
+  // arriving from the exact direction that was predicted and still missed by a
+  // list written from memory. Either prefix is cheap to exempt and either one
+  // is an outage to omit.
+  '/admin/',
+  '/v1/admin/',
+  // Engines keep reporting. Refusing ingestion does not pause anything, it
+  // loses the record of work that ran anyway.
+  '/v1/events',
+  // The credential a running job needs in ORDER to report. `/v1/events` being
+  // open and this being closed is incoherent: a workflow exchanges its GitHub
+  // identity token here for the callback credential it then sends events with,
+  // so refusing this while accepting those leaves the job holding nothing it
+  // can use. The route-table test found it, under `/v1/auth/` rather than the
+  // `/auth/` this list already carried, which is the second time a prefix that
+  // LOOKS like it covers a path did not.
+  '/v1/auth/',
+  // The surface that owns the switch. admin-portal has committed to this
+  // prefix as a hard interface for exactly this reason.
+  '/trpc/admin.',
+] as const
+
+export async function refuseDuringMaintenance(pool: Pool): Promise<string | null> {
+  return pool.withoutTenant((db) => engagedReason(db, 'maintenance'))
+}
 /**
  * The code the unexpected path returns.
  *
@@ -389,6 +506,16 @@ export function createServer(options: ServerOptions) {
   const ingestLimiter = new RateLimiter(clock, options.ingestLimit ?? { rate: 200, burst: 2000 })
   const authLimiter = new RateLimiter(clock, options.authLimit ?? { rate: 1, burst: 20 })
 
+  // Analytics. Off when no surrogate secret is configured, and off means every
+  // method still works and records nothing, so no producer has to check first.
+  // A producer wrapped in `if (analytics.enabled)` is a producer that stops
+  // being exercised by tests the moment somebody forgets the secret.
+  const analytics = createAnalytics({
+    secret: options.analyticsSecret ?? null,
+    clock,
+    counters: { events: metrics.analyticsEvents, rejections: metrics.analyticsRejections },
+  })
+
   // -------------------------------------------------------------------------
   // Rate limiting, before anything else does work.
   //
@@ -433,15 +560,57 @@ export function createServer(options: ServerOptions) {
   })
 
   app.use('*', async (c, next) => {
-    const limit = limitFor(c.req.method, new URL(c.req.url).pathname)
+    const path = new URL(c.req.url).pathname
+    const limit = limitFor(c.req.method, path)
     if (!limit) {
+      // Two different things arrive here, and until this line they were
+      // answered identically.
+      //
+      // A path the router has no route for is a typo in somebody's URL. It was
+      // answered 500, which told every monitor and load balancer watching the
+      // deployed control plane that the server was broken because a client
+      // asked for something that never existed. It is a 404, and Hono's own
+      // not-found handler already knows how to say so.
+      //
+      // A route that EXISTS with no declared limit is the hole this gate was
+      // built to catch, and it stays a refusal. Which of the two this is comes
+      // from the router itself rather than from a second list of paths, so
+      // there is nothing to keep in step. See servedRoute.
+      const route = servedRoute(app, c.req.method, path)
+      if (!route) return c.notFound()
+
       // Deliberately loud. The alternative is a quiet default, and a quiet
       // default means nobody ever notices the endpoint is unbounded.
+      //
+      // Loud in the LOG, though, not in the body. The body used to carry
+      // "Add it to ENDPOINT_LIMITS with the reason for the number", which is an
+      // instruction to a maintainer of this codebase served to anybody who can
+      // reach the port. It described this server's own gate design to a
+      // stranger and told the one person who could act on it nothing, because
+      // maintainers read logs and not other people's 500 bodies. So the
+      // sentence moves to the log line, where it names the catalog key to add,
+      // and the caller gets the same answer every other control plane failure
+      // gives: a code, a resolution, and the id that ties the two together.
+      //
+      // The route pattern is logged rather than the path: it comes from this
+      // server's route table, so it cannot carry a caller's string into a log,
+      // and it is already the key ENDPOINT_LIMITS would hold it under.
+      const requestId = c.get('requestId') ?? 'unassigned'
+      console.error('endpoint has no declared rate limit, refused', {
+        requestId,
+        route,
+        fix: 'Add it to ENDPOINT_LIMITS in web/apps/api/src/limits.ts, with the reason for the number.',
+      })
       return c.json(
         {
-          error:
-            'This endpoint has no declared rate limit, so the server refuses to serve it. ' +
-            'Add it to ENDPOINT_LIMITS with the reason for the number.',
+          error: {
+            code: CONTROL_PLANE_FAILURE,
+            message: 'The control plane could not complete this request.',
+            resolution:
+              'Retry once. If it fails again, quote the requestId below: it is the only thing ' +
+              'that ties this answer to a log line.',
+          },
+          requestId,
         },
         500,
       )
@@ -494,6 +663,61 @@ export function createServer(options: ServerOptions) {
     if (!c.res.headers.get('content-security-policy')) {
       c.header('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
     }
+  })
+
+  // -------------------------------------------------------------------------
+  // Maintenance mode.
+  // -------------------------------------------------------------------------
+  //
+  // Refuses everything that CHANGES something, for every organization, while
+  // the installation's maintenance switch is engaged. Four things are
+  // deliberately still allowed, and each one is the difference between a pause
+  // and an outage this product caused:
+  //
+  //   Reads. An operator and a customer can both still see what the state is,
+  //   which is what people do first when something is paused.
+  //
+  //   /auth. If signing in were refused, the operator who engaged maintenance
+  //   could not authenticate to release it, and the only way back would be a
+  //   deploy or a psql session. That is the canonical way a maintenance mode
+  //   becomes the incident.
+  //
+  //   /v1/events. Engines keep reporting. Refusing ingestion does not pause
+  //   anything, it loses the record of work that ran anyway.
+  //
+  //   The admin portal's own procedures. The switch has to be reachable from
+  //   the surface that owns it, and the matching prefix is asserted by a test
+  //   rather than trusted, because a rename here is a lockout.
+  //
+  // Enforced before the routes rather than inside each one, because the failure
+  // this guards against is a route somebody adds later and does not think
+  // about, which is the same reason ENDPOINT_LIMITS is a list rather than a
+  // decorator.
+  //
+  //   Anything under /admin. Operator sign-in runs BEFORE an operator session
+  //   exists, so it cannot be a procedure behind the admin session guard, and
+  //   if it lands at /admin/auth/... rather than under the tRPC prefix then
+  //   exempting only /trpc/admin. locks the operator away from the switch that
+  //   releases maintenance. This prefix is the one that costs nothing to add
+  //   and is a lockout to omit. `maintenanceExemptions` is exported so a test
+  //   can walk the server's REAL route table against it rather than against
+  //   somebody's recollection of it.
+  const MAINTENANCE_EXEMPT_PREFIXES = maintenanceExemptions
+  app.use('*', async (c, next) => {
+    const method = c.req.method.toUpperCase()
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next()
+    const path = new URL(c.req.url).pathname
+    if (MAINTENANCE_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return next()
+    const reason = await refuseDuringMaintenance(options.pool)
+    if (reason === null) return next()
+    return c.json(
+      {
+        error:
+          `This installation is paused for maintenance: ${reason}. Nothing has been lost, ` +
+          `everything can still be read, and work that was already running is untouched.`,
+      },
+      503,
+    )
   })
 
   // Liveness. Deliberately a static literal that touches nothing: it answers
@@ -554,6 +778,49 @@ export function createServer(options: ServerOptions) {
     return c.body(metrics.registry.render())
   })
 
+  /**
+   * Records a completed sign-in.
+   *
+   * Detached from whatever transaction the sign-in used, and that is the one
+   * place in this subsystem where the "same transaction as the thing it
+   * describes" rule is deliberately broken. The sign-in exchange spans several
+   * transactions across two modules, so there is no single one to join; and if
+   * there were, this is the path where a failed analytics insert would keep
+   * somebody out of their own account. Losing the event is the cheaper failure
+   * and it is counted either way.
+   *
+   * first_time is read from the age of the user row rather than from a session
+   * count, because sessions are swept when they expire, so a member returning
+   * after a month would read as new and the number would be quietly inflated.
+   * A user row is created during the exchange that issues the first session, so
+   * a row younger than five minutes is a first sign-in; five minutes is far
+   * above any exchange and far below any return visit.
+   */
+  async function recordSignIn(
+    method: 'github' | 'email_link' | 'device' | 'sso',
+    userId: string,
+    orgId: string | null,
+  ): Promise<void> {
+    const created = await options.pool
+      .withoutTenant(
+        (db) =>
+          db.execute<{ created_at: Date | string }>(
+            rawSql`SELECT created_at FROM users WHERE id = ${userId}::uuid`,
+          ),
+        { signinUserId: userId },
+      )
+      .catch(() => [])
+    const at = created[0]?.created_at
+    const ageMs = at ? clock.now().getTime() - new Date(at).getTime() : Number.POSITIVE_INFINITY
+
+    await analytics.recordDetached(options.pool, {
+      name: 'identity.signed_in',
+      occurredAt: clock.now(),
+      orgId,
+      payload: { method, first_time: ageMs < 5 * 60 * 1000 },
+    })
+  }
+
   // Resolving the browser's session, for the routes that need one outside tRPC.
   async function sessionFrom(cookie: string | undefined) {
     const token = readCookie(cookie, SESSION_COOKIE)
@@ -592,11 +859,18 @@ export function createServer(options: ServerOptions) {
    */
   function wayOut(): { actions: ProblemAction[]; sentence: string } {
     if (options.signupUrl) {
+      // NOT "we will tell you when it opens", which is what this said while
+      // there was a waitlist behind the link. Two things were wrong with it and
+      // only one has changed. The list is gone, so there is nothing to be told
+      // about; and the domain that link points at publishes no mail exchanger
+      // and an SPF policy authorizing no sender, so nothing could have told
+      // anybody anything even when there was. The link now goes to a form that
+      // writes a row a person reads, and the sentence says that and no more.
       return {
-        actions: [{ href: options.signupUrl, label: 'Join the waitlist' }],
+        actions: [{ href: options.signupUrl, label: 'Ask for access' }],
         sentence:
-          'Leave an address on the waitlist and we will tell you when it opens. The engine ' +
-          'itself is open source, runs on your own machine, and needs no account at all.',
+          'Tell us who you are on that page and somebody will read it. The engine itself is ' +
+          'open source, runs on your own machine, and needs no account at all.',
       }
     }
     return {
@@ -725,7 +999,11 @@ export function createServer(options: ServerOptions) {
         clock,
         options.github,
         { code, state },
-        options.signInAllowlist ?? null,
+        {
+          allowlist: options.signInAllowlist ?? null,
+          selfServeSignup: options.selfServeSignup === true,
+          log: (message, error) => console.error(message, error),
+        },
       )
 
       // Another edition may have an opinion about this sign-in: an
@@ -751,6 +1029,7 @@ export function createServer(options: ServerOptions) {
       })
 
       c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+      await recordSignIn('github', result.userId, decision.orgId)
       const base = options.appBaseUrl ?? '/'
       const target = safeRedirect(result.redirectTo) ?? '/'
       const landing = new URL(target, base.endsWith('/') ? base : `${base}/`)
@@ -872,11 +1151,57 @@ export function createServer(options: ServerOptions) {
 
   app.post('/v1/admin/signout', async (c) => {
     const token = readAdminSessionCookie(c.req.header('cookie'))
-    if (token) await adminSignOut(options.pool, token, clock.now())
+    if (token) {
+      // AN IMPERSONATION IS ENDED BEFORE THE OPERATOR SESSION IS, and that
+      // order is the whole of this block.
+      //
+      // The portal's refusal screen has always offered "End this session" and
+      // it has always called this route, which cleared the OPERATOR cookie and
+      // nothing else. The moment impersonation could actually be started, that
+      // became a hole: the customer cookie stayed live in the browser for the
+      // rest of its lifetime, and the row that would have explained it had just
+      // had its operator marker removed. A way out that leaves the door open is
+      // not a way out.
+      //
+      // Read first, because adminSignOut revokes the row this needs to read.
+      const operator = await resolveAdminSession(options.pool, token, clock.now())
+      if (operator && options.adminPool) {
+        await endImpersonation(options.adminPool, operator, clock.now(), {
+          ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+          how: 'signed out',
+        })
+      }
+      await adminSignOut(options.pool, token, clock.now())
+    }
     // Cleared whether or not there was a session, so a stale or unparseable
     // cookie can still be got rid of by pressing the button.
+    //
+    // BOTH cookies, for the reason above. Clearing the customer one on an
+    // ordinary operator sign-out costs an operator who also has a product
+    // session in the same browser one sign-in, and buys the guarantee that
+    // signing out of the portal never leaves a borrowed identity behind. That
+    // trade is not close.
     c.header('set-cookie', clearedAdminCookie(secure))
+    // append, not set. Hono's header() REPLACES by default, so the second call
+    // would silently discard the first and this route would clear exactly one
+    // cookie while reading as though it cleared two. Set-Cookie is the one
+    // header where a response legitimately carries several.
+    c.header('set-cookie', clearedCookie(secure), { append: true })
     return c.json({ signedOut: true })
+  })
+
+  // The two impersonation routes, registered from the lane that owns them so
+  // that this file gains an import and a call rather than eighty lines. They
+  // are here rather than in the tRPC tree because both end in a Set-Cookie for
+  // the CUSTOMER's session, and because the operator gate refuses every
+  // procedure while impersonating, which would make a tRPC `end` unreachable
+  // exactly when it is the only thing left to press. See admin/customers.ts.
+  registerImpersonationRoutes(app, {
+    pool: options.pool,
+    adminPool: options.adminPool ?? null,
+    clock,
+    secure,
+    appBaseUrl: options.appBaseUrl ?? '',
   })
 
   app.post('/auth/signout', async (c) => {
@@ -898,6 +1223,13 @@ export function createServer(options: ServerOptions) {
     const publicSignIn = {
       methods: signInMethods,
       signupsOpen: options.signInAllowlist == null,
+      // Whether signing in ENDS somewhere, which is a different question from
+      // whether it is allowed to start. The console renders one of two empty
+      // states from this: with self serve on, arriving in no organization is a
+      // failure worth reporting; with it off, it is the ordinary state of
+      // somebody waiting for an installation or an invitation, and telling
+      // them to fix it would be telling them to do something they cannot.
+      selfServeSignup: options.selfServeSignup === true,
       githubAppInstallUrl: options.githubAppInstallUrl,
     }
     if (!token) return c.json({ signedIn: false, ...publicSignIn }, 200)
@@ -914,9 +1246,19 @@ export function createServer(options: ServerOptions) {
       hostedAccess: hasHostedAccess(session.plan, hostedRequiredPlan),
       githubAppInstallUrl: options.githubAppInstallUrl,
       signupsOpen: options.signInAllowlist == null,
+      selfServeSignup: options.selfServeSignup === true,
       // Handed to the page so it can send it back on mutations. Safe to expose:
       // it is derived from the session secret and reveals nothing about it.
       csrfToken: session.csrfToken,
+      // Null on every ordinary sign-in. Set when this session is an operator
+      // acting as this account, and it is told to the PERSON BEING ACTED AS
+      // rather than only recorded about them. The audit entry is the durable
+      // record and the customer already gets a copy of it; this is what makes
+      // it visible while it is happening, which is the only time they can do
+      // anything about it. It carries no secret: the operator's address, the
+      // reason they typed, and the entry number, all three of which are already
+      // in that organization's own audit log.
+      impersonation: session.impersonation,
     })
   })
 
@@ -994,6 +1336,7 @@ export function createServer(options: ServerOptions) {
           replacing: existing ?? undefined,
         })
         c.header('set-cookie', sessionCookie(issued.token, issued.expiresAt, secure))
+        await recordSignIn('email_link', result.userId, result.orgId)
         const base = options.appBaseUrl ?? '/'
         const target = result.redirectTo ?? '/'
         return c.redirect(new URL(target, base.endsWith('/') ? base : `${base}/`).toString(), 302)
@@ -1180,7 +1523,7 @@ export function createServer(options: ServerOptions) {
           {
             error:
               'That login was not declined: it was already approved, already answered, or is no longer live. ' +
-              'If a terminal has a token it should not have, revoke it under Keys.',
+              'If a terminal has a token it should not have, revoke it under Command line.',
           },
           409,
         )
@@ -1255,6 +1598,121 @@ export function createServer(options: ServerOptions) {
       if (err instanceof InvitationError) return c.json({ error: err.message }, 400)
       throw err
     }
+  })
+
+  /* -------------------------------------------------------------------------
+   * Somebody asking to buy
+   *
+   * THE ONE ROUTE ON THIS SERVER THAT ANSWERS A CROSS ORIGIN BROWSER, and every
+   * line of the CORS handling below is narrower than it has to be because of
+   * what the rest of this process holds.
+   *
+   * The form is on the marketing site, which is a different origin from this
+   * one: antifailure.dev is a static export on one host and this control plane
+   * is on another. The alternative to letting that origin post here was to put
+   * the form on this host, which means sending a prospect off the marketing
+   * site to a bare application domain to type their name, and that is a worse
+   * product for a security property this route does not actually need.
+   *
+   * Why it does not need it. The allowed origin is one exact string from the
+   * environment and never `*`. `Access-Control-Allow-Credentials` is deliberately
+   * ABSENT, so a browser will not attach the session cookie and this endpoint
+   * can never act as somebody: it does not read a session and would not find one
+   * if it looked. The response body is an id and two booleans. And the route is
+   * INSERT-only at the database level, by grant rather than by policy, so the
+   * whole of what a cross origin caller can make this connection do is add a
+   * row that nothing on this role can read back. See migration 0031.
+   *
+   * That makes cross-site forgery uninteresting rather than merely unlikely:
+   * there is nothing to forge on somebody's behalf, and anybody can already do
+   * exactly this with curl. What CORS is buying here is the ability to show a
+   * person an error message on the page they are standing on instead of
+   * navigating them away from it.
+   * ---------------------------------------------------------------------- */
+
+  /** Says which origin may post, and nothing else. Returns whether a header was
+   *  set, so the OPTIONS handler can refuse plainly rather than answering a
+   *  preflight it has no intention of honouring. */
+  function allowLeadOrigin(c: Context): boolean {
+    const allowed = options.siteOrigin
+    if (!allowed) return false
+    // Exact match on the whole origin, never a suffix test. `endsWith` on a
+    // domain is how `evil-antifailure.dev` gets allowed, and it is the mistake
+    // that is invisible in review because the string looks right.
+    if (c.req.header('origin') !== allowed) return false
+    c.header('access-control-allow-origin', allowed)
+    // Two different caches key on this and both matter: without it a proxy can
+    // serve the response it built for one origin to a request from another.
+    c.header('vary', 'origin')
+    return true
+  }
+
+  app.options('/v1/leads', (c) => {
+    if (!allowLeadOrigin(c)) return c.body(null, 403)
+    c.header('access-control-allow-methods', 'POST, OPTIONS')
+    c.header('access-control-allow-headers', 'content-type')
+    c.header('access-control-max-age', '600')
+    return c.body(null, 204)
+  })
+
+  app.post('/v1/leads', async (c) => {
+    // The same bucket as the sign-in routes, because this has the same shape:
+    // an unauthenticated caller with no credential to key on, and a write.
+    const limited = authLimiter.take(
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+    )
+    // The CORS header goes on the refusal too. Without it the browser reports a
+    // CORS failure instead of the 429, and the page shows "could not reach the
+    // server" for a request the server answered perfectly.
+    allowLeadOrigin(c)
+    if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = (await c.req.json()) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+
+    const checked = validateLead({
+      email: String(body.email ?? ''),
+      name: String(body.name ?? ''),
+      company: String(body.company ?? ''),
+      seats: body.seats === undefined || body.seats === null ? null : Number(body.seats),
+      message: String(body.message ?? ''),
+      source: String(body.source ?? 'contact'),
+      ip: clientAddress(c.req.header('x-forwarded-for')),
+      userAgent: c.req.header('user-agent') ?? null,
+    })
+    if ('error' in checked) return c.json({ error: checked.error }, 400)
+
+    const { id } = await recordLead(options.pool, clock, checked.lead)
+
+    // Sent after the row, and its failure is not the caller's problem. The
+    // obligation this route has to the person on the page is that what they
+    // typed is written down somewhere a person will read; the mail is how that
+    // person finds out sooner. A provider outage must not turn a recorded lead
+    // into an error that makes them type it all again.
+    let notified = false
+    if (options.leadNotifier) {
+      const message = leadMessage({
+        product: options.leadNotifier.productName ?? 'Antifailure',
+        lead: checked.lead,
+        id,
+      })
+      try {
+        await options.leadNotifier.mailer.send({ to: options.leadNotifier.to, ...message })
+        notified = true
+      } catch (err) {
+        console.error('a lead was recorded and the notification could not be sent', err)
+      }
+    }
+
+    // `notified` is in the response on purpose, and the page reads it. A
+    // deployment with no mailer answers false, the page says somebody will read
+    // it rather than that somebody has been told, and the missing configuration
+    // is visible on the screen instead of comfortable in a log.
+    return c.json({ ok: true, id, notified }, 201)
   })
 
   /**
@@ -1519,6 +1977,7 @@ export function createServer(options: ServerOptions) {
 
     try {
       const result = await saveKey(options.pool, clock, options.sealingKey, {
+        analytics,
         orgId: caller.orgId,
         provider,
         key,
@@ -1601,6 +2060,7 @@ export function createServer(options: ServerOptions) {
     }
     try {
       const budget = await setBudget(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         provider,
         capUsd: cap,
@@ -1646,6 +2106,7 @@ export function createServer(options: ServerOptions) {
     const name = typeof body.name === 'string' ? body.name : ''
     try {
       const made = await mintEngineToken(options.pool, clock, {
+        analytics,
         orgId: caller.orgId,
         name,
         actorUserId: caller.userId,
@@ -1959,14 +2420,14 @@ export function createServer(options: ServerOptions) {
       // the sign in before install ordering that fix exists to close.
       const installation = outcome.handled
         ? null
-        : await handleDelivery(
-            options.pool,
-            clock,
-            event,
-            payload,
-            options.github,
-            options.forgetInstallationToken,
-          )
+        : await handleDelivery(options.pool, clock, event, payload, {
+            // Named fields rather than positions, for the reason the comment
+            // above gives: three optional collaborators on one call is where a
+            // value in the wrong slot still type checks.
+            github: options.github,
+            analytics,
+            forgetTokens: options.forgetInstallationToken,
+          })
 
       const detail = outcome.handled ? outcome.detail : (installation?.detail ?? outcome.detail)
       await closeDelivery(
@@ -2214,7 +2675,7 @@ export function createServer(options: ServerOptions) {
     }
 
     try {
-      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event)
+      const outcome = await handleStripeDelivery(options.pool, clock, billing.config, event, analytics)
       return c.json(outcome, 200)
     } catch (err) {
       // A real failure on our side, and the retry is wanted: a database that
@@ -2290,7 +2751,7 @@ export function createServer(options: ServerOptions) {
     if (!events) return c.json({ error: 'The body needs an events array.' }, 400)
 
     try {
-      const result = await ingest(options.pool, clock, ingestLimiter, engine, events)
+      const result = await ingest(options.pool, clock, ingestLimiter, engine, events, analytics)
       countIngestion(metrics, result, events)
       // 207 when some were rejected, so a caller that only checks the status
       // still learns that the batch was not wholly accepted.
@@ -2351,6 +2812,39 @@ export function createServer(options: ServerOptions) {
   })
 
   // -------------------------------------------------------------------------
+  // The site beacon
+  //
+  // The only unauthenticated write on this server, and the only route a browser
+  // on another origin may call. See analytics/beacon.ts for why that is safe:
+  // the application role cannot read the table it writes to, and the events it
+  // accepts are declared as carrying no organization at all.
+  // -------------------------------------------------------------------------
+
+  app.options('/v1/site/events', (c) => {
+    // The preflight. Answered here rather than by a wildcard handler, because a
+    // wildcard OPTIONS handler answers for every route on the server and that
+    // is how an endpoint nobody meant to expose becomes reachable from a page.
+    if (!beaconCors(c, options.siteOrigin ?? null)) return c.body(null, 403)
+    return c.body(null, 204)
+  })
+
+  app.post('/v1/site/events', async (c) => {
+    // The origin check comes first and refuses rather than answering without
+    // the header. A browser would refuse the response anyway; a non-browser
+    // caller would not, and this is the line that bounds it to the site.
+    if (!beaconCors(c, options.siteOrigin ?? null)) {
+      return c.json({ error: 'This endpoint serves the marketing site only.' }, 403)
+    }
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'The body is not JSON.' }, 400)
+    }
+    const result = await siteBeacon(body, { pool: options.pool, analytics, clock })
+    return c.json(result.body, result.status as 202)
+  })
+
   // Studio, for an engine
   //
   // An engine on a CI runner has no browser, no cookie and no way to obtain
@@ -2555,7 +3049,19 @@ export function createServer(options: ServerOptions) {
       // token. Something between a browser and this process may strip those
       // headers, and refusing every such request would break the portal for a
       // reason nobody could diagnose.
-      const adminToken = readCookie(c.req.header('cookie'), ADMIN_SESSION_COOKIE)
+      //
+      // readAdminSessionCookie, NOT readCookie with the bare name, and this
+      // line was the bare name until somebody drove a browser at it.
+      // adminSessionCookie writes `__Host-af_admin_session` whenever the cookie
+      // is Secure, which is every deployment that matters and none of the tests
+      // in this repository, because the test server speaks plain HTTP. So this
+      // read returned null in production, the operator was resolved a hundred
+      // lines below by readAdminSessionCookie regardless, and the entire
+      // operator CSRF check was skipped on exactly the deployments it exists
+      // for while admincsrf.test.ts went on passing. The suite below now
+      // presents the prefixed name as well, which is the assertion that can say
+      // no to this.
+      const adminToken = readAdminSessionCookie(c.req.header('cookie'))
       if (adminToken) {
         const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
         if (operator) {
@@ -2651,6 +3157,8 @@ export function createServer(options: ServerOptions) {
           // misconfigured.
           mailer: options.emailSignIn?.mailer ?? null,
           productName: options.emailSignIn?.productName ?? 'Antifailure',
+          analytics,
+          analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
           hostedRequiredPlan,
           operatorSetsPlan,
           actor,
@@ -2666,6 +3174,17 @@ export function createServer(options: ServerOptions) {
     }),
   )
 
+  // What answers a path with no route, when the console is not mounted to
+  // answer it with a page. Registered before mountConsole rather than after,
+  // because Hono holds ONE not-found handler and the last call wins: the
+  // console's handler has to be able to replace this, and it answers exactly
+  // this for the paths the API owns.
+  //
+  // Without it, an API-only deployment answered Hono's default, which is plain
+  // text, for the one response a caller finding its way around is most likely
+  // to get.
+  app.notFound(apiNotFound)
+
   // The console, last, so that every API route above wins a path collision.
   // Mounted on this app rather than a second one: the session cookie the
   // browser holds is the session these pages read, and a separate origin would
@@ -2679,6 +3198,7 @@ export function createServer(options: ServerOptions) {
     mountConsole(app, {
       pool: options.pool,
       clock,
+      analytics,
       secureCookies: secure,
       sealingKey: options.sealingKey ?? null,
       build: options.consoleBuild ?? {
@@ -2689,7 +3209,7 @@ export function createServer(options: ServerOptions) {
     })
   }
 
-  return { app, ingestLimiter, authLimiter, metrics }
+  return { app, ingestLimiter, authLimiter, metrics, analytics }
 }
 
 /**
@@ -2734,9 +3254,6 @@ function clientKey(forwardedFor: string | undefined, userAgent: string | undefin
 // saw it. Later entries were supplied by the caller and must never be used: a
 // limiter keyed on an attacker-chosen value is a limiter with unlimited
 // buckets.
-function clientIP(forwardedFor: string | undefined): string {
-  return (forwardedFor ?? '').split(',')[0]?.trim() || 'unknown'
-}
 
 /**
  * The caller's address, in a form the database will accept, or null.
@@ -2755,26 +3272,7 @@ function clientIP(forwardedFor: string | undefined): string {
  * because the audit field would not parse is the wrong trade in every
  * direction.
  */
-function clientAddress(forwardedFor: string | undefined): string | undefined {
-  const first = (forwardedFor ?? '').split(',')[0]?.trim()
-  if (!first) return undefined
-  // A bracketed IPv6 literal with a port, which is what some proxies send.
-  const unbracketed = /^\[(.+)\](?::\d+)?$/.exec(first)?.[1] ?? first
-  // An IPv4 address with a port, likewise. IPv6 is left alone here: it is
-  // full of colons, so stripping at the last one would truncate an address.
-  const withoutPort = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/.exec(unbracketed)?.[1] ?? unbracketed
-  return looksLikeAddress(withoutPort) ? withoutPort : undefined
-}
 
-function looksLikeAddress(value: string): boolean {
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
-    return value.split('.').every((octet) => Number(octet) <= 255)
-  }
-  // Deliberately shape rather than grammar: Postgres does the real parsing,
-  // and this only has to keep a header value that is plainly not an address
-  // out of the statement.
-  return /^[0-9a-fA-F:]+$/.test(value) && value.includes(':')
-}
 
 /**
  * Turns one ingested batch into the numbers the objectives are measured on.

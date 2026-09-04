@@ -65,7 +65,18 @@ describe('the OpenAPI document', () => {
       ['team', 'enterprise'],
     )
     assert.ok((checkoutSchema.required as string[]).includes('successUrl'))
-    assert.ok(!(checkoutSchema.required as string[]).includes('seats'))
+    // `seats` is GONE, not merely optional.
+    //
+    // This asserted only that it was absent from `required`, which it was:
+    // it had a default. That is what let a per unit seat count sit in the
+    // published contract for a product sold at a flat fee per organization,
+    // where a number a caller passed multiplied the price and entitled
+    // nothing. A property nobody must send should not be a property.
+    assert.equal(
+      'seats' in (checkoutSchema.properties as Record<string, unknown>), false,
+      'the published checkout contract still offers a seat count. Nothing is sold per unit ' +
+        'here: the plan decides how many members an organization may hold.',
+    )
 
     const repositories = byId.get('trpc_repositories_list')!
     const parameter = repositories.parameters!.find((item) => item.name === 'input') as {

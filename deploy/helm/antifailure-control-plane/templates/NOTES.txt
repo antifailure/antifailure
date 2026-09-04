@@ -30,7 +30,19 @@ No ingress. To reach it from your machine:
   curl localhost:8080/health
 {{- end }}
 
-Two things worth knowing:
+Three things worth knowing:
+{{ if kindIs "invalid" .Values.config.signinAllowlist }}
+  SIGN IN IS OPEN. Any GitHub account in the world may sign in, because
+  config.signinAllowlist is unset, and the application reads an unset allowlist
+  as open. That is the right answer only if your network already decides who
+  reaches this. Otherwise set config.signinAllowlist to the logins that may
+  sign in, or to an empty list to close it to everybody.
+{{- else if eq (len .Values.config.signinAllowlist) 0 }}
+  Sign in is CLOSED TO EVERYBODY. config.signinAllowlist is set and names
+  nobody, which is a real answer and not the same as leaving it unset.
+{{- else }}
+  Sign in is restricted to {{ len .Values.config.signinAllowlist }} account(s) by config.signinAllowlist.
+{{- end }}
 
   Readiness is a TCP check, not /health. /health is a static literal in the
   application and never touches the database, so it cannot distinguish a

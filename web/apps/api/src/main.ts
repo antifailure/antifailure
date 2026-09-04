@@ -15,6 +15,9 @@ import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
+import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
+import { leadNotifierFrom } from './enterprise/leads.ts'
+import { siteOriginFrom } from './siteorigin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -22,11 +25,13 @@ import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { surrogateSecretFrom } from './analytics/record.ts'
+import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
-import { RealStripeClient, stripeConfigFrom } from './billing/index.ts'
+import { PRICE_ENV, RealStripeClient, stripeConfigFrom } from './billing/index.ts'
 import {
   githubAppInstallUrlFrom,
   hostedRequiredPlanFrom,
@@ -178,12 +183,37 @@ function emailSignInFromEnv(): EmailSignInConfig | undefined {
 
 const emailSignIn = emailSignInFromEnv()
 
+// Where somebody asking to buy is announced, and where the page that asks them
+// is allowed to post from.
+//
+// Both are said out loud at start-up, because both are absences that look
+// exactly like working software. A deployment with a lead route and no notifier
+// records leads nobody is told about; a deployment with no site origin serves a
+// form that a browser refuses to submit and reports as a network error.
+const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN) ?? null
+console.log(
+  siteOrigin
+    ? `the marketing site at ${siteOrigin} may post analytics beacons and enterprise leads`
+    : 'AF_SITE_ORIGIN is not set: no other origin may post a beacon or an enterprise lead, so a form on the marketing site cannot submit',
+)
+const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
+console.log(leads.summary)
+
 // Said out loud at startup, every time. Whether an instance is open to the
 // world is not something anybody should have to infer from a deployment
 // template, and a closed instance that quietly opened is the failure that has
 // no symptom until it has a very large one.
 const signInAllowlist = parseAllowlist(process.env.AF_SIGNIN_ALLOWLIST)
 console.log(describeAllowlist(signInAllowlist))
+
+// The other half of the same sentence, said in the same place and for the same
+// reason. The allowlist decides who gets through the door; this decides whether
+// there is a room on the other side of it. An installation where sign-in is
+// open and self serve signup is off is one where every new person reaches an
+// empty state, which looks like a broken product rather than a configured one,
+// and the only way to find that out used to be to watch somebody do it.
+const selfServeSignup = selfServeSignupFrom(process.env.AF_SELF_SERVE_SIGNUP)
+console.log(describeSelfServeSignup(selfServeSignup))
 
 // Read at start-up rather than on first use, so a secret of the wrong length
 // stops the process here instead of on the one request the feature exists for.
@@ -207,6 +237,24 @@ console.log(`model prices configured for ${Object.keys(modelPrices).length} mode
 const stripe = stripeConfigFrom(process.env)
 console.log(stripe.summary)
 
+// Analytics. Off unless a surrogate secret is configured, and said out loud
+// either way, because "recording" and "not recording" are the two states an
+// operator most needs to be sure about and a dashboard of zeros looks the same
+// in both. Read at start-up so a secret of the wrong length stops the process
+// here rather than on the first event.
+const analyticsSecret = surrogateSecretFrom(process.env.AF_ANALYTICS_SURROGATE_SECRET)
+const analyticsOperatorOrgSlug = process.env.AF_ANALYTICS_OPERATOR_ORG ?? null
+console.log(
+  analyticsSecret
+    ? 'analytics is recording: AF_ANALYTICS_SURROGATE_SECRET is set'
+    : 'analytics is NOT recording: AF_ANALYTICS_SURROGATE_SECRET is not set',
+)
+console.log(
+  analyticsOperatorOrgSlug
+    ? `the analytics dashboard is readable by owners and admins of ${analyticsOperatorOrgSlug}`
+    : 'the analytics dashboard is readable by nobody: AF_ANALYTICS_OPERATOR_ORG is not set',
+)
+
 let hostedRequiredPlan
 let githubAppInstallUrl
 let signupUrl
@@ -222,7 +270,34 @@ try {
 }
 if (hostedRequiredPlan && !stripe.config) {
   console.error(
-    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Configure all four Stripe variables so an organization can satisfy the gate.',
+    'AF_HOSTED_REQUIRED_PLAN is set but billing is off. Set AF_STRIPE_SECRET_KEY, ' +
+      'AF_STRIPE_WEBHOOK_SECRET and AF_STRIPE_PRICE_TEAM so an organization can satisfy the gate.',
+  )
+  process.exit(2)
+}
+// The same contradiction reached through a second door, which opened when
+// AF_STRIPE_PRICE_ENTERPRISE stopped being required.
+//
+// The check above asks whether billing is on. Billing can now be on while the
+// gated plan itself has no price: set AF_HOSTED_REQUIRED_PLAN=enterprise with a
+// Team price and no Enterprise price and every organization is refused
+// everything until it holds a plan that this process has no way to sell it.
+// That is exactly the state the check above exists to prevent, so it is refused
+// in the same place and for the same reason rather than discovered by the first
+// customer who cannot get in.
+if (hostedRequiredPlan && stripe.config && !stripe.config.prices[hostedRequiredPlan]) {
+  // The variable is NAMED from PRICE_ENV rather than built out of the plan.
+  //
+  // This line originally wrote a prefix and appended the uppercased plan, which
+  // put a truncated fragment in the source and nothing else. config-docs.test.ts
+  // scans for AF_ names and reported that fragment as a variable read and not
+  // documented, which is true and unfixable from the reference: it is not a
+  // name anybody can set. A closed map is the only shape that keeps the set of
+  // settings this process reads enumerable.
+  console.error(
+    `AF_HOSTED_REQUIRED_PLAN is ${hostedRequiredPlan} and there is no Stripe price for that ` +
+      `plan, so no organization could ever satisfy the gate. Set ${PRICE_ENV[hostedRequiredPlan]}, ` +
+      'or unset AF_HOSTED_REQUIRED_PLAN.',
   )
   process.exit(2)
 }
@@ -253,6 +328,19 @@ console.log(
     : 'plans are not set by hand: billing.set is refused (AF_OPERATOR_SETS_PLAN is not set)',
 )
 
+// Said out loud for the same reason as its neighbours, and because this one was
+// unset on both control planes for weeks without anybody noticing. Nothing
+// fails when it is missing: sign-in works, the console renders, and the only
+// symptom is on a screen the operator does not see, shown to somebody who has
+// just arrived and has no organization yet. A configuration whose absence is
+// invisible from the inside is one the startup line has to name.
+console.log(
+  githubAppInstallUrl
+    ? `people with no organization are offered the GitHub App at ${githubAppInstallUrl}`
+    : 'people with no organization are NOT offered the GitHub App: AF_GITHUB_APP_INSTALL_URL is ' +
+        'not set. They can still ask GitHub to recheck their membership.',
+)
+
 // Located once, here, and said out loud either way. A control plane running
 // without its console is a legitimate way to run this; a control plane that
 // silently answers 404 on every page because a COPY was dropped from a
@@ -276,6 +364,8 @@ const { app, ingestLimiter, authLimiter } = createServer({
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
+  selfServeSignup,
+  leadNotifier: leads.notifier,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
   // The webhook's way of invalidating a cached token. Bound to the same
@@ -292,6 +382,14 @@ const { app, ingestLimiter, authLimiter } = createServer({
   signupUrl,
   modelPrices,
   consoleBuild,
+  analyticsSecret,
+  analyticsOperatorOrgSlug,
+  // The one origin the marketing site may call from, read and validated above
+  // rather than taken raw from the environment: siteOriginFrom refuses a value
+  // carrying a path, which could never match an Origin header and would allow
+  // nobody while looking configured. Unset refuses every beacon and every lead
+  // rather than reflecting whatever Origin arrives.
+  siteOrigin,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
@@ -308,6 +406,11 @@ if (maintenanceUrl) {
       adminUrl: maintenanceUrl,
       retentionMonths: retentionFromEnv(process.env),
       archiveDir: process.env.AF_EVENT_ARCHIVE_DIR,
+      // The analytics rollup rides the same pass, for the same reason and with
+      // the same credential: it reads a table the application role cannot read
+      // and writes one it can only select from. A second scheduler would be a
+      // second thing to notice had stopped.
+      analyticsRetentionDays: analyticsRetentionFromEnv(process.env),
       log: (line) => console.log(line),
     },
     systemClock,

@@ -15,6 +15,7 @@
 import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { Analytics } from '../analytics/record.ts'
 import type { StripeClient } from './stripe.ts'
 import { LIVE_STATUSES, type StripeConfig } from './plans.ts'
 import { recomputePlan, resolvePending, writeInvoice, writeSubscription } from './webhook.ts'
@@ -34,6 +35,8 @@ export interface BillingState {
     plan: string
     status: string
     priceId: string | null
+    /** What Stripe reported. A record of what was billed, never a grant: no
+     *  entitlement reads it. See stripe.ts:StripeSubscription.quantity. */
     quantity: number
     currentPeriodStart: string | null
     currentPeriodEnd: string | null
@@ -67,6 +70,7 @@ export async function attachCustomer(
   config: StripeConfig,
   orgId: string,
   customer: { id: string; email: string | null },
+  analytics: Analytics,
 ): Promise<{ customerId: string; created: boolean; resolved: number }> {
   const now = clock.now().toISOString()
   const inserted = await db.execute<{ stripe_customer_id: string }>(sql`
@@ -84,7 +88,7 @@ export async function attachCustomer(
   // In the same transaction as the insert. Half of this happening would leave a
   // customer attached with its events still unresolved, which looks exactly
   // like the bug this exists to prevent.
-  const { resolved } = await resolvePending(db, clock, config, orgId, customer.id)
+  const { resolved } = await resolvePending(db, clock, config, orgId, customer.id, analytics)
   return { customerId: customer.id, created: true, resolved }
 }
 
@@ -197,6 +201,7 @@ export async function reconcile(
   config: StripeConfig,
   client: StripeClient,
   orgId: string,
+  analytics: Analytics,
 ): Promise<Reconciliation> {
   const read = await pool.withTenant({ orgId }, async (db) => ({
     customer: await db.execute<{ stripe_customer_id: string }>(sql`
@@ -238,7 +243,7 @@ export async function reconcile(
       // advances the watermark past any delivery still in flight, which is
       // correct: a webhook describing an older state must not undo this.
       const written = await writeSubscription(
-        db, clock, config, orgId, subscription, clock.now(),
+        db, clock, config, orgId, subscription, clock.now(), analytics,
       )
       if (written.outcome === 'applied') changed += 1
       notes.push(`${subscription.id}: ${subscription.status}, ${written.detail}`)
@@ -258,7 +263,7 @@ export async function reconcile(
     }
 
     if (!subscriptions.error) {
-      notes.push(await recomputePlan(db, clock, orgId))
+      notes.push(await recomputePlan(db, clock, orgId, analytics))
     }
     return { checked: subscriptions.list.length, changed, notes }
   })

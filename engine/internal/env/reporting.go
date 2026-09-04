@@ -62,13 +62,15 @@ func (o *Orchestrator) openReporting(ctx context.Context) *session {
 	s.bus = events.NewBus(o.opts.Clock)
 
 	tel, terr := telemetry.Attach(ctx, s.bus, telemetry.Options{
-		StateDir: stateDir,
-		EnvID:    o.envID,
-		Redactor: o.opts.Redactor,
-		Clock:    o.opts.Clock,
-		State:    s.db,
-		Getenv:   o.opts.Getenv,
-		Version:  o.opts.Version,
+		StateDir:          stateDir,
+		EnvID:             o.envID,
+		Redactor:          o.opts.Redactor,
+		Clock:             o.opts.Clock,
+		State:             s.db,
+		Getenv:            o.opts.Getenv,
+		Version:           o.opts.Version,
+		ControlPlaneURL:   o.opts.ControlPlaneURL,
+		ControlPlaneToken: o.opts.ControlPlaneToken,
 		OnWarning: func(msg string) {
 			o.progress(msg)
 		},

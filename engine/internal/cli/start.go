@@ -423,6 +423,18 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest) stage {
 	if provider == "" {
 		provider = schema.DBDocker
 	}
+	// The variable naming production is checked before the provider, because
+	// it decides the same thing for every one of them: whether there is
+	// anything to copy. This step reported "docker, so it comes from the
+	// daemon checked above" for a manifest that named production and a shell
+	// that did not hold it, which is a step reported as finished while the
+	// thing it names is missing. The refresh that followed used to publish an
+	// empty golden from it, and now refuses with AF-DB-016, so the command
+	// whose whole job is to say where you are was the last thing still saying
+	// this was fine.
+	if src := sourceState(ctx, e, m, string(provider)); src != nil {
+		return *src
+	}
 	if provider == schema.DBDocker {
 		s.state = StageDone
 		s.detail = "docker, so it comes from the daemon checked above"
@@ -810,4 +822,43 @@ func symbolForStage(s StageState) string {
 	default:
 		return SymbolSkip
 	}
+}
+
+// sourceState reports the variable naming production, or nil when the manifest
+// names none and the provider's own check should answer instead.
+//
+// It reads the same chain the refresh reads, through the same constructor, so
+// the two cannot describe different places. A step that said the value was in
+// .env while the refresh looked only at the shell would be the same defect
+// pointing the other way.
+func sourceState(ctx context.Context, e *Env, m *schema.Manifest, provider string) *stage {
+	name := m.Database.SourceURLEnv
+	if name == "" {
+		return nil
+	}
+	s := stage{name: "the database source"}
+	value, res, found, err := modelChain(e).Lookup(ctx, name)
+	switch {
+	case err != nil:
+		s.state, s.why = StageUnchecked, "a source in the chain could not be read: "+err.Error()
+		s.detail = "not checked"
+	case !found || strings.TrimSpace(value.Reveal()) == "":
+		s.state = StageBlocked
+		s.detail = fmt.Sprintf(
+			"%s copies the database named by %s, and no configured source has it",
+			provider, name)
+		s.prose = fmt.Sprintf(
+			"Put production's read only connection string in %s, in this shell, "+
+				"in .env, or in the encrypted store. Without it a refresh has "+
+				"nothing to copy and refuses rather than making an empty golden.", name)
+		s.command = "af secret set " + name
+	default:
+		// The fingerprint rather than the value, for the same reason the model
+		// key is reported that way: it is enough to tell two credentials apart
+		// and it is not the credential.
+		s.state = StageDone
+		s.detail = fmt.Sprintf("%s, copying the database named by %s, found in %s",
+			provider, name, res.Source)
+	}
+	return &s
 }

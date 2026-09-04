@@ -21,6 +21,15 @@ These work on every command.
 | `-q`, `--quiet` | `false` | Print only what was asked for. |
 | `-v`, `--verbose` | `false` | Print the underlying cause of an error. |
 
+## Flags on `af` itself
+
+These work on `af` on its own rather than on a command under it.
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--short` | `false` | With --version, print only the version number. |
+| `--version` | `false` | Print the version, commit, and edition. |
+
 ## How output adapts
 
 Text output is stable for the same input. There are no timestamps and no
@@ -289,8 +298,8 @@ the manifest in the repository, on the machine the environment is on. A control
 plane that could change what an environment runs would be a control plane that
 could change what it masks.
 
-Needs a token in AF_CONTROL_PLANE_TOKEN. Create one in the control plane under
-engine tokens.
+Needs a credential. Run af login, or set AF_CONTROL_PLANE_TOKEN to an engine
+token, which is what a build machine with nobody sitting at it uses.
 
 ```
 af env pull <environment> [flags]

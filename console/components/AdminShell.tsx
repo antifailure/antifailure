@@ -17,30 +17,17 @@
  * where they are; it has to be legible at a glance and then get out of the way.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import {
-  IconAudit,
-  IconOperators,
-  IconSignOut,
-  IconTenants,
-  LogoMark,
-} from "@/components/icons";
+import { IconSignOut, LogoMark } from "@/components/icons";
 import { Button, Field, Lede, Standalone, inputClass } from "@/components/ui";
+import { ADMIN_NAV, ADMIN_OVERVIEW } from "@/lib/admin-nav";
+import type { AdminNavItem } from "@/lib/admin-nav";
 import { adminSignIn, adminSignOut, operatorMay, useAdminContext } from "@/lib/admin";
+import { endImpersonation } from "@/lib/admin-customers";
+import type { AdminMe } from "@/lib/admin";
 import type { ApiError } from "@/lib/api";
-
-const NAV = [
-  { href: "/admin", label: "Tenants", Icon: IconTenants, permission: "admin.tenants.read" },
-  { href: "/admin/audit", label: "Operator log", Icon: IconAudit, permission: "admin.audit.read" },
-  {
-    href: "/admin/operators",
-    label: "Operators",
-    Icon: IconOperators,
-    permission: "admin.operators.read",
-  },
-];
 
 /* -------------------------------------------------------------------------
  * Signed out
@@ -129,25 +116,61 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
  * warning strip on top would be a page of failed panels underneath, and the
  * reader would have to infer the one cause from a dozen symptoms.
  */
-function Impersonating({ label }: { label: string }) {
+function Impersonating() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // NO OPERATOR NAME ON THIS SCREEN, and that is forced rather than chosen. The
+  // only route that answers "who are you" is admin.me, and the gate refuses it
+  // for the same reason it refuses everything else here. The sentence is
+  // written so it does not need one: the reader is the person holding this
+  // browser, and telling them what state it is in is the whole job.
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      window.location.assign("/admin");
+    } catch (err) {
+      setError((err as ApiError).message);
+      setBusy(false);
+    }
+  }
+
   return (
     <Standalone title="This session is impersonating a customer" width={460} alert>
       <Lede>
-        You are signed in as <strong className="font-medium text-ink">{label}</strong>, and this
-        session is currently acting as a customer. The operator portal is closed to it until the
-        impersonation ends. That is deliberate: starting an impersonation is itself an operator
-        action, so a session that is already inside one cannot take another.
+        This browser is currently signed in as a customer, and the operator portal is closed to it
+        until that ends. That is deliberate: starting an impersonation is itself an operator
+        action, so a session already inside one cannot take another.
       </Lede>
-      <div className="mt-7">
+      <div className="mt-7 flex flex-wrap gap-2">
+        {/* THE PRIMARY WAY OUT ENDS THE IMPERSONATION AND NOTHING ELSE.
+            It used to sign the operator out entirely, which worked and was the
+            wrong shape: somebody who finished a support call had to sign in
+            again to write down what they found. This revokes the customer
+            session, clears the marker, records the ending in both audit chains
+            and leaves the operator signed in. */}
         <Button
           variant="primary"
-          onClick={() => {
-            void adminSignOut().then(() => window.location.reload());
-          }}
+          busy={busy}
+          onClick={() => void run(() => endImpersonation())}
         >
-          End this session
+          End the impersonation
+        </Button>
+        {/* Kept beside it, because the two are not the same. This one ends the
+            operator session as well, which is what somebody walking away from a
+            shared machine wants. It also ends the impersonation: see the block
+            on POST /v1/admin/signout in server.ts. */}
+        <Button busy={busy} onClick={() => void run(() => adminSignOut())}>
+          Sign out completely
         </Button>
       </div>
+      {error ? (
+        <p role="alert" className="mt-4 text-[12.5px] leading-5 text-fail">
+          {error}
+        </p>
+      ) : null}
     </Standalone>
   );
 }
@@ -156,39 +179,90 @@ function Impersonating({ label }: { label: string }) {
  * The chrome
  * ---------------------------------------------------------------------- */
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * One navigation entry.
+ *
+ * A real anchor, so it can be opened in a new tab, focused, and announced as a
+ * link. `aria-current="page"` rather than colour alone: the current entry is
+ * the one piece of state in this rail, and a lighter background is not
+ * something a screen reader can report.
+ */
+function NavLink({ item, onNavigate }: { item: AdminNavItem; onNavigate?: () => void }) {
   const path = usePathname();
-  const { me } = useAdminContext();
-  const entries = NAV.filter((n) => operatorMay(me, n.permission));
+  // Exact for the overview, prefix for everything else. Without the exception
+  // /admin would be marked current on all twenty three pages; with the prefix,
+  // a detail route under a section keeps its section marked, which is what the
+  // reader wants when they are two levels in.
+  const current = item.href === "/admin" ? path === item.href : path.startsWith(item.href);
+  const { Icon } = item;
+  return (
+    <li>
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        aria-current={current ? "page" : undefined}
+        title={item.summary}
+        className={[
+          // min-h-11 so every target clears the 44px floor on a phone, where
+          // this list is the drawer rather than the rail.
+          "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] leading-5",
+          current
+            ? "bg-[rgba(255,255,255,0.12)] font-medium text-white"
+            : "text-[rgba(255,255,255,0.72)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white",
+        ].join(" ")}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {/* The label wraps rather than truncating. "Experiments & Feature
+            Flags" does not fit 232px on one line, and an entry ending in an
+            ellipsis is an entry somebody has to click to identify. */}
+        <span className="min-w-0">{item.label}</span>
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * The whole rail: the overview, then six groups.
+ *
+ * The groups are real `<ul>`s under real headings rather than one flat list
+ * with dividers, so the structure a sighted reader gets from the spacing is
+ * the structure a screen reader gets from the markup. Twenty three entries in
+ * one undifferentiated list is a list nobody navigates twice.
+ *
+ * An entry whose permission the operator does not hold is not rendered, and a
+ * GROUP whose entries are all hidden loses its heading too. A heading over
+ * nothing reads as a section that failed to load.
+ */
+function NavList({ me, onNavigate }: { me: AdminMe | null; onNavigate?: () => void }) {
+  const groups = ADMIN_NAV.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => operatorMay(me, item.permission)),
+  })).filter((group) => group.items.length > 0);
 
   return (
-    <ul className="grid gap-0.5">
-      {entries.map(({ href, label, Icon }) => {
-        // Exact match for the index, prefix for the rest, or /admin would be
-        // marked current on every page in the portal.
-        const current = href === "/admin" ? path === href : path.startsWith(href);
-        return (
-          <li key={href}>
-            <Link
-              href={href}
-              onClick={onNavigate}
-              aria-current={current ? "page" : undefined}
-              className={[
-                // min-h-11 so every target clears the 44px floor on a phone,
-                // where this list is the drawer rather than the rail.
-                "flex min-h-11 items-center gap-2.5 rounded-md px-2.5 text-[13.5px]",
-                current
-                  ? "bg-[rgba(255,255,255,0.12)] font-medium text-white"
-                  : "text-[rgba(255,255,255,0.72)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white",
-              ].join(" ")}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {label}
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <div className="grid gap-5">
+      {operatorMay(me, ADMIN_OVERVIEW.permission) ? (
+        <ul className="grid gap-0.5">
+          <NavLink item={ADMIN_OVERVIEW} onNavigate={onNavigate} />
+        </ul>
+      ) : null}
+
+      {groups.map((group) => (
+        <section key={group.slug} aria-labelledby={`nav-${group.slug}`}>
+          <h2
+            id={`nav-${group.slug}`}
+            className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[rgba(255,255,255,0.55)]"
+          >
+            {group.label}
+          </h2>
+          <ul className="grid gap-0.5">
+            {group.items.map((item) => (
+              <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -230,6 +304,94 @@ function Wordmark() {
   );
 }
 
+/**
+ * The rail's navigation, on a phone.
+ *
+ * A native `dialog` opened with `showModal`, which is the same choice `Confirm`
+ * and `Drawer` make and for the same reasons: it brings focus containment,
+ * Escape, an inert background and `aria-modal` with it, and every hand rolled
+ * drawer in every console gets at least one of those wrong. It also RESTORES
+ * focus to the button that opened it on close, which is the half of focus
+ * management that is always the one left out.
+ *
+ * The one thing the element does not reliably give is a still page underneath,
+ * so the body is locked here, and unlocked in the same effect's teardown so an
+ * unmount while open cannot leave the page unscrollable.
+ */
+function NavDrawer({
+  open,
+  me,
+  onClose,
+}: {
+  open: boolean;
+  me: AdminMe | null;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (open && !el.open) el.showModal();
+    if (!open && el.open) el.close();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
+  return (
+    <dialog
+      ref={ref}
+      data-surface="inverted"
+      aria-label="Operator portal"
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      onClick={(e) => {
+        // The backdrop is this element's own pseudo element, so a click on it
+        // targets the dialog. Anything inside the panel stops before here.
+        if (e.target === ref.current) onClose();
+      }}
+      // m-0 with mr-auto puts it against the left edge instead of the middle,
+      // where the user agent would centre it. Tailwind's preflight zeroes the
+      // margin that would have done the centring, so both halves are needed.
+      className="m-0 mr-auto h-dvh max-h-dvh w-[min(300px,88vw)] max-w-full flex-col overflow-y-auto border-r border-rule bg-ink p-0 backdrop:bg-[rgba(16,16,16,0.55)] lg:hidden"
+    >
+      <div className="flex min-h-dvh flex-col px-3 py-4">
+        <div className="flex items-center justify-between gap-2">
+          <Wordmark />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close the menu"
+            className="-mr-1 grid h-11 w-11 shrink-0 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
+          >
+            <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" aria-hidden>
+              <path
+                d="M5 5l10 10M15 5 5 15"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <nav aria-label="Sections" className="mt-6 flex-1">
+          <NavList me={me} onNavigate={onClose} />
+        </nav>
+        <Who />
+      </div>
+    </dialog>
+  );
+}
+
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { me, status, error, reload } = useAdminContext();
   const [menu, setMenu] = useState(false);
@@ -242,6 +404,28 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <p className="text-[13px] text-muted">Checking your operator session</p>
       </main>
     );
+  }
+
+  // AN IMPERSONATING SESSION REACHES THIS FILE AS AN ERROR, NOT AS `me`.
+  //
+  // `me.impersonating` below can never be true, and the branch that reads it
+  // was unreachable from the day it was written. admin.me is an adminProcedure,
+  // adminProcedure refuses EVERY operator procedure while the session is
+  // impersonating, and it refuses first, before the permission check. So the
+  // moment an impersonation exists, admin.me answers 403 and this component
+  // takes the branch below: an operator inside a customer's account was shown
+  // "The control plane did not answer" and a Try again button that could only
+  // ever fail, with no way out on the screen at all.
+  //
+  // Nothing could produce that state until the routes that start one existed,
+  // which is why it survived review: the branch reads correctly and the code
+  // path that reaches it did not exist yet.
+  //
+  // Matched on the refusal the gate composes, which is the only thing that
+  // distinguishes this 403 from "your role cannot see this". The server owns
+  // that sentence and it is one string in one file.
+  if (status === "error" && error && error.status === 403 && /impersonating/i.test(error.message)) {
+    return <Impersonating />;
   }
 
   // 401 is "not signed in", which is a screen and not a failure. Anything else
@@ -261,64 +445,47 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (!me) return <SignIn onSignedIn={reload} />;
-  if (me.impersonating) return <Impersonating label={me.label} />;
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">
-      <aside data-surface="inverted" className="sticky top-0 hidden h-dvh flex-col border-r border-rule bg-ink px-3 py-4 lg:flex">
+    <div className="min-h-dvh lg:grid lg:grid-cols-[236px_1fr]">
+      {/* The rail scrolls on its own rather than with the page. Twenty three
+          entries are taller than a laptop viewport, and a rail that scrolls the
+          document takes the content with it. */}
+      <aside
+        data-surface="inverted"
+        className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-rule bg-ink px-3 py-4 lg:flex"
+      >
         <Wordmark />
         <nav aria-label="Operator portal" className="mt-6 flex-1">
-          <NavList />
+          <NavList me={me} />
         </nav>
         <Who />
       </aside>
 
-      <header data-surface="inverted" className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-ink px-4 lg:hidden">
+      <header
+        data-surface="inverted"
+        className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-ink px-4 lg:hidden"
+      >
         <Wordmark />
         <button
           type="button"
           onClick={() => setMenu(true)}
           aria-expanded={menu}
           aria-label="Open the menu"
-          className="grid h-11 w-11 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
+          className="-mr-1 grid h-11 w-11 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
         >
           <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" aria-hidden>
-            <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <path
+              d="M3 6h14M3 10h14M3 14h14"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
           </svg>
         </button>
       </header>
 
-      {menu ? (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <button
-            type="button"
-            aria-label="Close the menu"
-            onClick={() => setMenu(false)}
-            className="absolute inset-0 bg-[rgba(16,16,16,0.45)]"
-          />
-          <div data-surface="inverted" className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-ink px-3 py-4">
-            <div className="flex items-center justify-between px-2.5">
-              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white">
-                Operator
-              </span>
-              <button
-                type="button"
-                onClick={() => setMenu(false)}
-                aria-label="Close the menu"
-                className="-mr-2 grid h-11 w-11 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
-              >
-                <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" aria-hidden>
-                  <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-            <nav aria-label="Operator portal" className="mt-6 flex-1">
-              <NavList onNavigate={() => setMenu(false)} />
-            </nav>
-            <Who />
-          </div>
-        </div>
-      ) : null}
+      <NavDrawer open={menu} me={me} onClose={() => setMenu(false)} />
 
       <main className="min-w-0">{children}</main>
     </div>

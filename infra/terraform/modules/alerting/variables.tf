@@ -116,7 +116,7 @@ variable "database_cpu_percent" {
   default = 80
 }
 
-variable "connection_percent" {
+variable "database_connection_percent" {
   type        = number
   default     = 80
   description = "Percent of the server's max_connections at which to alert."

@@ -45,6 +45,12 @@ const (
 	// Dockerfile is {dockerfile} inside a build context rooted at the
 	// repository.
 	AFBLD005 Code = "AF-BLD-005"
+	// The Docker endpoint refused the build request for service {service}
+	// before opening a build log: {detail}
+	AFBLD006 Code = "AF-BLD-006"
+	// The build request for service {service} ended before a build log
+	// opened: {detail}
+	AFBLD007 Code = "AF-BLD-007"
 	// No build strategy could be detected for {service}.
 	AFBLD010 Code = "AF-BLD-010"
 	// The Dockerfile {dockerfile} for {service} is excluded from the build
@@ -87,8 +93,8 @@ const (
 	AFDB005 Code = "AF-DB-005"
 	// The provider's concurrent branch limit ({limit}) is reached.
 	AFDB006 Code = "AF-DB-006"
-	// Extension {extension} is required by the golden and is not available
-	// on the target.
+	// The source database uses the extension {extension}, and the Postgres
+	// the golden is built in does not carry it.
 	AFDB007 Code = "AF-DB-007"
 	// The database provider {provider} at {endpoint} rejected the
 	// configured credential.
@@ -111,9 +117,17 @@ const (
 	// The published golden {version} in {store} was made for a different
 	// project.
 	AFDB015 Code = "AF-DB-015"
-	// database.source_url_env names {variable}, and {variable} holds
-	// nothing in this shell.
+	// database.source_url_env names {variable}, and no configured source
+	// has a value for it.
 	AFDB016 Code = "AF-DB-016"
+	// The role in the connection string cannot read all of the source
+	// database: {detail}
+	AFDB017 Code = "AF-DB-017"
+	// Row level security stops pg_dump from reading the source as this
+	// role: {detail}
+	AFDB018 Code = "AF-DB-018"
+	// {program} stopped while copying the source database: {detail}
+	AFDB019 Code = "AF-DB-019"
 	// Personas cannot be provisioned because {provider} creates users only
 	// through its own API, and no sandbox tenant is configured.
 	AFDB020 Code = "AF-DB-020"
@@ -122,6 +136,11 @@ const (
 	// No table that looks like a users table was found, so there is
 	// nowhere to create the personas that sign in.
 	AFDB022 Code = "AF-DB-022"
+	// The source database answered and refused the connection: {detail}
+	AFDB023 Code = "AF-DB-023"
+	// The value of the variable named by database.source_url_env is not a
+	// connection string: {detail}
+	AFDB024 Code = "AF-DB-024"
 	// Migrations failed on the branch: {detail}
 	AFDB030 Code = "AF-DB-030"
 	// The migration finding {rule} fails this project's policy: {detail}
@@ -362,6 +381,8 @@ const (
 	// The encrypted local store has no passphrase: no system keyring
 	// answered and AF_SECRET_PASSPHRASE is not set.
 	AFSEC004 Code = "AF-SEC-004"
+	// The variable {name} could not be looked up: {detail}
+	AFSEC005 Code = "AF-SEC-005"
 	// The environment certificate could not be created: {detail}
 	AFSEC010 Code = "AF-SEC-010"
 
@@ -542,6 +563,24 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitFailure,
 	},
+	AFBLD006: {
+		Code:      AFBLD006,
+		Area:      "BLD",
+		Message:   "The Docker endpoint refused the build request for service {service} before opening a build log: {detail}",
+		NextStep:  "Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it.",
+		Docs:      "guides/build",
+		Retryable: false,
+		ExitCode:  ExitFailure,
+	},
+	AFBLD007: {
+		Code:      AFBLD007,
+		Area:      "BLD",
+		Message:   "The build request for service {service} ended before a build log opened: {detail}",
+		NextStep:  "Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again.",
+		Docs:      "guides/build",
+		Retryable: true,
+		ExitCode:  ExitFailure,
+	},
 	AFBLD010: {
 		Code:      AFBLD010,
 		Area:      "BLD",
@@ -689,11 +728,11 @@ var catalog = map[Code]Entry{
 	AFDB007: {
 		Code:      AFDB007,
 		Area:      "DB",
-		Message:   "Extension {extension} is required by the golden and is not available on the target.",
-		NextStep:  "Install {extension} on the target, or remove its use from the schema before refreshing.",
-		Docs:      "providers/overview",
+		Message:   "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.",
+		NextStep:  "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.",
+		Docs:      "concepts/goldens",
 		Retryable: false,
-		ExitCode:  ExitProvider,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDB008: {
 		Code:      AFDB008,
@@ -770,11 +809,38 @@ var catalog = map[Code]Entry{
 	AFDB016: {
 		Code:      AFDB016,
 		Area:      "DB",
-		Message:   "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
-		NextStep:  "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+		Message:   "database.source_url_env names {variable}, and no configured source has a value for it.",
+		NextStep:  "Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
 		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFDB017: {
+		Code:      AFDB017,
+		Area:      "DB",
+		Message:   "The role in the connection string cannot read all of the source database: {detail}",
+		NextStep:  "Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB018: {
+		Code:      AFDB018,
+		Area:      "DB",
+		Message:   "Row level security stops pg_dump from reading the source as this role: {detail}",
+		NextStep:  "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB019: {
+		Code:      AFDB019,
+		Area:      "DB",
+		Message:   "{program} stopped while copying the source database: {detail}",
+		NextStep:  "Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitProvider,
 	},
 	AFDB020: {
 		Code:      AFDB020,
@@ -800,6 +866,24 @@ var catalog = map[Code]Entry{
 		Message:   "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
 		NextStep:  "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
 		Docs:      "guides/personas",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB023: {
+		Code:      AFDB023,
+		Area:      "DB",
+		Message:   "The source database answered and refused the connection: {detail}",
+		NextStep:  "Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.",
+		Docs:      "concepts/goldens",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFDB024: {
+		Code:      AFDB024,
+		Area:      "DB",
+		Message:   "The value of the variable named by database.source_url_env is not a connection string: {detail}",
+		NextStep:  "Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.",
+		Docs:      "concepts/goldens",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
@@ -924,7 +1008,7 @@ var catalog = map[Code]Entry{
 		Code:      AFEE004,
 		Area:      "EE",
 		Message:   "The license covers {seats} seats and they are all in use.",
-		NextStep:  "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.",
+		NextStep:  "Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.",
 		Docs:      "enterprise/licensing",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
@@ -1609,6 +1693,15 @@ var catalog = map[Code]Entry{
 		Area:      "SEC",
 		Message:   "The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.",
 		NextStep:  "Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.",
+		Docs:      "guides/secrets",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFSEC005: {
+		Code:      AFSEC005,
+		Area:      "SEC",
+		Message:   "The variable {name} could not be looked up: {detail}",
+		NextStep:  "Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed.",
 		Docs:      "guides/secrets",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

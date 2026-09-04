@@ -11,6 +11,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  date,
   index,
   inet,
   integer,
@@ -19,6 +20,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   customType,
@@ -667,7 +669,22 @@ export const subscriptions = pgTable('subscriptions', {
   /** The plan this entitles, which is what moves organizations.plan. */
   plan: text('plan').notNull(),
   priceId: text('price_id'),
-  /** Seats. The only number a price multiplies. */
+  /**
+   * What Stripe reported as the subscription item's quantity. A RECORD, never
+   * a grant.
+   *
+   * The comment in migrations/0020_billing.sql calls this "the seat count" and
+   * cannot be corrected there, because a migration that already ran is
+   * digested and editing one breaks every database that applied it. This is the
+   * correction. Nothing this control plane sells has a quantity: checkout sends
+   * Stripe none, and how many members a plan may hold is a per plan constant in
+   * apps/api/src/entitlements.ts. The column is kept because Stripe puts a
+   * quantity on every subscription object, and an operator reconciling an
+   * invoice needs to see what was billed. It is displayed by the admin money
+   * screen, the billing summary and the organization export, and read by no
+   * entitlement or quota; apps/api/test/entitlements.test.ts fails if one
+   * starts.
+   */
   quantity: integer('quantity').notNull().default(1),
   status: text('status').notNull(),
   currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
@@ -715,6 +732,126 @@ export const billingEvents = pgTable('billing_events', {
   outcome: text('outcome').notNull().default('unresolved'),
   payload: jsonb('payload').notNull().default({}),
 })
+
+// ---------------------------------------------------------------------------
+// Analytics
+//
+// A closed stream, deliberately carrying no org_id. See migrations/0032: an
+// org_id would make these tables joinable back to a customer, which is the one
+// property the surrogate exists to remove. They are absent from
+// tenantScopedTables below for that reason and are named in the cross-tenant
+// suite's list of tables that are global on purpose.
+// ---------------------------------------------------------------------------
+
+export const analyticsEvents = pgTable('analytics_events', {
+  eventId: text('event_id').notNull(),
+  name: text('name').notNull(),
+  version: smallint('version').notNull().default(1),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  source: text('source').notNull(),
+  orgSurrogate: text('org_surrogate'),
+  sessionSurrogate: text('session_surrogate'),
+  actorKind: text('actor_kind').notNull(),
+  privacyBasis: text('privacy_basis').notNull(),
+  consentId: text('consent_id'),
+  payload: jsonb('payload').notNull().default({}),
+}, (t) => [
+  primaryKey({ columns: [t.eventId, t.occurredAt] }),
+  index('analytics_events_day_idx').on(t.occurredAt, t.name),
+])
+
+export const analyticsOrgFacts = pgTable('analytics_org_facts', {
+  orgSurrogate: text('org_surrogate').primaryKey(),
+  firstSeenOn: date('first_seen_on').notNull(),
+  lastActiveOn: date('last_active_on').notNull(),
+  firstEventOn: date('first_event_on'),
+  firstEnvironmentOn: date('first_environment_on'),
+  firstProvenRunOn: date('first_proven_run_on'),
+  firstPaidOn: date('first_paid_on'),
+  plan: text('plan'),
+  environmentsCreated: bigint('environments_created', { mode: 'number' }).notNull().default(0),
+  runsFinished: bigint('runs_finished', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('analytics_org_facts_first_seen_idx').on(t.firstSeenOn),
+  index('analytics_org_facts_last_active_idx').on(t.lastActiveOn),
+])
+
+export const analyticsDaily = pgTable('analytics_daily', {
+  day: date('day').notNull(),
+  name: text('name').notNull(),
+  dimA: text('dim_a').notNull().default(''),
+  dimB: text('dim_b').notNull().default(''),
+  events: bigint('events', { mode: 'number' }).notNull().default(0),
+  organizations: bigint('organizations', { mode: 'number' }).notNull().default(0),
+  sessions: bigint('sessions', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.day, t.name, t.dimA, t.dimB] }),
+  index('analytics_daily_day_idx').on(t.day, t.name),
+])
+
+export const analyticsRollupState = pgTable('analytics_rollup_state', {
+  id: boolean('id').primaryKey().default(true),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  settledAfter: date('settled_after'),
+  // The three insight shapes settle at different rates, so they carry their own
+  // freshness. See migrations/0033.
+  funnelsFinalBefore: date('funnels_final_before'),
+  cohortsCompleteThrough: date('cohorts_complete_through'),
+  subjectDaysKept: smallint('subject_days_kept'),
+})
+
+// The rollup's own working set: one row per subject per event per day, holding
+// the surrogate that analytics_daily throws away. Granted to nobody, so the
+// application cannot follow a subject even though this declares the shape. See
+// migrations/0033 for why that is the whole design.
+export const analyticsSubjectDays = pgTable('analytics_subject_days', {
+  subjectKind: text('subject_kind').notNull(),
+  subject: text('subject').notNull(),
+  name: text('name').notNull(),
+  day: date('day').notNull(),
+  events: bigint('events', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.subjectKind, t.subject, t.name, t.day] }),
+  index('analytics_subject_days_window_idx').on(t.subjectKind, t.day, t.subject),
+  index('analytics_subject_days_event_window_idx').on(t.subjectKind, t.name, t.day, t.subject),
+])
+
+export const analyticsActives = pgTable('analytics_actives', {
+  day: date('day').notNull(),
+  windowDays: smallint('window_days').notNull(),
+  subjectKind: text('subject_kind').notNull(),
+  name: text('name').notNull().default(''),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.day, t.windowDays, t.subjectKind, t.name] }),
+  index('analytics_actives_day_idx').on(t.day, t.subjectKind, t.windowDays),
+])
+
+export const analyticsRetentionCohorts = pgTable('analytics_retention_cohorts', {
+  subjectKind: text('subject_kind').notNull(),
+  cohortWeek: date('cohort_week').notNull(),
+  weeksLater: smallint('weeks_later').notNull(),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.subjectKind, t.cohortWeek, t.weeksLater] }),
+])
+
+export const analyticsFunnelWeeks = pgTable('analytics_funnel_weeks', {
+  funnel: text('funnel').notNull(),
+  enteredWeek: date('entered_week').notNull(),
+  stepsCompleted: smallint('steps_completed').notNull(),
+  subjects: bigint('subjects', { mode: 'number' }).notNull().default(0),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.funnel, t.enteredWeek, t.stepsCompleted] }),
+  index('analytics_funnel_weeks_window_idx').on(t.funnel, t.enteredWeek, t.stepsCompleted),
+])
 
 // ---------------------------------------------------------------------------
 // Running the organization
@@ -1010,6 +1147,8 @@ export const runtimeCommands = pgTable('runtime_commands', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+
+// ---------------------------------------------------------------------------
 // The pull request lifecycle. See migrations/0021.
 // ---------------------------------------------------------------------------
 
@@ -1133,6 +1272,30 @@ export const adminNotes = pgTable('admin_notes', {
    *  wrote about a customer, and the retraction is worth being able to see. */
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (t) => [index('admin_notes_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)])
+/**
+ * The installation's emergency switches.
+ *
+ * No org_id, and deliberately absent from tenantScopedTables below: these rows
+ * are configuration for the whole installation rather than data belonging to
+ * any customer. What confines the application role here is a GRANT, not a
+ * policy: it holds SELECT and nothing else, so a tenant route that reached
+ * this table raises rather than writing. See migrations/0031.
+ */
+export const platformControls = pgTable('platform_controls', {
+  /** The control's name, from the catalog in api/src/admin/controls.ts. A
+   *  fixed vocabulary the enforcement points match by literal value, which is
+   *  why the masking rules preserve it rather than hashing it. */
+  name: text('name').primaryKey(),
+  /** Null means not engaged. A timestamp rather than a boolean because "when
+   *  did this start" is the first question anybody asks about a switch that is
+   *  on, and a boolean cannot answer it. */
+  engagedAt: timestamp('engaged_at', { withTimezone: true }),
+  reason: text('reason'),
+  /** The operator's address, kept as text so the row still says who paused the
+   *  installation once their account is gone. */
+  engagedBy: text('engaged_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 /* ---------------------------------------------------------------------------
  * The operator portal (0029)
@@ -1314,3 +1477,40 @@ export const tenantScopedTables = [
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const
+
+/* ---------------------------------------------------------------------------
+ * Somebody asking to buy (0035)
+ *
+ * No org_id, and deliberately absent from tenantScopedTables: a lead is written
+ * by somebody who has no organization and may never have one, which is the
+ * whole reason the route exists.
+ *
+ * Typed here even though the application can only INSERT into it. The typed
+ * schema is what the drift test compares against the migrations, and a table
+ * left untyped is a table where a renamed column produces a query that fails at
+ * runtime on the one path nobody exercises. The reader is the operator CLI, on
+ * a privileged connection; see migration 0035 for why the serving role holds no
+ * SELECT on this table at all.
+ * ------------------------------------------------------------------------ */
+
+export const enterpriseLeads = pgTable('enterprise_leads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull(),
+  name: text('name').notNull(),
+  company: text('company').notNull(),
+  /** Null when the person did not say. Zero is refused by a constraint, so
+   *  "unknown" has one representation rather than two. */
+  seats: integer('seats'),
+  message: text('message').notNull(),
+  /** Which page it came from. */
+  source: text('source').notNull(),
+  ip: inet('ip'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The queue. Unhandled and handled-last-week look identical without these,
+   *  and the practical consequence is answering one person twice and another
+   *  never. */
+  handledAt: timestamp('handled_at', { withTimezone: true }),
+  handledBy: uuid('handled_by'),
+  handledNote: text('handled_note'),
+})

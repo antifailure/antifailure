@@ -10,12 +10,19 @@ const GANTT = [
 ];
 
 const GRID = [0, 100 / 3, 200 / 3, 100] as const;
-const MARKS = [
-  { at: 0, label: "00:00", align: "start" as const },
-  { at: 100 / 3, label: "00:06", align: "center" as const },
-  { at: 70, label: "now", align: "start" as const, now: true },
-  { at: 100, label: "00:18", align: "end" as const },
-] as const;
+type Mark = {
+  at: number;
+  label: string;
+  align: "start" | "center" | "end";
+  now?: boolean;
+};
+
+const MARKS: readonly Mark[] = [
+  { at: 0, label: "00:00", align: "start" },
+  { at: 100 / 3, label: "00:06", align: "center" },
+  { at: 70, label: "now", align: "start", now: true },
+  { at: 100, label: "00:18", align: "end" },
+];
 const NOW_AT = 70;
 const ROW_H = 36;
 const BAR_H = 20;

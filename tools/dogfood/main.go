@@ -49,11 +49,23 @@ import (
 
 func main() {
 	var (
-		root    = flag.String("C", ".", "Repository root to run in")
-		af      = flag.String("af", "", "Path to the af binary, defaulting to ./bin/af under the root")
-		mode    = flag.String("mode", "pr", "pr or nightly")
-		record  = flag.String("record", "", "Write the run record here as JSON")
-		report  = flag.String("report", "", "Where af ci writes the pull request comment")
+		root   = flag.String("C", ".", "Repository root to run in")
+		af     = flag.String("af", "", "Path to the af binary, defaulting to ./bin/af under the root")
+		mode   = flag.String("mode", "pr", "pr or nightly")
+		record = flag.String("record", "", "Write the run record here as JSON")
+		report = flag.String("report", "", "Where af ci writes the pull request comment")
+		// The same report as JSON, and it exists for one caller: the step that
+		// posts this run's result to the hosted control plane's pull request
+		// check. The check needs counts and an environment name, and reading
+		// them back out of the Markdown would be a parser for prose.
+		//
+		// Without it the harness ran `af ci` with no --report-json, so the
+		// workflow had no report.json, so the publish step had nothing to
+		// send, so the check said "Nothing was verified" about a run that had
+		// just verified everything. A flag the engine has had since it was
+		// written, with no caller.
+		reportJSON = flag.String("report-json", "",
+			"Where af ci writes the same report as JSON, for the control plane")
 		scale   = flag.Float64("budget-scale", 1, "Multiply every budget, for a slower machine")
 		refresh = flag.Bool("refresh-golden", false, "Refresh the golden first, as the nightly does")
 		keep    = flag.Bool("keep", false, "Leave the environment up, for debugging")
@@ -77,7 +89,7 @@ func main() {
 
 	r := &runner{
 		root: abs, af: binary, mode: *mode, scale: *scale,
-		keep: *keep, refresh: *refresh, reportPath: *report,
+		keep: *keep, refresh: *refresh, reportPath: *report, reportJSONPath: *reportJSON,
 	}
 	run := r.do()
 
@@ -167,6 +179,10 @@ type runner struct {
 	keep       bool
 	refresh    bool
 	reportPath string
+	// Where `af ci` writes the machine readable copy. Separate from
+	// reportPath because the Markdown is read by a person on the pull request
+	// and this one is read by the control plane's check.
+	reportJSONPath string
 }
 
 // Step is one command, timed and judged.
@@ -246,6 +262,9 @@ func (r *runner) do() *Run {
 	args := []string{"ci", "--no-color"}
 	if r.reportPath != "" {
 		args = append(args, "--report", r.reportPath)
+	}
+	if r.reportJSONPath != "" {
+		args = append(args, "--report-json", r.reportJSONPath)
 	}
 	if r.mode == "nightly" {
 		args = append(args, "--load")

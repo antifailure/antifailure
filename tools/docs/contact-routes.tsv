@@ -1,0 +1,67 @@
+# Every email address this repository publishes, and what happens when somebody
+# uses it.
+#
+# Four tab separated fields: the file, the address exactly as contactcheck
+# reports it, the verdict, and why. An address with no row here fails the gate,
+# which is the point: a default of no is the only rule that notices a domain
+# nobody has checked yet.
+#
+# The verdict is one of three words and nothing else:
+#
+#   receives          a person reads mail sent here, and the reason says who.
+#                     Refused outright at a domain contactcheck knows to be
+#                     dead, because no reason makes a domain with no mail
+#                     exchanger receive mail.
+#
+#   not-a-route       a value the software writes, a git identity, or an
+#                     illustration in a placeholder. Nobody is invited to send
+#                     anything to it. Refused when the text just before the
+#                     address reads as an instruction to write there.
+#
+#   records-a-defect  the address is quoted inside a description of a mailbox
+#                     that did not work. Refused unless the same file also
+#                     tells the reader it cannot receive.
+#
+# There is no `receives` row in this file today, and that is the honest state
+# of the project rather than an oversight. antifailure.dev has no mail
+# exchanger, publishes an SPF policy authorising no sender, a DMARC policy of
+# reject, and a revoked DKIM key. Every route this project offers a reader goes
+# through GitHub or through the booking calendar on the contact page.
+
+.changes/legal-pages-named-a-mailbox-that-could-not-receive.md	security@antifailure.dev	records-a-defect	the fragment recording that the legal pages stopped naming this mailbox. It quotes the sentence that was wrong and then says the domain publishes no mail exchanger.
+.githooks/pre-commit	potatogreenbean204@gmail.com	not-a-route	the wrong git identity this hook exists to refuse. It is compared against, never offered to anybody, and a commit carrying it is rejected before it is written.
+.github/workflows/ci.yml	potatogreenbean204@gmail.com	not-a-route	the same wrong git identity, checked again in CI for commits that reached the remote without the hook.
+.github/workflows/status.yml	status@antifailure.dev	records-a-defect	quoted in the comment explaining why the status commits no longer carry it. The workflow now commits as GitHub's Actions no-reply identity.
+CODE_OF_CONDUCT.md	conduct@antifailure.dev	records-a-defect	quoted in the enforcement section as the address that used to be there, immediately followed by the DNS reason it never worked and by the routes that do.
+console/app/(app)/members/page.tsx	someone@yourcompany.com	not-a-route	the placeholder inside the invite field. It is grey text in an empty input, replaced by whatever the operator types.
+console/app/(app)/settings/page.tsx	accounts@yourcompany.com	not-a-route	the placeholder inside the billing contact field, replaced by whatever the operator types.
+docs/plan/STATUS.md	virrsanghavi@gmail.com	not-a-route	quoted out of a Microsoft Entra ID provisioning log as evidence that a real directory read a real user back through the SCIM filter endpoint. It is a log line, not somewhere to write.
+docs/plan/notes/claims.md	ajay@acme.com	not-a-route	quoted from a marketing page's before-and-after illustration, in the row recording that the illustration was wrong. Nobody is asked to write there.
+docs/plan/notes/claims.md	vir.sanghavi@realcompany.com	not-a-route	the value written into a live column to falsify the masking scanner, quoted in the evidence for that claim. It is a test input, and the domain is not one this project owns.
+docs/src/content/docs/enterprise/sso.md	someone@gmail.com	not-a-route	an example of the address an attacker's own identity provider could assert, in the paragraph explaining why a domain has to be verified before it is trusted.
+ee/web/sso/src/provision.ts	ada@gmail.com	not-a-route	the same example, in the comment above the code that refuses it.
+justfile	potatogreenbean204@gmail.com	not-a-route	the same wrong git identity, checked once more over the commits on a branch before it is landed.
+tools/contactcheck/main.go	conduct@antifailure.dev	records-a-defect	named in this gate's own explanation of the defect it was written for, beside the dig output showing the domain has no mail exchanger.
+tools/contactcheck/main.go	security@antifailure.dev	records-a-defect	the other half of the same explanation.
+tools/preview/README.md	operator@preview.local	not-a-route	the operator the preview seeds, named in the section explaining that its password is generated fresh on every run and written outside the working tree. The preview database is thrown away, and .local is reserved by RFC 6762, so the address resolves nowhere.
+tools/preview/common.sh	operator@preview.local	not-a-route	the same seeded operator, as the shell variable the preview scripts sign in with.
+tools/preview/seed.ts	rhea.okafor@preview.local	not-a-route	one of eleven fixed fictional operators written into the throwaway preview database, this one holding super_admin. The identities are constant rather than random so two runs produce the same portal and screenshots can be compared.
+tools/preview/seed.ts	tomas.lindqvist@preview.local	not-a-route	the same seeded set, holding the infrastructure role.
+tools/preview/seed.ts	nadia.haddad@preview.local	not-a-route	the same seeded set, holding the security role.
+tools/preview/seed.ts	yusuf.demir@preview.local	not-a-route	the same seeded set, holding the billing role.
+tools/preview/seed.ts	clara.mendes@preview.local	not-a-route	the same seeded set, holding a support role.
+tools/preview/seed.ts	ines.duarte@preview.local	not-a-route	the same seeded set, holding the second support role.
+tools/preview/seed.ts	peter.novak@preview.local	not-a-route	the same seeded set, holding the analytics role.
+tools/preview/seed.ts	mira.solberg@preview.local	not-a-route	the same seeded set, holding read_only.
+tools/preview/seed.ts	oskar.wojcik@preview.local	not-a-route	the same seeded set, the one seeded suspended so the portal has a suspended operator to show.
+tools/preview/seed.ts	lena.fischer@preview.local	not-a-route	the same seeded set, the one seeded never provisioned so the portal has that state to show.
+www/components/home/visuals/TwinLifecycleScene.tsx	ada@corp.io	not-a-route	a row of invented customer data in the animated lifecycle film, shown being masked. The film is captioned as a shaped example.
+www/components/home/visuals/TwinLifecycleScene.tsx	user_00418@mask.local	not-a-route	what the same film shows that row becoming after masking. A generated value at a domain that does not resolve, which is the output the masker actually produces.
+www/components/home/visuals/headerMinis.tsx	ada@corp.io	not-a-route	the same invented row, in the small header animation that reuses the film's data.
+www/components/home/visuals/hero/StateFilm.tsx	ajay@acme.com	not-a-route	a row of invented customer data in the hero film, shown being masked.
+.changes/a-code-of-conduct-that-routed-complaints-into-silence.md	conduct@antifailure.dev	records-a-defect	the fragment recording that the code of conduct stopped naming it, beside the DNS reason nothing sent there was delivered.
+.changes/a-code-of-conduct-that-routed-complaints-into-silence.md	status@antifailure.dev	records-a-defect	the same fragment, recording that the status workflow stopped committing under it.
+.github/workflows/ci.yml	conduct@antifailure.dev	records-a-defect	named in the comment above the contactcheck step as the defect the step exists for, with the DNS reason beside it.
+.github/workflows/ci.yml	security@antifailure.dev	records-a-defect	the other half of the same comment.
+justfile	conduct@antifailure.dev	records-a-defect	named in the comment above the contactcheck recipe as the defect the recipe exists for, with the DNS reason beside it.
+justfile	security@antifailure.dev	records-a-defect	the other half of the same comment.

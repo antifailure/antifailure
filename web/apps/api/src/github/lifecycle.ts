@@ -675,20 +675,17 @@ async function handleWorkflowRun(
   const found = await deps.pool.withGitHubAccount(login, async (db) => {
     const repo = await repositoryByName(db, repository)
     if (!repo) return null
-    const rows = await db.execute<{ id: string; state: GenerationState }>(sql`
-      SELECT g.id, g.state::text AS state
+    const rows = await db.execute<{
+      id: string
+      state: GenerationState
+      workflow_run_id: string | null
+    }>(sql`
+      SELECT g.id, g.state::text AS state, g.workflow_run_id::text AS workflow_run_id
       FROM pr_generations g JOIN pull_requests p ON p.id = g.pull_request_id
       WHERE p.repository_id = ${repo.id}::uuid AND g.head_sha = ${headSha}
       ORDER BY g.queued_at DESC LIMIT 1`)
     const generation = rows[0]
     if (!generation) return { orgId: repo.org_id, generation: null }
-
-    // The run id is bound to the generation the first time it is seen, and it
-    // is what makes teardown possible: cancelling this run is the only route
-    // this control plane has into the runtime holding the environment.
-    await db.execute(sql`
-      UPDATE pr_generations SET workflow_run_id = ${run.id}, updated_at = ${deps.clock.now().toISOString()}
-      WHERE id = ${generation.id}::uuid AND workflow_run_id IS NULL`)
     return { orgId: repo.org_id, generation }
   })
 
@@ -710,6 +707,41 @@ async function handleWorkflowRun(
     }
   }
   const generationId = found.generation.id
+
+  // A RUN THIS CONTROL PLANE WAS NEVER TOLD ABOUT HAS NO STANDING TO SAY
+  // ANYTHING ABOUT THE COMMIT, AND THIS IS THE DEFECT THIS GUARD EXISTS FOR.
+  //
+  // A GitHub App is delivered `workflow_run` for EVERY workflow in the
+  // repository, and this handler used to bind the first one it saw and then
+  // let it end the generation. A repository with one workflow gets away with
+  // that. This one has seventeen, and on commit ada5644 the run that ended the
+  // generation was `Security`, which finished green fifty seconds in, while
+  // the job that actually runs `af ci` was still building its database. The
+  // check therefore said "Nothing was verified" about a check that was at that
+  // moment running, which is the same class of lie as a green gate that
+  // checked nothing: the state was correct about its own knowledge and wrong
+  // about the world, because it had bound itself to a stranger.
+  //
+  // The only party that knows which run is the check is the run itself, and it
+  // says so by asking for a callback credential, which proves through a
+  // workflow identity token that it is a job on this commit. `issueCallback`
+  // records the run id it names, so from here a bound run is the check and an
+  // unbound one is somebody else's workflow.
+  //
+  // The cost is deliberate and is not silence. A check whose job dies before
+  // it ever introduces itself is left to the deadline sweeper, which writes
+  // `timed_out` and "Nothing reported before the deadline", and that sentence
+  // is true. The sentence this replaces was not.
+  const bound = found.generation.workflow_run_id
+  if (bound !== String(run.id)) {
+    return {
+      handled: true,
+      detail: bound
+        ? `run ${run.id} is not the run reporting on ${shortSha(headSha)}`
+        : `no run has claimed ${shortSha(headSha)} yet, so run ${run.id} is not it`,
+      orgId: found.orgId,
+    }
+  }
 
   if (payload.action === 'in_progress' || payload.action === 'requested') {
     await markRunning(deps, login, generationId)
@@ -1566,6 +1598,15 @@ export async function issueCallback(
   )
 
   if ('refused' in result) return result
+
+  // Published here, and it has to be. The transaction above moved the
+  // generation from queued to running and bound it to the run that just proved
+  // which run it is, and neither of those is a fact until GitHub has been told.
+  // Without this the check reads "Waiting for a runner" for the whole twenty
+  // minutes a runner is plainly working, which is the same complaint this
+  // whole change is about one size smaller: a state that is correct about its
+  // own knowledge and stale about the world.
+  await publish(deps, login, result.generationId)
   return { token, generationId: result.generationId }
 }
 

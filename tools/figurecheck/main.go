@@ -116,6 +116,15 @@ var cssLines = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)linear-gradient|radial-gradient|conic-gradient`),
 	regexp.MustCompile(`(?i)mask-image|transform-origin|transform-box|\btransform\s*:`),
 	regexp.MustCompile(`(?i)\bcalc\(`),
+	// A transform function standing alone as a value. The `transform:` rule
+	// above matches the property, and a multi-line ternary inside style={{ }}
+	// leaves its branches on lines of their own, where the property is no
+	// longer in sight: `? "translate(-100%, -50%)"`. These are function calls
+	// that appear nowhere but a transform, so a percentage inside one is a
+	// geometry rather than a figure. Naming the functions, rather than
+	// skipping any line holding a percentage in quotes, is what keeps a real
+	// row like `share: "18%"` visible.
+	regexp.MustCompile(`(?i)\b(?:translate3d|translateX|translateY|translate|scale3d|scaleX|scaleY|scale|rotate3d|rotateX|rotateY|rotate|skewX|skewY|skew|matrix3d|matrix|perspective)\s*\(`),
 	regexp.MustCompile(`(?i)\bstyle\.\w+\s*=`),
 	// An SVG gradient stop or a coordinate given as a percentage.
 	regexp.MustCompile(`(?i)\b(?:x1|y1|x2|y2|cx|cy|fx|fy|r|offset|startOffset|width|height)\s*=\s*"`),

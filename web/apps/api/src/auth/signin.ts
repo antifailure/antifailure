@@ -20,6 +20,8 @@ import { appendAudit } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import type { GitHubClient, GitHubUser } from './github.ts'
 import type { Role } from '../permissions.ts'
+import { engagedReason } from '../admin/controls.ts'
+import { provisionPersonalOrganization, type ProvisionedOrganization } from './provision.ts'
 
 /** How long the browser has to come back from GitHub. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
@@ -71,9 +73,13 @@ export class SignInError extends Error {
  *
  * Unset is the self-hosted default and means there is nowhere: an operator who
  * runs an allowlist has their own way of being asked, and inventing a link to
- * the vendor's waitlist on their deployment would be wrong. The hosted planes
- * set it to the marketing site's request page, which is the list the visitor
- * was standing one click away from when they pressed Continue with GitHub.
+ * the vendor's contact form on their deployment would be wrong. The hosted
+ * planes set it to the marketing site's contact page, where a form writes a row
+ * a person reads.
+ *
+ * On a plane with no allowlist this is never rendered, because nobody is
+ * refused. It is still worth setting, so that closing sign-ups later is one
+ * decision rather than two.
  */
 export function signupUrlFrom(value: string | undefined | null): string | undefined {
   if (!value?.trim()) return undefined
@@ -187,6 +193,29 @@ export interface CompletedSignIn {
   orgId: string | null
   redirectTo: string | null
   label: string
+  /**
+   * The slug of the organization self serve signup created for this person on
+   * this sign-in, or null.
+   *
+   * Null covers three different things on purpose, because the caller does the
+   * same thing for all of them: they already had somewhere to be, the setting
+   * is off, or the attempt found the slug taken. It is not a success flag; it
+   * is what to say to somebody who has just arrived somewhere new.
+   */
+  provisioned: string | null
+}
+
+/** What the caller knows that the exchange itself does not. */
+export interface CompleteSignInOptions {
+  /** Who may sign in at all. See parseAllowlist. */
+  allowlist?: SignInAllowlist
+  /** Whether somebody arriving with no organization is given one. See
+   *  provision.ts, which also explains why the default is off. */
+  selfServeSignup?: boolean
+  /** Where a failure that must not fail the sign-in goes. Absent means it goes
+   *  nowhere, which is right for a test and wrong for a server, so main.ts
+   *  passes one. */
+  log?: (message: string, error: unknown) => void
 }
 
 /**
@@ -195,13 +224,45 @@ export interface CompletedSignIn {
  * Consuming the state and exchanging the code both happen before anything is
  * written, so a replayed callback cannot create a user or a session.
  */
+
+/**
+ * Refuses somebody this installation has never seen while sign-ups are paused.
+ *
+ * Named so that the catalog entry in admin/controls.ts points at a real
+ * function, and exported so a test can drive it directly as well as through
+ * the callback.
+ *
+ * A known account is never refused. That is the entire difference between this
+ * and the allowlist, and it is the reason the switch is safe to reach for: an
+ * operator pausing sign-ups during an incident must not also be signing out
+ * every customer who is mid-task.
+ */
+export async function refuseNewAccounts(pool: Pool, githubId: number): Promise<void> {
+  const reason = await pool.withoutTenant((db) => engagedReason(db, 'signups'))
+  if (reason === null) return
+  const known = await pool.withoutTenant(
+    async (db) => {
+      const rows = await db.execute<{ n: string }>(sql`
+        SELECT count(*) AS n FROM users WHERE github_id = ${githubId}`)
+      return Number(rows[0]?.n ?? 0) > 0
+    },
+    { githubIds: [githubId] },
+  )
+  if (known) return
+  throw new SignInError(
+    `New sign-ups are paused on this installation: ${reason}. ` +
+      `Accounts that already exist are unaffected.`,
+  )
+}
+
 export async function completeSignIn(
   pool: Pool,
   clock: Clock,
   github: GitHubClient,
   input: { code: string; state: string },
-  allowlist: SignInAllowlist = null,
+  options: CompleteSignInOptions = {},
 ): Promise<CompletedSignIn> {
+  const allowlist = options.allowlist ?? null
   const consumed = await pool.withoutTenant(async (db) => {
     // Deleted and returned in one statement, so two callbacks racing on the
     // same state cannot both find it.
@@ -254,6 +315,22 @@ export async function completeSignIn(
       { refusal: 'not-invited', authorizationRevoked: revoked },
     )
   }
+
+  // The installation's sign-up switch, checked in the same place and for the
+  // same reason as the allowlist above: before the user row, before the
+  // membership lookup, before anything is written.
+  //
+  // It refuses only people this installation has never seen. An allowlist
+  // refuses everybody not named on it, including somebody who has been signing
+  // in for a year, and that is the right shape for an allowlist and the wrong
+  // shape for a pause. What an operator wants during an incident is "stop new
+  // accounts appearing", not "lock out the customers".
+  //
+  // The githubIds declaration is what makes the read possible at all: see
+  // migrations/0006, writing to users is permitted and reading it is not,
+  // except for the ids the caller names. The id here came from GitHub moments
+  // ago for the person holding this code.
+  await refuseNewAccounts(pool, user.id)
 
   const orgs = await github.organizationsFor(accessToken)
 
@@ -329,12 +406,46 @@ export async function completeSignIn(
     { signinUserId: userId },
   )
 
+  // Signed in, admitted, and standing in nothing.
+  //
+  // READ AFTER the installation loop and after the existing memberships, never
+  // instead of them, which is the whole ordering argument. Somebody who belongs
+  // anywhere has a place already, whether they installed the App, a colleague
+  // did, or they took up an invitation last week, and creating a personal
+  // tenant beside it would put a second empty organization in their switcher
+  // for no reason. Zero here means zero after every other way
+  // of having one has been asked.
+  //
+  // Failing this must not fail the sign-in. Everything above it has already
+  // committed, the person is a real authenticated user either way, and the
+  // console has a state for holding no organization that predates this and
+  // still works. So a refusal from the database here costs somebody the
+  // convenience of arriving inside a tenant, not their login.
+  let provisioned: ProvisionedOrganization | null = null
+  if (memberships.length === 0 && options.selfServeSignup) {
+    try {
+      provisioned = await provisionPersonalOrganization(pool, clock, {
+        userId,
+        login: user.login,
+        label: user.name || user.login,
+      })
+    } catch (err) {
+      options.log?.('self serve signup could not create an organization', err)
+    }
+  }
+
   return {
+    provisioned: provisioned?.slug ?? null,
     userId,
     // An organization is chosen only when there is exactly one. With several,
     // the caller shows a picker: guessing puts somebody in the wrong tenant,
     // where every page is empty for no visible reason.
-    orgId: memberships.length === 1 ? memberships[0]!.org_id : null,
+    //
+    // The one just created counts as that one. It cannot appear in the list
+    // above, which was read before it existed, and it is reachable only in the
+    // branch where the list was empty, so this can never disagree with the
+    // rule: nothing to pick from, and then exactly one thing.
+    orgId: provisioned ? provisioned.orgId : memberships.length === 1 ? memberships[0]!.org_id : null,
     redirectTo: consumed.redirect_to,
     label: user.name || user.login,
   }

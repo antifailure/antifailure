@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-The production control plane is one `terraform apply` and eight things a person
+The production control plane is one `terraform apply` and nine things a person
 has to do in a browser or a shell, and the order matters because several of them
 fail if done early.
 
@@ -35,6 +35,16 @@ fails at plan rather than at the first delivery.
 **The OAuth App's client secret.** Same reason. Terraform seeds a placeholder
 once and then carries `ignore_changes` on the value, so rotating it with `az
 keyvault secret set` stays true.
+
+**The managed certificate's binding to the custom domain.** Not a policy
+decision, a circular one. Azure refuses to issue a managed certificate for a
+hostname that is not already bound to an app in the environment, and refuses
+`RequireCustomHostnameInEnvironment` if you ask the other way round, so the
+binding cannot name a certificate that cannot exist until the binding does.
+Terraform adds the hostname with no certificate, Terraform creates the
+certificate, and one `az containerapp hostname bind` closes the loop. The
+`ignore_changes` on the custom domain is what stops the next apply undoing it.
+Step 6 below is that command.
 
 **Role assignments outside this stack's group.** The DNS zone is in `af-web`.
 A stack that could grant itself write access to another group's resources would
@@ -71,9 +81,18 @@ terraform init -backend-config=backend.production.hcl -reconfigure
 `backend.hcl` and `backend.production.hcl` are both ignored by git, because the
 storage account name is an identifier this repository does not carry.
 
-**Read the first line of every plan.** A plan against the right state says
-roughly forty to add and nothing to destroy. Anything with destroys in it is the
-wrong state.
+**Read the first line of every plan, and then read its exit status.** A plan
+against the right state adds roughly forty resources and destroys nothing, and
+anything with destroys in it is the wrong state.
+
+The exit status is the separate check, and it is the one that has caught things
+here. This stack has twice produced a plan that printed in full, ended with its
+own `0 to destroy` summary, and then exited non-zero. Once for an output that
+carried a provider-sensitive value without declaring itself sensitive, which
+Terraform refuses while evaluating outputs and therefore after the whole diff
+has been printed. Once for the managed certificate's
+`RequireCustomHostnameInEnvironment`. Both look exactly like a plan that worked,
+and the only thing that tells them apart from one is `echo $?`.
 
 ### 2. Check the region, before anything else
 
@@ -125,15 +144,70 @@ is the decision to look at twice before applying, because it cannot be undone
 cheaply: high availability can be turned off later, but `geo_redundant_backup`
 is fixed when the server is created.
 
-**Expect to run the apply twice.** The Key Vault Secrets Officer grant is
+**The apply may need running twice.** The Key Vault Secrets Officer grant is
 created in the same apply that writes the first secrets, and Azure RBAC takes a
-minute or two to propagate. A second apply after the first fails on a secret
-write is normal and is not a sign of anything wrong.
+minute or two to propagate, so a second apply after the first fails on a secret
+write is normal and is not a sign of anything wrong. It did not happen on the
+first real run of this stack, and it is still the likeliest reason you see one.
+
+Whatever the cause, a partly finished apply is not a mess to clean up by hand.
+Terraform records every resource that succeeded, and running `plan` again asks
+for exactly the remainder. Read that plan the same way as the first: it should
+add what is missing and destroy nothing.
 
 Sign-in does not work yet. The OAuth values in the vault are placeholders and
 the next three steps replace them.
 
-### 6. Confirm the assumptions the alerts are built on
+### 6. Bind the certificate
+
+Terraform has added the hostname and created the certificate. Until something
+attaches one to the other, the name resolves and the TLS handshake is reset by
+the peer with no certificate offered at all.
+
+**Whether anything has to be that something is currently an open question, so
+this step checks first and fixes second.** Under the older `domain.tf` the bind
+below was a person's job, and the one recorded stand-up of this stack is the
+evidence: `afcpprod-unreachable` held Sev0 for ninety five minutes with the
+certificate issued and nothing serving it. `domain.tf` has since been rewritten
+so that the hostname is bound with no certificate and Azure attaches one itself
+when it issues, asynchronously and outside any apply. If that holds, the command
+below is a no-op.
+
+Nobody knows yet, and the honest reason is that nobody has applied the new
+configuration. It reasons from the provider's documented behaviour rather than
+from an observed apply, which is a good basis for a configuration change and a
+poor one for deleting a step whose absence is an outage.
+
+So prove it from outside first, because this is the step whose failure looks
+like a network problem:
+
+```sh
+curl -sS -o /dev/null -w 'http=%{http_code} sslverify=%{ssl_verify_result}\n' \
+  https://app.antifailure.dev/health
+```
+
+`sslverify=0` is a certificate the client trusts, and if you see it here then
+Azure bound the certificate without you. That is the thing this page cannot yet
+tell you, so say so, and the next person to stand production up can delete the
+command below with evidence rather than with an argument.
+
+A connection reset means the binding did not take, and this is the remedy:
+
+```sh
+CERT_ID=$(az containerapp env certificate list \
+  -n afcpprod-env -g af-cp-prod-centralus \
+  --query "[?properties.subjectName=='app.antifailure.dev'].id | [0]" -o tsv)
+
+az containerapp hostname bind -n afcpprod-app -g af-cp-prod-centralus \
+  --hostname app.antifailure.dev --environment afcpprod-env \
+  --certificate "$CERT_ID" --validation-method CNAME
+```
+
+`terraform plan` stays clean afterwards. The custom domain resource carries
+`ignore_changes` on the two fields this command writes, which is the provider's
+documented handling for an Azure managed certificate.
+
+### 7. Confirm the assumptions the alerts are built on
 
 Two numbers were derived rather than read, and both are quiet if wrong.
 
@@ -145,14 +219,24 @@ az postgres flexible-server parameter show \
 
 # The action group actually delivers. This sends a real notification.
 az monitor action-group test-notifications create \
-  -g af-cp-prod-centralus -n afcpprod-pager \
-  --alert-type metric --add-action email alerts "you@example.com"
+  --action-group afcpprod-pager -g af-cp-prod-centralus \
+  --alert-type metricstaticthreshold \
+  -a email email-0 "you@example.com" usecommonalertschema
 ```
 
 Do the second one. An action group that creates cleanly, attaches to every rule
-and delivers nothing looks exactly like one that works.
+and delivers nothing looks exactly like one that works. A `Status` of
+`Succeeded` in the result is the proof; anything else is a page that will not
+arrive.
 
-### 7. Create the production OAuth App
+THE RECEIVER NAME IS NOT FREE TEXT and neither is the alert type. Azure matches
+`email-0` against the receivers the action group already has and refuses
+`ActionOrReceiverNotExistedInActionGroup` for a name it does not hold, so it has
+to be the name the alerting module generates rather than a label of your own.
+`--alert-type metric` is rejected as invalid; the accepted value is
+`metricstaticthreshold`.
+
+### 8. Create the production OAuth App
 
 **This is your job, in a browser, at
 `https://github.com/settings/developers`.** Production needs its own, not
@@ -188,7 +272,7 @@ name that nothing in the product would ever use.
 
 Generate a client secret and keep the page open. GitHub shows it once.
 
-### 8. Create the production GitHub App
+### 9. Create the production GitHub App
 
 **Also your job, in a browser, at `https://github.com/settings/apps`.** The
 webhook secret and the private key are the credentials that let a delivery write
@@ -285,7 +369,7 @@ in memory and nothing writes them anywhere.
 Then, on the App's page, **Generate a private key**. GitHub downloads a `.pem`
 and never shows it again. Note the numeric **App ID** at the top of the page.
 
-### 9. Put the four values in Key Vault
+### 10. Put the four values in Key Vault
 
 Three of these replace placeholders Terraform seeded; two are ones Terraform
 deliberately does not own.
@@ -303,9 +387,9 @@ The private key goes in as a file. A PEM pasted through a shell loses its
 newlines, and the application fails to sign a JWT with an error about the key
 format rather than about how it was pasted.
 
-### 10. Tell Terraform the App exists, and apply again
+### 11. Tell Terraform the App exists, and apply again
 
-Set `github_app_id` in `production.tfvars` to the numeric id from step 8, then
+Set `github_app_id` in `production.tfvars` to the numeric id from step 9, then
 plan and apply. The plan reads the two secrets you just wrote, and fails if
 either is missing, which is the check working.
 
@@ -328,13 +412,44 @@ az containerapp ingress traffic set -n afcpprod-app -g af-cp-prod-centralus \
   --revision-weight <newest-revision>=100
 ```
 
-### 11. Install the App on the organization
+### 12. Install the App on the organization
 
 On the App's page, **Install App**, and choose the account and repositories.
 Nothing has a tenant until an installation exists: this is why everybody who
 signed in during the first week landed with no organization.
 
-### 12. Let continuous deployment reach production
+**Installing is not the same as being installed, and the difference is a webhook
+this control plane may have refused.** Installing sends one `installation`
+delivery, once. GitHub does not retry a webhook. So if the App was installed
+before step 11, which is the order the App's own setup page encourages, because
+Install App is on the page you are already looking at, then the delivery arrived
+at a control plane whose `AF_GITHUB_APP_WEBHOOK_SECRET` was unset, was answered
+**503**, and is gone. `github_installations` stays empty, every sign-in
+lands with no organization, and nothing anywhere says why.
+
+So check it. The App's **Advanced** tab lists every delivery with the status
+code this control plane returned, and each row has a **Redeliver** button. Use
+that tab: `gh api /app/hook/deliveries` does **not** work here, because the
+deliveries endpoint authenticates as the App and `gh` holds a user token. The
+API route needs a JWT signed with the App's private key, which is the same key
+you put in the vault in step 10.
+
+If the `installation` row is not 200, redeliver it. The response body is the
+check that matters, and a successful one names the installation:
+
+```
+{"event":"installation","action":"created","handled":true,
+ "detail":"installation 157834739 for antifailure, 1 repositories"}
+```
+
+One trap if you script this instead. Delivery ids are past the range a double
+holds exactly, 3839993231035072512 being a real one, so a JSON parser backed by
+doubles rounds the last digits and JavaScript's `JSON.parse` turns that id into
+...072500. A redelivery aimed at the rounded id is a 404 on a delivery
+that never existed, and it reads as "GitHub lost it" rather than as an
+arithmetic bug. Take the id out of the raw body as text.
+
+### 13. Let continuous deployment reach production
 
 **The federated credential already exists. Do not create it.** Checked rather
 than assumed: `af-infra-ci` carries eight, including
@@ -354,22 +469,39 @@ az ad app federated-credential list --id "$APP_ID" \
 
 **What is missing is the role assignment**, because the production group does
 not exist until step 5 and a grant cannot precede its scope. The identity needs
-on the production group what it already has on staging's:
+on the production group what it already has on staging's: Contributor, scoped to
+that group and nothing wider.
+
+**Terraform owns it. Do not create it by hand.** This page used to print an
+`az role assignment create` here and that instruction outlived the code that
+replaced it, which is worse than either alone: a grant made by hand is absent
+from the stack's state, cannot survive a rebuild, and reads to the next person
+as a resource Terraform does not manage. The grant is
+`azurerm_role_assignment.cd_deploys_the_group` in
+`stacks/control-plane/ci.tf`, and it is switched on by `cd_principal_id` in
+`production.tfvars`, which is already set. Step 5 creates it along with
+everything else.
+
+Confirm it after the apply, rather than trusting this page:
 
 ```sh
-az role assignment create --role Contributor \
+az role assignment list \
   --assignee "$(az ad app list --display-name af-infra-ci --query '[0].appId' -o tsv)" \
-  --scope "$(az group show -n af-cp-prod-centralus --query id -o tsv)"
+  --scope "$(az group show -n af-cp-prod-centralus --query id -o tsv)" \
+  --query "[].roleDefinitionName" -o tsv
 ```
 
-### 13. Set the approval rule on the production environment
+If that prints nothing, `cd.yml`'s production job fails at its first
+`az containerapp` call and continuous deployment cannot reach production at all.
+
+### 14. Set the approval rule on the production environment
 
 In repository settings, Environments, `production`: add required reviewers. The
 `cd.yml` job does not start until somebody clicks it, and the reviewer list
 lives there rather than in an `if:` a pull request can edit in the same commit
 that deploys.
 
-### 14. Release
+### 15. Release
 
 Push a `v*` tag. Continuous deployment builds once, deploys to staging, waits
 for the approval, and then promotes **the same image digest** staging tested.

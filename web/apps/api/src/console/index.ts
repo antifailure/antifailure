@@ -24,6 +24,7 @@
 import type { Context, Hono } from 'hono'
 import type { ApiEnv } from '../env.ts'
 import type { Pool } from '@antifailure/db'
+import type { Analytics } from '../analytics/record.ts'
 import type { Clock } from '../clock.ts'
 import {
   CSRF_HEADER,
@@ -43,6 +44,8 @@ import {
   setBudget,
 } from '../providers/store.ts'
 import { readAsset, type ConsoleBuild } from './static.ts'
+import { consoleClass } from '../limits.ts'
+import { apiNotFound } from '../notfound.ts'
 
 export interface ConsoleOptions {
   pool: Pool
@@ -54,6 +57,8 @@ export interface ConsoleOptions {
   sealingKey?: Buffer | null
   /** The exported console. A build that is absent is reported, never faked. */
   build: ConsoleBuild
+  /** Where the analytics event goes when a key is stored from these pages. */
+  analytics: Analytics
 }
 
 /**
@@ -213,6 +218,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
 
     try {
       const result = await saveKey(pool, clock, options.sealingKey, {
+        analytics: options.analytics,
         orgId: viewer.organization!,
         provider,
         key,
@@ -276,6 +282,7 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
       return c.json({ error: 'Give a number of US dollars, zero or more.' }, 400)
     }
     const budget = await setBudget(pool, clock, {
+      analytics: options.analytics,
       orgId: viewer.organization!,
       provider,
       capUsd: cap,
@@ -303,9 +310,19 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
    * added below it later.
    */
   app.notFound(async (c) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-      return c.json({ error: 'No route.' }, 404)
-    }
+    // Whether this is the API's space or the console's, asked with the one
+    // predicate that already answers it: consoleClass returns a class for the
+    // paths a browser asks for pages in, and null for everything the API owns,
+    // which is every method that changes something plus every path under a
+    // prefix in API_PREFIXES.
+    //
+    // Written as one question rather than as a method check, because a GET to
+    // a path under /v1 that does not exist is an API request and has to answer
+    // like one. It used to reach the rate limit gate and be answered 500,
+    // which is the defect this replaces; sending it here instead and then
+    // handing it the console's HTML would only trade one wrong answer for
+    // another, quieter one.
+    if (consoleClass(c.req.method, c.req.path) === null) return apiNotFound(c)
     if (!build.present) {
       // Said plainly, in the response as well as the log. A blank 404 here
       // looks exactly like a routing bug and is not one.
@@ -320,7 +337,16 @@ export function mountConsole(app: Hono<ApiEnv>, options: ConsoleOptions): void {
     }
 
     const asset = await readAsset(build, c.req.path)
-    if (!asset) return c.json({ error: 'No route.' }, 404)
+    if (!asset) {
+      return c.json(
+        {
+          error:
+            'No page at this path, and this build carries no 404 page to render ' +
+            'instead. Start at / for the console.',
+        },
+        404,
+      )
+    }
 
     c.header('content-type', asset.contentType)
     c.header('cache-control', asset.cacheControl)

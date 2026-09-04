@@ -81,6 +81,14 @@ describe('schema drift', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_D
       -- creates one.
       WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
       ORDER BY c.relname`
+    // The scan before its answer. Every name below is filtered out of `rows`,
+    // so a query that came back empty reports nothing untyped, which reads as
+    // "the schema is complete" and means "nothing was looked at". The typed
+    // side has its own floor in the test above; this is the database side.
+    assert.ok(
+      rows.length >= 16,
+      `the database reported ${rows.length} tables, so this assertion filtered almost nothing`,
+    )
     const typed = new Set(tables.map((t) => getTableConfig(t).name))
     const untyped = rows
       .map((r) => r.table_name)
@@ -139,6 +147,22 @@ describe('the tenant scoped table list', () => {
       .filter((name) => !isolatedByUser.has(name))
       .sort()
     const listed = schema.tenantScopedTables.map((t) => getTableConfig(t).name).sort()
+
+    // Two derived lists compared against each other agree perfectly when both
+    // derivations are broken, and this one is a filter over a filter: a column
+    // scan that stopped matching `org_id` empties `orgScoped`, and a
+    // tenantScopedTables that stopped resolving empties `listed`. Equal, green,
+    // and the list that decides which tables are isolated per tenant is no
+    // longer checked against anything.
+    assert.ok(
+      orgScoped.length >= 10,
+      `only ${orgScoped.length} typed tables were found to carry org_id, so the column scan is ` +
+        'broken and this comparison is between two lists of nothing',
+    )
+    assert.ok(
+      orgScoped.includes('environments'),
+      'the org_id scan no longer names environments, which is the table it is most certain about',
+    )
 
     assert.deepEqual(
       listed,

@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
@@ -70,8 +69,8 @@ the manifest in the repository, on the machine the environment is on. A control
 plane that could change what an environment runs would be a control plane that
 could change what it masks.
 
-Needs a token in AF_CONTROL_PLANE_TOKEN. Create one in the control plane under
-engine tokens.`),
+Needs a credential. Run af login, or set AF_CONTROL_PLANE_TOKEN to an engine
+token, which is what a build machine with nobody sitting at it uses.`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := controlPlaneClient(e, baseURL)
@@ -144,14 +143,10 @@ func controlPlaneClient(e *Env, baseURL string) (*controlplane.Client, error) {
 		return v, v != ""
 	})
 	if token == "" {
-		// A credential stored by af login. Expiry is checked here so that the
-		// failure is "your session expired, run af login" rather than a 401
-		// from a server the user then goes and investigates.
-		if cred, err := e.CredentialStore().Load(auth.Normalise(baseURL)); err == nil {
-			if !cred.Expired(e.Clock.Now()) {
-				token = cred.Token
-			}
-		}
+		// A credential stored by af login. Expiry is checked inside storedToken
+		// so that the failure is "your session expired, run af login" rather
+		// than a 401 from a server the user then goes and investigates.
+		token = storedToken(e, baseURL)
 	}
 
 	client, err := controlplane.New(controlplane.Options{

@@ -11,7 +11,7 @@
 // in two places is a rule that survives one of them being refactored away.
 
 import { initTRPC, TRPCError } from '@trpc/server'
-import type { Pool, Tenant, AdminPool } from '@antifailure/db'
+import type { Db, Pool, Tenant, AdminPool } from '@antifailure/db'
 import type { AdminActor } from './admin/trpc.ts'
 import { appendAudit, type AuditInput } from '@antifailure/db'
 import type { Permission, Role } from './permissions.ts'
@@ -19,6 +19,8 @@ import { permits } from './permissions.ts'
 import type { Clock } from './clock.ts'
 import type { GitHubClient } from './auth/github.ts'
 import type { Billing } from './billing/index.ts'
+import type { Analytics } from './analytics/record.ts'
+import { CATALOG } from './analytics/catalog.ts'
 import type { Message as MailMessage } from './auth/mail.ts'
 import {
   HOSTED_ACCESS_MESSAGE,
@@ -77,6 +79,22 @@ export interface Context {
   mailer: { send(message: MailMessage): Promise<void> } | null
   /** What the product calls itself in a message. */
   productName: string
+  /**
+   * The analytics recorder. Never null: when no surrogate secret is configured
+   * it records nothing and every method still works, so a producer never has to
+   * guard its call. A producer wrapped in a configuration check is a producer
+   * that stops being exercised by tests the day somebody forgets the variable.
+   */
+  analytics: Analytics
+  /**
+   * The organization whose members may read the analytics dashboard, by slug.
+   *
+   * Null means nobody, which is the safe default. See ServerOptions for why a
+   * permission alone cannot gate this: the dashboard shows every organization's
+   * numbers, and every organization has an owner who holds every permission
+   * inside their own.
+   */
+  analyticsOperatorOrgSlug: string | null
   /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
    *  leaving billing reachable while operational procedures are refused. */
   hostedRequiredPlan: HostedRequiredPlan | null
@@ -313,6 +331,37 @@ export async function audit(
   })
 }
 
+
+/**
+ * Records that a capability was used.
+ *
+ * Beside audit() and taking the same transaction, for the same reason: a funnel
+ * step recorded against a change that rolled back is a step that did not
+ * happen. One line at each call site so that instrumenting a new mutation is
+ * cheap enough that people do it, because the alternative is an adoption chart
+ * that only covers whichever features somebody remembered.
+ *
+ * The feature name is the only thing recorded. Not what changed, not which
+ * repository, not which rule: the audit log holds that and is the right place
+ * for it, and an analytics store kept for years to draw graphs from is not.
+ */
+export async function adopted(
+  db: Parameters<typeof appendAudit>[0],
+  ctx: OrgContext,
+  feature: Feature,
+): Promise<void> {
+  await ctx.analytics.record(db as unknown as Db, {
+    name: 'adoption.feature_used',
+    occurredAt: ctx.clock.now(),
+    orgId: ctx.actor.orgId,
+    payload: { feature },
+  })
+}
+
+/** The features the catalog counts. Narrowed from the catalog itself, so a
+ *  name that is not in the enum is a compile error at the call site rather than
+ *  a rejection at run time that nobody sees. */
+export type Feature = (typeof CATALOG)['adoption.feature_used']['payload']['feature']['values'][number]
 
 // The scope a request concerns, read off its input.
 //

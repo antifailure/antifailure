@@ -9,6 +9,7 @@ import {
   IconEnvironments,
   IconKeys,
   IconLoad,
+  IconAnalytics,
   IconMasking,
   IconMembers,
   IconNetwork,
@@ -16,6 +17,7 @@ import {
   IconRuns,
   IconSettings,
   IconSignOut,
+  IconTerminal,
   LogoMark,
 } from "@/components/icons";
 import { rest, type Session } from "@/lib/api";
@@ -59,6 +61,8 @@ const NAV = [
   { href: "/members", label: "Members", Icon: IconMembers },
   { href: "/plan", label: "Plan", Icon: IconPlan },
   { href: "/keys", label: "Provider keys", Icon: IconKeys },
+  { href: "/cli", label: "Command line", Icon: IconTerminal },
+  { href: "/analytics", label: "Analytics", Icon: IconAnalytics },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
@@ -224,12 +228,34 @@ function SignIn({ session }: { session: Session }) {
  * Signed in, and in no organization.
  *
  * Not an error and not an empty dashboard. Being let through the door is not
- * being given a tenant: membership arrives when the GitHub App reports an
- * installation, and until it does there is genuinely nothing here to show.
- * Saying so is the difference between a product that is waiting and one that
- * looks broken.
+ * being given a tenant, and saying so is the difference between a product that
+ * is waiting and one that looks broken.
+ *
+ * THREE DIFFERENT SCREENS, and the session decides which. Two of the three were
+ * added within a week of each other and they answer different questions, so the
+ * copy is chosen by both facts rather than by whichever was checked last.
+ *
+ * With self serve signup ON, arriving here means the provisioning step did not
+ * produce an organization. That is rare and is worth REPORTING rather than
+ * dressing up as a normal wait: the commonest cause is a slug another account
+ * already holds, which the signup deliberately will not adopt. Telling somebody
+ * to install an App when the plane was supposed to have handed them a tenant is
+ * telling them to fix something that is not their problem.
+ *
+ * With it OFF, this is the ordinary state: membership arrives when the GitHub
+ * App reports an installation or when somebody sends an invitation.
+ *
+ * And the install address is optional, and BOTH ACTIONS USED TO BE HIDDEN WITH
+ * IT. That is how this screen became a dead end on two control planes at once:
+ * the copy told somebody to install the App and then recheck their membership,
+ * and the only button under it was Sign out. Checking membership is
+ * `/auth/github`, which never needed the install address for anything, so it is
+ * offered either way and becomes the primary action when there is nothing to
+ * install from. The copy changes with it, because prose that names an action
+ * the page cannot offer is the failure rather than a symptom of it.
  */
 function NoOrganization({ session }: { session: Session }) {
+  const shouldHaveOne = session.selfServeSignup === true;
   return (
     <Standalone title="No organization yet" width={440}>
       <Lede>
@@ -238,21 +264,27 @@ function NoOrganization({ session }: { session: Session }) {
         yet. Not an empty dashboard. Nothing.
       </Lede>
       <Lede>
-        Membership follows a GitHub App installation. Install it on the
-        organization you want to connect, then ask GitHub to check your
-        membership again.
+        {shouldHaveOne
+          ? "Signing up here normally creates one for you, so this is not the usual outcome. It happens when the name your account would take is already in use. Installing the GitHub App on an organization gives you that one instead, and an invitation from somebody else works too."
+          : session.githubAppInstallUrl
+            ? "Membership follows a GitHub App installation or an invitation from somebody already inside. Install it on the organization you want to connect, then ask GitHub to check your membership again."
+            : "Membership follows a GitHub App installation or an invitation from somebody already inside, and this control plane has not been told where to install its App. If you already belong to a connected organization, check again below. If you do not, whoever runs this control plane has to give you the installation address."}
       </Lede>
-      {session.githubAppInstallUrl ? (
-        <div className="mt-6 space-y-3">
+      <div className="mt-6 space-y-3">
+        {session.githubAppInstallUrl ? (
           <LinkButton href={session.githubAppInstallUrl} full>
             <GitHubMark />
             Install the GitHub App
           </LinkButton>
-          <LinkButton href="/auth/github" full variant="secondary">
-            Check my GitHub membership
-          </LinkButton>
-        </div>
-      ) : null}
+        ) : null}
+        <LinkButton
+          href="/auth/github"
+          full
+          variant={session.githubAppInstallUrl ? "secondary" : "primary"}
+        >
+          Check my GitHub membership
+        </LinkButton>
+      </div>
       <div className="mt-6">
         <SignOutButton />
       </div>

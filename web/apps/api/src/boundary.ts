@@ -371,6 +371,21 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     grounds: 'different-credential',
     reason: 'Reports which operator is signed in, for the admin console. It reads the operator cookie and nothing else, so a session cookie or a bearer token reaches it as an anonymous caller.',
   },
+  // Stepping into a customer's account, and stepping back out. Plain routes
+  // rather than procedures because both end in a Set-Cookie for the CUSTOMER's
+  // session, and because the operator gate refuses every admin procedure while
+  // a session is impersonating, which would make a tRPC end unreachable exactly
+  // when it is the only thing left to press. See src/admin/customers.ts.
+  'POST /v1/admin/impersonation/start': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Takes an operator session from the operators table and issues a customer session against it. No credential this document describes can obtain the first, and publishing the shape would map the operator surface for somebody enumerating it.',
+  },
+  'POST /v1/admin/impersonation/end': {
+    audience: 'excluded',
+    grounds: 'different-credential',
+    reason: 'Ends that impersonation and revokes the session it issued. Meaningless to a caller who could never have started one.',
+  },
 
   'POST /webhooks/github': {
     audience: 'excluded',
@@ -381,6 +396,17 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     audience: 'excluded',
     grounds: 'different-credential',
     reason: 'The same arrangement for billing deliveries from Stripe, verified the same way and handled once.',
+  },
+  'POST /v1/leads': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason:
+      'The enterprise contact form on the marketing site posts it. It is the one route here a cross origin browser may call, it takes no credential and returns an id, and nothing integrates with it.',
+  },
+  'OPTIONS /v1/leads': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The preflight for the route above. A browser sends it; nothing calls it.',
   },
   'GET /exports/deletion': {
     audience: 'excluded',
@@ -410,6 +436,28 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     audience: 'excluded',
     grounds: 'operator-facing',
     reason: 'Serves the document itself. A document describing the route that serves it is circular, and the address is in reference/api.md where a person looking for it will be.',
+  },
+
+  // ---------------------------------------------------------------------
+  // The marketing site's beacon.
+  // ---------------------------------------------------------------------
+  // Classified `console-transport` because that is the nearest of the seven
+  // grounds and none of them was written with this route in mind. The ground's
+  // own definition names the console; the property it is really about is that
+  // the caller is a page this repository ships, so there is no second client
+  // to generate one for. That holds here: the caller is www/lib/analytics.ts,
+  // the origin check bounds the route to the site's own origin, and both ends
+  // move in this repository. If a reader disagrees, the honest fix is an
+  // eighth ground rather than a looser reading of this one.
+  'OPTIONS /v1/site/events': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'The CORS preflight for the beacon below. A browser sends it; nothing calls it, and there is no operation to describe.',
+  },
+  'POST /v1/site/events': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason: 'Where the marketing site posts page views. The caller is JavaScript this repository ships, the origin check refuses anything else from a browser, and the wire shape is free to change with the page that produces it.',
   },
 }
 

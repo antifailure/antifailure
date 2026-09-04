@@ -1,0 +1,11 @@
+# Destroys somebody decided to make, one per line, tab separated:
+#
+#   <terraform address>	<expiry YYYY-MM-DD>	<why it is intended>
+#
+# An address listed here is a destroy `terraform plan` is allowed to propose
+# without failing tools/planguard. Read that tool's package comment for why the
+# mechanism is a written line rather than a flag, and why an entry that
+# acknowledges nothing is an error rather than a harmless leftover.
+#
+# THE STEADY STATE OF THIS FILE IS EMPTY. A line here should be added in the
+# pull request that causes the destroy and removed in the one after it lands.

@@ -60,9 +60,81 @@ resource "azurerm_key_vault" "this" {
   soft_delete_retention_days = 7
   purge_protection_enabled   = var.key_vault_purge_protection
 
+  # REACHABLE, AND NOT READABLE, AND THE SECOND HALF DOES ALL THE WORK.
+  #
+  # tfsec reports these four lines as CRITICAL under
+  # azure-keyvault-specify-network-acl: "Vault network ACL does not block access
+  # by default." It is right about the configuration. A scanner severity is a
+  # prior rather than a verdict, so this block says what reaching this endpoint
+  # actually gets somebody, and what closing it would cost.
+  #
+  # WHAT REACHING IT GETS YOU. Nothing without a Microsoft Entra token, and
+  # nothing with one unless its principal holds a Key Vault DATA role here.
+  # rbac_authorization_enabled above means vault access policies do not exist on
+  # this vault, so the complete list of principals that can read a secret is the
+  # list of role assignments in this file:
+  #
+  #   app_reads_secrets        Key Vault Secrets User, on the user-assigned
+  #                            identity the Container App and both jobs run as.
+  #   deployer_writes_secrets  Key Vault Secrets Officer, on the one operator
+  #                            object id both stacks pin in their tfvars.
+  #
+  # And one identity is deliberately absent: the pull request plan job.
+  # stacks/control-plane/ci.tf grants it Reader on the resource group and says
+  # in prose why it holds no Key Vault data role, and infra.yml plans with
+  # -refresh=false so it never reads a secret value. Subscription Owner does not
+  # help an attacker either. Under RBAC authorization Owner is a control plane
+  # role and grants nothing on the data plane, which is the same split
+  # stacks/tfstate/main.tf documents for storage: reachable is not readable.
+  #
+  # So this is a missing layer, not an open door. Saying so plainly is the
+  # point. A pull request that inflates its own finding is one nobody trusts the
+  # next time.
+  #
+  # WHY THE ONE LINE FIX IS AN OUTAGE. Setting default_action = "Deny" here
+  # stops the control plane at its next revision, and the failure would read as
+  # an application defect rather than as a firewall.
+  #
+  # The application never calls Key Vault. app.tf declares Key Vault secret
+  # REFERENCES, and the Container Apps platform resolves those with the app's
+  # user-assigned identity before the container starts. The bypass on the line
+  # below does not cover that fetch, because Azure Container Apps is not on Key
+  # Vault's trusted services list, and a service that is not on that list is
+  # blocked by the firewall whether or not the bypass is enabled:
+  # learn.microsoft.com/azure/key-vault/general/overview-vnet-service-endpoints
+  #
+  # A virtual network rule does not rescue it. The environment is integrated
+  # with the apps subnet in network.tf, so a Microsoft.KeyVault service endpoint
+  # there looks like the answer and is not: the platform's fetch does not
+  # present as coming from that subnet, and the only reported workaround is to
+  # allow-list the environment's egress addresses, which are not stable and are
+  # not known until after the app exists.
+  # github.com/microsoft/azure-container-apps/issues/1287
+  #
+  # WHAT WOULD ACTUALLY CLOSE IT, so the next person does not rediscover this. A
+  # private endpoint, which is four resources rather than one word: a third
+  # subnet that is NOT delegated, because both subnets in network.tf are
+  # delegated and a private endpoint cannot sit in a delegated subnet; a
+  # privatelink.vaultcore.azure.net private DNS zone; a link from that zone to
+  # this network; and the endpoint itself. Deny is then safe for the app and is
+  # still in front of the operator, because `az keyvault secret set`, which the
+  # seeded secret comment below tells people to use for rotation, runs from
+  # wherever that person happens to be. A vault they cannot reach makes that
+  # instruction quietly untrue, which is the failure this file already refuses
+  # once.
+  #
+  # No plan can prove any of that, and getting it wrong is a production outage,
+  # so it belongs with somebody who can apply it and watch what happens.
+  # Recorded rather than silently accepted, and the expiry below is the whole
+  # point of recording it that way. tfsec stops honouring that line on
+  # 2027-03-03 and the CRITICAL comes back, into a job that now fails on it.
   public_network_access_enabled = true
   network_acls {
-    bypass         = "AzureServices"
+    bypass = "AzureServices"
+
+    # The directive sits on the line it excuses rather than above the block, so
+    # that changing this value means reading the reason. See the block above it.
+    #tfsec:ignore:azure-keyvault-specify-network-acl:exp:2027-03-03
     default_action = "Allow"
   }
 
@@ -158,15 +230,43 @@ resource "random_bytes" "provider_key_secret" {
   length = 32
 }
 
+# The key organization surrogates are computed under, 32 bytes as 64 hex
+# characters.
+#
+# Generated here for the same reason the sealing secret is: a surrogate anybody
+# can recompute is an organization identifier with extra steps, so the value
+# must not pass through a person, a workflow, or a tfvars file.
+#
+# keepers is empty on purpose, and the consequence is different from the sealing
+# secret's but just as permanent. Regenerating this does not stop anything from
+# working -- it re-keys every surrogate, so the same organization becomes a
+# different one, and every funnel that crosses the change silently splits in
+# two. There is no analytics story that starts with "the infrastructure changed
+# the key without being asked".
+resource "random_bytes" "analytics_surrogate_secret" {
+  count = var.analytics_enabled ? 1 : 0
+  # 32 bytes, which is what surrogateSecretFrom() requires exactly. The
+  # application wants them as 64 hex characters and stops at startup on any
+  # other length, so .hex is the attribute rather than .base64.
+  length = 32
+}
+
 locals {
   # provider-key-secret is owned rather than seeded: Terraform generates it, so
   # a difference between configuration and vault is drift to correct, which is
   # the definition of owned above.
+  #
+  # admin-database-url and analytics-surrogate-secret are owned on the same
+  # test: Terraform generated the password and the key material inside them.
   owned_secrets = merge({
     "database-url"           = local.app_url
     "migration-database-url" = local.migration_url
     }, var.provider_key_secret_enabled ? {
     "provider-key-secret" = random_bytes.provider_key_secret[0].base64
+    } : {}, var.operator_portal_enabled ? {
+    "admin-database-url" = local.operator_url
+    } : {}, var.analytics_enabled ? {
+    "analytics-surrogate-secret" = random_bytes.analytics_surrogate_secret[0].hex
   } : {})
   seeded_secrets = {
     "github-client-id"     = var.github_client_id
@@ -186,27 +286,160 @@ resource "azurerm_key_vault_secret" "owned" {
   depends_on = [azurerm_role_assignment.deployer_writes_secrets]
 }
 
-# The GitHub App's two secrets, read rather than written.
+# The GitHub App's two secrets, ADDRESSED RATHER THAN READ.
 #
 # See the variable comments: GitHub mints the private key and shows it once, so
 # Terraform cannot create it and must not manage it. A person puts both in the
-# vault; this reads them so the container app can reference them by id.
+# vault and the container app references them by id.
 #
-# count on github_app_id rather than on the secrets existing, so that a stack
-# with no App plans clean instead of failing on a data source for a secret that
-# is deliberately absent.
-data "azurerm_key_vault_secret" "github_app_private_key" {
-  count        = var.github_app_id == "" ? 0 : 1
-  name         = var.github_app_private_key_secret_name
+# THESE WERE `data "azurerm_key_vault_secret"` AND THAT MADE EVERY PLAN A
+# PRIVILEGED READ. The container app never wants the secret's VALUE, only its
+# versionless id, which is a URI built from the vault's own uri and the secret's
+# name. Both are already here, so a data source was spending a Key Vault data
+# plane read to obtain a string that is a function of two things in this
+# configuration. Reading a secret to learn its address is the wrong shape.
+#
+# What that cost, measured rather than argued. `terraform plan -refresh=false`
+# does NOT serve a data source from state; it evaluates it, so the read happened
+# on every plan. On staging that passed, because the plan identity holds Key
+# Vault Secrets Officer there. On production it holds Contributor on the group
+# and nothing on the vault, so the moment `github_app_id` was set the production
+# plan check failed and could only have been fixed by granting a pull request
+# identity read access to production's App private key. That key signs as the
+# installation on every customer repository this product is installed on, and a
+# pull request can edit the workflow that uses the identity in the same commit.
+# Constructing the id needs no role at all.
+#
+# WHAT THIS GIVES UP, and it is a real trade rather than a free win. The data
+# source also asserted the secret EXISTS, so a missing secret failed at plan.
+# Now it fails at apply, with Azure naming the secret it could not find. That
+# check was only ever load bearing on staging: on production the identity that
+# runs the plan cannot read the vault, so the plan could not assert it there
+# either. An apply that stops with "secret not found" beats a plan that only
+# verifies the environment where it does not matter.
+#
+# DO NOT RESTORE THE DATA SOURCE. This is the file somebody edits when they see
+# a constructed id where a read used to be, so the instruction belongs here and
+# not only in production.tfvars. Restoring it does not give the existence check
+# back: it gives back a plan that fails on permission, on production, for every
+# pull request, and the only way through is the grant refused above. If the
+# check is what you want, the honest place for it is the apply, which already
+# names the secret it could not find.
+#
+# Empty on no App, so a stack without one renders no secret block at all, which
+# is what the count on the old data sources was for.
+#
+# Addressed, not read: the trailing slash on vault_uri is trimmed rather than
+# assumed, so this cannot depend on how the provider spells it.
+locals {
+  github_app_secret_ids = var.github_app_id == "" ? {} : {
+    "github-app-private-key"    = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.github_app_private_key_secret_name}"
+    "github-app-webhook-secret" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.github_app_webhook_secret_name}"
+  }
+}
+
+# Stripe's two credentials and Resend's one, read rather than written, and the
+# reason is the same one the GitHub App's key gets.
+#
+# THESE ARE NOT SEEDED EITHER, and the difference from github-client-secret
+# above is worth stating because it looks like the same case. A seeded secret is
+# written once as a placeholder and then owned by the operator, which means
+# there is a window where the vault holds a placeholder and the application is
+# running with it. For an OAuth secret that window is a sign-in that fails. For
+# a Stripe key it is billing reporting itself as ON at startup while every
+# charge is refused by Stripe, which is exactly the "partially configured"
+# state the application prints a warning about -- reached by the tool that was
+# supposed to configure it.
+#
+# So there is no placeholder and no tfvars input for the VALUE. A person puts
+# the real secret in the vault, then sets the switch that turns the feature on;
+# a plan with the switch on and no secret in the vault fails on these data
+# sources, naming the secret, which is a truthful refusal rather than a deploy
+# that comes up broken. self-hosting/azure.md has the two commands in order.
+data "azurerm_key_vault_secret" "stripe_secret_key" {
+  count        = var.stripe_price_team == "" ? 0 : 1
+  name         = var.stripe_secret_key_secret_name
   key_vault_id = azurerm_key_vault.this.id
 }
 
-data "azurerm_key_vault_secret" "github_app_webhook_secret" {
-  count        = var.github_app_id == "" ? 0 : 1
-  name         = var.github_app_webhook_secret_name
+data "azurerm_key_vault_secret" "stripe_webhook_secret" {
+  count        = var.stripe_price_team == "" ? 0 : 1
+  name         = var.stripe_webhook_secret_secret_name
   key_vault_id = azurerm_key_vault.this.id
 }
 
+data "azurerm_key_vault_secret" "resend_api_key" {
+  count        = var.mail_from == "" ? 0 : 1
+  name         = var.resend_api_key_secret_name
+  key_vault_id = azurerm_key_vault.this.id
+}
+
+# NO EXPIRY ON THESE THREE, AND THE REPORT THAT ASKS FOR ONE IS THREE THINGS
+# WRONG AT ONCE.
+#
+# tfsec reports six LOW results here under azure-keyvault-ensure-secret-expiry,
+# "Secret should have an expiry date specified". Three things about that:
+#
+# IT IS THREE SECRETS, NOT SIX. tfsec emits each one twice, once against this
+# resource and once against the module call in stacks/control-plane. The three
+# are github-client-id, github-client-secret and github-redirect-uri, and two of
+# them are not credentials at all: an OAuth client id is in the address bar of
+# every person who signs in, and the redirect URI is written in plain text in
+# production.tfvars in this repository. Only github-client-secret is a secret,
+# and it is the one an operator rotates by hand at GitHub.
+#
+# IT DOES NOT SEE THE SECRETS THAT MATTER, AND THE LIST GREW WHILE THIS WAS
+# BEING WRITTEN. azurerm_key_vault_secret.owned above sets no expiration_date
+# either and tfsec reports nothing at all about it. It holds five:
+#
+#   database-url                the application's database credential
+#   migration-database-url      the one that can run DDL
+#   provider-key-secret         the sealing key for customers' provider keys
+#   admin-database-url          the operator portal's antifailure_admin login
+#   analytics-surrogate-secret  the key every analytics surrogate is derived from
+#
+# The last two arrived after this comment was first written, which is the point
+# rather than an aside: the unscanned half of this vault grows and the scanner
+# stays quiet about it. Rewriting local.owned_secrets as a literal map makes the
+# same rule fire on all five, so the silence is tfsec failing to evaluate that
+# expression rather than a difference in this configuration. Anybody who "fixed"
+# the six results the scanner prints would leave both database credentials, the
+# provider sealing key and the analytics key carrying the exact property the rule
+# exists to complain about, and the report would come back clean. That is worse
+# than the finding.
+#
+# AND AN EXPIRY WOULD ENFORCE NOTHING. This is the part that looks backwards and
+# is not. Key Vault's own documentation says exp on a SECRET "is for
+# informational purposes only", and that "a secret's get operation works for
+# not-yet-valid and expired secrets". So a date here is neither the scheduled
+# outage it resembles nor a control: the app keeps reading the secret either
+# way. It is metadata.
+#
+# Both ways to write that metadata in Terraform are worse than leaving it out:
+#
+#   A literal date is a date somebody has to edit by hand, and when it passes
+#   nothing breaks, so nobody finds out. An expiry whose lapsing is invisible is
+#   protection that is not there, which is the failure tools/vulncheck exists to
+#   catch in the file next door.
+#
+#   timeadd(timestamp(), ...) is evaluated on every plan, so it would show these
+#   three secrets as changed forever. stacks/tfstate/variables.tf already refuses
+#   timestamp() for that reason on the policy exemption, and this file argues at
+#   length that a plan which always shows a diff is a plan people stop reading.
+#
+# The seeded half has a third problem on top. `az keyvault secret set`, which
+# self-hosting/control-plane.md tells the operator to use, writes a NEW VERSION
+# carrying no expiry at all. Terraform would put one back at the next apply,
+# which might be months later, and in between the vault says one thing and the
+# configuration says another.
+#
+# WHAT WOULD MAKE IT REAL, which is the trigger to revisit rather than a date
+# picked to look responsible. Key Vault raises SecretNearExpiry and
+# SecretExpired through Event Grid, and modules/alerting already owns this
+# stack's action groups. An expiry wired to those is a rotation reminder for
+# github-client-secret and worth having. An expiry with nothing watching it is a
+# date in a portal.
+#tfsec:ignore:azure-keyvault-ensure-secret-expiry:exp:2027-03-03
 resource "azurerm_key_vault_secret" "seeded" {
   for_each     = local.seeded_secrets
   name         = each.key

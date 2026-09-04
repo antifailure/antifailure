@@ -21,7 +21,7 @@ func TestFiresOnBehaviourSomebodyCanSee(t *testing.T) {
 		"runner/src/execute.ts",
 		"www/components/pages/product/Load.tsx",
 		"www/app/globals.css",
-		"api/waitlist/index.js",
+		"api/index/index.js",
 		"schemas/manifest.v1.json",
 		"deploy/docker/control-plane.Dockerfile",
 		"deploy/helm/antifailure-control-plane/Chart.yaml",

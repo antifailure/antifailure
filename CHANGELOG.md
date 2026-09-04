@@ -14,6 +14,863 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.1.1
+
+A patch release, cut for one reason: two fixes that only take effect once the
+control plane serving this installation is the one running them. Both were
+merged into `main` days ago and neither could do anything from there, because
+merging deploys staging and only a tag deploys production.
+
+**The check on your pull requests could report that nothing was verified even
+when everything was.** The control plane bound its check to the FIRST
+`workflow_run` delivery it saw for a commit. This repository has seventeen
+workflows, so a fifty second security scan routinely decided the outcome of a
+check about a twenty minute test run, and the answer it gave was that nothing
+had reported. The binding is now to the run that actually carries the report.
+
+**A manifest in a subdirectory could never find the runner.** `af runner
+install` walked up to the checkout root to place the runner, and the
+orchestrator that later goes looking for it did not walk anywhere. Any project
+whose `antifailure.yaml` is not at the top of its repository installed a runner
+into one directory and then failed to find it from another. Both now use the
+same search, in `engine/internal/runnerpath`.
+
+<!-- relnotes:omit -->
+
+### Fixed
+
+- The pull request check bound to the first workflow run of a commit rather
+  than to the one carrying the report, so a short workflow could answer a
+  question about a long one (#212).
+- `af runner install` and the orchestrator searched for the runner differently,
+  so a manifest below the repository root installed a runner nothing could find
+  (#209).
+- The MCP reference documented every tool and never said how to connect a
+  client to any of them (#216).
+
+<!-- relnotes:end -->
+
+## v1.1.0
+
+Three things happened in this release and they are worth separating.
+
+**The hosted product became something a person can actually use.** v1.0.0
+shipped a control plane nobody could sign up for, whose operator portal nobody
+could sign in to, whose only two writes both answered 403, and whose sign-up
+page led to a waitlist that stored an address on a domain with no way to write
+back. Every one of those is closed here. Anybody can create an account, the
+first operator can be created at all, twenty two operator sections exist and can
+write, and the waitlist is gone rather than improved.
+
+**Three things v1.0.0 listed as explicitly not stable are stable now,** and each
+one has a gate behind it rather than a sentence. That is most of what a minor
+release can honestly be: 1.0 drew a boundary and said what was outside it, and
+the work since has been moving things across that line one at a time, with the
+check written before the promise.
+
+**And a run of defects that every existing instrument was green about.** Two
+render gates that reported success over an application they never opened. A
+permission held by two roles with no route behind it. A verifier called by
+nothing outside its own test. An event stream nothing stopped shrinking. A
+deploy path that could set a third of the configuration the product reads. In
+each case something was checking, and it was answering a nearby question. The
+pattern is common enough in this release that the fixes are described by what
+the old check could not see, rather than only by what changed.
+
+### What became stable, and what checks it
+
+**The event stream's shape.** The 1.0 notes listed the set of event types as not
+stable, with the reason "types are added as features land". That says what
+happens when the catalog grows and nothing at all about what happens when it
+shrinks, which is the only direction that breaks anybody. Nothing was stopping
+it shrinking: `schemas/events.v1.json` is generated from the Go type and the
+catalog, so deleting a type or an envelope field regenerates cleanly, the diff
+is green, every test passes, and the consumer filtering on that type receives
+nothing and cannot tell that from a quiet system.
+`engine/internal/events/stream.register.json` now records the fifty five types
+and the eight envelope fields version 1 promised, and `just eventcheck` refuses
+a type that is gone, a field that is gone, a field whose type changed, a
+required field that became optional, and a closed set that lost a value. The
+`data` object stays outside the promise, and the reference now says so: it is
+the type specific payload and its keys move with the code that writes them.
+
+**The self-hosting inputs.** v1.0.0 listed the Helm values file and the
+Terraform variables as free to change in a minor release. The cost of that
+sentence fell entirely on the operator, whose values file and tfvars file are
+their configuration, kept in their repository and applied by their pipeline: an
+upgrade was a hand migration that could not be automated, and nobody outside
+this repository could know whether a key still existed in the version they were
+about to take. It also failed quietly. Helm accepts a values key no template
+reads, and Terraform only warns about a variable nothing declares, so a rename
+does not stop an apply, it removes a setting while the apply reports success.
+The promise is now the name, the type, and whether an input is required, for
+every key in the chart's values and every variable and output in the Terraform.
+`tools/inputcheck` compares against a snapshot taken at v1.0.0 and refuses a
+removal, a rename, a changed type, an optional input becoming required, and a
+new input arriving without a default. Adding an optional input stays compatible.
+Defaults are deliberately excluded, and `image_tag` is why: it names the release
+being cut, and `tools/tagsync` exists to make sure it moves.
+
+Five variables were renamed first, because freezing a name that is wrong means
+living with it until a 2.0. The foundation module's `name` is
+`resource_group_name`. Its `log_analytics` is `log_analytics_enabled`, a switch
+that sat one line from an output called `log_analytics_id`. The alerting
+module's `connection_percent` is `database_connection_percent`.
+`golden_replication` and `golden_soft_delete_days` are `goldens_replication`
+and `goldens_soft_delete_days`. If you are self-hosting from the modules, those
+five are the only renames in this release and they are the last ones until 2.0.
+
+**The identity of a lint finding.** See Added. A finding's `LINT-NNN` never
+moves and is never reused; its rule name, title, explanation and fix all stay
+free to change, which is what makes a rule better.
+
+### What moves when this tag is pushed
+
+The same things v1.0.0 moved. `tools/tagsync` holds every version pin in the
+tree against this changelog, so the chart's `appVersion` and the four examples
+in the release runbook name this release, and the two Terraform `image_tag`
+defaults keep naming v1.0.0 until this tag has actually published, because those
+two are read by an apply from `main` and naming an unpublished tag produces a
+failed apply on the stack that runs the product rather than a stale deployment.
+
+### Behaviour you may depend on that changed
+
+- A path the control plane has no route for answers **404** rather than 500. It
+  had been answering 500 with a body that told whoever asked to edit the rate
+  limit table, so anything treating a 500 from `/v1/` as "the server is
+  unhealthy" was reading a routing answer as an outage. `GET /health` is
+  unchanged and was always correct. A route that exists and declares no rate
+  limit is still refused, and still refused before its handler runs; what moved
+  is where the explanation goes.
+- A `HEAD` request now resolves its rate limit through the `GET` it is
+  dispatched as. Every `HEAD` on a bounded endpoint used to be treated as
+  unbounded and refused.
+- On a deployment running with the console switched off, a path with no route
+  answers JSON rather than plain text. Everything else the API says is JSON, and
+  the response somebody finding their way around is most likely to get was the
+  one that parsed differently.
+- **Five Terraform variables were renamed**, and they are the last renames until
+  2.0 because the surface is frozen from this release. The foundation module's
+  `name` is `resource_group_name`. Its `log_analytics` is
+  `log_analytics_enabled`. The alerting module's `connection_percent` is
+  `database_connection_percent`. `golden_replication` and
+  `golden_soft_delete_days` are `goldens_replication` and
+  `goldens_soft_delete_days`. `tools/inputcheck` refuses any further rename.
+- `af --version` prints the version instead of `unknown flag: --version`. It is
+  the same implementation `af version` runs, including asking the running binary
+  for its edition, so the two cannot disagree.
+
+<!-- relnotes:omit -->
+
+### Added
+
+**The operator portal.** Six groups, twenty two sections and an overview, with
+the navigation, the page headings and the permission each section needs declared
+in one place so they cannot drift apart. Every route exists and opens something
+from the first commit: a section nobody has built yet says so, names what will
+live there and which permission will read it, because a page of zeroes on this
+portal is indistinguishable from an answer and an operator reading "0 failing
+runs" off a placeholder during an incident has been lied to by their own
+tooling. The whole portal works on a phone. The rail becomes a drawer that traps
+focus, closes on Escape, returns focus to the button that opened it, and locks
+the page behind it, and every list becomes a stacked record rather than a table
+scrolling sideways with the two columns you came for out of sight.
+
+**What the portal can see, and what it says it cannot.** Customers reads a
+customer's organizations, sessions, operator notes, and their subscription,
+invoices, charges and credit from the payment provider rather than from a local
+copy of it. Product lists every environment on the installation, groups them by
+the branch that made them, reads the golden data versions and the masking rules
+a scan proposed, and separates the three run families rather than merging them
+into a table that would have to drop the columns somebody came for. Developer
+Platform lists the repositories, the pull requests with the newest check
+generation on each, every credential that can act as a customer, and every
+delivery that arrived from GitHub or Stripe including the ones that resolved to
+no organization. Operations carries system health, the fleet, the teardown
+ledger, the egress firewall, the failure explorer and the email page. Security &
+Governance carries every standing credential on the installation as one list,
+the audit chain, and what is held about a named person.
+
+Each of those pages names its own absences rather than drawing them. There is no
+experiment table, so the flags page says flags are complete and experiments are
+not, and names the four things that would end that. There is no snapshot ledger
+or restore history in the schema, so Safe State says which table each answer
+would need. There is no exception store, so failures are grouped by the failure
+code a run ended with. There is no delivery record, so the email page reports
+whether the installation can send at all and counts sign-in links by what became
+of them, because a link issued and never used before it expired is the only
+trace a delivery failure leaves anywhere in this schema. Event payloads are
+never returned: the field names and the byte size say whether ingestion is
+working without putting a copy of a tenant's data in an operator's browser.
+
+**A run that finished is not a run that passed, and the pages say so.** Every
+run carries a standing beside its own state. A load run whose state is
+`succeeded` can carry a failing verdict, and an agent run that reached
+`complete` having reported no verdict at all did nothing and found nothing. The
+second is shown as its own answer rather than as a pass, which is the exit code
+zero over nothing defect this repository has already shipped once.
+
+**Three emergency switches, and a teardown ledger that keeps three states
+apart.** Maintenance mode, new sign-ups and new runs are each enforced by a
+named function with a real call site, refuse at a path a test drives, and are
+released from the same screen that engaged them. Maintenance keeps reads,
+sign-in and event ingestion working, so the operator who paused the installation
+can still authenticate to unpause it. Pausing sign-ups refuses only accounts the
+installation has never seen, so nobody mid-task is locked out. Freezing runs
+leaves teardown working. Engaging or releasing a switch writes a high severity
+audit entry in the same transaction as the change, with the entry first, so a
+switch cannot take effect without its record. A fleet teardown asks the server
+what it would touch and makes that count the thing you type, so nobody confirms
+a blast radius they have not read. In the ledger a RECORDED request with no
+workflow run had nothing to send, a DISPATCHED one has been asked for and not
+confirmed because a cancel GitHub accepts is not a runtime saying the
+environment is gone, and a CONFIRMED one is the only one the runtime
+acknowledged.
+
+**Impersonation, bounded rather than trusted.** It needs a stated reason of at
+least eight characters, it lasts minutes rather than the product's thirty days,
+the operator portal is closed to that session for as long as it lasts, and the
+customer gets the record in their own audit log at the moment it starts. The
+audit entry is written before the session exists, structurally: the session row
+carries the entry's sequence number as a foreign key into the chain, so a
+session that was never recorded cannot be represented. Ending it revokes the
+customer session the browser is holding, and so does signing out of the operator
+portal.
+
+**The audit chain can leave the building.** `admin.audit.export` had been a
+declared permission held by two roles with no route behind it, which looks like
+a capability from every angle except the one that counts. It is a route now: a
+file, in JSON or CSV, carrying each entry's previous and current hash so
+somebody who does not trust the vendor can check it, and recording its own
+departure in the chain it came from. The verifier it calls had the same shape in
+the other direction, written and tested and called by nothing outside a test, so
+the chain's tamper evidence was a property of the code rather than of the
+product. Verification now runs over the range a file actually covers, because a
+slice shipped with a verification of something larger verifies a different
+document from the one in the reader's hands.
+
+**Data Governance answers what is held about one person, and refuses the parts
+this product cannot.** The locations are read from the database catalog when the
+question is asked, so a table added next month is in the answer, and each one
+carries its foreign key's own on-delete behaviour, because that is the erasure
+answer rather than a description of one. What is not built is named: there is no
+per person erasure, organization erasure leaves the people in it behind, both
+audit chains keep the actor's name on purpose because the name is hashed into
+the entry, and there is no retention policy table so nothing expires on a
+schedule.
+
+**A closed analytics stream, which cannot become a second copy of the event
+stream.** An event whose name is not in the catalog, or whose payload carries a
+field the catalog does not declare, is refused and counted rather than stored
+and filtered later. There is no free-text field kind, so a repository name or a
+query string cannot reach the database even by mistake. The organization is
+recorded as a keyed hash rather than as an id, so the stream counts
+organizations and follows one through a funnel without being able to name one.
+The application role holds INSERT and no SELECT, so only the rollup, which runs
+as the schema owner, ever reads it, and only daily aggregates come back out.
+Milestones live in the organization facts table rather than in the stream:
+"the first time this organization proved something" was an event until the
+ordering tests showed two concurrent batches could both claim to be the first,
+and as a column set with LEAST it has no race and converges to the same date
+whatever order events arrive in.
+
+**A producer for every analytics event, and a gate that fails when one loses its
+call site,** because an event nothing emits is a row on a dashboard that reads
+zero forever, which is indistinguishable from a quiet week. The marketing site
+normalizes the referrer into a bounded channel in the browser, so the raw
+referrer, the URL and the query string never cross the network. It sets no
+cookie, uses no third party, keeps its session identifier in `sessionStorage`
+so it dies with the tab, and turns itself off for a reader who has set Global
+Privacy Control or Do Not Track.
+
+**The analytics dashboard, and the one gate on this server that is not a
+permission.** The page answers about the whole installation rather than one
+organization, and every organization has an owner who holds every permission in
+their own, so the route requires membership of the organization named by
+`AF_ANALYTICS_OPERATOR_ORG` as well as the `analytics.read` permission. Unset
+means nobody, and the route says which variable to set. Every panel carries
+where its numbers came from: the window, when the rollup last ran, which days
+are still moving, and whether recording is switched on at all. Three different
+things render as zeros and the page says which one it is showing.
+
+**A stable identifier for every lint finding.** The v1.0.0 notes said the stable
+identifier for a finding was its rule name within a release, which is another
+way of saying there was no stable identifier at all: anything filtering,
+suppressing or counting a finding had to match on a name the next release was
+free to rewrite, and rewriting names is what improving a rule looks like. Every
+finding now carries a `LINT-NNN` identifier beside the rule name, in
+`--output json` and at the head of the report a person reads. It is assigned
+once and never reused, not even after the rule that earned it is deleted, so a
+filter written against one never quietly starts matching something else. The
+rule name, the title, the explanation and the fix all stay free to change,
+because that is what makes a rule better.
+`engine/internal/insights/lintcatalog.yaml` is the source of truth, the
+reference page and the published catalogue at
+`antifailure.dev/lint-findings.v1.json` are generated from it, and `just
+lintcheck` refuses a rule with no identifier, an entry for a rule that no longer
+exists, a duplicate, and an identifier that has left the catalogue since it was
+registered. Nothing about which findings a release reports has changed.
+
+**`af doctor` reports the Postgres client, and the newest server version it can
+read.** Doctor's promise is that every problem it names is one you would
+otherwise meet halfway through a run. Copying production shells out to `pg_dump`
+and `pg_restore` and it never looked at either, so a machine with neither, or
+with a client older than the source, said "This machine can run Antifailure" and
+then failed at the step that comes after every other one. `pg_dump` refuses a
+server newer than itself outright and there is no flag for it, so the ceiling is
+worth knowing before the twenty minutes rather than after. It is a warning
+rather than a failure when nothing is found, because a project that fills its
+golden from `database.seed` runs neither program.
+
+**The pricing page publishes what the free plan actually allows,** from the code
+that enforces it. Three environments live at once, twenty four environment-hours
+committed by one run, and seventy two in any rolling day. All three were
+enforced in the control plane and printed nowhere a customer could read, so the
+only way to learn the shape of the free plan was to reach a limit and read the
+refusal. `web/apps/api/test/plan-facts.test.ts` fails the build if the published
+numbers and `PLAN_QUOTAS` stop agreeing. Two quotas are deliberately not
+published: `goldens` and `artifactGigabytes` are counted for display and no path
+refuses a creation over either, and publishing a limit that nothing applies is
+the same defect pointing the other way, so the test refuses those two by name
+until somebody wires them.
+
+**A gate that refuses a contact route this project cannot answer.**
+`tools/contactcheck` reads every text file in the tree and requires a row in
+`tools/docs/contact-routes.tsv` for every address, saying whether a person reads
+it, whether it is a value the software writes rather than an invitation, or
+whether it is a defect being quoted. An address with no row fails, so a domain
+nobody has checked is caught by the missing row. It does not resolve MX at check
+time: that would make every pull request depend on somebody else's resolver, and
+an MX record proves a server accepts mail, not that a person reads what lands
+there.
+
+**The README says that releases carry a signed bill of materials and signed
+checksums.** It did not say so before, deliberately, because no published
+release carried either file until v1.0.0 and the releases page disproved the
+claim in under a minute for exactly the reader it was meant to impress. The
+workflow steps existed and had never executed. v1.0.0 ran them for the first
+time and published both, so the sentence is checkable now and it names the two
+filenames.
+
+**Anybody can create an account.** Signing in with GitHub lands you in your own
+organization on the free plan, owned by you, with the free plan's quotas and
+cost caps enforced against it from the first environment. There is no card, no
+invitation and no password anywhere in the flow: GitHub has to report a verified
+address before a user row is written, which is the whole of the email
+verification and is stronger than a link this domain could not have sent. The
+organization is named after your GitHub account and carries its login, so
+installing the GitHub App on that account later adopts the same organization
+rather than creating a second one beside it, and the environments, the audit
+chain and the plan survive the step. `AF_SELF_SERVE_SIGNUP=1` turns it on and it
+is off by default, because what it grants is a tenant with real compute against
+it, and forgetting a variable has to close a door rather than open one. The
+process says which mode it is in at start-up, beside the line about the sign-in
+allowlist, because the two settings are one sentence: who may sign in, and
+whether there is anything on the other side of the door.
+
+**A contact form for buying,** which is what replaces the waitlist for anybody
+who needs seats, single sign-on, a security review or an agreement to sign. It
+writes a row into the control plane's own database, where the role that serves
+public requests holds insert and no select, so no request to the site can ever
+return somebody else's contact details. `af-control-plane-backup leads` reads
+the queue, oldest first, and marks one handled. The confirmation on the page
+says which of two things happened, because a deployment with no mailer records
+the lead and tells nobody, and a form that answered a plain success there would
+be the waitlist again with better spacing.
+
+**The first operator can exist.** Operator accounts were created by a route that
+needs an operator session, which needs an operator account, and nothing anywhere
+ever wrote an operator's password, so the operator portal was unreachable by
+anybody on every deployment.
+`af-control-plane-backup bootstrap-operator` creates the permanent root operator
+once and refuses to take over one that already exists, and
+`set-operator-password` gives a password to an operator the portal created,
+revoking every session that operator holds. The password is read from the
+environment or from standard input and deliberately never from an argument,
+because an argument is visible in `ps` to every user on the machine, lands in
+the shell history file, and on a CI runner is printed by any step that echoes
+its own invocation.
+
+**A Command line screen in the console.** Nothing in the console had ever
+mentioned the command line. A new organization landed on an environments list
+whose three empty cards each explained that something appears when the engine
+reports one, and no screen anywhere said how to get an engine, sign it in, or
+run it, because the install command was on the marketing site and in the
+documentation, which is where somebody who has not signed up yet is. The screen
+carries the install command, the sign-in command and the first two commands
+worth running, and both empty states on the environments page lead to it. The
+sign-in command names the control plane the console is being served from, and
+says nothing when that is already the hosted instance, because a plain `af
+login` on a self hosted plane signs a terminal in to somewhere else and stores a
+credential for an origin nothing that person runs will ever talk to.
+`tokens.list` and `tokens.revoke` were written, permissioned and audited with no
+console calling either, so a ninety day credential granted by `af login` could
+be neither seen nor taken away from any screen in the product. Both are on that
+page, telling a terminal apart from an engine token, because revoking your own
+laptop and revoking a build machine are not the same act.
+
+**Three analytics questions a daily count cannot answer.** Weekly and monthly
+distinct counts, a conversion funnel over events with a window, and retention as
+a cohort grid. All three were impossible before, for one reason: the rollup
+grouped by a subject and then threw it away, so nothing could follow one
+organization across two days or one session across two events. The rollup keeps
+a working set the application has no grant on, and publishes counts computed
+from it.
+
+**The beacon does not count crawlers that run JavaScript, or driven browsers,**
+and an opt out lasts longer than the tab. Opening any page with
+`?af-analytics=off` switches measurement off for that browser, which is how
+somebody who works here keeps their own reading out of the numbers.
+
+**A switch on the privacy page that turns this site's page counting off,** and a
+section saying what leaves the browser and what never does. The subprocessor
+page already told readers a preference would be remembered if they switched
+measurement off, and the only way to switch it off was a query parameter
+documented in one source comment, so the promise had no reachable mechanism
+behind it. The control renders the reason rather than a position, because four
+different things can stop a reader being counted and only one of them is the
+switch: a browser sending Global Privacy Control is not counted whatever the
+switch says, and where the decision is not the reader's there is no switch at
+all, only the state.
+
+### Fixed
+
+**Every write in the operator portal was refused, and had been since the portal
+existed.** Suspending an organization and resuming one were its only two
+mutations, both were wired to buttons, both answered 403, and both looked
+correct in review. There were two independent causes and the second is the one
+that would have cost somebody a night.
+
+The console sent no operator CSRF token, above a comment arguing at length that
+none was needed because the operator cookie is `SameSite=Strict` and a browser
+sends it on no cross-site request of any kind. That reasoning is sound and it
+does not matter: the control plane refuses every operator mutation that does not
+carry the header and its suite pins that three ways. Two individually correct
+halves, and nobody ran the pair.
+
+The origin check compared a browser's `Origin` header against `AF_APP_BASE_URL`
+as text. Those are different things. An origin is a scheme, a host and a port,
+with no path and no trailing slash, ever; a base URL is a base URL. So the check
+agreed only when the variable happened to be spelled exactly as an origin.
+Setting it with a trailing slash was refused. Setting it to a URL with a path
+was refused. Leaving it unset, which is what the shipped configuration does
+deliberately because the address is allocated at run time, was refused. Three of
+the four ordinary spellings turned every operator write into "This operator
+request came from another site", which is a sentence that sends whoever reads it
+looking for an attacker who was never there. Nothing was loosened: a request
+from a genuinely different site is still refused against every spelling, an
+`Origin` that is not a URL is now refused rather than waved through, and when no
+base URL is configured the check declines to judge rather than refusing, because
+it has nothing to judge against.
+
+The same console helper also unwrapped nothing. It answered the tRPC envelope
+carrying the type of the value inside it, which the compiler cannot see and no
+caller had read, so a suspend that promised `{suspended: boolean}` delivered an
+object whose `suspended` was undefined, and the first caller to read one
+downloaded a file containing the word "undefined".
+
+**Two render gates were green about a console they never opened.**
+`motioncheck` finds its applications on disk and used to include one only when
+something was found there. In CI the console was installed and built after both
+render gates ran, so an unbuilt directory was dropped from the run without a
+word and the check reported success over the marketing site alone: 42 files read
+with the console hidden, 64 with it present, exit zero in both cases. The
+animation ban is the rule this project reaches for most often, and for the whole
+life of the gate it was enforced on one of the two applications.
+
+`classcheck` never claimed the console, and why it did not is the more useful
+half. It exists because `cn` is a plain join rather than tailwind-merge, and the
+console does not import `cn` anywhere, so it read as exempt. It is not: it
+composes classes in template literals, and an interpolated string carrying a
+margin beside a margin written after it is the same defect with the same cause,
+because the cascade decides and not the order of the literal. Both gates now
+read every Next application, find them by looking for the config file that makes
+one rather than by holding a list, walk for prerendered HTML at any depth, and
+refuse an application that is not built instead of skipping it.
+
+`classcheck` also judges more than colour. It began with five colour properties
+because the four defects that motivated it were colours, which was narrower than
+the rule it enforces: a height written last and beaten by a height written first
+is the same defect and just as invisible in review. Across both applications, 61
+files and 16661 elements, twenty one properties add exactly one finding, and
+that finding is real. The baseline card in the hero film asked for 58 percent of
+the height and rendered at full height, because the component set `h-full` in
+its own class string and the call site passed `h-[58%]` beside it. Every
+arbitrary value is emitted before every named utility, so the component won and
+the frame it was drawing was wrong.
+
+**Every way a real production database can refuse a copy printed the transcript
+and no next step.** Pointing a golden refresh at a Postgres carrying what a
+production schema carries stops in four ordinary places, none of them a broken
+database. A read only role, which is what the generated manifest's own comment
+tells you to hand this tool, cannot read the sequences. Row level security is
+on, and Postgres is right to refuse a dump it would have to filter, because a
+dump taken under a policy carries only the rows that role can see and nothing in
+it says so, but `query would be affected by row-level security policy` is not a
+sentence that tells you `BYPASSRLS` exists. An extension the source has and a
+stock Postgres image does not, which is every schema using PostGIS, pgvector,
+TimescaleDB or `pg_cron`, failed inside the restore with a control file path.
+And a typo in the connection string arrived as the driver's account of four
+failed dial attempts.
+
+Each now has a code, a cause and a remedy that was checked by running it:
+`AF-DB-017` for a refused read, `AF-DB-018` for row level security,
+`AF-DB-007` for a missing extension, `AF-DB-023` for a refused connection and
+`AF-DB-024` for a value that is not a connection string. Anything not recognised
+keeps its whole transcript under `AF-DB-019` and is told to run the program
+itself, rather than being forced into the nearest code.
+
+`pg_dump` stops at the first object it cannot read and says nothing about the
+rest, so a read only role missing several grants used to cost one refresh per
+grant, and each refresh starts a Postgres container before it discovers the
+next. When a refusal is about privileges the source is now asked what else this
+role cannot read and all of it arrives at once, so applying every remedy the
+message names, in one go, publishes the golden. The question is only asked after
+`pg_dump` has already refused, so it cannot stop a copy that would have worked.
+
+**The variable naming production was read from the shell and nowhere else, and
+`af start` called that fine.** The secrets guide opens with
+`source_url_env: PRODUCTION_DATABASE_URL` and then lists the four places a value
+is looked up: this shell, `.env`, the encrypted local store, and the system
+keyring. This one variable read the first and none of the others, so a project
+that put the production URL in `.env` beside the `STRIPE_SECRET_KEY` that `af
+up` finds there was told the variable held nothing, and `af secret set
+PRODUCTION_DATABASE_URL` stored a value nothing would read. It now goes through
+the same chain as every other name in the manifest, built by the same
+constructor, so a command that says where a value will come from cannot describe
+a different chain than the one that fetches it. `af start` now names which of
+the four sources answered, or refuses to call the step finished.
+
+**The rehearsal's per statement timing test no longer compares two real
+statements to each other.** It ended by asserting that building an index over
+50,000 rows takes longer than adding a nullable column, which is true most of
+the time and was never the property the test exists for. It went red on a pull
+request whose diff was one file mode bit and one markdown file, because a
+contended runner spent 84ms adding the column and 33ms building the index. A
+check that fails for reasons no diff can explain is worse than one that is
+missing, because it teaches everybody to rerun a red job without reading it, and
+that habit is what lets a real failure through. The fixture now plants a
+statement whose duration is a fact rather than a measurement, and the assertions
+that remain catch one total copied onto every row, a duration charged to the
+neighbouring statement, a running total that grows down the list, a single
+statement reported for a whole file, and a duration read from the transaction
+clock rather than the wall clock.
+
+**Four published claims did not match the code, and all four were true when they
+were written.** The terms page said "Sign-in is for the waitlist. There is no
+public production control plane yet", and the privacy notice said the same.
+Installing the GitHub App creates an organization: the installation webhook
+inserts one and consults no allowlist, because an installation is the moment a
+tenant begins. Both pages now say what happens, with the limit that makes it
+accurate, which is that nothing can be run in that organization until somebody
+signs in. `legal-facts` gained three assertions keyed on the mechanism rather
+than on the sentence, so the combination that was published fails. Separately, a
+CI step named "The rules classify every column" claimed `af mask plan` refuses a
+column no rule names. It does not and never did, because every refusal keys on
+problems and a column with no transform cannot become one; the step is worth
+running and its comment now says what it really catches.
+
+**GitHub reported this repository's license as `NOASSERTION`.** No license in
+the sidebar, absent from the license filter, and to anyone scanning it, all
+rights reserved. The cause was a correct paragraph in the wrong place: `LICENSE`
+held the MIT text followed by a note that `ee/` is separately licensed, and
+GitHub identifies a license with Licensee, which normalizes the file and folds
+appended prose into the comparison. `LICENSE` is now the unmodified MIT text and
+detects as MIT, and the carve out moved to `LICENSING.md`. Licensee ignores HTML
+comments, so wrapping the paragraph in one would have restored detection with
+the text still in place; that was rejected, because the tools it would hide the
+carve out from are the same ones companies run before adopting something.
+
+**Issuing a paid enterprise licence was somebody remembering that a Go program
+exists.** `tools/licensegen` signs the keys `ee/engine/license` verifies, and
+searching the tree for it found the tool, one test comment and a line in
+`.gitignore`. There is a runbook now, and writing it against the verifier rather
+than against the generator turned up three things the generator did not know.
+`"features": ["ssoo"]` signed cleanly, parsed cleanly, reported the licence
+active and permitted nothing, so `licensegen issue` closes the set at issue
+time, which is the only place it can be closed without costing a customer the
+features they did buy. `seats` was an `int`, so a request that omitted it signed
+an unlimited licence and said nothing; it is a pointer now and an absent field
+is refused. And `-key-id` is a label the program cannot check against the key it
+signs with, so `issue` prints the public key belonging to the key that actually
+signed, on standard error so a pipe still carries only the token.
+
+**The "No organization yet" screen offered neither of its two actions when
+`AF_GITHUB_APP_INSTALL_URL` was unset.** Both buttons were behind the same
+condition, so an unset address hid the membership recheck as well, even though
+that action is an ordinary sign-in exchange that never needed an installation
+address. What was left was two paragraphs of instructions and a Sign out button.
+The recheck is offered either way now and becomes the primary action when there
+is nothing to install from. Leaving the address unset stays supported, because a
+self-hosted control plane may grant membership its own way; what was missing is
+the operator being told, and the startup log now names the state either way. The
+variable was unset on both control planes for weeks precisely because nothing
+failed and nothing said so.
+
+**The code of conduct named an address that could not receive a harassment
+report.** The `antifailure.dev` domain publishes no mail exchanger, an SPF policy
+authorising no sender, a DMARC policy of reject with strict alignment, and a
+DKIM record whose empty `p=` revokes the key. Nothing addressed there was ever
+delivered, and the person reporting got a silence they could not tell apart from
+being ignored. There is no confidential channel to put in its place, so the
+section says that instead of naming another mailbox: it lists what does resolve
+and what each one costs the reporter, and it names the gap none of them closes,
+which is that a complaint about a maintainer has nowhere independent to go
+inside the project.
+
+**The retention page now says what happens when somebody asks to be removed.**
+The personal fields are erased and the account row is kept by choice, not
+because the database refuses. The delete would succeed. What it would also do is
+null a column that sits inside the audit hash chain, so every entry that person
+wrote would stop hashing to its recorded hash and the organization's audit log
+would report itself as altered.
+
+**Every path the control plane had no route for answered HTTP 500,** with a body
+instructing a stranger to edit `ENDPOINT_LIMITS`. `/v1/health`, `/v1/version`,
+`/v1/status` and any made up path under `/v1/` all did this on the deployed
+control plane, while `GET /health` answered `200 {"ok":true}` throughout, so the
+service was fine and the answer said otherwise.
+
+The rate limit gate is not the defect and is not weakened here: an endpoint that
+ships with no declared limit is one nobody load tested, and refusing to serve it
+is how that stops shipping. The gate runs in an `app.use('*')` middleware, and
+middleware runs before routing, so it sees a method and a path and nothing else.
+A route that exists with no limit and a path that matches no route at all
+arrived looking identical, and it answered both the same way. `servedRoute()`
+asks the router which case it is, and asks the router rather than a second list
+of paths that could drift out of step. No route now reaches the not-found
+handler, which already existed and was simply unreachable from here. A route
+with no declared limit is still refused before its handler runs; what moved is
+the loud part, from a 500 body served to anybody who can reach the port, to the
+log line where the one person who could act on it will read it, with the caller
+getting `AF-CP-003` and a request id like every other control plane failure.
+
+`HEAD` on any endpoint the API owns was the first case wearing the second one's
+clothes. Hono answers a HEAD by dispatching the request again as a GET, and
+`ENDPOINT_LIMITS` is keyed by method and held no HEAD entries, so the route
+existed and the gate resolved nothing for it. That is not the gate catching an
+unbounded endpoint, it is the gate failing to recognise a bounded one declared
+a line above.
+
+One more thing turned up while checking every entry point. Hono holds a single
+not-found handler and the console registered it, so a deployment started with
+the console switched off answered a path with no route in plain text, when
+everything else the API says is JSON. The API registers its own before the
+console mounts, so the console replaces it when it is there and answers exactly
+the same thing for the paths the API owns.
+
+**`af login` connected nothing.** A person who signed up, signed a terminal in,
+and ran `af up` watched an empty environments list forever, and every part of it
+looked configured. `attachControlPlane` took a token from
+`AF_CONTROL_PLANE_TOKEN` or from a GitHub Actions identity and from nowhere
+else, so the credential the device grant so carefully protects was read by `af
+env pull` and by nothing that reports a run. The CLI now hands the stored
+credential and the origin it was issued by to the orchestrator, which passes
+both to telemetry, and `af up`, `af test`, `af ci` and `af workload` report with
+it. The environment token still wins, because exporting one is a decision and a
+credential on the machine is a default, and a machine nobody has signed in
+behaves exactly as it did before.
+
+A login whose token could not be stored used to leave that token live. It is
+minted the moment somebody approves, and on macOS the write that follows can be
+refused, over ssh or under a launchd agent, where there is nobody to authorise
+the keychain prompt. The command returned an error and left a ninety day
+credential nobody held, nobody could see and nobody could revoke, with another
+one beside it on every retry. It now revokes what it cannot keep, and says the
+token is still live and where to revoke it when the revocation fails too.
+
+**Checkout sold a per unit seat count that entitled nothing.** It took a `seats`
+number between one and a thousand and passed it to Stripe as the line item
+quantity, so the price multiplied by it, and nothing ever read it back. How many
+members an organization may hold is a constant per plan, enforced by
+`seatVerdict`, and it never consulted the subscription at all. An organization
+that bought three seats on Team got fifty. An organization that bought two
+hundred seats on Team also got fifty, and paid two hundred times as much for the
+same limit. What this product sells is one hosted control plane per organization
+at a flat fee, so there is no number for a price to multiply. The input is gone
+from the route and from the published contract, and checkout sends Stripe no
+quantity at all rather than a hardcoded one. The column stays and is labelled
+for what it is, `stripeQuantity`, because Stripe reports a quantity on every
+subscription object it sends and an operator reconciling an invoice needs to see
+what was actually billed; no entitlement and no quota reads it, and a test holds
+that. A billing ordering that was never covered is now covered: a plan downgrade
+while an organization holds more members than the lower plan allows removes
+nobody, and refuses the next invitation naming what is held.
+
+**A control plane that sold one plan self-serve and one by arrangement took no
+money at all.** `AF_STRIPE_PRICE_ENTERPRISE` was required, so a deployment that
+set the secret key, the webhook secret and the Team price and nothing else
+landed in the partially configured branch: no configuration, billing entirely
+off, every billing route answering `PRECONDITION_FAILED`, and the Team price
+that did exist unsellable. The startup line called it an operator error. That is
+the shape this product actually sells in, because Enterprise is agreed with a
+person and has no Stripe price at all. Measured by calling the function rather
+than by reading it. Billing is on for that combination now, with a startup line
+naming both halves, so the first Enterprise refusal does not read like an outage
+to whoever is on call. Checkout for a plan with no price is refused before
+Stripe is called, with a sentence saying the plan is arranged with a person and
+where to ask, rather than sending an empty price identifier and returning a
+generic failure to the buyer with the largest cheque.
+
+**The hosted deploy path could set 16 of the 45 variables the control plane
+reads.** The Terraform module is the only route onto that container:
+`deploy/cd/deploy.sh` updates the image and sets no environment at all, and
+setting one with the Azure CLI is drift the next apply removes. So 29 documented
+variables had no supported way to be set, and every symptom read as a broken
+feature rather than as an unset variable: the operator portal's routes all
+refused for want of a database credential, billing was off with a real Stripe
+price behind Team, the marketing site's beacon was refused cross origin as a
+bare network error, the analytics stream recorded nothing, and both actions were
+missing from the "No organization yet" screen.
+
+The module sets 34 of them now, the operator credential included, and that one
+needed a second half: its role is created `NOLOGIN` by the migrations and
+nothing had ever given it a login, so wiring the variable alone would not have
+produced a broken portal, it would have produced no control plane at all,
+because the pool is awaited at start-up. The bootstrap job does it, inside the
+virtual network, because Terraform cannot reach a server with no public
+endpoint. The other ten are exempt with a written reason, and the reasons are
+real: two are stamped into the image at build time, one is absent from the
+serving process on purpose, and Enterprise has no Stripe price.
+
+`tools/wirecheck` is the gate, and what it proves is narrow on purpose: a
+supported deploy path can DELIVER the variable, not that the feature works. Mail
+is the live example and the guide says so, because `antifailure.dev` publishes
+an SPF policy authorising no sender, a DMARC policy of reject with strict
+alignment, and a revoked Resend DKIM key, so the module can carry the mail
+configuration and the domain still cannot send. Two checks already covered this
+ground and both answered a nearby question: they prove a variable is DOCUMENTED,
+and a variable that is documented, read by the application, and unreachable by
+every apply passes both of them cleanly. That is how 29 accumulated in silence
+with every instrument green.
+
+**The sign-in allowlist could not be configured to mean everybody.** Terraform
+always set the variable and an empty list rendered it as an empty string, which
+the control plane reads as naming nobody, so the most open intent and the most
+closed one produced the same deployment. The variable is nullable now, in
+Terraform and in the chart, with all three states rendered and checked.
+
+**`af --version` answered `unknown flag`** on a fresh install, which is the
+first thing a person types after one. It is the same implementation `af version`
+runs, byte for byte in all three output shapes, rather than the framework's
+static template: the edition is asked of the running binary, because the package
+variable that template would print is never stamped by any build, and the
+enterprise binary once reported "community edition" from the one command an
+auditor asks.
+
+**The site beacon sent one request per event** into an endpoint built to take
+twenty, lost every event whose request failed, and treated the browser tab as
+the session, so a tab left open over a weekend was one visit. It batches and
+retries now, and a session ends after thirty minutes idle and after a day, which
+makes the identifier shorter lived as well as the count truer.
+
+**Two replicas both rolled up, and raced.** The analytics rollup rides the
+maintenance pass, every replica runs that pass, and it runs once immediately on
+start. Production is configured for two replicas, so on every deploy two rollups
+began within milliseconds of each other: each day recompute is a delete and an
+insert, the second insert failed on the primary key, and it took the whole
+maintenance pass down with it. The visible symptom was not a wrong number, it
+was a dashboard that stopped updating while a line went into a log. Every
+analytics writer takes one transaction scoped lock now, so a second replica
+queues instead of colliding.
+
+**A catalogued analytics event had nothing left to emit it.** The waitlist was
+removed and `site.waitlist_submitted` kept its definition, its export and its
+catalog entry, so the acquisition funnel ended on a step that could never fill
+and every gate read that as fine. It is `site.lead_submitted` now, produced by
+the contact form that replaced the waitlist, and the gate asks whether each
+producer function has a caller rather than whether the event name appears in a
+file. The contact page also gained a page shape of its own, having been counted
+as "other" while holding the only form on the site.
+
+**The control plane's configuration reference shipped with an unresolved merge
+in it.** Literal `<<<<<<< HEAD`, `=======` and `>>>>>>>` around six rows of the
+variable table, two of them the same variable described twice, on the one page
+somebody reads to configure this product. The resolution is the union of both
+sides rather than either of them: each side held a row the other did not, and
+each held a better version of one they shared. `AF_GITHUB_APP_INSTALL_URL`
+keeps the newer description, because the console stopped hiding the membership
+recheck behind the install address and the older text described the screen
+before that fix. `AF_SIGNUP_URL` takes the other side, because the version that
+survived said a refused visitor would be pointed at "somebody else's waitlist"
+and the waitlist was removed in this same release.
+
+`tools/conflictcheck` is the gate, and what it is for is narrower than it looks.
+Every gate this repository has was green about this. Markdown does not fail to
+parse, the prose check reads punctuation, and two separate checks ask whether a
+variable is DOCUMENTED, which a row inside a conflict block is. The only check
+that went red went red for a consequence rather than the cause: it reported a
+variable as documented with no supported deploy able to set it, which sent two
+people to look at Terraform when the cause was four lines of git output in a
+table. What the new gate cannot catch is written into the tool: a conflict
+resolved by keeping one side whole, when the union was correct, leaves no
+marker at all and is invisible to it and to git.
+
+### Changed
+
+**The four solutions pages draw the product now.** They carried stock schematics
+that could have illustrated any product. They carry sixteen figures drawn as the
+artifacts this product actually produces: the egress rule table with its per-host
+mode, the twin ledger beside the live processors it refused to call, the
+attempted-effect receipt, a query plan that turns an index scan into a
+sequential one, the lock wait chain, and the buyer and seller rows a referential
+subset has to restore together. The wide figures are redrawn below the small
+breakpoint rather than scaled down: the host mode matrix is four mode columns
+and a grid of marks on a desktop, and on a phone the same data as one row per
+host naming only the mode that applies, so nothing sits behind a sideways
+scroll. Every state on these figures is carried by its shape and its label as
+well as its colour. The architecture page and the safety report page have folded
+into the product overview, and both URLs go there.
+
+**The control plane stack and module default `image_tag` to `v1.0.0`.** They
+were pinned to `v0.1.1`, deliberately, until the tag existed. `tools/tagsync`
+classifies both as live pins, meaning they are read by an apply from `main`
+rather than from a released tree, and the maintenance job reads the value with
+no `ignore_changes`, so pointing them at a tag before that tag published would
+not have produced a stale deployment, it would have produced a failed apply on
+the stack that runs the product.
+
+**The waitlist is gone.** It stored one address per person in a table nothing in
+this repository could read, and mailed nobody, on a domain that publishes no
+mail exchanger and an SPF policy authorising no outbound sender at all. Somebody
+who left an address was waiting for a message with no route to them. The
+function, its client, its scheduled probe and three error codes nothing could
+return any more are gone, and the sign-up page describes what pressing the
+button actually does instead.
+
+**The pricing page describes the two paid plans that exist.** It advertised a
+"Growth + Enterprise" band and a hero line about "Growth and Enterprise", and
+there is no Growth plan behind it: the control plane sells team and enterprise,
+the quota table knows free, team and enterprise, and the only prices an operator
+can configure are the two. A third name on a pricing page is a plan a reader can
+ask to buy and nobody can sell. No price number moved. Each paid plan now
+publishes how many people it holds, which is the question the removed seat
+picker used to imply and which was written down nowhere a reader could find it,
+and a test fails the build if those numbers and the enforced ones stop agreeing.
+
+<!-- relnotes:end -->
+
+### Security
+
+- The trust boundary page now says that masking and the scan that checks it are
+  one instrument rather than two, and what that means for the data a check
+  comment can carry. Both decide what to look at from
+  `information_schema.columns.data_type` and both accept the same six values, so
+  a column outside that list is not emptied by the fail-closed default and is
+  not read by the verification scan. It is copied. `citext`, which is the
+  ordinary Postgres type for an email address or a username, reports as
+  `USER-DEFINED` and is outside the list. That compounds with the one path on
+  which records already crossed the boundary: an invariant that does not hold
+  carries up to five rows into the check comment, so such a row can carry a real
+  production value. The page had said the scan covers every column; the sentence
+  is corrected rather than softened, and the page no longer describes the scan
+  as verifying the masking, because a check that shares its subject's blind spot
+  verifies nothing about that blind spot. No masking behaviour changes here, and
+  the page says why: widening the list is not additive, because a column copied
+  today would start being emptied, which changes `rules_digest` and invalidates
+  every existing golden.
+- CodeQL runs on this repository. Nothing was scanning our own code.
+
 ## v1.0.0
 
 The first stable release, and the first since v0.1.1 on 26 August 2026.
@@ -53,11 +910,38 @@ Stable, and breaking any of these costs a major version:
   signatures name.
 - **The error codes.** A code in the error reference keeps its meaning. Codes
   are the stable identifier for a refusal; the sentence beside one is not.
+- **The lint finding identifiers.** Every migration lint finding carries a
+  `LINT-NNN` identifier, listed in the lint findings reference. It is assigned
+  once, keeps its meaning, and is never reused, not even after the rule that
+  earned it is deleted. Match on it rather than on the rule name.
+- **The event stream.** An event type is not removed and does not change what
+  it means, and the envelope around it does not lose a field, change a field's
+  type, or make a required field optional. Types and fields are added as
+  features land, so ignore what you were not built to understand rather than
+  refusing the event. The `data` object is the exception and is not promised:
+  it is the type specific payload and its keys move with the code.
+- **The self-hosting configuration.** Every key in the Helm chart's
+  `values.yaml`, and every variable and output in the Terraform under
+  `infra/terraform`. A key or a variable will not be removed, renamed, or given
+  a different type, an optional input will not become required, and a new input
+  arrives with a default. This one changed in this release: it used to be on
+  the list below. A self hoster's values file and tfvars file are their
+  configuration, kept in their repository and applied by their pipeline, and a
+  rename does not fail that pipeline loudly. Helm accepts a key no template
+  reads and Terraform only warns about a variable nothing declares, so the
+  setting stops being in force while the apply still reports success. Outputs
+  are promised by name because two runbook commands read one. The values
+  themselves are not promised: `image_tag` names the release being cut, and
+  `tools/tagsync` exists to make sure it does. `tools/inputcheck` holds the tree
+  to a snapshot of every one of them, so a rename fails in the pull request
+  that proposes it rather than in somebody's upgrade.
 
 Explicitly not stable, and free to change in a minor release:
 
-- The Helm chart's values and the Terraform module's variables. The chart is
-  versioned separately and is at 0.1.1 for that reason.
+- The defaults and the validation rules those self-hosting inputs carry, and
+  what the Terraform creates behind them. The names and the types are the
+  contract; the resources are an implementation and a default moves with a
+  release.
 - Most of the control plane's HTTP API, which is mostly how the console and the
   engine speak to each other. The part that is published is named rather than
   described: every route the router serves is classified in
@@ -69,9 +953,10 @@ Explicitly not stable, and free to change in a minor release:
   lists every importable package with its classification and the reason for it,
   and one that is listed nowhere fails the build rather than arriving public by
   default.
-- Lint rule names and their findings, which move as the rules improve. The
-  stable identifier for a finding is its rule name within a release.
-- The event stream's set of types. Types are added as features land.
+- Lint rule names, and which findings a release reports. A rule is renamed when
+  a clearer name exists, and a release may find something an earlier one passed.
+  That is the product working, and it is why the identifier above is what to
+  match on.
 
 ### The boundary is now checked rather than described
 
@@ -168,10 +1053,13 @@ manifest or pipeline does.
   `deploy/docker/control-plane.Dockerfile` move together, the dependency
   install, the console build and the runtime, so an operator pulling the new
   tag gets one runtime rather than a mixture of two. The three examples move
-  with it, because an example is the first Dockerfile most people copy. Alpine
-  3.24 carries psql 18 under the unversioned `postgresql-client` package where
-  3.20 carried psql 16, and a client newer than the server is the direction
-  libpq supports, so the migration those examples run behaves as it did.
+  with it, because an example is the first Dockerfile most people copy. One of
+  them changes the psql its migration runs: the Go example's runtime moves from
+  Alpine 3.20 to 3.24, which carries psql 18 under the unversioned
+  `postgresql-client` package where 3.20 carried psql 16. A client newer than
+  the server is the direction libpq supports, so that migration behaves as it
+  did. The Next.js example does not move, because its Node base was already
+  built on Alpine 3.24 and was already giving it psql 18.
 - Every route to the hosted control plane says the same thing about it. The
   `/signin` and `/signup` tabs both read "Join the waitlist" and both
   descriptions said there was no hosted control plane, which a crawler, a
@@ -285,6 +1173,16 @@ manifest or pipeline does.
 <!-- relnotes:omit -->
 
 ### Added
+
+**Who may sign in, from the Helm chart.** `config.signinAllowlist` sets
+`AF_SIGNIN_ALLOWLIST` on the Deployment. The chart named every other setting the
+application reads and not this one, so a control plane installed from it on a
+public address accepted any GitHub account in the world, which is exactly the
+week the Terraform module's own comment describes. Left alone it sets nothing
+and behaviour is unchanged. An empty list is a real answer and means nobody, so
+the variable is set whenever the operator said anything at all, including an
+empty list: a block that vanished when the list was empty would turn the most
+restrictive intent into the least restrictive deployment.
 
 **Before an environment exists.** `af change` reads the diff of a pull request
 and says which checks will exercise what it touched, opening no environment and

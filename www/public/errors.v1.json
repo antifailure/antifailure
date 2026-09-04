@@ -190,6 +190,28 @@
       "planned": false
     },
     {
+      "code": "AF-BLD-006",
+      "area": "BLD",
+      "areaName": "Build",
+      "message": "The Docker endpoint refused the build request for service {service} before opening a build log: {detail}",
+      "resolution": "Nothing was built and no build log exists. Correct what the message names, then run 'af up' again. If it names a Dockerfile, its path is resolved inside build.context, and .dockerignore can exclude it.",
+      "docs": "https://antifailure.dev/docs/guides/build",
+      "retryable": false,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
+      "code": "AF-BLD-007",
+      "area": "BLD",
+      "areaName": "Build",
+      "message": "The build request for service {service} ended before a build log opened: {detail}",
+      "resolution": "Nothing was built and no build log exists. If Docker is unreachable, run 'af doctor'. For a cancellation or temporary Docker failure, run 'af up' again.",
+      "docs": "https://antifailure.dev/docs/guides/build",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-BLD-010",
       "area": "BLD",
       "areaName": "Build",
@@ -322,6 +344,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-007",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The source database uses the extension {extension}, and the Postgres the golden is built in does not carry it.",
+      "resolution": "Point database.provider at a service whose Postgres has {extension}, or drop the extension from the source schema. The docker provider builds a golden in the stock postgres image, which carries the contrib modules and nothing else, so PostGIS, pgvector, TimescaleDB and pg_cron are not there.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-DB-008",
       "area": "DB",
       "areaName": "Database",
@@ -402,11 +435,44 @@
       "code": "AF-DB-016",
       "area": "DB",
       "areaName": "Database",
-      "message": "database.source_url_env names {variable}, and {variable} holds nothing in this shell.",
-      "resolution": "Export {variable} with the read only connection string of the database to copy, then refresh again. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
+      "message": "database.source_url_env names {variable}, and no configured source has a value for it.",
+      "resolution": "Put the read only connection string of the database to copy in one of the searched sources: export {variable} in this shell, add it to .env, or run 'af secret set {variable}'. To build a golden with no production behind it, remove database.source_url_env and set database.seed instead.",
       "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-017",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The role in the connection string cannot read all of the source database: {detail}",
+      "resolution": "Grant what is listed, in every schema and not only public: 'GRANT USAGE ON SCHEMA <schema> TO <role>', 'GRANT SELECT ON ALL TABLES IN SCHEMA <schema> TO <role>', and the same for ALL SEQUENCES. Anything listed as row level security needs 'ALTER ROLE <role> BYPASSRLS' instead, which no grant provides.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-018",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "Row level security stops pg_dump from reading the source as this role: {detail}",
+      "resolution": "Copy as a role that is exempt, with 'ALTER ROLE <role> BYPASSRLS', or as the owner of the tables where row level security is not forced. Postgres refuses rather than filtering because a dump taken under a policy carries only the rows that role can see, and nothing in it would say so.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-019",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "{program} stopped while copying the source database: {detail}",
+      "resolution": "Run {program} yourself against the same connection string to see the whole transcript, or run this command again with -v. The copy only ever reads the source, so nothing in it was changed.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 5,
       "planned": false
     },
     {
@@ -438,6 +504,28 @@
       "message": "No table that looks like a users table was found, so there is nowhere to create the personas that sign in.",
       "resolution": "Name the table with auth.table if it is there under a name this did not recognise, use auth.adapter: seed to have the personas seeded instead, or give a persona 'login: none' if it never signs in, in which case no account is needed.",
       "docs": "https://antifailure.dev/docs/guides/personas",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-023",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The source database answered and refused the connection: {detail}",
+      "resolution": "Check the value of the variable named by database.source_url_env. The host and port are right, because a server replied, so it is the user, the password or the database name that is not.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-024",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The value of the variable named by database.source_url_env is not a connection string: {detail}",
+      "resolution": "Give it the URL form, 'postgres://user:password@host:5432/dbname', with any character outside A to Z, 0 to 9 and '-._~' in the password percent encoded.",
+      "docs": "https://antifailure.dev/docs/concepts/goldens",
       "retryable": false,
       "exitCode": 3,
       "planned": false
@@ -546,7 +634,7 @@
       "area": "EE",
       "areaName": "Enterprise",
       "message": "The license covers {seats} seats and they are all in use.",
-      "resolution": "Remove an inactive member, or contact licensing@antifailure.dev to add seats. No existing member was removed.",
+      "resolution": "Remove an inactive member, or ask for more seats at https://antifailure.dev/contact. No existing member was removed.",
       "docs": "https://antifailure.dev/docs/enterprise/licensing",
       "retryable": false,
       "exitCode": 6,
@@ -1174,6 +1262,17 @@
       "areaName": "Secrets",
       "message": "The encrypted local store has no passphrase: no system keyring answered and AF_SECRET_PASSPHRASE is not set.",
       "resolution": "Set AF_SECRET_PASSPHRASE, or store the passphrase in the system keyring on a platform that has one. There is deliberately no default: a store encrypted with a passphrase everybody knows only looks encrypted.",
+      "docs": "https://antifailure.dev/docs/guides/secrets",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-SEC-005",
+      "area": "SEC",
+      "areaName": "Secrets",
+      "message": "The variable {name} could not be looked up: {detail}",
+      "resolution": "Fix the source named in the message, or export {name} in this shell, which is the first source the chain reads and beats the one that failed.",
       "docs": "https://antifailure.dev/docs/guides/secrets",
       "retryable": false,
       "exitCode": 3,

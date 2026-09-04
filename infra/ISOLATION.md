@@ -6,14 +6,15 @@ documented in one.
 
 ## The boundary
 
-Every resource this project creates lives in one of four resource groups, all
+Every resource this project creates lives in one of five resource groups, all
 tagged `project=antifailure`:
 
 | Group | Holds | Budget |
 | --- | --- | --- |
 | `af-dev-eastus` | Development: registry, key vault, storage, the DNS zone for previews | 400 USD per month |
 | `af-corpus-eastus` | Corpus testing: the preview cluster and its spot node pool | 600 USD per month |
-| `af-cp-centralus` | The hosted control plane | 300 USD per month |
+| `af-cp-centralus` | The hosted control plane, staging | 300 USD per month |
+| `af-cp-prod-centralus` | The hosted control plane, production | 450 USD per month |
 | `af-tfstate-eastus` | Terraform remote state only | negligible |
 
 These were named `-scus` when this document was written, for South Central US.
@@ -22,8 +23,16 @@ That region is denied on this subscription by a policy assignment called
 `global`. Quota was never the constraint; both regions have 65 cores. Note that
 `af-web`, created by the site work, is also ours and also tagged.
 
-Nothing outside these four is created, modified, read for configuration, or
+Nothing outside these five is created, modified, read for configuration, or
 deleted. No role is ever assigned at subscription scope.
+
+Production is a SEPARATE GROUP from staging and that is the point rather than a
+naming convention. A `terraform destroy` aimed at staging, an azguard cleanup
+scoped to a tag, or a policy assignment applied to the group would otherwise all
+reach the control plane customers are using. The two also keep separate Terraform
+state, `control-plane.tfstate` and `control-plane-production.tfstate`, because
+the stack directory is shared and an apply of `production.tfvars` against
+staging's state proposes to destroy staging and create production.
 
 ## Resource groups that already exist in this subscription
 
@@ -157,7 +166,10 @@ as decoration, just written in prose.
 
 ```
 ME_afcp-env_af-cp-centralus_centralus
+ME_afcpprod-env_af-cp-prod-centralus_centralus
 ```
+
+One per Container Apps environment, so production's apply produced a second.
 
 It holds the infrastructure for the Container Apps environment. Azure names it,
 Azure creates it, Azure deletes it when the environment goes, and its
@@ -211,7 +223,9 @@ percent on the fourth of the month is the one worth acting on.
 `tools/cost estimate` reads a Terraform plan against `infra/pricing.yaml` and
 prints a projected monthly bill; `--budget N` makes it refuse. Every price in
 that file was read from the Azure retail prices API on the date recorded there.
-The control plane stack currently projects **32.49 USD a month**.
+The control plane stack projects **30.47 USD a month** for staging and
+**353.04** for production, the difference being almost entirely
+`high_availability`, which forces a General Purpose SKU and then runs two of it.
 
 A resource the estimator cannot price is reported `UNKNOWN` and suppresses the
 total. This is deliberate: an estimator that silently prices what it does not

@@ -27,7 +27,7 @@ locals {
   # table here, so the alert's threshold and the application's own ceiling are
   # derived from the same value. See modules/control-plane/database.tf for the
   # measurements and the az command that produced them.
-  connection_ceiling = floor(var.usable_connections * var.connection_percent / 100)
+  connection_ceiling = floor(var.usable_connections * var.database_connection_percent / 100)
 }
 
 resource "azurerm_monitor_metric_alert" "database_storage" {
@@ -83,7 +83,7 @@ resource "azurerm_monitor_metric_alert" "database_connections" {
   scopes              = [var.postgres_server_id]
   severity            = 2
 
-  description = "Peaked above ${local.connection_ceiling} active connections, which is ${var.connection_percent} percent of the ${var.usable_connections} this server will hand an ordinary role. Runbook: ${local.runbooks}/database-connections/"
+  description = "Peaked above ${local.connection_ceiling} active connections, which is ${var.database_connection_percent} percent of the ${var.usable_connections} this server will hand an ordinary role. Runbook: ${local.runbooks}/database-connections/"
 
   window_size = "PT15M"
   frequency   = "PT5M"

@@ -197,7 +197,16 @@ describe('signing in against the allowlist', {
     assert.match(html, /You have not been invited yet/)
     // And it gives them somewhere to go, which is the whole point.
     assert.match(html, /href="https:\/\/antifailure\.test\/signup"/)
-    assert.match(html, /Join the waitlist/)
+    // Not "Join the waitlist", which is what this label was and what it said
+    // for as long as there was a list behind the link. The list is gone, and so
+    // is the promise beside it: the page it points at now writes a row a person
+    // reads, on a domain that could never have mailed anybody back.
+    assert.match(html, /Ask for access/)
+    assert.doesNotMatch(
+      html,
+      /we will tell you when it opens/i,
+      'the refusal page promises a message on a domain that authorizes no sender',
+    )
     assert.equal(res.headers.get('set-cookie'), null, 'the page issued a session cookie')
   })
 
@@ -363,12 +372,12 @@ describe('an installation closed to everybody', {
   })
 })
 
-describe('a self-hosted installation with an allowlist and no waitlist', {
+describe('a self-hosted installation with an allowlist and nowhere to send anybody', {
   skip: (await available()) ? false : 'no Postgres at AF_TEST_DATABASE_URL',
 }, () => {
   // AF_SIGNUP_URL unset is the self-hosted default. The page must not invent a
   // link: an operator running their own allowlist has their own way of being
-  // asked, and pointing their users at the vendor's waitlist would be wrong.
+  // asked, and pointing their users at the vendor's contact form would be wrong.
   let api: ApiHarness
 
   before(async () => {
@@ -384,6 +393,7 @@ describe('a self-hosted installation with an allowlist and no waitlist', {
     ).text()
 
     assert.doesNotMatch(html, /waitlist/i)
+    assert.doesNotMatch(html, /Ask for access/)
     assert.doesNotMatch(html, /antifailure\.dev/)
     assert.doesNotMatch(html, /<a /, 'a page with nowhere to send anybody rendered a link')
     assert.match(html, /Ask an owner of this installation/)

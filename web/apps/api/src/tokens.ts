@@ -27,6 +27,7 @@
 
 import { appendAudit, sql, type Pool } from '@antifailure/db'
 import type { Clock } from './clock.ts'
+import type { Analytics } from './analytics/record.ts'
 import { randomBytes, createHash } from 'node:crypto'
 
 /** Who may mint or revoke an engine token. The same two roles the
@@ -63,6 +64,11 @@ export interface MintInput {
   actorUserId: string
   actorLabel: string
   origin: 'cli' | 'web'
+  /** Where the analytics event goes. Taken as an argument rather than reached
+   *  for, so the event commits with the token in one transaction: an onboarding
+   *  step recorded against a token that was rolled back is a funnel step that
+   *  did not happen. */
+  analytics: Analytics
 }
 
 /**
@@ -102,6 +108,19 @@ export async function mintEngineToken(
               ${input.actorUserId}::uuid, 'engine', ${now.toISOString()})
       RETURNING id`)
     const id = rows[0]!.id
+
+    // Before the insert would have been simpler to read and would have counted
+    // the one just made. This counts the tokens that existed BEFORE it, which
+    // is the number that answers "is this organization wiring CI for the first
+    // time" rather than "does this organization have a token".
+    const existing = await db.execute<{ n: string }>(sql`
+      SELECT count(*) AS n FROM engine_tokens WHERE kind = 'engine' AND id <> ${id}::uuid`)
+    await input.analytics.record(db, {
+      name: 'onboarding.engine_token_minted',
+      occurredAt: now,
+      orgId: input.orgId,
+      payload: { via: input.origin === 'cli' ? 'cli' : 'console', first: Number(existing[0]!.n) === 0 },
+    })
 
     // The prefix is the target, never the token. An audit log that recorded the
     // credential would undo the hashing three lines above it.

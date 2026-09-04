@@ -88,23 +88,14 @@ on:
         description: Multiplier on production's rate. observed_load only.
         required: false
         default: ''
-      seed:
-        description: Makes two runs do the same thing. A number for load, free text for exploration.
-        required: false
-        default: ''
-      concurrency:
-        description: Ceiling on requests in flight. http_scenario only.
-        required: false
-        default: ''
       run_id:
         description: The control plane's identifier for this run. Leave it empty; the engine asks.
         required: false
         default: ''
       seed:
         description: >-
-          Replays the same schedule or the same wander. A whole number for
-          scenario and any string for explore, because that is what each
-          command's own --seed takes.
+          Makes load, scenario and explore repeat the same choices. Use a whole
+          number for load or scenario, and any string for explore.
         required: false
         default: ''
       concurrency:
@@ -179,6 +170,78 @@ jobs:
           # deep clone shares no history with the base branch, so there is no
           # merge base to find. Without this the analysis fails with AF-DET-010.
           fetch-depth: 0
+
+      # BEFORE THE WORK, so the control plane knows which run this is while it
+      # still matters.
+      #
+      # A GitHub App is delivered a `workflow_run` event for EVERY workflow in
+      # your repository, and it cannot tell yours apart from your linter's
+      # until one of them says so. This step is a run saying so, and it proves
+      # it: the credential comes back only for an identity GitHub signed, whose
+      # `run_id` claim is GitHub's own rather than anything this file asserts.
+      #
+      # Claiming here rather than beside the report at the end buys three
+      # things. The check reads "Building the environment and running the
+      # agents" for the minutes that is true rather than "Waiting for a runner".
+      # A job that dies halfway is a run the control plane can name and cancel,
+      # which is its only route into the runtime holding your environment. And
+      # a run that dies is reported in seconds rather than at the deadline.
+      #
+      # AF_CONTROL_PLANE unset skips it, and this job comments for itself
+      # below. That is the self-hosted and no-account path and it stays working.
+      - name: Tell the control plane this run is the one checking this commit
+        id: claim
+        if: env.AF_CONTROL_PLANE != ''
+        env:
+          # ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN are put in the environment
+          # by the runner itself for any job with id-token: write, so they are
+          # used below without being declared here. Declaring them would read
+          # them at expression time, which is before the runner sets them.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # EVERY FAILURE HERE IS SURVIVED, AND THAT IS THE SHAPE OF THIS
+          # SCRIPT. The observability of a run is not the run: a control plane
+          # that is down, or a repository nobody has connected, must not turn a
+          # working check into a red job.
+          #
+          # `:-` on both runner variables rather than a bare read. Under
+          # `set -u` a bare read of an unset one ends the step, and on a pull
+          # request from a FORK GitHub sets NEITHER of them. That would make the
+          # one case this has to handle gracefully, an outside contributor who
+          # can fix nothing, the one case that goes red.
+          request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          if [ -z "$request_token" ] || [ -z "$request_url" ]; then
+            echo "This job was granted no workflow identity, so it cannot introduce itself."
+            echo "On a pull request from a fork GitHub withholds one, which is deliberate."
+            exit 0
+          fi
+
+          # The audience matters. Without one GitHub mints an identity for your
+          # organization's URL, which every workflow in it can obtain, and a
+          # credential any workflow can get is not a credential.
+          # `|| true` on the pipeline, because `set -o pipefail` would
+          # otherwise end the job on a curl that could not connect.
+          identity=$(curl -sS -H "Authorization: Bearer $request_token" \
+            "${request_url}&audience=antifailure-control-plane" |
+            jq -r '.value // empty' || true)
+          if [ -z "$identity" ]; then
+            echo "GitHub would not mint a workflow identity for this job."
+            exit 0
+          fi
+          token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+            -H "Authorization: Bearer ${identity}" \
+            -H 'content-type: application/json' \
+            -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
+            jq -r '.token // empty' || true)
+          if [ -z "$token" ]; then
+            echo "The control plane issued no callback credential for ${HEAD_SHA}."
+            echo "This run reports through the comment below instead."
+            exit 0
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
 
       - name: Install Antifailure
         # Every step gets a fresh process and a fresh PATH, so the step that
@@ -359,37 +422,19 @@ jobs:
       # below. That is the self-hosted and no-account path and it stays working.
       - name: Tell the control plane what this commit did
         id: publish
-        if: always() && env.AF_CONTROL_PLANE != '' && hashFiles('report.json') != ''
+        if: >-
+          always() && steps.claim.outputs.token != ''
+          && hashFiles('report.json') != ''
         env:
-          # ACTIONS_ID_TOKEN_REQUEST_URL and _TOKEN are put in the environment by
-          # the runner itself for any job with id-token: write, so they are used
-          # below without being declared here. Declaring them would read them at
-          # expression time, which is before the runner sets them.
+          TOKEN: ${{ steps.claim.outputs.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          # The identity token, asked for with the audience the control plane
-          # expects. Without an audience GitHub mints one for the repository
-          # owner's URL, which every workflow in the organization can get, and a
-          # credential that any workflow can obtain is not a credential.
-          identity=$(curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=antifailure-control-plane" |
-            sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
-          if [ -z "$identity" ]; then
-            echo "GitHub would not mint a workflow identity token."
-            echo "On a pull request from a fork it never will, which is deliberate."
-            exit 0
-          fi
-
-          token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
-            -H "Authorization: Bearer ${identity}" \
-            -H 'content-type: application/json' \
-            -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
-            sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-          if [ -z "$token" ]; then
-            echo "The control plane did not issue a callback credential for ${HEAD_SHA}."
-            exit 0
-          fi
+          # The credential the claim step already holds, rather than a second
+          # identity exchange. One run has one credential, it is good for an
+          # hour against this commit alone, and asking for another here would
+          # be the run introducing itself twice.
+          token="$TOKEN"
 
           # jq is on every GitHub-hosted runner. The report and the Markdown go
           # in as JSON values rather than being pasted into a string, because a

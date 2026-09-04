@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	dockerbuild "github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/client"
 
@@ -281,8 +282,7 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		log, buildErr, err = b.attempt(ctx, req, opts, extra, false)
 	}
 	if err != nil {
-		return res, aferrors.Wrap(err, aferrors.AFBLD001,
-			"service", req.Service, "duration", b.clock.Since(started).Round(time.Second).String())
+		return res, b.startFailure(err, req)
 	}
 
 	res.Log = log
@@ -291,6 +291,45 @@ func (b *DockerBuilder) Build(ctx context.Context, req Request) (Result, error) 
 		return res, buildFailure(buildErr, req, res.Duration.Round(time.Second).String())
 	}
 	return res, nil
+}
+
+// startFailure reports an error returned before Docker opened the response
+// stream. Result has no log on this path, so AF-BLD-001 cannot tell the reader
+// to inspect one. A permanent endpoint refusal and a request that was
+// cancelled or interrupted need different retry guidance.
+//
+// The endpoint's text can contain a credential. Redact it once here, before it
+// reaches the normal message, the wrapped error, JSON output, or an event.
+func (b *DockerBuilder) startFailure(err error, req Request) error {
+	raw := err.Error()
+	code := aferrors.AFBLD007
+	if cerrdefs.IsInvalidArgument(err) ||
+		cerrdefs.IsNotFound(err) ||
+		cerrdefs.IsUnauthorized(err) ||
+		cerrdefs.IsPermissionDenied(err) ||
+		cerrdefs.IsNotImplemented(err) ||
+		strings.Contains(raw, "Cannot locate specified Dockerfile") {
+		code = aferrors.AFBLD006
+	}
+
+	detail := b.redactor.String(raw)
+	cause := sanitizedBuildCause{message: detail, original: err}
+	return aferrors.Wrap(cause, code, "service", req.Service, "detail", detail)
+}
+
+// sanitizedBuildCause keeps cancellation identity without making the
+// original text reachable through the error chain. It deliberately does not
+// implement Unwrap. Verbose and JSON output both render Error, which returns
+// only the redacted message.
+type sanitizedBuildCause struct {
+	message  string
+	original error
+}
+
+func (e sanitizedBuildCause) Error() string { return e.message }
+
+func (e sanitizedBuildCause) Is(target error) bool {
+	return errors.Is(e.original, target)
 }
 
 // buildFailure names build.context when the build ran from the repository root
@@ -318,11 +357,10 @@ func buildFailure(err error, req Request, duration string) error {
 
 // attempt runs one build and reads its stream.
 //
-// Two errors come back and they are different things. The first is whether the
-// build could be STARTED, which is a fault of this process or the daemon. The
-// second is whether the build SUCCEEDED, which is a fault of the Dockerfile
-// and arrives inside the stream rather than from the call. Only the second is
-// worth showing somebody a log for, and only the first is worth retrying.
+// Two errors come back and they are different things. The first means Docker
+// did not open a response stream, so there is no build log. It may be a
+// permanent refusal or a temporary interruption. The second arrives inside
+// the stream after the build ran, so the log is the evidence to read.
 func (b *DockerBuilder) attempt(
 	ctx context.Context,
 	req Request,

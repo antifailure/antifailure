@@ -101,27 +101,3 @@ func TestRunnerSourceHonoursAnExplicitFrom(t *testing.T) {
 		t.Errorf("got %q, want the explicit %q, not the checkout at %q", got, other, root)
 	}
 }
-
-// Outside a checkout the search is the pair it always was, so the error names
-// the two directories that could plausibly hold a runner rather than every
-// directory between here and the filesystem root.
-func TestCheckoutRunnersStopsAtTwoWithoutACheckout(t *testing.T) {
-	work := filepath.Join(t.TempDir(), "a", "b", "c")
-	if err := os.MkdirAll(work, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got := checkoutRunners(work)
-	want := []string{
-		filepath.Join(work, "runner"),
-		filepath.Join(filepath.Dir(work), "runner"),
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("got %v, want %v", got, want)
-			break
-		}
-	}
-}

@@ -49,6 +49,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import type { Analytics } from '../analytics/record.ts'
+import { planName, subscriptionStatus } from '../analytics/normalize.ts'
 import { DEFAULT_PLAN } from '../limits.ts'
 import { ENTITLING_STATUSES, planForPrice, planForStatus, type StripeConfig } from './plans.ts'
 import { invoiceOf, subscriptionOf, type StripeInvoice, type StripeSubscription } from './stripe.ts'
@@ -196,6 +198,7 @@ export async function handleStripeDelivery(
   clock: Clock,
   config: StripeConfig,
   event: StripeEvent,
+  analytics: Analytics,
 ): Promise<StripeOutcome> {
   if (!HANDLED_EVENTS.includes(event.type)) {
     // Acknowledged and not recorded. A Stripe account emits dozens of event
@@ -255,7 +258,7 @@ export async function handleStripeDelivery(
       }
     }
 
-    const applied = await apply(db, clock, config, orgId, event)
+    const applied = await apply(db, clock, config, orgId, event, analytics)
     await db.execute(sql`
       UPDATE billing_events
       SET org_id = ${orgId}::uuid, outcome = ${applied.outcome},
@@ -283,6 +286,7 @@ export async function resolvePending(
   config: StripeConfig,
   orgId: string,
   customerId: string,
+  analytics: Analytics,
 ): Promise<{ resolved: number; details: string[] }> {
   const pending = await db.execute<{
     stripe_event_id: string
@@ -305,7 +309,7 @@ export async function resolvePending(
       created: row.event_created_at instanceof Date ? row.event_created_at : new Date(row.event_created_at),
       object: row.payload,
     }
-    const applied = await apply(db, clock, config, orgId, event)
+    const applied = await apply(db, clock, config, orgId, event, analytics)
     await db.execute(sql`
       UPDATE billing_events
       SET org_id = ${orgId}::uuid, outcome = ${applied.outcome},
@@ -334,15 +338,16 @@ async function apply(
   config: StripeConfig,
   orgId: string,
   event: StripeEvent,
+  analytics: Analytics,
 ): Promise<Outcome> {
   switch (event.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
       const subscription = subscriptionOf(event.object)
-      const written = await writeSubscription(db, clock, config, orgId, subscription, event.created)
+      const written = await writeSubscription(db, clock, config, orgId, subscription, event.created, analytics)
       if (written.outcome === 'stale') return written
-      const moved = await recomputePlan(db, clock, orgId)
+      const moved = await recomputePlan(db, clock, orgId, analytics)
       return { outcome: 'applied', detail: `${subscription.status}; ${moved}` }
     }
 
@@ -389,6 +394,7 @@ export async function writeSubscription(
   orgId: string,
   subscription: StripeSubscription,
   eventCreated: Date,
+  analytics: Analytics,
 ): Promise<Outcome> {
   const entitled = planForPrice(config, subscription.priceId)
   const now = clock.now().toISOString()
@@ -433,6 +439,20 @@ export async function writeSubscription(
       detail: 'an older event than the one this subscription was last written from; nothing changed',
     }
   }
+  await analytics.record(db, {
+    name: 'revenue.subscription_changed',
+    occurredAt: eventCreated,
+    orgId,
+    // The plan and the status. Never the amount, never the price identifier,
+    // never the customer: an analytics store kept for years to draw graphs from
+    // is not where a payment record belongs, and the subscriptions table
+    // already holds all of it.
+    payload: {
+      plan: planName(entitled ?? DEFAULT_PLAN),
+      status: subscriptionStatus(subscription.status),
+    },
+  })
+
   return { outcome: 'applied', detail: 'subscription written' }
 }
 
@@ -444,7 +464,12 @@ export async function writeSubscription(
  * property of all of them. Deterministic: the newest subscription in an
  * entitling status decides, and no subscription in one means free.
  */
-export async function recomputePlan(db: Db, clock: Clock, orgId: string): Promise<string> {
+export async function recomputePlan(
+  db: Db,
+  clock: Clock,
+  orgId: string,
+  analytics: Analytics,
+): Promise<string> {
   const live = await db.execute<{ plan: string; status: string }>(sql`
     SELECT plan, status FROM subscriptions
     WHERE org_id = ${orgId}::uuid
@@ -461,11 +486,26 @@ export async function recomputePlan(db: Db, clock: Clock, orgId: string): Promis
   }
   const plan = ENTITLING_STATUSES.includes(newest.status) ? newest.plan : wanted
 
-  const moved = await db.execute<{ plan: string }>(sql`
+  // The plan it is moving FROM, read in the same statement rather than before
+  // it. A separate SELECT would be a different snapshot from the UPDATE, so two
+  // deliveries landing together could each report the same old plan and the
+  // chart would show one upgrade twice.
+  const moved = await db.execute<{ was: string }>(sql`
+    WITH before AS (SELECT id, plan FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE)
     UPDATE organizations
     SET plan = ${plan}, updated_at = ${clock.now().toISOString()}
-    WHERE id = ${orgId}::uuid AND plan <> ${plan}
-    RETURNING plan`)
+    FROM before
+    WHERE organizations.id = before.id AND organizations.plan <> ${plan}
+    RETURNING before.plan AS was`)
+
+  if (moved.length > 0) {
+    await analytics.record(db, {
+      name: 'revenue.plan_changed',
+      occurredAt: clock.now(),
+      orgId,
+      payload: { from: planName(moved[0]!.was), to: planName(plan) },
+    })
+  }
   return moved.length > 0 ? `the plan is now ${plan}` : `the plan stays ${plan}`
 }
 

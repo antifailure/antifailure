@@ -210,16 +210,26 @@ type mintingRun struct {
 // closes, which is the whole lifecycle a command has.
 func runOne(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
 	t.Helper()
-	return runWith(t, r, h, env, true)
+	return runWith(t, r, h, env, true, "")
 }
 
 // runWithoutAddress is the same, for a repository that names no control plane.
 func runWithoutAddress(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
 	t.Helper()
-	return runWith(t, r, h, env, false)
+	return runWith(t, r, h, env, false, "")
 }
 
-func runWith(t *testing.T, r *runner, h *hosted, env map[string]string, addressed bool) *mintingRun {
+// runSignedIn is the same, for a machine somebody has run af login on. The CLI
+// hands the stored credential over rather than telemetry reading it, so a test
+// hands it over the same way.
+func runSignedIn(t *testing.T, r *runner, h *hosted, env map[string]string, stored string) *mintingRun {
+	t.Helper()
+	return runWith(t, r, h, env, true, stored)
+}
+
+func runWith(
+	t *testing.T, r *runner, h *hosted, env map[string]string, addressed bool, stored string,
+) *mintingRun {
 	t.Helper()
 
 	runnerSrv := httptest.NewServer(r)
@@ -252,14 +262,15 @@ func runWith(t *testing.T, r *runner, h *hosted, env map[string]string, addresse
 
 	out := &mintingRun{runner: r, plane: h, dir: dir}
 	tel, err := Attach(t.Context(), bus, Options{
-		StateDir:        dir,
-		EnvID:           "shop-main-a1b2",
-		Redactor:        redact.New(),
-		Clock:           fake,
-		State:           db,
-		ControlPlaneURL: address,
-		Getenv:          func(k string) string { return full[k] },
-		OnWarning:       func(s string) { out.warned = append(out.warned, s) },
+		StateDir:          dir,
+		EnvID:             "shop-main-a1b2",
+		Redactor:          redact.New(),
+		Clock:             fake,
+		State:             db,
+		ControlPlaneURL:   address,
+		ControlPlaneToken: stored,
+		Getenv:            func(k string) string { return full[k] },
+		OnWarning:         func(s string) { out.warned = append(out.warned, s) },
 	})
 	require.NoError(t, err)
 
