@@ -21,26 +21,6 @@ function lerp(from: number, to: number, t: number) {
   return from + (to - from) * ease(t);
 }
 
-function cameraAt(t: number) {
-  if (t < 0.3) {
-    return { x: lerp(0, -8, span(t, 0, 0.3)), y: 0, scale: lerp(1, 1.02, span(t, 0, 0.3)) };
-  }
-
-  if (t < 0.62) {
-    return {
-      x: lerp(-8, -20, span(t, 0.3, 0.62)),
-      y: lerp(0, -8, span(t, 0.3, 0.62)),
-      scale: lerp(1.02, 1.045, span(t, 0.3, 0.62)),
-    };
-  }
-
-  return {
-    x: lerp(-20, -42, span(t, 0.62, 1)),
-    y: lerp(-8, -12, span(t, 0.62, 1)),
-    scale: lerp(1.045, 1.06, span(t, 0.62, 1)),
-  };
-}
-
 function cursorAt(t: number) {
   if (t < 0.2) {
     return { x: lerp(168, 292, span(t, 0.04, 0.2)), y: lerp(150, 180, span(t, 0.04, 0.2)), click: false };
@@ -212,14 +192,10 @@ function Timeline({ t, compact = false }: { t: number; compact?: boolean }) {
 function DesktopScreen({ t }: { t: number }) {
   const report = ease(span(t, 0.76, 0.92));
   const metrics = ease(span(t, 0.56, 0.9));
-  const cam = cameraAt(t);
 
   return (
-    <div className="absolute inset-0 max-sm:hidden">
-      <div
-        className="absolute left-1/2 top-1/2 h-[390px] w-[760px] will-change-transform"
-        style={{ transform: `translate3d(calc(-50% + ${cam.x}px), calc(-50% + ${cam.y}px), 0) scale(${cam.scale})` }}
-      >
+    <div className="absolute inset-0 hidden items-center justify-center px-8 py-7 sm:flex">
+      <div className="relative h-[390px] w-[760px]">
         <div className="relative h-full overflow-hidden rounded-[28px] border border-black/[0.08] bg-white shadow-[0_22px_70px_rgba(15,34,38,0.14)]">
           <div className="absolute inset-x-0 bottom-0 h-[45%] bg-[linear-gradient(to_bottom,rgba(255,255,255,0),rgba(224,232,211,0.82))]" />
           <div className="relative p-8">
@@ -444,7 +420,7 @@ export function TwinIdeStage() {
       className="relative overflow-hidden rounded-[10px] border border-black/[0.11] bg-white font-sans tracking-tight shadow-[0_18px_60px_rgba(0,0,0,0.05)]"
       aria-label="A short Antifailure product demo showing a risky pull request, a contained run, replayed checkout traffic, and a failed release report with cleanup proof."
     >
-      <div className="relative h-[430px] overflow-hidden bg-[#f8f6ef] max-sm:h-[430px]" aria-hidden="true">
+      <div className="relative h-[456px] overflow-hidden bg-[#f8f6ef] max-sm:h-[430px]" aria-hidden="true">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_14%,rgba(102,143,93,0.12),transparent_30%),radial-gradient(circle_at_82%_76%,rgba(180,165,116,0.11),transparent_34%),linear-gradient(to_right,rgba(58,52,41,0.026)_1px,transparent_1px),linear-gradient(to_bottom,rgba(58,52,41,0.022)_1px,transparent_1px)] bg-[size:100%_100%,100%_100%,40px_40px,40px_40px]" />
         <DesktopScreen t={t} />
         <CompactScreen t={t} />
