@@ -82,6 +82,7 @@ gate: _reports
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "payment secrets reach the app"  just test-infra-config
     run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
@@ -951,6 +952,11 @@ inputcheck:
 # that has stopped being needed is reported so the file cannot rot.
 wirecheck:
     go run ./tools/wirecheck .
+
+# Mocked providers exercise the rendered payment references without cloud access.
+test-infra-config:
+    terraform -chdir=infra/terraform/modules/control-plane init -backend=false -input=false
+    terraform -chdir=infra/terraform/modules/control-plane test
 
 # No file in the tree carries a merge conflict marker.
 #

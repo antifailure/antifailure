@@ -338,36 +338,20 @@ locals {
   }
 }
 
-# Stripe's two credentials and Resend's one, read rather than written, and the
-# reason is the same one the GitHub App's key gets.
-#
-# THESE ARE NOT SEEDED EITHER, and the difference from github-client-secret
-# above is worth stating because it looks like the same case. A seeded secret is
-# written once as a placeholder and then owned by the operator, which means
-# there is a window where the vault holds a placeholder and the application is
-# running with it. For an OAuth secret that window is a sign-in that fails. For
-# a Stripe key it is billing reporting itself as ON at startup while every
-# charge is refused by Stripe, which is exactly the "partially configured"
-# state the application prints a warning about -- reached by the tool that was
-# supposed to configure it.
-#
-# So there is no placeholder and no tfvars input for the VALUE. A person puts
-# the real secret in the vault, then sets the switch that turns the feature on;
-# a plan with the switch on and no secret in the vault fails on these data
-# sources, naming the secret, which is a truthful refusal rather than a deploy
-# that comes up broken. self-hosting/azure.md has the two commands in order.
-data "azurerm_key_vault_secret" "stripe_secret_key" {
-  count        = var.stripe_price_team == "" ? 0 : 1
-  name         = var.stripe_secret_key_secret_name
-  key_vault_id = azurerm_key_vault.this.id
+# Stripe credentials are addressed by their versionless IDs, like the GitHub
+# App credentials above. The Container App identity reads their values. The
+# identity planning production holds no vault read permission and needs none.
+# Missing credentials therefore fail when Azure resolves the references during
+# deployment, rather than requiring the pull request identity to read them.
+locals {
+  stripe_secret_ids = var.stripe_price_team == "" ? {} : {
+    "stripe-secret-key"     = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.stripe_secret_key_secret_name}"
+    "stripe-webhook-secret" = "${trimsuffix(azurerm_key_vault.this.vault_uri, "/")}/secrets/${var.stripe_webhook_secret_secret_name}"
+  }
 }
 
-data "azurerm_key_vault_secret" "stripe_webhook_secret" {
-  count        = var.stripe_price_team == "" ? 0 : 1
-  name         = var.stripe_webhook_secret_secret_name
-  key_vault_id = azurerm_key_vault.this.id
-}
-
+# Resend still uses a data source, so enabling mail requires vault read access
+# for the planning identity. It is not part of the billing switch.
 data "azurerm_key_vault_secret" "resend_api_key" {
   count        = var.mail_from == "" ? 0 : 1
   name         = var.resend_api_key_secret_name
