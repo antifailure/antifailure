@@ -91,18 +91,20 @@ function Install() {
   return (
     <Card
       title="Install the engine"
-      note="One command, on the machine the work happens on."
+      note="Install the command line and prepare its browser runner."
     >
       <div className="space-y-3 px-4 py-4">
         <CommandBlock command={INSTALL} said="Install command copied to the clipboard" />
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
-          Downloads the release for your platform, checks it against the
-          published checksum, and puts <code className="font-mono">af</code> and
-          its runner under <code className="font-mono">~/.antifailure</code>,
-          with that directory added to the file your login shell reads. It is
-          POSIX <code className="font-mono">sh</code> rather than bash, so it
-          works in a container as well as on a laptop, and it is the same file
-          served at that address if you would rather read it first.
+          Downloads and verifies the release for your machine, then installs
+          <code className="font-mono"> af</code> and its runner under
+          <code className="font-mono"> ~/.antifailure</code>. Run this in a
+          terminal on the machine where you will test your application.
+        </p>
+        <CommandBlock command="af runner install" said="Runner setup command copied to the clipboard" />
+        <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+          With Node.js installed, this prepares the browser runner that executes
+          your workflows. Docker runs the isolated environment.
         </p>
       </div>
     </Card>
@@ -119,7 +121,7 @@ function SignIn({ origin }: { origin: string | null }) {
   return (
     <Card
       title="Sign this terminal in"
-      note="The device authorization grant. Nothing is pasted and nothing is copied through a clipboard."
+      note="Connect your terminal to the account you are using here."
     >
       <div className="space-y-3 px-4 py-4">
         {command === null ? (
@@ -134,18 +136,14 @@ function SignIn({ origin }: { origin: string | null }) {
           <CommandBlock command={command} said="Sign-in command copied to the clipboard" />
         )}
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
-          It prints an eight character code and opens this control plane in a
-          browser. Check that the code on the screen is the code in your
-          terminal, approve it, and the token goes from here straight into the
-          operating system&rsquo;s credential store. Nobody is ever shown it, no
-          clipboard carries it, and it never reaches a shell history file.
+          Your terminal opens an approval page. Match its code to the one in
+          your terminal, then approve. The credential is stored securely on
+          your machine, so you do not need to copy a secret.
         </p>
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
-          The token can read environments and runs and write events, and nothing
-          else. It cannot manage members, change policy, or touch a provider
-          key. <code className="font-mono">af login --scope providers.write</code>{" "}
-          asks for more, and what was asked for is on the approval screen, so a
-          capability cannot be granted without being read.
+          This lets the terminal report environments and results to your
+          organization. Managing members, policy and provider keys requires
+          separate permissions.
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
           <LinkButton href="/device" variant="secondary">
@@ -163,30 +161,70 @@ function SignIn({ origin }: { origin: string | null }) {
 }
 
 function FirstRun() {
+  // The signed-in content appears after the document's initial hash lookup.
+  // Complete a direct link once this target exists, without smooth motion.
+  useEffect(() => {
+    if (window.location.hash === "#first-run") {
+      document.getElementById("first-run")?.scrollIntoView();
+    }
+  }, []);
   return (
+    <div id="first-run" className="scroll-mt-6">
     <Card
-      title="Get a first result"
-      note="Neither of these needs an account. Both run entirely on your machine."
+      title="Run your first check"
+      note="Run these in your application checkout. The environment runs on your machine; a signed-in terminal reports its results here."
     >
       <div className="space-y-5 px-4 py-4">
         <div className="space-y-2">
+          <h3 className="text-[14px] font-medium text-ink">1. Describe your app</h3>
           <CommandBlock command="af init" said="af init copied to the clipboard" />
           <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
-            Reads the repository and writes{" "}
-            <code className="font-mono">antifailure.yaml</code>: the services it
-            found, the port each listens on, the migration command, and a
-            network policy derived from the SDKs you depend on. It runs nothing
-            from the repository, and everything it reports names the file it
-            came from.
+            Reads your repository and writes{" "}
+            <code className="font-mono">antifailure.yaml</code>. Review the
+            services, database setup and network rules it detects, plus the test
+            accounts and workflows it proposes. A workflow describes something
+            a user should be able to do in your app.
           </p>
         </div>
         <div className="space-y-2">
+          <h3 className="text-[14px] font-medium text-ink">2. Check what is ready</h3>
           <CommandBlock command="af start" said="af start copied to the clipboard" />
           <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
-            Says where you are and what the single next command is, read off
-            that machine as it is right now rather than off a record of what it
-            last did. It is the one command worth remembering, and it is safe to
-            run at any point because it writes nothing.
+            Checks your machine and configuration, then names the next step.
+            Resolve the prerequisites it reports before continuing. You can
+            run this again whenever you are unsure what to do next.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-[14px] font-medium text-ink">3. Create an isolated environment</h3>
+          <CommandBlock command="af up" said="af up copied to the clipboard" />
+          <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+            Builds and starts a copy of your app with its own database and
+            network policy. If you use production data, review the masking
+            rules first: masking replaces sensitive values in the copy before
+            tests use it. The source database is read, not rewritten.
+          </p>
+          <LinkButton href="https://antifailure.dev/docs/concepts/masking" variant="secondary">
+            Understand masking
+          </LinkButton>
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-[14px] font-medium text-ink">4. Execute your workflows</h3>
+          <CommandBlock command="af test" said="af test copied to the clipboard" />
+          <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+            A run is one execution of the workflows in your manifest. The runner
+            uses your app in a browser and reports each verdict with evidence.
+            Open Runs to inspect the result. A blocked or unverified workflow
+            needs attention; it is not a successful test.
+          </p>
+          <LinkButton href="/runs" variant="secondary">View run results</LinkButton>
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-[14px] font-medium text-ink">5. Remove the environment</h3>
+          <CommandBlock command="af down" said="af down copied to the clipboard" />
+          <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+            Stops and removes the resources created for this environment. Use
+            this after inspecting a result, including after a failed startup.
           </p>
         </div>
         <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
@@ -197,6 +235,7 @@ function FirstRun() {
         </p>
       </div>
     </Card>
+    </div>
   );
 }
 
@@ -423,13 +462,18 @@ export default function CliPage() {
   return (
     <Page
       title="Command line"
-      lede="The engine runs on your machine and in your CI, never on this control plane. Install it, sign this terminal in, and run it: three commands, and the runs appear here. What CI needs is a different credential and it comes last."
+      lede="Install the engine, connect your terminal to this account, then create an isolated environment and run your workflows. The steps below take you through a result and cleanup."
     >
       <div className="space-y-6">
         <Install />
         <SignIn origin={origin} />
         <FirstRun />
-        <ForCI origin={origin} />
+        <details>
+          <summary className="cursor-pointer rounded-md px-1 py-3 text-[13px] font-medium text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink">
+            Next: run checks in CI
+          </summary>
+          <div className="mt-3"><ForCI origin={origin} /></div>
+        </details>
         <Tokens mayManage={may(role, "tokens.manage")} csrf={csrf} />
       </div>
     </Page>

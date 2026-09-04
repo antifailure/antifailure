@@ -28,10 +28,53 @@
  * this gets the envelope with the right TypeScript type on it, which is the
  * shape of bug that survives a compiler and a review.
  *
- * Optional all the way down rather than asserted, because a body that is not
- * the expected shape has already failed and throwing a TypeError here would
- * replace whatever the control plane said with a stack trace.
+ * HTTP success does not prove that this envelope exists. Returning undefined
+ * made the hook report ready while Loaded kept a skeleton on screen forever.
+ * Refuse a missing envelope with the error the existing retry UI understands.
+ * Null, false, zero and empty collections remain valid endpoint results.
  */
-export function trpcData<T>(body: unknown): T {
-  return (body as { result?: { data?: T } } | null)?.result?.data as T;
+export function trpcData<T>(body: unknown, status = 200): T {
+  if (record(body) && Object.hasOwn(body, "error")) {
+    const error = body.error;
+    const message = typeof error === "string" ? error : record(error) ? error.message : undefined;
+    const code = record(error) && record(error.data) ? error.data.code : undefined;
+    if (typeof message === "string" && message.trim()) {
+      throw new ApiError(message, status, typeof code === "string" ? code : "UNKNOWN");
+    }
+    throw incompleteResponse(status);
+  }
+  if (!record(body) || !record(body.result) || !Object.hasOwn(body.result, "data") || body.result.data === undefined) {
+    throw incompleteResponse(status);
+  }
+  return body.result.data as T;
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function incompleteResponse(status: number): ApiError {
+  return new ApiError("The control plane returned an incomplete response. Try again.", status, "INVALID_RESPONSE");
+}
+
+/** Parsing and envelope validation are shared by queries and mutations. */
+export async function trpcResponse<T>(response: Response): Promise<T> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw incompleteResponse(response.status);
+  }
+  return trpcData<T>(body, response.status);
 }

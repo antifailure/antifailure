@@ -227,14 +227,22 @@ function Create({ onRequested }: { onRequested: () => void }) {
             <Empty
               title="No repositories connected"
               action={
-                <LinkButton href="/cli" variant="secondary">
-                  Bring one up from a terminal
-                </LinkButton>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {session.data?.githubAppInstallUrl ? (
+                    <LinkButton href={session.data.githubAppInstallUrl} variant="secondary">
+                      Connect a GitHub repository
+                    </LinkButton>
+                  ) : null}
+                  <LinkButton href="/cli" variant="secondary">
+                    Start from your terminal
+                  </LinkButton>
+                </div>
               }
             >
-              One appears here once the GitHub App reports an installation that
-              includes it. That is not the only way in: the engine brings an
-              environment up from the checkout you already have.
+              For checks in GitHub, install the App on your repository and
+              configure its Antifailure workflow. For a first local check, use
+              the application checkout you already have. Connecting a repository
+              alone does not start an environment.
             </Empty>
           ) : (
             <form
@@ -500,7 +508,7 @@ function Environments() {
   return (
     <Page
       title="Environments"
-      lede="Every environment this organization has, newest first. State is what the engine last reported, not what was asked for."
+      lede="An environment is an isolated copy of your app where workflows can run safely. This list shows what the engine last reported, newest first."
     >
       {selected ? (
         <div className="mb-6">
@@ -522,13 +530,13 @@ function Environments() {
                 title="No environments yet"
                 action={
                   <LinkButton href="/cli" variant="secondary">
-                    Start with the command line
+                    Run your first check
                   </LinkButton>
                 }
               >
-                An environment appears here the first time an engine reports
-                one. Nothing has yet, which is what an organization looks like
-                before its first run, not something being wrong.
+                Create a copy of your app, execute a workflow against it, then
+                inspect the result under Runs. The command-line guide walks
+                through setup, execution and cleanup.
               </Empty>
             ) : (
               <>
@@ -587,7 +595,14 @@ function Environments() {
       </Card>
 
       <div className="mt-6">
-        <Runtimes />
+        {state.status === "ready" && state.data.length === 0 ? (
+          <details>
+            <summary className="cursor-pointer rounded-md px-1 py-3 text-[13px] font-medium text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink">
+              Optional: name where environments run
+            </summary>
+            <div className="mt-3"><Runtimes /></div>
+          </details>
+        ) : <Runtimes />}
       </div>
     </Page>
   );
