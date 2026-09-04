@@ -479,6 +479,28 @@ describe(
       assert.equal((await generation(head))?.state, 'passed')
     })
 
+    for (const [name, extra, conclusion] of [
+      ['load policy failure', { Findings: [{ Level: 'fail', Rule: 'load_regression' }] }, 'failure'],
+      ['incomplete load', { Load: { Sent: 0, Unavailable: 'all routes refused' } }, 'action_required'],
+    ] as const) {
+      it(`a reported ${name} reaches the GitHub check`, async () => {
+        const head = sha(name)
+        await deliver('pull_request', pullRequestPayload('opened', 301, head))
+        await deliver('workflow_run', workflowRunPayload('in_progress', head, 5301))
+        const token = await callbackFor(head, 5301)
+        const response = await h.fetch('/v1/pr/report', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            head_sha: head,
+            report: { Workflows: [{ Name: 'read', Verdict: 'pass' }], ...extra },
+          }),
+        })
+        if (response.status !== 200) throw new Error(`report refused: ${response.status}`)
+        assert.equal(checkFor(head)?.conclusion, conclusion)
+      })
+    }
+
     // -----------------------------------------------------------------------
     // ordering: callback then request
     // -----------------------------------------------------------------------

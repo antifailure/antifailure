@@ -33,6 +33,7 @@ import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { suspensionReason } from '../ingest.ts'
 import { GitHubApiError, GitHubPermissionError, type RepositoryApi } from './api.ts'
+import { countPolicyAndLoad } from './findings.ts'
 import {
   CHECK_NAME,
   COMMENT_MARKER,
@@ -1134,6 +1135,7 @@ export function decodeReport(value: unknown): DecodedReport {
     }
   }
 
+  countPolicyAndLoad(run, counts)
   return {
     counts,
     environment: text(run.Environment),
