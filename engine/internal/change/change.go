@@ -533,7 +533,7 @@ func available(c Check, m *schema.Manifest) (bool, string) {
 		return true, ""
 	case CheckLoad:
 		if m.Load == nil || !m.Load.Enabled {
-			return false, "load is off in the manifest, and af ci generates it only with --load"
+			return false, "load is off in the manifest, so af ci runs it only when it is handed --load"
 		}
 		return true, ""
 	case CheckEgress:

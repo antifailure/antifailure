@@ -310,6 +310,7 @@ jobs:
             --mode pr \
             --report "$GITHUB_WORKSPACE/dogfood-report.md" \
             --report-json "$GITHUB_WORKSPACE/dogfood-report.json" \
+            --require-load \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
 
       # The verdict, to the check the App posts on this pull request.
@@ -697,6 +698,8 @@ jobs:
             --af "$GITHUB_WORKSPACE/bin/af" \
             --mode nightly \
             --refresh-golden \
+            --require-load \
+            --report-json "$GITHUB_WORKSPACE/dogfood-report.json" \
             --record "$GITHUB_WORKSPACE/dogfood-record.json"
 
       - name: Nothing was left behind
@@ -719,6 +722,7 @@ jobs:
           name: nightly-${{ strategy.job-index }}
           path: |
             dogfood-record.json
+            dogfood-report.json
             ${{ matrix.manifest }}/.antifailure/logs
           retention-days: 30
           # Same reason as the control plane job above: without this the log is

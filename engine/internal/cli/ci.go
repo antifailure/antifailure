@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // af ci is the whole check in one command, because that is how it is used.
@@ -51,6 +52,9 @@ The agents drive the workflows, the invariants are asked of the data, the
 migrations are rehearsed against a throwaway branch of the golden, and what the
 environment reached for is summarised. Every finding is ranked by the manifest's
 policy block, which decides what fails the check and what is only reported.
+
+Load runs when the manifest enables it. A missing traffic source produces a
+read-only smoke from the literal safe routes, not a production benchmark.
 
 Teardown happens whatever the outcome, including a failure and including an
 interrupt, because an environment that outlives its pull request is the leak
@@ -211,7 +215,7 @@ change.`),
 			migration = readDatabase(ctx, e, o, gate,
 				insights.Configure(m.Insights), &run, baseline, saveBaseline)
 
-			if withLoad {
+			if shouldRunLoad(m, withLoad) {
 				e.Out.Section("Generating load")
 				// DefaultDuration rather than Duration, so the manifest's own
 				// load.duration still decides. The hardcoded 30s used to sit
@@ -226,6 +230,7 @@ change.`),
 					// section and no finding, and silence is read as success.
 					e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), lErr.Error())
 					run.Notes = append(run.Notes, "the load run did not complete: "+lErr.Error())
+					run.Load = incompleteLoadReport(res, refused, lErr)
 				default:
 					p95, errorRate := o.Thresholds()
 					run.Load = loadReport(res, refused, p95, errorRate, &run)
@@ -257,7 +262,8 @@ change.`),
 	cmd.Flags().StringVar(&jsonOutput, "report-json", "",
 		"Write the same report here as JSON, for a program to read")
 	cmd.Flags().BoolVar(&skipTeardown, "keep", false, "Leave the environment up, for debugging a failure")
-	cmd.Flags().BoolVar(&withLoad, "load", false, "Generate load as well as running the workflows")
+	cmd.Flags().BoolVar(&withLoad, "load", false,
+		"Generate load even when the manifest's load block is off")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Give up after this long")
 	cmd.Flags().StringVar(&docsBase, "docs", "", "Where documentation links point")
 	cmd.Flags().StringVar(&runner, "runner", "", "Path to the runner's entry point")
@@ -267,6 +273,12 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+// shouldRunLoad honors the manifest and permits an explicit upward override.
+// The flag cannot silently disable a check the manifest requires.
+func shouldRunLoad(m *schema.Manifest, forced bool) bool {
+	return forced || (m != nil && m.Load != nil && m.Load.Enabled)
 }
 
 // ciExit turns the verdict into an exit status.
@@ -596,6 +608,16 @@ func reportTeardown(e *Env, td *env.Teardown, err error) {
 // at the call site, so `af ci --load` said the same thing whether the safe list
 // let through every route or one out of forty. `af load run` has always
 // reported it. Found by `loadgolden`, which had the other half of this block.
+func incompleteLoadReport(res *load.Result, refused []load.Route, cause error) *report.Load {
+	if res == nil {
+		res = &load.Result{}
+	}
+	var run report.Run
+	l := loadReport(res, refused, 0, 0, &run)
+	l.Unavailable = cause.Error()
+	return l
+}
+
 func loadReport(
 	res *load.Result, refused []load.Route, p95Increase, errorRate float64, run *report.Run,
 ) *report.Load {
@@ -603,11 +625,19 @@ func loadReport(
 		Sent: res.Sent, Rate: res.Rate,
 		ErrorRate: res.ErrorRate, P95Ms: res.Overall.P95Ms,
 		Refused: refusedRoutes(refused),
+		Source:  res.Source,
+	}
+	for _, route := range res.Routes {
+		l.Routes = append(l.Routes, report.LoadRoute{Route: route.Route, Sent: route.Sent, Errors: route.Errors})
+	}
+	if res.Sent == 0 {
+		l.Unavailable = "the load run completed without sending any requests"
 	}
 	for _, b := range res.Breaches(p95Increase, errorRate) {
 		l.Regressed = append(l.Regressed, b.What)
 	}
 	if res.InertP95(p95Increase) {
+		l.Unavailable = "no route had a baseline for the configured p95 threshold"
 		run.Notes = append(run.Notes,
 			"load.thresholds sets p95_increase and no route had a baseline to compare against, "+
 				"so nothing was measured against it")

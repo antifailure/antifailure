@@ -334,14 +334,27 @@ insights:
   query_regression: true
   plan_diff: true
 
+policy:
+  # This is an availability smoke with no timing baseline. An observed error
+  # rate breach must fail dogfood rather than leave a warning beside success.
+  load_regression: fail
+
 load:
   enabled: true
   source: none
   # A smoke, not a benchmark. The question is whether the control plane answers
   # under any load at all, on a shared CI runner where a number would mean
   # nothing anyway.
-  scale: 0.05
-  duration: 60s
+  #
+  # scale was 0.05 and it was a fraction of a rate that does not exist. It
+  # means a multiplier on PRODUCTION'S arrival rate, and `source: none` has no
+  # production to take one from, so the number it multiplied was the default
+  # shape's 5 requests a second. A quarter of a request a second for a minute
+  # is fifteen requests, which is not a smoke of anything. 1 against a
+  # synthesised 5 is the honest reading of "as fast as the default sends", and
+  # thirty seconds of it is 150 requests across the four pages below.
+  scale: 1
+  duration: 30s
   safe_routes:
     - GET /environments
     - GET /runs

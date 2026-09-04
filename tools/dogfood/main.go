@@ -66,9 +66,10 @@ func main() {
 		// written, with no caller.
 		reportJSON = flag.String("report-json", "",
 			"Where af ci writes the same report as JSON, for the control plane")
-		scale   = flag.Float64("budget-scale", 1, "Multiply every budget, for a slower machine")
-		refresh = flag.Bool("refresh-golden", false, "Refresh the golden first, as the nightly does")
-		keep    = flag.Bool("keep", false, "Leave the environment up, for debugging")
+		scale       = flag.Float64("budget-scale", 1, "Multiply every budget, for a slower machine")
+		refresh     = flag.Bool("refresh-golden", false, "Refresh the golden first, as the nightly does")
+		keep        = flag.Bool("keep", false, "Leave the environment up, for debugging")
+		requireLoad = flag.Bool("require-load", false, "Require a completed load report with actual requests")
 	)
 	flag.Parse()
 
@@ -90,6 +91,7 @@ func main() {
 	r := &runner{
 		root: abs, af: binary, mode: *mode, scale: *scale,
 		keep: *keep, refresh: *refresh, reportPath: *report, reportJSONPath: *reportJSON,
+		requireLoad: *requireLoad,
 	}
 	run := r.do()
 
@@ -183,6 +185,7 @@ type runner struct {
 	// reportPath because the Markdown is read by a person on the pull request
 	// and this one is read by the control plane's check.
 	reportJSONPath string
+	requireLoad    bool
 }
 
 // Step is one command, timed and judged.
@@ -275,6 +278,7 @@ func (r *runner) do() *Run {
 	ci := r.step(run, "ci", append([]string{r.af}, args...)...)
 
 	r.readVerdicts(run)
+	r.readLoadEvidence(run)
 
 	// Only ask about events when the run reached the point of making an
 	// environment. `af ci` refusing a directory with no manifest produces no

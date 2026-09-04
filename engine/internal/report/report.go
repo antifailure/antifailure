@@ -95,11 +95,15 @@ func (i Invariant) Violated() bool { return i.Error == "" && !i.Held }
 
 // Load is a traffic result.
 type Load struct {
-	Sent      int
-	Rate      float64
-	ErrorRate float64
-	P95Ms     float64
-	Regressed []string
+	// Unavailable distinguishes an incomplete experiment from a healthy one.
+	Unavailable string
+	Source      string
+	Routes      []LoadRoute
+	Sent        int
+	Rate        float64
+	ErrorRate   float64
+	P95Ms       float64
+	Regressed   []string
 	// Refused are the routes the generator would not send, because nothing in
 	// the manifest named them safe.
 	//
@@ -109,6 +113,13 @@ type Load struct {
 	// it. The number of requests cannot show it: sending 500 requests at one
 	// route looks like sending 500 across forty.
 	Refused []string
+}
+
+// LoadRoute is the observed request count for one endpoint.
+type LoadRoute struct {
+	Route  string
+	Sent   int
+	Errors int
 }
 
 // Egress summarises outbound traffic.
@@ -311,6 +322,8 @@ func (r Run) Verdict() string {
 	switch {
 	case counts[VerdictFail] > 0, r.InvariantsViolated() > 0, fail > 0:
 		return VerdictFail
+	case r.Load != nil && r.Load.Unavailable != "":
+		return VerdictBlocked
 	case counts[VerdictFlaky] > 0:
 		return VerdictFlaky
 	case warn > 0:
@@ -644,8 +657,17 @@ func (r Run) Markdown() string {
 	}
 
 	if l := r.Load; l != nil {
+		if l.Unavailable != "" {
+			fmt.Fprintf(&b, "Load was inconclusive: %s\n", oneLine(l.Unavailable))
+		}
 		fmt.Fprintf(&b, "Load: %d requests at %.0f a second, p95 %.0fms, %.1f%% failed.\n",
 			l.Sent, l.Rate, l.P95Ms, l.ErrorRate*100)
+		if l.Source != "" {
+			fmt.Fprintf(&b, "Traffic source: %s.\n", oneLine(l.Source))
+		}
+		for _, route := range l.Routes {
+			fmt.Fprintf(&b, "- %s: %d requests, %d errors.\n", oneLine(route.Route), route.Sent, route.Errors)
+		}
 		if len(l.Regressed) > 0 {
 			fmt.Fprintf(&b, "Slower than production: %s\n", strings.Join(l.Regressed, ", "))
 		}

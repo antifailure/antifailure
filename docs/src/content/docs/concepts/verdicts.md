@@ -21,6 +21,11 @@ When more than one applies, the run reports the worst: `fail`, then `flaky`,
 then `warn`, then `blocked`, then `unverified`. Whichever word wins, the
 comment lists every finding worst first, so nothing is hidden by the order.
 
+A required load experiment that did not complete is `blocked`, even if another
+check produced a warning or intermittent result. A real failure still wins.
+Completed workflows do not stand in for load that sent no requests or could
+not measure its required baseline.
+
 ## Blocked is not a failure
 
 `blocked` is the one worth reading twice. It means a browser did not start, an
