@@ -104,6 +104,16 @@ export interface UnscopedOptions {
    *  organization it belonged to has been purged. There is no membership left
    *  to authorise against, so the link is the authorisation. */
   deletionTokenHash?: Buffer
+  /** The client_id of a registered MCP client, for reading its registration.
+   *  A client belongs to no organization, so there is no tenant to scope by;
+   *  what confines the read is that the caller already holds the value. */
+  mcpClientId?: string
+  /** The hash of an MCP authorization code, for minting it at the consent
+   *  screen and redeeming it at the token endpoint. The redemption has no
+   *  session and no tenant by definition and holds only this. */
+  mcpCodeHash?: Buffer
+  /** A presented MCP access token, isolated from engine bearer lookup. */
+  mcpTokenHash?: Buffer
 }
 
 /** What a verified webhook delivery declares it is about. */
@@ -304,6 +314,11 @@ export function createPool(options: PoolOptions): Pool {
     fn: (db: Db) => Promise<T>,
   ): Promise<T> {
     return root.transaction(async (tx) => {
+      // Clear the MCP lookup scopes for every entry point, including webhook
+      // and operator paths. Explicit settings below replace these defaults.
+      await tx.execute(rawSql`SELECT set_config('antifailure.mcp_client_id', '', true),
+        set_config('antifailure.mcp_code_hash', '', true),
+        set_config('antifailure.mcp_token_hash', '', true)`)
       await tx.execute(rawSql`SELECT set_config('statement_timeout', ${String(statementTimeout)}, true)`)
       if (options.rowSecurity === false) {
         await tx.execute(rawSql`SELECT set_config('row_security', 'off', true)`)
@@ -353,6 +368,12 @@ export function createPool(options: PoolOptions): Pool {
           // has no business declaring either.
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
+          // Cleared for the same reason. An MCP client belongs to no
+          // organization and an authorization code has none until it is
+          // redeemed, so a transaction that declares a tenant, an account, a
+          // customer or a delivery has no business declaring either.
+          'antifailure.mcp_client_id': '',
+          'antifailure.mcp_code_hash': opts?.mcpCodeHash?.toString('hex') ?? '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
@@ -406,6 +427,11 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.deletion_token_hash': opts?.deletionTokenHash
             ? opts.deletionTokenHash.toString('hex')
             : '',
+          'antifailure.mcp_client_id': opts?.mcpClientId ?? '',
+          'antifailure.mcp_token_hash': opts?.mcpTokenHash?.toString('hex') ?? '',
+          'antifailure.mcp_code_hash': opts?.mcpCodeHash
+            ? opts.mcpCodeHash.toString('hex')
+            : '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
@@ -448,6 +474,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': '',
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
+          'antifailure.mcp_client_id': '',
+          'antifailure.mcp_code_hash': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
@@ -490,6 +518,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.stripe_customer': customer,
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
+          'antifailure.mcp_client_id': '',
+          'antifailure.mcp_code_hash': '',
           'antifailure.github_delivery': '',
           'antifailure.pr_callback_hash': '',
           'antifailure.sweeper': '',
@@ -709,6 +739,8 @@ export function createPool(options: PoolOptions): Pool {
           'antifailure.sweeper': '',
           'antifailure.invitation_token_hash': '',
           'antifailure.deletion_token_hash': '',
+          'antifailure.mcp_client_id': '',
+          'antifailure.mcp_code_hash': '',
           // The two operator settings, cleared here like everywhere else. This
           // scope arrived from main while the operator boundary was still on a
           // branch, so it was the one scope in this file that did not name

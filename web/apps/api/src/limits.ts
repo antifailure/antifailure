@@ -37,6 +37,16 @@ export interface EndpointLimit {
  * ends up behind a limit sized for a cheap one.
  */
 export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
+  'GET /.well-known/oauth-protected-resource': { rate: 10, burst: 30, key: 'ip', reason: 'Small public discovery document for MCP clients.' },
+  'GET /.well-known/oauth-authorization-server': { rate: 10, burst: 30, key: 'ip', reason: 'Small public authorization discovery document.' },
+  'POST /auth/mcp/register': { rate: 0.1, burst: 5, key: 'ip', reason: 'Client registration writes a persistent row and is needed only when connecting.' },
+  'GET /auth/mcp/authorize': { rate: 1, burst: 10, key: 'ip', reason: 'A person starts a connection and reviews consent.' },
+  'GET /auth/mcp/pending': { rate: 1, burst: 10, key: 'ip', reason: 'A signed-in person reads the pending connection once.' },
+  'POST /auth/mcp/approve': { rate: 1, burst: 5, key: 'ip', reason: 'Explicit consent mints a single-use authorization code.' },
+  'POST /auth/mcp/token': { rate: 1, burst: 10, key: 'ip', reason: 'One token exchange follows one approved connection.' },
+  'POST /mcp': { rate: 5, burst: 20, key: 'token', reason: 'Each MCP request can read tenant data or dispatch work through existing permission gates.' },
+  'GET /mcp': { rate: 5, burst: 20, key: 'ip', reason: 'Stateless MCP rejects a standalone event stream cheaply.' },
+  'DELETE /mcp': { rate: 5, burst: 20, key: 'ip', reason: 'Stateless MCP holds no transport session to delete.' },
   'GET /health': {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',

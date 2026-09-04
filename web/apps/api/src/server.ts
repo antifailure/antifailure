@@ -47,6 +47,7 @@ import { actorOf } from './admin/trpc.ts'
 import { clientAddress, clientIP } from './clientaddress.ts'
 import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
+import { mountHostedMcp } from './mcp.ts'
 import type { Context as TrpcContext, Actor } from './trpc.ts'
 import type { Clock } from './clock.ts'
 import { systemClock } from './clock.ts'
@@ -827,6 +828,22 @@ export function createServer(options: ServerOptions) {
     if (!token) return null
     return resolveSession(options.pool, clock, token)
   }
+
+  mountHostedMcp(app, {
+    base: {
+      pool: options.pool, clock, github: options.github, stripe: options.stripe ?? null,
+      appBaseUrl: options.appBaseUrl ?? '', mailer: options.emailSignIn?.mailer ?? null,
+      productName: options.emailSignIn?.productName ?? 'Antifailure', analytics,
+      analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
+      hostedRequiredPlan, operatorSetsPlan, admin: null, adminPool: null, origin: 'api',
+    },
+    actorFrom: async (cookie) => {
+      const session = await sessionFrom(cookie)
+      if (!session?.orgId || !session.role) return null
+      return { userId: session.userId, label: session.label, orgId: session.orgId,
+        role: session.role, sessionId: session.sessionId, plan: session.plan ?? 'free' }
+    },
+  })
 
   // -------------------------------------------------------------------------
   // Routes another edition registered

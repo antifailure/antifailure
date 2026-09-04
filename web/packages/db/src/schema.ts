@@ -350,16 +350,23 @@ export const engineTokens = pgTable('engine_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  // 'engine', 'cli' or 'oidc'. A cli token acts as a person and carries
+  // 'engine', 'cli', 'oidc' or 'mcp'. A cli token acts as a person and carries
   // user_id; an engine token is a machine and deliberately has none. See
   // migration 0012. An oidc token is one workflow job, minted by exchanging a
   // GitHub Actions identity token, and it carries the binding that earned it
-  // and an expiry the database insists on. See migration 0025.
+  // and an expiry the database insists on. See migration 0025. An mcp token is
+  // a person too, minted by the OAuth consent screen for one registered MCP
+  // client, and it is a separate kind so that the audience check the MCP
+  // authorization specification requires is a WHERE clause rather than a
+  // promise: a cli token is refused at /mcp and an mcp token is refused at
+  // /v1/whoami. See migration 0038.
   kind: text('kind').notNull().default('engine'),
   userId: uuid('user_id'),
   scopes: text('scopes').array().notNull().default([]),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   bindingId: uuid('binding_id'),
+  mcpClientId: text('mcp_client_id'),
+  mcpResource: text('mcp_resource'),
 }, (t) => [index('engine_tokens_org_idx').on(t.orgId)])
 
 // Which organization a GitHub repository may report as.
@@ -399,6 +406,40 @@ export const deviceAuthorizations = pgTable('device_authorizations', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 }, (t) => [index('device_authorizations_expiry_idx').on(t.expiresAt)])
+
+// An MCP client that registered itself, per RFC 7591. It has no tenant on
+// purpose: one registration is shared by everybody in every organization who
+// connects through that client, so an owner would lock out the second one. Its
+// rows are reachable only by declaring the client_id the caller already holds,
+// the same shape as device_authorizations. See migration 0038.
+export const mcpClients = pgTable('mcp_clients', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clientId: text('client_id').notNull(),
+  clientSecretHash: bytea('client_secret_hash'),
+  clientName: text('client_name').notNull(),
+  redirectUris: text('redirect_uris').array().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+})
+
+// The single-use code between the consent screen and the token endpoint. Same
+// classification and the same reason as device_authorizations: the token
+// exchange has no session and no tenant, and holds only the code.
+export const mcpAuthorizationCodes = pgTable('mcp_authorization_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  codeHash: bytea('code_hash').notNull(),
+  clientId: text('client_id').notNull(),
+  redirectUri: text('redirect_uri').notNull(),
+  codeChallenge: text('code_challenge').notNull(),
+  codeChallengeMethod: text('code_challenge_method').notNull(),
+  scopes: text('scopes').array().notNull(),
+  resource: text('resource'),
+  approvedUserId: uuid('approved_user_id').notNull(),
+  approvedOrgId: uuid('approved_org_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+}, (t) => [index('mcp_codes_expiry_idx').on(t.expiresAt)])
 
 // A customer's provider key. The ciphertext is here; nothing reads it except
 // the code handing the key to the provider. See src/providers/seal.ts.
