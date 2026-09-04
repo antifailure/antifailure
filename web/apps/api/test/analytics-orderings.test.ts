@@ -53,7 +53,8 @@ describe(
       const day = today()
       await h.admin`
         DELETE FROM analytics_events
-        WHERE occurred_at >= ${day}::date AND occurred_at < (${day}::date + interval '2 days')`
+        WHERE occurred_at >= (${day}::date::timestamp AT TIME ZONE 'UTC')
+          AND occurred_at < ((${day}::date + interval '2 days') AT TIME ZONE 'UTC')`
       await h.admin`DELETE FROM analytics_daily WHERE day >= ${day}::date`
       await h.close()
     })
