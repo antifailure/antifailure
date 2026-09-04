@@ -17,7 +17,7 @@
  * where they are; it has to be legible at a glance and then get out of the way.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { IconSignOut, LogoMark } from "@/components/icons";
@@ -234,6 +234,7 @@ function NavLink({ item, onNavigate }: { item: AdminNavItem; onNavigate?: () => 
  * nothing reads as a section that failed to load.
  */
 function NavList({ me, onNavigate }: { me: AdminMe | null; onNavigate?: () => void }) {
+  const labelPrefix = useId();
   const groups = ADMIN_NAV.map((group) => ({
     ...group,
     items: group.items.filter((item) => operatorMay(me, item.permission)),
@@ -248,9 +249,9 @@ function NavList({ me, onNavigate }: { me: AdminMe | null; onNavigate?: () => vo
       ) : null}
 
       {groups.map((group) => (
-        <section key={group.slug} aria-labelledby={`nav-${group.slug}`}>
+        <section key={group.slug} aria-labelledby={`${labelPrefix}-${group.slug}`}>
           <h2
-            id={`nav-${group.slug}`}
+            id={`${labelPrefix}-${group.slug}`}
             className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-[rgba(255,255,255,0.55)]"
           >
             {group.label}

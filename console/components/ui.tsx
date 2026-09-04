@@ -317,7 +317,7 @@ export type Tone = "pass" | "fail" | "warn" | "neutral";
  */
 export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   const styles: Record<Tone, string> = {
-    pass: "text-pass bg-[rgba(30,122,58,0.1)]",
+    pass: "text-pass bg-card",
     fail: "text-fail bg-[rgba(179,38,30,0.1)]",
     warn: "text-warn bg-[rgba(138,90,0,0.12)]",
     neutral: "text-muted bg-[rgba(16,16,16,0.06)]",
