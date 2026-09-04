@@ -396,6 +396,10 @@ export async function writeSubscription(
   eventCreated: Date,
   analytics: Analytics,
 ): Promise<Outcome> {
+  // Serialize before taking a subscription lock. Different subscription rows
+  // still decide one organization plan, so locking only the final update lets
+  // concurrent writers each compute from a snapshot missing the other's row.
+  await db.execute(sql`SELECT id FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`)
   const entitled = planForPrice(config, subscription.priceId)
   const now = clock.now().toISOString()
 
@@ -415,7 +419,8 @@ export async function writeSubscription(
       ${entitled ?? DEFAULT_PLAN}, ${subscription.priceId}, ${subscription.quantity},
       ${subscription.status}, ${iso(subscription.currentPeriodStart)},
       ${iso(subscription.currentPeriodEnd)}, ${subscription.cancelAtPeriodEnd},
-      ${iso(subscription.canceledAt)}, ${eventCreated.toISOString()}, ${now}, ${now})
+      ${iso(subscription.canceledAt)}, ${eventCreated.toISOString()},
+      ${(subscription.createdAt ?? eventCreated).toISOString()}, ${now})
     ON CONFLICT (stripe_subscription_id) DO UPDATE SET
       plan = coalesce(${entitled}, subscriptions.plan),
       price_id = excluded.price_id,
@@ -426,6 +431,7 @@ export async function writeSubscription(
       cancel_at_period_end = excluded.cancel_at_period_end,
       canceled_at = excluded.canceled_at,
       last_event_at = excluded.last_event_at,
+      created_at = coalesce(${iso(subscription.createdAt ?? null)}::timestamptz, subscriptions.created_at),
       updated_at = ${now}
     -- The watermark. An event created before the one this row was last written
     -- from updates nothing, so a late delivery cannot resurrect a cancelled
@@ -470,13 +476,19 @@ export async function recomputePlan(
   orgId: string,
   analytics: Analytics,
 ): Promise<string> {
+  await db.execute(sql`SELECT id FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`)
+  const entitling = sql.join(ENTITLING_STATUSES.map((status) => sql`${status}`), sql`, `)
   const live = await db.execute<{ plan: string; status: string }>(sql`
     SELECT plan, status FROM subscriptions
     WHERE org_id = ${orgId}::uuid
-    ORDER BY created_at DESC
+    ORDER BY (status IN (${entitling}) AND plan <> ${DEFAULT_PLAN}) DESC,
+             created_at DESC, stripe_subscription_id DESC
     LIMIT 1`)
   const newest = live[0]
   if (!newest) return 'no subscription; the plan was left alone'
+  if (ENTITLING_STATUSES.includes(newest.status) && newest.plan === DEFAULT_PLAN) {
+    return 'the subscription price grants no known plan; the plan was left alone'
+  }
 
   const wanted = planForStatus(newest.status, null)
   if (wanted === null) {

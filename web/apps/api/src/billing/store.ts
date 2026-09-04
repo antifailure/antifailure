@@ -100,17 +100,17 @@ export async function readBillingState(db: Db, orgId: string): Promise<BillingSt
   const customer = await db.execute<{ stripe_customer_id: string; email: string | null }>(sql`
     SELECT stripe_customer_id, email FROM billing_customers WHERE org_id = ${orgId}::uuid`)
 
+  const liveStatuses = sql.join(LIVE_STATUSES.map((status) => sql`${status}`), sql`, `)
   const subscription = await db.execute<SubscriptionRow>(sql`
     SELECT stripe_subscription_id, plan, status, price_id, quantity,
            current_period_start, current_period_end, cancel_at_period_end, canceled_at
     FROM subscriptions WHERE org_id = ${orgId}::uuid
-    ORDER BY created_at DESC LIMIT 1`)
+    ORDER BY (status IN (${liveStatuses})) DESC, created_at DESC, stripe_subscription_id DESC LIMIT 1`)
 
   // Each status as its own bind parameter. Interpolating a JavaScript array
   // into `= ANY(...)` produces a row expression rather than an array, which
   // Postgres refuses, and the refusal reaches the caller as a 500 on the
   // billing screen.
-  const liveStatuses = sql.join(LIVE_STATUSES.map((status) => sql`${status}`), sql`, `)
   const live = await db.execute<{ n: string }>(sql`
     SELECT count(*) AS n FROM subscriptions
     WHERE org_id = ${orgId}::uuid AND status IN (${liveStatuses})`)
@@ -215,6 +215,10 @@ export async function reconcile(
   // missing customer.subscription.created webhook leaves no local id to query,
   // which made the old reconciliation unable to recover the exact outage it
   // claimed to handle.
+  // A response can have been read before a newer webhook arrives. Giving that
+  // snapshot the response-completion time would let the older answer overwrite
+  // the delivery that landed while the network call was in flight.
+  const observedAt = clock.now()
   const [subscriptions, invoices] = await Promise.all([
     client
       .listSubscriptions(customerId, 50)
@@ -239,11 +243,9 @@ export async function reconcile(
       notes.push(`subscriptions could not be read from Stripe (${subscriptions.error})`)
     }
     for (const subscription of subscriptions.list) {
-      // The event time is now, because this is what Stripe believes now. That
-      // advances the watermark past any delivery still in flight, which is
-      // correct: a webhook describing an older state must not undo this.
+      // The observation began before the request, not after its response.
       const written = await writeSubscription(
-        db, clock, config, orgId, subscription, clock.now(), analytics,
+        db, clock, config, orgId, subscription, observedAt, analytics,
       )
       if (written.outcome === 'applied') changed += 1
       notes.push(`${subscription.id}: ${subscription.status}, ${written.detail}`)
@@ -256,7 +258,7 @@ export async function reconcile(
       notes.push(`invoices could not be read from Stripe (${invoices.error})`)
     } else {
       for (const invoice of invoices.list) {
-        const written = await writeInvoice(db, clock, orgId, invoice, clock.now())
+        const written = await writeInvoice(db, clock, orgId, invoice, observedAt)
         if (written.outcome === 'applied') changed += 1
       }
       notes.push(`${invoices.list.length} invoices read from Stripe`)
