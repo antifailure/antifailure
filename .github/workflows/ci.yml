@@ -213,6 +213,12 @@ jobs:
         # tree that runs the script and a commit that does not.
         run: go run ./tools/execcheck .
 
+      - name: The serving app and its maintenance job use one tested image
+        # A failed candidate, a failed public health gate and a failed job
+        # update have different safe end states. This runs the real deploy
+        # script against fake Azure and health endpoints and proves all three.
+        run: ./deploy/cd/deploy_test.sh
+
       - name: No YAML key is defined twice in one mapping
         # examples/github-workflow.yml declared `seed` and `concurrency` twice
         # each in its workflow_dispatch inputs. YAML keeps the last definition,

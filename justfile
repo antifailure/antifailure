@@ -99,6 +99,7 @@ gate: _reports
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
+    run "deploy keeps jobs on one image" just deploycheck
     run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -974,6 +975,12 @@ gatecheck:
 # pull request.
 execcheck:
     go run ./tools/execcheck .
+
+# The serving application and the scheduled DDL job stay on one tested image.
+# The test runs the real deploy script against fake Azure and health endpoints,
+# including every failure ordering that must leave maintenance unchanged.
+deploycheck:
+    ./deploy/cd/deploy_test.sh
 
 # No YAML key is defined twice in one mapping.
 #

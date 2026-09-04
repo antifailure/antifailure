@@ -74,6 +74,7 @@ resource_group_name  = "af-tfstate-eastus"
 storage_account_name = "<the state account>"
 container_name       = "tfstate"
 key                  = "control-plane-production.tfstate"
+use_azuread_auth     = true
 EOF
 terraform init -backend-config=backend.production.hcl -reconfigure
 ```
