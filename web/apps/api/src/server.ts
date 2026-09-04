@@ -1219,6 +1219,10 @@ export function createServer(options: ServerOptions) {
   const signInMethods = ['github', ...(options.emailSignIn ? ['email'] : [])]
 
   app.get('/auth/session', async (c) => {
+    // Identity, membership, role and revocation are all read live here. A
+    // cached response can restore a permission that was removed or hide one
+    // that was granted, so neither a browser nor an intermediary may retain it.
+    c.header('cache-control', 'no-store')
     const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
     const publicSignIn = {
       methods: signInMethods,
@@ -1242,6 +1246,23 @@ export function createServer(options: ServerOptions) {
       orgSlug: session.orgSlug,
       role: session.role,
       plan: session.plan,
+      // Whether THIS organization is the one operating this installation.
+      //
+      // The console is one static export served by every installation, so it
+      // cannot know at build time which organization that is, and the slug
+      // itself is not the console's business: naming it would tell every
+      // customer who operates the plane they are a tenant of. A boolean
+      // answers the installation relationship without disclosing the slug.
+      //
+      // Not a permission, deliberately. analytics.read is held by owners and
+      // admins of EVERY organization, because it describes a kind of reading
+      // rather than a right over this installation. The console combines that
+      // permission with this field, and routers/analytics.ts enforces both.
+      // Without the field, the console showed an installation-wide dashboard
+      // in every customer's sidebar and let them click through to a refusal.
+      analyticsOperator:
+        options.analyticsOperatorOrgSlug != null &&
+        session.orgSlug === options.analyticsOperatorOrgSlug,
       hostedRequiredPlan,
       hostedAccess: hasHostedAccess(session.plan, hostedRequiredPlan),
       githubAppInstallUrl: options.githubAppInstallUrl,

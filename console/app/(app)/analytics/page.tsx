@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSessionContext } from "@/components/session";
 import { query, useApi } from "@/lib/api";
-import { may } from "@/lib/roles";
+import { mayReadAnalytics } from "@/lib/roles";
 import { DayColumns, Meter } from "@/components/Meter";
 import {
   Card,
@@ -160,18 +160,35 @@ function Analytics() {
   const overview = useApi<Overview>(() => query("analytics.overview", { days }), [days]);
   const catalog = useApi<CatalogAnswer>(() => query("analytics.catalog"), []);
 
-  // The permission the console knows about. The server checks it again and then
-  // checks something this copy cannot express: that the caller belongs to the
-  // organization operating this installation. So hiding the page here is a
-  // convenience and never the boundary, and the server's refusal is what the
-  // Loaded branch below renders when it disagrees.
-  if (!may(session.data?.role, "analytics.read")) {
+  // The shared helper asks both questions: whether this organization operates
+  // the installation and whether this role holds analytics.read. The server
+  // enforces both again, so this branch is a useful screen rather than the
+  // boundary.
+  if (!mayReadAnalytics(session.data)) {
+    const operator = session.data?.analyticsOperator === true;
     return (
       <Page title="Analytics">
         <Card title="Analytics">
-          <Empty title="Your role cannot see this">
-            The dashboard covers the whole installation rather than one organization, so it needs
-            the analytics.read permission, which owners and admins have.
+          <Empty
+            title={
+              operator
+                ? "Your role cannot see this"
+                : "This dashboard is not about your organization"
+            }
+          >
+            {operator ? (
+              <>
+                The dashboard covers the whole installation, so it needs the
+                analytics.read permission, which owners and admins have.
+              </>
+            ) : (
+              <>
+                It counts arrivals across the whole installation, so it belongs
+                to whoever operates this control plane rather than to any one
+                tenant on it. Your own runs, environments and usage are on the
+                pages in the menu.
+              </>
+            )}
           </Empty>
         </Card>
       </Page>

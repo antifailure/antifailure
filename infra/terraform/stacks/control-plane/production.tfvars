@@ -347,3 +347,31 @@ operator_portal_enabled = true
 # that antifailure.dev actually talks to. Unset here presents to a visitor as a
 # network error on the contact form with no explanation anywhere.
 site_origin = "https://antifailure.dev"
+
+# ---------------------------------------------------------------------------
+# The acquisition dashboard, and who it belongs to.
+# ---------------------------------------------------------------------------
+
+# WITHOUT THIS, THE PAGE CAN ONLY REFUSE. routers/analytics.ts compares the
+# caller's organization slug against this value, and an empty value refuses
+# EVERYBODY with PRECONDITION_FAILED naming the variable. That is the state
+# this plane was in while the console showed the page to every customer, so the
+# only thing anybody ever saw there was an error about a variable they could
+# not set.
+#
+# The slug rather than the identifier, because a slug is what an operator can
+# write here without first querying their own database. It is compared against
+# the row rather than against the session, so renaming the organization takes
+# effect on the next request rather than at a sign-in that may never come.
+#
+# `antifailure` is the organization operating this control plane. It is the
+# same row every tenant here is a peer of, which is why the console never
+# receives this value: naming the operator to a customer is a fact about
+# somebody else. The session carries a boolean instead.
+analytics_operator_org = "antifailure"
+
+# Recording, which is a separate question from reading. Off means the page
+# still renders and says, in the provenance line, that every number on it is
+# zero because nothing is being counted, rather than presenting an empty funnel
+# as a bad week.
+analytics_enabled = true

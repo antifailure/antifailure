@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpcData } from "@/lib/wire";
+import { isCurrentResponse } from "@/lib/session-freshness";
 
 /**
  * Where the API is.
@@ -38,6 +39,11 @@ export interface Session {
   selfServeSignup?: boolean;
   githubAppInstallUrl?: string;
   plan?: string | null;
+  /** Whether this organization is the one operating this installation. Absent
+   *  from an older control plane, which is read as false: showing an
+   *  installation-wide dashboard to a tenant is the failure this field exists
+   *  to end, so an unknown answer hides it rather than showing it. */
+  analyticsOperator?: boolean;
   hostedRequiredPlan?: string | null;
   hostedAccess?: boolean;
 }
@@ -131,6 +137,8 @@ export async function rest<T>(
   init: {
     method?: string;
     body?: unknown;
+    /** Browser cache policy for endpoints whose answer is identity or access. */
+    cache?: RequestCache;
     /** The TENANT token, sent as x-antifailure-csrf. */
     csrf?: string;
     /**
@@ -159,6 +167,7 @@ export async function rest<T>(
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: "same-origin",
+    cache: init.cache,
     headers,
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
@@ -249,12 +258,12 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
     run
       .current()
       .then((data) => {
-        if (!alive.current || mine !== seq.current) return;
+        if (!isCurrentResponse(alive.current, mine, seq.current)) return;
         setState({ status: "ready", data, error: null });
         setRefreshing(false);
       })
       .catch((error: unknown) => {
-        if (!alive.current || mine !== seq.current) return;
+        if (!isCurrentResponse(alive.current, mine, seq.current)) return;
         setRefreshing(false);
         // The held rows are still the last thing the control plane actually
         // said. Throwing them away because the next question went unanswered
@@ -274,7 +283,7 @@ export function useApi<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 
 /** The signed-in session, or the absence of one. */
 export function useSession() {
-  return useApi<Session>(() => rest<Session>("/auth/session"), []);
+  return useApi<Session>(() => rest<Session>("/auth/session", { cache: "no-store" }), []);
 }
 
 /**

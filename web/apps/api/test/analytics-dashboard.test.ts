@@ -56,6 +56,12 @@ describe(
       assert.equal(body.result.data.provenance.recording, true)
     })
 
+    it('lets an admin of the operator organization read it', async () => {
+      const session = await signInAs(h, operator, 'admin')
+      const res = await callProcedure(h, session, 'analytics.overview', 'query', { days: 28 })
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+    })
+
     it('refuses the OWNER of another organization, who holds every permission in their own', async () => {
       // The case the permission matrix cannot see, and the reason this file
       // exists. A permission check alone answers yes here.
@@ -77,6 +83,63 @@ describe(
       const session = await signInAs(h, operator, 'member')
       const res = await callProcedure(h, session, 'analytics.overview', 'query', { days: 28 })
       assert.equal(errorCode(res.body), 'FORBIDDEN')
+    })
+
+    it('refuses a viewer of the operator organization, who lacks the permission', async () => {
+      const session = await signInAs(h, operator, 'viewer')
+      const res = await callProcedure(h, session, 'analytics.overview', 'query', { days: 28 })
+      assert.equal(errorCode(res.body), 'FORBIDDEN')
+    })
+
+    it('tells the console whether THIS organization operates the installation', async () => {
+      // One of the two fields the shared console helper reads. The other is
+      // role, because only owners and admins hold analytics.read.
+      //
+      // /analytics sat in every customer's sidebar because the console gated
+      // it on analytics.read, which owners and admins of EVERY organization
+      // hold. So a customer clicked an installation-wide dashboard and met a
+      // refusal written for somebody else, and the console had no field that
+      // could have told it otherwise: the slug is deliberately not sent, since
+      // naming the operator to every tenant is a fact about somebody else.
+      const asOperator = await signInAs(h, operator, 'owner')
+      const mine = await h.fetch('/auth/session', { headers: { cookie: asOperator.cookie } })
+      const mineBody = (await mine.json()) as { role: string; analyticsOperator?: boolean }
+      assert.equal(mineBody.role, 'owner')
+      assert.equal(mineBody.analyticsOperator, true)
+
+      // The positive control above is what makes this line mean something: an
+      // owner of another organization holds the same permission and the same
+      // role, and differs only in the installation relationship this field
+      // reports.
+      const asCustomer = await signInAs(h, customer, 'owner')
+      const theirs = await h.fetch('/auth/session', { headers: { cookie: asCustomer.cookie } })
+      const theirsBody = (await theirs.json()) as { role: string; analyticsOperator?: boolean }
+      assert.equal(theirsBody.role, 'owner')
+      assert.equal(theirsBody.analyticsOperator, false)
+
+      // And the slug itself never leaves the control plane.
+      assert.ok(
+        !JSON.stringify(theirsBody).includes(operator.slug),
+        'the session named the operating organization to a tenant',
+      )
+    })
+
+    it('reports no analytics operator at all when the variable is unset', async () => {
+      // The state every self-hosted installation starts in, and the one this
+      // repository's own production plane was in: with nothing configured the
+      // entry must be hidden from EVERYBODY, including the operator, because
+      // the page behind it can only refuse.
+      const unset = await startApi()
+      try {
+        const org = await seedOrg(unset.admin, 'noopsorg')
+        const session = await signInAs(unset, org, 'owner')
+        const res = await unset.fetch('/auth/session', { headers: { cookie: session.cookie } })
+        const body = (await res.json()) as { analyticsOperator?: boolean }
+        assert.equal(body.analyticsOperator, false)
+        await dropOrg(unset.admin, org.orgId)
+      } finally {
+        await unset.close()
+      }
     })
 
     it('refuses everyone, and says which variable to set, when none is configured', async () => {

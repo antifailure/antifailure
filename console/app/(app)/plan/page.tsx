@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { mutate, query, useApi } from "@/lib/api";
-import { may } from "@/lib/roles";
 import { useSessionContext } from "@/components/session";
 import {
   Badge,
@@ -126,6 +125,10 @@ function money(amount: string | number, currency: string): string {
 
 function Billing() {
   const session = useSessionContext();
+  // These procedures each enforce billing.manage after reading the current
+  // role from the database. The shared browser session can hold an older role
+  // until its refresh returns, so it must not decide whether their data gets
+  // rendered. A server refusal still reaches Loaded as the page error.
   const state = useApi<PageState>(async () => {
     const [quota, billing, invoicePage] = await Promise.all([
       query<PlanState>("billing.get"),
@@ -135,20 +138,8 @@ function Billing() {
     return { quota, billing, invoices: invoicePage.invoices };
   }, []);
   const csrf = session.data?.csrfToken ?? "";
-  const mayManage = may(session.data?.role, "billing.manage");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  if (!mayManage) {
-    return (
-      <Card title="Plan">
-        <Empty title="Your role cannot see this">
-          The plan decides this organization&rsquo;s quotas, and changing it needs
-          the billing.manage permission, which only an owner holds.
-        </Empty>
-      </Card>
-    );
-  }
 
   async function act(name: string, action: () => Promise<void>) {
     setBusy(name);
