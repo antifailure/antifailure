@@ -1,3 +1,5 @@
+# fixed
+
 An image used only to execute isolated snippets was detected as a web server,
 and a repository's Alembic migration was assigned to it even though the image
 contained neither Alembic nor the application's schema. Initialization now
