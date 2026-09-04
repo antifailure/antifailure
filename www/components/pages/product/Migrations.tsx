@@ -1,6 +1,6 @@
 import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product";
+import { PMG01, PMG02, PMG03, PMG04 } from "@/components/pages/figures/product-migrations";
 import { cn } from "@/lib/cn";
 
 const CAPTIONS = [

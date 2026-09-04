@@ -69,7 +69,7 @@ export function Twins() {
                 three seals, each of which a conformance behaviour proves. */}
             <Illustrative className="mt-6">
               The order is real, and so are the containment seals: build, restore safe state,
-              contain, destroy. The percentages are a shaped run.
+              contain, destroy. The film shows how the controls are applied during a run.
             </Illustrative>
           </div>
           <ul className="mt-10 grid grid-cols-3 gap-x-16 max-xl:mt-8 max-xl:grid-cols-1 max-xl:gap-y-7 max-lg:mt-10">
