@@ -210,6 +210,9 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 
 		case KindMigration:
 			c := get(f.Subject)
+			if c.dir == "" {
+				c.dir = f.Extra["dir"]
+			}
 			if c.migrate == "" {
 				c.migrate = f.Value
 			}
@@ -248,13 +251,16 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 	// Two sources describing one service are still one service.
 	order = coalesceServices(byName, order)
 
-	// A migration command found for the repository as a whole belongs to the
-	// web service that will run it, not to a phantom service of its own.
-	reassignRepoWideMigration(byName, order)
+	// A migration needs an owner with evidence, not the first service in a
+	// sorted list. An orphan with no unique local owner becomes a question.
+	reassignRepoWideMigration(byName, order, questions)
 
 	out := make([]schema.Service, 0, len(order))
 	for _, name := range order {
 		c := byName[name]
+		if len(c.declaredBy) == 0 {
+			continue
+		}
 		// A candidate with nothing but a migration command is not a service.
 		if c.kind == schema.ServiceWeb && c.port == 0 && c.command == "" && c.build == nil && c.framework == "" {
 			continue
@@ -411,9 +417,9 @@ func coalesceServices(byName map[string]*candidate, order []string) []string {
 	var groupOrder []string
 	for _, name := range order {
 		c := byName[name]
-		// A candidate nothing declared is not a service yet. The repository
-		// wide migration is the case, and reassignRepoWideMigration owns it.
-		if len(c.declaredBy) == 0 {
+		// An image may borrow runtime evidence from another source in its
+		// directory. Orphan migrations are resolved separately below.
+		if len(c.declaredBy) == 0 && c.build == nil {
 			continue
 		}
 		key := normalizeDir(c.dir) + "\x00" + string(c.kind)
@@ -570,28 +576,37 @@ func normalizeDir(dir string) string {
 	return strings.TrimPrefix(cleaned, "./")
 }
 
-// reassignRepoWideMigration moves a migration command that was attributed to
-// the repository onto the service most likely to own it.
-func reassignRepoWideMigration(byName map[string]*candidate, order []string) {
-	var orphan *candidate
+// reassignRepoWideMigration transfers a migration only to a unique local
+// service. A command found elsewhere needs the user's explicit image choice.
+func reassignRepoWideMigration(byName map[string]*candidate, order []string, questions *[]Question) {
 	for _, name := range order {
-		c := byName[name]
-		if c.migrate != "" && c.port == 0 && c.command == "" && c.framework == "" && c.build == nil {
-			orphan = c
-			break
-		}
-	}
-	if orphan == nil {
-		return
-	}
-	for _, name := range order {
-		c := byName[name]
-		if c == orphan || c.kind != schema.ServiceWeb || c.migrate != "" {
+		orphan := byName[name]
+		if orphan.migrate == "" || len(orphan.declaredBy) != 0 {
 			continue
 		}
-		c.migrate = orphan.migrate
+		var owners []*candidate
+		var options []string
+		for _, other := range order {
+			c := byName[other]
+			if len(c.declaredBy) == 0 || c.migrate != "" {
+				continue
+			}
+			options = append(options, c.name)
+			if normalizeDir(c.dir) == normalizeDir(orphan.dir) {
+				owners = append(owners, c)
+			}
+		}
+		if len(owners) == 1 {
+			owners[0].migrate = orphan.migrate
+		} else {
+			*questions = append(*questions, Question{
+				ID: "migration." + name + ".service", Migration: orphan.migrate,
+				Prompt:  fmt.Sprintf("Which service image can run %s?", orphan.migrate),
+				Options: append(options, "manual:configure"),
+				Why:     "The migration was found outside a unique service directory. Its image must contain the migration tool and files. Choose manual only if you will configure migrations separately before af up.",
+			})
+		}
 		orphan.migrate = ""
-		return
 	}
 }
 

@@ -315,6 +315,8 @@ type Result struct {
 
 // Question is something detection could not decide.
 type Question struct {
+	// Migration is the command awaiting an explicit runtime owner.
+	Migration string `json:",omitempty"`
 	// ID is stable, so that a non interactive run can answer it by flag.
 	ID string
 	// Prompt is the question, in the second person.

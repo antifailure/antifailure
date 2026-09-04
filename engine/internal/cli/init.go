@@ -152,6 +152,11 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	if err != nil {
 		return err
 	}
+	for _, q := range res.Questions {
+		if q.Migration != "" && assumed[q.ID] != "" {
+			body = append([]byte("# "+strings.ReplaceAll(assumed[q.ID], "\n", "\n# ")+"\n"), body...)
+		}
+	}
 	if _, err := manifest.Parse(body, manifestPath, env.WorkDir); err != nil {
 		// The refusal has to say that nothing was written. Wrapping the
 		// validator's own error let AF-MAN-002 reach the user unchanged, and
@@ -269,6 +274,23 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 			return aferrors.Coded(aferrors.AFDET004,
 				"question", q.Prompt,
 				"id", q.ID)
+		}
+		if q.Migration != "" {
+			if answer == "manual:configure" {
+				assumed[q.ID] = "Not configured: " + q.Migration + ". Configure migrations before af up."
+				continue
+			}
+			applied := false
+			for j := range res.Draft.Services {
+				if res.Draft.Services[j].Name == answer && res.Draft.Services[j].Migrate == "" {
+					res.Draft.Services[j].Migrate = q.Migration
+					applied = true
+				}
+			}
+			if !applied {
+				return aferrors.Coded(aferrors.AFDET006, "id", q.ID+"="+answer, "known", strings.Join(q.Options, ", "))
+			}
+			continue
 		}
 		_ = applyAnswer(res.Draft, q.ID, answer)
 	}

@@ -74,13 +74,15 @@ func (a *DockerAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error) 
 			Detail: fmt.Sprintf("%s builds this service.", p),
 			Extra:  extra,
 		})
-		out = append(out, Finding{
-			Kind: KindService, Subject: name, Value: "web",
-			Confidence: Medium, Evidence: p,
-			// A Dockerfile carries no name of its own, so this one is the
-			// directory, which the merger treats as the weakest identity.
-			Extra: map[string]string{"dir": dir, "name_from": "dir"},
-		})
+		if df.command != "" || len(df.ports) > 0 {
+			out = append(out, Finding{
+				Kind: KindService, Subject: name, Value: "web",
+				Confidence: Medium, Evidence: p,
+				// A Dockerfile carries no name of its own, so this one is the
+				// directory, which the merger treats as the weakest identity.
+				Extra: map[string]string{"dir": dir, "name_from": "dir"},
+			})
+		}
 		if len(df.stages) > 1 {
 			out = append(out, Finding{
 				Kind: KindNote, Subject: name + ".stages", Value: strings.Join(df.stages, ","),
