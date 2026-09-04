@@ -1,9 +1,13 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { handleStripeDelivery, recomputePlan, writeSubscription } from '../src/billing/webhook.ts'
-import { readBillingState, reconcile } from '../src/billing/store.ts'
-import { RealStripeClient, subscriptionOf } from '../src/billing/stripe.ts'
+import type postgres from 'postgres'
+import type { SQL } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { Db, Pool } from '@antifailure/db'
+import { handleStripeDelivery, recomputePlan, writeInvoice, writeSubscription } from '../src/billing/webhook.ts'
+import { attachCustomer, readBillingState } from '../src/billing/store.ts'
+import { invoiceOf, subscriptionOf } from '../src/billing/stripe.ts'
 import { available, startApi, seedOrg, dropOrg, stripeAgainstMockPack, type ApiHarness } from './harness.ts'
 import type { StripeConfig } from '../src/billing/plans.ts'
 
@@ -23,11 +27,11 @@ describe('billing across subscription arrival orders', { skip: !hasDatabase }, (
     await h.close()
   })
 
-  async function fixture() {
+  async function fixture(attached = true) {
     const org = await seedOrg(h.admin, 'billing-order')
     orgIds.push(org.orgId)
     const customer = `cus_${randomUUID()}`
-    await h.admin`INSERT INTO billing_customers (org_id, stripe_customer_id) VALUES (${org.orgId}, ${customer})`
+    if (attached) await h.admin`INSERT INTO billing_customers (org_id, stripe_customer_id) VALUES (${org.orgId}, ${customer})`
     return { orgId: org.orgId, customer }
   }
 
@@ -97,44 +101,60 @@ describe('billing across subscription arrival orders', { skip: !hasDatabase }, (
     assert.equal(await plan(f.orgId), 'enterprise')
   })
 
-  it('a reconciliation response cannot undo a newer webhook delivered while its request was in flight', async () => {
+  it('an older unknown active purchase is preserved behind a newer ended purchase', async () => {
     const f = await fixture()
-    const body = object(f.customer, `sub_${randomUUID()}`, 100)
-    await deliver(body)
-    h.clock.advance(1000)
-    const client = new RealStripeClient({ ...config, fetch: async input => {
-      const url = new URL(String(input))
-      if (url.pathname === '/v1/subscriptions') {
-        h.clock.advance(1000)
-        await deliver({ ...body, status: 'canceled' })
-        h.clock.advance(1000)
-        return Response.json({ data: [body] })
-      }
-      return Response.json({ data: [] })
-    } })
-    await reconcile(h.pool, h.clock, config, client, f.orgId, h.analytics)
-    assert.equal(await plan(f.orgId), 'free')
+    await h.admin`UPDATE organizations SET plan = 'enterprise' WHERE id = ${f.orgId}`
+    await deliver(object(f.customer, `sub_${randomUUID()}`, 100, 'unknown'))
+    await deliver(object(f.customer, `sub_${randomUUID()}`, 200, 'team', 'canceled'))
+    assert.equal(await plan(f.orgId), 'enterprise')
   })
 
-  it('an invoice reconciliation snapshot cannot undo payment delivered during its request', async () => {
-    const f = await fixture()
-    const invoice = { id: `in_${randomUUID()}`, customer: f.customer, status: 'open', amount_paid: 0 }
-    const client = new RealStripeClient({ ...config, fetch: async input => {
-      const url = new URL(String(input))
-      if (url.pathname === '/v1/invoices') {
-        h.clock.advance(1000)
-        await handleStripeDelivery(h.pool, h.clock, config, {
-          id: `evt_${randomUUID()}`, type: 'invoice.paid', created: h.clock.now(),
-          object: { ...invoice, status: 'paid', amount_paid: 50000 },
-        }, h.analytics)
-        h.clock.advance(1000)
-        return Response.json({ data: [invoice] })
+  it('forced overlap of initial attachment and webhook resolves the paid purchase', async () => {
+    const f = await fixture(false)
+    const inserted = barrier()
+    const continueWebhook = barrier()
+    const continueAttach = barrier()
+    let pendingRead = false
+    const watched: Pool = {
+      ...h.pool,
+      withStripeCustomer: (customer, fn) => h.pool.withStripeCustomer(customer, db =>
+        fn(afterQuery(db, async statement => {
+          if (statement.includes('INSERT INTO billing_events')) {
+            inserted.release()
+            await continueWebhook.promise
+          }
+        }))),
+    }
+    const webhook = handleStripeDelivery(watched, h.clock, config, {
+      id: `evt_${randomUUID()}`, type: 'customer.subscription.created', created: h.clock.now(),
+      object: object(f.customer, `sub_${randomUUID()}`, 100, 'enterprise'),
+    }, h.analytics)
+    await inserted.promise
+    const attachment = h.pool.withTenant({ orgId: f.orgId }, db => attachCustomer(
+      afterQuery(db, async statement => {
+        if (statement.includes('FROM billing_events')) {
+          pendingRead = true
+          await continueAttach.promise
+        }
+      }), h.clock, config, f.orgId, { id: f.customer, email: null }, h.analytics,
+    ))
+    try {
+      // With serialization, attachment waits on the customer lock. Without
+      // either call site, its pending SELECT sees no committed webhook row.
+      for (let i = 0; i < 200 && !pendingRead; i++) {
+        const waits = await h.admin`SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND usename = 'antifailure_app' AND wait_event = 'advisory'`
+        if (waits.length) break
+        await new Promise(resolve => setTimeout(resolve, 5))
+        if (i === 199) throw new Error('Attachment reached neither the lock nor its pending-event read')
       }
-      return Response.json({ data: [] })
-    } })
-    await reconcile(h.pool, h.clock, config, client, f.orgId, h.analytics)
-    const [row] = await h.admin`SELECT amount_paid FROM invoices WHERE stripe_invoice_id = ${invoice.id}`
-    assert.equal(Number(row!.amount_paid), 50000)
+      continueWebhook.release()
+      await webhook
+    } finally {
+      continueWebhook.release()
+      continueAttach.release()
+      await Promise.all([webhook, attachment])
+    }
+    assert.equal(await plan(f.orgId), 'enterprise')
   })
 
   it('a later delivery repairs the creation time stored by older application code', async () => {
@@ -203,6 +223,64 @@ describe('billing across subscription arrival orders', { skip: !hasDatabase }, (
     try { await waitForBlockedQuery() } finally { release() }
     await assert.doesNotReject(Promise.all([holder, writer]))
   })
+
+  it('invoice repair takes the organization before an existing invoice lock', async () => {
+    const f = await fixture()
+    const id = `in_${randomUUID()}`
+    await h.admin`INSERT INTO invoices (org_id, stripe_invoice_id, stripe_customer_id, status, last_event_at) VALUES (${f.orgId}, ${id}, ${f.customer}, 'open', '2025-01-01')`
+    await assert.doesNotReject(holdingOrganization(f.orgId, async tx => {
+      await tx`SELECT id FROM invoices WHERE stripe_invoice_id = ${id} FOR UPDATE NOWAIT`
+    }, () => h.pool.withTenant({ orgId: f.orgId }, async db => {
+      await writeInvoice(db, h.clock, f.orgId, invoiceOf({ id, customer: f.customer, status: 'paid' })!, h.clock.now())
+      await recomputePlan(db, h.clock, f.orgId, h.analytics)
+    })))
+  })
+
+  it('a payment-method delivery takes the organization before its entity lock and event foreign key', async () => {
+    const f = await fixture()
+    const id = `pm_${randomUUID()}`
+    await h.admin`INSERT INTO payment_methods (org_id, stripe_payment_method_id, stripe_customer_id, last_event_at) VALUES (${f.orgId}, ${id}, ${f.customer}, '2025-01-01')`
+    await assert.doesNotReject(holdingOrganization(f.orgId, async tx => {
+      await tx`SELECT id FROM payment_methods WHERE stripe_payment_method_id = ${id} FOR UPDATE NOWAIT`
+    }, () => handleStripeDelivery(h.pool, h.clock, config, {
+      id: `evt_${randomUUID()}`, type: 'payment_method.detached', created: h.clock.now(), object: { id, customer: f.customer },
+    }, h.analytics)))
+  })
+
+  async function holdingOrganization(orgId: string, inspect: (tx: postgres.TransactionSql) => Promise<void>, operation: () => Promise<unknown>) {
+    const locked = barrier()
+    const inspectNow = barrier()
+    const holder = h.admin.begin(async tx => {
+      await tx`SELECT id FROM organizations WHERE id = ${orgId} FOR UPDATE`
+      locked.release()
+      await inspectNow.promise
+      await inspect(tx)
+    })
+    await locked.promise
+    const writer = operation()
+    try { await waitForBlockedQuery() } finally { inspectNow.release() }
+    await Promise.all([holder, writer])
+  }
+
+  function barrier() {
+    let release!: () => void
+    const promise = new Promise<void>(resolve => { release = resolve })
+    return { promise, release }
+  }
+
+  function afterQuery(db: Db, after: (statement: string) => Promise<void>): Db {
+    return new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === 'execute') return async (query: SQL) => {
+          const result = await target.execute(query)
+          await after(new PgDialect().sqlToQuery(query).sql)
+          return result
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+  }
 
   async function waitForBlockedQuery() {
     for (let attempt = 0; attempt < 200; attempt++) {

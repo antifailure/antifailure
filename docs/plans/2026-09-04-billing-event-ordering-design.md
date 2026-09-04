@@ -31,18 +31,31 @@ status retains the existing conservative behavior instead of guessing a plan.
 The billing screen independently prefers a live subscription so cancellation
 and checkout do not act on a newer ended purchase.
 
-Reconciliation records its observation time before starting the provider
-requests. A newer webhook arriving during those requests must not be overwritten
-by a response that was already in flight. This applies to invoices as well as
-subscriptions. Provider requests remain outside database transactions.
+Customer attachment and live delivery take the same customer-keyed transaction
+advisory lock before either inserts a row. This closes the concurrent ordering
+where the customer lookup and pending-event lookup each missed an uncommitted
+row, then neither side retried. The complete lock order is customer,
+organization, then billing entity. Invoice repair takes the organization lock
+before the invoice, and every known-customer delivery takes it before applying
+an event, so its final organization foreign-key check cannot invert that order.
+
+Reconciliation snapshot ordering remains a separate required repair. Independent
+review rejected a request-start timestamp change: a fresh canceled response
+could then be overwritten by an older webhook delivered after the response.
+Request-end timestamps have the opposite ambiguity, masking a newer event whose
+change occurred after the response snapshot was taken. A local clock value is
+not a provider object version. The safe follow-up is a persisted per-object
+dirty generation and refresh lease: events schedule canonical provider reads,
+reads run outside transactions, and only the current lease and generation may
+apply the response. Periodic reconciliation reaches the same writer.
 
 ## Verification and boundary
 
 Real PostgreSQL tests cover both subscription arrival orders, canceled and
 unknown-price competitors, stable ties, correction of old creation values,
-missing creation fields, and both lock boundaries. Controlled provider responses
-prove that a subscription cancellation and an invoice payment delivered during
-reconciliation survive its completion. Every new assertion is independently
+missing creation fields, and the lock boundaries. Forced overlap pauses actual
+database statements so attachment and webhook delivery reach the precise race
+that previously left a paid purchase unresolved. Every new assertion is independently
 mutation-tested. Existing signed webhook, replay, missing-webhook recovery,
 tenant isolation and entitlement enforcement suites remain required.
 

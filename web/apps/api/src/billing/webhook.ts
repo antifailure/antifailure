@@ -225,6 +225,7 @@ export async function handleStripeDelivery(
   }
 
   return pool.withStripeCustomer(customerId, async (db) => {
+    await lockBillingCustomer(db, customerId)
     // The insert is the claim on the work. A retry inserts nothing, so the
     // handler below runs once for one event id however many times Stripe sends
     // it. Doing this first, before any decision, is what makes that true even
@@ -258,6 +259,10 @@ export async function handleStripeDelivery(
       }
     }
 
+    // Invoice and payment-method writes eventually attach their event to this
+    // organization too. Take its lock before any entity lock, including the
+    // event update's foreign-key check, to match reconciliation's order.
+    await db.execute(sql`SELECT id FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`)
     const applied = await apply(db, clock, config, orgId, event, analytics)
     await db.execute(sql`
       UPDATE billing_events
@@ -318,6 +323,16 @@ export async function resolvePending(
     details.push(`${event.type}: ${applied.detail}`)
   }
   return { resolved: pending.length, details }
+}
+
+/** A customer can be named before its local row exists, so row locks alone
+ * cannot serialize attachment with a delivery. Both paths take this lock before
+ * inserting, then use fresh statement snapshots after any contender commits.
+ * The order is customer, organization, then billing entity. No network call is
+ * made while this transaction-scoped lock is held. */
+export async function lockBillingCustomer(db: Db, customerId: string): Promise<void> {
+  await db.execute(sql`
+    SELECT pg_advisory_xact_lock(hashtextextended(${'antifailure.billing.customer:' + customerId}, 0))`)
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +497,7 @@ export async function recomputePlan(
     SELECT plan, status FROM subscriptions
     WHERE org_id = ${orgId}::uuid
     ORDER BY (status IN (${entitling}) AND plan <> ${DEFAULT_PLAN}) DESC,
-             created_at DESC, stripe_subscription_id DESC
+             (status IN (${entitling})) DESC, created_at DESC, stripe_subscription_id DESC
     LIMIT 1`)
   const newest = live[0]
   if (!newest) return 'no subscription; the plan was left alone'
@@ -535,6 +550,7 @@ export async function writeInvoice(
   invoice: StripeInvoice,
   eventCreated: Date,
 ): Promise<Outcome> {
+  await db.execute(sql`SELECT id FROM organizations WHERE id = ${orgId}::uuid FOR UPDATE`)
   const now = clock.now().toISOString()
   const paidAt = invoice.status === 'paid' ? eventCreated.toISOString() : null
 

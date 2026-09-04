@@ -18,7 +18,7 @@ import type { Clock } from '../clock.ts'
 import type { Analytics } from '../analytics/record.ts'
 import type { StripeClient } from './stripe.ts'
 import { LIVE_STATUSES, type StripeConfig } from './plans.ts'
-import { recomputePlan, resolvePending, writeInvoice, writeSubscription } from './webhook.ts'
+import { lockBillingCustomer, recomputePlan, resolvePending, writeInvoice, writeSubscription } from './webhook.ts'
 
 export interface BillingCustomer {
   orgId: string
@@ -72,6 +72,7 @@ export async function attachCustomer(
   customer: { id: string; email: string | null },
   analytics: Analytics,
 ): Promise<{ customerId: string; created: boolean; resolved: number }> {
+  await lockBillingCustomer(db, customer.id)
   const now = clock.now().toISOString()
   const inserted = await db.execute<{ stripe_customer_id: string }>(sql`
     INSERT INTO billing_customers (org_id, stripe_customer_id, email, created_at, updated_at)
@@ -215,10 +216,6 @@ export async function reconcile(
   // missing customer.subscription.created webhook leaves no local id to query,
   // which made the old reconciliation unable to recover the exact outage it
   // claimed to handle.
-  // A response can have been read before a newer webhook arrives. Giving that
-  // snapshot the response-completion time would let the older answer overwrite
-  // the delivery that landed while the network call was in flight.
-  const observedAt = clock.now()
   const [subscriptions, invoices] = await Promise.all([
     client
       .listSubscriptions(customerId, 50)
@@ -243,9 +240,12 @@ export async function reconcile(
       notes.push(`subscriptions could not be read from Stripe (${subscriptions.error})`)
     }
     for (const subscription of subscriptions.list) {
-      // The observation began before the request, not after its response.
+      // This legacy watermark is a local observation time, not a provider
+      // version. Moving it to request start fixes one ordering and breaks the
+      // reverse. Snapshot/event ambiguity needs a persisted canonical refresh
+      // protocol; this plan-selection repair does not claim to solve it.
       const written = await writeSubscription(
-        db, clock, config, orgId, subscription, observedAt, analytics,
+        db, clock, config, orgId, subscription, clock.now(), analytics,
       )
       if (written.outcome === 'applied') changed += 1
       notes.push(`${subscription.id}: ${subscription.status}, ${written.detail}`)
@@ -258,7 +258,7 @@ export async function reconcile(
       notes.push(`invoices could not be read from Stripe (${invoices.error})`)
     } else {
       for (const invoice of invoices.list) {
-        const written = await writeInvoice(db, clock, orgId, invoice, observedAt)
+        const written = await writeInvoice(db, clock, orgId, invoice, clock.now())
         if (written.outcome === 'applied') changed += 1
       }
       notes.push(`${invoices.list.length} invoices read from Stripe`)
