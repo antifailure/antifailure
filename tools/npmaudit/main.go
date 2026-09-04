@@ -321,7 +321,7 @@ func parse(stdout []byte, project string, runErr error, stderr string) ([]*findi
 		return nil, fmt.Errorf("%s: npm audit printed something that is not a report: %w\n%s", project, err, trim(stderr))
 	}
 	if rep.Error != nil {
-		return nil, fmt.Errorf("%s: npm audit refused: %s %s\n%s", project, rep.Error.Code, rep.Error.Summary, rep.Error.Detail)
+		return nil, refusal(project, rep.Error, runErr, stderr)
 	}
 	if rep.AuditReportVersion == nil {
 		if runErr != nil {
@@ -370,6 +370,53 @@ func identifier(url string, source int) string {
 		}
 	}
 	return fmt.Sprintf("npm-%d", source)
+}
+
+// refusal turns npm's error object into a sentence that names a cause.
+//
+// THE FAILURE THAT EARNED IT. `npm advisories` went red on main and on every
+// open pull request, and the entire output was:
+//
+//	npmaudit: api: npm audit refused:
+//	exit status 1
+//
+// Nothing after the colon. npm had returned a report whose `error` object was
+// present and whose code, summary and detail were all empty, and the format
+// string printed the three empty strings faithfully. The step had run for
+// exactly five minutes first, which is the shape of a registry that never
+// answered, and none of that reached anybody: this is the ONE error path that
+// fires when the registry is unreachable and it was the one path of the three
+// here that did not carry stderr.
+//
+// So the rule this encodes is the one the repository already applies to the
+// error catalogue. A message that cannot name a cause has to say that it
+// cannot, rather than trailing off and leaving a reader to assume the tool
+// found nothing worth printing. An empty refusal now reports itself as empty,
+// and every refusal carries the process's own diagnostics.
+func refusal(project string, e *npmError, runErr error, stderr string) error {
+	said := strings.TrimSpace(strings.Join([]string{e.Code, e.Summary, e.Detail}, " "))
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: npm audit refused", project)
+	if said == "" {
+		// The case that produced this function. npm said it was refusing and
+		// then said nothing about why, so that fact is the finding.
+		b.WriteString(" and gave no code, summary or detail")
+	} else {
+		fmt.Fprintf(&b, ": %s", said)
+	}
+	if runErr != nil {
+		fmt.Fprintf(&b, "\nnpm exited: %v", runErr)
+	}
+	if out := trim(stderr); out != "" {
+		fmt.Fprintf(&b, "\nnpm wrote to stderr:\n%s", out)
+	} else {
+		// Said out loud, because "the tool printed nothing more" and "the tool
+		// discarded what was printed" look identical from a log, and the second
+		// of those is the defect this function replaces.
+		b.WriteString("\nnpm wrote nothing to stderr.")
+	}
+	return errors.New(b.String())
 }
 
 func trim(s string) string {

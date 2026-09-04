@@ -298,3 +298,72 @@ func TestTheFixtureIsShapedLikeNpmsOutput(t *testing.T) {
 		t.Fatal("the request entry is the union case and needs all five elements")
 	}
 }
+
+// The exact shape that took main red: npm returns an error object and fills in
+// none of it. The old format string printed three empty strings, so the whole
+// output was "npmaudit: api: npm audit refused:" with nothing after the colon.
+func TestAnEmptyRefusalSaysThatItIsEmpty(t *testing.T) {
+	const blank = `{"error":{"code":"","summary":"","detail":""}}`
+	_, err := parse([]byte(blank), "api", nil, "")
+	if err == nil {
+		t.Fatal("an empty refusal was read as a clean tree")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "gave no code, summary or detail") {
+		t.Errorf("an empty refusal must say it is empty: %q", msg)
+	}
+	if strings.HasSuffix(strings.SplitN(msg, "\n", 2)[0], ":") {
+		t.Errorf("the first line trails off after a colon: %q", msg)
+	}
+}
+
+// The one path that fires when the registry is unreachable is the one that used
+// to discard the diagnostics. Both the process's exit error and its stderr have
+// to reach the reader.
+func TestARefusalCarriesStderrAndTheExitError(t *testing.T) {
+	const blank = `{"error":{"code":"","summary":"","detail":""}}`
+	_, err := parse([]byte(blank), "api", os.ErrDeadlineExceeded, "npm ERR! network request to https://registry.npmjs.org failed")
+	if err == nil {
+		t.Fatal("an empty refusal was read as a clean tree")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "registry.npmjs.org") {
+		t.Errorf("stderr did not reach the reader: %q", msg)
+	}
+	if !strings.Contains(msg, os.ErrDeadlineExceeded.Error()) {
+		t.Errorf("the exit error did not reach the reader: %q", msg)
+	}
+}
+
+// Silence from npm and silence from this tool look identical in a log, and the
+// second one is the defect being fixed, so an empty stderr is stated rather
+// than left out.
+func TestAnEmptyStderrIsStatedRatherThanOmitted(t *testing.T) {
+	const blank = `{"error":{"code":"","summary":"","detail":""}}`
+	_, err := parse([]byte(blank), "api", nil, "   ")
+	if err == nil {
+		t.Fatal("an empty refusal was read as a clean tree")
+	}
+	if !strings.Contains(err.Error(), "npm wrote nothing to stderr") {
+		t.Errorf("an empty stderr must be stated: %q", err.Error())
+	}
+}
+
+// A refusal that DOES say why keeps saying it. Fixing the empty case must not
+// bury the populated one.
+func TestAPopulatedRefusalStillNamesItsCause(t *testing.T) {
+	const enolock = `{"error":{"code":"ENOLOCK","summary":"This command requires an existing lockfile.","detail":"Try creating one first"}}`
+	_, err := parse([]byte(enolock), "runner", nil, "")
+	if err == nil {
+		t.Fatal("npm refusing to run was read as a clean tree")
+	}
+	msg := err.Error()
+	for _, want := range []string{"ENOLOCK", "existing lockfile", "Try creating one first", "runner"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal dropped %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "gave no code") {
+		t.Errorf("a populated refusal was reported as empty: %s", msg)
+	}
+}
