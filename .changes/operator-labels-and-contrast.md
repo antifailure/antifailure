@@ -6,3 +6,7 @@ previously made accessible labels ambiguous.
 
 Success badges use the card background. Their previous translucent green fill
 reduced text contrast below 4.5:1 on the overview page background.
+
+The overview now aligns its attention and installation panels in one row,
+places recent actions across the full width, and gives each directory-card row
+a shared bottom edge. Narrow screens keep a natural single-column layout.
