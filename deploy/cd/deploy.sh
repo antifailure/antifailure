@@ -12,10 +12,11 @@
 #      one. A revision that cannot start never reaches a user.
 #   3. Shift traffic.
 #   4. Check the public origin, including which commit answers.
-#   5. Deactivate every revision this deploy superseded except one, and prove
-#      what is left fits in the database's connection budget.
-#   6. On any failure after step 2, put traffic back on the revision that was
-#      serving before and deactivate the new one.
+#   5. Deactivate every revision this deploy superseded except one, update the
+#      scheduled job, and prove the database's connection budget still fits.
+#   6. On a failed public health check, restore the previous revision. Candidate
+#      failures never move traffic. Maintenance and budget failures report the
+#      unhealthy operational state while leaving the healthy app serving.
 #
 # Step 6 is only fast because the app runs in Multiple revision mode: the old
 # revision is still up with no traffic, so the way back is one API call rather
