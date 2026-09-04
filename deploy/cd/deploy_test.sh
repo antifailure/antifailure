@@ -69,7 +69,11 @@ case "$command" in
           printf 'Running\n'
         fi
         ;;
-      properties.fqdn) printf 'candidate.example\n' ;;
+      properties.fqdn)
+        if [ "${AF_DEPLOY_TEST_ADDRESS:-present}" != missing ]; then
+          printf 'candidate.example\n'
+        fi
+        ;;
       properties.createdTime) printf '2026-09-04T00:00:00Z\n' ;;
     esac
     ;;
@@ -96,8 +100,10 @@ log="${AF_DEPLOY_TEST_LOG:?}"
 url="${!#}"
 printf 'health %s\n' "$url" >> "$log"
 
-if [[ "$url" == https://public.example/* ]] &&
-   [ "${AF_DEPLOY_TEST_PUBLIC:-ok}" = fail ]; then
+if { [[ "$url" == https://public.example/* ]] &&
+     [ "${AF_DEPLOY_TEST_PUBLIC:-ok}" = fail ]; } ||
+   { [[ "$url" == https://candidate.example/* ]] &&
+     [ "${AF_DEPLOY_TEST_CANDIDATE_HEALTH:-ok}" = fail ]; }; then
   case " $* " in
     *" -f"*) exit 22 ;;
     *" -w "*) printf '503' ;;
@@ -139,6 +145,9 @@ line_of() {
 expect() {
   local name="$1"
   shift
+  if [ -n "${AF_DEPLOY_TEST_ASSERT:-}" ] && [ "$AF_DEPLOY_TEST_ASSERT" != "$name" ]; then
+    return 0
+  fi
   if "$@"; then
     printf 'ok  %s\n' "$name"
   else
@@ -176,6 +185,22 @@ expect "maintenance receives the tested digest" has_line \
   "job-update maintenance ghcr.io/example/control-plane@sha256:tested" "$CASE_LOG"
 expect "maintenance moves after public health" later_than \
   "job-update maintenance" "health https://public.example/readyz" "$CASE_LOG"
+expect "maintenance moves after candidate health" later_than \
+  "job-update maintenance" "health https://candidate.example/readyz" "$CASE_LOG"
+
+run_deploy address-missing AF_DEPLOY_TEST_ADDRESS=missing
+expect "a missing candidate address refuses the deploy" is_nonzero "$CASE_RC"
+expect "a missing candidate address leaves maintenance alone" omits \
+  "job-update maintenance" "$CASE_LOG"
+expect "a missing candidate address is never promoted" omits \
+  "containerapp ingress traffic set" "$CASE_LOG"
+
+run_deploy candidate-unhealthy AF_DEPLOY_TEST_CANDIDATE_HEALTH=fail
+expect "an unhealthy candidate refuses the deploy" is_nonzero "$CASE_RC"
+expect "an unhealthy candidate leaves maintenance alone" omits \
+  "job-update maintenance" "$CASE_LOG"
+expect "an unhealthy candidate is never promoted" omits \
+  "containerapp ingress traffic set" "$CASE_LOG"
 
 run_deploy revision-failed AF_DEPLOY_TEST_REVISION=fail
 expect "a failed candidate refuses the deploy" is_nonzero "$CASE_RC"

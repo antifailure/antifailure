@@ -333,7 +333,9 @@ if [ -n "$REV_FQDN" ] && [ "$REV_FQDN" != "None" ]; then
     exit 1
   fi
 else
-  say "no per-revision address available; skipping the pre-promotion smoke test"
+  say "NO CANDIDATE ADDRESS. Cannot prove the revision is healthy. Traffic never moved; $PREVIOUS is still serving."
+  az containerapp revision deactivate -n "$APP" -g "$RG" --revision "$NEW" -o none || true
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
