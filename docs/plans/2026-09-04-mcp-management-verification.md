@@ -40,6 +40,11 @@ not a mock response page. The operator signed in through the normal form.
 - Revocation required the prefix and a reason. Submitting it closed the dialog,
   removed the action, reduced active credentials from one to zero, and increased
   revoked credentials from one to two.
+- A separate cross-component probe minted a real hosted credential through the
+  OAuth implementation and exercised the mounted MCP handler. Tools listing
+  returned HTTP 200. After revoking that same credential in this page's browser
+  dialog, replaying the same bearer returned HTTP 401. The raw credential stayed
+  in process memory rather than appearing in a command argument or report.
 - A network failure showed the shared error and a working retry action.
 - A failed refresh after successful revocation retained the prior data with an
   explicit stale-answer warning. Retry recovered the updated credential state.
