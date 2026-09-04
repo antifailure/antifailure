@@ -9,7 +9,8 @@
   },
   "bin": {
     "af-control-plane": "./src/main.ts",
-    "af-control-plane-backup": "./src/backup-cli.ts"
+    "af-control-plane-backup": "./src/backup-cli.ts",
+    "af-operator": "./src/operator-cli.ts"
   },
   "scripts": {
     "start": "node src/main.ts",
