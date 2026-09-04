@@ -14,6 +14,7 @@ on:
     paths:
       - 'web/**'
       - 'deploy/**'
+      - '.dockerignore'
       - '.github/workflows/control-plane-image.yml'
 
   # NO `paths:` FILTER HERE, AND THAT IS THE POINT.
@@ -149,6 +150,16 @@ jobs:
           }
           check_refusal maintenance.mjs AF_MAINTENANCE_DATABASE_URL
           check_refusal bootstrap.mjs AF_MIGRATION_DATABASE_URL
+
+          # Exercise the packaged command, not only the source file it wraps.
+          out=$(docker run --rm --entrypoint af-operator "$img" init 2>&1) && rc=0 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "FAIL: operator setup exited 0 without its runtime credential"; exit 1
+          fi
+          case "$out" in
+            *AF_ADMIN_DATABASE_URL*) echo "operator setup refuses and names its runtime credential" ;;
+            *) echo "FAIL: operator setup did not reach its credential guard. It said: $out"; exit 1 ;;
+          esac
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
