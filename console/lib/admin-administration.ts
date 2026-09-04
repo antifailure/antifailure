@@ -139,6 +139,7 @@ export interface AdminUsage {
   windowHours: number;
   since: string;
   rows: UsageRow[];
+  series: { day: string; hours: number; measuredAt: string | null }[];
 }
 
 export interface SpendRow {

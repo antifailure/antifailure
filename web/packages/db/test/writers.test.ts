@@ -137,6 +137,29 @@ function sitesFor(table: string, verb: 'INSERT INTO' | 'FROM' | 'UPDATE'): Site[
   return found
 }
 
+/** A function installed by a migration keeps running after the migration.
+ * A bare backfill does not. Count a body only when a production call or a
+ * trigger on a production-written table reaches that exact function. */
+function recurringSqlWriter(site: Site): boolean {
+  if (!isMigration(site.file)) return false
+  const source = contents.get(path.join(repo, site.file))?.join('\n') ?? ''
+  const routines = /CREATE(?: OR REPLACE)? FUNCTION\s+(\w+)\s*\([\s\S]*?\$\$([\s\S]*?)\$\$;/gi
+  for (const match of source.matchAll(routines)) {
+    const first = source.slice(0, match.index).split('\n').length
+    const last = first + match[0].split('\n').length - 1
+    if (site.line < first || site.line > last) continue
+    const name = match[1]!
+    const called = new RegExp(`\\b(?:SELECT|CALL)\\s+${name}\\s*\\(`, 'i')
+    for (const [file, lines] of contents) {
+      if (!isMigration(file) && !isFixture(file) && lines.some((line) => called.test(line))) return true
+    }
+    const trigger = new RegExp(`CREATE TRIGGER\\s+\\w+[\\s\\S]*?\\bON\\s+(\\w+)\\s+FOR EACH ROW EXECUTE FUNCTION\\s+${name}\\s*\\(`, 'i')
+    const table = trigger.exec(source)?.[1]
+    if (table && sitesFor(table, 'INSERT INTO').some((s) => !isMigration(s.file) && !isFixture(s.file))) return true
+  }
+  return false
+}
+
 /** Where a customer meets the table: the console's API, or the compliance pack. */
 function isCustomerFacingReader(file: string): boolean {
   const p = file.split(path.sep).join('/')
@@ -280,7 +303,7 @@ describe('every table a screen reads is written by something that is not a fixtu
     for (const table of tables) {
       const readers = sitesFor(table, 'FROM').filter((s) => isCustomerFacingReader(s.file))
       const writers = sitesFor(table, 'INSERT INTO')
-      const inserted = writers.filter((s) => !isFixture(s.file) && !isMigration(s.file))
+      const inserted = writers.filter((s) => !isFixture(s.file) && (!isMigration(s.file) || recurringSqlWriter(s)))
       const fixtures = writers.filter((s) => isFixture(s.file))
 
       // A SINGLETON SEEDED BY ITS MIGRATION AND MAINTAINED BY UPDATE.

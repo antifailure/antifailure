@@ -1460,7 +1460,30 @@ export const adminOperations = pgTable('admin_operations', {
 /** Every table the application writes to, for the cross-tenant suite. A table
  *  added to the schema and forgotten here is a table nobody proved is
  *  isolated, so the suite asserts this list covers the database. */
+export const environmentUsage = pgTable('environment_usage', {
+  environmentId: uuid('environment_id').primaryKey(),
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  envId: text('env_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  tornDownAt: timestamp('torn_down_at', { withTimezone: true }),
+})
+
+export const usageRollupState = pgTable('usage_rollup_state', {
+  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  dirtyFrom: timestamp('dirty_from', { withTimezone: true }),
+  rolledThrough: timestamp('rolled_through', { withTimezone: true }),
+})
+
+export const environmentUsageDaily = pgTable('environment_usage_daily', {
+  orgId: uuid('org_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  day: date('day').notNull(),
+  hours: numeric('hours').notNull(),
+  environments: bigint('environments', { mode: 'number' }).notNull(),
+  measuredAt: timestamp('measured_at', { withTimezone: true }).notNull(),
+}, (t) => [primaryKey({ columns: [t.orgId, t.day] })])
+
 export const tenantScopedTables = [
+  environmentUsage, environmentUsageDaily, usageRollupState,
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
   events, auditEntries, providerKeys, providerBudgets,

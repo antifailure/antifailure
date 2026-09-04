@@ -284,6 +284,32 @@ describe('the administration routes', { skip: hasDb ? false : 'no database' }, (
    * ------------------------------------------------------------------ */
 
   describe('usage, measured in environment-hours', () => {
+    test('recorded daily history reaches the operator route after environment cleanup', async () => {
+      const caller = await callerFor('analytics')
+      const now = h.clock.now()
+      await h.admin`SELECT roll_up_environment_usage(${now.toISOString()}::timestamptz)`
+      const before = await caller.admin.administration.usage({ window: '7d', limit: 100 })
+      const org = await seedOrg(h.admin, 'history')
+      const envId = `history-${randomUUID()}`
+      await h.admin`
+        INSERT INTO environments(org_id, repository_id, env_id, branch, state, created_at, torn_down_at)
+        VALUES (${org.orgId}, ${org.repoId}, ${envId}, 'main', 'torn_down',
+          ${new Date(now.getTime() - 2 * 3600_000).toISOString()},
+          ${new Date(now.getTime() - 3600_000).toISOString()})`
+      await h.admin`DELETE FROM environments WHERE org_id = ${org.orgId}`
+      await h.admin`SELECT roll_up_environment_usage(${now.toISOString()}::timestamptz)`
+      const after = await caller.admin.administration.usage({ window: '7d', limit: 100 })
+      const sum = (data: typeof after) => data.series.reduce((total, point) => total + point.hours, 0)
+      assert.deepEqual({
+        retained: after.rows.find((row) => row.id === org.orgId)?.hours,
+        dailyIncrease: Math.round((sum(after) - sum(before)) * 100) / 100,
+      }, { retained: 1, dailyIncrease: 1 })
+      assert.deepEqual(after.series.slice(-2).map((point) => point.day), [
+        new Date(now.getTime() - 86400_000).toISOString().slice(0, 10),
+        now.toISOString().slice(0, 10),
+      ], 'the empty current UTC day remains a dated slot rather than compressing time')
+    })
+
     test('an environment held for a known time is measured as that time', async () => {
       const caller = await callerFor('analytics')
       // Timestamps derived from h.clock, NOT from the database's now().
