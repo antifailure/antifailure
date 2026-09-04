@@ -304,6 +304,10 @@ type Result struct {
 	// Questions are the things af init has to ask, because a finding was below
 	// the confidence threshold or two analyzers disagreed.
 	Questions []Question
+	// UnassignedImages names Dockerfiles whose runtime was not established by
+	// a command, port, framework or Compose declaration. Their base image may
+	// inherit a process, so omission must be visible rather than called unused.
+	UnassignedImages []string
 	// Partial reports that the time or size budget ran out before the walk
 	// finished, so the draft may be incomplete.
 	Partial bool
@@ -428,6 +432,20 @@ func Run(ctx context.Context, fsys fs.FS, root string, opts Options) (*Result, e
 
 	sortFindings(res.Findings)
 	res.Draft, res.Questions = Merge(res.Findings, root)
+	assigned := map[string]bool{}
+	for _, svc := range res.Draft.Services {
+		if svc.Build != nil {
+			assigned[svc.Build.Dockerfile] = true
+		}
+	}
+	for _, f := range res.Findings {
+		if f.Kind == KindBuild && f.Value == "dockerfile" {
+			dockerfile := f.Extra["dockerfile"]
+			if dockerfile != "" && !assigned[dockerfile] {
+				res.UnassignedImages = appendUnique(res.UnassignedImages, dockerfile)
+			}
+		}
+	}
 	res.Duration = opts.Clock.Since(start)
 	return res, nil
 }

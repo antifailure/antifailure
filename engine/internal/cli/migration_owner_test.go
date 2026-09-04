@@ -1,12 +1,55 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func unassignedImageFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"package.json":     `{"name":"dashboard","dependencies":{"next":"15"}}`,
+		"proxy/Dockerfile": "FROM nginx:stable\n",
+	} {
+		filename := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(filename), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestUnassignedImage_SummaryNamesExcludedImage(t *testing.T) {
+	dir := unassignedImageFixture(t)
+	got := runCLI(t, dir, nil, "init", "--non-interactive")
+	if got.code != 0 {
+		t.Fatal(got.stderr)
+	}
+	require.Contains(t, got.stdout, "proxy/Dockerfile")
+}
+
+func TestUnassignedImage_JSONNamesExcludedImage(t *testing.T) {
+	dir := unassignedImageFixture(t)
+	got := runCLI(t, dir, nil, "init", "--non-interactive", "--output", "json")
+	if got.code != 0 {
+		t.Fatal(got.stderr)
+	}
+	var report struct {
+		UnassignedImages []string `json:"unassigned_images"`
+	}
+	if err := json.Unmarshal([]byte(got.stdout), &report); err != nil {
+		t.Fatal(err)
+	}
+	require.Equal(t, []string{"proxy/Dockerfile"}, report.UnassignedImages)
+}
 
 func migrationOwnerFixture(t *testing.T) string {
 	t.Helper()

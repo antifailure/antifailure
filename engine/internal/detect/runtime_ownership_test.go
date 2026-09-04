@@ -59,3 +59,19 @@ func TestRuntimeOwnership_UniqueLocalMigrationKeepsItsOwner(t *testing.T) {
 	})
 	require.Equal(t, "alembic upgrade head", serviceNamed(t, res.Draft, "ui").Migrate)
 }
+
+func TestRuntimeOwnership_InheritedRuntimeIsReportedAsUnassigned(t *testing.T) {
+	res := run(t, "research", map[string]string{
+		"dashboard/package.json": `{"name":"dashboard","dependencies":{"next":"15"}}`,
+		"proxy/Dockerfile":       "FROM nginx:stable\n",
+	})
+	require.Equal(t, []string{"proxy/Dockerfile"}, res.UnassignedImages)
+}
+
+func TestRuntimeOwnership_AssignedImageIsNotReportedMissing(t *testing.T) {
+	res := run(t, "research", map[string]string{
+		"compose.yaml":       "services:\n  api:\n    build: ./runtime\n    command: python app.py\n    ports:\n      - '8080:8080'\n",
+		"runtime/Dockerfile": "FROM python:3.12-slim\nWORKDIR /app\n",
+	})
+	require.Empty(t, res.UnassignedImages)
+}

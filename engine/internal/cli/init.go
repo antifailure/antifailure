@@ -99,14 +99,15 @@ func parseAnswers(raw []string) map[string]string {
 
 // InitReport is the JSON form of af init.
 type InitReport struct {
-	ManifestPath string            `json:"manifest_path"`
-	Created      bool              `json:"created"`
-	Services     []string          `json:"services"`
-	EgressRules  int               `json:"egress_rules"`
-	Questions    []detect.Question `json:"questions,omitempty"`
-	Assumed      map[string]string `json:"assumed,omitempty"`
-	Findings     int               `json:"findings"`
-	Partial      bool              `json:"partial"`
+	ManifestPath     string            `json:"manifest_path"`
+	Created          bool              `json:"created"`
+	Services         []string          `json:"services"`
+	EgressRules      int               `json:"egress_rules"`
+	Questions        []detect.Question `json:"questions,omitempty"`
+	Assumed          map[string]string `json:"assumed,omitempty"`
+	Findings         int               `json:"findings"`
+	Partial          bool              `json:"partial"`
+	UnassignedImages []string          `json:"unassigned_images,omitempty"`
 }
 
 func runInit(ctx context.Context, env *Env, opts initOptions) error {
@@ -186,7 +187,8 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	report := InitReport{
 		ManifestPath: manifestPath, Created: true, Services: names,
 		EgressRules: len(res.Draft.Egress.Rules), Questions: res.Questions,
-		Assumed: assumed, Findings: len(res.Findings), Partial: res.Partial,
+		UnassignedImages: res.UnassignedImages,
+		Assumed:          assumed, Findings: len(res.Findings), Partial: res.Partial,
 	}
 	if env.Out.Format == FormatJSON {
 		return env.Out.JSON(report)
@@ -451,6 +453,13 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 	env.Out.Table([]Column{
 		Col("SERVICE"), Col("KIND"), Num("PORT"), Col("PATH"), Flex("COMMAND"),
 	}, rows)
+	if len(res.UnassignedImages) > 0 {
+		env.Out.Section("Images without a detected service")
+		for _, dockerfile := range res.UnassignedImages {
+			env.Out.Printf("  %s\n", dockerfile)
+		}
+		env.Out.Note(StyleWarn, "These images were not added. No command or port established their runtime; a base image may supply one. If an image runs part of your application, declare that service and its command in Compose or in this manifest before af up.")
+	}
 
 	if len(res.Draft.Egress.Rules) > 0 {
 		env.Out.Section("Network policy")
