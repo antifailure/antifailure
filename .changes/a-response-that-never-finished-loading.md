@@ -1,4 +1,4 @@
-## Fixed
+# fixed
 
 A successful HTTP response with a missing tRPC result left console cards
 loading forever. Queries and mutations now reject malformed or incomplete

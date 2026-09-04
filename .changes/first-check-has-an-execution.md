@@ -1,4 +1,4 @@
-## Fixed
+# fixed
 
 The console's first-result guide stopped at commands that prepare a manifest
 and inspect the machine, without executing a test. It now walks through runner
