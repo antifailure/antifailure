@@ -142,12 +142,14 @@ line_of() {
   grep -nF "$1" "$2" | head -1 | cut -d: -f1
 }
 
+CHECKED=0
 expect() {
   local name="$1"
   shift
   if [ -n "${AF_DEPLOY_TEST_ASSERT:-}" ] && [ "$AF_DEPLOY_TEST_ASSERT" != "$name" ]; then
     return 0
   fi
+  CHECKED=$((CHECKED + 1))
   if "$@"; then
     printf 'ok  %s\n' "$name"
   else
@@ -227,4 +229,8 @@ expect "a stale maintenance read back names both images" contains \
   "maintenance image read back as ghcr.io/example/control-plane@sha256:old; expected ghcr.io/example/control-plane@sha256:tested" \
   "$CASE_OUT"
 
-printf 'deploy ordering: all cases passed\n'
+if [ "$CHECKED" -eq 0 ]; then
+  printf 'FAIL  no deployment assertions matched the selection\n' >&2
+  exit 1
+fi
+printf 'deploy ordering: %s assertions passed\n' "$CHECKED"
