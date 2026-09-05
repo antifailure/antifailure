@@ -194,11 +194,38 @@ traffic weights. The module says so, with `ignore_changes` on
 is what lets the two run on their own schedules instead of undoing each other.
 
 The consequence is not obvious and it has already caught us once. Any Terraform
-change to the template creates a **new revision**, and because Terraform does
-not touch traffic weights, that revision comes up with **zero percent of
-traffic**. Terraform reports a successful apply. Production is still serving the
-old revision, without the change. Add an environment variable this way and the
-application will not see it, for as long as nobody deploys.
+change to the template creates a **new revision**, and that revision comes up
+with **zero percent of traffic**. Terraform reports a successful apply.
+Production is still serving the old revision, without the change. Add an
+environment variable this way and the application will not see it, for as long
+as nobody deploys.
+
+The mechanism is worth stating exactly, because the obvious explanation is the
+wrong one. Terraform does not leave the traffic block out. It sends one, and
+`ignore_changes` decides which one: the value it refreshed from Azure rather
+than the value written in the configuration.
+
+Those two do not say the same thing. The configuration asks for
+`latest_revision = true` at one hundred percent, which would put every new
+revision straight into service. What Azure actually holds, once any deploy has
+run, is a pin naming one revision:
+
+```hcl
+traffic_weight = [{
+  latest_revision = false
+  percentage      = 100
+  revision_suffix = "c64e67a86-031648"
+}]
+```
+
+So the apply reasserts the pin it just read, the revision named there keeps all
+of the traffic, and the one Terraform has built gets none of it. It is not that
+Terraform declines to move traffic. It is that Terraform faithfully puts back
+the arrangement it found, and the revision it is creating is not in it.
+
+Which is why the question "where will the traffic be after this apply" is
+answered by Azure and not by anything in this repository. Ask it directly, with
+the commands below, before and after.
 
 So after an apply that touched the template, check what is actually serving:
 
@@ -219,6 +246,37 @@ az containerapp ingress traffic set -n afcp-app -g af-cp-centralus \
 
 Moving it by hand is a traffic shift and not a rollback: both revisions run the
 same image unless a deploy happened in between.
+
+### Terraform state is not a record of what is serving
+
+Once traffic moves, whether a deploy moved it or you moved it with the command
+above, the stored state file keeps the OLD revision suffix, and it keeps it
+indefinitely. Nothing writes the true value back, because `ignore_changes` on
+`ingress[0].traffic_weight` is exactly what stops Terraform caring.
+
+Both of our environments were stale that way when this was written, each by more
+than one deploy. Neither was a fault and neither needed repairing.
+
+The distinction that matters is between the STORED file and a REFRESH. A plan
+and an apply both refresh, so the value they act on is the one they just read
+from Azure, and it is current. `terraform state show` and `terraform state pull`
+read the stored file, and it is not. On the deployment this was written against,
+the stored file named a revision that had already been deactivated while the
+plan's own view named the one actually serving.
+
+So: **do not ask this repository what is serving.** Not the state file, which
+answers confidently and wrongly, and not a plan either. An empty plan means
+Terraform intends no change, and because this attribute is ignored, that is not
+a statement about where traffic is. Ask Azure, with the two commands above.
+
+The one case that needs real care is REMOVING that `ignore_changes`, and the
+consequence is the opposite of what the stale file suggests. The stored suffix
+is not what would take effect: the configuration is. `latest_revision = true`
+would win, so traffic would follow the newest revision automatically, every
+Terraform apply would put its own revision into service at one hundred percent
+with no opportunity to probe it first, and each apply would undo the pin the
+deploy pipeline sets. If you want that, it is a deliberate change to how
+releases work here and not a tidy-up of a stale field.
 
 ### Grant yourself write access to the vault, once
 

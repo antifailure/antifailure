@@ -413,6 +413,13 @@ az containerapp ingress traffic set -n afcpprod-app -g af-cp-prod-centralus \
   --revision-weight <newest-revision>=100
 ```
 
+Read that from Azure and not from Terraform. The stored state file records the
+traffic weight from before the last deploy and `ignore_changes` deliberately
+keeps it there, so it is stale by design and says nothing about what is serving.
+An empty plan is not an answer either, because the attribute that would say so
+is the ignored one. See
+[the revision mode trap](/docs/self-hosting/azure#terraform-state-is-not-a-record-of-what-is-serving).
+
 ### 12. Install the App on the organization
 
 On the App's page, **Install App**, and choose the account and repositories.
