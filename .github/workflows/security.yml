@@ -18,7 +18,26 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The daily scan is in its own group, and that is not a detail.
+  #
+  # Everything below about pending runs is true, and it was written about
+  # commits. It applies to the SCHEDULE too, and there the cost is different:
+  # a push run that gets skipped is one commit without its own verdict, and
+  # the newest commit still reaches one. The scheduled run is not one of many.
+  # It is the freshness control, it is the only run `security-watch` measures,
+  # and there is exactly one a day.
+  #
+  # On 2026-09-05 a burst of merges to main cancelled it while it was pending,
+  # so the day's scan never completed, `security-watch` reported the newest
+  # SCHEDULED scan as cancelled, and it was right to. Reading a push run as a
+  # substitute is the one thing that watchdog deliberately refuses, because a
+  # busy afternoon of pull requests would otherwise make a dead schedule look
+  # fresh.
+  #
+  # Keying the group on the event separates the two. A merge burst can still
+  # skip a pending push run, which is the accepted trade below, and it can no
+  # longer touch the daily one.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'schedule' && 'schedule' || 'change' }}
   # A run on main is the verdict a tag and a deploy are read against, so it
   # is never cancelled. On a branch the saving is real and nothing depends
   # on the superseded answer, so cancelling stays.
