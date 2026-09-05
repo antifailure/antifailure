@@ -265,9 +265,11 @@ func newVerifyModelKeyTool(p *Project, probe probeModelKey) *Tool {
 		// nothing.
 		ReadOnly: false,
 		Description: "Prove the configured model key actually works, by sending one real " +
-			"completion of a single token to the provider. It costs a fraction of a cent " +
-			"and counts against the account's rate limits, which is why it is not marked " +
-			"read only. Use it before a long run, or when a run failed in a way that might " +
+			"completion of a single token to the provider. IT SPENDS MONEY: a fraction of a " +
+			"cent, billed to whoever owns the configured key, and the call counts against " +
+			"that account's rate limits. That is why it is not marked read only, and it is " +
+			"why timeout_seconds has a ceiling rather than being open ended. Use it before " +
+			"a long run, or when a run failed in a way that might " +
 			"be the key. A real call rather than a check of the key's shape, because a well " +
 			"formed key that was revoked this morning passes every shape check there is. It " +
 			"tells the failures apart: a rejected key, an empty balance, a model name the " +

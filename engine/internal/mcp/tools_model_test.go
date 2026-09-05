@@ -329,3 +329,21 @@ func TestModelToolsBoundEveryArgument(t *testing.T) {
 		requireBounded(t, tool.Name, tool.Input)
 	}
 }
+
+func TestVerifyModelKey_TheDescriptionSaysItSpends(t *testing.T) {
+	t.Parallel()
+	// The one tool here that costs money. A caller must be able to read that
+	// off the description before calling it, rather than learning it from the
+	// bill, and the read only annotation is the other half of the same fact.
+	tool := newVerifyModelKeyTool(testProject(t), nil)
+
+	require.Contains(t, tool.Description, "SPENDS MONEY")
+	require.Contains(t, tool.Description, "rate limits")
+	require.False(t, tool.ReadOnly,
+		"a tool that spends against somebody's account is not read only")
+
+	// And the spend is bounded rather than open ended.
+	require.True(t, tool.Input.Properties["timeout_seconds"].HasMax)
+	require.Equal(t, float64(maxProbeSeconds),
+		tool.Input.Properties["timeout_seconds"].Maximum)
+}

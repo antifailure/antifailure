@@ -244,7 +244,10 @@ sees both sets, so read the server a tool came from before believing a name.
 
 The hosted `list_environments` and the local `inspect_environments` are
 different things: the hosted one reads what the control plane was told, and the
-local one reads the runtime that is actually holding the containers.
+local one reads the runtime that is actually holding the containers. No local
+tool reuses a hosted name. Where the two answer a near enough question, the
+local one carries a qualifier, the way `inspect_egress_firewall` does beside
+hosted `inspect_recorded_egress`.
 
 ## The division of authority
 
@@ -655,10 +658,12 @@ whether a monthly spending cap actually applies to it. No key is a supported
 answer and not a failure: runs fall back to a deterministic planner.
 
 `verify_model_key` proves the key works with one real completion of a single
-token. It costs a fraction of a cent and counts against the account's rate
-limits, which is why it is not marked read only. It tells the failures apart: a
-rejected key, an empty balance, a model the endpoint does not serve, a throttle,
-an outage and an endpoint nothing answers on have different fixes.
+token. It spends money: a fraction of a cent, billed to whoever owns the
+configured key, and the call counts against that account's rate limits. That is
+why it is not marked read only and why its timeout has a ceiling. It tells the
+failures apart: a rejected key, an empty balance, a model the endpoint does not
+serve, a throttle, an outage and an endpoint nothing answers on have different
+fixes.
 
 `describe_control_plane_account` says who this machine is signed in as and what
 the credential is allowed to do. It asks the control plane rather than reading
