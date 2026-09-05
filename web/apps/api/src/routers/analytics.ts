@@ -41,6 +41,7 @@ import {
   funnelOrder,
   organizationFunnel,
   planMix,
+  recordingStopped,
   retention,
   retentionGrid,
   series,
@@ -114,6 +115,15 @@ export interface Provenance {
   /** False when no surrogate secret is configured, so nothing is recorded. */
   recording: boolean
   /**
+   * True when this installation recorded once and is not recording now, which
+   * is a different thing from never having recorded and reads identically on
+   * the page unless it is said. The usual cause is a rollback to a revision
+   * that predates the analytics variables. `recording` alone cannot express it:
+   * false covers both the installation that switched analytics on yesterday and
+   * lost it, and the one that never wanted it.
+   */
+  recordingStopped: boolean
+  /**
    * The three insight shapes settle at different rates, so each carries its
    * own answer. One freshness line for all of them would be right about the
    * daily counts and wrong about the other two: a funnel week is still gaining
@@ -137,6 +147,7 @@ async function provenanceFor(c: OrgContext, days: number): Promise<Provenance> {
     lastRolledUpAt: state.lastRunAt,
     settledAfter: state.settledAfter,
     recording: c.analytics.enabled,
+    recordingStopped: recordingStopped(c.analytics.enabled, state.lastRunAt),
     funnelsFinalBefore: state.funnelsFinalBefore,
     cohortsCompleteThrough: state.cohortsCompleteThrough,
     subjectDaysKept: state.subjectDaysKept,
