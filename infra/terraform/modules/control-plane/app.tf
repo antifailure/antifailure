@@ -724,6 +724,31 @@ resource "azurerm_container_app" "this" {
   # the old one. Add an environment variable here and the application does not
   # see it until somebody deploys. Check what is actually serving after an apply
   # that touched the template; the self-hosting guide has the two commands.
+  #
+  # WHY THE NEW REVISION GETS NOTHING, since the obvious reading is wrong.
+  # Ignoring an attribute does not mean omitting it. Terraform sends a traffic
+  # block either way, and this line decides which one: the value refreshed from
+  # Azure rather than the one written below. The block below asks for
+  # latest_revision = true at 100 percent; Azure, after any deploy, holds a pin
+  # naming one revision. The apply puts back the arrangement it just read, and
+  # the revision it is creating is not in that arrangement, so it gets zero.
+  #
+  # THE STORED STATE FILE IS A STALE COPY OF THAT, and it stays stale because
+  # this line is what stops Terraform caring. A plan and an apply refresh, so
+  # they act on the current value; `terraform state show` and `state pull` read
+  # the stored one and do not. On this deployment the stored file named a
+  # revision that had already been DEACTIVATED while the plan's own view named
+  # the one actually serving. Neither is a fault to repair. It means only this:
+  # do not ask Terraform what is serving, and do not read an empty plan as an
+  # answer either, because the attribute that would say so is this one. Ask
+  # Azure.
+  #
+  # If this line is ever REMOVED, the consequence is the opposite of what the
+  # stale file suggests. The stored suffix is not what would take effect, the
+  # configuration is: latest_revision = true wins, traffic follows the newest
+  # revision automatically, every apply puts its own revision straight into
+  # service with no chance to probe it, and each apply undoes the pin the deploy
+  # sets. That is a deliberate change to how releases work, not a tidy-up.
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,
