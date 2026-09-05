@@ -32,20 +32,57 @@ database:
   migrationUrl: ""
   # Preferred over the two above: a Secret you created yourself, so no
   # credential is ever written into a values file or a release manifest.
+  # The connection string the OPERATOR PORTAL uses, and the only credential on
+  # this installation that can read across tenants. A second credential rather
+  # than a second setting on the first: its role holds BYPASSRLS, and the
+  # application's role must never hold it.
+  #
+  # Leave it empty on an installation with no operator portal, which is the
+  # right answer for a single team. /admin then refuses every request and names
+  # this setting, rather than answering an empty list that reads like a platform
+  # with no customers on it.
+  adminUrl: ""
   existingSecret: ""
   secretKeys:
     url: AF_DATABASE_URL
     migrationUrl: AF_MIGRATION_DATABASE_URL
+    adminUrl: AF_ADMIN_DATABASE_URL
 
 github:
   clientId: ""
   clientSecret: ""
   redirectUri: ""
+  # Where the GitHub API lives. Point it at a GitHub Enterprise Server's API,
+  # which is usually https://ghe.example.com/api/v3.
+  apiBase: ""
+  # The GitHub App, which is a different thing from the OAuth App above and is
+  # what receives installations and webhooks.
+  #
+  # All three of appId, privateKey and webhookSecret or none of them. The
+  # application stops at startup on a partial set, and this chart refuses to
+  # render one, because a half configured App is an installation that looks
+  # wired and drops every delivery.
+  appId: ""
+  # The PEM GitHub generated, or that PEM base64 encoded. Literal \n sequences
+  # are turned back into newlines by the application, because most ways of
+  # getting a multi-line value into a container flatten it.
+  privateKey: ""
+  # Every delivery to /webhooks/github is verified against this before its body
+  # is parsed. Without it that route answers 503 rather than accepting unsigned
+  # deliveries.
+  webhookSecret: ""
+  # The public https://github.com/apps/<slug>/installations/new address. Set, a
+  # person who signs in with no organization is offered Install the GitHub App.
+  # Unset, they are told the address has not been configured. Any other origin
+  # or path stops the process at startup.
+  installUrl: ""
   existingSecret: ""
   secretKeys:
     clientId: AF_GITHUB_CLIENT_ID
     clientSecret: AF_GITHUB_CLIENT_SECRET
     redirectUri: AF_GITHUB_REDIRECT_URI
+    appPrivateKey: AF_GITHUB_APP_PRIVATE_KEY
+    appWebhookSecret: AF_GITHUB_APP_WEBHOOK_SECRET
 
 # Applies the schema and grants the application role its membership, as a Job
 # that runs before the Deployment rolls. Turn it off only if something else
@@ -103,6 +140,148 @@ config:
   # App installation or an invitation. Turn it on to run a control plane people
   # sign themselves up to.
   selfServeSignup: false
+  # Connections in the operator pool. Small on purpose: it serves a handful of
+  # operators rather than customer traffic. Read only when database.adminUrl or
+  # an existing Secret carrying it is set.
+  adminPoolMax: ""
+  # Where a browser reaches this deployment. It is what a sign-in link points
+  # at, so a wrong value here is a link that lands somewhere nobody is serving.
+  publicUrl: ""
+  # The browser origin the marketing site is served from, as a whole origin such
+  # as https://example.com, with no path, query or fragment.
+  #
+  # It widens exactly one route, the enterprise contact form, which is the only
+  # endpoint on this server that answers a cross-origin browser. Empty means no
+  # other origin may post, so a contact form on a separate marketing host cannot
+  # submit and the visitor is shown a network error for a deliberate refusal.
+  # There is no value meaning "any origin".
+  #
+  # THIS WAS UNREACHABLE FROM THIS CHART UNTIL IT WAS ADDED, along with the rest
+  # of the settings above and below it. See the note at the top of extraEnv.
+  siteOrigin: ""
+  # Where somebody the sign-in allowlist refuses is sent instead. Empty is the
+  # self-hosted default and means the refusal page offers no link: an operator
+  # running an allowlist has their own way of being asked, and pointing their
+  # users at somebody else's contact page would be wrong. Must be an absolute
+  # http or https address, or the process stops at startup.
+  signupUrl: ""
+  # The product name in a mail subject line, for a white-labelled deployment.
+  # Empty leaves the application's own default.
+  productName: ""
+  # What a model costs, as model=input/output in US dollars per million tokens,
+  # comma separated: claude-sonnet-5=3/15,gpt-4.1=2/8. Adds to the built-in
+  # defaults rather than replacing them. A model with no price is refused rather
+  # than charged nothing, and a malformed entry stops the process at startup.
+  modelPrices: ""
+  # Set to `enterprise` on a hosted control plane sold only to enterprise
+  # organizations. Leave it empty when self-hosting: it refuses the product to
+  # every organization Stripe has not granted that plan, and setting it while
+  # billing is off stops the process, because then no customer could satisfy it.
+  hostedRequiredPlan: ""
+
+# Sealing customers' Anthropic and OpenAI keys.
+#
+# 32 bytes of base64, from `openssl rand -base64 32`. Empty means provider keys
+# cannot be stored at all: saving one is refused rather than written in the
+# clear. It must not live in the same place as the database, or a database dump
+# carries both halves, which is the argument for existingSecret here.
+providerKeys:
+  secret: ""
+  existingSecret: ""
+  secretKeys:
+    secret: AF_PROVIDER_KEY_SECRET
+
+# Mail, and the enterprise leads that are announced over it.
+#
+# Setting leadNotifyEmail WITHOUT a mailer is its own state and the startup log
+# calls it out: that deployment believes it is announcing leads and cannot. Read
+# the queue either way with `af-control-plane-backup leads`.
+mail:
+  # The Resend key. An HTTP mail API rather than SMTP on purpose: it is a
+  # request an egress sidecar can capture.
+  resendApiKey: ""
+  # The From address. Resend refuses a domain it has not verified.
+  from: ""
+  # Where an enterprise lead is announced. Empty means leads are recorded and
+  # nobody is mailed, which the form itself tells the person who filled it in.
+  leadNotifyEmail: ""
+  existingSecret: ""
+  secretKeys:
+    resendApiKey: AF_RESEND_API_KEY
+
+# Billing.
+#
+# All three of secretKey, webhookSecret and priceTeam or none of them. The
+# application leaves billing OFF on a partial set and prints the missing names;
+# this chart refuses to render one, because the one an operator usually misses
+# is the webhook secret, which fails only when a real customer pays.
+#
+# There is deliberately no enterprise price. Enterprise is agreed with a person,
+# so checkout refuses that plan by name rather than pretending a price exists.
+stripe:
+  secretKey: ""
+  webhookSecret: ""
+  # The Stripe price the `team` plan is sold at. A subscription for a price not
+  # named here is recorded and does NOT change the plan, because entitling
+  # somebody who has paid to the free plan would take away what they just
+  # bought.
+  priceTeam: ""
+  existingSecret: ""
+  secretKeys:
+    secretKey: AF_STRIPE_SECRET_KEY
+    webhookSecret: AF_STRIPE_WEBHOOK_SECRET
+
+# The analytics the marketing site's beacon feeds.
+analytics:
+  # 64 hex characters, which is 32 bytes, from `openssl rand -hex 32`. The key
+  # organization surrogates are computed under. Empty records nothing at all,
+  # and the dashboard says so rather than showing an empty chart. A value of any
+  # other length stops the process at startup rather than on the first event.
+  surrogateSecret: ""
+  # The slug of the organization that operates this control plane. Its owners
+  # and admins may read the dashboard; nobody else may, whatever permissions
+  # they hold in their own organization. Empty means nobody.
+  operatorOrg: ""
+  # Delete raw analytics events older than this many days. The daily aggregates
+  # computed from them are kept. Empty keeps the raw events forever, which is
+  # the default because retention is an operator's decision and not a chart's.
+  retentionDays: ""
+  existingSecret: ""
+  secretKeys:
+    surrogateSecret: AF_ANALYTICS_SURROGATE_SECRET
+
+# Anything this chart does not name, put into the serving container as is.
+#
+# WHY BOTH THIS AND THE NAMED SETTINGS ABOVE, because one without the other is
+# wrong in a way that already cost somebody a working contact form.
+#
+# Every setting above used to be missing. A Kubernetes installation could not
+# set the site origin, the operator credential, the GitHub App, Stripe, mail,
+# provider keys or analytics, and there was no escape hatch either, so those
+# features were not merely unconfigured, they were unreachable. Nothing said so:
+# each one presents as a broken feature rather than as configuration, and the
+# site origin in particular presents as a contact form telling a visitor to
+# check their own network connection.
+#
+# A generic hatch alone would have unblocked all of it and made none of it
+# discoverable. Nobody reads a chart to learn that a product has analytics. The
+# named settings are the chart telling you what there is to set.
+#
+# So this is for the variable this chart does not name YET, and for a variable
+# that is not the control plane's at all, such as one a sidecar reads. It is
+# deliberately NOT counted as delivery by tools/wirecheck: if it were, this
+# chart would be permanently green for every variable that will ever exist,
+# which is a check that cannot say no. A new setting still earns a named value.
+#
+# Standard core/v1 EnvVar entries, so valueFrom works:
+#
+#   extraEnv:
+#     - name: AF_SOMETHING_NEW
+#       value: "1"
+#     - name: AF_SOMETHING_SECRET
+#       valueFrom:
+#         secretKeyRef: { name: my-secret, key: AF_SOMETHING_SECRET }
+extraEnv: []
 # Keeping event partitions ahead of the writes. A range-partitioned table with
 # no partition for an incoming row does not slow down, it fails, so this is not
 # optional housekeeping.

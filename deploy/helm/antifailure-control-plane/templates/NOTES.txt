@@ -30,7 +30,7 @@ No ingress. To reach it from your machine:
   curl localhost:8080/health
 {{- end }}
 
-Three things worth knowing:
+Four things worth knowing:
 {{ if kindIs "invalid" .Values.config.signinAllowlist }}
   SIGN IN IS OPEN. Any GitHub account in the world may sign in, because
   config.signinAllowlist is unset, and the application reads an unset allowlist
@@ -42,6 +42,28 @@ Three things worth knowing:
   nobody, which is a real answer and not the same as leaving it unset.
 {{- else }}
   Sign in is restricted to {{ len .Values.config.signinAllowlist }} account(s) by config.signinAllowlist.
+{{- end }}
+
+  What is OFF in this release, so that nobody discovers it from a broken page:
+{{- $off := list }}
+{{- if not (or .Values.database.adminUrl .Values.database.existingSecret) }}{{ $off = append $off "the operator portal (database.adminUrl)" }}{{ end }}
+{{- if not .Values.github.appId }}{{ $off = append $off "the GitHub App, so installations and webhooks (github.appId and its key and secret)" }}{{ end }}
+{{- if not (or .Values.stripe.secretKey .Values.stripe.existingSecret) }}{{ $off = append $off "billing (the stripe block)" }}{{ end }}
+{{- if not (or .Values.mail.resendApiKey .Values.mail.existingSecret) }}{{ $off = append $off "mail, so sign-in links and lead announcements (mail.resendApiKey)" }}{{ end }}
+{{- if not (or .Values.providerKeys.secret .Values.providerKeys.existingSecret) }}{{ $off = append $off "storing customers' provider keys (providerKeys.secret)" }}{{ end }}
+{{- if not (or .Values.analytics.surrogateSecret .Values.analytics.existingSecret) }}{{ $off = append $off "analytics (analytics.surrogateSecret)" }}{{ end }}
+{{- if not .Values.config.siteOrigin }}{{ $off = append $off "cross-origin posts from a marketing site, so its enterprise contact form cannot submit (config.siteOrigin)" }}{{ end }}
+{{- if eq (len $off) 0 }}
+  Nothing. Every optional feature this chart configures has a value set.
+{{- else }}
+{{- range $off }}
+    {{ . }}
+{{- end }}
+
+  Each is a supported state and each is silent from the outside: the feature
+  presents as broken rather than as unconfigured. The startup log names them
+  too. Every one of these was UNREACHABLE from this chart until recently, so if
+  you are upgrading, they may be off because nobody could turn them on.
 {{- end }}
 
   Readiness is a TCP check, not /health. /health is a static literal in the
