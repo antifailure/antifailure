@@ -67,7 +67,7 @@ Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
 The identity is long and you need it three times, so name it once:
 
 ```sh
-TAG=v1.2.0
+TAG=v1.2.1
 REPO=antifailure/antifailure
 WORKFLOW=.github/workflows/release.yml
 
@@ -136,10 +136,10 @@ trusting either of us.
 ```sh
 git clone https://github.com/antifailure/antifailure
 cd antifailure
-git checkout v1.2.0
-./tools/release/build.sh linux amd64 1.2.0 \
+git checkout v1.2.1
+./tools/release/build.sh linux amd64 1.2.1 \
   "$(git rev-parse HEAD)" "$(git show -s --format=%cI HEAD)" dist stage
-sha256sum dist/antifailure_1.2.0_linux_amd64.tar.gz
+sha256sum dist/antifailure_1.2.1_linux_amd64.tar.gz
 ```
 
 That hash should be the line for your platform in `checksums.txt`. You need the

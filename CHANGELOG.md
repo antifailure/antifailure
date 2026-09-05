@@ -14,6 +14,216 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.2.1
+
+v1.2.0 was cut for a careers form that told people the server could not be
+reached, and it fixed that form for some of the people who meet it. This
+release is about the rest of them, and about the instruments that were green
+while a whole hostname was broken.
+
+`antifailure.dev` and `www.antifailure.dev` are two custom domains on one Azure
+Static Web App. Both are Ready, both serve every page, and neither redirects to
+the other, because a Static Web Apps route rule matches on a PATH and its
+configuration schema has no hostname condition at all. The control plane
+compared a browser's `Origin` header against one origin, the apex. So a visitor
+who typed `www`, followed an old link, or was handed the `www` page by a search
+engine had every form and every beacon on the site refused: the analytics
+beacon silently, and the enterprise contact form and the careers form with
+"Could not reach the server. Check your connection and press it again; nothing
+you typed is lost." That sentence blames the visitor's own network for a refusal
+the server issued deliberately, and no lead and no application was recorded.
+Nothing anybody ran went red, because the apex worked and every check used the
+apex.
+
+**Pushing this tag does not by itself restore `www`, and this note says so
+rather than letting somebody find out from the site.** The fix is half code and
+half configuration, and only the code half is in an image. `AF_SITE_ORIGIN` and
+the `site_origin` Terraform variable now take a comma separated list, every
+route that answers a cross origin browser compares through one shared function
+rather than four copies of the same rule, and a single origin with no comma
+still parses to a list of one so an installation that already sets it needs no
+change. The value lives in `production.tfvars`, which names both hostnames. An
+environment variable on a Container App moves when Terraform applies, and
+`deploy/cd/deploy.sh` updates the image and nothing else, on purpose. So the
+order is this tag, then an apply. Between the two, production runs code that can
+read a list and holds a variable with one entry in it, and `www` is still
+refused.
+
+**The instrument that would have said so had no browser, and now has one.** The
+agents that drive this product on every pull request are pointed at a disposable
+stack built from one commit, where the front end and the API necessarily agree,
+so the one failure they structurally cannot see is a site deployed ahead of the
+API it posts to. `tools/sitesmoke` drives the real deployed site with the
+product's own agent, fills the careers form in on every hostname the site
+answers on, presses the button, and requires the page to show the control
+plane's own answer. When it does not, the failure quotes the sentence the page
+actually showed. It files no applications: the scheduled run answers the
+optional work link with a URL the control plane's own validation refuses, so the
+request reaches the handler and is turned away before anything is written.
+
+The agent needed four fixes before it could have found this at any target. A
+checkbox reports a value whether or not it is ticked, so every required
+acknowledgment and every radio group read as already answered and the planner
+skipped them. A required field whose label matched no known shape was left
+empty, so the browser refused to submit at all. The submit button said "Send
+application", which was on no list of words that move a workflow forward, and
+once the document's own submit controls were consulted the site header's "Sign
+in" link still won, so the agent filled the whole form in and then navigated away
+from it. And "Could not reach the server" was on no list of failure signals, so
+the page telling the agent its request never arrived was judged unreadable, the
+verdict was unverified, and unverified exits zero. An expectation may now be
+quoted, and a quoted one is required on the page character for character.
+
+`tools/routecheck` is the other half and it refuses earlier: it asks the
+deployment, not the tree, whether the control plane serves the routes the site
+calls, and it blocks the publish rather than reporting afterwards. Every control
+plane URL the site builds is now declared in `www/lib/control-plane-routes.ts`,
+and a call site that builds one anywhere else fails the `www` gate naming the
+file and the line. `just origincheck` compares the hostnames the site is served
+on against the origins each control plane is configured with, in both
+directions, on every branch. `just check-origins` runs after a publish, asks
+Azure which custom domains are actually bound rather than trusting a list in the
+repository, and exits saying NOT CHECKED rather than passing when it cannot
+reach Azure.
+
+**A Kubernetes installation could not be configured.** The Helm chart could set
+15 of the 46 variables the configuration reference documents, and the other 31
+had no value in the chart and no generic escape hatch either. The operator
+portal, the whole GitHub App and therefore installations and webhooks, all of
+billing, all of mail, the secret that seals customers' provider keys, the
+analytics pipeline and the origin a marketing site is allowed to post from were
+unreachable, and every one of them presents as a broken feature rather than as
+something nobody configured. The chart now names all of them, validates the sets
+that are all or nothing at render time with a sentence, and prints which
+optional features are off in the release it just created. `tools/wirecheck`,
+the check that should have caught this, compared the reference page against the
+Terraform module only, so a variable could be documented, read by the
+application, wired for the hosted installation and unreachable for every self
+hosted one while the gate stayed green. It asks the same question of both
+routes now.
+
+**And another run of things that were checking, and answering a nearby
+question.** `af runner check` reported a runner ready while `af test` ran a
+different copy of it and died in node, because the check read the directory
+`af runner install` writes and a run resolves the nearest runner that can
+actually run. The same command then answered `complete: true` about a tree
+whose `package.json` it had just said it could not parse, and exited 0, so a
+script reading the exit code was told an uninspectable tree was fine. The API's
+404 told callers that `GET /openapi.json` lists every endpoint this control
+plane serves, which is false for 51 of the 63 routes it registers, so somebody
+who mistyped a path was told by us to conclude the route does not exist. And
+`oauth_states`, which holds one row per sign-in that has been started and not
+finished, had gone without a sweeper since the first migration while sessions,
+device authorizations and sign-in links each got one: every person who pressed
+"Continue with GitHub" and closed the tab left a row behind permanently. The
+volume was never the problem. An unbounded, security relevant table on an
+unauthenticated path is.
+
+### What moves when this tag is pushed
+
+**No migrations.** v1.2.0 applied three and production has them. Every schema
+object this release reads already exists, so the bootstrap job has nothing to
+do and the one part of a deploy that cannot be rolled back does not run at all.
+That is worth stating rather than leaving to be inferred from an empty
+directory listing, because "read every migration the tag carries that production
+has not seen" is a step in the runbook and the honest answer to it here is that
+there are none.
+
+The tag deploys the control plane image, and it publishes the binary that
+`curl -fsSL https://antifailure.dev/install.sh | sh` hands to a stranger. The
+installer follows `releases/latest`, so the download changes the moment the
+release is created.
+
+The two Terraform `image_tag` defaults name v1.1.1 and keep naming it until
+this tag has published. They are read by an apply from `main` with no
+`ignore_changes`, so naming an unpublished tag produces a failed apply on the
+stack that runs the product rather than a stale deployment. They move in their
+own commit afterwards, and they did not move after v1.2.0 either, which is the
+loose end this sentence exists to record.
+
+### Behaviour you may depend on that changed
+
+- **`af runner check` has three verdicts where it had two, and exit code 9
+  is new.** `complete` and `not complete` cannot say "I could not tell", and
+  the command was resolving that by reporting an unreadable tree as ready.
+  Ready exits 0, blocked exits 3, and undetermined exits 9, which the error
+  reference publishes as "nothing was measured". `complete` is true only for
+  ready. A script that treated any non zero exit as a blockage still works; one
+  that treated exit 0 as ready now gets a 9 where it used to get a wrong 0.
+- **`af runner check -o json` exits non zero when it reports the runner
+  incomplete.** It previously did that only without `-o json`, so the flag
+  changed the exit code while the reference said it does not.
+- **`af runner check` reports on the runner a run in that directory would
+  actually use, and prints its path.** It read `~/.antifailure/runner`
+  regardless. On a fresh clone with a `runner/` directory that has no
+  `node_modules`, the answer changes, and the new answer is the one `af test`
+  acts on.
+- **`AF_SITE_ORIGIN` and `site_origin` accept a comma separated list.** A single
+  origin with no comma parses to a list of one, so nothing already set needs to
+  change. There is still no value meaning "any origin", the comparison is still
+  exact equality on the whole origin rather than a suffix test, and a response
+  still carries the one origin that matched rather than the list.
+- **The Helm chart refuses an incomplete feature at render time rather than
+  installing half of it.** A GitHub App missing its private key, billing missing
+  its webhook secret, an operator pool with no operator credential, and a
+  required plan with billing off are now render errors with a sentence. An
+  installation that was silently running half configured will fail to upgrade
+  until the missing half is supplied, and that is the defect being surfaced
+  rather than a new one.
+
+<!-- relnotes:omit -->
+
+### Added
+
+- The Helm chart can set every configuration variable the control plane reads,
+  validates the sets that are all or nothing at render time, prints which
+  optional features are off, and carries `extraEnv` for anything it does not
+  name yet (#256).
+- A gate that refuses to publish the marketing site when it calls a control
+  plane route the deployed control plane does not serve. `tools/routecheck`
+  asks the deployment rather than the tree, and fails when it cannot establish
+  an answer rather than reporting a pass it did not earn (#249).
+- `tools/sitesmoke`, which drives the real deployed site with the product's own
+  agent, fills the careers form in on every hostname the site answers on, and
+  quotes the sentence the page showed when it does not get the control plane's
+  own answer. It runs on a schedule as well as after a deploy (#262).
+
+### Fixed
+
+- Every form and every beacon on the marketing site was refused for anybody who
+  arrived on the `www` hostname. `AF_SITE_ORIGIN` and `site_origin` take a
+  comma separated list, and one shared function answers every cross origin
+  route instead of four copies of the rule. Two checks were added because
+  nothing could have caught this: `just origincheck` on every branch, and
+  `just check-origins` after a publish, which asks Azure which domains are
+  bound rather than trusting a list (#252).
+- `af runner check` reported the runner ready while `af test` ran a different
+  copy and died in node, and separately reported `complete: true` about a tree
+  it had just said it could not parse (#251, #261).
+- The API's 404 told callers to look for the route in a document that
+  deliberately omits 51 of the 63 routes this control plane registers. A test
+  now holds that sentence to the register in both directions (#260).
+- Abandoned GitHub sign-ins were kept for good. `oauth_states` is swept a day
+  past expiry from the same housekeeping interval that sweeps sessions, device
+  authorizations and sign-in links. Expiry is still decided when a callback is
+  redeemed, so a late sweep costs table size and cannot end a sign-in in
+  flight (#259).
+- The homepage's Isolated Twin section draws the twin again. The panel that
+  replaced it pinned a "Release blocked" card over the three readings it was
+  there to explain, and on a phone the card covered the panel outright. The
+  figure now redraws itself below 1024 pixels rather than scaling a 940 unit
+  sheet into 220 pixels of width, where every label landed near two pixels
+  tall (#250).
+- A burst of merges to main cancelled the day's scheduled vulnerability scan
+  while it was pending. The scheduled scan has its own concurrency group now,
+  and the watchdog skips a cancelled run rather than reading it as a failure.
+  The freshness limit still decides, so a schedule cancelled every day ages out
+  and alarms anyway (#258).
+- The site deploy gate's own probe left a permanent `oauth_states` row on every
+  publish (#255).
+
+<!-- relnotes:end -->
+
 ## v1.2.0
 
 Merging deploys staging. Only a tag deploys production, so everything below has
