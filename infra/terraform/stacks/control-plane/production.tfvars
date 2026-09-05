@@ -375,3 +375,48 @@ analytics_operator_org = "antifailure"
 # zero because nothing is being counted, rather than presenting an empty funnel
 # as a bad week.
 analytics_enabled = true
+
+# ---------------------------------------------------------------------------
+# Taking payment.
+# ---------------------------------------------------------------------------
+
+# ONE SWITCH, AND IT IS THIS LINE. An empty stripe_price_team is billing off
+# for the whole installation: modules/control-plane/keyvault.tf references no
+# Stripe secret, app.tf sets none of the three environment variables, and the
+# process says "billing is off" at start-up. Setting it turns all of that on
+# together, which is deliberate. A plane that had an API key and no price, or a
+# price and no webhook secret, would be one that can start a checkout it cannot
+# finish, and the first person to find that would be a customer holding a
+# receipt for something they did not get.
+#
+# THE VALUE HERE IS NOT A SECRET AND THE TWO THAT ARE DO NOT LIVE IN THIS FILE.
+# A price identifier is sent to a browser to start a checkout, so it belongs in
+# a tracked file. The API key and the webhook signing secret are addressed by
+# their versionless vault IDs and read by the Container App identity at deploy
+# time. Terraform never sees either value, no plan reads them, and the pull
+# request plan job holds no Key Vault data role at all.
+#
+# WHICH MEANS THE ORDER MATTERS, AND GETTING IT WRONG BREAKS A DEPLOY RATHER
+# THAN FAILING A PLAN. Azure resolves those two references when it creates the
+# revision. If the secrets are not in afcpprod-kv-centralus before the apply,
+# the plan still succeeds and the revision fails to start. Put both secrets in
+# the vault first. docs/src/content/docs/self-hosting/production.md has the
+# commands, and they pass the value on standard input so it never reaches a
+# shell history or a process listing.
+#
+# Team is a flat 500 USD per month for the organization rather than per seat,
+# which is why checkout sends quantity exactly 1. There is deliberately no
+# enterprise price: that plan is arranged with a person, and checkout refuses
+# it by name rather than reaching Stripe with an empty identifier.
+stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
+
+# NOT SET, AND THAT IS THE DECISION RATHER THAN THE DEFAULT. hosted_required_plan
+# would gate the product behind a paid plan, and modules/control-plane/app.tf
+# refuses it unless billing is on, so switching billing on is the moment it
+# becomes settable. It stays empty: turning payment on so somebody CAN buy is a
+# different act from requiring everybody already here to buy, and the second one
+# locks out every organization on this plane the moment it applies.
+#
+# operator_sets_plan is likewise unset and cannot be set now. Granting a plan by
+# hand on a plane that sells the same plan is refused at plan time, and the
+# process exits at start-up on the combination.
