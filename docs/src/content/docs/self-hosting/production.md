@@ -532,7 +532,10 @@ Billing is off on a control plane that has never been told about Stripe, and off
 is a supported state rather than a half-finished one: a self-hosted installation
 takes no money, and every route that would charge answers `PRECONDITION_FAILED`
 naming the settings it needs. What follows turns it on, in the only order that
-works.
+works. The four sections below are deliberately not numbered, because this is
+not step sixteen of first setup: it is a separate procedure somebody runs later,
+possibly years later, on a control plane that is already serving. Run them in
+the order they are written.
 
 **Three settings, and two of them are credentials.** `web/apps/api/src/billing/plans.ts`
 requires exactly these:
@@ -555,7 +558,7 @@ Enterprise is agreed with a person, so no Stripe price exists behind it. Checkou
 refuses that plan by name and points at the contact route. A plan with no price
 is a plan that is not sold here, not a misconfiguration.
 
-### 1. Create the webhook endpoint at Stripe
+### First, create the webhook endpoint at Stripe
 
 **Your job, in a browser, at `https://dashboard.stripe.com/webhooks`.** This step
 is first because `AF_STRIPE_WEBHOOK_SECRET` does not exist until you do it:
@@ -584,7 +587,7 @@ selection costs a 200 and nothing else. A narrower one loses an entitlement.
 about.** Test mode has its own endpoint, its own signing secret, its own keys and
 its own prices, and nothing crosses between the two.
 
-### 2. Put the two credentials in Key Vault
+### Then put the two credentials in Key Vault
 
 The vault name is `afcpprod-kv-centralus` for production. Use the `afsecret`
 helper on the [Azure page](/docs/self-hosting/azure), which takes the value at a
@@ -602,7 +605,7 @@ az keyvault secret list --vault-name afcpprod-kv-centralus \
 
 Two names, or stop here.
 
-### 3. Set the price, and only then apply
+### Then set the price, and only then apply
 
 `stripe_price_team` in `production.tfvars` is the switch. Setting it makes the
 container app reference both vault secrets by their versionless ids.
@@ -614,13 +617,14 @@ vault and the only way to give it a read is to grant a pull request identity
 access to production's credentials. So a plan is green whether or not the
 secrets exist, Azure discovers a missing one while resolving references during
 deployment, and the revision fails to start on a control plane that was serving
-a moment earlier. Step 2 is not optional and it is not reorderable.
+a moment earlier. Putting the credentials in the vault is not optional and it is not
+reorderable.
 
 Apply, then shift traffic the way every other change to this app is shifted:
 the app runs in `Multiple` revision mode, so the apply creates a revision at zero
 traffic. Probe it at zero, then shift.
 
-### 4. Prove it, on the running control plane
+### Then prove it, on the running control plane
 
 **A route that answers 200 is not proof that a plan changed.** Four checks, in
 order, each of which can only pass if the one before it did.
