@@ -1561,7 +1561,7 @@ export const tenantScopedTables = [
   workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,
   runtimeCommands,
 
-  githubDeliveries, pullRequests, prGenerations, teardownRequests,
+  githubDeliveries, pullRequests, prGenerations, teardownRequests, repositorySetups,
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const
