@@ -1669,6 +1669,13 @@ Say whether the runner can run.
 Reports each thing af test needs from the runner separately: the source, the
 dependencies it declares, a node new enough to run it, and the browser.
 
+It reports on the runner af test would actually use from here, which is the
+nearest one that can run rather than the nearest one that exists. Any runner it
+went past is named, with what is wrong with it, because a report about a
+directory the reader did not mean is how this command came to say a runner was
+ready while the run took a different copy and died on a module it could not
+resolve.
+
 It does not claim the runner executes. Knowing that means starting node and
 launching a browser, which is what af test is. Anything this cannot determine
 is reported as not checked rather than as ok, because a check that answers ok

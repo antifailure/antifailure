@@ -165,6 +165,15 @@ the runner executes, because knowing that means starting node and launching a
 browser, which is what `af test` is. Anything it cannot determine it reports as
 not checked rather than as ok.
 
+It reports on the runner `af test` would use from where you are standing, and
+prints that path. A run looks for a runner in your own checkout before it looks
+at `~/.antifailure/runner`, and it takes the nearest one that can actually run
+rather than the nearest one that exists, so a `runner/` directory whose
+dependencies were never installed is passed over rather than started and
+crashed. When that happens the check names the directory it went past and says
+what is missing from it, because a report about a tree you did not mean is
+worse than no report.
+
 A failed browser download is not fatal. The runner is usable the moment a
 browser arrives, and until then a workflow that needs a page read comes back
 `unverified` rather than guessed at.

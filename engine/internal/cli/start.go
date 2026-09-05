@@ -311,15 +311,22 @@ func dockerState(ctx context.Context, e *Env, p startProbe) stage {
 // rung of its own rather than being folded into the machine check.
 func runnerState(ctx context.Context, e *Env, p startProbe) stage {
 	s := stage{name: "the agent runner", command: "af runner install"}
-	home, err := p.home()
-	target := filepath.Join(home, ".antifailure", "runner")
-	if err != nil {
+	if _, err := p.home(); err != nil {
 		s.state, s.why = StageUnchecked, "this platform did not report a home directory"
 		s.detail, s.command = "not checked", ""
 		return s
 	}
+	// The runner af test would use from here, not ~/.antifailure/runner
+	// unconditionally. This rung reported "installed" while a run in the same
+	// directory took a nearer runner with no dependencies and died in node.
+	target, passedOver, err := runnerToCheck(e.WorkDir)
+	if err != nil {
+		s.state, s.why = StageUnchecked, err.Error()
+		s.detail, s.command = "not checked", ""
+		return s
+	}
 	var blockers, warnings []string
-	for _, r := range checkRunner(ctx, target) {
+	for _, r := range append(passedOverChecks(passedOver), checkRunner(ctx, target)...) {
 		if r.symbol == SymbolOK || r.symbol == SymbolSkip {
 			continue
 		}

@@ -514,6 +514,16 @@ func (o *Orchestrator) driveRunner(ctx context.Context, job runnerJob) (*TestRep
 // leg that ran an example under examples/ failed here, naming four paths and
 // not the one the runner was in, and so did any customer whose manifest is not
 // at the top of their repository.
+//
+// Nearest that CAN RUN, not simply nearest. Widening the search to the top of
+// the checkout put this repository's own runner/ ahead of ~/.antifailure/runner
+// for every run inside it, and on a fresh checkout runner/ is source with no
+// node_modules. So `af runner install` populated Home, `af runner check` read
+// Home and said ready, and the run took runner/ and died inside node with
+// ERR_MODULE_NOT_FOUND on playwright. A directory that cannot resolve the
+// dependencies it declares is not a runner, and runnerpath.Choose is where
+// that is decided, so this and `af runner check` cannot answer about different
+// trees again.
 func (o *Orchestrator) findRunner(override string) (string, error) {
 	if override != "" {
 		if _, err := os.Stat(override); err == nil {
@@ -521,15 +531,37 @@ func (o *Orchestrator) findRunner(override string) (string, error) {
 		}
 		return "", aferrors.Coded(aferrors.AFAGT004, "detail", "looked in "+override)
 	}
-	dirs := runnerpath.ToRun(o.opts.Root)
-	candidates := make([]string, 0, len(dirs))
-	for _, d := range dirs {
-		candidates = append(candidates, filepath.Join(d, "src", "main.ts"))
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+	choice := runnerpath.Choose(o.opts.Root)
+	if choice.Runner.Exists() {
+		// Said out loud rather than substituted quietly. A nearer runner that
+		// cannot run is still the one somebody is editing, and watching your
+		// edits do nothing because a different copy ran is a worse afternoon
+		// than being told which copy ran.
+		//
+		// Guarded because a directly constructed Orchestrator has no progress
+		// func, and a run must not crash for want of somewhere to say this.
+		for _, p := range choice.InCheckout() {
+			if o.progress != nil {
+				o.progress(fmt.Sprintf("the runner at %s %s, so this run uses the one at %s",
+					p.Dir, p.Why(), choice.Runner.Dir))
+			}
 		}
+		return choice.Runner.Entry, nil
+	}
+	// A runner that is present and cannot run is a better thing to report than
+	// the list of every path that held nothing. This case used to be returned
+	// as success, and af test then died inside node with ERR_MODULE_NOT_FOUND,
+	// which named a package rather than the fact that the runner was never
+	// installed.
+	if len(choice.PassedOver) > 0 {
+		p := choice.PassedOver[0]
+		return "", aferrors.Coded(aferrors.AFAGT004,
+			"detail", "the runner at "+p.Dir+" "+p.Why()+
+				", and no other runner was found; install one with: af runner install")
+	}
+	candidates := make([]string, 0, len(choice.Looked))
+	for _, d := range choice.Looked {
+		candidates = append(candidates, filepath.Join(d, "src", "main.ts"))
 	}
 	return "", aferrors.Coded(aferrors.AFAGT004,
 		"detail", "looked in "+strings.Join(candidates, ", "))

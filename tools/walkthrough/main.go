@@ -149,14 +149,19 @@ func walk(root, example string, budget time.Duration) error {
 			// between "pinned by" and "package-lock.json". A check that reads
 			// prose is measuring the wrap.
 			out, err := w.af_(ctx, "runner", "check", "-o", "json")
-			if err != nil {
-				return fmt.Errorf("the runner is not ready after af runner install: %w", err)
-			}
 			var report struct {
-				Complete bool `json:"complete"`
+				Path     string `json:"path"`
+				Complete bool   `json:"complete"`
 				Checks   []struct {
 					Name, Result, Detail string
 				} `json:"checks"`
+			}
+			// The document is read before the exit code is judged, because
+			// the report says WHICH check failed and the exit code says only
+			// that one did. The message a person gets from this step has to
+			// be the one they can act on.
+			if err != nil {
+				return fmt.Errorf("the runner is not ready after af runner install: %w\n%s", err, out)
 			}
 			if jsonErr := json.Unmarshal([]byte(out), &report); jsonErr != nil {
 				return fmt.Errorf("af runner check did not return a document this can read: %w\n%s",
@@ -182,7 +187,7 @@ func walk(root, example string, budget time.Duration) error {
 					"are whatever npm resolved today rather than what this release was tested "+
 					"with: %s", deps)
 			}
-			return nil
+			return runnerStarts(ctx, report.Path)
 		}},
 		{"af explain", func(ctx context.Context, w *world) error {
 			out, err := w.af_(ctx, "explain")
@@ -318,6 +323,43 @@ func walk(root, example string, budget time.Duration) error {
 	fmt.Printf("\nwalkthrough: the getting started path took %s\n", total.Round(time.Second))
 	if budget > 0 && total > budget {
 		return fmt.Errorf("that is longer than the %s budget", budget)
+	}
+	return nil
+}
+
+// runnerStarts loads the runner af runner check named and confirms node can
+// resolve it, which is the one claim that command deliberately does not make.
+//
+// af runner check reads a directory. It reported ready while the run resolved
+// a DIFFERENT directory, so the walkthrough learned about a runner with no
+// dependencies three steps later, from inside af test, as
+//
+//	Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright' imported
+//	  from /home/runner/work/antifailure/antifailure/runner/src/browser.ts
+//
+// which names a package and not the fact that the runner was never installed.
+// Starting the runner here costs a process and puts that failure at the step
+// whose whole job is to answer the question. It exits immediately for want of
+// a job document, so this waits on nothing.
+func runnerStarts(ctx context.Context, dir string) error {
+	if dir == "" {
+		return errors.New("af runner check named no path, so there is nothing to start")
+	}
+	entry := filepath.Join(dir, "src", "main.ts")
+	cmd := exec.CommandContext(ctx, "node", "--experimental-strip-types", entry)
+	cmd.Stdin = strings.NewReader("")
+	out, err := cmd.CombinedOutput()
+	// A non zero exit is expected: with no job document the runner refuses.
+	// What is not expected is node failing to load the program at all, which
+	// is what an uninstalled dependency looks like.
+	if strings.Contains(string(out), "ERR_MODULE_NOT_FOUND") ||
+		strings.Contains(string(out), "Cannot find package") {
+		return fmt.Errorf("af runner check called %s ready and node cannot load it, so "+
+			"af test would die inside the runner rather than reaching a workflow:\n%s",
+			dir, out)
+	}
+	if err != nil && !strings.Contains(string(out), "job document") {
+		return fmt.Errorf("the runner at %s did not start: %w\n%s", dir, err, out)
 	}
 	return nil
 }
