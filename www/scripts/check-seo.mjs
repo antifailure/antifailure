@@ -41,9 +41,43 @@ const OUT = path.join(ROOT, "out");
  * every signal that points at the site between two spellings of it.
  *
  * Both wrong spellings are asserted against, not just the scheme: www is a
- * second live origin serving this same build on its own certificate, so
- * https://www.antifailure.dev is reachable, returns 200, and is exactly as
- * wrong to canonicalise to as the http:// one.
+ * second live origin serving this same build on its own certificate, so the www
+ * origin is reachable, returns 200, and is exactly as wrong to canonicalise to
+ * as the http:// one.
+ *
+ * THIS DOES NOT CONTRADICT AF_SITE_ORIGIN ACCEPTING THE www ORIGIN, and the two
+ * arrived within a day of each other so somebody will meet them together.
+ *
+ * They govern different things. This rule is about what the site PUBLISHES: one
+ * spelling in the index, one target for every inbound signal, no split between
+ * two addresses for the same page. AF_SITE_ORIGIN is about which page the API
+ * will ANSWER, and a visitor who typed www exists whether or not a search engine
+ * indexes them. Canonicalising to the apex while refusing the hostname a real
+ * person arrived on is how the marketing site spent a week with every form and
+ * every beacon returning 403 to anybody who typed four extra characters. Both
+ * rules are right, and holding only one of them is what broke it.
+ *
+ * THERE IS DELIBERATELY NO EXEMPTION FOR PROSE THAT NAMES THE HOSTNAME, and the
+ * changelog is where that bites: `.changes/*.md` is rendered into /changelog,
+ * so a release note about a www bug trips this. It was tempting to exempt a
+ * mention as opposed to a use, and the reason not to is measured rather than
+ * felt. In changelog.html the string sits inside a <code> element and really is
+ * inert. In changelog.md and llms-full.txt, which are the surfaces built FOR
+ * machines, the backticks are stripped and it appears as a BARE URL. llms-full
+ * .txt is what an agent fetches instead of reading the site, so a "mention"
+ * there is a link an agent may follow or cite, pointed at the exact origin every
+ * rel=canonical on the site asks it to ignore. That is a use.
+ *
+ * The other reason is this check's own design, in the comment above the
+ * assertion: it searches for the wrong answer rather than surveying the right
+ * one, so it needs no list of files allowed to mention the site and a file added
+ * later cannot fall outside it. An exemption list is the one thing that reopens
+ * that hole, and the person who adds the second row is always in a hurry.
+ *
+ * A note can still be completely specific without emitting the origin: name the
+ * hostname, say the header carried it, quote the status code and the message the
+ * visitor saw. Going vague to get past this is not the deal. See
+ * .changes/the-www-hostname-could-not-talk-to-its-own-api.md for one that does.
  */
 const ORIGIN = "https://antifailure.dev";
 const WRONG_ORIGINS = [

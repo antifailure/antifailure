@@ -20,6 +20,15 @@
 // `evil-antifailure.dev` gets allowed, and it is the mistake that is invisible
 // in review because the string looks right.
 //
+// ACCEPTING www DOES NOT MAKE www CANONICAL, and the two rules sit one layer
+// apart rather than in tension. www/scripts/check-seo.mjs refuses any built file
+// that publishes a spelling of the site other than the apex, and it is right:
+// that is about what the site PUBLISHES, one target for every inbound signal.
+// This is about which page the API will ANSWER, and a visitor who typed www
+// exists whether or not a search engine indexes them. Canonicalising to the apex
+// while refusing the hostname a real person arrived on is exactly the outage
+// above. Both rules hold at once; holding only one of them is what broke it.
+//
 // Whatever is allowed here is still one exact origin per response. A CORS
 // `Access-Control-Allow-Origin` header carries a single origin, never a list,
 // so matchSiteOrigin returns the ONE entry that matched and that is what gets
