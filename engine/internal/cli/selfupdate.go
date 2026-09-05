@@ -113,11 +113,16 @@ func performUpdate(ctx context.Context, executable, installPrefix, current, goos
 		}
 		runner = filepath.Join(prefix, "share", "antifailure", "runner")
 		var err error
-		lock, err = acquireUpdateLock(filepath.Join(binDir, ".af-update-lock"))
-		if err != nil {
+		lock, err = acquireUpdateLock(filepath.Join(binDir, ".af-update-lock")) //nolint:staticcheck // see below
+		// SA4023 fires on this under GOOS=windows and only there, because that
+		// build's acquireUpdateLock refuses unconditionally, so the comparison
+		// really is always true for it. On the two platforms that can
+		// self-update it is the check that matters, and Windows never arrives
+		// here anyway: the platform is refused further up.
+		if err != nil { //nolint:staticcheck // always true on windows only, see above
 			return r, err
 		}
-		defer lock.Close()
+		defer func() { _ = lock.Close() }()
 		if err := recoverUpdate(lock, binDir, runner); err != nil {
 			return r, err
 		}
@@ -325,7 +330,7 @@ func recoverUpdate(lock *os.File, binDir, runner string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, 4097))
 	if err != nil {
 		return err
@@ -386,12 +391,12 @@ func unpackUpdate(archive, stage, root string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	decoded := &io.LimitedReader{R: gz, N: (256 << 20) + 1}
 	tr := tar.NewReader(decoded)
 	seen := map[string]bool{}
