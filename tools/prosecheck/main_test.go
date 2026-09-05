@@ -82,6 +82,16 @@ func TestTheRealDocumentsAreClean(t *testing.T) {
 	if len(files) < 20 {
 		t.Fatalf("found %d documents, which suggests this is looking in the wrong place", len(files))
 	}
+	// The trees by name, not only a count. A list that quietly stops covering
+	// one of them still clears a threshold, which is how the plan notes went
+	// unread while this test was green: `docs/src/content/docs` is what Astro
+	// renders, so it looked like the documentation, and the ADRs, the RFCs and
+	// the design notes beside it belonged to no list at all.
+	for _, tree := range []string{"docs/src/content/docs/", "docs/plan/", "docs/adr/"} {
+		if !reaches(files, tree) {
+			t.Errorf("%s is reached by nothing, so its prose is checked by nothing", tree)
+		}
+	}
 	var out strings.Builder
 	if err := run(root, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
@@ -163,13 +173,13 @@ func TestTheRealSourceIsClean(t *testing.T) {
 	if len(files) < 100 {
 		t.Fatalf("found %d source files, which suggests this is looking in the wrong place", len(files))
 	}
-	var www, console bool
-	for _, f := range files {
-		www = www || strings.HasPrefix(f, "www/")
-		console = console || strings.HasPrefix(f, "console/")
-	}
-	if !www || !console {
-		t.Fatalf("www reached: %v, console reached: %v", www, console)
+	// One assertion per tree rather than one condition over all three, so that
+	// a tree dropping out of the list is reported as itself instead of hiding
+	// behind whichever check ran first.
+	for _, tree := range []string{"www/", "console/", "docs/"} {
+		if !reaches(files, tree) {
+			t.Errorf("%s is reached by nothing, so its TypeScript is checked by nothing", tree)
+		}
 	}
 	// Nothing from a dependency or a build directory, which would make the
 	// check both slow and somebody else's problem.
@@ -224,6 +234,93 @@ func TestOnlyTheGeneratorsOwnBlockIsExemptFromTheMarkdownScan(t *testing.T) {
 	}
 }
 
+// The documentation site is the one place where "the documentation" and "the
+// site" are the same tree, which is how it fell between the two lists. Astro
+// builds it, so its pages are TypeScript, and `docs/src/pages/llms-full.txt.ts`
+// writes the plain text twin of the entire manual. The sentence at the top of
+// that file saying what the route serves carried an em dash through every green
+// run this gate has ever had.
+//
+// `www/README.md` and `www/page.tsx` are controls and neither is decoration.
+// `run` refuses a tree it found no Markdown or no TypeScript in, deliberately,
+// so without a file outside docs in each walk, narrowing either list back down
+// would make `run` return an error for a reason that has nothing to do with
+// what this test is asking, and the test would pass on it. The assertion on
+// file and line closes the same hole from the other side. Both were watched
+// failing before they were trusted.
+func TestTheDocumentationSitesTypeScriptIsInScope(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "www/README.md", "Site prose.\n")
+	write(t, root, "www/page.tsx", "export const ok = 1;\n")
+	write(t, root, "docs/src/pages/llms-full.txt.ts",
+		"/**\n * /docs/llms-full.txt \u2014 the complete documentation as one file.\n */\n")
+
+	var out strings.Builder
+	if err := run(root, &out); err == nil {
+		t.Fatalf("the documentation site's TypeScript was read by nothing:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "docs/src/pages/llms-full.txt.ts:2") {
+		t.Errorf("the defect was not reported against its file and line:\n%s", out.String())
+	}
+}
+
+// The other half of the same seam. `docs/src/content/docs` is what Astro
+// renders, so it read as "the documentation", and the ADRs, the RFCs, the plan
+// notes and the design documents sitting beside it were prose that no gate in
+// this repository had an opinion about. Both rules are checked here, because
+// what those files actually carried was eighteen defects of both shapes.
+func TestDocumentationMarkdownOutsideTheContentCollectionIsInScope(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "www/README.md", "Site prose.\n")
+	write(t, root, "www/page.tsx", "export const ok = 1;\n")
+	write(t, root, "docs/src/content/docs/page.md", "Rendered documentation.\n")
+	write(t, root, "docs/plan/notes/dogfood.md",
+		"This is the dead code shape \u2014 the parts are all there.\n")
+	write(t, root, "docs/adr/0001-language-choices.md",
+		"One runtime -- and nothing else was considered.\n")
+
+	var out strings.Builder
+	if err := run(root, &out); err == nil {
+		t.Fatalf("documentation Markdown outside the collection was read by nothing:\n%s", out.String())
+	}
+	for _, want := range []string{"docs/plan/notes/dogfood.md:1", "docs/adr/0001-language-choices.md:1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("%s was not reported:\n%s", want, out.String())
+		}
+	}
+}
+
+// A limit, asserted so that widening this checker has to argue with a test
+// rather than find out in CI.
+//
+// `--` is the SQL line comment, and this rule matches the sequence with
+// whitespace on both sides, which is exactly how a migration writes an indented
+// one. 1120 of the 1242 lines that would be flagged outside this checker's
+// reach are SQL comments: 853 in the migrations and 267 more in SQL written as
+// template literals in the api's TypeScript. They cannot be rewritten, because
+// there the sequence is the syntax and not a decision somebody should have made
+// differently. So the migrations stay out of reach on purpose, which is why
+// `sources` names three trees by hand instead of taking the repository.
+//
+// The comment in the fixture is INDENTED, and that is the whole test. A `--` at
+// the start of a line has no character before it, so `\s--\s` cannot match it
+// and an unindented SQL comment is invisible to this rule already. Written flush
+// left first, this test passed with `.sql` added to the extensions and `web`
+// added to the trees, which is the mutation it exists to catch. It was asserting
+// a property of column zero and not a property of the scope.
+func TestTheDoubleHyphenRuleDoesNotFollowSQLIntoTheMigrations(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "www/README.md", "Site prose.\n")
+	write(t, root, "www/page.tsx", "export const ok = 1;\n")
+	write(t, root, "web/packages/db/migrations/0001_init.sql",
+		"CREATE TABLE members (\n  -- Stored lowercased: providers disagree about case.\n  email text\n);\n")
+
+	var out strings.Builder
+	if err := run(root, &out); err != nil {
+		t.Fatalf("a SQL comment is syntax and must not be a prose defect: %v\n%s", err, out.String())
+	}
+}
+
 func write(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -233,6 +330,17 @@ func write(t *testing.T, root, rel, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// reaches reports whether the walk produced anything at all from a tree. The
+// question a count cannot answer.
+func reaches(files []string, prefix string) bool {
+	for _, f := range files {
+		if strings.HasPrefix(f, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(files []string, want string) bool {

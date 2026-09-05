@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 import { getCollection } from "astro:content";
 
 /**
- * /docs/llms-full.txt — the complete documentation as one plain-text file.
+ * /docs/llms-full.txt: the complete documentation as one plain-text file.
  *
  * This is the single most useful thing this site can hand an assistant, and it
  * is nearly free to produce: the docs are already markdown, so there is nothing
