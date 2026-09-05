@@ -121,7 +121,7 @@ func main() {
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		files++
 		s := bufio.NewScanner(f)

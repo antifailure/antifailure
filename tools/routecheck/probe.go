@@ -45,7 +45,7 @@ func probeAll(origin string, routes []Route, allowWrites bool, timeout time.Dura
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
-	fmt.Fprintf(out, "\nasking %s what it actually serves\n\n", origin)
+	_, _ = fmt.Fprintf(out, "\nasking %s what it actually serves\n\n", origin)
 	results := make([]Result, 0, len(routes))
 	for _, r := range routes {
 		results = append(results, probeOne(client, origin, r, allowWrites, attempts))
@@ -62,7 +62,7 @@ func probeAll(origin string, routes []Route, allowWrites bool, timeout time.Dura
 		if res.Status != 0 {
 			status = fmt.Sprintf("%4d", res.Status)
 		}
-		fmt.Fprintf(out, "  %-*s  %s  %-10s  %s\n", width, res.Route.Method+" "+res.Route.Path, status, res.Verdict, res.Detail)
+		_, _ = fmt.Fprintf(out, "  %-*s  %s  %-10s  %s\n", width, res.Route.Method+" "+res.Route.Path, status, res.Verdict, res.Detail)
 	}
 
 	var absent, unknown, notProbed []Result
@@ -108,7 +108,7 @@ func probeAll(origin string, routes []Route, allowWrites bool, timeout time.Dura
 	if b.Len() > 0 {
 		return errors.New(b.String())
 	}
-	fmt.Fprintf(out, "\nall %d route(s) the site calls are served by %s\n", len(results), origin)
+	_, _ = fmt.Fprintf(out, "\nall %d route(s) the site calls are served by %s\n", len(results), origin)
 	return nil
 }
 

@@ -185,7 +185,7 @@ func TestARedirectIsTheAnswerAndIsNotFollowed(t *testing.T) {
 	var hits int
 	srv := controlPlaneLike(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		http.Redirect(w, r, "https://github.example/login", 302)
+		http.Redirect(w, r, "https://github.example/login", http.StatusFound)
 	})
 	defer srv.Close()
 

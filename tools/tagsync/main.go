@@ -212,7 +212,7 @@ func main() {
 func read(root string, p pin) (string, error) {
 	source, err := os.ReadFile(filepath.Join(root, p.file))
 	if err != nil {
-		return "", fmt.Errorf("%s is a version pin this check watches and cannot be read: %v", p.file, err)
+		return "", fmt.Errorf("%s is a version pin this check watches and cannot be read: %w", p.file, err)
 	}
 	found := p.pattern.FindAllStringSubmatch(string(source), -1)
 	if len(found) != 1 {
@@ -249,7 +249,7 @@ func tags(root string) (map[string]bool, error) {
 func preparing(root string) (string, error) {
 	file, err := os.Open(filepath.Join(root, "CHANGELOG.md"))
 	if err != nil {
-		return "", fmt.Errorf("reading CHANGELOG.md, which says which release is being prepared: %v", err)
+		return "", fmt.Errorf("reading CHANGELOG.md, which says which release is being prepared: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 

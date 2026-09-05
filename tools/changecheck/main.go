@@ -189,7 +189,7 @@ func validateFragments(dir string) error {
 		"The first line is one of \"# added\", \"# fixed\", \"# changed\" or \"# security\",\n"+
 		"and every heading is followed by prose. www/lib/changelog.ts reads this\n"+
 		"grammar and nothing else, so a fragment outside it is one the published\n"+
-		"changelog silently drops.",
+		"changelog silently drops",
 		len(problems), plural(len(problems), "fragment", "fragments"),
 		strings.Join(problems, "\n  "))
 }

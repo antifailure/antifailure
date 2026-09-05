@@ -348,14 +348,14 @@ func decideAt(directives []directive, failing map[string]map[string]bool, out io
 
 		switch {
 		case expired:
-			fmt.Fprintf(out, "EXPIRED  %s  %s  accepted until %s\n", d.where(), d.Rule, d.Expires)
+			_, _ = fmt.Fprintf(out, "EXPIRED  %s  %s  accepted until %s\n", d.where(), d.Rule, d.Expires)
 			problems = append(problems, fmt.Sprintf(
 				"the decision to accept %s at %s expired on %s. tfsec has already stopped honouring it, "+
 					"so the finding is back; reread the reason written above it and either fix the "+
 					"configuration or set a new date on purpose",
 				d.Rule, d.where(), d.Expires))
 		case !used:
-			fmt.Fprintf(out, "STALE    %s  %s  nothing in this file breaks that rule\n", d.where(), d.Rule)
+			_, _ = fmt.Fprintf(out, "STALE    %s  %s  nothing in this file breaks that rule\n", d.where(), d.Rule)
 			problems = append(problems, fmt.Sprintf(
 				"the ignore for %s at %s suppressed nothing: with every ignore disabled, that rule is "+
 					"not failing in that file. So either the finding was fixed and this comment now "+
@@ -367,7 +367,7 @@ func decideAt(directives []directive, failing map[string]map[string]bool, out io
 		}
 	}
 
-	fmt.Fprintf(out, "\n%d ignores, %d live, %d expired or stale\n",
+	_, _ = fmt.Fprintf(out, "\n%d ignores, %d live, %d expired or stale\n",
 		len(directives), live, len(directives)-live)
 
 	if len(problems) > 0 {

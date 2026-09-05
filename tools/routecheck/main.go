@@ -102,7 +102,7 @@ func run(root, origin string, allowWrites bool, timeout time.Duration, attempts 
 		b.WriteString("from that module instead of building the URL here.")
 		return errors.New(b.String())
 	}
-	fmt.Fprintf(out, "the site builds control plane URLs in one place, and declares %d route(s) there\n", len(routes))
+	_, _ = fmt.Fprintf(out, "the site builds control plane URLs in one place, and declares %d route(s) there\n", len(routes))
 
 	served, err := ParseBoundaryRegister(filepath.Join(root, boundaryPath))
 	if err != nil {
@@ -118,10 +118,10 @@ func run(root, origin string, allowWrites bool, timeout time.Duration, attempts 
 		sort.Strings(undeclared)
 		return fmt.Errorf("the site calls %d route(s) this repository's control plane does not serve at all:\n  %s\n\n%s classifies every route the router mounts, and route-boundary.test.ts\nfails on one that is missing from it, so a route absent from that register is a\nroute absent from the server", len(undeclared), strings.Join(undeclared, "\n  "), boundaryPath)
 	}
-	fmt.Fprintf(out, "every route it declares is one this repository's control plane mounts\n")
+	_, _ = fmt.Fprintf(out, "every route it declares is one this repository's control plane mounts\n")
 
 	if origin == "" {
-		fmt.Fprintf(out, "\nno -origin given, so what is DEPLOYED was not checked. The offline half cannot\nsee the failure this command exists for: it passed on the day the careers form\nbroke, because main's API did declare the route.\n")
+		_, _ = fmt.Fprintf(out, "\nno -origin given, so what is DEPLOYED was not checked. The offline half cannot\nsee the failure this command exists for: it passed on the day the careers form\nbroke, because main's API did declare the route.\n")
 		return nil
 	}
 	return probeAll(origin, routes, allowWrites, timeout, attempts, out)

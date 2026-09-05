@@ -141,7 +141,7 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "scanning %d modules: %s\n\n", len(modules), strings.Join(modules, ", "))
+	_, _ = fmt.Fprintf(out, "scanning %d modules: %s\n\n", len(modules), strings.Join(modules, ", "))
 
 	// Built once, then run in each module's own directory rather than driven
 	// with govulncheck's -C flag. Building once is the cheaper shape when there
@@ -235,7 +235,7 @@ func buildScanner(root string) (string, func(), error) {
 	if err != nil {
 		return "", func() {}, err
 	}
-	cleanup := func() { os.RemoveAll(dir) }
+	cleanup := func() { _ = os.RemoveAll(dir) }
 
 	bin := filepath.Join(dir, "govulncheck")
 	cmd := exec.Command("go", "build", "-o", bin, "golang.org/x/vuln/cmd/govulncheck")
@@ -389,26 +389,26 @@ func decideAt(findings []*finding, summaries map[string]string, pol *policy, out
 	var problems []string
 
 	for _, k := range uncovered {
-		fmt.Fprintf(out, "REACHABLE  %s  %s\n", k.id, k.module)
+		_, _ = fmt.Fprintf(out, "REACHABLE  %s  %s\n", k.id, k.module)
 		if s := summaries[k.id]; s != "" {
-			fmt.Fprintf(out, "           %s\n", s)
+			_, _ = fmt.Fprintf(out, "           %s\n", s)
 		}
-		fmt.Fprintf(out, "           https://pkg.go.dev/vuln/%s\n", k.id)
+		_, _ = fmt.Fprintf(out, "           https://pkg.go.dev/vuln/%s\n", k.id)
 		problems = append(problems, fmt.Sprintf("%s is reachable in %s and is not accepted in %s", k.id, k.module, policyFile))
 	}
 
 	for _, e := range expired {
-		fmt.Fprintf(out, "EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Module, e.Expires)
+		_, _ = fmt.Fprintf(out, "EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Module, e.Expires)
 		problems = append(problems, fmt.Sprintf("the decision to accept %s in %s expired on %s and needs rereading", e.ID, e.Module, e.Expires))
 	}
 
 	for _, e := range unused {
-		fmt.Fprintf(out, "STALE      %s  %s  matches nothing\n", e.ID, e.Module)
+		_, _ = fmt.Fprintf(out, "STALE      %s  %s  matches nothing\n", e.ID, e.Module)
 		problems = append(problems, fmt.Sprintf("%s in %s is accepted in %s but nothing reaches it any more, so the entry is claiming to protect against something that is not there", e.ID, e.Module, policyFile))
 	}
 
 	covered := len(seen) - len(uncovered)
-	fmt.Fprintf(out, "\n%d reachable, %d accepted, %d unaccepted, %d expired, %d stale\n",
+	_, _ = fmt.Fprintf(out, "\n%d reachable, %d accepted, %d unaccepted, %d expired, %d stale\n",
 		len(seen), covered, len(uncovered), len(expired), len(unused))
 
 	if len(problems) > 0 {

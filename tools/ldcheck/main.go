@@ -205,38 +205,33 @@ func packageDir(root, modulePath, moduleDir, pkg string) (string, error) {
 // constant is the same silent no-op as -X against a missing symbol. Neither
 // does a variable of another type, for the same reason.
 func hasStringVar(dir, name string) error {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	files, err := parseNonTestFiles(dir)
 	if err != nil {
-		return fmt.Errorf("parsing %s: %w", dir, err)
+		return err
 	}
 
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				gen, ok := decl.(*ast.GenDecl)
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value, ok := spec.(*ast.ValueSpec)
 				if !ok {
 					continue
 				}
-				for _, spec := range gen.Specs {
-					value, ok := spec.(*ast.ValueSpec)
-					if !ok {
+				for _, ident := range value.Names {
+					if ident.Name != name {
 						continue
 					}
-					for _, ident := range value.Names {
-						if ident.Name != name {
-							continue
-						}
-						if gen.Tok == token.CONST {
-							return fmt.Errorf("%s is a constant; the linker cannot write to one", name)
-						}
-						if !isStringVar(value) {
-							return fmt.Errorf("%s is not a string; -X only writes strings", name)
-						}
-						return nil
+					if gen.Tok == token.CONST {
+						return fmt.Errorf("%s is a constant; the linker cannot write to one", name)
 					}
+					if !isStringVar(value) {
+						return fmt.Errorf("%s is not a string; -X only writes strings", name)
+					}
+					return nil
 				}
 			}
 		}
@@ -274,30 +269,25 @@ func isStringVar(value *ast.ValueSpec) bool {
 // fixed at compile time, and demanding a flag for it would ask for the one thing
 // that silently does nothing.
 func unstamped(dir string, stamped map[string]bool) ([]string, error) {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	files, err := parseNonTestFiles(dir)
 	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", dir, err)
+		return nil, err
 	}
 
 	var found []string
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				gen, ok := decl.(*ast.GenDecl)
-				if !ok || gen.Tok != token.VAR {
-					continue
-				}
-				names, strings := groupNames(gen)
-				if !anyStamped(names, stamped) {
-					continue
-				}
-				for _, name := range strings {
-					if !stamped[name] {
-						found = append(found, name)
-					}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.VAR {
+				continue
+			}
+			names, strings := groupNames(gen)
+			if !anyStamped(names, stamped) {
+				continue
+			}
+			for _, name := range strings {
+				if !stamped[name] {
+					found = append(found, name)
 				}
 			}
 		}
@@ -345,4 +335,40 @@ func sorted(set map[string]bool) []string {
 func fail(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "ldcheck: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// parseNonTestFiles parses every non-test Go file in one directory.
+//
+// This was parser.ParseDir, which Go 1.25 deprecated. The replacement is
+// deliberately the same reading rather than a better one: it parses the files
+// on disk, in name order, with no type checking and no build context.
+//
+// SO IT STILL DOES NOT UNDERSTAND BUILD TAGS, which is the reason ParseDir was
+// deprecated, and saying so is the point of this comment. A package level
+// string behind a //go:build tag is counted here on every platform. The fix
+// for that is golang.org/x/tools/go/packages, which type checks and therefore
+// needs the tree to compile; this gate runs over directories to answer whether
+// a symbol is declared, and a gate that can only answer about a tree that
+// already builds is a gate that goes quiet exactly when a build is broken.
+// Nothing in this repository declares a version string behind a build tag, and
+// if something ever does, this is where the answer becomes wrong.
+func parseNonTestFiles(dir string) ([]*ast.File, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
+	}
+	fset := token.NewFileSet()
+	var out []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", filepath.Join(dir, name), err)
+		}
+		out = append(out, file)
+	}
+	return out, nil
 }

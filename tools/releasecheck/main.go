@@ -189,7 +189,7 @@ func check(source []byte, out io.Writer) ([]string, error) {
 	problems = append(problems, checkBundlesArePublished(publish, assets, out)...)
 
 	if len(problems) == 0 {
-		fmt.Fprintf(out, "releasecheck: %d assets, every one named before it is published, "+
+		_, _ = fmt.Fprintf(out, "releasecheck: %d assets, every one named before it is published, "+
 			"every signature published, and the signing job holds an OIDC token\n", len(assets))
 	}
 	return problems, nil
@@ -259,7 +259,7 @@ func checkSigningToken(wf workflow, out io.Writer) []string {
 				name, describe(granted)))
 			continue
 		}
-		fmt.Fprintf(out, "ok  the %q job signs and holds `id-token: write`\n", name)
+		_, _ = fmt.Fprintf(out, "ok  the %q job signs and holds `id-token: write`\n", name)
 	}
 	return problems
 }
@@ -343,7 +343,7 @@ func checkUnmatchedFiles(publishing *step, out io.Writer) []string {
 				"not told was absent",
 			publishing.label(), value)}
 	}
-	fmt.Fprintf(out, "ok  a `files:` pattern that matches nothing stops the release\n")
+	_, _ = fmt.Fprintf(out, "ok  a `files:` pattern that matches nothing stops the release\n")
 	return nil
 }
 
@@ -413,7 +413,7 @@ func checkAssetsAreNamedEarlier(publish *job, index int, assets []string, out io
 					pattern, dir))
 				continue
 			}
-			fmt.Fprintf(out, "ok  %-36s named into %s\n", pattern, dir)
+			_, _ = fmt.Fprintf(out, "ok  %-36s named into %s\n", pattern, dir)
 			continue
 		}
 		if !names(corpus, pattern) {
@@ -423,7 +423,7 @@ func checkAssetsAreNamedEarlier(publish *job, index int, assets []string, out io
 				pattern))
 			continue
 		}
-		fmt.Fprintf(out, "ok  %-36s named before it is published\n", pattern)
+		_, _ = fmt.Fprintf(out, "ok  %-36s named before it is published\n", pattern)
 	}
 	return problems
 }
@@ -462,7 +462,7 @@ func checkBundlesArePublished(publish *job, assets []string, out io.Writer) []st
 					"the runner and nobody can fetch it", path))
 			continue
 		}
-		fmt.Fprintf(out, "ok  %-36s signed and published\n", path)
+		_, _ = fmt.Fprintf(out, "ok  %-36s signed and published\n", path)
 	}
 	return problems
 }

@@ -119,14 +119,14 @@ func write(root, name, out string, when time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
 
 	// BestCompression rather than the default, named rather than inherited: the
 	// level is part of the output bytes, so leaving it implicit would make the
 	// archive depend on a default that a Go release is free to change.
 	zw, err := gzip.NewWriterLevel(f, gzip.BestCompression)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	// Left at its zero value on purpose. gzip's header carries a modification
@@ -138,16 +138,16 @@ func write(root, name, out string, when time.Time) error {
 	tw := tar.NewWriter(zw)
 	for _, p := range paths {
 		if err := add(tw, root, p, when); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("%s: %w", p, err)
 		}
 	}
 	if err := tw.Close(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := zw.Close(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -248,7 +248,7 @@ func add(tw *tar.Writer, root, rel string, when time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	written, err := io.Copy(tw, f)
 	if err != nil {
 		return err

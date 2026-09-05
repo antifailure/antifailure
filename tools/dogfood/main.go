@@ -729,7 +729,7 @@ func (r *runner) capture(name string, args ...string) string {
 }
 
 func (run *Run) print(w *os.File) {
-	fmt.Fprintf(w, "\ndogfood: %s run on %s, %s\n",
+	_, _ = fmt.Fprintf(w, "\ndogfood: %s run on %s, %s\n",
 		run.Mode, shortCommit(run.Commit), duration(run.Seconds))
 	for _, s := range run.Steps {
 		mark := "ok"
@@ -739,7 +739,7 @@ func (run *Run) print(w *os.File) {
 		case s.Over:
 			mark = fmt.Sprintf("OVER BUDGET (%s)", duration(s.Budget))
 		}
-		fmt.Fprintf(w, "  %-16s %8s  %s\n", s.Name, duration(s.Seconds), mark)
+		_, _ = fmt.Fprintf(w, "  %-16s %8s  %s\n", s.Name, duration(s.Seconds), mark)
 	}
 	if len(run.Verdicts) > 0 {
 		// Beside the timings, because a run that took four minutes and reached
@@ -750,20 +750,20 @@ func (run *Run) print(w *os.File) {
 			kinds = append(kinds, fmt.Sprintf("%d %s", n, v))
 		}
 		sort.Strings(kinds)
-		fmt.Fprintf(w, "  %-16s %8s  %s\n", "workflows", "", strings.Join(kinds, ", "))
+		_, _ = fmt.Fprintf(w, "  %-16s %8s  %s\n", "workflows", "", strings.Join(kinds, ", "))
 	}
 	if len(run.Findings) > 0 {
-		fmt.Fprintf(w, "\n%s to classify as a product bug, a CI defect, or a docs gap:\n",
+		_, _ = fmt.Fprintf(w, "\n%s to classify as a product bug, a CI defect, or a docs gap:\n",
 			plural(len(run.Findings), "thing", "things"))
 		for _, f := range run.Findings {
-			fmt.Fprintf(w, "  - %s\n", f)
+			_, _ = fmt.Fprintf(w, "  - %s\n", f)
 		}
 	}
 	if run.Green {
-		fmt.Fprintf(w, "\ngreen\n")
+		_, _ = fmt.Fprintf(w, "\ngreen\n")
 		return
 	}
-	fmt.Fprintf(w, "\nnot green\n")
+	_, _ = fmt.Fprintf(w, "\nnot green\n")
 }
 
 func writeRecord(path string, run *Run) error {

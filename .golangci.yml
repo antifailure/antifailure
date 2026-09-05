@@ -72,6 +72,22 @@ linters:
         linters:
           - bodyclose
 
+# Report every finding, not a sample of them.
+#
+# golangci-lint caps output by default: max-same-issues is 3 and
+# max-issues-per-linter is 50. A run that says "27 issues" when there are 122
+# is not a smaller version of the truth, it is a number that cannot be used.
+# The tools module was measured at 27 with the defaults and at 122 without
+# them, and the plan built on the first number was wrong about how much work
+# there was and about which packages carried it.
+#
+# The engine has been at zero since this file existed, so this changes nothing
+# there today. It changes what the first regression looks like, which is the
+# only moment the cap could ever matter.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 formatters:
   enable:
     - gofmt

@@ -109,6 +109,7 @@ gate: _reports
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
     run "lint"                           just lint
+    run "the gates lint too"             just lint-tools
     run "the gates themselves"           just test-tools
     run "coverage"                       just coverage
     run "engine"                         just test-engine
@@ -1367,6 +1368,28 @@ generate:
 # certifies this machine's keychain works, by not looking at the keychain.
 keyring:
     cd engine && go test ./internal/secrets/ -count=1
+
+# The same linter set, pointed at the module that decides what ships.
+#
+# tools/ holds prosecheck, gatecheck, changecheck, routecheck, wirecheck,
+# claimcheck and every other instrument this repository trusts to say no, and
+# until this recipe existed CI linted the engine only. The gates were the least
+# linted code in the tree. It carried 122 findings when somebody finally looked,
+# and the count had been reported as 27 because golangci-lint caps repeated
+# issues by default; see the issues block in .golangci.yml.
+lint-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v golangci-lint > /dev/null; then
+      echo "golangci-lint is not installed. brew install golangci-lint"
+      exit 1
+    fi
+    cd tools
+    # verify before run, for the reason the engine recipe gives: `run` does not
+    # validate the config, so an invalid one passes locally and fails the moment
+    # CI's action verifies it.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...
 
 # Lint the code the other platforms compile.
 #
