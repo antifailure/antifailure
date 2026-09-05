@@ -1684,6 +1684,14 @@ command used to report "ok runner" whenever src/main.ts existed, which was true
 of an install with no dependencies at all, and the real failure surfaced much
 later inside af test as a node error about a module it could not resolve.
 
+The verdict has three values and not two, for the same reason. Ready means
+every question that decides whether af test can run was asked and answered ok,
+and exits 0. Blocked means one of them was answered no, and exits 3. Undetermined
+means one of them could not be answered at all, which is neither, and exits 9,
+the code reference/errors.md publishes as "nothing was measured".
+A runner whose package.json cannot be parsed used to land in the first of those
+and report itself complete.
+
 ```
 af runner check
 ```
