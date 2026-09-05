@@ -6,27 +6,28 @@ import { u } from "../SafetyCards";
 
 /**
  * Waveform of the route mix, measured off the 288x351 reference crop.
- * Local y = 0 is card y = 90. 19 capsules, width 10, vertically centered on
+ * Local y = 0 is card y = 90. 17 capsules, width 10, vertically centered on
  * y = 121.
  *
- * The bleed used to be a claim rather than a measurement. At pitch 15.5 from
- * origin −1 the run spanned −1 to 288 across a 288 wide card, so the first
- * capsule lost one pixel and the last one ended flush against the edge with
- * nothing cut off it at all. A waveform that stops dead at both edges reads as
- * a chart that happens to fit, not as a slice out of something longer.
+ * NO CAPSULE IS CUT BY THE CARD. It used to claim a bleed it did not have: at
+ * pitch 15.5 from origin -1 the run spanned -1 to 288 across a 288 wide card,
+ * so the first capsule lost one pixel and the last ended flush with the edge
+ * with nothing cut off it at all. I then read "cut off the last bars on either
+ * side" as an instruction to cut them properly and moved the run to -5 at
+ * pitch 16, which put half of each end capsule outside the card. That was the
+ * wrong half of the instruction. The end capsules are DELETED.
  *
- * Origin −5 at pitch 16 puts the run at −5 to 293, so exactly half of the
- * first capsule and half of the last are outside the card and the overflow
- * clip on the card takes them. Symmetric by construction: 18 × 16 + 10 = 298,
- * which is the 288 card plus 5 either side.
+ * So 17 capsules rather than 19, origin 11 at pitch 16. The last one starts at
+ * 11 + 16 x 16 = 267 and ends at 277, which leaves 11 either side: the run is
+ * inset and symmetric, and the overflow clip on the card now has nothing to
+ * take.
  */
-const BAR_LEFT = -5;
+const BAR_LEFT = 11;
 const BAR_PITCH = 16;
 const BAR_WIDTH = 10;
 
 /** [top, bottom] per bar, in reference pixels from the top of this box. */
 const BARS: readonly (readonly [number, number])[] = [
-  [65, 177],
   [100, 142],
   [75, 167],
   [50, 192],
@@ -44,7 +45,6 @@ const BARS: readonly (readonly [number, number])[] = [
   [67, 175],
   [85, 157],
   [47, 195],
-  [78, 164],
 ];
 
 const BAR_GRADIENT = "linear-gradient(180deg, #33bf00 0%, #4CB782 42%, #E0A21A 78%, #d97706 100%)";
