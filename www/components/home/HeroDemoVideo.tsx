@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { cn } from "@/lib/cn";
 
 function VolumeIcon({ on }: { on: boolean }) {
   return (
@@ -41,6 +43,16 @@ export function HeroDemoVideo() {
   const frameRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setFullscreen(document.fullscreenElement === frameRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
 
   const toggleVolume = () => {
     const video = videoRef.current;
@@ -69,7 +81,10 @@ export function HeroDemoVideo() {
     <div className="relative left-1/2 mt-20 w-screen max-w-[1500px] -translate-x-1/2 px-8 max-xl:mt-16 max-md:mt-12 max-md:px-5">
       <div
         ref={frameRef}
-        className="group relative overflow-hidden rounded-[24px] bg-[#f3f2ec] shadow-[0_30px_100px_rgba(0,0,0,0.08)] transition-shadow duration-300 max-md:rounded-[18px] [&:fullscreen]:rounded-none [&:fullscreen]:bg-black [&:fullscreen]:p-0"
+        className={cn(
+          "group relative overflow-hidden bg-[#f3f2ec] shadow-[0_30px_100px_rgba(0,0,0,0.08)] transition-shadow duration-300",
+          fullscreen && "flex h-screen items-center justify-center bg-black shadow-none",
+        )}
       >
         <div
           className="pointer-events-none absolute inset-0 opacity-70"
@@ -81,7 +96,7 @@ export function HeroDemoVideo() {
         />
         <video
           ref={videoRef}
-          className="relative block aspect-video w-full rounded-[24px] bg-white object-cover max-md:rounded-[18px] [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:object-contain"
+          className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
           src="/home/option-4.mp4"
           autoPlay
           muted={muted}
