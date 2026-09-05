@@ -103,6 +103,14 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newTeardownTool(project, engine, orch.tearDown))
 	server.Register(newDescribeEnvironmentTool(project, orch.readStatus))
 	server.Register(newReadLogsTool(project, orch.readLogs))
+	server.Register(newFidelityTool(project, orch.fidelity))
+	server.Register(newExplainErrorTool(project))
+	server.Register(newExplainConfigTool(project))
+	server.Register(newPlanChecksTool(project, orch.analyseChange))
+	server.Register(newInvariantsTool(project, orch.invariants))
+	server.Register(newCompareReleasesTool(project, engine, orch.compareReleases))
+	server.Register(newInspectMaskingTool(project, orch.maskingReaders()))
+	server.Register(newApplyMaskingTool(project, engine, orch.maskApply))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 
