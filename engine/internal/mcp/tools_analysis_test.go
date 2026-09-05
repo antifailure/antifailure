@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -994,4 +996,71 @@ func TestEvidenceTools_ThePublishedSchemasAreValidJSON(t *testing.T) {
 		require.NoError(t, err, "%s", tool.Name)
 		require.Contains(t, string(body), `"additionalProperties":false`, "%s", tool.Name)
 	}
+}
+
+func TestEvidenceTools_ThePublishedListActuallyCarriesThemOverTheProtocol(t *testing.T) {
+	t.Parallel()
+	// Registered is not published. handleToolsList is what a client actually
+	// reads, and a tool that exists in the map and never reaches that response
+	// is a dead capability that looks like a working one from every other
+	// angle, which is exactly the shape this repository keeps finding.
+	store, _ := newStore(t)
+	server := NewServer("test-project", store, nil)
+	for _, tool := range evidenceTools(t) {
+		server.Register(tool)
+	}
+
+	out := &bytes.Buffer{}
+	frames := initFrame + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
+	require.NoError(t, server.Serve(context.Background(), bytes.NewBufferString(frames), out))
+
+	published := out.String()
+	for _, name := range []string{
+		"assess_environment_fidelity", "explain_error",
+		"explain_effective_configuration", "plan_checks_for_change",
+		"check_data_invariants", "compare_with_previous_release",
+		"inspect_data_masking", "apply_data_masking",
+	} {
+		require.Contains(t, published, `"name":"`+name+`"`, "%s was registered and not published", name)
+	}
+}
+
+func TestEvidenceTools_ThePublishedListSaysWhichOfThemOnlyRead(t *testing.T) {
+	t.Parallel()
+	// The read only hint is what a client uses to decide whether to prompt. It
+	// travels in the annotations of the published entry, not in the Go field,
+	// so this reads the response rather than the struct.
+	store, _ := newStore(t)
+	server := NewServer("test-project", store, nil)
+	for _, tool := range evidenceTools(t) {
+		server.Register(tool)
+	}
+
+	out := &bytes.Buffer{}
+	frames := initFrame + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
+	require.NoError(t, server.Serve(context.Background(), bytes.NewBufferString(frames), out))
+
+	var body struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Annotations struct {
+					ReadOnlyHint bool `json:"readOnlyHint"`
+				} `json:"annotations"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if strings.Contains(line, `"tools"`) {
+			require.NoError(t, json.Unmarshal([]byte(line), &body))
+		}
+	}
+	require.NotEmpty(t, body.Result.Tools)
+
+	hints := map[string]bool{}
+	for _, tool := range body.Result.Tools {
+		hints[tool.Name] = tool.Annotations.ReadOnlyHint
+	}
+	require.True(t, hints["inspect_data_masking"], "the read only masking tool must say so")
+	require.False(t, hints["apply_data_masking"], "the irreversible one must not")
 }
