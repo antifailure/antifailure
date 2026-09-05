@@ -687,7 +687,7 @@ jobs:
 
       - name: Every operator section the navigation lists was exported
         # The list above is written out by hand, which is right for a dozen
-        # routes and wrong for the operator portal: it has twenty three
+        # routes and wrong for the operator portal: it has twenty four
         # sections, six people are adding to them, and a hand kept copy would
         # be behind within a day. So this reads the navigation itself, which is
         # the same file the rail is drawn from, and checks the export for every
@@ -697,15 +697,15 @@ jobs:
         # avoid. A stray server-only import stops one page exporting, its route
         # starts answering with the 404 page, and the rail keeps the entry: the
         # reader clicks a section that is supposed to exist and gets nothing,
-        # which teaches them to distrust the other twenty two as well.
+        # which teaches them to distrust the other twenty three as well.
         run: |
           routes=$(grep -oE 'href: "/admin[^"]*"' console/lib/admin-nav.ts | cut -d'"' -f2)
           count=$(printf '%s\n' "$routes" | grep -c .)
           # A grep that stops matching returns nothing, and a loop over nothing
           # passes every time. The count is what keeps this from going quietly
           # green if the navigation is ever reformatted out from under it.
-          if [ "$count" -ne 23 ]; then
-            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 23"
+          if [ "$count" -ne 24 ]; then
+            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 24"
             exit 1
           fi
           missing=0
