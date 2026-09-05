@@ -239,6 +239,23 @@ hooks:
       exit 1
     fi
 
+# Squash merge a pull request so the commit it creates carries a sign-off.
+#
+# `gh pr merge --squash --body ""` makes a squash commit with no
+# `Signed-off-by` trailer. Six pull requests were merged that way on
+# 2026-09-05. Main's `commits are attributed to their author` context failed on
+# the result, cd.yml's gate read that failure and skipped its build, staging
+# and production jobs, and staging sat six merges behind at cb3f30f1 until the
+# next merge, 597b3819, carried the trailer and let it move again. The commit
+# hooks cannot help: a squash commit is created on GitHub's side, so nothing
+# local runs at the moment the button is pressed.
+#
+# See tools/prmerge for what it refuses and why. `-dry-run` checks everything
+# and merges nothing.
+[doc("Squash merge a pull request with a Developer Certificate of Origin sign-off.")]
+merge pr *args:
+    go run ./tools/prmerge -pr {{pr}} {{args}}
+
 # Start the Postgres the control plane suites need.
 #
 # pg_stat_statements is preloaded because the query regression work needs it and

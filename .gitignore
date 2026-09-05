@@ -307,3 +307,12 @@ web/apps/api/zzserve.ts
 # Anchored, so it ignores the build artefact at the root and not the harness at
 # tools/preview.
 /preview
+
+# `go build ./tools/prmerge` writes ./prmerge at the repository root, for the
+# same reason /preview is here: tools/gatecheck refuses any tools directory
+# whose name is not ignored, because the next `git add -A` would otherwise
+# commit a platform specific executable.
+#
+# Anchored, so it ignores the build artefact at the root and not the command at
+# tools/prmerge.
+/prmerge
