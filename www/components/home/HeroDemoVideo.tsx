@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/cn";
+import { VideoRestartButton } from "./VideoRestartButton";
+import { useViewportVideoPlayback } from "./useViewportVideoPlayback";
 
 function VolumeIcon({ on }: { on: boolean }) {
   return (
@@ -39,11 +41,19 @@ function FullscreenIcon() {
   );
 }
 
+const DEMO_STEPS = [
+  "Risky migration detected",
+  "Replay runs inside containment",
+  "Report blocks unsafe release",
+];
+
 export function HeroDemoVideo() {
   const frameRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+
+  useViewportVideoPlayback(videoRef);
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -65,6 +75,14 @@ export function HeroDemoVideo() {
     void video.play();
   };
 
+  const restartVideo = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.currentTime = 0;
+    void video.play();
+  };
+
   const openFullscreen = () => {
     const frame = frameRef.current;
     if (!frame) return;
@@ -78,7 +96,29 @@ export function HeroDemoVideo() {
   };
 
   return (
-    <div className="relative left-1/2 mt-20 w-screen max-w-[1500px] -translate-x-1/2 px-8 max-xl:mt-16 max-md:mt-12 max-md:px-5">
+    <div className="relative mt-20 grid w-full grid-cols-[minmax(220px,330px)_minmax(0,1fr)] gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12">
+      <div className="flex h-full max-w-[390px] flex-col justify-between max-xl:max-w-[720px] max-xl:gap-y-8">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.3em] text-gray-new-50">
+            Product walkthrough
+          </p>
+          <h2 className="mt-5 text-[38px] leading-[1.03] tracking-[-0.06em] text-black max-lg:text-[34px] max-md:text-[30px]">
+            Watch a risky pull request get stopped before release.
+          </h2>
+          <p className="mt-7 text-[17px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mt-5 max-md:text-base max-md:leading-6">
+            A concise look at Antifailure in motion: how the product frames risky
+            changes, surfaces safety signals, and gives teams confidence before shipping.
+          </p>
+        </div>
+        <ul className="space-y-4">
+          {DEMO_STEPS.map((step) => (
+            <li key={step} className="flex items-center gap-4 text-base tracking-extra-tight text-black">
+              <span className="size-2 rounded-full bg-[#668f5d]" aria-hidden />
+              <span>{step}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
       <div
         ref={frameRef}
         className={cn(
@@ -106,6 +146,7 @@ export function HeroDemoVideo() {
           aria-label="A product demo video showing Antifailure validating a deployment before release."
         />
         <div className="absolute right-4 bottom-4 z-10 flex items-center gap-2 max-sm:right-3 max-sm:bottom-3">
+          <VideoRestartButton onClick={restartVideo} />
           <button
             type="button"
             className="grid size-10 place-items-center rounded-full bg-black/72 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors duration-200 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"

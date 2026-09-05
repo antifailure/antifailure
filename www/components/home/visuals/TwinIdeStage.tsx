@@ -21,6 +21,11 @@ function lerp(from: number, to: number, t: number) {
   return from + (to - from) * ease(t);
 }
 
+function smoothstep(t: number) {
+  const v = clamp(t);
+  return v * v * (3 - 2 * v);
+}
+
 function cursorAt(t: number) {
   if (t < 0.2) {
     return { x: lerp(168, 292, span(t, 0.04, 0.2)), y: lerp(150, 180, span(t, 0.04, 0.2)), click: false };
@@ -153,8 +158,9 @@ function SafetyRing({ t, compact = false }: { t: number; compact?: boolean }) {
 
 function Timeline({ t, compact = false }: { t: number; compact?: boolean }) {
   const report = ease(span(t, 0.76, 0.92));
-  const timeline = ease(span(t, 0.18, 0.72));
+  const timeline = smoothstep(span(t, 0.16, 0.74));
   const labels = compact ? ["PR", "Run", "Replay", "Report"] : ["Current release", "Candidate PR", "Checkout replay", "Report"];
+  const positions = [0, 0.32, 0.62, 1] as const;
 
   return (
     <div className={compact ? "mt-7" : "mt-8"}>
@@ -166,22 +172,42 @@ function Timeline({ t, compact = false }: { t: number; compact?: boolean }) {
       <div className={cn("relative", compact ? "mt-4 h-8" : "mt-4 h-11")}>
         <div className={cn("absolute rounded-full bg-black/10", compact ? "inset-x-3 top-3 h-1" : "left-8 right-8 top-5 h-1")} />
         <div
-          className={cn("absolute rounded-full bg-[#668f5d]", compact ? "left-3 top-3 h-1" : "left-8 top-5 h-1")}
-          style={{ width: `${timeline * 82}%` }}
+          className={cn(
+            "absolute rounded-full bg-[#668f5d] will-change-transform",
+            compact ? "left-3 right-3 top-3 h-1" : "left-8 right-8 top-5 h-1",
+          )}
+          style={{ transform: `scaleX(${timeline})`, transformOrigin: "left center" }}
         />
-        {[0, 0.32, 0.62, 1].map((position, index) => {
-          const activeDot = timeline >= position - 0.04;
-          const failed = index === 3 && report > 0.55;
+        {positions.map((position, index) => {
+          const dot = smoothstep(span(timeline, Math.max(0, position - 0.1), Math.min(1, position + 0.02)));
+          const fail = smoothstep(span(report, 0.42, 0.72));
+          const failed = index === 3 && fail > 0;
+          const ringColor = failed
+            ? `rgba(189,88,78,${0.14 + fail * 0.22})`
+            : `rgba(102,143,93,${0.14 + dot * 0.24})`;
+          const dotColor = failed
+            ? "#bd584e"
+            : dot > 0.02
+              ? "#668f5d"
+              : "rgba(0,0,0,0.16)";
+
           return (
             <span
               key={position}
               className={cn("absolute grid -translate-x-1/2 place-items-center rounded-full border bg-white", compact ? "top-0 size-7" : "top-2 size-7")}
               style={{
                 left: `${compact ? 7 + position * 86 : 8 + position * 84}%`,
-                borderColor: failed ? "rgba(189,88,78,0.36)" : activeDot ? "rgba(102,143,93,0.38)" : "rgba(0,0,0,0.12)",
+                borderColor: dot > 0.02 || failed ? ringColor : "rgba(0,0,0,0.12)",
               }}
             >
-              <span className="size-3 rounded-full" style={{ backgroundColor: failed ? "#bd584e" : activeDot ? "#668f5d" : "rgba(0,0,0,0.16)" }} />
+              <span
+                className="size-3 rounded-full will-change-transform"
+                style={{
+                  backgroundColor: dotColor,
+                  opacity: Math.max(0.72, dot),
+                  transform: `scale(${0.72 + dot * 0.28})`,
+                }}
+              />
             </span>
           );
         })}
