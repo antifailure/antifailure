@@ -1,14 +1,10 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
-import { useSession, type ApiError, type Session } from "@/lib/api";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { useSession } from "@/lib/api";
+import { shouldRefreshSession } from "@/lib/session-freshness";
 
-interface SessionState {
-  status: "loading" | "ready" | "error";
-  data: Session | null;
-  error: ApiError | null;
-  reload: () => void;
-}
+type SessionState = ReturnType<typeof useSession>;
 
 const Ctx = createContext<SessionState | null>(null);
 
@@ -23,7 +19,25 @@ const Ctx = createContext<SessionState | null>(null);
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const state = useSession();
-  return <Ctx.Provider value={state as SessionState}>{children}</Ctx.Provider>;
+  const reload = state.reload;
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (shouldRefreshSession("focus", document.visibilityState)) reload();
+    };
+    const onVisibilityChange = () => {
+      if (shouldRefreshSession("visibilitychange", document.visibilityState)) reload();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [reload]);
+
+  return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }
 
 /** The session, from the provider. Throws rather than silently refetching if a

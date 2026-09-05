@@ -296,13 +296,13 @@ func poll(c client, sha, workflow string, attempts int, interval time.Duration, 
 				return refuse, stop.Error(), nil
 			}
 			lastErr = err
-			fmt.Fprintf(out, "attempt %d: could not read the run list: %v\n", attempt, err)
+			_, _ = fmt.Fprintf(out, "attempt %d: could not read the run list: %v\n", attempt, err)
 			sleep(interval, attempt, attempts)
 			continue
 		}
 		lastErr = nil
 		v, why, r := decide(found, workflow)
-		fmt.Fprintf(out, "attempt %d: %s (%s)%s\n", attempt, why, v, link(r))
+		_, _ = fmt.Fprintf(out, "attempt %d: %s (%s)%s\n", attempt, why, v, link(r))
 		if v != wait {
 			return v, why, r
 		}
@@ -386,8 +386,8 @@ func summarise(line string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintln(f, line)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintln(f, line)
 }
 
 func fail(format string, args ...any) {

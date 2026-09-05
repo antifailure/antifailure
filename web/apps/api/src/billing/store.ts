@@ -18,7 +18,7 @@ import type { Clock } from '../clock.ts'
 import type { Analytics } from '../analytics/record.ts'
 import type { StripeClient } from './stripe.ts'
 import { LIVE_STATUSES, type StripeConfig } from './plans.ts'
-import { recomputePlan, resolvePending, writeInvoice, writeSubscription } from './webhook.ts'
+import { lockBillingCustomer, recomputePlan, resolvePending, writeInvoice, writeSubscription } from './webhook.ts'
 
 export interface BillingCustomer {
   orgId: string
@@ -72,6 +72,7 @@ export async function attachCustomer(
   customer: { id: string; email: string | null },
   analytics: Analytics,
 ): Promise<{ customerId: string; created: boolean; resolved: number }> {
+  await lockBillingCustomer(db, customer.id)
   const now = clock.now().toISOString()
   const inserted = await db.execute<{ stripe_customer_id: string }>(sql`
     INSERT INTO billing_customers (org_id, stripe_customer_id, email, created_at, updated_at)
@@ -100,17 +101,17 @@ export async function readBillingState(db: Db, orgId: string): Promise<BillingSt
   const customer = await db.execute<{ stripe_customer_id: string; email: string | null }>(sql`
     SELECT stripe_customer_id, email FROM billing_customers WHERE org_id = ${orgId}::uuid`)
 
+  const liveStatuses = sql.join(LIVE_STATUSES.map((status) => sql`${status}`), sql`, `)
   const subscription = await db.execute<SubscriptionRow>(sql`
     SELECT stripe_subscription_id, plan, status, price_id, quantity,
            current_period_start, current_period_end, cancel_at_period_end, canceled_at
     FROM subscriptions WHERE org_id = ${orgId}::uuid
-    ORDER BY created_at DESC LIMIT 1`)
+    ORDER BY (status IN (${liveStatuses})) DESC, created_at DESC, stripe_subscription_id DESC LIMIT 1`)
 
   // Each status as its own bind parameter. Interpolating a JavaScript array
   // into `= ANY(...)` produces a row expression rather than an array, which
   // Postgres refuses, and the refusal reaches the caller as a 500 on the
   // billing screen.
-  const liveStatuses = sql.join(LIVE_STATUSES.map((status) => sql`${status}`), sql`, `)
   const live = await db.execute<{ n: string }>(sql`
     SELECT count(*) AS n FROM subscriptions
     WHERE org_id = ${orgId}::uuid AND status IN (${liveStatuses})`)
@@ -239,9 +240,10 @@ export async function reconcile(
       notes.push(`subscriptions could not be read from Stripe (${subscriptions.error})`)
     }
     for (const subscription of subscriptions.list) {
-      // The event time is now, because this is what Stripe believes now. That
-      // advances the watermark past any delivery still in flight, which is
-      // correct: a webhook describing an older state must not undo this.
+      // This legacy watermark is a local observation time, not a provider
+      // version. Moving it to request start fixes one ordering and breaks the
+      // reverse. Snapshot/event ambiguity needs a persisted canonical refresh
+      // protocol; this plan-selection repair does not claim to solve it.
       const written = await writeSubscription(
         db, clock, config, orgId, subscription, clock.now(), analytics,
       )

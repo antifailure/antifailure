@@ -311,25 +311,42 @@ func dockerState(ctx context.Context, e *Env, p startProbe) stage {
 // rung of its own rather than being folded into the machine check.
 func runnerState(ctx context.Context, e *Env, p startProbe) stage {
 	s := stage{name: "the agent runner", command: "af runner install"}
-	home, err := p.home()
-	target := filepath.Join(home, ".antifailure", "runner")
-	if err != nil {
+	if _, err := p.home(); err != nil {
 		s.state, s.why = StageUnchecked, "this platform did not report a home directory"
 		s.detail, s.command = "not checked", ""
 		return s
 	}
+	// The runner af test would use from here, not ~/.antifailure/runner
+	// unconditionally. This rung reported "installed" while a run in the same
+	// directory took a nearer runner with no dependencies and died in node.
+	target, passedOver, err := runnerToCheck(e.WorkDir)
+	if err != nil {
+		s.state, s.why = StageUnchecked, err.Error()
+		s.detail, s.command = "not checked", ""
+		return s
+	}
+	results := append(passedOverChecks(passedOver), checkRunner(ctx, target)...)
 	var blockers, warnings []string
-	for _, r := range checkRunner(ctx, target) {
+	for _, r := range results {
 		if r.symbol == SymbolOK || r.symbol == SymbolSkip {
 			continue
 		}
-		if r.blocker {
+		if r.decides {
 			blockers = append(blockers, r.label+": "+r.detail)
 			continue
 		}
 		warnings = append(warnings, r.label+": "+r.detail)
 	}
 	switch {
+	case runnerVerdict(results) == VerdictUndetermined && len(blockers) == 0:
+		// A deciding question that could not be answered. This rung used to
+		// skip past a `skip` with the other unremarkable answers and report
+		// "installed", so a runner whose package.json cannot be parsed made
+		// af start say the runner step was done. Every other rung in this
+		// command already has StageUnchecked for exactly this; the runner rung
+		// was the one that did not use it.
+		s.state, s.why = StageUnchecked, strings.Join(unanswered(results), "; ")
+		s.detail, s.command = "not checked", ""
 	case len(blockers) > 0:
 		// Pending rather than blocked. Nothing is wrong with the machine; the
 		// runner has simply not been installed yet, and af runner install is

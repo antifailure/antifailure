@@ -130,6 +130,8 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		// A response cannot authorize traffic outside the selected safe route.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: opts.Concurrency,
 			// Compression off, so the numbers measure the application rather
@@ -160,7 +162,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		go func(r Route) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			send(ctx, client, opts.BaseURL, r, m, opts.Clock)
+			send(ctx, client, opts.BaseURL, r, m, opts.Clock, opts.Shape.Source == "safe_routes" || opts.Shape.Source == "default")
 		}(route)
 
 		if opts.Progress != nil && !opts.Clock.Now().Before(reportAt) {
@@ -188,19 +190,19 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 func send(
 	ctx context.Context, client *http.Client, baseURL string,
-	route Route, m *meter, c clock.Clock,
+	route Route, m *meter, c clock.Clock, smoke bool,
 ) {
 	status, elapsed, err := sendOnce(ctx, client, baseURL, route, c)
 	reason := ""
 	switch {
 	case err != nil:
 		reason = classify(err)
-	case status >= 500:
+	case status >= 500 || (smoke && status >= 400):
 		// A mix read from production contains the routes production serves,
 		// and some of those answer 404 for most of their traffic. Counting a
 		// 404 here would report the shape's own contents as a failure. A
-		// scenario is judged differently, because a declared journey that
-		// gets a 404 is a broken journey.
+		// scenario or synthetic smoke is judged differently: a declared path
+		// that gets a 404 is broken rather than observed production traffic.
 		reason = strconv.Itoa(status)
 	}
 	m.record(route.String(), elapsed, reason)

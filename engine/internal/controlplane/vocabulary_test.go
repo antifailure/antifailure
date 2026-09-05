@@ -221,17 +221,30 @@ var typeConst = regexp.MustCompile(`(?m)^\s*([A-Za-z][A-Za-z0-9]*)\s+Type\s*=\s*
 // hud.Plain.Suppressed both take an events.Type and are consumers, so a
 // reference count would call a type live because something displays it.
 //
-// The four names are the complete set of ways a constant reaches the bus:
-// Orchestrator.emit, event and eventErr in internal/env, and Bus.Emit under
-// them. emitHelpers below fails if that stops being true, because a fifth one
-// added without updating this pattern would make every type it emits look
+// The names are the complete set of ways a constant reaches the bus:
+// Orchestrator.emit, emitFor, event, eventErr and eventFor in internal/env,
+// and Bus.Emit under them. emitFor and eventFor are the forms that name an
+// environment other than the checkout's, which is what a sweep needs.
+// emitHelpers below fails if this set stops being complete, because another
+// one added without updating this pattern would make every type it emits look
 // unemitted, which is a loud failure rather than a silent one.
-var emitCall = regexp.MustCompile(`\b(?:emit|event|eventErr|Emit)\(\s*[^)\n]*?\bevents\.([A-Z][A-Za-z0-9]*)`)
+//
+// Longer names come first in the alternation so that emitFor and eventFor are
+// not shadowed by the emit and event prefixes they begin with.
+//
+// emit and emitFor take the level before the type, so what this pattern
+// actually captures from them is events.LevelInfo and never their event type.
+// That was already true of emit and it is harmless, because a level is not a
+// mapped type and because nothing reaches the bus through those two without
+// going through event, eventErr or eventFor, which put the type first. They
+// are named here so this list and the helper list the tripwire checks describe
+// the same set, rather than because the pattern can read a type out of them.
+var emitCall = regexp.MustCompile(`\b(?:emitFor|eventErr|eventFor|emit|event|Emit)\(\s*[^)\n]*?\bevents\.([A-Z][A-Za-z0-9]*)`)
 
 // emitHelpers matches any orchestrator method that takes an event type at all,
 // which is the only shape a new way to reach the bus can have.
 //
-// Matching the three known names instead would count removals and renames and
+// Matching the known names instead would count removals and renames and
 // miss the case that matters, an ADDED helper, because the count of the three
 // stays three. That was the first version of this and it went green against a
 // deliberately added fourth.
@@ -277,7 +290,7 @@ func emittedTypes(t *testing.T) map[string]bool {
 		helpers = append(helpers, string(m[1]))
 	}
 	slices.Sort(helpers)
-	if known := []string{"emit", "event", "eventErr"}; !slices.Equal(helpers, known) {
+	if known := []string{"emit", "emitFor", "event", "eventErr", "eventFor"}; !slices.Equal(helpers, known) {
 		t.Fatalf("%s declares %v as the methods taking an event type and this test's "+
 			"pattern knows %v; add the new one to emitCall, because a type only it emits "+
 			"would otherwise read as emitted by nothing", orchestrator, helpers, known)

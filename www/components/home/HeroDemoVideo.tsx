@@ -106,8 +106,10 @@ export function HeroDemoVideo() {
             Watch a risky pull request get stopped before release.
           </h2>
           <p className="mt-7 text-[17px] leading-7 tracking-extra-tight text-gray-new-40 max-md:mt-5 max-md:text-base max-md:leading-6">
-            A concise look at Antifailure in motion: how the product frames risky
-            changes, surfaces safety signals, and gives teams confidence before shipping.
+            Eighty eight seconds. Antifailure copies production with every real
+            name replaced, runs the change against the copy on every pull
+            request, and fails the check when a migration turns a query into a
+            sequential scan over forty eight million rows.
           </p>
         </div>
         <ul className="space-y-4">
@@ -134,15 +136,24 @@ export function HeroDemoVideo() {
           }}
           aria-hidden
         />
+        {/* NO autoPlay AND NO loop, and both are deliberate.
+            A loop is the thing tools/motioncheck exists to refuse, and the
+            rule it states has no carve out for a real event, so it has none
+            for a film either: this plays once when the section is scrolled to,
+            settles on its last frame, and stops, which is what the twin figure
+            in the same page already does. autoPlay would download the whole
+            file for every visitor including the ones who never scroll this
+            far, so playback is started by the viewport observer instead and
+            preload is none until then. The poster is what the section shows
+            until that happens, so the slot is never an empty rectangle. */}
         <video
           ref={videoRef}
           className={cn("relative block w-full bg-white object-contain", fullscreen ? "h-screen" : "aspect-video")}
-          src="/home/option-4.mp4"
-          autoPlay
+          src="/home/product-walkthrough.mp4"
+          poster="/home/product-walkthrough.jpg"
           muted={muted}
-          loop
           playsInline
-          preload="metadata"
+          preload="none"
           aria-label="A product demo video showing Antifailure validating a deployment before release."
         />
         <div className="absolute right-4 bottom-4 z-10 flex items-center gap-2 max-sm:right-3 max-sm:bottom-3">

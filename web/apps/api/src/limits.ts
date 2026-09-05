@@ -37,6 +37,16 @@ export interface EndpointLimit {
  * ends up behind a limit sized for a cheap one.
  */
 export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
+  'GET /.well-known/oauth-protected-resource': { rate: 10, burst: 30, key: 'ip', reason: 'Small public discovery document for MCP clients.' },
+  'GET /.well-known/oauth-authorization-server': { rate: 10, burst: 30, key: 'ip', reason: 'Small public authorization discovery document.' },
+  'POST /auth/mcp/register': { rate: 0.1, burst: 5, key: 'ip', reason: 'Client registration writes a persistent row and is needed only when connecting.' },
+  'GET /auth/mcp/authorize': { rate: 1, burst: 10, key: 'ip', reason: 'A person starts a connection and reviews consent.' },
+  'GET /auth/mcp/pending': { rate: 1, burst: 10, key: 'ip', reason: 'A signed-in person reads the pending connection once.' },
+  'POST /auth/mcp/approve': { rate: 1, burst: 5, key: 'ip', reason: 'Explicit consent mints a single-use authorization code.' },
+  'POST /auth/mcp/token': { rate: 1, burst: 10, key: 'ip', reason: 'One token exchange follows one approved connection.' },
+  'POST /mcp': { rate: 5, burst: 20, key: 'token', reason: 'Each MCP request can read tenant data or dispatch work through existing permission gates.' },
+  'GET /mcp': { rate: 5, burst: 20, key: 'ip', reason: 'Stateless MCP rejects a standalone event stream cheaply.' },
+  'DELETE /mcp': { rate: 5, burst: 20, key: 'ip', reason: 'Stateless MCP holds no transport session to delete.' },
   'GET /health': {
     rate: 50, burst: 200, key: 'ip',
     reason: 'A liveness probe from a load balancer, plus whatever else asks. Cheap, and refusing it looks like an outage.',
@@ -132,6 +142,14 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   // through. One a second sustained is far above a person typing a form, and
   // ten at once covers somebody who pressed the button twice and a preflight
   // beside it.
+  'POST /v1/applications': {
+    rate: 1 / 60, burst: 5, key: 'ip',
+    reason: 'An applicant submits once and may retry. Five attempts cover correction without accepting a sustained submission script.',
+  },
+  'OPTIONS /v1/applications': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Application form preflight requests contain no applicant data and may precede corrections.',
+  },
   'POST /v1/leads': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Filling in a contact form is a human action, once. The row is written by an anonymous caller, so the address is the only key there is, and the burst covers a double press and a retry.',

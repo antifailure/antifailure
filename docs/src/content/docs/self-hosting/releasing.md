@@ -327,6 +327,9 @@ in the workflow, so it cannot be edited in the same pull request that deploys.
    migrations first in the `afcpprod-bootstrap` job**, creates the new revision
    at zero traffic, health checks it on its own address, shifts traffic, health
    checks the public origin, and rolls traffic back if that last check fails.
+4. After both health checks pass, points `afcpprod-maintenance` at the exact
+   image digest staging tested and reads the job back. A failed candidate cannot
+   change the scheduled process that runs DDL later.
 
 The migration runs before any traffic moves. If it fails, nothing has changed
 and the previous revision is still serving. That ordering is the reason a

@@ -177,7 +177,7 @@ func run(root string, out *os.File) error {
 			checked, plural(checked, "manifest", "manifests"))
 		return fmt.Errorf("the documentation shows a manifest the engine would refuse")
 	}
-	fmt.Fprintf(out, "manifestcheck: %d %s in the documentation, every key is one the engine accepts\n",
+	_, _ = fmt.Fprintf(out, "manifestcheck: %d %s in the documentation, every key is one the engine accepts\n",
 		checked, plural(checked, "manifest", "manifests"))
 	return nil
 }

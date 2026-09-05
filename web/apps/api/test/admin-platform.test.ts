@@ -464,11 +464,11 @@ describe('the developer platform routes', { skip: hasDb ? false : 'no database' 
     )
   })
 
-  test('the MCP route says the control plane records nothing, rather than the console assuming it', async () => {
+  test('the MCP route distinguishes recorded credentials from the local tool catalog', async () => {
     const caller = await callerFor('read_only')
     const surface = await caller.admin.platform.mcp.surface()
-    assert.equal(surface.recordsAnything, false)
+    assert.equal(surface.recordsAnything, true)
     assert.equal(surface.tools.length, MCP_TOOLS.length)
-    assert.ok(surface.why.length > 0, 'the page states an absence without saying why')
+    assert.ok(surface.why.length > 0, 'the page must explain which surface it measures')
   })
 })

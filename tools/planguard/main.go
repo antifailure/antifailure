@@ -343,10 +343,10 @@ func readPlan(path string) (*planFile, error) {
 	}
 	var p planFile
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w\n\nThis wants the output of `terraform show -json <planfile>`, not the plan file itself and not the human readable plan.", path, err)
+		return nil, fmt.Errorf("parsing %s: %w\n\nThis wants the output of `terraform show -json <planfile>`, not the plan file itself and not the human readable plan", path, err)
 	}
 	if p.FormatVersion == "" {
-		return nil, fmt.Errorf("%s has no format_version, so it is not a `terraform show -json` document. Refusing to report zero destroys from a file this tool did not understand.", path)
+		return nil, fmt.Errorf("%s has no format_version, so it is not a `terraform show -json` document. Refusing to report zero destroys from a file this tool did not understand", path)
 	}
 	return &p, nil
 }

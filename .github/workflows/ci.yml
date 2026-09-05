@@ -213,6 +213,12 @@ jobs:
         # tree that runs the script and a commit that does not.
         run: go run ./tools/execcheck .
 
+      - name: The serving app and its maintenance job use one tested image
+        # A failed candidate, a failed public health gate and a failed job
+        # update have different safe end states. This runs the real deploy
+        # script against fake Azure and health endpoints and proves all three.
+        run: ./deploy/cd/deploy_test.sh
+
       - name: No YAML key is defined twice in one mapping
         # examples/github-workflow.yml declared `seed` and `concurrency` twice
         # each in its workflow_dispatch inputs. YAML keeps the last definition,
@@ -359,6 +365,24 @@ jobs:
         with:
           version: v2.13.1
           working-directory: engine
+          args: --timeout 15m
+
+      - name: Lint the gates
+        # The step above lints the engine and, until this one existed, that was
+        # the whole of it. tools/ holds prosecheck, gatecheck, changecheck,
+        # routecheck, wirecheck, claimcheck and every other instrument this
+        # repository trusts to say no, and it was the least linted code in the
+        # tree: 122 findings, on the same linter set the engine is held to at
+        # zero.
+        #
+        # Same action, same version, same config, a different working
+        # directory. Two invocations rather than one run over both modules
+        # because they are separate Go modules joined by a workspace, and
+        # golangci-lint runs against one module's package graph at a time.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          working-directory: tools
           args: --timeout 15m
 
       - name: The gates themselves
@@ -652,6 +676,41 @@ jobs:
         # same reason.
         run: go run ./tools/classcheck .
 
+      - name: The site calls control plane routes that exist
+        # Somebody filled in the careers form on antifailure.dev and was told
+        # "Could not reach the server". The form was correct and the route was
+        # correct: `POST https://app.antifailure.dev/v1/applications` answered
+        # 404, because this site publishes on every merge to main and the
+        # control plane only moves when a `v*` tag is promoted. The page was
+        # live in front of an API twenty two commits behind it.
+        #
+        # This is the half a pull request can prove, and it is deliberately not
+        # the half that catches the failure above: it checks that every control
+        # plane URL the site builds is declared in one module, and that every
+        # route declared there is one this repository's control plane mounts.
+        # On the day the form broke, main's server.ts did declare the route, so
+        # this would have been green. It exists so that the inventory the other
+        # half reads cannot go stale or go quietly incomplete, and it says out
+        # loud when it finishes that what is DEPLOYED was not checked here.
+        #
+        # The half that would have caught it needs a live origin and runs in
+        # deploy.yml, immediately before the publish.
+        run: go run ./tools/routecheck -root .
+
+      - name: The production smoke waits for sentences we still produce
+        # tools/sitesmoke drives the deployed careers form with the product's
+        # own agent and asserts on what a PERSON sees: the confirmation when it
+        # works, and the page's own error sentence when it does not. That half
+        # runs on a schedule and after a deploy, in sitesmoke.yml, because it
+        # asks the internet.
+        #
+        # This is its offline half. It reads the sentences that check waits for
+        # out of the files that are supposed to render them, because an
+        # expectation waiting for words the site no longer shows fails every
+        # deployment, and one satisfied by the wrong page passes every one. It
+        # says out loud when it finishes that NO DEPLOYMENT WAS CHECKED.
+        run: go run ./tools/sitesmoke -root .
+
       - name: No animation that never stops
         # If a piece of UI animates on an infinite loop while the user does
         # nothing, it is wrong. Reads the built stylesheet and HTML rather than
@@ -681,7 +740,7 @@ jobs:
 
       - name: Every operator section the navigation lists was exported
         # The list above is written out by hand, which is right for a dozen
-        # routes and wrong for the operator portal: it has twenty three
+        # routes and wrong for the operator portal: it has twenty four
         # sections, six people are adding to them, and a hand kept copy would
         # be behind within a day. So this reads the navigation itself, which is
         # the same file the rail is drawn from, and checks the export for every
@@ -691,15 +750,15 @@ jobs:
         # avoid. A stray server-only import stops one page exporting, its route
         # starts answering with the 404 page, and the rail keeps the entry: the
         # reader clicks a section that is supposed to exist and gets nothing,
-        # which teaches them to distrust the other twenty two as well.
+        # which teaches them to distrust the other twenty three as well.
         run: |
           routes=$(grep -oE 'href: "/admin[^"]*"' console/lib/admin-nav.ts | cut -d'"' -f2)
           count=$(printf '%s\n' "$routes" | grep -c .)
           # A grep that stops matching returns nothing, and a loop over nothing
           # passes every time. The count is what keeps this from going quietly
           # green if the navigation is ever reformatted out from under it.
-          if [ "$count" -ne 23 ]; then
-            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 23"
+          if [ "$count" -ne 24 ]; then
+            echo "::error::read $count routes out of console/lib/admin-nav.ts, expected 24"
             exit 1
           fi
           missing=0
@@ -1200,6 +1259,30 @@ jobs:
         # that is documented, read, and unreachable by every apply passes both.
         run: go run ./tools/wirecheck .
 
+      - name: Every hostname the site is served on is an origin the plane answers
+        # antifailure.dev and www.antifailure.dev are two custom domains on one
+        # Azure Static Web App. Both are Ready, both serve every page, and
+        # neither redirects to the other: a Static Web Apps route rule matches
+        # on PATH and the configuration schema has no hostname condition at all.
+        # site_origin in production.tfvars held one value, the apex.
+        #
+        # So the control plane refused every call the site makes whenever the
+        # visitor had arrived on www. The analytics beacon, silently. The
+        # enterprise contact form, as "Could not reach the server". The careers
+        # application form, on a form somebody had just filled in. It was
+        # reported from a phone, on the live site, while every check anybody had
+        # run was green, because every one of them asked the apex and the apex
+        # was perfect.
+        #
+        # This step is the half that needs no credential: the hostnames in
+        # tools/site/hostnames.txt against site_origin in each control plane
+        # tfvars, in BOTH directions, because an allowed origin with no hostname
+        # behind it is a widened CORS boundary that reads like a leftover. The
+        # half that asks Azure which domains are really bound runs after a
+        # publish in deploy.yml, which is what keeps hostnames.txt from being a
+        # list somebody typed.
+        run: go run ./tools/origincheck origins
+
       - name: No file carries an unfinished merge
         # One reached main and stayed there through a release being prepared:
         # literal `<<<<<<< HEAD`, `=======` and `>>>>>>>` around six rows of the
@@ -1323,6 +1406,54 @@ jobs:
           AF_CHANGECHECK_BASE: ${{ github.event.pull_request.base.sha }}
           AF_CHANGECHECK_BEFORE: ${{ github.event.before }}
         run: go run ./tools/changecheck .
+
+  mergefields:
+    name: the merge command still fits the API
+    # Only on a pull request, because it needs one to read: the field list is
+    # checked against a real pull request rather than against a fixture, and on
+    # a push to main there is none to point at.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Reads only, and each one is a read this check makes: the pull request,
+    # the check runs on its head, and the commit statuses on the same commit.
+    # A job level block replaces the workflow level one rather than adding to
+    # it, so `contents` is repeated here on purpose.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Every field name the merge command uses is one the API has
+        # tools/prmerge asked `gh pr view` for a field called `merged`. There
+        # is no such field. All 25 of its tests passed, because every one
+        # answered from a fixture the tool's own suite had written, and the
+        # fixture invented the field the code was reading. The first real
+        # invocation died on the first call with `Unknown JSON field:
+        # "merged"`, which meant the command that exists to make merging safe
+        # could not read a pull request at all.
+        #
+        # A suite that builds its own input can be complete and still describe
+        # a system that does not exist. This is the check that reads the other
+        # side of the boundary, and it runs the same argument lists the merge
+        # path runs.
+        #
+        # It does NOT check branch protection here, and it says so rather than
+        # passing over it: that read needs administration rights and this token
+        # has none. That half is proved on the real path instead, because a
+        # wrong key there leaves an empty required list, which refuses every
+        # merge rather than allowing one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run ./tools/prmerge -check-fields -pr ${{ github.event.pull_request.number }}
 
   authorship:
     name: commits are attributed to their author

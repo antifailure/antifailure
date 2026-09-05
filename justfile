@@ -82,6 +82,10 @@ gate: _reports
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "the site calls routes that exist" just routecheck
+    run "every hostname has an origin"   just origincheck
+    run "the smoke waits for real sentences" just sitesmoke
+    run "payment secrets reach the app"  just test-infra-config
     run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
     run "every figure has a source"      just figurecheck
@@ -99,11 +103,13 @@ gate: _reports
     run "the examples still compile"     just examples
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
+    run "deploy keeps jobs on one image" just deploycheck
     run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
     run "format"                         just fmt-check
     run "lint"                           just lint
+    run "the gates lint too"             just lint-tools
     run "the gates themselves"           just test-tools
     run "coverage"                       just coverage
     run "engine"                         just test-engine
@@ -236,6 +242,26 @@ hooks:
       echo "one cannot be signed off." >&2
       exit 1
     fi
+
+# Squash merge a pull request so the commit it creates carries a sign-off.
+#
+# `gh pr merge --squash --body ""` makes a squash commit with no
+# `Signed-off-by` trailer. Six pull requests were merged that way on
+# 2026-09-05. Main's `commits are attributed to their author` context failed on
+# the result, cd.yml's gate read that failure and skipped its build, staging
+# and production jobs, and staging sat six merges behind at cb3f30f1 until the
+# next merge, 597b3819, carried the trailer and let it move again. The commit
+# hooks cannot help: a squash commit is created on GitHub's side, so nothing
+# local runs at the moment the button is pressed.
+#
+# See tools/prmerge for what it refuses and why. Three read only modes, all of
+# which merge nothing: `-dry-run` checks everything and prints the command it
+# would run, `-check-fields` asks the real API whether the field names this
+# command reads still exist, and `-confirm-only` reads an already merged pull
+# request and proves its commit carries the sign-off.
+[doc("Squash merge a pull request with a Developer Certificate of Origin sign-off.")]
+merge pr *args:
+    go run ./tools/prmerge -pr {{pr}} {{args}}
 
 # Start the Postgres the control plane suites need.
 #
@@ -683,6 +709,27 @@ seo:
 check-tls:
     tools/site/check-tls.sh
 
+# The live half of `just origincheck`: what Azure really serves, and what the
+# deployed control plane really answers.
+#
+# Not in `just gate`, for the same reason as `check-tls`. Its answer is not a
+# function of the tree: it asks Azure which custom domains are bound to af-site
+# and asks a deployed control plane to answer a real CORS preflight from each of
+# them, so the same commit is green today and red the morning somebody binds a
+# hostname in the portal. That is exactly the case it exists for, and it needs
+# both a signed in Azure CLI and the network, which `just gate` must not.
+#
+# It exits 2, not 0, when it cannot reach Azure. A check that reports success
+# for a question it never asked is how the next hostname somebody binds becomes
+# invisible all over again.
+#
+# Point it somewhere else with --api, which is how a local plane carrying a
+# change is checked before it is deployed:
+#
+#     go run ./tools/origincheck live --api http://127.0.0.1:8791
+check-origins:
+    go run ./tools/origincheck all --api https://app.antifailure.dev
+
 # The getting started path, run in order and timed.
 #
 # Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
@@ -878,6 +925,10 @@ sidebarcheck:
 runbookcheck:
     go run ./tools/runbookcheck .
 
+# Create the first operator using the deployment's existing database credential.
+operator-init environment:
+    node deploy/cd/operator-init.mjs {{quote(environment)}}
+
 # STATUS.md keeps the rule it states about itself.
 #
 # That file opens by saying every component carries one of a fixed set of
@@ -952,6 +1003,88 @@ inputcheck:
 wirecheck:
     go run ./tools/wirecheck .
 
+# The site does not call a control plane route that is not there.
+#
+# Somebody filled in the careers form on antifailure.dev and was told "Could not
+# reach the server". The form was right, the route was right, and
+# `POST https://app.antifailure.dev/v1/applications` answered 404: the site
+# publishes on every merge to main and the control plane only moves on a `v*`
+# tag, so the page was live against an API twenty two commits behind it.
+#
+# This is the OFFLINE half, which is what a pull request can prove. It checks
+# that every control plane URL the site builds is declared in
+# www/lib/control-plane-routes.ts and that every route declared there is one
+# this repository's control plane actually mounts. It CANNOT see the failure
+# above, and says so when it finishes: on the day the careers form broke, main's
+# API did declare the route. The half that would have caught it needs a live
+# origin and runs in deploy.yml against the control plane the site is about to
+# be published in front of.
+routecheck:
+    go run ./tools/routecheck -root .
+
+# The same command against a control plane that is actually running.
+#
+# Not part of `just gate`, because it asks the internet and a gate that blocks a
+# merge on a network timeout is a gate people learn to re-run rather than read.
+# deploy.yml runs it before the publish step, which is where the answer matters:
+# the question is not what main declares, it is what the origin this build is
+# about to point browsers at will answer them.
+routecheck-deployed origin="https://app.antifailure.dev":
+    go run ./tools/routecheck -root . -origin {{origin}} -allow-write-probes
+
+# Every hostname the marketing site is served on is one the control plane will
+# answer a browser from.
+#
+# THE FAILURE. antifailure.dev and www.antifailure.dev are two custom domains on
+# one Azure Static Web App, both Ready, both serving every page, and neither
+# redirects to the other because a Static Web Apps route rule matches on PATH
+# and its schema has no hostname condition at all. site_origin in
+# production.tfvars held one value, the apex. So every call the site makes was
+# refused 403 whenever a visitor had arrived on www: the analytics beacon, the
+# enterprise contact form, the careers application form. It was found on a
+# phone, by a person, on the live site, and every check anybody had run was
+# green because they all asked the apex.
+#
+# This is the offline half and it is the one that runs on every branch: the
+# hostnames in tools/site/hostnames.txt against site_origin in each control
+# plane tfvars, in both directions. `just check-origins` is the other half, and
+# it is what keeps hostnames.txt from being a list somebody typed.
+origincheck:
+    go run ./tools/origincheck origins
+
+# The sentences the production smoke waits for are still the ones we produce.
+#
+# THE OFFLINE HALF of tools/sitesmoke, and it is deliberately modest about what
+# it proves. It cannot see a deployment, and on the day the careers form broke
+# the tree was perfect: main declared the route and production was serving a
+# version from before it existed. What it CAN prove is the one way the online
+# half could go quietly wrong. The smoke waits for the control plane's own
+# refusal, "Use a public http or https link without credentials", and for the
+# site's own confirmation, "It is written down." An expectation waiting for a
+# sentence this repository no longer produces fails every deployment forever;
+# one satisfied by the wrong page passes every deployment forever. So the
+# sentences are read out of the files that are supposed to render them.
+sitesmoke:
+    go run ./tools/sitesmoke -root .
+
+# The same command against the site that is actually deployed.
+#
+# Not part of `just gate`, for the reason routecheck-deployed gives: it asks the
+# internet, and a gate that blocks a merge on somebody's bad afternoon is a gate
+# people learn to re-run rather than read. It runs on a schedule and after a
+# deploy in .github/workflows/sitesmoke.yml, which is where the answer matters.
+#
+# It files no job applications. Add -allow-writes to run the workflow that
+# does, which is the only way to prove through a browser that a valid
+# application actually reaches the database.
+sitesmoke-deployed origin="https://antifailure.dev":
+    go run ./tools/sitesmoke -root . -origin {{origin}}
+
+# Mocked providers exercise the rendered payment references without cloud access.
+test-infra-config:
+    terraform -chdir=infra/terraform/modules/control-plane init -backend=false -input=false
+    terraform -chdir=infra/terraform/modules/control-plane test
+
 # No file in the tree carries a merge conflict marker.
 #
 # One reached main inside a documentation table and every other gate was green
@@ -974,6 +1107,12 @@ gatecheck:
 # pull request.
 execcheck:
     go run ./tools/execcheck .
+
+# The serving application and the scheduled DDL job stay on one tested image.
+# The test runs the real deploy script against fake Azure and health endpoints,
+# including every failure ordering that must leave maintenance unchanged.
+deploycheck:
+    ./deploy/cd/deploy_test.sh
 
 # No YAML key is defined twice in one mapping.
 #
@@ -1229,6 +1368,28 @@ generate:
 # certifies this machine's keychain works, by not looking at the keychain.
 keyring:
     cd engine && go test ./internal/secrets/ -count=1
+
+# The same linter set, pointed at the module that decides what ships.
+#
+# tools/ holds prosecheck, gatecheck, changecheck, routecheck, wirecheck,
+# claimcheck and every other instrument this repository trusts to say no, and
+# until this recipe existed CI linted the engine only. The gates were the least
+# linted code in the tree. It carried 122 findings when somebody finally looked,
+# and the count had been reported as 27 because golangci-lint caps repeated
+# issues by default; see the issues block in .golangci.yml.
+lint-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v golangci-lint > /dev/null; then
+      echo "golangci-lint is not installed. brew install golangci-lint"
+      exit 1
+    fi
+    cd tools
+    # verify before run, for the reason the engine recipe gives: `run` does not
+    # validate the config, so an invalid one passes locally and fails the moment
+    # CI's action verifies it.
+    golangci-lint config verify
+    golangci-lint run --timeout 15m ./...
 
 # Lint the code the other platforms compile.
 #

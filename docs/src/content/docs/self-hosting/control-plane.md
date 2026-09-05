@@ -135,6 +135,27 @@ On Kubernetes, use the chart in `deploy/helm/antifailure-control-plane`, which
 runs step 1 as a Job before the Deployment rolls. It installs on any conformant
 cluster and is developed against kind.
 
+Its `values.yaml` names every setting on the reference page that an installation
+is meant to choose, with the argument for each one written where you set it.
+Read that file rather than a list here: a second list would rot, and the one in
+the chart is checked. `tools/wirecheck` compares the reference page against both
+supported installation routes, the Terraform module and this chart, and fails
+the build when either cannot deliver a variable and no row in
+`tools/docs/wiring-exemptions.tsv` gives a reason. Eight variables have such a
+row for the chart, and the reasons are in that file.
+
+That check was added because the chart could not set 23 of them, including
+`AF_SITE_ORIGIN`, and nothing said so. A missing setting does not present as a
+missing setting: the operator portal answers as though the installation has no
+customers, the enterprise contact form on a marketing site tells the visitor to
+check their network connection, and analytics records nothing. `helm install`
+prints which of these are off in the release it just created.
+
+`extraEnv` puts anything the chart does not name into the serving container. It
+is the escape hatch for a variable added faster than this chart learns it, and
+it is deliberately not counted as delivery by the check above, so a new setting
+still earns a named value.
+
 ## Two database roles, on purpose
 
 The application connects as an unprivileged role that cannot run DDL. A role

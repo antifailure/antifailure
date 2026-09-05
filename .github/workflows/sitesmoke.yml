@@ -1,0 +1,114 @@
+name: Site smoke
+
+# A person filling in the careers form, from outside, on every hostname.
+#
+# THE FAILURE. Somebody filled in the form on the real https://antifailure.dev
+# and was told "Could not reach the server." Nothing in this repository was
+# wrong: main declared the route, the form posted to it, CI was green and the
+# deploy was green. The site publishes on every merge to main and the control
+# plane only moves when a `v*` tag is promoted, so the page was live against an
+# API twenty two commits behind it, and no check anybody had could see the space
+# between two independently versioned deployments.
+#
+# The dogfood run could not see it either, and the reason is structural rather
+# than an oversight: it builds a disposable stack out of ONE commit, so the
+# front end and the API necessarily agree, the form submits, and the run
+# correctly reports nothing wrong. Same agent, same Chromium, same form, wrong
+# target.
+#
+# WHY THIS IS NOT tools/routecheck, which merged before it and runs before the
+# site publishes. That asks the control plane whether a route exists, and it
+# reports `POST /v1/applications -> 404`. A person reads "Could not reach the
+# server." Only the second is the failure anybody had, and reaching it needs the
+# real page, its JavaScript, the control plane URL baked into the build, and a
+# cross origin request from the exact hostname somebody typed. Both are wanted.
+# Neither is the other.
+#
+# IT FILES NO JOB APPLICATIONS. The scheduled workflow answers the optional work
+# link with a URL the control plane's own validation refuses, so the request
+# reaches the handler and is refused before anything is written. The path that
+# includes the write needs -allow-writes and is not run here. The reason each
+# workflow is inert is in tools/sitesmoke/workflows.go, checked against the
+# API's source rather than assumed.
+#
+# ON A SCHEDULE AS WELL AS AFTER A DEPLOY, and the schedule is not the
+# afterthought. The failure that is live as this is written arrived with no
+# deploy at all: antifailure.dev and www.antifailure.dev are two custom domains
+# on one Static Web App, the control plane's site_origin held one of them, and
+# every form on www has been refused ever since somebody bound the second
+# domain. Nothing shipped on the day it broke.
+
+on:
+  schedule:
+    # 08:00 UTC daily, an hour after the sign-up probe, so no two scheduled
+    # jobs compete for the same runner minute.
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sitesmoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: a person can use the careers form
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Same guard as deploy.yml and signup.yml. A fork running this on a
+    # schedule would drive somebody else's production site.
+    if: ${{ github.repository == 'antifailure/antifailure' }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: Install the runner and its browser
+        # The product's own agent, not a second browser harness beside it.
+        # `af runner install` resolves the same dependencies; this job installs
+        # them directly because it has no engine binary and needs no
+        # environment.
+        run: |
+          npm --prefix runner ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Drive the careers form on every hostname
+        # EXPECT www TO BE RED UNTIL A TAG SHIPS THE ORIGIN FIX, and do not
+        # "fix" it here. antifailure.dev and www.antifailure.dev are two custom
+        # domains on one Static Web App, and production's site_origin names one
+        # of them, so a cross origin request from www is refused 403 and the
+        # form shows "Could not reach the server." That is a real, live,
+        # user facing breakage and it is what this check is for. The
+        # configuration fix is on a branch; production carries it only when
+        # somebody promotes a `v*` tag.
+        #
+        # Both hostnames, because both are bound, both serve every page, and
+        # neither redirects to the other, so both are addresses people type.
+        run: |
+          go run ./tools/sitesmoke -root . \
+            -origin https://antifailure.dev \
+            -origin https://www.antifailure.dev \
+            -artifacts "${RUNNER_TEMP}/sitesmoke"
+
+      - name: Keep the evidence
+        # Uploaded on a failure, because the failure is the run somebody has to
+        # reproduce and it is the hardest one to reproduce by hand.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sitesmoke-evidence
+          path: ${{ runner.temp }}/sitesmoke
+          retention-days: 7
+          if-no-files-found: warn

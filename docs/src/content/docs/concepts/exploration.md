@@ -30,6 +30,15 @@ explore:
 Run it with `af explore`. Every finding names the page, the control and the
 step, so you can go and look.
 
+`af ci` also runs enabled goals, before declared workflows and their final
+database invariants, so those invariants observe writes made while exploring.
+Its JSON and pull request report retain the observations, page and move counts,
+and trace paths. No extra flag or model key is required. Set a step budget on
+each goal to bound the work. A configured goal with no browser evidence makes
+the check incomplete, not a clean exploration; observations remain advisory.
+That incomplete result takes precedence over warnings and flaky workflows,
+but never hides a real workflow, invariant or policy failure.
+
 ## An exploration cannot fail your build
 
 `af explore` reports `pass` unless it could not run at all, and it exits zero

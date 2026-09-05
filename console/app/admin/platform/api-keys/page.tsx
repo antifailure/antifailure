@@ -62,6 +62,7 @@ const KIND_WORDS: Record<string, string> = {
   engine: "engine",
   cli: "person",
   oidc: "workflow",
+  mcp: "MCP",
 };
 
 const KIND_HINTS: Record<string, string> = {
@@ -69,6 +70,7 @@ const KIND_HINTS: Record<string, string> = {
     "Belongs to the organization rather than to whoever made it, so it keeps working after that person leaves.",
   cli: "Minted by af login for one person's machine, and it acts as them.",
   oidc: "Minted per workflow job by trading a GitHub identity. Short lived, and tied to a binding.",
+  mcp: "Approved by a person for a hosted MCP client. Reconnect the client to replace it.",
 };
 
 export default function PlatformApiKeysPage() {
@@ -210,7 +212,7 @@ function Credentials() {
       title="Credentials"
       note={
         mayRevoke
-          ? "Revoking is immediate and cannot be undone. There is no rotate: only the hash is stored, so nothing here can produce a replacement. The customer makes one with af token create."
+          ? "Revoking is immediate and cannot be undone. The customer reconnects an MCP client or creates a replacement engine credential with af token create."
           : "Your role can read this list and not change it."
       }
     >
@@ -231,6 +233,7 @@ function Credentials() {
               { value: "engine", label: "Engine" },
               { value: "cli", label: "Person" },
               { value: "oidc", label: "Workflow" },
+              { value: "mcp", label: "MCP" },
             ],
           },
           {
@@ -349,7 +352,7 @@ function RevokeCredential({
       <p>
         There is no way back. Only a hash of the value is stored, so nobody, including us, can
         recover it. {credential ? <span className="font-mono">{credential.orgSlug}</span> : null}{" "}
-        creates a replacement themselves with <span className="font-mono">af token create</span>.
+        {credential?.kind === "mcp" ? "reconnects their MCP client to approve a replacement." : <>creates a replacement themselves with <span className="font-mono">af token create</span>.</>}
       </p>
       {credential ? (
         <p className="text-[12.5px] text-dim">{KIND_HINTS[credential.kind] ?? ""}</p>

@@ -44,9 +44,11 @@ var commandExamples = map[string]string{
 		"# standard input and output, so running it in a terminal looks idle.\n" +
 		"af mcp\n" +
 		"# It serves exactly the checkout it starts in, so the client is\n" +
-		"# configured to run it there.\n" +
+		"# configured to run it there. A client without a working directory\n" +
+		"# setting passes -C with the absolute checkout in its configuration.\n" +
 		"af mcp",
 	"af doctor": "af doctor\naf doctor -o json",
+	"af update": "af update\n# Check the latest release without replacing any file.\naf update --check -o json",
 	"af start": "" +
 		"# Where you are on the first run, and the one command that moves you on.\n" +
 		"af start\n" +

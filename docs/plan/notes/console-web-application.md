@@ -18,7 +18,7 @@ The session is a `SameSite=Lax` cookie set by the control plane's origin.
 Serving the console from `antifailure.dev` would make every data call
 cross-origin, which needs `SameSite=None` on that cookie and a CORS policy that
 allows credentials. That widens the cross-site request surface of **every**
-endpoint on the API -- ingestion, provider keys, device approval -- in order to
+endpoint on the API (ingestion, provider keys, device approval) in order to
 move a dashboard to a second hostname. The trade is not worth making.
 
 So the console is a static export that the control plane's own Hono process
@@ -26,8 +26,8 @@ serves from `/app/console-out`: one origin, one cookie policy, one process. See
 `web/apps/api/src/console/static.ts`.
 
 The consequence to design around: a static export has no server, so there are
-no dynamic route segments. A detail view is a query string on a static page --
-`/runs?run=...`, `/environments?env=...`, `/masking?repo=...` -- never
+no dynamic route segments. A detail view is a query string on a static page:
+`/runs?run=...`, `/environments?env=...`, `/masking?repo=...`, never
 `/runs/[runId]`, which cannot be exported without knowing every id at build
 time. Query strings turn out to be the better answer anyway: a specific run is
 a link somebody can send.
@@ -68,7 +68,7 @@ Four things, none of which a passing build would have shown.
 **Every navigation blanked the page.** `Shell` was inside each page rather than
 in a layout. A layout survives a client-side navigation and a page does not, so
 clicking the sidebar unmounted the shell, refetched the session, and cleared the
-whole window -- navigation rail included -- until it came back. It looked like
+whole window, navigation rail included, until it came back. It looked like
 the application crashed on every click. Fixed by moving the chrome into
 `app/(app)/layout.tsx`, which is also what makes one session fetch serve every
 screen instead of three.
@@ -84,8 +84,8 @@ question, and `Loaded` refuses to hand a null to its children so the shape of
 that mistake shows a skeleton instead of a white screen.
 
 **The CSRF header was wrong.** The client sent `x-af-csrf`; the server has
-always read `x-antifailure-csrf`. Every mutation in the console -- storing a
-key, setting a cap, changing a role, approving a terminal -- answered 403. The
+always read `x-antifailure-csrf`. Every mutation in the console (storing a
+key, setting a cap, changing a role, approving a terminal) answered 403. The
 tests caught it, which is the only reason it is in this list rather than in
 production.
 

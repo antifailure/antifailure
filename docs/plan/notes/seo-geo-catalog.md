@@ -16,7 +16,7 @@ experiment rather than vendor blogging.
 
 ---
 
-## Part 1 — 100 SEO techniques
+## Part 1: 100 SEO techniques
 
 ### A. Crawl and index foundations
 
@@ -151,7 +151,7 @@ experiment rather than vendor blogging.
 
 ---
 
-## Part 2 — 100 GEO techniques
+## Part 2: 100 GEO techniques
 
 ### A. AI crawler access
 

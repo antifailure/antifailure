@@ -49,3 +49,17 @@ export const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
 export function may(role: string | null | undefined, permission: string): boolean {
   return (ROLE_PERMISSIONS[role ?? ""] ?? []).includes(permission);
 }
+
+/**
+ * Whether the installation analytics link belongs in this session.
+ *
+ * Both facts matter. `analyticsOperator` identifies the one organization that
+ * operates this installation, while `analytics.read` keeps members and viewers
+ * of that organization out. The server enforces both again. This helper keeps
+ * the page and both navigation rails from drifting into different questions.
+ */
+export function mayReadAnalytics(
+  session: { analyticsOperator?: boolean; role?: string | null } | null | undefined,
+): boolean {
+  return session?.analyticsOperator === true && may(session.role, "analytics.read");
+}

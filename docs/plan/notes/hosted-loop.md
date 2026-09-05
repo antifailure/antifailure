@@ -29,7 +29,7 @@ file rolled back, and the application came up with no schema at all: `/health`
 answered `200` while every endpoint that touched a table returned `500`. The
 extension is now allow-listed in Terraform and the bootstrap job has run.
 
-**Sign-in is GitHub OAuth, with signups closed -- and it has never worked.**
+**Sign-in is GitHub OAuth, with signups closed. It has never worked.**
 The OAuth App `Antifailure (staging)` exists under the `antifailure`
 organization, client id `Ov23lipGqLbu1cZJn1EF`, with the right callback. What
 was in Key Vault under `github-client-id` and `github-client-secret` was the
@@ -49,9 +49,9 @@ a made-up token answers 404, "no such token", where a wrong secret answers 401.
 The serving replica restarted 20 minutes after the secret was written, so it is
 the value the process holds.
 
-The App has exactly one client secret now. There were three by the end -- one
+The App has exactly one client secret now. There were three by the end: one
 from yesterday, one minted during the passkey session whose plaintext went
-nowhere, and this one -- and the two that nothing could use were deleted, both
+nowhere, and this one. The two that nothing could use were deleted, both
 "Never used".
 
 What has not happened is one human click. GitHub disables the Authorize button
@@ -84,7 +84,7 @@ static export served by the control plane from its own origin so the session
 cookie stays same-origin. Environments, runs with verdicts and artifacts,
 masking rules and attestation history, the egress policy with a way to ask it
 about one request, the audit log with its chain check, members, provider keys,
-and the device approval screen -- each with a loading, an empty and an error
+and the device approval screen, each with a loading, an empty and an error
 state. The 1,400 lines of hand-written HTML it replaces rendered as unstyled
 text in a real browser for a week. See `notes/console-web-application.md` for
 what the browser found that the build did not.

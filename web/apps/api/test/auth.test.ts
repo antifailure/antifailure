@@ -12,7 +12,10 @@ import {
   ABSOLUTE_LIFETIME_MS, IDLE_TIMEOUT_MS, hashToken, issueSession, resolveSession,
   sessionCookie, readCookie, csrfTokenFor, csrfMatches, sweepSessions,
 } from '../src/auth/session.ts'
-import { safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError } from '../src/auth/signin.ts'
+import {
+  safeRedirect, beginSignIn, completeSignIn, syncMembership, SignInError, type SyncReport,
+  sweepOAuthStates, OAUTH_STATE_SWEEP_MARGIN_MS,
+} from '../src/auth/signin.ts'
 import { FakeClock } from '../src/clock.ts'
 import { FakeGitHub } from '../src/auth/fakegithub.ts'
 import { GitHubError } from '../src/auth/github.ts'
@@ -122,6 +125,18 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
     assert.equal(body.signedIn, true)
     assert.equal(body.orgId, org.orgId)
     assert.equal(body.role, 'member')
+  })
+
+  it('does not let a browser cache a signed in or signed out session', async () => {
+    const signedIn = await signInAs(h, org, 'member', 'uncached')
+    const [withSession, withoutSession] = await Promise.all([
+      h.fetch('/auth/session', { headers: { cookie: signedIn.cookie } }),
+      h.fetch('/auth/session'),
+    ])
+    assert.deepEqual(
+      [withSession.headers.get('cache-control'), withoutSession.headers.get('cache-control')],
+      ['no-store', 'no-store'],
+    )
   })
 
   it('signs in behind a chain of proxies, where the forwarded header is a list', async () => {
@@ -810,6 +825,42 @@ describe('sessions', { skip: hasDatabase ? false : 'no Postgres' }, () => {
     }
   })
 
+  it('billing reads a promotion made after the browser cached its session', async () => {
+    // This is the production ordering. The browser had a ready member session
+    // before the role changed, then the shared layout kept that answer while
+    // the Plan page mounted. Every billing procedure read the new owner role
+    // from the database and succeeded. A client gate over the older answer was
+    // the only refusal in the path.
+    const owner = await signInAs(h, org, 'owner', 'promoter')
+    const promoted = await signInAs(h, org, 'member', 'promoted')
+    const [person] = await h.admin<{ github_login: string }[]>`
+      SELECT github_login FROM users WHERE id = ${promoted.userId}`
+
+    const cached = await h.fetch('/auth/session', { headers: { cookie: promoted.cookie } })
+    const cachedSession = (await cached.json()) as { role: string }
+    const changed = await callProcedure(h, owner, 'members.setRole', 'mutation', {
+      githubLogin: person!.github_login,
+      role: 'owner',
+    })
+    const procedureStatuses: number[] = []
+    for (const [path, input] of [
+      ['billing.get', {}],
+      ['subscriptions.current', {}],
+      ['subscriptions.invoices', { limit: 20 }],
+    ] as const) {
+      const response = await callProcedure(h, promoted, path, 'query', input)
+      procedureStatuses.push(response.status)
+    }
+
+    const refreshed = await h.fetch('/auth/session', { headers: { cookie: promoted.cookie } })
+    const refreshedSession = (await refreshed.json()) as { role: string }
+    assert.deepEqual(
+      [cachedSession.role, changed.status, ...procedureStatuses, refreshedSession.role],
+      ['member', 200, 200, 200, 200, 'owner'],
+      JSON.stringify(changed.body),
+    )
+  })
+
   // -------------------------------------------------------------------------
   // The sweeper, and the two clocks it has to satisfy at once.
   // -------------------------------------------------------------------------
@@ -1160,6 +1211,53 @@ describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgr
     assert.ok(!logins2.includes(arrives.login), 'a member GitHub no longer reports is still listed')
   })
 
+  it('a sync that removes its caller makes the next session read signed out', async () => {
+    const ownOrg = await seedOrg(h.admin, 'syncself')
+    try {
+      await installFor(ownOrg.orgId, ownOrg.slug)
+      await signInAs(h, ownOrg, 'owner', 'staysowner')
+      const actor = await signInAs(h, ownOrg, 'admin', 'syncedout')
+      const upstream = await signInAs(h, ownOrg, 'member', 'upstream')
+      const [person] = await h.admin<{ github_login: string }[]>`
+        SELECT github_login FROM users WHERE id = ${actor.userId}`
+      const [kept] = await h.admin<{
+        github_id: string
+        github_login: string
+        email: string
+        name: string | null
+        avatar_url: string | null
+      }[]>`
+        SELECT github_id, github_login, email, name, avatar_url
+        FROM users WHERE id = ${upstream.userId}`
+      await h.admin`
+        UPDATE members SET source = 'github'
+        WHERE org_id = ${ownOrg.orgId} AND user_id = ${actor.userId}`
+
+      h.github.setMembers(ownOrg.slug, [{
+        user: {
+          id: Number(kept!.github_id),
+          login: kept!.github_login,
+          email: kept!.email,
+          name: kept!.name,
+          avatarUrl: kept!.avatar_url,
+        },
+        role: 'member',
+      }])
+      const result = await callProcedure(h, actor, 'members.sync', 'mutation', {})
+      const report = (result.body as { result: { data: SyncReport } }).result.data
+
+      const refreshed = await h.fetch('/auth/session', { headers: { cookie: actor.cookie } })
+      const session = (await refreshed.json()) as { signedIn: boolean }
+      assert.deepEqual(
+        [result.status, report.removed.includes(person!.github_login), session.signedIn],
+        [200, true, false],
+        JSON.stringify(result.body),
+      )
+    } finally {
+      await dropOrg(h.admin, ownOrg.orgId)
+    }
+  })
+
   it('an empty answer from GitHub is a refusal with a reason, not a 500', async () => {
     // syncMembership throws SignInError here on purpose: applying an empty
     // list would remove every owner, and an outage looks exactly like this.
@@ -1199,5 +1297,220 @@ describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgr
     const member = await signInAs(h, org, 'member')
     const { body } = await callProcedure(h, member, 'members.sync', 'mutation', {})
     assert.equal(errorCode(body), 'FORBIDDEN')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The handshakes nobody came back from.
+// ---------------------------------------------------------------------------
+//
+// oauth_states had no sweeper from 0001 until this suite existed. completeSignIn
+// deletes a state ON REDEMPTION, in the statement that reads it, and that was
+// the only DELETE the table ever saw: every person who pressed "Continue with
+// GitHub" and closed the tab left a row behind for good, and so does the site
+// deploy gate, which probes GET /auth/github on every publish.
+//
+// Two things are proved here and only one of them is about counting rows.
+//
+// The first is that the DELETE reaches the rows at all. 0016 and 0024 are both
+// named after a sweeper that could not delete: their policies key on a value
+// the caller declares, a sweeper declares none, and the statement matched
+// nothing and reported success forever. A statement that matches nothing does
+// not raise, so the only way to know is to put a row in and look for it
+// afterwards, through the pool the process really uses, on a role that really
+// is subject to the policy. Hence the BYPASSRLS assertion below: without it
+// this suite would still pass against a role that had been quietly exempted,
+// and it would be proving the opposite of what it says.
+//
+// The second is that it is housekeeping and not enforcement, which is the
+// claim that decides whether a sweep racing a callback can end somebody's
+// sign-in. That is a table of orderings rather than one case.
+describe('the sweeper for handshakes nobody came back from', {
+  skip: hasDatabase ? false : 'no Postgres',
+}, () => {
+  let h: ApiHarness
+  let org: Org
+
+  before(async () => {
+    h = await startApi()
+    org = await seedOrg(h.admin, 'oauthsweep')
+    await h.admin`
+      INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+      VALUES (${org.orgId}, ${Math.floor(Math.random() * 1e12)}, ${org.slug}, 'Organization')`
+  })
+
+  after(async () => {
+    await dropOrg(h.admin, org.orgId)
+    await h.close()
+  })
+
+  /** A state row of a chosen age, written past the application entirely. */
+  async function plant(expiresAt: Date): Promise<string> {
+    const state = `swept-${randomUUID()}`
+    await h.admin`
+      INSERT INTO oauth_states (state, redirect_to, created_at, expires_at)
+      VALUES (${state}, NULL, ${h.clock.now().toISOString()}, ${expiresAt.toISOString()})`
+    return state
+  }
+
+  async function present(state: string): Promise<number> {
+    const [row] = await h.admin<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM oauth_states WHERE state = ${state}`
+    return row!.n
+  }
+
+  it('deletes through row level security rather than around it', async () => {
+    // The assertion that makes every other one in this file mean what it says.
+    // The application pool connects as antifailure_app; oauth_states has row
+    // level security enabled and forced since 0002. If that role could bypass
+    // it, a green sweep would prove nothing about the policy, which is exactly
+    // the mistake 0016 and 0024 were written to undo from the other direction.
+    const [role] = await h.admin<{ bypass: boolean; superuser: boolean }[]>`
+      SELECT rolbypassrls AS bypass, rolsuper AS superuser
+      FROM pg_roles WHERE rolname = 'antifailure_app'`
+    assert.equal(role!.bypass, false, 'antifailure_app can bypass row level security, so the sweep below proves nothing')
+    assert.equal(role!.superuser, false, 'antifailure_app is a superuser, so the sweep below proves nothing')
+
+    const [table] = await h.admin<{ enabled: boolean; forced: boolean }[]>`
+      SELECT relrowsecurity AS enabled, relforcerowsecurity AS forced
+      FROM pg_class WHERE relname = 'oauth_states'`
+    assert.equal(table!.enabled, true, 'oauth_states has row level security switched off')
+    assert.equal(table!.forced, true, 'oauth_states does not force row level security on its owner')
+
+    // And now the delete itself, on that role, through that policy.
+    const state = await plant(new Date(h.clock.now().getTime() - 48 * 60 * 60 * 1000))
+    const removed = await sweepOAuthStates(h.pool, h.clock)
+    assert.ok(removed >= 1, `the sweep reported ${removed} rows, so the DELETE matched nothing`)
+    assert.equal(await present(state), 0, 'a dead handshake survived a sweep on the application role')
+  })
+
+  it('leaves a handshake that is dead but inside the margin', async () => {
+    // The row is unusable ten minutes after it is written, so this one is
+    // already refused by completeSignIn. What it isolates is the CUTOFF: a
+    // sweep written against now() rather than the margin would take this row,
+    // and a suite that only ever planted 48 hour old rows could not tell.
+    const state = await plant(new Date(h.clock.now().getTime() - 60 * 60 * 1000))
+    await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(
+      await present(state),
+      1,
+      'the sweep ignored OAUTH_STATE_SWEEP_MARGIN_MS and took a row younger than the margin',
+    )
+  })
+
+  it('leaves a handshake that is still in flight, and the person still signs in', async () => {
+    // SWEEP THEN CALLBACK, on a live row. Asserted through the callback rather
+    // than through a row count, because the property is that the sweep cannot
+    // end a sign-in somebody is in the middle of.
+    const login = `inflight-${randomUUID().slice(0, 6)}`
+    h.github.addUser({
+      id: Math.floor(Math.random() * 1e9), login,
+      email: `${login}@example.test`, name: login,
+    })
+    h.github.addOrganization(login, { id: 1, login: org.slug })
+    const start = await h.fetch('/auth/github')
+    const state = new URL(start.headers.get('location')!).searchParams.get('state')!
+    const code = h.github.approve(login)
+
+    await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(await present(state), 1, 'the sweep took a handshake that had not expired')
+
+    const res = await h.fetch(`/auth/github/callback?code=${code}&state=${state}`)
+    assert.equal(res.status, 302, 'the sweep ended a sign-in that was in flight')
+  })
+
+  it('has nothing to do after a callback has redeemed the state', async () => {
+    // CALLBACK THEN SWEEP. The redemption is the delete, so this ordering
+    // exists to prove the sweep is not what keeps the table honest and that
+    // running it over an already-redeemed handshake changes nothing.
+    const login = `redeemed-${randomUUID().slice(0, 6)}`
+    h.github.addUser({
+      id: Math.floor(Math.random() * 1e9), login,
+      email: `${login}@example.test`, name: login,
+    })
+    h.github.addOrganization(login, { id: 1, login: org.slug })
+    const start = await h.fetch('/auth/github')
+    const state = new URL(start.headers.get('location')!).searchParams.get('state')!
+    const code = h.github.approve(login)
+    const res = await h.fetch(`/auth/github/callback?code=${code}&state=${state}`)
+    assert.equal(res.status, 302)
+    assert.equal(await present(state), 0, 'redemption did not delete the state')
+
+    await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(await present(state), 0, 'a redeemed state came back')
+    // And the session that callback issued is untouched by the sweep.
+    const cookie = res.headers.get('set-cookie')!.split(';')[0]!
+    const session = await h.fetch('/auth/session', { headers: { cookie } })
+    const body = (await session.json()) as { signedIn: boolean }
+    assert.equal(body.signedIn, true, 'the sweep signed out somebody who had just signed in')
+  })
+
+  it('is housekeeping, so a swept handshake was already being refused', async () => {
+    // The claim main.ts makes about all four sweeps: expiry is enforced on the
+    // read, so a sweeper that is late costs table size and nothing else. Both
+    // orderings on a dead handshake, in the only sequence that holds them.
+    const state = await plant(new Date(h.clock.now().getTime() - 48 * 60 * 60 * 1000))
+
+    // REFUSED WHILE THE ROW IS STILL THERE, which has nothing to do with the
+    // sweeper.
+    await assert.rejects(
+      completeSignIn(h.pool, h.clock, h.github, { code: 'irrelevant', state }),
+      (err: unknown) => err instanceof SignInError && err.refusal === 'link-expired',
+      'an expired handshake was accepted while its row was still in the table',
+    )
+    // completeSignIn deletes on redemption, so it has already taken that row.
+    assert.equal(await present(state), 0, 'the refusal left the row behind')
+
+    // SWEPT, THEN THE SAME QUESTION ASKED AGAIN. The row goes and the answer
+    // does not move.
+    const second = await plant(new Date(h.clock.now().getTime() - 48 * 60 * 60 * 1000))
+    await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(await present(second), 0, 'the sweep left a dead handshake behind')
+    await assert.rejects(
+      completeSignIn(h.pool, h.clock, h.github, { code: 'irrelevant', state: second }),
+      (err: unknown) => err instanceof SignInError && err.refusal === 'link-expired',
+      'the answer changed once the row was removed',
+    )
+  })
+
+  it('reports zero rather than failing when there is nothing to sweep', async () => {
+    // A with no B. The housekeeping interval calls this every five minutes on
+    // an installation nobody signs in to, and an exception there is a line in
+    // the log every five minutes for the life of the process.
+    await sweepOAuthStates(h.pool, h.clock)
+    const removed = await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(removed, 0, `a second sweep with nothing left to take reported ${removed}`)
+  })
+
+  it('keeps the margin at a day, so shortening it is a decision somebody made', () => {
+    // Written out again rather than compared to itself. The first version of
+    // the test below computed its own fixture FROM this constant, so halving
+    // the margin moved the rows and the assertion at the same time and the
+    // mutation stayed green: the test could not see a change to the only
+    // number it was about. An independent copy is the point.
+    assert.equal(
+      OAUTH_STATE_SWEEP_MARGIN_MS,
+      24 * 60 * 60 * 1000,
+      'the margin moved. It is not an expiry, so nothing breaks when it changes, but it is ' +
+        'the whole of what separates a dead handshake from one in flight when two clocks ' +
+        'disagree, and it should move on purpose.',
+    )
+  })
+
+  it('measures the margin from the clock it is given', async () => {
+    // The cutoff is the one value a caller controls. Unlike sweepSessions this
+    // has no second clock in a policy to catch a wrong one, so what is checked
+    // is that a day of margin is applied at all: a row a second older than the
+    // day goes and one a second younger stays.
+    //
+    // The day is a literal here for the reason given above. Deriving the
+    // fixture from the constant under test makes the two move together, which
+    // is a test that agrees with any value.
+    const edge = h.clock.now().getTime() - 24 * 60 * 60 * 1000
+    const older = await plant(new Date(edge - 1000))
+    const younger = await plant(new Date(edge + 1000))
+    await sweepOAuthStates(h.pool, h.clock)
+    assert.equal(await present(older), 0, 'a row past the margin survived the sweep')
+    assert.equal(await present(younger), 1, 'a row inside the margin was taken by the sweep')
   })
 })

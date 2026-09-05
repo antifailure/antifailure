@@ -1,0 +1,18 @@
+# Hostnames the Static Web App af-site really serves and whose origins are
+# deliberately NOT allowed to call the control plane, with the reason each one
+# is allowed to stay that way.
+#
+# Two tab separated fields: the hostname, and why its origin must not be in
+# site_origin. A reason is required, because an exemption with no argument
+# behind it cannot be told apart from somebody silencing a finding they did not
+# understand. A row that has stopped being needed is reported, so this list
+# cannot rot into a permanent allowance: origincheck fails when a hostname here
+# is no longer bound.
+#
+# THE REASON HAS TO BE TRUE. "It is not a hostname a visitor arrives on" is a
+# claim about the world, and the way to be wrong about it is to write it for a
+# hostname somebody has published a link to. The apex and www are both hostnames
+# visitors arrive on, which is why neither of them is here and why both are in
+# tools/site/hostnames.txt instead.
+
+agreeable-hill-09b250510.7.azurestaticapps.net	The platform's own default hostname, assigned by Azure rather than chosen, never published, and not in any DNS record this project owns. It is reachable and it does serve the site, so a page loaded from it has its beacon and both forms refused, and that is the accepted cost: allowing it would widen the unauthenticated write routes to a name Azure controls and would change if the app were ever recreated. Nothing links to it.

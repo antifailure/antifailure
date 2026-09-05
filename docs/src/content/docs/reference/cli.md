@@ -108,6 +108,9 @@ migrations are rehearsed against a throwaway branch of the golden, and what the
 environment reached for is summarised. Every finding is ranked by the manifest's
 policy block, which decides what fails the check and what is only reported.
 
+Load runs when the manifest enables it. A missing traffic source produces a
+read-only smoke from the literal safe routes, not a production benchmark.
+
 Teardown happens whatever the outcome, including a failure and including an
 interrupt, because an environment that outlives its pull request is the leak
 this product exists to prevent. It happens before the report is written, so a
@@ -135,7 +138,7 @@ af ci --report report.md --report-json report.json --keep
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 | `--docs` | - | Where documentation links point. |
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
-| `--load` | `false` | Generate load as well as running the workflows. |
+| `--load` | `false` | Generate load even when the manifest's load block is off. |
 | `--report` | - | Write the report here as well as to the terminal. |
 | `--report-json` | - | Write the same report here as JSON, for a program to read. |
 | `--runner` | - | Path to the runner's entry point. |
@@ -1185,6 +1188,11 @@ than followed.
 Standard output carries the protocol and nothing else. Progress, warnings and
 errors go to standard error, where the client's log will show them.
 
+Client setup differs by host. https://antifailure.dev/docs/reference/mcp has
+the current command or configuration for each supported local client. This
+release provides no hosted MCP URL. A browser client requires a separately
+operated and authenticated Streamable HTTP bridge.
+
 ```
 af mcp
 ```
@@ -1194,7 +1202,8 @@ af mcp
 # standard input and output, so running it in a terminal looks idle.
 af mcp
 # It serves exactly the checkout it starts in, so the client is
-# configured to run it there.
+# configured to run it there. A client without a working directory
+# setting passes -C with the absolute checkout in its configuration.
 af mcp
 ```
 
@@ -1660,6 +1669,13 @@ Say whether the runner can run.
 Reports each thing af test needs from the runner separately: the source, the
 dependencies it declares, a node new enough to run it, and the browser.
 
+It reports on the runner af test would actually use from here, which is the
+nearest one that can run rather than the nearest one that exists. Any runner it
+went past is named, with what is wrong with it, because a report about a
+directory the reader did not mean is how this command came to say a runner was
+ready while the run took a different copy and died on a module it could not
+resolve.
+
 It does not claim the runner executes. Knowing that means starting node and
 launching a browser, which is what af test is. Anything this cannot determine
 is reported as not checked rather than as ok, because a check that answers ok
@@ -1667,6 +1683,14 @@ about something it never examined is worse than one that admits the gap: this
 command used to report "ok runner" whenever src/main.ts existed, which was true
 of an install with no dependencies at all, and the real failure surfaced much
 later inside af test as a node error about a module it could not resolve.
+
+The verdict has three values and not two, for the same reason. Ready means
+every question that decides whether af test can run was asked and answered ok,
+and exits 0. Blocked means one of them was answered no, and exits 3. Undetermined
+means one of them could not be answered at all, which is neither, and exits 9,
+the code reference/errors.md publishes as "nothing was measured".
+A runner whose package.json cannot be parsed used to land in the first of those
+and report itself complete.
 
 ```
 af runner check
@@ -2021,6 +2045,27 @@ af up --rebuild --hud
 | `--branch` | - | Branch to create the environment for, defaulting to the checked out one. |
 | `--hud` | `false` | Watch the run on a live dashboard, or a line per event where there is no terminal. |
 | `--rebuild` | `false` | Build every image again, even when an identical one exists. |
+
+### `af update`
+
+Install the latest verified CLI release in place.
+
+Downloads the latest stable community release for this platform, verifies the published SHA256 checksum, and replaces this binary and its bundled runner source. It leaves shell profiles and project files alone. Package-managed installations must be upgraded through their package manager; enterprise binaries must use their enterprise distribution. The check option reads the latest release without changing files. For a legacy installer with a separate binary directory, the prefix option names its original installation prefix.
+
+```
+af update [flags]
+```
+
+```
+af update
+# Check the latest release without replacing any file.
+af update --check -o json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--check` | `false` | Show the latest release without changing files. |
+| `--prefix` | - | Installer prefix for a legacy custom binary directory. |
 
 ### `af version`
 

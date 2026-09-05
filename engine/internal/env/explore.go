@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +52,7 @@ type goalDoc struct {
 // about. The workflow half of the same document is decoded into TestReport by
 // Test, which is why the counts and the results are not repeated here.
 type resultDocument struct {
-	Explorations []explore.Exploration `json:"explorations"`
+	Explorations []json.RawMessage `json:"explorations"`
 }
 
 // Explore sends agents at the manifest's goals with no declared workflow.
@@ -103,12 +104,42 @@ func (o *Orchestrator) Explore(ctx context.Context, opts ExploreOptions) (*explo
 	if err != nil {
 		return nil, err
 	}
+	return decodeExplorationReport(out)
+}
+
+// Decode one result at a time so a malformed neighbor cannot erase evidence
+// from goals that the browser really exercised.
+func decodeExplorationReport(out []byte) (*explore.Report, error) {
 	var doc resultDocument
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return nil, aferrors.Wrap(err, aferrors.AFAGT003,
 			"detail", "the runner's output could not be read: "+err.Error())
 	}
-	return &explore.Report{Explorations: doc.Explorations}, nil
+	result := &explore.Report{}
+	for i, raw := range doc.Explorations {
+		var x explore.Exploration
+		err := json.Unmarshal(raw, &x)
+		unknown := x.Outcome.Verdict != "pass" && x.Outcome.Verdict != "blocked"
+		if err != nil || x.Name == "" || unknown {
+			name := x.Name
+			named := name != ""
+			if name == "" {
+				name = fmt.Sprintf("unreadable-result-%d", i+1)
+			}
+			x = explore.Exploration{Name: name}
+			x.Outcome.Verdict = "blocked"
+			x.Outcome.Cause = "runner-failure"
+			x.Outcome.Detail = "The runner returned an exploration with no readable name."
+			if unknown && named {
+				x.Outcome.Detail = "The runner returned an unsupported exploration verdict."
+			}
+			if err != nil {
+				x.Outcome.Detail = "The runner returned an unreadable exploration: " + err.Error()
+			}
+		}
+		result.Explorations = append(result.Explorations, x)
+	}
+	return result, nil
 }
 
 // Goals is what the manifest declares, for a caller that has to map a result

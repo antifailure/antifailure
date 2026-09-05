@@ -171,6 +171,69 @@ export async function beginSignIn(
 }
 
 /**
+ * How long a dead handshake is left in the table before the sweep takes it.
+ *
+ * The row is unusable ten minutes after it is written, so this is not an
+ * expiry and nothing turns on getting it right. It is a margin, and what it
+ * buys is that the sweep cannot race a callback that is still in flight even
+ * if this process and the database disagree about the time by hours.
+ * sweepDeviceAuthorizations takes the same day for the same reason.
+ */
+export const OAUTH_STATE_SWEEP_MARGIN_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Removes handshakes nobody came back from, and returns how many.
+ *
+ * completeSignIn deletes a state ON REDEMPTION, in the statement that reads
+ * it, and until this existed that was the only DELETE this table ever saw.
+ * Nothing swept it. So every person who pressed "Continue with GitHub" and
+ * closed the tab left a row behind for good, and so did the site deploy gate,
+ * which probes GET /auth/github on every publish under -allow-write-probes.
+ * The volume is trivial and was never the objection: the objection is a
+ * security relevant table on an unauthenticated path with no upper bound.
+ *
+ * Housekeeping rather than enforcement, and the distinction is load bearing
+ * rather than decorative. completeSignIn compares expires_at against its own
+ * clock after it has taken the row, so a state this sweep has not reached yet
+ * is already refused, and a sweep that is late costs table size and nothing
+ * else. Nothing here can end a sign-in that is still in flight.
+ *
+ * IT NEEDS NO POLICY OF ITS OWN, WHICH IS NOT WHAT THE TWO SWEEPERS BEFORE IT
+ * FOUND, and the difference is worth saying out loud because assuming it would
+ * have been the whole bug. 0016 and 0024 are both named after a sweeper that
+ * could not delete: every policy on device_authorizations and on sessions keys
+ * on a value the caller declares, so a sweeper declaring none matched no row
+ * and reported success over zero rows for the life of the process. The policy
+ * on THIS table is handshakes_are_public, `FOR ALL TO antifailure_app USING
+ * (true)`, written that way in 0002 because a handshake has no tenant and no
+ * user to key on and the state value is the only thing worth holding. A
+ * DELETE from the application role therefore reaches every expired row
+ * already. Adding a role or a policy here would widen the schema to buy
+ * something it already has.
+ *
+ * That is a claim about row level security, so it is measured rather than
+ * asserted: the test runs this through the ordinary application pool, which
+ * connects as antifailure_app, and first proves that role has neither
+ * BYPASSRLS nor superuser, so a delete that removes the row is a delete that
+ * went THROUGH the policy rather than around it.
+ *
+ * The count comes from RETURNING a constant. Returning the state values would
+ * pull a table's worth of live 256-bit secrets into this process to count
+ * them, which is a thing to avoid for the same reason sweepSessions does not
+ * return an id.
+ */
+export async function sweepOAuthStates(pool: Pool, clock: Clock): Promise<number> {
+  const cutoff = new Date(clock.now().getTime() - OAUTH_STATE_SWEEP_MARGIN_MS)
+  return pool.withoutTenant(async (db) => {
+    const rows = await db.execute<{ n: string }>(sql`
+      WITH gone AS (
+        DELETE FROM oauth_states WHERE expires_at < ${cutoff.toISOString()} RETURNING 1
+      ) SELECT count(*) AS n FROM gone`)
+    return Number(rows[0]?.n ?? 0)
+  })
+}
+
+/**
  * Only a path on this application is accepted as a return target.
  *
  * An absolute URL here is an open redirect, and an open redirect on the

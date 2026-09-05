@@ -161,10 +161,10 @@ func (w *sweeper) Destroy(ctx context.Context, envID string) (int, error) {
 	}
 	defer func() { _ = l.Release() }()
 
-	w.o.event(w.s, events.EnvDestroying, "removing "+envID+", which has expired")
+	w.o.eventFor(w.s, envID, events.EnvDestroying, "removing "+envID+", which has expired")
 	td := w.o.teardown(ctx, w.s, envID)
 	w.result.Teardowns[envID] = td
-	w.o.event(w.s, events.EnvDestroyed, "removed "+envID,
+	w.o.eventFor(w.s, envID, events.EnvDestroyed, "removed "+envID,
 		events.F("removed", td.Removed), events.F("pending", len(td.Pending)),
 		events.F("reason", "expired"))
 

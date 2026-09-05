@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 )
 
 // af runner check reported "ok runner" on a tree with no node_modules.
@@ -65,13 +67,18 @@ func TestATreeInstalledWithNoLockfileIsNotReportedAsPinned(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "package-lock.json")); err != nil {
 		t.Fatal(err)
 	}
-	deps := find(t, checkRunner(t.Context(), dir), "dependencies")
+	results := checkRunner(t.Context(), dir)
+	deps := find(t, results, "dependencies")
 
 	if deps.symbol != SymbolWarn {
 		t.Errorf("dependencies reported %q on an unpinned tree, want warn", deps.symbol)
 	}
-	if deps.blocker {
-		t.Error("an unpinned tree is treated as a blocker, but the runner does run")
+	// Asserted on the verdict rather than on a field, because the verdict is
+	// what a caller acts on and it used to be derived from the field in a way
+	// that lost a case. The runner DOES run on an unpinned tree; it just runs
+	// versions nobody chose.
+	if v := runnerVerdict(results); v != VerdictReady {
+		t.Errorf("an unpinned tree gave the verdict %q, want ready: the runner does run", v)
 	}
 	if !strings.Contains(deps.detail, "package-lock.json") {
 		t.Errorf("detail %q does not name what is missing", deps.detail)
@@ -114,8 +121,8 @@ func TestTheTreeInstallShLeftBehindDoesNotPass(t *testing.T) {
 	if deps.symbol != SymbolFail {
 		t.Errorf("dependencies reported %q on a tree with no node_modules, want fail", deps.symbol)
 	}
-	if !deps.blocker {
-		t.Error("missing dependencies is not treated as a blocker, so the command exits 0")
+	if v := runnerVerdict(results); v != VerdictBlocked {
+		t.Errorf("a tree with no node_modules gave the verdict %q, want blocked, so the command exits 0", v)
 	}
 	if !strings.Contains(deps.detail, "node_modules") {
 		t.Errorf("detail %q does not say what is missing", deps.detail)
@@ -138,7 +145,7 @@ func TestAnEmptyNodeModulesDoesNotPass(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got := dependencyCheck(dir, runnerManifest{Dependencies: map[string]string{"playwright": "^1.49.0"}})
+	got := dependencyCheck(runnerpath.Inspect(dir))
 	if got.symbol != SymbolFail {
 		t.Errorf("reported %q for an empty node_modules, want fail", got.symbol)
 	}
@@ -170,36 +177,56 @@ func TestNoRunnerAtAllIsOneClearFailure(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("want one finding when there is no runner, got %d: %v", len(results), results)
 	}
-	if results[0].symbol != SymbolFail || !results[0].blocker {
-		t.Errorf("no runner reported %q, blocker=%v", results[0].symbol, results[0].blocker)
+	if results[0].symbol != SymbolFail || !results[0].decides {
+		t.Errorf("no runner reported %q, decides=%v", results[0].symbol, results[0].decides)
+	}
+	if v := runnerVerdict(results); v != VerdictBlocked {
+		t.Errorf("no runner at all gave the verdict %q, want blocked", v)
 	}
 }
 
 // A package.json that cannot be read is a question this did not answer, and
 // answering ok anyway is the defect being fixed rather than a smaller version.
+//
+// THE ASSERTION THIS TEST WAS MISSING, and it is why `complete: true` came
+// back about a tree nobody could inspect. It said an unanswered question must
+// not be reported as a proven failure, which is right and is kept below. It
+// said nothing about what the whole command then concluded, and the verdict
+// was computed as "nothing proved a blockage, therefore ready". The test was
+// asserting the right thing about the finding and had no opinion about the
+// answer, so the answer was free to be wrong.
 func TestAnUnreadableManifestIsReportedAsUnchecked(t *testing.T) {
 	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
 	dir := brokenTree(t)
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deps := find(t, checkRunner(t.Context(), dir), "dependencies")
+	results := checkRunner(t.Context(), dir)
+	deps := find(t, results, "dependencies")
 	if deps.symbol != SymbolSkip {
 		t.Errorf("reported %q for an unparseable package.json, want skip", deps.symbol)
 	}
-	if deps.blocker {
-		t.Error("an unanswered question must not be a blocker; it is not a known failure")
+	if deps.symbol == SymbolFail {
+		t.Error("an unanswered question was reported as a proven failure; it is not one")
+	}
+	if deps.remedy != "" {
+		t.Errorf("an unanswered question carries the remedy %q, which claims to fix something nobody diagnosed", deps.remedy)
 	}
 	if !strings.Contains(deps.detail, "not checked") {
 		t.Errorf("detail %q does not say the question went unanswered", deps.detail)
+	}
+	if v := runnerVerdict(results); v != VerdictUndetermined {
+		t.Errorf("a runner whose manifest could not be read gave the verdict %q, want undetermined", v)
+	}
+	if got := unanswered(results); len(got) == 0 {
+		t.Error("the verdict is undetermined and nothing names the question that went unanswered")
 	}
 }
 
 // The old line printed the version it found and called it ok, so a node too
 // old to run the runner passed a check named after readiness.
 func TestNodeIsComparedAgainstWhatTheRunnerDeclares(t *testing.T) {
-	m := runnerManifest{}
-	m.Engines.Node = ">=22.6"
+	m := runnerpath.State{Node: ">=22.6"}
 
 	cases := []struct {
 		found  string
@@ -229,8 +256,7 @@ func TestNodeIsComparedAgainstWhatTheRunnerDeclares(t *testing.T) {
 // A range this cannot read is reported as unread. Treating it as satisfied
 // would put the check back where it started.
 func TestAnUnreadableNodeRangeIsNotTreatedAsSatisfied(t *testing.T) {
-	m := runnerManifest{}
-	m.Engines.Node = "^22 || ^24"
+	m := runnerpath.State{Node: "^22 || ^24"}
 	got := nodeCheck("v24.2.0", m)
 	if got.symbol != SymbolSkip {
 		t.Errorf("reported %q for a range it cannot parse, want skip", got.symbol)
@@ -274,8 +300,8 @@ func TestAMissingBrowserWarnsWithoutBlocking(t *testing.T) {
 	if got.symbol != SymbolWarn {
 		t.Errorf("reported %q for a missing browser, want warn", got.symbol)
 	}
-	if got.blocker {
-		t.Error("a missing browser blocks the run, which is stricter than af test is")
+	if got.decides {
+		t.Error("the browser is treated as deciding whether af test can run, which is stricter than af test is")
 	}
 	if !strings.Contains(got.remedy, "af runner install") {
 		t.Errorf("remedy %q does not say what to do", got.remedy)
@@ -307,8 +333,7 @@ func TestEveryFailureCarriesARemedyThatFitsIt(t *testing.T) {
 			t.Errorf("%s reported %q with no remedy", r.label, r.symbol)
 		}
 	}
-	m := runnerManifest{}
-	m.Engines.Node = ">=22.6"
+	m := runnerpath.State{Node: ">=22.6"}
 	if got := nodeCheck("", m).remedy; !strings.Contains(got, "nodejs.org") {
 		t.Errorf("a missing node advises %q, which does not say where to get node", got)
 	}
@@ -326,7 +351,15 @@ func TestTheRemedyIsNotPrintedTwiceOnAMachineWithNoRunner(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	var buf bytes.Buffer
-	e := &Env{Out: NewOutput(&buf, &buf), Getenv: func(string) string { return "" }}
+	// WorkDir matters now: the command reports on the runner a run started
+	// HERE would use, so a test that means "a machine with no runner" has to
+	// stand somewhere with no runner rather than in this checkout, which has
+	// one.
+	e := &Env{
+		Out:     NewOutput(&buf, &buf),
+		WorkDir: t.TempDir(),
+		Getenv:  func(string) string { return "" },
+	}
 	cmd := newRunnerCheckCommand(e)
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("af runner check exited 0 against a home with no runner in it")

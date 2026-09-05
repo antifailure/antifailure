@@ -65,9 +65,12 @@ below that take no session either.
 | `POST /v1/pr/callback-token` | a GitHub Actions workflow identity token | Exchanges a job's own identity for a credential scoped to one commit. |
 | `POST /v1/pr/report` | that credential | What a job says about the commit it checked. |
 | `POST /webhooks/github`, `POST /webhooks/stripe` | an HMAC over the raw body | Deliveries. Verified before the body is parsed, and each one handled once. |
-| `/auth/*` | varies | GitHub sign in for a browser, and the device flow `af login` uses. |
+| `/auth/*` | varies | GitHub sign in for a browser, the device flow `af login` uses, and the browser consent an MCP client is sent through. |
+| `POST /mcp` | an MCP access token issued by that consent | The hosted Model Context Protocol endpoint. Stateless JSON only, so `GET /mcp` and `DELETE /mcp` answer `405` with an `Allow: POST` header rather than opening an event stream this endpoint would have no session for. See [MCP](/docs/reference/mcp). |
+| `GET /.well-known/oauth-protected-resource` | none | Which resource `/mcp` is and which authorization server issues tokens for it, read by an MCP client before it authorizes. The resource is the configured public origin rather than the request's `Host`, so a token cannot be minted for an audience somebody else named. |
+| `GET /.well-known/oauth-authorization-server` | none | The authorization, token and registration endpoints, `authorization_code` as the one grant, and `S256` as the one challenge method. |
 | `GET /exports/deletion` | the token in the link, and nothing else | Downloads the export of an organization that has been deleted. |
-| `POST /v1/leads` | none | The enterprise contact form on the marketing site. The only route here that answers a cross-origin browser, allowed for one exact origin from `AF_SITE_ORIGIN` and carrying no credentials. Writes a row the serving role can insert into and cannot read back; an operator reads the queue with `af-control-plane-backup leads`. |
+| `POST /v1/leads` | none | The enterprise contact form on the marketing site. One of the routes here that answers a cross-origin browser, allowed for the exact origins named in `AF_SITE_ORIGIN` and carrying no credentials. Writes a row the serving role can insert into and cannot read back; an operator reads the queue with `af-control-plane-backup leads`. |
 | `POST /webhooks/github` | HMAC signature | Deliveries from the GitHub App. No session and no token: the body's signature is the credential, and an unsigned delivery is refused. |
 | `POST /webhooks/stripe` | HMAC signature | Billing deliveries, verified the same way. |
 | `POST /byok/anthropic/v1/messages` | engine or CLI token, in that provider's own header | The budgeted model proxy. See [Model keys](/docs/guides/model-keys). |

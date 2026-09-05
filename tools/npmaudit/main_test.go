@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,17 +82,52 @@ func TestACleanReportIsNoFindings(t *testing.T) {
 }
 
 // npm exits non-zero both when it finds advisories and when it cannot run, so
-// the two have to be told apart by whether a report came back. ENOLOCK is the
-// one this repository will actually meet: runner/ has dependencies and no
-// lockfile.
+// the two have to be told apart by whether a report came back. ENOLOCK is a
+// stable refusal shape that exercises the older nested fields.
 func TestNpmRefusingIsAnErrorAndNotAnEmptyReport(t *testing.T) {
 	const enolock = `{"error":{"code":"ENOLOCK","summary":"This command requires an existing lockfile.","detail":"Try creating one first"}}`
 	_, err := parse([]byte(enolock), "runner", nil, "")
 	if err == nil {
 		t.Fatal("npm refusing to run was read as a clean tree")
 	}
-	if !strings.Contains(err.Error(), "ENOLOCK") || !strings.Contains(err.Error(), "runner") {
-		t.Fatalf("the error should name the project and npm's code: %v", err)
+	message := err.Error()
+	for name, want := range map[string]string{
+		"project": "runner",
+		"code":    "ENOLOCK",
+		"summary": "This command requires an existing lockfile.",
+		"detail":  "Try creating one first",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(message, want) {
+				t.Fatalf("error does not contain %q:\n%s", want, message)
+			}
+		})
+	}
+}
+
+// npm 11 emits audit endpoint failures in this shape, observed against a
+// deliberately unreachable registry: the useful message is at the root, code
+// is absent, and the other nested fields are empty. Every channel is asserted
+// in its own subtest so removing any one production line turns a named
+// assertion red rather than stopping before the later checks run.
+func TestNpmElevenRefusalKeepsEveryDiagnosticChannel(t *testing.T) {
+	const body = `{"message":"request to http://127.0.0.1:1/-/npm/v1/security/advisories/bulk failed, reason: connect ECONNREFUSED 127.0.0.1:1","error":{"summary":"","detail":""}}`
+	_, err := parse([]byte(body), "api", errors.New("exit status 1"), "registry closed the connection")
+	if err == nil {
+		t.Fatal("npm's refusal was accepted")
+	}
+	message := err.Error()
+	for name, want := range map[string]string{
+		"empty nested fields": "npm supplied no error code, summary, or detail",
+		"root message":        "connect ECONNREFUSED 127.0.0.1:1",
+		"process error":       "process error: exit status 1",
+		"stderr":              "stderr: registry closed the connection",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(message, want) {
+				t.Fatalf("error does not contain %q:\n%s", want, message)
+			}
+		})
 	}
 }
 
@@ -167,6 +203,18 @@ func TestAProjectWithNoLockfileIsNamedRatherThanIgnored(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "1 not covered") {
 		t.Fatalf("the summary hid the uncovered project:\n%s", out.String())
+	}
+}
+
+type failedWriter struct{ err error }
+
+func (w failedWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestAReportThatCannotBeWrittenFailsTheGate(t *testing.T) {
+	want := errors.New("report destination closed")
+	err := decideAt(nil, []string{"web"}, nil, &policy{}, failedWriter{want}, time.Now())
+	if !errors.Is(err, want) {
+		t.Fatalf("write failure was lost: %v", err)
 	}
 }
 

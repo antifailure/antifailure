@@ -60,6 +60,10 @@ export interface Page {
   goto(url: string): Promise<void>;
   /** fill types into the field with an accessible name matching the pattern. */
   fill(field: RegExp, value: string): Promise<void>;
+  /** check chooses the checkbox or radio with that accessible name. A
+   *  browser refuses to type into either, so this is not `fill` with a
+   *  different value. */
+  check(field: RegExp): Promise<void>;
   /** has answers whether that field is on the page right now, without
    *  throwing. It is what lets the sign-in path be searched rather than
    *  assumed: a fill against the wrong page costs ten seconds and reports a

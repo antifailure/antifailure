@@ -149,21 +149,38 @@ func walk(root, example string, budget time.Duration) error {
 			// between "pinned by" and "package-lock.json". A check that reads
 			// prose is measuring the wrap.
 			out, err := w.af_(ctx, "runner", "check", "-o", "json")
-			if err != nil {
-				return fmt.Errorf("the runner is not ready after af runner install: %w", err)
-			}
 			var report struct {
-				Complete bool `json:"complete"`
-				Checks   []struct {
+				Path string `json:"path"`
+				// Verdict is ready, blocked or undetermined. Read beside
+				// Complete rather than instead of it: this runs against the
+				// binary built from the checkout, and reading only the newer
+				// field would make this step silently vacuous against one that
+				// predates it.
+				Verdict    string   `json:"verdict"`
+				Complete   bool     `json:"complete"`
+				Unanswered []string `json:"unanswered"`
+				Checks     []struct {
 					Name, Result, Detail string
 				} `json:"checks"`
+			}
+			// The document is read before the exit code is judged, because
+			// the report says WHICH check failed and the exit code says only
+			// that one did. The message a person gets from this step has to
+			// be the one they can act on.
+			if err != nil {
+				return fmt.Errorf("the runner is not ready after af runner install: %w\n%s", err, out)
 			}
 			if jsonErr := json.Unmarshal([]byte(out), &report); jsonErr != nil {
 				return fmt.Errorf("af runner check did not return a document this can read: %w\n%s",
 					jsonErr, out)
 			}
 			if !report.Complete {
-				return fmt.Errorf("af runner check exited 0 and reports the runner incomplete:\n%s", out)
+				// The verdict says which of two very different things this is:
+				// a runner proven unable to run, or one nothing could be
+				// determined about. The second used to arrive here as
+				// complete: true and exit 0.
+				return fmt.Errorf("af runner check exited 0 and reports the runner %s:\n%s",
+					incompleteAs(report.Verdict, report.Unanswered), out)
 			}
 			deps := ""
 			for _, c := range report.Checks {
@@ -182,7 +199,7 @@ func walk(root, example string, budget time.Duration) error {
 					"are whatever npm resolved today rather than what this release was tested "+
 					"with: %s", deps)
 			}
-			return nil
+			return runnerStarts(ctx, report.Path)
 		}},
 		{"af explain", func(ctx context.Context, w *world) error {
 			out, err := w.af_(ctx, "explain")
@@ -322,6 +339,43 @@ func walk(root, example string, budget time.Duration) error {
 	return nil
 }
 
+// runnerStarts loads the runner af runner check named and confirms node can
+// resolve it, which is the one claim that command deliberately does not make.
+//
+// af runner check reads a directory. It reported ready while the run resolved
+// a DIFFERENT directory, so the walkthrough learned about a runner with no
+// dependencies three steps later, from inside af test, as
+//
+//	Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'playwright' imported
+//	  from /home/runner/work/antifailure/antifailure/runner/src/browser.ts
+//
+// which names a package and not the fact that the runner was never installed.
+// Starting the runner here costs a process and puts that failure at the step
+// whose whole job is to answer the question. It exits immediately for want of
+// a job document, so this waits on nothing.
+func runnerStarts(ctx context.Context, dir string) error {
+	if dir == "" {
+		return errors.New("af runner check named no path, so there is nothing to start")
+	}
+	entry := filepath.Join(dir, "src", "main.ts")
+	cmd := exec.CommandContext(ctx, "node", "--experimental-strip-types", entry)
+	cmd.Stdin = strings.NewReader("")
+	out, err := cmd.CombinedOutput()
+	// A non zero exit is expected: with no job document the runner refuses.
+	// What is not expected is node failing to load the program at all, which
+	// is what an uninstalled dependency looks like.
+	if strings.Contains(string(out), "ERR_MODULE_NOT_FOUND") ||
+		strings.Contains(string(out), "Cannot find package") {
+		return fmt.Errorf("af runner check called %s ready and node cannot load it, so "+
+			"af test would die inside the runner rather than reaching a workflow:\n%s",
+			dir, out)
+	}
+	if err != nil && !strings.Contains(string(out), "job document") {
+		return fmt.Errorf("the runner at %s did not start: %w\n%s", dir, err, out)
+	}
+	return nil
+}
+
 // build compiles the binary the walkthrough drives, so it walks this working
 // tree rather than whatever `af` happens to be on the path.
 func build(root string) (string, error) {
@@ -445,4 +499,23 @@ func jsonField(doc, key string) string {
 		return ""
 	}
 	return rest[:k]
+}
+
+// incompleteAs describes a runner check that did not come back ready.
+//
+// A binary older than the verdict field reports neither value, so this says
+// "incomplete" for it rather than inventing a state. Being vague about an old
+// binary is better than being specific and wrong about it.
+func incompleteAs(verdict string, unanswered []string) string {
+	switch verdict {
+	case "undetermined":
+		if len(unanswered) > 0 {
+			return "undetermined: " + strings.Join(unanswered, "; ")
+		}
+		return "undetermined, with nothing named as unanswered"
+	case "blocked":
+		return "blocked"
+	default:
+		return "incomplete"
+	}
 }

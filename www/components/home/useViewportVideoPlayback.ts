@@ -7,7 +7,22 @@ export function useViewportVideoPlayback(videoRef: RefObject<HTMLVideoElement | 
     const video = videoRef.current;
     if (!video) return;
 
-    let pausedByViewport = false;
+    // TRUE, NOT FALSE, AND THIS IS THE WHOLE BUG THE `autoPlay` ATTRIBUTE WAS
+    // HIDING. The flag means "this is stopped and the viewport is allowed to
+    // start it". Starting at false made the first intersection a no-op, so the
+    // observer could only ever RESUME a video that had already played and then
+    // scrolled away. Nothing here could begin playback, and the element's own
+    // `autoPlay` was what made the section look like it worked, at the cost of
+    // downloading the file for every visitor including the ones who never
+    // scroll to it.
+    let pausedByViewport = true;
+
+    // Reduced motion is honoured by never starting it. The poster stays, the
+    // restart button still works, so the film is reachable by anybody who
+    // wants it and is not played at anybody who has asked for less movement.
+    const reducedMotion =
+      typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) return;
 
     const playFromCurrentTime = () => {
       pausedByViewport = false;

@@ -557,6 +557,42 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// is the moment a lapsed certificate is worth knowing about. Run it by
 		// hand with `just check-tls`.
 		"check-tls": true,
+		// The deployed route contract. The same shape as check-tls and out for
+		// the same reason: its answer is not a function of the tree. It asks
+		// the control plane that is running right now whether it serves the
+		// routes the marketing site calls, so the same commit is green today
+		// and red the moment the site publishes ahead of a control plane that
+		// has not been promoted, which is the failure it exists for. It needs
+		// the network, which `just gate` must not, and it runs in deploy.yml
+		// immediately before the publish, which is the moment the answer can
+		// still stop something. What IS a function of the tree is that the
+		// inventory it reads is complete and names routes this repository
+		// serves, and `just routecheck` covers that inside `gate`.
+		"routecheck-deployed": true,
+		// The live half of the origin check. Same reasoning as check-tls, and
+		// the same shape: its answer is not a function of the tree. It asks
+		// Azure which custom domains are bound to the Static Web App and asks a
+		// deployed control plane to answer a real CORS preflight from each one,
+		// so the same commit is green today and red the morning somebody binds
+		// a hostname in the portal. That is the case it exists for. It needs a
+		// signed in Azure CLI and the network, which `just gate` must not, and
+		// it runs in deploy.yml after a publish. The half that IS a function of
+		// the tree, hostnames.txt against the tfvars, is the `origincheck`
+		// recipe and that one is in `gate`.
+		"check-origins": true,
+		// The deployed site smoke. The same shape again, and the same reason:
+		// its answer is not a function of the tree. It opens the careers form
+		// on the hostnames people actually type, fills it in with the
+		// product's own agent, presses the button, and reads what the page
+		// says came back, so the same commit is green today and red the
+		// morning somebody binds a second custom domain the control plane has
+		// never heard of. It needs the network and a browser, neither of which
+		// `just gate` may need, and it runs on a schedule and after a deploy in
+		// sitesmoke.yml, which is where drift arriving with no deploy at all
+		// gets noticed. What IS a function of the tree is that the sentences it
+		// waits for are still the ones this repository renders, and `just
+		// sitesmoke` covers that inside `gate`.
+		"sitesmoke-deployed": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
@@ -576,6 +612,17 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// property it helps with -- every commit carrying a sign-off -- is
 		// already a gate in CI that does not depend on anybody having run it.
 		"hooks": true,
+		// Creates the first privileged operator in a chosen live deployment.
+		// Running account creation as part of a source check would be a write
+		// to production, not verification. Its tests run inside test-web.
+		"operator-init": true,
+		// Merges a pull request. It writes to main, which is the furthest
+		// thing there is from a check on a tree, and the property it exists
+		// for, a squash commit carrying a sign-off, is already a required
+		// context in CI. It is here for the same reason `hooks` is: the
+		// convenience is what makes the gate satisfiable, not a substitute
+		// for it. `go test ./tools/prmerge` is what runs in `gate`.
+		"merge": true,
 	}
 
 	var uncalled []string
@@ -626,6 +673,21 @@ func fail(format string, args ...any) {
 // An exemption naming a gate no workflow runs fails the build. See the loop
 // that fills `stale`.
 var exemptFromGate = map[string]string{
+	"tool prmerge": "" +
+		"Its answer does not come from this repository. tools/prmerge asks the " +
+		"GitHub API whether the field names it reads still exist, against a real " +
+		"pull request, so its answer moves when gh or the API moves and it needs " +
+		"the network, which `just gate` must not. It also needs a pull request to " +
+		"point at, and `just gate` runs on a branch that may not have one. " +
+		"It exists because the tool once asked `gh pr view` for a field called " +
+		"`merged`, which does not exist, with 25 green tests behind it: every one " +
+		"of them answered from a fixture the suite itself had written. What IS a " +
+		"function of the tree is every decision the tool makes, and " +
+		"`go test ./tools/prmerge` covers that inside `gate`, including that the " +
+		"request and the struct ask for the same fields. " +
+		"It runs on every pull request in ci.yml. Run it by hand with " +
+		"`just merge <number> -check-fields`.",
+
 	"tool vulncheck": "" +
 		"Its answer does not come from this repository. tools/vulncheck asks the " +
 		"Go vulnerability database which known advisories are reachable from our " +

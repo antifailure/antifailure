@@ -198,8 +198,9 @@ export async function environmentHoursSince(
         - GREATEST(created_at, ${since.toISOString()}::timestamptz)
       )) / 3600.0
     ), 0) AS hours
-    FROM environments
+    FROM environment_usage
     WHERE org_id = ${orgId}
+      AND created_at < ${now.toISOString()}::timestamptz
       AND COALESCE(torn_down_at, ${now.toISOString()}::timestamptz) > ${since.toISOString()}::timestamptz`)
 
   // COALESCE guarantees a row and a number, but the driver hands back numeric
@@ -253,19 +254,22 @@ export async function costAttribution(
     hours: string | number | null
     runs: string | number | null
   }>(sql`
-    SELECT e.env_id, r.full_name AS repository, e.branch,
-           e.created_at, e.torn_down_at,
+    SELECT u.env_id, COALESCE(r.full_name, 'Removed repository') AS repository,
+           COALESCE(e.branch, 'Removed environment') AS branch,
+           u.created_at, u.torn_down_at,
            EXTRACT(EPOCH FROM (
-             LEAST(COALESCE(e.torn_down_at, ${now.toISOString()}::timestamptz),
+             LEAST(COALESCE(u.torn_down_at, ${now.toISOString()}::timestamptz),
                    ${now.toISOString()}::timestamptz)
-             - GREATEST(e.created_at, ${since.toISOString()}::timestamptz)
+             - GREATEST(u.created_at, ${since.toISOString()}::timestamptz)
            )) / 3600.0 AS hours,
            (SELECT count(*) FROM runs ru WHERE ru.environment_id = e.id) AS runs
-    FROM environments e
-    JOIN repositories r ON r.id = e.repository_id
-    WHERE e.org_id = ${orgId}
-      AND COALESCE(e.torn_down_at, ${now.toISOString()}::timestamptz) > ${since.toISOString()}::timestamptz
-    ORDER BY hours DESC, e.env_id
+    FROM environment_usage u
+    LEFT JOIN environments e ON e.id = u.environment_id
+    LEFT JOIN repositories r ON r.id = e.repository_id
+    WHERE u.org_id = ${orgId}
+      AND u.created_at < ${now.toISOString()}::timestamptz
+      AND COALESCE(u.torn_down_at, ${now.toISOString()}::timestamptz) > ${since.toISOString()}::timestamptz
+    ORDER BY hours DESC, u.env_id
     LIMIT ${limit}`)
 
   return rows.map((row) => ({

@@ -2,7 +2,7 @@
 // holds the result to a policy, the way tools/vulncheck does for Go.
 //
 // THE GAP THIS CLOSES. govulncheck covers the Go modules and nothing covered
-// the JavaScript. Seven lockfiles ship here, one of them the control plane that
+// the JavaScript. Eight lockfiles ship here, one of them the control plane that
 // holds organizations, policy and billing, and every `npm ci` in
 // .github/workflows/ci.yml passes --no-audit. So the half of this repository
 // that is exposed to the internet had no dependency advisory check at all,
@@ -29,11 +29,12 @@
 // skipped. npm audit cannot speak for a tree it cannot resolve, and a check that
 // quietly leaves one project out is the shape of assertion this repository has
 // been caught by before: scoped to a collection that excludes the casualty, it
-// passes forever and discovers nothing. Today that is runner, which is installed
-// with `npm install` rather than `npm ci` and has no lockfile to audit.
+// passes forever and discovers nothing. Runner used to be that project. It has
+// its own lockfile now and is audited with the other seven.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,7 @@ type allowEntry struct {
 type report struct {
 	AuditReportVersion *int                   `json:"auditReportVersion"`
 	Vulnerabilities    map[string]packageVuln `json:"vulnerabilities"`
+	Message            string                 `json:"message"`
 	Error              *npmError              `json:"error"`
 }
 
@@ -162,21 +164,84 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	var findings []*finding
-	for _, project := range locked {
-		found, err := auditProject(filepath.Join(root, project), project)
-		if err != nil {
-			return err
-		}
-		findings = append(findings, found...)
-	}
-
 	pol, err := loadPolicy(filepath.Join(root, policyFile))
+	if err != nil {
+		return err
+	}
+	findings, err := auditProjects(context.Background(), root, locked, out, defaultAuditBudget, auditProject)
 	if err != nil {
 		return err
 	}
 
 	return decide(findings, locked, unlocked, pol, out)
+}
+
+type auditBudget struct {
+	workers int
+	project time.Duration
+	total   time.Duration
+}
+
+// Two waves cover today's eight lockfiles in about ten minutes even if every npm
+// call stalls. The overall limit also covers future lockfiles. Both leave room
+// for setup, compilation and diagnostics inside Security's fifteen minute job.
+var defaultAuditBudget = auditBudget{workers: 4, project: 5 * time.Minute, total: 11 * time.Minute}
+
+type projectAudit func(context.Context, string, string) ([]*finding, error)
+
+// auditProjects writes each result as it arrives, including failures, and waits
+// for every project. An incomplete scan never reaches the policy summary: an
+// unknown result cannot make an acceptance look stale or a lockfile look clean.
+func auditProjects(parent context.Context, root string, projects []string, out io.Writer, budget auditBudget, audit projectAudit) ([]*finding, error) {
+	ctx, cancel := context.WithTimeout(parent, budget.total)
+	defer cancel()
+	if _, err := fmt.Fprintf(out, "Auditing %d lockfiles with %d workers, %s per project, %s overall\n", len(projects), budget.workers, budget.project, budget.total); err != nil {
+		return nil, fmt.Errorf("write audit progress: %w", err)
+	}
+	type result struct {
+		project string
+		elapsed time.Duration
+		found   []*finding
+		err     error
+	}
+	jobs := make(chan string, len(projects))
+	results := make(chan result, len(projects))
+	for _, project := range projects {
+		jobs <- project
+	}
+	close(jobs)
+	for range min(budget.workers, len(projects)) {
+		go func() {
+			for project := range jobs {
+				started := time.Now()
+				if err := ctx.Err(); err != nil {
+					results <- result{project: project, err: fmt.Errorf("not started: overall audit budget ended: %w", err)}
+					continue
+				}
+				projectCtx, stop := context.WithTimeout(ctx, budget.project)
+				found, err := audit(projectCtx, filepath.Join(root, project), project)
+				stop()
+				results <- result{project: project, elapsed: time.Since(started), found: found, err: err}
+			}
+		}()
+	}
+	var findings []*finding
+	var failures []error
+	for range projects {
+		r := <-results
+		status := fmt.Sprintf("AUDITED %s in %s, %d findings", r.project, r.elapsed.Round(time.Millisecond), len(r.found))
+		if r.err != nil {
+			failure := fmt.Errorf("%s after %s: %w", r.project, r.elapsed.Round(time.Millisecond), r.err)
+			failures = append(failures, failure)
+			status = "INCONCLUSIVE " + failure.Error()
+		}
+		if _, err := fmt.Fprintln(out, status); err != nil {
+			failures = append(failures, fmt.Errorf("write audit progress: %w", err))
+			cancel()
+		}
+		findings = append(findings, r.found...)
+	}
+	return findings, errors.Join(failures...)
 }
 
 // discoverProjects returns the directories holding a package-lock.json, and
@@ -300,13 +365,25 @@ func declaresDependencies(path string) (bool, error) {
 //
 // --package-lock-only so that node_modules does not have to be installed: the
 // lockfile is the thing under review, and requiring an install would make this
-// gate cost six installs and depend on which of them had been run.
-func auditProject(dir, project string) ([]*finding, error) {
-	cmd := exec.Command("npm", "audit", "--package-lock-only", "--json")
+// gate cost eight installs and depend on which of them had been run.
+func auditProject(ctx context.Context, dir, project string) ([]*finding, error) {
+	cmd := exec.CommandContext(ctx, "npm", "audit", "--package-lock-only", "--json")
 	cmd.Dir = dir
+	return executeAudit(ctx, cmd, project)
+}
+
+func executeAudit(ctx context.Context, cmd *exec.Cmd, project string) ([]*finding, error) {
+	// A child retaining stdout must not keep Wait alive after npm is killed.
+	cmd.WaitDelay = 2 * time.Second
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, runErr := cmd.Output()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%s: npm audit did not finish: %w\nprocess error: %s\nstderr: %s", project, err, fmt.Sprint(runErr), trim(stderr.String()))
+	}
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return nil, fmt.Errorf("%s: npm audit output did not close: %w\nstderr: %s", project, runErr, trim(stderr.String()))
+	}
 
 	// The exit code is deliberately not consulted. npm audit exits 1 when it
 	// finds an advisory, which is the case this gate exists to handle, and it
@@ -321,7 +398,7 @@ func parse(stdout []byte, project string, runErr error, stderr string) ([]*findi
 		return nil, fmt.Errorf("%s: npm audit printed something that is not a report: %w\n%s", project, err, trim(stderr))
 	}
 	if rep.Error != nil {
-		return nil, fmt.Errorf("%s: npm audit refused: %s %s\n%s", project, rep.Error.Code, rep.Error.Summary, rep.Error.Detail)
+		return nil, npmRefusal(project, &rep, runErr, stderr)
 	}
 	if rep.AuditReportVersion == nil {
 		if runErr != nil {
@@ -358,6 +435,37 @@ func parse(stdout []byte, project string, runErr error, stderr string) ([]*findi
 		}
 	}
 	return findings, nil
+}
+
+// npmRefusal keeps every diagnostic channel npm uses for an audit endpoint
+// failure. npm 11 writes the useful network failure into the root message,
+// then adds an error object whose code, summary and detail are all empty. Older
+// releases put the useful fields inside error. The process error and stderr are
+// independent evidence and must not disappear merely because stdout was JSON.
+func npmRefusal(project string, rep *report, runErr error, stderr string) error {
+	var lines []string
+	nested := []string{trim(rep.Error.Code), trim(rep.Error.Summary), trim(rep.Error.Detail)}
+	var fields []string
+	for _, field := range nested {
+		if field != "" {
+			fields = append(fields, field)
+		}
+	}
+	if len(fields) == 0 {
+		lines = append(lines, "npm supplied no error code, summary, or detail")
+	} else {
+		lines = append(lines, strings.Join(fields, " "))
+	}
+	if message := trim(rep.Message); message != "" {
+		lines = append(lines, "npm message: "+message)
+	}
+	if runErr != nil {
+		lines = append(lines, "process error: "+runErr.Error())
+	}
+	if diagnostic := trim(stderr); diagnostic != "" {
+		lines = append(lines, "stderr: "+diagnostic)
+	}
+	return fmt.Errorf("%s: npm audit refused: %s", project, strings.Join(lines, "\n"))
 }
 
 // identifier is the GHSA id out of the advisory URL, because that is the name a
@@ -467,24 +575,31 @@ func decideAt(findings []*finding, locked, unlocked []string, pol *policy, out i
 	})
 
 	var problems []string
+	var writeErr error
+	report := func(format string, args ...any) {
+		if writeErr != nil {
+			return
+		}
+		_, writeErr = fmt.Fprintf(out, format, args...)
+	}
 
 	for _, k := range uncovered {
 		f := seen[k]
-		fmt.Fprintf(out, "ADVISORY   %s  %s  %s  in %s\n", k.id, k.pkg, f.Severity, strings.Join(sortedSet(projects[k]), ", "))
+		report("ADVISORY   %s  %s  %s  in %s\n", k.id, k.pkg, f.Severity, strings.Join(sortedSet(projects[k]), ", "))
 		if f.Title != "" {
-			fmt.Fprintf(out, "           %s\n", f.Title)
+			report("           %s\n", f.Title)
 		}
-		fmt.Fprintf(out, "           %s\n", f.URL)
+		report("           %s\n", f.URL)
 		problems = append(problems, fmt.Sprintf("%s affects %s and is not accepted in %s", k.id, k.pkg, policyFile))
 	}
 
 	for _, e := range expired {
-		fmt.Fprintf(out, "EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Package, e.Expires)
+		report("EXPIRED    %s  %s  accepted until %s\n", e.ID, e.Package, e.Expires)
 		problems = append(problems, fmt.Sprintf("the decision to accept %s in %s expired on %s and needs rereading", e.ID, e.Package, e.Expires))
 	}
 
 	for _, e := range unused {
-		fmt.Fprintf(out, "STALE      %s  %s  matches nothing\n", e.ID, e.Package)
+		report("STALE      %s  %s  matches nothing\n", e.ID, e.Package)
 		problems = append(problems, fmt.Sprintf("%s in %s is accepted in %s but no lockfile carries it any more, so the entry is claiming to protect against something that is not there", e.ID, e.Package, policyFile))
 	}
 
@@ -492,13 +607,16 @@ func decideAt(findings []*finding, locked, unlocked []string, pol *policy, out i
 	// so a project without one is not covered by this gate and the summary must
 	// not read as though it were.
 	for _, project := range unlocked {
-		fmt.Fprintf(out, "UNCHECKED  %s has dependencies and no package-lock.json, so npm audit cannot speak for it\n", project)
+		report("UNCHECKED  %s has dependencies and no package-lock.json, so npm audit cannot speak for it\n", project)
 	}
 
 	covered := len(seen) - len(uncovered)
-	fmt.Fprintf(out, "\n%d lockfile(s) audited, %d not covered, %d advisories, %d accepted, %d unaccepted, %d expired, %d stale\n",
+	report("\n%d lockfile(s) audited, %d not covered, %d advisories, %d accepted, %d unaccepted, %d expired, %d stale\n",
 		len(locked), len(unlocked), len(seen), covered, len(uncovered), len(expired), len(unused))
 
+	if writeErr != nil {
+		return fmt.Errorf("write the npm audit report: %w", writeErr)
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "\n  "))
 	}

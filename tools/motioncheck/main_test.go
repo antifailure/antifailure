@@ -234,3 +234,86 @@ func TestAnApplicationThatIsNotBuiltFailsAndNamesItself(t *testing.T) {
 		t.Errorf("the report does not name the application that is missing:\n%s", out)
 	}
 }
+
+// A LOOPING VIDEO IS THE SAME BAN, AND UNTIL THESE TESTS EXISTED THIS GATE
+// REPORTED "0 animations that never stop" OVER A PAGE CARRYING TWO OF THEM.
+//
+// Everything above reads CSS, and `<video autoplay loop>` is not CSS. The
+// attribute is spelled `autoPlay` in the source and `autoplay=""` in the
+// render, which is the second reason a source scan would not have found it.
+func TestAVideoThatAutoplaysOnALoopIsAFinding(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/product-walkthrough.mp4" autoplay="" loop="" muted=""></video>`,
+	})
+	code, out := run(root)
+	if code == 0 {
+		t.Fatalf("a video looping forever passed:\n%s", out)
+	}
+	if !strings.Contains(out, "/home/product-walkthrough.mp4") {
+		t.Errorf("the report does not name the file, so an exemption cannot be copied from it:\n%s", out)
+	}
+}
+
+// The rule is about the loop, not about the film. A video that plays once when
+// it is scrolled to and then stops is what the homepage's twin figure already
+// does, and refusing it would make this gate an argument against motion rather
+// than against motion that never ends.
+func TestAVideoThatPlaysOnceIsNotAFinding(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/product-walkthrough.mp4" autoplay="" muted=""></video>`,
+	})
+	if code, out := run(root); code != 0 {
+		t.Fatalf("a video that stops was reported:\n%s", out)
+	}
+}
+
+// A looping video nobody started is a choice the reader makes when they press
+// play, which is the carve out the top of this file describes for a control
+// somebody operates rather than one that operates on them.
+func TestALoopingVideoNobodyStartedIsNotAFinding(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/product-walkthrough.mp4" loop="" controls=""></video>`,
+	})
+	if code, out := run(root); code != 0 {
+		t.Fatalf("a video the reader has to start was reported:\n%s", out)
+	}
+}
+
+// THE SUBSTRING TRAP, WHICH IS HOW THIS RULE WOULD BE WORKED AROUND RATHER
+// THAN OBEYED. `loop` is inside `loop-demo.mp4` and inside `data-looping`, and
+// a naive `strings.Contains` refuses a video that does not loop at all. The
+// first person to meet that false positive removes the check.
+func TestLoopInsideAFilenameIsNotALoopingVideo(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/loop-demo.mp4" data-looping="false" autoplay="" muted=""></video>`,
+	})
+	if code, out := run(root); code != 0 {
+		t.Fatalf("a filename containing the word loop was read as a loop attribute:\n%s", out)
+	}
+}
+
+// Bare attributes, as a hand written page or a non React renderer writes them.
+func TestABareLoopAttributeIsAFinding(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/ambient.mp4" autoplay loop muted></video>`,
+	})
+	if code, out := run(root); code == 0 {
+		t.Fatalf("a bare autoplay loop passed:\n%s", out)
+	}
+}
+
+func TestAVideoExemptionIsKeyedOnTheSource(t *testing.T) {
+	root := site(t, map[string]string{
+		htmlPath: `<video src="/home/earns-it.mp4" autoplay="" loop=""></video>`,
+	})
+	if code, _ := run(root); code == 0 {
+		t.Fatal("expected a finding before the exemption")
+	}
+
+	exempt["/home/earns-it.mp4"] = "a test, restored immediately below"
+	defer delete(exempt, "/home/earns-it.mp4")
+
+	if code, out := run(root); code != 0 {
+		t.Fatalf("the exemption did not silence it:\n%s", out)
+	}
+}

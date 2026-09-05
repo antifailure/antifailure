@@ -264,15 +264,28 @@ func (o *Orchestrator) AddSink(s events.Sink) {
 // tolerating them here is a nil check repeated at every call site plus a panic
 // the first time one is forgotten.
 func (o *Orchestrator) emit(s *session, level events.Level, t events.Type, msg string, f ...events.Field) {
+	o.emitFor(s, o.envID, level, t, msg, f...)
+}
+
+// emitFor names the environment the event is about, which is not always the
+// checkout's own. A sweep removes an environment it is not running inside, and
+// stamping o.envID on that teardown advances the wrong environment's row in
+// the control plane, so the target travels explicitly.
+func (o *Orchestrator) emitFor(s *session, envID string, level events.Level, t events.Type, msg string, f ...events.Field) {
 	if s == nil || s.bus == nil {
 		return
 	}
-	s.bus.Emit(o.envID, t, level, msg, f...)
+	s.bus.Emit(envID, t, level, msg, f...)
 }
 
 // event publishes at info level, which is what almost every lifecycle step is.
 func (o *Orchestrator) event(s *session, t events.Type, msg string, f ...events.Field) {
 	o.emit(s, events.LevelInfo, t, msg, f...)
+}
+
+// eventFor is event for an environment other than the checkout's.
+func (o *Orchestrator) eventFor(s *session, envID string, t events.Type, msg string, f ...events.Field) {
+	o.emitFor(s, envID, events.LevelInfo, t, msg, f...)
 }
 
 // eventErr publishes at error level, which is what puts a line in the

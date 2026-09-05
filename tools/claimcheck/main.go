@@ -815,7 +815,19 @@ var siteClaims = []siteClaim{
 		// screen sends a browser at a control plane's GitHub exchange. If this
 		// product ever stops having one, that link is the first thing to go, and
 		// whoever removes it is told to revisit what the site may say.
-		premise: [2]string{"www/components/AuthScreen.tsx", `CONTROL_PLANE_URL + "/auth/github"`},
+		//
+		// Re-anchored a second time, and for a smaller reason than the first.
+		// The premise was the expression `CONTROL_PLANE_URL + "/auth/github"`
+		// until every control plane URL this site builds became a value in
+		// www/lib/control-plane-routes.ts, so that tools/routecheck can prove
+		// the DEPLOYED control plane serves each one. The link is unchanged and
+		// still points at the same place; only the accessor moved, exactly as
+		// `c.token` became `c.bearer()` in the rule above. The fact worth
+		// anchoring is that this screen sends a browser at the control plane's
+		// GitHub exchange, and `controlPlaneUrl("auth.github")` is now the way
+		// that is said. Deleting the link still trips this rule, which is the
+		// whole point of it.
+		premise: [2]string{"www/components/AuthScreen.tsx", `controlPlaneUrl("auth.github")`},
 		reason: "the hosted control plane is deployed and open, and AuthScreen sends " +
 			"people to it. The denial survived once as the meta description of " +
 			"/signin and /signup, which is what a crawler and a link preview read, " +

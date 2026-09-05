@@ -48,6 +48,7 @@ output "job_ids" {
 
 output "custom_domain_verification_id" {
   value       = azurerm_container_app.this.custom_domain_verification_id
+  sensitive   = true
   description = "The value the asuid TXT record carries. Output so that binding a name in a zone this stack does not own is a copy rather than a portal visit."
 }
 

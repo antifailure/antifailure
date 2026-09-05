@@ -96,12 +96,34 @@ jobs:
           # requests makes a dead schedule look fresh. The daily run is the
           # control; a pull request run is a check on that pull request and is
           # visible there.
-          run_json=$(gh api \
-            "repos/${GH_REPO}/actions/workflows/security.yml/runs?event=schedule&status=completed&per_page=1" \
-            --jq '.workflow_runs[0] // empty')
+          # CANCELLED IS NOT A VERDICT, IN EITHER DIRECTION, and reading it
+          # as one was this check's own defect. GitHub cancels a merely
+          # PENDING run when a newer one queues in the same group, so a burst
+          # of merges to main cancelled the daily scan on 2026-09-05 and this
+          # check reported that vulnerability scanning had stopped working. It
+          # had not: the scan before it passed and the scan after it passed.
+          #
+          # A watchdog that reds on somebody's merge cadence is one people
+          # learn to ignore, and it is the only thing standing between a
+          # silently disabled schedule and nobody noticing. So a cancelled run
+          # is SKIPPED rather than believed, and the age check below is what
+          # then decides. That is strictly stronger than it sounds: skipping
+          # carries no information forward, so a schedule that is cancelled
+          # every day ages past the limit and alarms anyway, while a scan that
+          # genuinely FAILED still reports `failure` and alarms immediately.
+          #
+          # security.yml now keys its concurrency on the event so a merge
+          # burst cannot reach the daily run at all. This half is the belt to
+          # that braces: it is what makes the check honest about a word GitHub
+          # uses for three unrelated things.
+          runs_json=$(gh api \
+            "repos/${GH_REPO}/actions/workflows/security.yml/runs?event=schedule&status=completed&per_page=20" \
+            --jq '[.workflow_runs[] | select(.conclusion != "cancelled")]')
+
+          run_json=$(printf '%s' "${runs_json}" | jq -r '.[0] // empty')
 
           if [ -z "${run_json}" ]; then
-            echo "problem=The Security workflow has no completed SCHEDULED run at all. Either it has never run on its cron, or the schedule was disabled before the first one." >> "$GITHUB_OUTPUT"
+            echo "problem=The Security workflow has no completed SCHEDULED run that was not cancelled. Either it has never run to a conclusion on its cron, the schedule was disabled, or every recent scheduled run was cancelled before it could start." >> "$GITHUB_OUTPUT"
             echo "url=" >> "$GITHUB_OUTPUT"
             exit 0
           fi

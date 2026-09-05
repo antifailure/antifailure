@@ -108,6 +108,7 @@ export interface InsightResult {
  */
 export async function recomputeSubjectDays(admin: postgres.Sql, day: string): Promise<number> {
   return admin.begin(async (tx) => {
+    await tx`SELECT set_config('TimeZone', 'UTC', true)`
     // One writer at a time, for the reason in lock.ts.
     await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`DELETE FROM analytics_subject_days WHERE day = ${day}::date`
@@ -342,6 +343,8 @@ async function recomputeOneFunnel(
     GROUP BY 2, 3`
 
   return admin.begin(async (tx) => {
+    // The entry week and the elapsed-day window are both defined in UTC.
+    await tx`SELECT set_config('TimeZone', 'UTC', true)`
     // One writer at a time, for the reason in lock.ts.
     await tx.unsafe(TAKE_ROLLUP_LOCK)
     await tx`

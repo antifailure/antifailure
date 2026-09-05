@@ -1174,7 +1174,7 @@ func (h *rtHarness) inventoryAttributesResources(ctx context.Context) {
 // guarantee the whole thing is sold on.
 
 func (h *rtHarness) egressNoPolicyMeansNothingGetsOut(ctx context.Context) {
-	h.requireInternet(ctx)
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	// A manifest with no egress section is valid. It must mean nothing gets
 	// out, not that the sidecar failed to parse a policy and let everything
 	// through, and not that the environment refused to start.
@@ -1188,7 +1188,7 @@ func (h *rtHarness) egressNoPolicyMeansNothingGetsOut(ctx context.Context) {
 }
 
 func (h *rtHarness) egressAllowedHostIsReached(ctx context.Context) {
-	h.requireInternet(ctx)
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	code := h.probe(ctx, h.envID("eg2"), h.allowOnly(),
 		"wget -T 20 -q -O - http://"+h.opts.AllowedHost+"/")
 	if code != reached {
@@ -1200,7 +1200,21 @@ func (h *rtHarness) egressAllowedHostIsReached(ctx context.Context) {
 }
 
 func (h *rtHarness) egressHostWithNoRuleIsRefused(ctx context.Context) {
-	h.requireInternet(ctx)
+	// The ALLOWED host only, and RefusedHost deliberately not, which is the
+	// opposite of what the equivalent test in the local runtime's own suite
+	// does. This assertion is that a request FAILED, and a host that is merely
+	// down satisfies it, so guarding on RefusedHost looks like the obvious
+	// improvement. It is wrong here and runtime_selftest_test.go said so
+	// within one run: that self-test drives a FAKE runtime that touches no
+	// network, and it sets RefusedHost to "refused.invalid" precisely so the
+	// name can never resolve. Probing it from the test process skipped two
+	// behaviors, and the self-test reported them as behaviors that could no
+	// longer go red, which is exactly what it exists to catch.
+	//
+	// RefusedHost is a caller's option, and a caller may legitimately give an
+	// unroutable name. Only AllowedHost is something this harness can insist
+	// on being reachable.
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	code := h.probe(ctx, h.envID("eg3"), h.allowOnly(),
 		"wget -T 20 -q -O - http://"+h.opts.RefusedHost+"/")
 	if code != refused {
@@ -1209,7 +1223,8 @@ func (h *rtHarness) egressHostWithNoRuleIsRefused(ctx context.Context) {
 }
 
 func (h *rtHarness) egressAppliesWithoutProxyVariables(ctx context.Context) {
-	h.requireInternet(ctx)
+	// AllowedHost only, for the reason on egressHostWithNoRuleIsRefused above.
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	// The property the whole design rests on. Proxy variables are a request,
 	// and a great many clients ignore them: Node has no proxy support at all,
 	// and plenty of SDKs bundle a client that does the same. An egress control
@@ -1229,7 +1244,7 @@ func (h *rtHarness) egressAppliesWithoutProxyVariables(ctx context.Context) {
 }
 
 func (h *rtHarness) egressCannotBeBypassedByAddress(ctx context.Context) {
-	h.requireInternet(ctx)
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	// Interception is by DNS, so the obvious way around it is to skip DNS.
 	// That has to fail for a reason that has nothing to do with DNS: the
 	// environment has no route out, so a packet addressed straight at the
@@ -1259,7 +1274,7 @@ func (h *rtHarness) egressCannotReachMetadata(ctx context.Context) {
 }
 
 func (h *rtHarness) egressCannotBeBypassedByUDP(ctx context.Context) {
-	h.requireInternet(ctx)
+	h.requireInternet(ctx, "http://"+h.opts.AllowedHost)
 	// DNS is the one thing the environment is allowed to speak to the sidecar,
 	// so UDP straight past it to somebody else's resolver is the obvious
 	// tunnel: a name lookup carries whatever the client puts in it.
@@ -1398,27 +1413,40 @@ func shortLivedClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// requireInternet skips when this machine cannot reach the host the egress
-// behaviors decide about.
+// requireInternet skips when this machine cannot reach what an egress behavior
+// depends on.
 //
 // A laptop on a plane should report a skip, not a failure that looks exactly
 // like a broken egress control. The check is deliberately made from the test
 // process rather than from inside an environment: what it is asking is whether
 // the machine has internet at all, and asking from inside would be asking the
 // question the behavior itself exists to answer.
-func (h *rtHarness) requireInternet(ctx context.Context) {
+//
+// IT TAKES THE ORIGINS RATHER THAN ASSUMING THEM. Every behavior below happens
+// to use plain HTTP today, so this harness has never had the defect its twin in
+// engine/internal/runtime/local did, where the guard probed HTTP and six tests
+// then required HTTPS, and a required context went red on an unrelated pull
+// request because HTTP answered and nothing skipped. The parameter is here so
+// that adding an HTTPS behavior cannot quietly reintroduce it: an origin that is
+// not named is not guarded, and naming it is the same string the probe uses.
+//
+// The first origin is a plain parameter and not part of the variadic, so a call
+// that guards on nothing does not compile.
+func (h *rtHarness) requireInternet(ctx context.Context, origin string, more ...string) {
 	h.t.Helper()
 	c := shortLivedClient(10 * time.Second)
 	defer c.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+h.opts.AllowedHost+"/", nil)
-	if err != nil {
-		h.t.Fatalf("building the reachability request: %v", err)
+	for _, origin := range append([]string{origin}, more...) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/", nil)
+		if err != nil {
+			h.t.Fatalf("building the reachability request for %s: %v", origin, err)
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			h.t.Skipf("skipped: %s is not reachable from this machine: %v", origin, err)
+		}
+		_ = resp.Body.Close()
 	}
-	resp, err := c.Do(req)
-	if err != nil {
-		h.t.Skipf("skipped: %s is not reachable from this machine: %v", h.opts.AllowedHost, err)
-	}
-	_ = resp.Body.Close()
 }
 
 // httpGet reads a URL and returns its body.

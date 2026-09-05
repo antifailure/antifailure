@@ -1,12 +1,7 @@
-"use client";
-
-import { useRef } from "react";
-
 import { Container } from "@/components/layout/Container";
 import { Heading } from "@/components/layout/Heading";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { VideoRestartButton } from "./VideoRestartButton";
-import { useViewportVideoPlayback } from "./useViewportVideoPlayback";
+import { TwinIdeStage } from "./visuals/TwinIdeStage";
 
 const FEATURES = [
   {
@@ -50,18 +45,6 @@ const FEATURES = [
 ];
 
 export function Twins() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useViewportVideoPlayback(videoRef);
-
-  const restartVideo = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.currentTime = 0;
-    void video.play();
-  };
-
   return (
     <section
       className="relative scroll-mt-[60px] overflow-hidden pt-8 pb-4 safe-paddings max-xl:pt-6 max-xl:pb-4 max-lg:scroll-mt-0 max-lg:pt-5 max-lg:pb-3 max-md:pt-4 max-md:pb-2"
@@ -78,21 +61,7 @@ export function Twins() {
             title="<strong>A disposable production twin.</strong> Build the candidate, restore safe state, contain side effects, and destroy everything when the report is done."
           />
           <div className="relative mt-14 min-w-0 max-xl:mt-12 max-lg:mt-10 max-md:mt-8 max-sm:mt-11">
-            <video
-              ref={videoRef}
-              className="block h-auto w-full object-contain"
-              src="/home/disposable-production-twin.mp4"
-              aria-label="Disposable production twin demonstration"
-              autoPlay
-              loop
-              muted
-              playsInline
-              controls
-              preload="metadata"
-            />
-            <div className="absolute top-4 right-4 z-10">
-              <VideoRestartButton onClick={restartVideo} />
-            </div>
+            <TwinIdeStage />
             {/* "The four phases ... are real" asserted a named model. There
                 is none: no four-phase entity exists in the engine, and
                 /product/twins names four differently, Plan, Provision, Run and

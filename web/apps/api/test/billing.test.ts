@@ -44,7 +44,7 @@ import {
   type StripeEvent,
 } from '../src/billing/webhook.ts'
 import { PLANS, planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
-import { RealStripeClient } from '../src/billing/stripe.ts'
+import { RealStripeClient, invoiceOf, subscriptionOf } from '../src/billing/stripe.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   stripeAgainstMockPack, type ApiHarness, type Org, type SignedIn,
@@ -454,6 +454,152 @@ describe('the subscription collection boundary', () => {
     assert.equal(url.searchParams.get('customer'), 'cus_right')
     assert.equal(url.searchParams.get('status'), 'all')
     assert.equal(url.searchParams.get('limit'), '50')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The two shapes Basil moved
+//
+// `2025-03-31.basil` removed two field paths these decoders read, and BOTH the
+// old and the new shape are live at the same time: a webhook is delivered at
+// the version its endpoint was created with, which is a different setting from
+// the `stripe-version` header this client sends on its own requests. So there
+// is no cutover after which one of these fixtures becomes historical, and each
+// pair below is one payload of each age asserted to decode to the same answer.
+//
+// The fixtures are the shapes Stripe documents, not the shapes the decoder
+// happens to accept: a fixture written to agree with the code proves only that
+// the code agrees with itself, which is how `tools/prmerge` shipped 25 passing
+// tests against a field that does not exist.
+// ---------------------------------------------------------------------------
+
+/** A subscription as Basil sends it: no period at the top, one per item. */
+function basilSubscription(over: { items?: unknown } = {}): Record<string, unknown> {
+  return {
+    id: 'sub_basil',
+    object: 'subscription',
+    customer: 'cus_basil',
+    status: 'active',
+    cancel_at_period_end: false,
+    canceled_at: null,
+    items: 'items' in over ? over.items : {
+      object: 'list',
+      has_more: false,
+      data: [
+        {
+          id: 'si_basil',
+          object: 'subscription_item',
+          quantity: 1,
+          price: { id: 'price_team_afmock', object: 'price' },
+          current_period_start: 1767225600,
+          current_period_end: 1769904000,
+        },
+      ],
+    },
+  }
+}
+
+/** An invoice as Basil sends it: no `subscription`, one `parent` that says
+ *  which kind of object generated the invoice. */
+function basilInvoice(parent: unknown): Record<string, unknown> {
+  return {
+    id: 'in_basil',
+    object: 'invoice',
+    customer: 'cus_basil',
+    number: 'AF-0002',
+    status: 'paid',
+    amount_due: 4900,
+    amount_paid: 4900,
+    currency: 'usd',
+    hosted_invoice_url: 'https://invoice.stripe.com/i/afmock',
+    period_start: 1767225600,
+    period_end: 1769904000,
+    parent,
+  }
+}
+
+const PERIOD_END = new Date(1769904000 * 1000)
+const PERIOD_START = new Date(1767225600 * 1000)
+
+describe('a subscription billing period, which Basil moved onto the item', () => {
+  it('reads the period off the item when Basil sent no period at the top', () => {
+    assert.deepEqual(subscriptionOf(basilSubscription()).currentPeriodEnd, PERIOD_END)
+  })
+
+  it('reads the start off the item too, not only the end', () => {
+    assert.deepEqual(subscriptionOf(basilSubscription()).currentPeriodStart, PERIOD_START)
+  })
+
+  it('still reads a pre Basil subscription, which carries the period at the top', () => {
+    const before = subscriptionObject({ id: 'sub_old', customer: 'cus_old' })
+    assert.deepEqual(subscriptionOf(before).currentPeriodEnd, PERIOD_END)
+  })
+
+  it('prefers the top level when a payload somehow carries both', () => {
+    // Not a shape Stripe sends, and that is the point: the precedence has to
+    // be asserted somewhere or it is only an accident of which line came
+    // first. The top level is the one the pinned outgoing version sends.
+    const both = subscriptionObject({ id: 'sub_both', customer: 'cus_both' })
+    const items = (both.items as { data: Record<string, unknown>[] }).data
+    items[0]!.current_period_end = 1700000000
+    assert.deepEqual(subscriptionOf(both).currentPeriodEnd, PERIOD_END)
+  })
+
+  it('decodes a subscription with no items at all rather than throwing', () => {
+    // The condition that already leaves priceId null. It must not become the
+    // condition that takes the whole delivery down, because a delivery that
+    // throws is a delivery that is retried forever.
+    const empty = basilSubscription({ items: { object: 'list', has_more: false, data: [] } })
+    const decoded = subscriptionOf(empty)
+    assert.equal(decoded.currentPeriodEnd, null)
+  })
+
+  it('decodes a subscription with no items field at all rather than throwing', () => {
+    assert.equal(subscriptionOf(basilSubscription({ items: undefined })).currentPeriodEnd, null)
+  })
+})
+
+describe('the subscription an invoice came from, which Basil moved under parent', () => {
+  it('reads it out of parent.subscription_details on a Basil invoice', () => {
+    const invoice = basilInvoice({
+      type: 'subscription_details',
+      subscription_details: { subscription: 'sub_basil', metadata: {} },
+    })
+    assert.equal(invoiceOf(invoice)?.subscriptionId, 'sub_basil')
+  })
+
+  it('still reads a pre Basil invoice, which carries subscription at the top', () => {
+    const before = invoiceObject({ id: 'in_old', customer: 'cus_old', subscription: 'sub_old' })
+    assert.equal(invoiceOf(before)?.subscriptionId, 'sub_old')
+  })
+
+  it('refuses a subscription id off a parent of another kind', () => {
+    // The parent carries a subscription_details sibling that names the WRONG
+    // subscription, so this cell fails if the decoder walks to that field
+    // without reading parent.type first. Omitting the sibling would have let
+    // the test pass with no type check at all, which is a check that cannot
+    // say no.
+    const quoted = basilInvoice({
+      type: 'quote_details',
+      quote_details: { quote: 'qt_1' },
+      subscription_details: { subscription: 'sub_not_this_one' },
+    })
+    assert.equal(invoiceOf(quoted)?.subscriptionId, null)
+  })
+
+  it('reads null off a one off invoice, which has no parent at all', () => {
+    assert.equal(invoiceOf(basilInvoice(null))?.subscriptionId, null)
+  })
+
+  it('reads null when the parent says subscription_details and carries none', () => {
+    assert.equal(invoiceOf(basilInvoice({ type: 'subscription_details' }))?.subscriptionId, null)
+  })
+
+  it('keeps decoding the rest of a Basil invoice, not only the subscription', () => {
+    // The parent change is not allowed to cost the fields an operator reads an
+    // invoice for. Asserted separately so a break in the period decode cannot
+    // hide behind the subscription assertion above.
+    assert.equal(invoiceOf(basilInvoice(null))?.amountPaid, 4900)
   })
 })
 
@@ -1233,11 +1379,11 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   //
   // Asserted on the BODY THAT REACHED STRIPE rather than on the input schema,
   // because the input schema is not what an invoice is computed from. A route
-  // that quietly defaulted the quantity to something would satisfy a schema
-  // assertion and still bill per unit.
+  // that multiplied the quantity would satisfy a schema assertion and still
+  // charge the organization more than its flat subscription price.
   // -------------------------------------------------------------------------
 
-  it('checkout sends Stripe no quantity, because nothing here is sold per unit', async () => {
+  it('checkout sends Stripe exactly one organization subscription', async () => {
     const before = sentToStripe.length
     const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'team',
@@ -1258,9 +1404,8 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     )
 
     assert.equal(
-      form.has('line_items[0][quantity]'), false,
-      'checkout sent Stripe a per unit quantity. The price multiplies by it and nothing ' +
-        'entitles anything from it, so this is a charge for something the buyer does not get.',
+      form.get('line_items[0][quantity]'), '1',
+      'the licensed recurring price must buy exactly one organization subscription',
     )
   })
 
@@ -1283,7 +1428,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const form = new URLSearchParams(sent.body)
     assert.equal(form.get('line_items[0][price]'), 'price_team_afmock')
     assert.equal(
-      form.has('line_items[0][quantity]'), false,
+      form.get('line_items[0][quantity]'), '1',
       'a seat count in the input reached Stripe as a quantity',
     )
     // Every VALUE, rather than a substring of the whole body.

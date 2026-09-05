@@ -291,7 +291,7 @@ func readExemptions(path string) (map[key]string, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	s := bufio.NewScanner(f)
 	for n := 1; s.Scan(); n++ {

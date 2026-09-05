@@ -2,7 +2,8 @@
  * The site beacon: everything it sends, and everything it refuses to.
  *
  * SPLIT FROM analytics.ts SO THAT IT CAN BE TESTED. This file imports nothing
- * but lib/site.ts and lib/bots.ts, neither of which imports a framework, so a
+ * but lib/control-plane-routes.ts and lib/bots.ts, and the first of those
+ * imports only lib/site.ts, so nothing on the path pulls in a framework and a
  * plain `node --test` can load it and drive the queue, the session rules and
  * the opt out against stub globals. analytics.ts holds the one React hook and
  * re-exports the rest, because next/navigation does not resolve outside the
@@ -49,7 +50,7 @@
  * the correct answer.
  */
 
-import { CONTROL_PLANE_URL } from "./site";
+import { controlPlaneUrl } from "./control-plane-routes";
 import { looksAutomated } from "./bots";
 
 /**
@@ -65,7 +66,7 @@ import { looksAutomated } from "./bots";
  * looks finished, which is the defect this repository has shipped most often.
  */
 const ENDPOINT =
-  process.env.NEXT_PUBLIC_AF_ANALYTICS_ENDPOINT ?? `${CONTROL_PLANE_URL}/v1/site/events`;
+  process.env.NEXT_PUBLIC_AF_ANALYTICS_ENDPOINT ?? controlPlaneUrl("site.events");
 
 const SESSION_KEY = "af.session.v1";
 

@@ -167,6 +167,7 @@ export const FOOTER_MENUS = [
       { text: "Marketplaces", href: "/solutions/marketplaces" },
       { text: "Developer tools", href: "/solutions/devtools" },
       { text: "About", href: "/about" },
+      { text: "Careers", href: "/careers" },
       { text: "Contact", href: "/contact" },
       { text: "Request access", href: "/signup" },
     ],

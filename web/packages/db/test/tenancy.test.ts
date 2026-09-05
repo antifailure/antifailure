@@ -94,6 +94,23 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
         'no tenant until somebody approves it; a row is reachable only by the device code ' +
           'or the user code the caller already holds, the same shape as oauth_states',
       ],
+      [
+        'mcp_clients',
+        'an OAuth client registration belongs to the client rather than to a tenant: one ' +
+          'registration is used by everybody in every organization who connects through it, so ' +
+          'giving it an owner would stop the second organization reading the row the first one ' +
+          'created. What confines the application role is a policy keyed on a client_id of 32 ' +
+          'random bytes the caller has to already hold, the same shape as oauth_states. See ' +
+          'migrations/0038.',
+      ],
+      [
+        'mcp_authorization_codes',
+        'no tenant exists until somebody approves the connection, and the token exchange that ' +
+          'reads the row carries no session and no tenant, which is why the columns are named ' +
+          'approved_org_id and approved_user_id. A row is reachable only by presenting the hash ' +
+          'of the code the caller already holds, the same shape as device_authorizations. See ' +
+          'migrations/0038.',
+      ],
       ['schema_migrations', "the schema's own bookkeeping, not tenant data"],
       [
         'platform_controls',
@@ -112,6 +129,17 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'here cannot read a row back even holding its id, and a query bug on a public path ' +
           'cannot publish a prospect\'s contact details. Reading is antifailure_admin or the ' +
           'migration role, through af-control-plane-backup leads. See migrations/0035.',
+      ],
+      [
+        'recruitment_applications',
+        'somebody applying for a job, who is not a customer, has no organization and is not ' +
+          'going to get one from applying. It is the same shape as enterprise_leads and for ' +
+          'the same reason: what confines the application role is a GRANT rather than a ' +
+          'policy, INSERT and no SELECT, so the anonymous careers form can write a row and no ' +
+          'query on a public path can read an applicant\'s name, address or answers back even ' +
+          'holding the id. Reading, reviewing and deleting are antifailure_admin through the ' +
+          'operator portal alone. recruitment.test.ts asserts the 42501 on the read. See ' +
+          'migrations/0039.',
       ],
       [
         'admin_notes',

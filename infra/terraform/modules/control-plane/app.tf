@@ -287,17 +287,12 @@ resource "azurerm_container_app" "this" {
     }
   }
 
-  # The App's two secrets, which this module reads rather than writes, and the
-  # three credentials Stripe and Resend mint, which it reads for the same
-  # reason: a resource that manages a value it cannot produce is a resource that
-  # will one day set it to the empty string.
+  # Reference externally minted credentials without managing their values.
+  # GitHub and Stripe references do not require a vault read while planning.
   dynamic "secret" {
     for_each = merge(
       local.github_app_secret_ids,
-      var.stripe_price_team == "" ? {} : {
-        "stripe-secret-key"     = data.azurerm_key_vault_secret.stripe_secret_key[0].versionless_id
-        "stripe-webhook-secret" = data.azurerm_key_vault_secret.stripe_webhook_secret[0].versionless_id
-      },
+      local.stripe_secret_ids,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },
@@ -517,13 +512,25 @@ resource "azurerm_container_app" "this" {
         }
       }
 
-      # The one origin the marketing site's beacon may be called from.
+      # Every origin the marketing site is served from, for the beacon, the
+      # enterprise lead form and the careers application form.
       #
       # Dynamic, and this one is worth checking rather than assuming, because it
       # is a CORS decision and the dangerous default would be permissive. It is
-      # not: the application compares the arriving Origin against this value and
-      # refuses when it is falsy, so unset and empty both refuse every beacon
-      # and neither reflects whatever Origin arrives. Absent is the safe end.
+      # not: the application compares the arriving Origin against these values
+      # for exact equality and refuses when none matches, so unset and empty
+      # both refuse every beacon and neither reflects whatever Origin arrives.
+      # Absent is the safe end.
+      #
+      # SEVERAL ORIGINS TRAVEL IN THIS ONE VARIABLE, comma separated, and the
+      # module does nothing to the string. AF_SITE_ORIGIN is what the process
+      # parses and var.site_origin is what an operator writes, and them being the
+      # same bytes means there is no translation here to get wrong. A single
+      # origin with no comma parses to a list of one, so an installation that
+      # already sets this needs no change. A second variable would have been a
+      # second chance to configure the beacon and the forms differently, which
+      # presents as one form failing with a network error on a site whose
+      # analytics work.
       dynamic "env" {
         for_each = var.site_origin == "" ? [] : [var.site_origin]
         content {
@@ -729,6 +736,31 @@ resource "azurerm_container_app" "this" {
   # the old one. Add an environment variable here and the application does not
   # see it until somebody deploys. Check what is actually serving after an apply
   # that touched the template; the self-hosting guide has the two commands.
+  #
+  # WHY THE NEW REVISION GETS NOTHING, since the obvious reading is wrong.
+  # Ignoring an attribute does not mean omitting it. Terraform sends a traffic
+  # block either way, and this line decides which one: the value refreshed from
+  # Azure rather than the one written below. The block below asks for
+  # latest_revision = true at 100 percent; Azure, after any deploy, holds a pin
+  # naming one revision. The apply puts back the arrangement it just read, and
+  # the revision it is creating is not in that arrangement, so it gets zero.
+  #
+  # THE STORED STATE FILE IS A STALE COPY OF THAT, and it stays stale because
+  # this line is what stops Terraform caring. A plan and an apply refresh, so
+  # they act on the current value; `terraform state show` and `state pull` read
+  # the stored one and do not. On this deployment the stored file named a
+  # revision that had already been DEACTIVATED while the plan's own view named
+  # the one actually serving. Neither is a fault to repair. It means only this:
+  # do not ask Terraform what is serving, and do not read an empty plan as an
+  # answer either, because the attribute that would say so is this one. Ask
+  # Azure.
+  #
+  # If this line is ever REMOVED, the consequence is the opposite of what the
+  # stale file suggests. The stored suffix is not what would take effect, the
+  # configuration is: latest_revision = true wins, traffic follows the newest
+  # revision automatically, every apply puts its own revision straight into
+  # service with no chance to probe it, and each apply undoes the pin the deploy
+  # sets. That is a deliberate change to how releases work, not a tidy-up.
   lifecycle {
     ignore_changes = [
       template[0].container[0].image,

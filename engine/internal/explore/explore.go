@@ -229,18 +229,24 @@ func (r Report) Headline() string {
 	if len(r.Explorations) == 0 {
 		return "No exploration ran."
 	}
-	if b := r.Blocked(); b == len(r.Explorations) {
+	b := r.Blocked()
+	if b == len(r.Explorations) {
 		return fmt.Sprintf("%s could not run, so nothing was explored.",
 			plural(b, "exploration", "explorations"))
 	}
 	findings := r.Findings()
+	observed := len(r.Explorations) - b
+	suffix := ""
+	if b > 0 {
+		suffix = fmt.Sprintf(" Not explored: %s could not run.", plural(b, "exploration", "explorations"))
+	}
 	if len(findings) == 0 {
 		return fmt.Sprintf("%s wandered the application and found nothing worth reporting.",
-			plural(len(r.Explorations), "exploration", "explorations"))
+			plural(observed, "exploration", "explorations")) + suffix
 	}
 	return fmt.Sprintf("%s found %s. None of it counts against this change.",
-		plural(len(r.Explorations), "exploration", "explorations"),
-		plural(len(findings), "thing", "things"))
+		plural(observed, "exploration", "explorations"),
+		plural(len(findings), "thing", "things")) + suffix
 }
 
 func plural(n int, one, many string) string {

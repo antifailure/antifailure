@@ -170,6 +170,9 @@ async function recomputeDay(admin: postgres.Sql, day: string, name: EventName): 
   const dimB = dimensionExpression(name, 1)
 
   return admin.begin(async (tx) => {
+    // JavaScript chose a UTC day. Date casts must use that same boundary,
+    // independent of the database host's local timezone or daylight saving.
+    await tx`SELECT set_config('TimeZone', 'UTC', true)`
     // The lock first, so two replicas recomputing the same day queue rather
     // than colliding on the primary key. See lock.ts for why it is transaction
     // scoped rather than held across the run.

@@ -121,6 +121,8 @@ COPY web/packages/policy ./packages/policy
 # how a schema arrives that the running code does not understand.
 COPY deploy/docker/bootstrap.mjs ./bootstrap.mjs
 COPY deploy/docker/maintenance.mjs ./maintenance.mjs
+COPY deploy/docker/af-operator /usr/local/bin/af-operator
+RUN chmod 755 /usr/local/bin/af-operator
 # The preview identities. Refuses to run outside an environment the engine
 # created; see the file for why that check is not a formality.
 COPY deploy/docker/personas.mjs ./personas.mjs

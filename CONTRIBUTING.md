@@ -126,6 +126,65 @@ than no gate.
 So this one is a review practice and it stays one. If the message accounts for
 part of the diff, ask about the rest before approving.
 
+### Merging
+
+Merge with `just merge <number>` and not with `gh pr merge` by hand.
+
+```
+just merge 231
+just merge 231 -dry-run       # check everything and merge nothing
+just merge 231 -check-fields  # ask the API whether its field names still exist
+just merge 231 -confirm-only  # prove a merged commit carries the sign-off
+```
+
+The reason is a deployment outage rather than a style preference. Six pull
+requests were merged on 2026-09-05 with `gh pr merge --squash --body ""`. A
+squash commit made that way carries no `Signed-off-by` trailer, and the trailer
+is a required context, so `commits are attributed to their author` failed on
+main. `.github/workflows/cd.yml` has a gate job that waits for CI on the same
+commit; it read that failure and skipped its build, staging and production
+jobs, so staging stayed six merges behind at `cb3f30f1` while every one of
+those changes was on main. It moved again only when the next merge,
+`597b3819`, carried the trailer.
+
+No hook can prevent this. `.githooks/prepare-commit-msg` writes the trailer
+onto local commits and a squash commit is created on GitHub's side, so the
+only thing that runs at the moment of the merge is whatever the person pressing
+the button typed. `just merge` is that thing:
+
+* it requires all nine of main's required contexts to report the literal word
+  `success` on the pull request's exact head sha, and confirms that list
+  against branch protection rather than trusting the copy in its own source;
+* it reads `mergeStateStatus` and never `mergeable`, which only says whether
+  the branch conflicts;
+* it says which red checks it is ignoring, because `Antifailure` and
+  `dogfood, against the control plane` are not required and reading a red mark
+  on either as a block has cost this project hours;
+* it builds the sign-off from your own `git config user.name` and
+  `user.email`, which is clause (c) of the Developer Certificate of Origin:
+  somebody relaying another person's contribution signs as themselves and
+  leaves the authorship alone. It refuses a body carrying anybody else's
+  sign-off rather than adding a second one;
+* it never passes `--delete-branch`, which deletes the branch even when the
+  merge is refused and so closes the pull request. It prints the deletion
+  command for you to run afterwards;
+* and it reads the commit back off the remote afterwards and fails if the
+  trailer is not there, because a tool that intends to sign and cannot prove it
+  did is the defect it was written to prevent. `-confirm-only` runs that one
+  check on its own against any merged pull request, so the code that decides
+  whether a commit is signed can be exercised on a real commit without merging
+  one to exercise it.
+
+The first version of this command asked `gh pr view` for a field called
+`merged`. There is no such field, and all 25 of its tests passed anyway,
+because every one of them answered from a fixture the suite itself had written.
+The first real invocation died on its first call. So `-check-fields` reads the
+other side of the boundary: it runs the same argument lists the merge path
+runs, against a real pull request, and reports a name the API does not have or
+a key a real response does not carry. It runs on every pull request in
+`.github/workflows/ci.yml` as "the merge command still fits the API", and it
+names what it could not check rather than passing over it.
+
 ## The changelog
 
 Every change to something a user can see adds a fragment under `.changes/`.
@@ -234,6 +293,23 @@ the gate goes on when the count reaches zero. TypeScript is strict, no `any`, fo
 comments, docs, commit messages, and user-facing strings does not use em dashes
 or double hyphens as punctuation. Error messages are written in the second
 person, name the thing that failed, and say what to do next.
+
+`tools/prosecheck` is the gate for that rule, and it does not reach everywhere
+the rule applies, so it is worth knowing what is actually holding you. It reads
+Markdown under `docs`, `examples`, `.changes`, `www`, `console` and the
+repository root, and every file with a `ts`, `tsx` or `mjs` extension under
+`www`, `console` and `docs`. It does not read Go, SQL, Terraform, YAML, or the
+api's and runner's TypeScript. A defect in a Go comment or a Terraform comment
+is yours to catch, and the engine carries four `require.NotContains` assertions
+of its own because nothing else checks the strings the CLI prints.
+
+The double hyphen half of the rule cannot be widened past those trees, and that
+is a limit rather than something nobody has got to yet. `--` is the SQL line
+comment and the POSIX end of options marker, so outside prose it is syntax far
+more often than punctuation: of the 1242 lines outside the gate that match the
+rule, 1120 are SQL comments. An em dash collides with no language here, which
+is why the two halves of one rule do not reach equally far. The measurement and
+the reasoning are in `tools/prosecheck/main.go`.
 
 Every user-facing error carries a code from
 `engine/internal/errors/catalog.yaml`. Adding a code without a catalog entry

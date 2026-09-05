@@ -18,7 +18,8 @@ interface Screen {
   readonly title: string;
   readonly text: string;
   readonly controls?: readonly string[];
-  readonly fields?: readonly { name: string; type: string }[];
+  readonly fields?: readonly { name: string; type: string; required?: boolean }[];
+  readonly submits?: readonly string[];
   readonly unnamed?: number;
   /** where a control leads. A control with no entry here does nothing. */
   readonly links?: Readonly<Record<string, string>>;
@@ -46,8 +47,10 @@ class Site implements Surface {
       title: screen.title,
       fields: (screen.fields ?? []).map((f) => ({
         name: f.name, type: f.type, filled: this.#filled.has(`${this.#at}|${f.name}`),
+        required: f.required ?? false,
       })),
       controls: screen.controls ?? [],
+      submits: screen.submits ?? [],
       unnamed: screen.unnamed ?? 0,
       text: screen.text,
     };
@@ -362,7 +365,8 @@ test('destructive names the controls it should and nothing else', () => {
 
 test('a page signature changes when anything a person would notice changes', () => {
   const base: Snapshot = {
-    url: '/a', title: 'A', fields: [], controls: ['One'], unnamed: 0, text: 'hello',
+    url: '/a', title: 'A', fields: [], controls: ['One'], submits: [], unnamed: 0,
+    text: 'hello',
   };
   const same = signature(base);
   assert.equal(signature({ ...base }), same);
@@ -372,7 +376,10 @@ test('a page signature changes when anything a person would notice changes', () 
   assert.notEqual(signature({ ...base, unnamed: 1 }), same);
   assert.notEqual(signature({ ...base, text: 'goodbye' }), same);
   assert.notEqual(
-    signature({ ...base, fields: [{ name: 'Email', type: 'email', filled: false }] }), same);
+    signature({
+      ...base,
+      fields: [{ name: 'Email', type: 'email', filled: false, required: false }],
+    }), same);
   // Control order is the DOM's business, not the page's meaning.
   assert.equal(signature({ ...base, controls: ['One'] }), same);
 });

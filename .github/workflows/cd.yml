@@ -67,6 +67,7 @@ env:
   RESOURCE_GROUP: af-cp-centralus
   APP: afcp-app
   BOOTSTRAP_JOB: afcp-bootstrap
+  MAINTENANCE_JOB: afcp-maintenance
   STAGING_URL: https://app.dev.antifailure.dev
   # Production, in its own resource group with its own everything. The names
   # come from `name = "afcpprod"` in production.tfvars, and the group is
@@ -75,6 +76,7 @@ env:
   PRODUCTION_RESOURCE_GROUP: af-cp-prod-centralus
   PRODUCTION_APP: afcpprod-app
   PRODUCTION_BOOTSTRAP_JOB: afcpprod-bootstrap
+  PRODUCTION_MAINTENANCE_JOB: afcpprod-maintenance
   PRODUCTION_URL: https://app.antifailure.dev
 
 jobs:
@@ -280,7 +282,7 @@ jobs:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
           deploy/cd/deploy.sh \
-            "${RESOURCE_GROUP}" "${APP}" "${BOOTSTRAP_JOB}" \
+            "${RESOURCE_GROUP}" "${APP}" "${BOOTSTRAP_JOB}" "${MAINTENANCE_JOB}" \
             "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${STAGING_URL}"
 
       - name: What is serving
@@ -393,7 +395,8 @@ jobs:
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
           deploy/cd/deploy.sh \
-            "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" "${PRODUCTION_BOOTSTRAP_JOB}" \
+            "${PRODUCTION_RESOURCE_GROUP}" "${PRODUCTION_APP}" \
+            "${PRODUCTION_BOOTSTRAP_JOB}" "${PRODUCTION_MAINTENANCE_JOB}" \
             "${IMAGE_DIGEST}" "${GITHUB_SHA}" "${PRODUCTION_URL}"
 
       - name: What is serving

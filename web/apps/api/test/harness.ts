@@ -92,6 +92,8 @@ export interface ApiHarness {
 }
 
 export interface StartApiOptions {
+  /** Canonical origin for browser and SDK integration against a real listener. */
+  appBaseUrl?: string
   /**
    * Serve cookies the way production does. Defaults false, because the test
    * client speaks plain HTTP.
@@ -143,11 +145,11 @@ export interface StartApiOptions {
   /** The organization allowed to read the dashboard, by slug. Undefined means
    *  none, which is the production default until an operator names one. */
   analyticsOperatorOrgSlug?: string | null
-  /** Where the marketing site is served from. One value for both routes a
-   *  browser on it calls cross-origin: the analytics beacon and POST /v1/leads.
-   *  Defaults to a fixed test origin rather than none, so a suite that does not
-   *  care gets a working one. */
-  siteOrigin?: string | null
+  /** Every origin the marketing site is served from. One value for all three
+   *  route families a browser on it calls cross-origin: the analytics beacon,
+   *  POST /v1/leads and POST /v1/applications. Defaults to a fixed test origin
+   *  rather than none, so a suite that does not care gets a working one. */
+  siteOrigins?: readonly string[] | null
   /** The plan required by a hosted deployment. Null is the self-hosted default. */
   hostedRequiredPlan?: HostedRequiredPlan | null
   /** Whether this installation's operator sets plans by hand. Undefined is the
@@ -257,14 +259,14 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     analyticsSecret:
       options.analyticsSecret === undefined ? TEST_ANALYTICS_SECRET : options.analyticsSecret,
     analyticsOperatorOrgSlug: options.analyticsOperatorOrgSlug ?? null,
-    siteOrigin: options.siteOrigin ?? 'https://www.test',
+    siteOrigins: options.siteOrigins ?? ['https://www.test'],
     // Configured, so the two routes exist and the catalog test covers them.
     // Nothing is sent: the mailer keeps what it was given.
     emailSignIn: { mailer, baseUrl: 'http://api.test', productName: 'Antifailure' },
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
     secureCookies: options.secureCookies ?? false,
-    appBaseUrl: 'http://app.test/',
+    appBaseUrl: options.appBaseUrl ?? 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     selfServeSignup: options.selfServeSignup ?? false,
     leadNotifier: options.leadNotifier ?? null,

@@ -17,9 +17,8 @@
 // estimated, defaulted, or filled in to make a card look complete. Where a
 // measurement does not exist the field is absent and the page says so, because
 // the failure this portal cannot afford is an operator during an incident
-// reading a placeholder as an answer. That is also why there is no rollup
-// table behind `usage`: there is none in this schema, and inventing a series
-// would be worse than admitting there is no history.
+// reading a placeholder as an answer. Usage history comes from scheduled
+// persisted measurements, with their measurement time carried to the reader.
 //
 // WHY THE OVERVIEW IS TWO ROUTES AND NOT ONE. `standing` reads organizations
 // and environments; `activity` reads the operator audit chain. They are two
@@ -43,6 +42,7 @@ import { router } from '../trpc.ts'
 import { adminProcedure, type AdminContext } from './trpc.ts'
 import { capsFor, round } from '../costs.ts'
 import { CONTROL_NAMES, controlStates } from './controls.ts'
+import { recruitmentRouter } from './recruitment.ts'
 
 /**
  * How far back the operator activity summary reads, in entries.
@@ -84,6 +84,7 @@ function num(value: string | number | null | undefined): number {
 }
 
 export const administrationRouter = router({
+  applications: recruitmentRouter,
   /**
    * What the installation is doing, for the page an operator lands on.
    *
@@ -282,12 +283,10 @@ export const administrationRouter = router({
    * asking who is using the platform is asking the same question the cap asks,
    * about everybody at once.
    *
-   * THERE IS NO ROLLUP TABLE IN THIS SCHEMA, and this route does not pretend
-   * otherwise. Every figure is computed at the moment of the call, over
-   * environments, so there is no series before what that table still holds and
-   * nothing here can draw a trend. The response carries the window and the
-   * fact that it was computed live, so the page states it rather than
-   * implying a warehouse that does not exist.
+   * The durable interval ledger survives environment and repository cleanup.
+   * Scheduled daily UTC aggregates provide the historical series. Rolling
+   * totals include live intervals up to the request clock, while every daily
+   * point carries its measurement time so stale maintenance is visible.
    *
    * Two windows per row on purpose. The selected window answers "who is using
    * this", and the rolling twenty four hours answers "who is about to be
@@ -342,10 +341,10 @@ export const administrationRouter = router({
                      - GREATEST(e.created_at, ${day.toISOString()}::timestamptz)
                    )) / 3600.0
                  )), 0) AS day_hours,
-                 count(e.id) AS environments,
-                 count(e.id) FILTER (WHERE e.state <> 'torn_down') AS live
+                 count(e.env_id) AS environments,
+                 count(e.env_id) FILTER (WHERE e.torn_down_at IS NULL) AS live
           FROM organizations o
-          JOIN environments e ON e.org_id = o.id
+          JOIN environment_usage e ON e.org_id = o.id
           -- The overlap, which is what makes every duration above positive.
           WHERE e.created_at < ${now.toISOString()}::timestamptz
             AND COALESCE(e.torn_down_at, ${now.toISOString()}::timestamptz)
@@ -354,11 +353,27 @@ export const administrationRouter = router({
           ORDER BY window_hours DESC
           LIMIT ${input.limit}`)
 
+        const series = await db.execute<{ day: string; hours: string; measured_at: Date | string | null }>(sql`
+          WITH coverage AS (
+            SELECT min(day) AS first, max(measured_at) AS latest FROM environment_usage_daily
+          ), days AS (
+            SELECT generate_series(
+              GREATEST(coverage.first, (${since.toISOString()}::timestamptz AT TIME ZONE 'UTC')::date)::timestamp,
+              LEAST((coverage.latest AT TIME ZONE 'UTC')::date,
+                (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')::date)::timestamp,
+              interval '1 day')::date AS day
+            FROM coverage WHERE first IS NOT NULL
+          )
+          SELECT days.day::text, COALESCE(SUM(d.hours), 0)::text AS hours,
+            min(d.measured_at) AS measured_at
+          FROM days LEFT JOIN environment_usage_daily d ON d.day = days.day
+          GROUP BY days.day ORDER BY days.day`)
         return {
           at: now.toISOString(),
           window: input.window,
           windowHours,
           since: since.toISOString(),
+          series: series.map((r) => ({ day: r.day, hours: round(num(r.hours)), measuredAt: r.measured_at === null ? null : iso(r.measured_at) })),
           rows: rows.map((r) => {
             const dayHours = round(num(r.day_hours))
             const dayCapHours = capsFor(r.plan).perDayHours

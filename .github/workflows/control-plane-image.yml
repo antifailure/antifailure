@@ -14,6 +14,7 @@ on:
     paths:
       - 'web/**'
       - 'deploy/**'
+      - '.dockerignore'
       - '.github/workflows/control-plane-image.yml'
 
   # NO `paths:` FILTER HERE, AND THAT IS THE POINT.
@@ -150,6 +151,16 @@ jobs:
           check_refusal maintenance.mjs AF_MAINTENANCE_DATABASE_URL
           check_refusal bootstrap.mjs AF_MIGRATION_DATABASE_URL
 
+          # Exercise the packaged command, not only the source file it wraps.
+          out=$(docker run --rm --entrypoint af-operator "$img" init 2>&1) && rc=0 || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "FAIL: operator setup exited 0 without its runtime credential"; exit 1
+          fi
+          case "$out" in
+            *AF_ADMIN_DATABASE_URL*) echo "operator setup refuses and names its runtime credential" ;;
+            *) echo "FAIL: operator setup did not reach its credential guard. It said: $out"; exit 1 ;;
+          esac
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: control-plane-image
@@ -243,6 +254,42 @@ jobs:
           refuse --set database.url=x --set github.clientId=i --set github.clientSecret=s --set github.redirectUri=u
           refuse --set database.url=x --set database.migrationUrl=y --set github.clientId=i \
                  --set github.clientSecret=s --set github.redirectUri=u --set maintenance.mode=weekly
+          # The all-or-nothing sets. Each of these renders valid YAML and
+          # installs cleanly; the application then stops at startup, or worse,
+          # runs half configured. A half configured GitHub App accepts
+          # installations and drops every delivery, and two thirds of Stripe
+          # leaves billing off with the missing piece usually being the webhook
+          # secret, which fails for the first time when a real customer pays.
+          ok() {
+            if ! helm template t deploy/helm/antifailure-control-plane "$@" >/dev/null 2>&1; then
+              echo "FAIL: refused a combination that is correct: $*"; exit 1
+            fi
+            echo "rendered as it should: $*"
+          }
+          base=(--set database.url=x --set database.migrationUrl=y --set github.clientId=i
+                --set github.clientSecret=s --set github.redirectUri=https://x/cb)
+          refuse "${base[@]}" --set github.appId=1
+          refuse "${base[@]}" --set github.appId=1 --set github.privateKey=k
+          refuse "${base[@]}" --set github.privateKey=k --set github.webhookSecret=w
+          ok     "${base[@]}" --set github.appId=1 --set github.privateKey=k --set github.webhookSecret=w
+          # An operator-supplied Secret is evidence for Stripe and not for the
+          # App, because a Secret named by stripe.existingSecret exists for
+          # Stripe and nothing else, while github.existingSecret carries the
+          # OAuth App that every installation has. Both directions asserted, so
+          # neither rule can be quietly given the other's shape.
+          ok     --set database.existingSecret=d --set github.existingSecret=g
+          ok     --set database.existingSecret=d --set github.existingSecret=g --set github.appId=1
+          refuse "${base[@]}" --set stripe.secretKey=sk
+          refuse "${base[@]}" --set stripe.secretKey=sk --set stripe.webhookSecret=wh
+          refuse "${base[@]}" --set stripe.priceTeam=price
+          refuse "${base[@]}" --set stripe.existingSecret=s
+          ok     "${base[@]}" --set stripe.secretKey=sk --set stripe.webhookSecret=wh --set stripe.priceTeam=price
+          ok     "${base[@]}" --set stripe.existingSecret=s --set stripe.priceTeam=price
+          refuse "${base[@]}" --set config.adminPoolMax=4
+          ok     "${base[@]}" --set config.adminPoolMax=4 --set database.adminUrl=postgres://admin
+          refuse "${base[@]}" --set config.hostedRequiredPlan=enterprise
+          ok     "${base[@]}" --set config.hostedRequiredPlan=enterprise --set stripe.secretKey=sk \
+                 --set stripe.webhookSecret=wh --set stripe.priceTeam=price
 
       # Who may sign in, in all three of its states, because the difference
       # between them is the whole feature and two of the three are silent.

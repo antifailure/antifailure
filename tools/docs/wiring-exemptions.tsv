@@ -1,30 +1,46 @@
-# Variables docs/reference/control-plane.md documents and the Terraform module
-# in infra/terraform/modules/control-plane cannot set, with the reason each one
-# is allowed to stay that way.
+# Variables docs/reference/control-plane.md documents that a supported
+# installation route cannot set, with the reason each one is allowed to stay
+# that way on that route.
 #
-# Two tab separated fields: the variable, and why the supported deploy path
-# cannot deliver it. A reason is required, because an exemption with no
-# argument behind it cannot be told apart from somebody silencing a finding
-# they did not understand. An exemption that stops being needed is reported, so
-# this list cannot rot: figurecheck's equivalent had five stale rows found in
-# one evening, which is only possible because staleness fails.
+# THREE tab separated fields: the variable, the ROUTE the row excuses, and why
+# that route cannot deliver it. The routes are the ones tools/wirecheck knows:
+#
+#   terraform   infra/terraform/modules/control-plane, the hosted installation
+#   helm        deploy/helm/antifailure-control-plane, a Kubernetes one
+#
+# THE ROUTE COLUMN IS NOT BOOKKEEPING. A reason is a claim about one way of
+# installing this and is routinely false of another. AF_INSECURE_COOKIES is the
+# clearest case: the Terraform module refuses it on purpose, because TLS
+# terminates at the Container Apps ingress and a deployment that set it would be
+# sending session cookies without the Secure attribute over a public route; the
+# Helm chart sets it deliberately, because a chart installs on a laptop over
+# plain HTTP with no ingress at all. One variable, two routes, two opposite and
+# both correct answers, and a file with one row per variable could hold only one
+# of them. A row on a route nothing reads is refused rather than ignored, since
+# an exemption that looks applied and is not fails as quietly as a stale one.
+#
+# A reason is required, because an exemption with no argument behind it cannot
+# be told apart from somebody silencing a finding they did not understand. An
+# exemption that stops being needed is reported, so this list cannot rot:
+# figurecheck's equivalent had five stale rows found in one evening, which is
+# only possible because staleness fails.
 #
 # THE REASON HAS TO BE TRUE, and that is the whole mechanism. A value stamped
 # into the image at build time can say so. A value another process injects at
-# run time can say so. A variable an operator is expected to set on a hosted
-# installation cannot be given a truthful reason here, and the answer is then
-# to add an env block rather than to invent one. The twenty nine that this gate
-# was written for could not all have had rows: the operator database
-# credential, the Stripe configuration, the mail configuration, the analytics
-# secret and the App install address are every one of them things somebody
-# running this is meant to set, and there was nothing true to write for them.
+# run time can say so. A variable an operator is expected to set cannot be given
+# a truthful reason here, and the answer is then to wire it up rather than to
+# invent one. The twenty nine this gate was written for could not all have had
+# rows, and neither could the thirty two the Helm chart was missing: the
+# operator database credential, the GitHub App, billing, mail, provider key
+# sealing and analytics are every one of them things somebody running this is
+# meant to set, and there was nothing true to write for any of them.
 #
-# A ROW HERE MEANS "THE MODULE CANNOT SET IT", NOT "THE FEATURE DOES NOT WORK",
-# and the absence of a row means only that the module CAN set it. Neither says
+# A ROW HERE MEANS "THIS ROUTE CANNOT SET IT", NOT "THE FEATURE DOES NOT WORK",
+# and the absence of a row means only that the route CAN set it. Neither says
 # anything about whether the feature functions once it is set. Mail is the live
-# example: AF_MAIL_FROM and AF_RESEND_API_KEY have no row because the module
-# carries them, and mail from antifailure.dev is still rejected by every
-# receiver honouring DMARC until its DNS is fixed. This file is about delivery.
+# example: AF_MAIL_FROM and AF_RESEND_API_KEY have no row because both routes
+# carry them, and mail from antifailure.dev is still rejected by every receiver
+# honouring DMARC until its DNS is fixed. This file is about delivery.
 #
 # AF_CONTROL_PLANE_TOKEN and AF_ADMIN_BOOTSTRAP_PASSWORD are deliberately absent
 # from this file. The reference already says where each one is set, in a table
@@ -32,13 +48,21 @@
 # or in a CI job for the first, in the shell that runs the command for the
 # second. wirecheck reads that column rather than a row restating it.
 
-AF_VERSION	stamped into the image at build time by the release pipeline and reported by /readyz. A value set here would not change the build; it would make the endpoint lie about which one is running.
-AF_COMMIT	stamped into the image at build time, exactly as AF_VERSION is, and reported by the same endpoint for the same purpose.
-AF_MIGRATE	migrations are applied by the bootstrap job, which runs once and completes before the app rolls. This variable applies them at start-up instead, which on a Container App means every replica racing the same schema change. app.tf says so at the resource: the serving process holds no credential that can run DDL and this variable is absent on purpose.
-AF_ENV_URL	injected by Antifailure inside a preview environment: the address of the environment's first web service, allocated at run time. Nothing written in a manifest or a tfvars file can be right, which is why AF_PUBLIC_URL is the one a deployment sets and this is the fallback.
-AF_INSECURE_COOKIES	refused by this module on purpose rather than merely unset. TLS terminates at the Container Apps ingress and allow_insecure_connections is false, so an installation that set this would be sending session cookies without the Secure attribute over a public route. app.tf states it at the ingress block.
-AF_CONSOLE_DIR	the published image carries the console at the default path and nothing needs setting. It exists for somebody who builds console/ themselves, which is not a hosted installation of the published image.
-AF_STRIPE_PRICE_ENTERPRISE	there is no Stripe price behind Enterprise and there is not meant to be one. Enterprise is arranged with a person, so the plan is not sold self-serve; a module input for it would either be permanently empty or would make an absent price look present, and checkout refuses that plan by name instead.
-AF_STRIPE_API_BASE	where the Stripe API lives, overridden only by tests pointing at the engine's own Stripe mock pack. A hosted installation talks to Stripe, and a module input for this would be a way to point production's payments at something that is not Stripe.
-AF_RESEND_BASE_URL	where the mail API lives, overridden only to point at a local capture during development. A hosted installation sends real mail through Resend.
-AF_EVENT_ARCHIVE_DIR	a filesystem path, and this module mounts no volume on the maintenance job. A directory here would be the replica's own ephemeral storage, which is destroyed when the job ends, so the retention sweep would drop partitions whose archive did not survive being written. Setting it needs a storage mount this module does not create.
+AF_VERSION	terraform	stamped into the image at build time by the release pipeline and reported by /readyz. A value set here would not change the build; it would make the endpoint lie about which one is running.
+AF_COMMIT	terraform	stamped into the image at build time, exactly as AF_VERSION is, and reported by the same endpoint for the same purpose.
+AF_MIGRATE	terraform	migrations are applied by the bootstrap job, which runs once and completes before the app rolls. This variable applies them at start-up instead, which on a Container App means every replica racing the same schema change. app.tf says so at the resource: the serving process holds no credential that can run DDL and this variable is absent on purpose.
+AF_ENV_URL	terraform	injected by Antifailure inside a preview environment: the address of the environment's first web service, allocated at run time. Nothing written in a manifest or a tfvars file can be right, which is why AF_PUBLIC_URL is the one a deployment sets and this is the fallback.
+AF_INSECURE_COOKIES	terraform	refused by this module on purpose rather than merely unset. TLS terminates at the Container Apps ingress and allow_insecure_connections is false, so an installation that set this would be sending session cookies without the Secure attribute over a public route. app.tf states it at the ingress block.
+AF_CONSOLE_DIR	terraform	the published image carries the console at the default path and nothing needs setting. It exists for somebody who builds console/ themselves, which is not a hosted installation of the published image.
+AF_STRIPE_PRICE_ENTERPRISE	terraform	there is no Stripe price behind Enterprise and there is not meant to be one. Enterprise is arranged with a person, so the plan is not sold self-serve; a module input for it would either be permanently empty or would make an absent price look present, and checkout refuses that plan by name instead.
+AF_STRIPE_API_BASE	terraform	where the Stripe API lives, overridden only by tests pointing at the engine's own Stripe mock pack. A hosted installation talks to Stripe, and a module input for this would be a way to point production's payments at something that is not Stripe.
+AF_RESEND_BASE_URL	terraform	where the mail API lives, overridden only to point at a local capture during development. A hosted installation sends real mail through Resend.
+AF_EVENT_ARCHIVE_DIR	terraform	a filesystem path, and this module mounts no volume on the maintenance job. A directory here would be the replica's own ephemeral storage, which is destroyed when the job ends, so the retention sweep would drop partitions whose archive did not survive being written. Setting it needs a storage mount this module does not create.
+AF_VERSION	helm	stamped into the image at build time by the release pipeline and reported by /readyz, exactly as on the hosted route. A value set in a values file would not change the image; it would make the endpoint lie about which one is running.
+AF_COMMIT	helm	stamped into the image at build time, exactly as AF_VERSION is, and reported by the same endpoint for the same purpose.
+AF_MIGRATE	helm	migrations are the bootstrap Job's work. That Job is a pre-install hook, runs once, and completes before the Deployment rolls; this variable applies them at start-up instead, which on a Deployment means every replica racing the same schema change. templates/deployment.yaml says so where the variable would otherwise go: the serving pods hold no credential that can run DDL, so setting it would not even work.
+AF_ENV_URL	helm	injected by Antifailure inside a preview environment: the address of the environment's first web service, allocated at run time. Nothing written in a values file can be right, which is why config.publicUrl is the one an installation sets and this is the fallback.
+AF_CONSOLE_DIR	helm	the published image carries the console at the default path and nothing needs setting. It exists for somebody who builds console/ themselves, which is not an installation of the published image, and such a person is building their own image and can set it there.
+AF_STRIPE_PRICE_ENTERPRISE	helm	there is no Stripe price behind Enterprise and there is not meant to be one. Enterprise is arranged with a person, so the plan is not sold self-serve; a values key for it would either be permanently empty or would make an absent price look present, and checkout refuses that plan by name instead.
+AF_STRIPE_API_BASE	helm	where the Stripe API lives, overridden only by tests pointing at the engine's own Stripe mock pack. A real installation talks to Stripe, and a values key for this would be a way to point a production installation's payments at something that is not Stripe. Somebody who genuinely needs it has extraEnv, which is what an escape hatch is for.
+AF_RESEND_BASE_URL	helm	where the mail API lives, overridden only to point at a local capture during development. A real installation sends real mail through Resend, and extraEnv covers the development case.

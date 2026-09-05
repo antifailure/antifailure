@@ -341,3 +341,163 @@ describe('the route boundary', () => {
     assert.deepEqual(missing, ['GET /v1/invented'], 'a contract route absent from the document was not caught')
   })
 })
+
+// ---------------------------------------------------------------------------
+// What the 404 says about the document, held to the same register.
+// ---------------------------------------------------------------------------
+//
+// `apiNotFound` used to tell every caller "GET /openapi.json lists every
+// endpoint this control plane serves". That was false the moment #93 withheld
+// the operator surface and stayed false through every route classified
+// `excluded` since. Production serves the document with 94 paths and not one
+// of the four routes the marketing site calls is in it.
+//
+// The cost is specific rather than cosmetic. Somebody who mistypes
+// `/v1/application` gets that sentence, fetches the document, does not find
+// `/v1/applications` in it either, and concludes from what we told them that
+// the endpoint does not exist. It does. Watch the near miss while reading
+// this: `/v1/auth/github-oidc` IS in the document and is a different route
+// from `GET /auth/github`, which is not.
+//
+// Nothing pinned the sentence, so nothing could notice it had gone false.
+// These three assertions are what a false claim in this particular error body
+// is catchable BY, and the reason it is catchable at all is that the claim is
+// about a document this same process serves and a register this repository
+// already keeps. Neither of those is true of error bodies in general, and no
+// assertion here would catch a false claim about anything else.
+describe('the 404 the API answers with', () => {
+  /** The body the running server actually returns for an unrouted path. */
+  async function notFoundBody(): Promise<string> {
+    const { app } = createServer({
+      pool: {} as unknown as Pool,
+      github: {} as unknown as GitHubClient,
+    })
+    // A path with the shape of the mistake this is for: one character off a
+    // route that exists and is deliberately not in the document.
+    const res = await app.request('/v1/application')
+    assert.equal(res.status, 404, 'the path chosen for this test is routed after all')
+    const body = (await res.json()) as { error?: string }
+    assert.ok(typeof body.error === 'string' && body.error.length > 0, 'the 404 carries no message')
+    return body.error
+  }
+
+  /**
+   * The disclaimer the body has to carry while the document is not exhaustive,
+   * and has to drop when it is.
+   *
+   * A substring rather than the whole sentence, because pinning the whole
+   * sentence would fail on a comma and teach people to update the literal
+   * without re-reading the claim. A substring rather than a pattern for words
+   * like "every" or "all", because the honest sentence has to be able to
+   * NEGATE a completeness claim and a rule that cannot tell a mention from a
+   * use would refuse it. That distinction has cost this repository four
+   * instruments in one day.
+   */
+  const NOT_EXHAUSTIVE = 'not everything this control plane serves'
+
+  it('names a route this same process serves, so the answer cannot rot', async () => {
+    const message = await notFoundBody()
+    const named = message.match(/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\/\S*)/)
+    assert.ok(
+      named,
+      `the 404 names no route to go and look at, so nothing here can check what it points ` +
+        `somebody at: ${JSON.stringify(message)}`,
+    )
+    // The trailing punctuation of the sentence is not part of the path, and
+    // the dot in `/openapi.json` is. Stripping only the sentence enders keeps
+    // both true; a character class that excluded dots read the route as
+    // `/openapi` and failed on the correct message.
+    const route = `${named[1]} ${named[2]!.replace(/[.,;:]+$/, '')}`
+    assert.ok(
+      servedRoutes().includes(route),
+      `the 404 sends a caller to ${route} and this process does not serve it`,
+    )
+  })
+
+  /**
+   * The rule, as a function, so both of its branches can be exercised.
+   *
+   * Returns what is wrong or null. The real assertion below feeds it the real
+   * numbers and the real body; the control after it feeds it fabricated ones,
+   * because a rule that has only ever been shown agreeing with today's tree is
+   * evidence that today's tree is consistent and not that an inconsistent one
+   * would be caught.
+   */
+  function claimProblem(absent: string[], served: number, message: string): string | null {
+    if (absent.length > 0) {
+      if (message.includes(NOT_EXHAUSTIVE)) return null
+      return (
+        `${absent.length} of the ${served} routes this process serves are not in openapi.json, ` +
+        `and the 404 does not say so:\n  ${JSON.stringify(message)}\n` +
+        `A caller who mistyped one of them reads this, fetches the document, does not find the ` +
+        `route there either, and concludes it does not exist. Among the absent: ` +
+        `${absent.slice(0, 4).join(', ')}`
+      )
+    }
+    if (!message.includes(NOT_EXHAUSTIVE)) return null
+    return (
+      `the document now carries every route this process serves, so the 404 has nothing left ` +
+      `to disclaim. Delete the clause naming ${JSON.stringify(NOT_EXHAUSTIVE)}.`
+    )
+  }
+
+  it('does not tell a caller the document is complete while it is not', async () => {
+    // The decidable half. "Is the document exhaustive" is a set comparison
+    // this file already knows how to do, so the claim in the body is checked
+    // against the answer rather than against a form of words.
+    const served = servedRoutes()
+    assert.ok(
+      served.length > 50,
+      `only ${served.length} routes were found, so this comparison is not looking at the server`,
+    )
+    const absent = served.filter((route) => {
+      const space = route.indexOf(' ')
+      return !generated.has(`${route.slice(0, space)} ${documentPath(route.slice(space + 1))}`)
+    })
+    assert.equal(claimProblem(absent, served.length, await notFoundBody()), null)
+  })
+
+  it('catches the claim in both directions, on fabricated numbers', () => {
+    // The negative control. Without it the assertion above is only evidence
+    // that the sentence and the register agree today.
+    assert.match(
+      claimProblem(['GET /auth/github'], 100, 'GET /openapi.json lists every endpoint this control plane serves.') ?? '',
+      /does not say so/,
+      'a completeness claim over a document missing a served route was not caught',
+    )
+    assert.equal(
+      claimProblem(['GET /auth/github'], 100, `it is ${NOT_EXHAUSTIVE}`),
+      null,
+      'an honest disclaimer was reported as a problem',
+    )
+    assert.match(
+      claimProblem([], 100, `it is ${NOT_EXHAUSTIVE}`) ?? '',
+      /nothing left to disclaim/,
+      'a disclaimer left behind after the document became complete was not caught',
+    )
+    assert.equal(
+      claimProblem([], 100, 'GET /openapi.json describes the endpoints a client can integrate with.'),
+      null,
+      'a body with no claim to make was reported as a problem',
+    )
+  })
+
+  it('is false about the four routes the site calls, which is what produced this', async () => {
+    // The concrete case, named so it cannot be argued away as theoretical. If
+    // any of these is ever published the assertion fails and whoever published
+    // it deletes the line, the same self-emptying device as
+    // CONTRACT_NOT_YET_IN_DOCUMENT above.
+    const siteCalls = ['GET /auth/github', 'POST /v1/applications', 'POST /v1/leads']
+    const served = new Set(servedRoutes())
+    for (const route of siteCalls) {
+      assert.ok(served.has(route), `${route} is not served, so this case no longer says anything`)
+      const space = route.indexOf(' ')
+      const published = `${route.slice(0, space)} ${documentPath(route.slice(space + 1))}`
+      assert.ok(
+        !generated.has(published),
+        `${route} is in the document now. Delete it from this list; the 404's disclaimer is ` +
+          `about the routes that are not.`,
+      )
+    }
+  })
+})

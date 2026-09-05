@@ -122,7 +122,7 @@ func check(sbomPath, artifacts, name string, minPackages int, out io.Writer) ([]
 	if err := validateAgainstSchema(body); err != nil {
 		return []string{fmt.Sprintf("it is not a valid SPDX 2.3 document: %v", err)}, nil
 	}
-	fmt.Fprintf(out, "ok  %s validates against the SPDX 2.3 schema\n", filepath.Base(sbomPath))
+	_, _ = fmt.Fprintf(out, "ok  %s validates against the SPDX 2.3 schema\n", filepath.Base(sbomPath))
 
 	var doc document
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -176,11 +176,11 @@ func check(sbomPath, artifacts, name string, minPackages int, out io.Writer) ([]
 				b.rel, sum, b.rel))
 			continue
 		}
-		fmt.Fprintf(out, "ok  %s is described, sha256 %s\n", b.rel, sum)
+		_, _ = fmt.Fprintf(out, "ok  %s is described, sha256 %s\n", b.rel, sum)
 	}
 
 	if len(problems) == 0 {
-		fmt.Fprintf(out, "sbomcheck: %d packages, %d binaries, every one described\n",
+		_, _ = fmt.Fprintf(out, "sbomcheck: %d packages, %d binaries, every one described\n",
 			len(doc.Packages), len(binaries))
 	}
 	return problems, nil
@@ -255,7 +255,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err

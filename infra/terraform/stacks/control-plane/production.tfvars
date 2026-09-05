@@ -340,10 +340,98 @@ alerting_enabled = true
 # argument, and it is a step somebody runs after this applies.
 operator_portal_enabled = true
 
-# Where the marketing site is served from, for the two endpoints a browser
-# calls cross origin: the contact form that writes a lead, and the analytics
-# beacon. Unset refuses every one of them rather than reflecting whatever
-# Origin arrives, which is the right default and the wrong answer for the plane
-# that antifailure.dev actually talks to. Unset here presents to a visitor as a
-# network error on the contact form with no explanation anywhere.
-site_origin = "https://antifailure.dev"
+# EVERY hostname the marketing site is served on, for the three endpoints a
+# browser calls cross origin: the contact form that writes a lead, the careers
+# form that writes an application, and the analytics beacon. Unset refuses every
+# one of them rather than reflecting whatever Origin arrives, which is the right
+# default and the wrong answer for the plane that antifailure.dev actually talks
+# to. Unset here presents to a visitor as a network error on the contact form
+# with no explanation anywhere.
+#
+# BOTH HOSTNAMES, AND THIS LINE HELD ONLY THE APEX. antifailure.dev and
+# www.antifailure.dev are two custom domains on the same Azure Static Web App,
+# both Ready, both answering 200 for every page, and Static Web Apps cannot
+# redirect one to the other because a route rule matches on PATH and its schema
+# carries no hostname condition. So everybody who typed www, followed an old
+# link, or was handed the www page by a search engine had the beacon, the
+# contact form and the careers form refused 403, and nothing on the page said
+# why. Reported from a phone on the live site while every check was green,
+# because every check asked the apex.
+#
+# tools/site/hostnames.txt is the same set written once. `just check-origins`
+# refuses when this value, that file and the domains actually bound to af-site
+# disagree.
+site_origin = "https://antifailure.dev,https://www.antifailure.dev"
+
+# ---------------------------------------------------------------------------
+# The acquisition dashboard, and who it belongs to.
+# ---------------------------------------------------------------------------
+
+# WITHOUT THIS, THE PAGE CAN ONLY REFUSE. routers/analytics.ts compares the
+# caller's organization slug against this value, and an empty value refuses
+# EVERYBODY with PRECONDITION_FAILED naming the variable. That is the state
+# this plane was in while the console showed the page to every customer, so the
+# only thing anybody ever saw there was an error about a variable they could
+# not set.
+#
+# The slug rather than the identifier, because a slug is what an operator can
+# write here without first querying their own database. It is compared against
+# the row rather than against the session, so renaming the organization takes
+# effect on the next request rather than at a sign-in that may never come.
+#
+# `antifailure` is the organization operating this control plane. It is the
+# same row every tenant here is a peer of, which is why the console never
+# receives this value: naming the operator to a customer is a fact about
+# somebody else. The session carries a boolean instead.
+analytics_operator_org = "antifailure"
+
+# Recording, which is a separate question from reading. Off means the page
+# still renders and says, in the provenance line, that every number on it is
+# zero because nothing is being counted, rather than presenting an empty funnel
+# as a bad week.
+analytics_enabled = true
+
+# ---------------------------------------------------------------------------
+# Taking payment.
+# ---------------------------------------------------------------------------
+
+# ONE SWITCH, AND IT IS THIS LINE. An empty stripe_price_team is billing off
+# for the whole installation: modules/control-plane/keyvault.tf references no
+# Stripe secret, app.tf sets none of the three environment variables, and the
+# process says "billing is off" at start-up. Setting it turns all of that on
+# together, which is deliberate. A plane that had an API key and no price, or a
+# price and no webhook secret, would be one that can start a checkout it cannot
+# finish, and the first person to find that would be a customer holding a
+# receipt for something they did not get.
+#
+# THE VALUE HERE IS NOT A SECRET AND THE TWO THAT ARE DO NOT LIVE IN THIS FILE.
+# A price identifier is sent to a browser to start a checkout, so it belongs in
+# a tracked file. The API key and the webhook signing secret are addressed by
+# their versionless vault IDs and read by the Container App identity at deploy
+# time. Terraform never sees either value, no plan reads them, and the pull
+# request plan job holds no Key Vault data role at all.
+#
+# WHICH MEANS THE ORDER MATTERS, AND GETTING IT WRONG BREAKS A DEPLOY RATHER
+# THAN FAILING A PLAN. Azure resolves those two references when it creates the
+# revision. If the secrets are not in afcpprod-kv-centralus before the apply,
+# the plan still succeeds and the revision fails to start. Put both secrets in
+# the vault first. docs/src/content/docs/self-hosting/production.md has the
+# commands, and they pass the value on standard input so it never reaches a
+# shell history or a process listing.
+#
+# Team is a flat 500 USD per month for the organization rather than per seat,
+# which is why checkout sends quantity exactly 1. There is deliberately no
+# enterprise price: that plan is arranged with a person, and checkout refuses
+# it by name rather than reaching Stripe with an empty identifier.
+stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
+
+# NOT SET, AND THAT IS THE DECISION RATHER THAN THE DEFAULT. hosted_required_plan
+# would gate the product behind a paid plan, and modules/control-plane/app.tf
+# refuses it unless billing is on, so switching billing on is the moment it
+# becomes settable. It stays empty: turning payment on so somebody CAN buy is a
+# different act from requiring everybody already here to buy, and the second one
+# locks out every organization on this plane the moment it applies.
+#
+# operator_sets_plan is likewise unset and cannot be set now. Granting a plan by
+# hand on a plane that sells the same plan is refused at plan time, and the
+# process exits at start-up on the combination.

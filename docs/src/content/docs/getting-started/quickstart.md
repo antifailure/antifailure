@@ -117,6 +117,30 @@ kernel isolation, proxy settings, git, and the environments this machine is
 still holding. Every problem it names carries what to do about it, and every one
 of them is a problem you would otherwise meet halfway through a run.
 
+It also validates the manifest when one exists and compares a stable CLI version
+with the latest published GitHub release, with a three second network timeout.
+An outdated version or invalid manifest fails the check. No network, a development
+build, or no manifest is reported explicitly, never as a successful check of
+something it could not inspect. An absent manifest is normal before initialization;
+it does not mean the machine is broken.
+
+```bash
+af update
+```
+
+This downloads the latest stable release for this platform, verifies its published
+checksum, and replaces the installed binary and its bundled runner source. The old
+binary stays in place until the replacement is ready. Shell profiles and project
+files are left alone. If a package manager owns the binary, upgrade through that
+manager instead. Enterprise binaries use their enterprise distribution, not the
+public community release. Afterwards, run `af runner install` to refresh the installed
+runner and `af doctor` to check the installation. To see the latest release without
+changing files:
+
+```bash
+af update --check
+```
+
 ## Install the agent runner
 
 ```bash
@@ -140,6 +164,15 @@ node against the range the runner requires, and the browser. It does not claim
 the runner executes, because knowing that means starting node and launching a
 browser, which is what `af test` is. Anything it cannot determine it reports as
 not checked rather than as ok.
+
+It reports on the runner `af test` would use from where you are standing, and
+prints that path. A run looks for a runner in your own checkout before it looks
+at `~/.antifailure/runner`, and it takes the nearest one that can actually run
+rather than the nearest one that exists, so a `runner/` directory whose
+dependencies were never installed is passed over rather than started and
+crashed. When that happens the check names the directory it went past and says
+what is missing from it, because a report about a tree you did not mean is
+worse than no report.
 
 A failed browser download is not fatal. The runner is usable the moment a
 browser arrives, and until then a workflow that needs a page read comes back

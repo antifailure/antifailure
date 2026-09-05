@@ -165,7 +165,7 @@ export default function MaskingPage() {
     >
       <Page
         title="Masking"
-        lede="Which columns are transformed on the way out, and what each golden attests it did."
+        lede="Masking replaces sensitive values in copied data before tests use it. Review the rules here and the verification recorded for each reusable database snapshot, called a golden."
       >
         <WithRepository>{(repository) => <Masking repository={repository} />}</WithRepository>
       </Page>

@@ -317,7 +317,7 @@ export type Tone = "pass" | "fail" | "warn" | "neutral";
  */
 export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   const styles: Record<Tone, string> = {
-    pass: "text-pass bg-[rgba(30,122,58,0.1)]",
+    pass: "text-pass bg-card",
     fail: "text-fail bg-[rgba(179,38,30,0.1)]",
     warn: "text-warn bg-[rgba(138,90,0,0.12)]",
     neutral: "text-muted bg-[rgba(16,16,16,0.06)]",
@@ -547,7 +547,7 @@ export function CommandBlock({
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink">
+      <pre tabIndex={0} className="min-w-0 flex-1 overflow-x-auto rounded-md border border-rule bg-[rgba(16,16,16,0.03)] px-3 py-2.5 font-mono text-[12.5px] leading-6 text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink">
         <code>{command}</code>
       </pre>
       <CopyButton

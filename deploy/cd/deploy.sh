@@ -12,10 +12,11 @@
 #      one. A revision that cannot start never reaches a user.
 #   3. Shift traffic.
 #   4. Check the public origin, including which commit answers.
-#   5. Deactivate every revision this deploy superseded except one, and prove
-#      what is left fits in the database's connection budget.
-#   6. On any failure after step 2, put traffic back on the revision that was
-#      serving before and deactivate the new one.
+#   5. Deactivate every revision this deploy superseded except one, update the
+#      scheduled job, and prove the database's connection budget still fits.
+#   6. On a failed public health check, restore the previous revision. Candidate
+#      failures never move traffic. Maintenance and budget failures report the
+#      unhealthy operational state while leaving the healthy app serving.
 #
 # Step 6 is only fast because the app runs in Multiple revision mode: the old
 # revision is still up with no traffic, so the way back is one API call rather
@@ -28,16 +29,17 @@
 # backward compatible with the previous release. That constraint is real and is
 # stated in docs/plan/notes/cd.md rather than pretended away here.
 #
-#   deploy.sh <resource-group> <app> <bootstrap-job> <image> <commit> <base-url>
+#   deploy.sh <resource-group> <app> <bootstrap-job> <maintenance-job> <image> <commit> <base-url>
 
 set -euo pipefail
 
 RG="${1:?resource group}"
 APP="${2:?container app}"
-JOB="${3:?bootstrap job}"
-IMAGE="${4:?image reference, digest-pinned}"
-COMMIT="${5:?commit being deployed}"
-BASE_URL="${6:?public origin}"
+BOOTSTRAP_JOB="${3:?bootstrap job}"
+MAINTENANCE_JOB="${4:?maintenance job}"
+IMAGE="${5:?image reference, digest-pinned}"
+COMMIT="${6:?commit being deployed}"
+BASE_URL="${7:?public origin}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -242,17 +244,17 @@ say "currently serving: $PREVIOUS"
 # ---------------------------------------------------------------------------
 # 1. Migrations, before traffic.
 # ---------------------------------------------------------------------------
-say "migration pre-check: running $JOB on the new image"
+say "migration pre-check: running $BOOTSTRAP_JOB on the new image"
 
-az containerapp job update -n "$JOB" -g "$RG" --image "$IMAGE" -o none
+az containerapp job update -n "$BOOTSTRAP_JOB" -g "$RG" --image "$IMAGE" -o none
 
-EXEC="$(az containerapp job start -n "$JOB" -g "$RG" --query name -o tsv)"
+EXEC="$(az containerapp job start -n "$BOOTSTRAP_JOB" -g "$RG" --query name -o tsv)"
 say "bootstrap execution: $EXEC"
 
 # Poll rather than trusting a single read: the execution is Running for a while
 # and its terminal state is the only one worth acting on.
 for _ in $(seq 1 60); do
-  STATUS="$(az containerapp job execution show -n "$JOB" -g "$RG" --job-execution-name "$EXEC" \
+  STATUS="$(az containerapp job execution show -n "$BOOTSTRAP_JOB" -g "$RG" --job-execution-name "$EXEC" \
     --query "properties.status" -o tsv 2>/dev/null || echo Unknown)"
   case "$STATUS" in
     Succeeded) break ;;
@@ -332,7 +334,9 @@ if [ -n "$REV_FQDN" ] && [ "$REV_FQDN" != "None" ]; then
     exit 1
   fi
 else
-  say "no per-revision address available; skipping the pre-promotion smoke test"
+  say "NO CANDIDATE ADDRESS. Cannot prove the revision is healthy. Traffic never moved; $PREVIOUS is still serving."
+  az containerapp revision deactivate -n "$APP" -g "$RG" --revision "$NEW" -o none || true
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -345,7 +349,40 @@ say "post-deploy health gate on $BASE_URL"
 if "$HERE/health-gate.sh" "$BASE_URL" "$COMMIT" 40 3; then
   say "DEPLOYED: $BASE_URL is serving $COMMIT from $NEW"
   reap_superseded "$NEW" "$PREVIOUS"
+
+  # The scheduled job must run the same code that is serving. Terraform creates
+  # it from a release tag, but continuous deployment moves the application by
+  # digest. Before this update, every app deploy left maintenance on the tag
+  # Terraform last applied. Production reached v1.1.0 while the partition job
+  # still ran v1.0.0.
+  #
+  # This is after both health gates. Moving the job before the candidate proves
+  # itself would let a failed release change the process that runs DDL later.
+  # A failure here does not roll back a healthy application. It makes the run
+  # fail with the app serving and the scheduled job unchanged, which is the
+  # exact state an operator has to repair.
+  maintenance_updated=true
+  say "updating scheduled maintenance job $MAINTENANCE_JOB to the tested image"
+  if az containerapp job update -n "$MAINTENANCE_JOB" -g "$RG" --image "$IMAGE" -o none; then
+    maintenance_image="$(az containerapp job show -n "$MAINTENANCE_JOB" -g "$RG" \
+      --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)"
+    if [ "$maintenance_image" = "$IMAGE" ]; then
+      say "maintenance job now uses $IMAGE"
+    else
+      maintenance_updated=false
+      echo "maintenance image read back as ${maintenance_image:-nothing}; expected $IMAGE"
+    fi
+  else
+    maintenance_updated=false
+  fi
+  if [ "$maintenance_updated" != true ]; then
+    echo "::error title=Maintenance image stayed behind::$APP is healthy on $COMMIT, but $MAINTENANCE_JOB is not on $IMAGE. The application remains on the healthy revision."
+  fi
+
   assert_connection_budget
+  if [ "$maintenance_updated" != true ]; then
+    exit 1
+  fi
   exit 0
 fi
 

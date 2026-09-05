@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ROLE_PERMISSIONS, may } from "./roles.ts";
+import { ROLE_PERMISSIONS, may, mayReadAnalytics } from "./roles.ts";
 
 /*
  * The invariants the lapsed-exits screen is built on.
@@ -51,4 +51,18 @@ test("an unknown or absent role is refused rather than defaulted", () => {
   assert.equal(may(undefined, "data.export"), false);
   assert.equal(may("", "organization.delete"), false);
   assert.equal(may("superuser", "billing.manage"), false);
+});
+
+test("analytics needs both the operator organization and a permitted role", () => {
+  assert.deepEqual(
+    [
+      mayReadAnalytics({ analyticsOperator: true, role: "owner" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "admin" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "member" }),
+      mayReadAnalytics({ analyticsOperator: true, role: "viewer" }),
+      mayReadAnalytics({ analyticsOperator: false, role: "owner" }),
+      mayReadAnalytics({ role: "owner" }),
+    ],
+    [true, true, false, false, false, false],
+  );
 });

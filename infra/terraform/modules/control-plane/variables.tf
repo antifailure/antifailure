@@ -154,7 +154,7 @@ variable "image_repository" {
 }
 variable "image_tag" {
   type    = string
-  default = "v1.0.0"
+  default = "v1.1.1"
 }
 variable "image_digest" {
   type        = string
@@ -470,15 +470,50 @@ variable "analytics_retention_days" {
   description = "Delete raw analytics events older than this many days. Null keeps them forever, because retention is an operator's decision."
 }
 
-# The one origin the marketing site's beacon may be called from.
+# Every origin the marketing site is served from, for the three things a
+# browser on it calls cross origin: the analytics beacon, the enterprise lead
+# form and the careers application form.
 #
-# Empty refuses every beacon, which is what unset does in the application too,
-# so this cannot be set wrong in the dangerous direction: there is no value here
+# Empty refuses all of them, which is what unset does in the application too, so
+# this cannot be set wrong in the dangerous direction: there is no value here
 # that reflects whatever Origin arrives.
+#
+# MORE THAN ONE, COMMA SEPARATED, BECAUSE THE SITE IS SERVED ON MORE THAN ONE
+# HOSTNAME. This held one value, the apex, and www.antifailure.dev is a second
+# custom domain on the same Azure Static Web App answering 200 for every page.
+# Static Web Apps cannot redirect one hostname to the other: a route rule matches
+# on PATH and the schema has no hostname condition at all. So a visitor on www
+# had every call the site makes refused 403 and there was nothing in the tree
+# that could have said so.
+#
+# STILL ONE STRING, and that is deliberate rather than lazy. It is the value of
+# AF_SITE_ORIGIN with nothing done to it, so there is no join between what an
+# operator writes and what the process parses, and no shape for that join to get
+# wrong. It is also the input docs/reference/stability.md promised: a list would
+# be a retyped variable, which costs a major version, and every tfvars already
+# holding one origin keeps working untouched.
 variable "site_origin" {
   type        = string
   default     = ""
-  description = "The origin the marketing site is served from. Empty refuses every beacon."
+  description = "Every origin the marketing site is served from, as whole origins separated by commas, such as https://example.com,https://www.example.com. Empty refuses every beacon, lead and application."
+
+  validation {
+    # A path, a query or anything beyond scheme, host and port can never equal
+    # an Origin header, so such a value would allow nobody while looking
+    # configured. The application refuses it at startup; refusing it at plan
+    # time means finding out before the revision fails rather than after.
+    condition = var.site_origin == "" || alltrue([
+      for o in split(",", var.site_origin) : can(regex("^https?://[^/?#,]+$", trimspace(o)))
+    ])
+    error_message = "Each site origin must be scheme, host and optional port and nothing more, such as https://example.com. A browser sends only that in the Origin header. Separate several with commas."
+  }
+
+  validation {
+    # There is no value here meaning "any origin". The routes this configures
+    # write to the database from an unauthenticated caller.
+    condition     = !strcontains(var.site_origin, "*")
+    error_message = "There is no wildcard site origin. Name each origin the site is served on."
+  }
 }
 
 # Where a person with no organization installs the GitHub App.

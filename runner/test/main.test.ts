@@ -32,7 +32,7 @@ interface RunnerOutput {
   explorations: unknown[];
 }
 
-async function runMain(doc: Record<string, unknown>): Promise<{
+async function runMain(doc: Record<string, unknown>, environment = process.env): Promise<{
   code: number | null;
   stdout: string;
   stderr: string;
@@ -40,6 +40,7 @@ async function runMain(doc: Record<string, unknown>): Promise<{
   const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-main-'));
   const child = spawn(process.execPath, ['--experimental-strip-types', main], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: environment,
   });
   let stdout = '';
   let stderr = '';
@@ -72,6 +73,14 @@ test('a document whose workflows are null is a document with no workflows', asyn
   const doc = JSON.parse(stdout) as RunnerOutput;
   assert.deepEqual(doc.results, []);
   assert.deepEqual(doc.explorations, []);
+});
+
+test('a runner with no workflows does not claim it is using a model', async () => {
+  const result = await runMain({
+    base_url: 'http://127.0.0.1:1', workflows: [], goals: [], personas: [],
+  }, { ...process.env, ANTHROPIC_API_KEY: 'AF_FAKE_UNUSED_MODEL_KEY' });
+  if (result.code !== 0) throw new Error(result.stderr);
+  assert.doesNotMatch(result.stderr, /reading pages with/);
 });
 
 test('a document with no workflows key at all is the same answer', async () => {

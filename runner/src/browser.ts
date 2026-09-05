@@ -94,6 +94,67 @@ async function settled(pw: PWPage): Promise<void> {
   await pw.waitForLoadState('networkidle', { timeout: RENDER_MS }).catch(() => {});
 }
 
+/** How long a press gets to finish what it started, and how long still counts
+ *  as the page having stopped changing.
+ *
+ * THE FAILURE. A press on a form that submits through `fetch` returns the
+ * instant the click lands, and the page's own handler then disables the
+ * fieldset while the request is in flight. The snapshot taken immediately
+ * afterwards reads a form with every field disabled and a submit button
+ * relabelled "Recording it", which the snapshot reports as a page offering
+ * nothing at all. Driving this repository's own careers form, the agent filled
+ * it in, pressed "Send application", looked at the page a millisecond later,
+ * decided nothing there moved it forward, and followed the "Sign in" link in
+ * the site header instead. It had filled in a form and then walked away from
+ * it, and the run reported a careers page with no controls on it.
+ *
+ * `settled` CANNOT FIX THIS AND IT IS WORTH KNOWING WHY, because it looks like
+ * it should. `waitForLoadState('networkidle')` asks whether the CURRENT
+ * DOCUMENT has already reached that state, not whether the page is quiet right
+ * now. A client rendered page reaches it seconds after it loads and stays
+ * there, so every later call returns immediately, and a press that starts a
+ * request is followed by a "wait" that waits for nothing. It is still right
+ * after a navigation, which is a new document, and that is what it is kept
+ * for.
+ *
+ * What is actually being waited for is the page settling, so that is what is
+ * measured: the rendered text is read until it stops changing.
+ */
+const PRESS_MS = 15_000;
+const QUIET_MS = 300;
+
+/** Waits until the page's rendered text stops changing, or the budget runs out.
+ *
+ * Bounded on both sides on purpose. A page that never stops changing, because
+ * something on it animates or polls, must not hold a run forever; and a page
+ * that changed once must not be read in the middle of changing again.
+ */
+async function quiet(
+  pw: PWPage, budgetMs: number, inFlight: () => number,
+): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  let last: string | undefined;
+  let since = Date.now();
+  for (;;) {
+    const now = await pw.locator('body').innerText().catch(() => '');
+    // A request still in the air is the case this is really about. The form
+    // disables its own fieldset for exactly as long as the request takes, so
+    // the text is perfectly stable while the page is at its least readable:
+    // no fields, no submit control, and a button labelled "Recording it".
+    // Text alone said "settled" there, and a slow answer from the control
+    // plane was enough to make the agent walk off to the site header.
+    const busy = inFlight() > 0;
+    if (busy || now !== last) {
+      last = now;
+      since = Date.now();
+    } else if (Date.now() - since >= QUIET_MS) {
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    await pw.waitForTimeout(100);
+  }
+}
+
 /** Session is one browser, one context, one page, and its evidence. */
 export class Session {
   readonly #browser: Browser;
@@ -101,6 +162,8 @@ export class Session {
   readonly #page: PWPage;
   readonly #console: string[] = [];
   readonly #failed: string[] = [];
+  /** How many requests this page has in the air right now. See quiet. */
+  #inFlight = 0;
   readonly #artifacts: string;
 
   private constructor(browser: Browser, context: BrowserContext, page: PWPage, artifacts: string) {
@@ -134,12 +197,15 @@ export class Session {
     const page = await context.newPage();
     const session = new Session(browser, context, page, options.artifacts);
 
+    page.on('request', () => { session.#inFlight++; });
+    page.on('requestfinished', () => { session.#inFlight--; });
     page.on('console', (m) => {
       if (m.type() === 'error' || m.type() === 'warning') {
         session.#console.push(`${m.type()}: ${m.text()}`);
       }
     });
     page.on('requestfailed', (r) => {
+      session.#inFlight--;
       // The egress policy is the usual cause, and naming the request is the
       // difference between a mystery and a one line fix.
       session.#failed.push(`${r.method()} ${r.url()}: ${r.failure()?.errorText ?? 'failed'}`);
@@ -150,6 +216,10 @@ export class Session {
   /** page returns the adapter the login and workflow code drives. */
   page(): Page {
     const pw = this.#page;
+    // Read through a closure rather than passed as a number, because it has to
+    // be the count AT THE MOMENT IT IS ASKED, not the count when the press
+    // started, which is always zero.
+    const inFlight = () => this.#inFlight;
     return {
       async goto(url: string) {
         await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -162,6 +232,13 @@ export class Session {
         // reachability and does not need to be long.
         await (await locate(pw, field, 3_000)).fill(value, { timeout: 10_000 });
       },
+      async check(field: RegExp) {
+        // A checkbox and a radio are not filled, they are chosen, and `fill`
+        // on either throws. Separated here rather than branched inside `fill`
+        // because the caller already knows which it wants: a planner that
+        // decided to tick an acknowledgment has not decided to type into it.
+        await (await locate(pw, field, 3_000)).check({ timeout: 10_000 });
+      },
       async has(field: RegExp, timeoutMs: number) {
         const half = Math.max(250, Math.floor(timeoutMs / 2));
         try {
@@ -172,20 +249,27 @@ export class Session {
         }
       },
       async click(control: RegExp) {
-        const button = pw.getByRole('button', { name: control });
-        if (await button.count() > 0) {
-          await button.first().click({ timeout: 10_000 });
-          return;
-        }
-        const link = pw.getByRole('link', { name: control });
-        if (await link.count() > 0) {
-          await link.first().click({ timeout: 10_000 });
-          return;
-        }
-        // Falls back to anything with that accessible name, which covers the
-        // div somebody made into a button. Failing here rather than guessing
-        // at a selector keeps the failure honest.
-        await pw.getByText(control).first().click({ timeout: 10_000 });
+        const press = async () => {
+          const button = pw.getByRole('button', { name: control });
+          if (await button.count() > 0) {
+            await button.first().click({ timeout: 10_000 });
+            return;
+          }
+          const link = pw.getByRole('link', { name: control });
+          if (await link.count() > 0) {
+            await link.first().click({ timeout: 10_000 });
+            return;
+          }
+          // Falls back to anything with that accessible name, which covers the
+          // div somebody made into a button. Failing here rather than guessing
+          // at a selector keeps the failure honest.
+          await pw.getByText(control).first().click({ timeout: 10_000 });
+        };
+        await press();
+        // A navigation first, which is a new document and the one thing
+        // `settled` still answers honestly, then the page's own rerender.
+        await settled(pw);
+        await quiet(pw, PRESS_MS, inFlight);
       },
       async waitForAny(patterns: readonly RegExp[], timeoutMs: number) {
         const deadline = Date.now() + timeoutMs;
@@ -227,16 +311,59 @@ export class Session {
         if (wrapping?.textContent) return wrapping.textContent.trim();
         return el.getAttribute('placeholder') ?? el.getAttribute('name') ?? '';
       };
-      const out: { name: string; type: string; filled: boolean }[] = [];
+      // A checkbox and a radio carry a `value` whether or not anybody chose
+      // them: an unticked <input type=checkbox> reads "on" and an unchosen
+      // radio reads whatever the markup gave it. So `filled: !!input.value`
+      // was TRUE for every one of them, always, and a planner that skips
+      // filled fields skipped every acknowledgment and every option group on
+      // every page. That is the reason this repository's own careers form
+      // could not be completed by its own agent: the required "I understand
+      // there is no salary" box and the role radios all reported themselves
+      // as already answered.
+      //
+      // A radio is answered when its GROUP has a chosen member rather than
+      // when this particular option is the chosen one. Reported per option it
+      // would send a planner to tick the second role after the first, which
+      // in a radio group means changing its mind rather than making progress.
+      const chosenInGroup = (input: HTMLInputElement): boolean => {
+        const scope = input.form ?? document;
+        if (!input.name) return input.checked;
+        return Array.from(
+          scope.querySelectorAll<HTMLInputElement>(
+            `input[type="radio"][name="${CSS.escape(input.name)}"]`),
+        ).some((option) => option.checked);
+      };
+      const answered = (input: HTMLInputElement): boolean => {
+        if (input.type === 'checkbox') return input.checked;
+        if (input.type === 'radio') return chosenInGroup(input);
+        return !!input.value;
+      };
+      const out: {
+        name: string; type: string; filled: boolean; required: boolean;
+      }[] = [];
       for (const el of document.querySelectorAll('input, textarea, select')) {
         const input = el as HTMLInputElement;
         if (input.type === 'hidden' || input.disabled) continue;
+        // A field the browser will not let anybody interact with is not a
+        // field. The honeypot on this repository's own careers form is the
+        // case: it is a labelled text input inside a `hidden` div, so it
+        // reported itself as ordinary here, and a planner that filled it
+        // would either time out against an invisible element or, worse,
+        // succeed and be refused by the server as a bot.
+        if (typeof input.checkVisibility === 'function' && !input.checkVisibility()) continue;
         const name = named(el);
         if (!name) continue;
-        out.push({ name, type: input.type || el.tagName.toLowerCase(), filled: !!input.value });
+        out.push({
+          name,
+          type: input.type || el.tagName.toLowerCase(),
+          filled: answered(input),
+          required: input.required,
+        });
       }
       return out;
-    }).catch(() => [] as { name: string; type: string; filled: boolean }[]);
+    }).catch(() => [] as {
+      name: string; type: string; filled: boolean; required: boolean;
+    }[]);
 
     const interactive = await pw.evaluate(() => {
       const out: string[] = [];
@@ -258,14 +385,34 @@ export class Session {
         add(el.getAttribute('aria-label') ?? el.getAttribute('title')
           ?? el.textContent ?? (el as HTMLInputElement).value);
       }
-      return { controls: out, unnamed };
-    }).catch(() => ({ controls: [] as string[], unnamed: 0 }));
+      // Which of those controls submits a form, by name.
+      //
+      // A deterministic planner knows the words that move a sign up or a
+      // checkout forward, and it cannot know the words on every form anybody
+      // writes. "Send application" is the button on this repository's own
+      // careers form and it matches none of them, so the agent filled the
+      // whole form in and then had nothing it was willing to press. The
+      // document already knows which control submits; asking it is better
+      // than adding another word to a list that can never be finished.
+      const submits: string[] = [];
+      for (const el of document.querySelectorAll(
+        'button[type="submit"], input[type="submit"], form button:not([type])')) {
+        const input = el as HTMLInputElement;
+        if (input.disabled) continue;
+        if (typeof input.checkVisibility === 'function' && !input.checkVisibility()) continue;
+        const name = (el.getAttribute('aria-label') ?? el.getAttribute('title')
+          ?? el.textContent ?? input.value ?? '').trim();
+        if (name && name.length < 60 && !submits.includes(name)) submits.push(name);
+      }
+      return { controls: out, unnamed, submits };
+    }).catch(() => ({ controls: [] as string[], unnamed: 0, submits: [] as string[] }));
 
     return {
       url: pw.url(),
       title: await pw.title().catch(() => ''),
       fields,
       controls: interactive.controls,
+      submits: interactive.submits,
       unnamed: interactive.unnamed,
       text: await pw.locator('body').innerText().catch(() => ''),
     };

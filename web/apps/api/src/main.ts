@@ -14,10 +14,10 @@ import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
-import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
+import { parseAllowlist, describeAllowlist, signupUrlFrom, sweepOAuthStates } from './auth/signin.ts'
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { leadNotifierFrom } from './enterprise/leads.ts'
-import { siteOriginFrom } from './siteorigin.ts'
+import { siteOriginsFrom, siteOriginsSummary } from './siteorigin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -25,6 +25,7 @@ import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { freshness, recordingStopped } from './analytics/read.ts'
 import { surrogateSecretFrom } from './analytics/record.ts'
 import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
@@ -190,12 +191,8 @@ const emailSignIn = emailSignInFromEnv()
 // exactly like working software. A deployment with a lead route and no notifier
 // records leads nobody is told about; a deployment with no site origin serves a
 // form that a browser refuses to submit and reports as a network error.
-const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN) ?? null
-console.log(
-  siteOrigin
-    ? `the marketing site at ${siteOrigin} may post analytics beacons and enterprise leads`
-    : 'AF_SITE_ORIGIN is not set: no other origin may post a beacon or an enterprise lead, so a form on the marketing site cannot submit',
-)
+const siteOrigins = siteOriginsFrom(process.env.AF_SITE_ORIGIN)
+console.log(siteOriginsSummary(siteOrigins))
 const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
 console.log(leads.summary)
 
@@ -254,6 +251,42 @@ console.log(
     ? `the analytics dashboard is readable by owners and admins of ${analyticsOperatorOrgSlug}`
     : 'the analytics dashboard is readable by nobody: AF_ANALYTICS_OPERATOR_ORG is not set',
 )
+
+// Did this installation record once and stop?
+//
+// "Analytics is not recording" is the correct and unremarkable state for a
+// staging environment and for any self-hosted control plane whose operator
+// never wanted it, so the line above cannot be an alarm. On an installation
+// that HAS recorded it is a regression, and the usual way to reach it is a
+// rollback to a revision that predates the analytics variables, which takes the
+// environment back with it and leaves everything else working.
+//
+// The database is asked because it is the only party to this that a rollback
+// does not move. See recordingStopped in analytics/read.ts for why an absent
+// variable cannot detect its own absence.
+//
+// A failed read is reported as a failed read. An installation whose rollup
+// state cannot be reached has not been shown to be healthy, and printing
+// nothing here would be indistinguishable from printing nothing because there
+// was nothing to say.
+try {
+  const state = await pool.withoutTenant((db) => freshness(db))
+  if (recordingStopped(analyticsSecret !== null, state.lastRunAt)) {
+    console.error(
+      'ANALYTICS HAS STOPPED RECORDING. This installation was recording, and the ' +
+        `last rollup ran at ${state.lastRunAt}, but AF_ANALYTICS_SURROGATE_SECRET is ` +
+        'not set on this revision, so nothing new is being written and the dashboard ' +
+        'will keep serving the numbers up to that point. A rollback to a revision ' +
+        'from before analytics was configured does exactly this. Restore the ' +
+        'variable, or if analytics was switched off deliberately, expect a hole.',
+    )
+  }
+} catch (err) {
+  console.error(
+    'could not check whether analytics has stopped recording: ' +
+      (err instanceof Error ? err.message : String(err)),
+  )
+}
 
 let hostedRequiredPlan
 let githubAppInstallUrl
@@ -384,12 +417,12 @@ const { app, ingestLimiter, authLimiter } = createServer({
   consoleBuild,
   analyticsSecret,
   analyticsOperatorOrgSlug,
-  // The one origin the marketing site may call from, read and validated above
-  // rather than taken raw from the environment: siteOriginFrom refuses a value
+  // Every origin the marketing site may call from, read and validated above
+  // rather than taken raw from the environment: siteOriginsFrom refuses a value
   // carrying a path, which could never match an Origin header and would allow
-  // nobody while looking configured. Unset refuses every beacon and every lead
-  // rather than reflecting whatever Origin arrives.
-  siteOrigin,
+  // nobody while looking configured. Unset refuses every beacon, every lead and
+  // every application rather than reflecting whatever Origin arrives.
+  siteOrigins,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })
@@ -437,6 +470,15 @@ const housekeeping = setInterval(
     // device_authorizations grew for the life of the process.
     void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
       console.error('device authorization sweep', err),
+    )
+
+    // Beside the other two because it is the same kind of debt, and it is the
+    // one that had no sweeper at all rather than one that could not delete.
+    // A state row is dead ten minutes after it is written and stayed in the
+    // table for good: every abandoned "Continue with GitHub" left one, and so
+    // did every site publish, because the deploy gate probes GET /auth/github.
+    void sweepOAuthStates(pool, systemClock).catch((err) =>
+      console.error('oauth state sweep', err),
     )
 
     // Not housekeeping. This one finishes work a customer asked for and is the

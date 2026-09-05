@@ -197,6 +197,6 @@ func cmdRegion(args []string) int {
 		report(errs)
 		return 1
 	}
-	fmt.Fprintf(os.Stdout, "azguard: %s can create PostgreSQL %s on %s\n", strings.Join(locations, ", "), version, azureSku)
+	_, _ = fmt.Fprintf(os.Stdout, "azguard: %s can create PostgreSQL %s on %s\n", strings.Join(locations, ", "), version, azureSku)
 	return 0
 }

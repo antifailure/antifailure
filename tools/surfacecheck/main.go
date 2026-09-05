@@ -119,13 +119,13 @@ func run(root string, updateBaseline bool, out *os.File) (int, error) {
 	if updateBaseline {
 		if len(problems) > 0 {
 			report(out, problems)
-			fmt.Fprintln(out, "\nThe baseline was not rewritten: the surface it would record is not one that passes the checks above.")
+			_, _ = fmt.Fprintln(out, "\nThe baseline was not rewritten: the surface it would record is not one that passes the checks above.")
 			return 1, nil
 		}
 		if err := WriteBaseline(filepath.Join(root, baselineFile), packages, classes); err != nil {
 			return 0, err
 		}
-		fmt.Fprintf(out, "surfacecheck: wrote %s\n", baselineFile)
+		_, _ = fmt.Fprintf(out, "surfacecheck: wrote %s\n", baselineFile)
 		return 0, nil
 	}
 
@@ -149,7 +149,7 @@ func run(root string, updateBaseline bool, out *os.File) (int, error) {
 			exported += len(pkg.Exports())
 		}
 	}
-	fmt.Fprintf(out, "surfacecheck: %d importable packages, %d stable holding %d exports, %d additions since v1.0.0\n",
+	_, _ = fmt.Fprintf(out, "surfacecheck: %d importable packages, %d stable holding %d exports, %d additions since v1.0.0\n",
 		len(packages), stable, exported, additions)
 	return 0, nil
 }
@@ -163,14 +163,14 @@ func report(out *os.File, problems []Problem) {
 		}
 		byKind[p.Kind] = append(byKind[p.Kind], p)
 	}
-	fmt.Fprintf(out, "surfacecheck: %d problems\n", len(problems))
+	_, _ = fmt.Fprintf(out, "surfacecheck: %d problems\n", len(problems))
 	for _, kind := range kinds {
-		fmt.Fprintf(out, "\n%s\n", kind)
+		_, _ = fmt.Fprintf(out, "\n%s\n", kind)
 		list := byKind[kind]
 		sort.Slice(list, func(i, j int) bool { return list[i].Message < list[j].Message })
 		for _, p := range list {
-			fmt.Fprintf(out, "  %s\n", p.Message)
+			_, _ = fmt.Fprintf(out, "  %s\n", p.Message)
 		}
-		fmt.Fprintf(out, "\n  %s\n", strings.ReplaceAll(byKind[kind][0].Remedy, "\n", "\n  "))
+		_, _ = fmt.Fprintf(out, "\n  %s\n", strings.ReplaceAll(byKind[kind][0].Remedy, "\n", "\n  "))
 	}
 }

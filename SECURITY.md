@@ -154,9 +154,16 @@ because govulncheck reads Go modules and stops there, and every `npm ci` in CI
 passes `--no-audit`, so the half of this repository that faces the internet had
 no advisory check at all. One caveat that is not true of the Go scanner: npm
 audit has no reachability analysis, so an entry in `.npmaudit.yaml` argues from
-how a package is used rather than from a call graph. One gap: `runner/` has
-dependencies and no lockfile, so nothing resolves its tree, and the tool reports
-that on every run rather than skipping it quietly.
+how a package is used rather than from a call graph. All eight lockfiles are
+covered, including the runner's.
+
+Four workers audit independent lockfiles concurrently. Each npm process has
+five minutes and the scan has eleven minutes, leaving time for setup and
+diagnostics inside the fifteen minute CI job. Results print as they arrive,
+with the project and elapsed time. A deadline or registry refusal is an
+inconclusive scan that fails the gate, never a clean dependency tree. Queued
+projects that miss the overall deadline are named as not started. Policy
+decisions run only after every lockfile returns an audit report.
 
 **Release artifacts.** Built with `-trimpath` and CGO disabled from the tagged
 commit, by `tools/release/build.sh`, which is the one copy of the build that

@@ -255,6 +255,21 @@ var (
 	classAttr  = regexp.MustCompile(`class="([^"]*)"`)
 	styleAttr  = regexp.MustCompile(`style="([^"]*)"`)
 	bannedAnim = regexp.MustCompile(`\banimate-(pulse|ping)\b`)
+
+	// The opening tag of a video element and everything declared on it.
+	videoTag = regexp.MustCompile(`(?is)<video\b([^>]*)>`)
+
+	// The src, so an exemption names the file rather than "a video".
+	srcAttr = regexp.MustCompile(`\bsrc="([^"]*)"`)
+
+	// Each as a WHOLE attribute rather than as a substring. `loop` appears
+	// inside `src="/home/loop-demo.mp4"` and inside `data-looping`, and
+	// matching either would refuse a video that does not loop, which is how a
+	// rule comes to be worked around rather than obeyed. React writes a true
+	// boolean attribute as `loop=""` and a hand written page may write it
+	// bare, so both endings are accepted.
+	autoplayAttr = regexp.MustCompile(`(?i)(^|\s)autoplay(=""|=''|\s|$)`)
+	loopAttr     = regexp.MustCompile(`(?i)(^|\s)loop(=""|=''|\s|$)`)
 )
 
 func collectVars(css string, into map[string]string) {
@@ -355,6 +370,41 @@ func scanHTML(site, path, html string) (int, []string) {
 			found = append(found, fmt.Sprintf(
 				"%s %s: `%s` on an element, which throbs for attention forever", site, path, name))
 		}
+	}
+
+	// A LOOPING VIDEO IS THE SAME BAN AND THIS GATE COULD NOT SEE IT.
+	//
+	// Everything above reads CSS, either from a stylesheet or from a style
+	// attribute, and `<video autoplay loop>` is neither. So a homepage could
+	// carry two of them, playing forever behind a reader who is doing nothing,
+	// and this tool would report "0 animations that never stop" over the exact
+	// file they are in. That is the shape of failure this repository keeps
+	// finding in its own instruments: a check answering a nearby question and
+	// being quoted for the one it was not asked.
+	//
+	// The rule at the top of this file has no carve out for a real event, so it
+	// has none for a film either. A video that plays once when it is scrolled
+	// to and then stops is fine and is not reported. It is the `loop` that is
+	// refused, and only in company with `autoplay`, because a looping video
+	// somebody pressed play on is a choice they made.
+	//
+	// The source is `autoPlay` and `loop` in JSX and `autoplay=""` and `loop=""`
+	// in the render, which is the other reason this belongs here rather than in
+	// a source scan: the attribute names are not even spelled the same.
+	for _, m := range videoTag.FindAllStringSubmatch(html, -1) {
+		attrs := m[1]
+		if !autoplayAttr.MatchString(attrs) || !loopAttr.MatchString(attrs) {
+			continue
+		}
+		name := "a video"
+		if src := srcAttr.FindStringSubmatch(attrs); src != nil {
+			name = src[1]
+		}
+		if _, ok := exempt[name]; ok {
+			continue
+		}
+		found = append(found, fmt.Sprintf(
+			"%s %s: <video> plays `%s` on an endless loop with no reader doing anything", site, path, name))
 	}
 
 	// Inline styles are how this site writes most of its artwork animation, so

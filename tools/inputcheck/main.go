@@ -354,11 +354,11 @@ func shortName(dir string) string {
 func valuesInputs(path string) ([]input, error) {
 	source, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading the chart's values, which is half of what this checks: %v", err)
+		return nil, fmt.Errorf("reading the chart's values, which is half of what this checks: %w", err)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(source, &doc); err != nil {
-		return nil, fmt.Errorf("%s is not valid YAML: %v", path, err)
+		return nil, fmt.Errorf("%s is not valid YAML: %w", path, err)
 	}
 	if len(doc.Content) == 0 {
 		return nil, fmt.Errorf("%s is empty", path)
@@ -442,7 +442,7 @@ var (
 func blockInputs(path, source, want string) ([]input, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading %s, which declares part of what this promises: %v", path, err)
+		return nil, fmt.Errorf("reading %s, which declares part of what this promises: %w", path, err)
 	}
 
 	var cleaned []string
@@ -587,7 +587,7 @@ func writeGolden(root string, inputs []input) error {
 func readGolden(root string) ([]input, error) {
 	source, err := os.ReadFile(filepath.Join(root, goldenPath))
 	if err != nil {
-		return nil, fmt.Errorf("reading the snapshot of the v1.0.0 surface: %v", err)
+		return nil, fmt.Errorf("reading the snapshot of the v1.0.0 surface: %w", err)
 	}
 	var out []input
 	for n, line := range strings.Split(string(source), "\n") {
