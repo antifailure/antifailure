@@ -247,9 +247,6 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 		return nil, err
 	}
 
-	o.reportVerdicts(rs, id, report.Results)
-	o.reportRunFinished(rs, id, runStartedAt, report, "complete")
-
 	// Asked after the workflows, of the rows they left behind. This is the
 	// only part of a run that looks at the data rather than at the screen, and
 	// until it was here the manifest's invariants were parsed, validated,
@@ -276,6 +273,11 @@ func (o *Orchestrator) Test(ctx context.Context, opts TestOptions) (*TestReport,
 	// application do. See markSynthesized: this is the only place the fact
 	// that a response was invented can reach a verdict.
 	o.markSynthesized(ctx, report)
+	// Only publish the answer the caller receives. The runner's pass can
+	// become unverified after the proxy log is read, and a completed run must
+	// not be announced while its database checks are still running.
+	o.reportVerdicts(rs, id, report.Results)
+	o.reportRunFinished(rs, id, runStartedAt, report, "complete")
 	return report, nil
 }
 
