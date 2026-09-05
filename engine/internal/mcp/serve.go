@@ -96,6 +96,13 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newCancelRunTool(project, store))
 	server.Register(newInspectEgressTool(project, orch.observe))
 	server.Register(newRehearseMigrationTool(project, engine, orch.rehearse))
+	server.Register(newRunLoadTestTool(project, engine, orch.sendLoad))
+	server.Register(newRunWorkflowsTool(project, engine, orch.driveWorkflows))
+	server.Register(newExploreTool(project, engine, orch.driveExploration))
+	server.Register(newStartEnvironmentTool(project, engine, orch.bringUp))
+	server.Register(newTeardownTool(project, engine, orch.tearDown))
+	server.Register(newDescribeEnvironmentTool(project, orch.readStatus))
+	server.Register(newReadLogsTool(project, orch.readLogs))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 
