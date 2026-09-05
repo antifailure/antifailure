@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useSessionContext } from "@/components/session";
 import { query, useApi } from "@/lib/api";
+import { recordingState } from "@/lib/analytics-provenance";
 import { mayReadAnalytics } from "@/lib/roles";
 import { DayColumns, Meter } from "@/components/Meter";
 import {
@@ -70,6 +71,9 @@ interface Provenance {
   lastRolledUpAt: string | null;
   settledAfter: string | null;
   recording: boolean;
+  /** True when this installation recorded once and is not recording now. Off
+   *  and never on read identically as zeros, and only one of them is a fault. */
+  recordingStopped: boolean;
   /** The three insight shapes settle at different rates, so each panel says
    *  which of these applies to it rather than sharing one line. */
   funnelsFinalBefore: string | null;
@@ -629,12 +633,20 @@ function Analytics() {
 /**
  * Where the numbers came from, above the numbers.
  *
- * Three states that all render as zeros and mean different things: recording is
- * off, the rollup has never run, and nothing happened. A page that cannot tell
- * a reader which of those they are looking at is a page that will be believed
- * about the wrong one.
+ * Four states that all render as flat or empty and mean different things:
+ * recording was never on, recording was on and has STOPPED, the rollup has
+ * never run, and nothing happened. A page that cannot tell a reader which of
+ * those they are looking at is a page that will be believed about the wrong
+ * one.
+ *
+ * The second is the one worth the extra sentence. Numbers that stopped moving
+ * look exactly like numbers nobody is generating, so a control plane rolled
+ * back past its analytics variables shows a plausible dashboard of real but
+ * frozen figures. Saying "off" there is true and useless; saying it stopped is
+ * what sends somebody to look.
  */
 function Provenance({ p }: { p: Provenance }) {
+  const recording = recordingState(p);
   return (
     <div className="rounded-lg border border-rule bg-card px-4 py-3">
       <p className="text-[13px] leading-6 text-muted">
@@ -642,12 +654,18 @@ function Provenance({ p }: { p: Provenance }) {
           {p.from} to {p.to}
         </span>
         {". "}
-        {p.recording ? null : (
+        {recording === "stopped" ? (
+          <span className="text-warn">
+            Recording has stopped on this control plane. It was recording and it is not now, so
+            the numbers below end where they end instead of being current. A rollback to a
+            revision from before AF_ANALYTICS_SURROGATE_SECRET was set does exactly this.{" "}
+          </span>
+        ) : recording === "never-recorded" ? (
           <span className="text-warn">
             Recording is switched off on this control plane, so nothing new is arriving. Set
             AF_ANALYTICS_SURROGATE_SECRET to turn it on.{" "}
           </span>
-        )}
+        ) : null}
         {p.lastRolledUpAt === null ? (
           <span className="text-warn">
             The rollup has never run, so every number here is zero because nothing has been

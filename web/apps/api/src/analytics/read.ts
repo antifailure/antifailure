@@ -53,6 +53,38 @@ export interface Freshness {
   subjectDaysKept: number | null
 }
 
+/**
+ * Whether this installation recorded analytics once and is not recording now.
+ *
+ * THE FAILURE THIS EXISTS TO CATCH. The surrogate secret and the operator
+ * organization reach the container as environment variables, and a Container
+ * Apps rollback goes to a whole earlier revision, environment and all. Roll
+ * back past the revision that introduced them and analytics switches off
+ * silently: the process starts, every route answers, and the only symptom is
+ * that the numbers stop moving. Nobody notices a chart that has stopped, they
+ * notice a chart that is wrong, and by then the hole is however long it took.
+ *
+ * WHY THE ANSWER IS IN THE DATABASE AND NOT IN THE ENVIRONMENT. The absent
+ * variable cannot be its own detector. An installation that has never recorded
+ * and one that has been rolled back present exactly the same environment, and
+ * the first is a legitimate way to run this: staging does it, and so does any
+ * self-hosted control plane whose operator does not want analytics. A rule that
+ * refuses the absent variable refuses both. `last_run_at` separates them,
+ * because it is written by the rollup and survives what the rollback removed:
+ * null forever on an installation that never recorded, and set on one that did.
+ *
+ * This deliberately does not refuse to start. A rollback happens during an
+ * incident, the image carries this code into whichever revision is rolled back
+ * to, and Container Apps cannot add a variable to a revision that exists, so a
+ * startup refusal would block the recovery at the moment it was needed and turn
+ * lost analytics into a control plane that is down. `ensureBypass()` earns its
+ * refusal because the admin pool is load bearing for every request. This is
+ * not, so it is loud instead of fatal.
+ */
+export function recordingStopped(recording: boolean, lastRolledUpAt: string | null): boolean {
+  return !recording && lastRolledUpAt !== null
+}
+
 export async function freshness(db: Db): Promise<Freshness> {
   const rows = await db.execute<{
     last_run_at: Date | string | null

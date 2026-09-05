@@ -25,6 +25,7 @@ import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
+import { freshness, recordingStopped } from './analytics/read.ts'
 import { surrogateSecretFrom } from './analytics/record.ts'
 import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
@@ -254,6 +255,42 @@ console.log(
     ? `the analytics dashboard is readable by owners and admins of ${analyticsOperatorOrgSlug}`
     : 'the analytics dashboard is readable by nobody: AF_ANALYTICS_OPERATOR_ORG is not set',
 )
+
+// Did this installation record once and stop?
+//
+// "Analytics is not recording" is the correct and unremarkable state for a
+// staging environment and for any self-hosted control plane whose operator
+// never wanted it, so the line above cannot be an alarm. On an installation
+// that HAS recorded it is a regression, and the usual way to reach it is a
+// rollback to a revision that predates the analytics variables, which takes the
+// environment back with it and leaves everything else working.
+//
+// The database is asked because it is the only party to this that a rollback
+// does not move. See recordingStopped in analytics/read.ts for why an absent
+// variable cannot detect its own absence.
+//
+// A failed read is reported as a failed read. An installation whose rollup
+// state cannot be reached has not been shown to be healthy, and printing
+// nothing here would be indistinguishable from printing nothing because there
+// was nothing to say.
+try {
+  const state = await pool.withoutTenant((db) => freshness(db))
+  if (recordingStopped(analyticsSecret !== null, state.lastRunAt)) {
+    console.error(
+      'ANALYTICS HAS STOPPED RECORDING. This installation was recording, and the ' +
+        `last rollup ran at ${state.lastRunAt}, but AF_ANALYTICS_SURROGATE_SECRET is ` +
+        'not set on this revision, so nothing new is being written and the dashboard ' +
+        'will keep serving the numbers up to that point. A rollback to a revision ' +
+        'from before analytics was configured does exactly this. Restore the ' +
+        'variable, or if analytics was switched off deliberately, expect a hole.',
+    )
+  }
+} catch (err) {
+  console.error(
+    'could not check whether analytics has stopped recording: ' +
+      (err instanceof Error ? err.message : String(err)),
+  )
+}
 
 let hostedRequiredPlan
 let githubAppInstallUrl
