@@ -78,6 +78,9 @@ jobs:
             terraform -chdir="$dir" validate
           done
 
+      - name: Payment references reach the serving application
+        run: terraform -chdir=infra/terraform/modules/control-plane test
+
       # The azguard and cost tests are deliberately NOT run here. ci.yml already
       # runs `cd tools && go test ./...` on every pull request and that covers
       # both. A second, narrower invocation would be a gate with no matching

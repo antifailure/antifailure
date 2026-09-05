@@ -287,17 +287,12 @@ resource "azurerm_container_app" "this" {
     }
   }
 
-  # The App's two secrets, which this module reads rather than writes, and the
-  # three credentials Stripe and Resend mint, which it reads for the same
-  # reason: a resource that manages a value it cannot produce is a resource that
-  # will one day set it to the empty string.
+  # Reference externally minted credentials without managing their values.
+  # GitHub and Stripe references do not require a vault read while planning.
   dynamic "secret" {
     for_each = merge(
       local.github_app_secret_ids,
-      var.stripe_price_team == "" ? {} : {
-        "stripe-secret-key"     = data.azurerm_key_vault_secret.stripe_secret_key[0].versionless_id
-        "stripe-webhook-secret" = data.azurerm_key_vault_secret.stripe_webhook_secret[0].versionless_id
-      },
+      local.stripe_secret_ids,
       var.mail_from == "" ? {} : {
         "resend-api-key" = data.azurerm_key_vault_secret.resend_api_key[0].versionless_id
       },

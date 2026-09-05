@@ -1233,11 +1233,11 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
   //
   // Asserted on the BODY THAT REACHED STRIPE rather than on the input schema,
   // because the input schema is not what an invoice is computed from. A route
-  // that quietly defaulted the quantity to something would satisfy a schema
-  // assertion and still bill per unit.
+  // that multiplied the quantity would satisfy a schema assertion and still
+  // charge the organization more than its flat subscription price.
   // -------------------------------------------------------------------------
 
-  it('checkout sends Stripe no quantity, because nothing here is sold per unit', async () => {
+  it('checkout sends Stripe exactly one organization subscription', async () => {
     const before = sentToStripe.length
     const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', {
       plan: 'team',
@@ -1258,9 +1258,8 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     )
 
     assert.equal(
-      form.has('line_items[0][quantity]'), false,
-      'checkout sent Stripe a per unit quantity. The price multiplies by it and nothing ' +
-        'entitles anything from it, so this is a charge for something the buyer does not get.',
+      form.get('line_items[0][quantity]'), '1',
+      'the licensed recurring price must buy exactly one organization subscription',
     )
   })
 
@@ -1283,7 +1282,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const form = new URLSearchParams(sent.body)
     assert.equal(form.get('line_items[0][price]'), 'price_team_afmock')
     assert.equal(
-      form.has('line_items[0][quantity]'), false,
+      form.get('line_items[0][quantity]'), '1',
       'a seat count in the input reached Stripe as a quantity',
     )
     // Every VALUE, rather than a substring of the whole body.

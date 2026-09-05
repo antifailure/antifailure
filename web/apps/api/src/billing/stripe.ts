@@ -82,7 +82,7 @@ export interface StripeSubscription {
    * What Stripe says the subscription item's quantity is. A RECORD, never an
    * input to a decision.
    *
-   * Nothing this control plane sells has a quantity: checkout sends none and
+   * Checkout buys exactly one organization subscription, and
    * the plan alone decides what an organization may hold. Stripe still reports
    * one on every subscription object, so it is read and stored as sent, which
    * is what lets an operator chasing an invoice see what was actually billed.
@@ -370,18 +370,10 @@ export class RealStripeClient implements StripeClient {
       mode: 'subscription',
       customer: input.customerId,
       'line_items[0][price]': input.priceId,
-      // `line_items[0][quantity]` is deliberately absent rather than set to 1.
-      //
-      // Stripe treats the parameter as optional and bills a licensed recurring
-      // price once when it is omitted, which is exactly the flat organization
-      // fee this sells. Omitting it also keeps the call valid if a price is
-      // ever made metered, because Stripe REFUSES a quantity on a metered
-      // price. A hardcoded 1 would still be declaring a per unit purchase of
-      // one, which is the shape that let a caller ask for two hundred.
-      //
-      // test/billing.test.ts asserts this parameter is not in the body that
-      // reaches Stripe, so putting it back turns a suite red rather than an
-      // invoice large.
+      // A licensed recurring price requires a quantity. One buys the flat
+      // organization subscription; this is never a caller supplied seat count.
+      // Metered prices have a different contract and are not sold here.
+      'line_items[0][quantity]': '1',
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       // Both, and deliberately. client_reference_id is what the completed
