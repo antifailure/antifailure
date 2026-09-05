@@ -65,6 +65,8 @@ export interface StripeCustomer {
 export interface StripeSubscription {
   id: string
   customerId: string
+  /** Provider creation time, never the time a webhook happened to arrive. */
+  createdAt?: Date | null
   /** The subscription item the price hangs off.
    *
    *  Carried because changing a plan means REPLACING that item's price, and an
@@ -756,6 +758,7 @@ export function subscriptionOf(body: Record<string, unknown>): StripeSubscriptio
   return {
     id,
     customerId,
+    createdAt: instant(body.created),
     itemId: item ? text(item.id) : null,
     status: text(body.status) ?? 'incomplete',
     priceId: item ? idOf(item.price) : null,
