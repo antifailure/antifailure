@@ -580,6 +580,19 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// the tree, hostnames.txt against the tfvars, is the `origincheck`
 		// recipe and that one is in `gate`.
 		"check-origins": true,
+		// The deployed site smoke. The same shape again, and the same reason:
+		// its answer is not a function of the tree. It opens the careers form
+		// on the hostnames people actually type, fills it in with the
+		// product's own agent, presses the button, and reads what the page
+		// says came back, so the same commit is green today and red the
+		// morning somebody binds a second custom domain the control plane has
+		// never heard of. It needs the network and a browser, neither of which
+		// `just gate` may need, and it runs on a schedule and after a deploy in
+		// sitesmoke.yml, which is where drift arriving with no deploy at all
+		// gets noticed. What IS a function of the tree is that the sentences it
+		// waits for are still the ones this repository renders, and `just
+		// sitesmoke` covers that inside `gate`.
+		"sitesmoke-deployed": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates

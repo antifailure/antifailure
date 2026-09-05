@@ -10,7 +10,7 @@ import { Session } from './browser.ts';
 import { signIn, type Persona, type Page } from './login.ts';
 import type { InboxSource } from './inbox.ts';
 import {
-  DeterministicPlanner, freshIdentity, judgeAll,
+  DeterministicPlanner, failureSentence, freshIdentity, judgeAll,
   type Action, type Planner, type Snapshot, type Workflow,
 } from './workflow.ts';
 import { classify, type Attempt, type Cause, type Outcome } from './verdict.ts';
@@ -200,6 +200,10 @@ async function attemptOnce(
         await page.fill(action.field, action.value);
         taken.push(`Fill ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`);
         break;
+      case 'check':
+        await page.check(action.field);
+        taken.push(`Choose ${action.field.source.replace(/[\^$]/g, '')}: ${action.why}`);
+        break;
       case 'click':
         await page.click(action.control);
         taken.push(`Press ${action.control.source.replace(/[\^$]/g, '')}: ${action.why}`);
@@ -232,12 +236,22 @@ function finalJudgement(
   switch (judgeAll(workflow.expect, snapshot.text)) {
     case 'met':
       return { cause: 'succeeded', detail: 'Every expectation is visible on the page.', taken };
-    case 'unmet':
+    case 'unmet': {
+      // Quoted, not summarised. "The page shows an error rather than what was
+      // expected" was the whole of this sentence, and it is the same sentence
+      // for a route that does not exist, a hostname the control plane refuses,
+      // a database that is down and a card that was declined. The words on the
+      // screen are the only thing that tells those apart, and they were being
+      // thrown away one line before the report was written.
+      const said = failureSentence(snapshot.text);
       return {
         cause: 'expectation-not-met',
-        detail: `${why} The page shows an error rather than what was expected.`,
+        detail: said
+          ? `${why} The page shows an error rather than what was expected. It says: "${said}"`
+          : `${why} The page shows an error rather than what was expected.`,
         taken,
       };
+    }
     default:
       return {
         // page-unreadable, not synthesized-response. This branch is about a

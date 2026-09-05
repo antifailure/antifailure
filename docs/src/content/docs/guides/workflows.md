@@ -52,6 +52,38 @@ Expectations can name things outside the browser. "A welcome message arrives in
 the inbox" is checked against [the inbox](/docs/guides/inbox), which is why capture
 mode exists.
 
+## Quote a sentence the page either shows or does not
+
+An ordinary expectation is a sentence about the product, and it is judged by how
+many of its meaningful words appear on the page. Two thirds of them is enough,
+because an expectation carries connective words no page repeats and requiring
+all of them would mean writing expectations for the matcher instead of for a
+person.
+
+That reading is wrong for a page that renders one specific sentence when
+something works and a different one when it does not, which is the ordinary case
+for a form. Put such a sentence in double quotes and it is required on the page
+character for character, up to case and runs of whitespace:
+
+```yaml
+expect:
+  - '"It is written down."'
+```
+
+Two thirds of the words is a low bar on a page with four thousand characters of
+prose on it. Our own careers page is the case that earned this: the control
+plane's refusal, "Use a public http or https link without credentials", scores
+six of its seven words against that page before the form has been touched,
+because `public`, `link`, `use`, `credentials` and an install command containing
+`https` are all already on it. The expectation was satisfied before the agent
+did anything, and the workflow passed in one step over a form it never
+submitted.
+
+A quoted expectation that is absent is a FAILURE rather than an unclear result.
+A string is on the page or it is not, and there is no third answer to hedge
+towards. That is the difference that matters: an unclear result is `unverified`,
+and `unverified` exits zero.
+
 ## Ordering
 
 Workflows share an environment and run in order, because a subscription usually

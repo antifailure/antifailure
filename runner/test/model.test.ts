@@ -16,8 +16,9 @@ const workflow: Workflow = {
 const snapshot: Snapshot = {
   url: 'https://app.test/pricing',
   title: 'Pricing',
-  fields: [{ name: 'Card number', type: 'text', filled: false }],
+  fields: [{ name: 'Card number', type: 'text', filled: false, required: false }],
   controls: ['Choose Pro', 'Back'],
+  submits: [],
   unnamed: 0,
   text: 'Pricing. Free or Pro.',
 };

@@ -84,6 +84,7 @@ gate: _reports
     run "documented config can be set"   just wirecheck
     run "the site calls routes that exist" just routecheck
     run "every hostname has an origin"   just origincheck
+    run "the smoke waits for real sentences" just sitesmoke
     run "payment secrets reach the app"  just test-infra-config
     run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
@@ -1049,6 +1050,34 @@ routecheck-deployed origin="https://app.antifailure.dev":
 # it is what keeps hostnames.txt from being a list somebody typed.
 origincheck:
     go run ./tools/origincheck origins
+
+# The sentences the production smoke waits for are still the ones we produce.
+#
+# THE OFFLINE HALF of tools/sitesmoke, and it is deliberately modest about what
+# it proves. It cannot see a deployment, and on the day the careers form broke
+# the tree was perfect: main declared the route and production was serving a
+# version from before it existed. What it CAN prove is the one way the online
+# half could go quietly wrong. The smoke waits for the control plane's own
+# refusal, "Use a public http or https link without credentials", and for the
+# site's own confirmation, "It is written down." An expectation waiting for a
+# sentence this repository no longer produces fails every deployment forever;
+# one satisfied by the wrong page passes every deployment forever. So the
+# sentences are read out of the files that are supposed to render them.
+sitesmoke:
+    go run ./tools/sitesmoke -root .
+
+# The same command against the site that is actually deployed.
+#
+# Not part of `just gate`, for the reason routecheck-deployed gives: it asks the
+# internet, and a gate that blocks a merge on somebody's bad afternoon is a gate
+# people learn to re-run rather than read. It runs on a schedule and after a
+# deploy in .github/workflows/sitesmoke.yml, which is where the answer matters.
+#
+# It files no job applications. Add -allow-writes to run the workflow that
+# does, which is the only way to prove through a browser that a valid
+# application actually reaches the database.
+sitesmoke-deployed origin="https://antifailure.dev":
+    go run ./tools/sitesmoke -root . -origin {{origin}}
 
 # Mocked providers exercise the rendered payment references without cloud access.
 test-infra-config:

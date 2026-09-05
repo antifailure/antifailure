@@ -417,3 +417,249 @@ test('the snapshot reads rendered text, never markup', async () => {
       `browser.ts reads ${forbidden}, so the page's markup can reach the model`);
   }
 });
+
+/** A form shaped like this repository's own careers form, served over HTTP.
+ *
+ * THE FAILURE THIS EXISTS FOR. Somebody filled in the careers form on
+ * antifailure.dev and read "Could not reach the server." The obvious question
+ * was why the agents had not found it, and the obvious answer was that they had
+ * been pointed at an environment built from one commit, where the site and the
+ * control plane necessarily agree. That answer was true and it was not the
+ * whole of it. Pointed straight at the deployed site, the agent could not have
+ * found it either, for four separate reasons, and every one of them is a
+ * property of this form's SHAPE rather than of the target:
+ *
+ *  1. The required acknowledgment is a checkbox. A checkbox carries value="on"
+ *     whether or not it is ticked, so the snapshot reported it as already
+ *     filled and the planner skipped it.
+ *  2. The role is a radio group, filled for the same wrong reason.
+ *  3. "What have you built" is required and matches no known field shape, so it
+ *     was left empty and the browser refused to submit the form at all.
+ *  4. The button says "Send application", which is on no list of words that
+ *     move a workflow forward, so nothing pressed it.
+ *
+ *  And after all four, the sentence the broken page shows was on no list of
+ *  failure signals, so the run came back UNVERIFIED and exited zero.
+ *
+ * `reachable: false` is the deployed control plane refusing the request, which
+ * is what a 404 from a version behind and a 403 from an unconfigured hostname
+ * both look like from inside the page: the fetch rejects and the form shows its
+ * own sentence.
+ */
+function careersForm(options: {
+  readonly reachable: boolean;
+  /** How long the control plane takes to answer. See the slow test below. */
+  readonly answerAfterMs?: number;
+}): {
+  server: Server; url: Promise<string>; received: Record<string, unknown>[];
+} {
+  const received: Record<string, unknown>[] = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (req.method === 'POST' && url.pathname === '/v1/applications') {
+      if (!options.reachable) {
+        // No CORS header and a refusal, which is what the browser turns into a
+        // rejected fetch and the page turns into its banner. Modelled here as
+        // a plain refusal because this server is same origin: what the test
+        // needs is the page's failure branch, and the page takes it on any
+        // response it cannot confirm.
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end('{}');
+        return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        received.push(JSON.parse(body || '{}') as Record<string, unknown>);
+        setTimeout(() => {
+          res.writeHead(201, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ id: 'written-down', recorded: true }));
+        }, options.answerAfterMs ?? 0);
+      });
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><body>
+      <a href="/signin">Sign in</a>
+      <h1>Careers</h1>
+      <form id="apply">
+        <fieldset>
+          <legend>Which role</legend>
+          <label for="r1"><input id="r1" type="radio" name="role" value="founding_engineer" required> Founding engineer</label>
+          <label for="r2"><input id="r2" type="radio" name="role" value="founding_growth" required> Founding growth</label>
+        </fieldset>
+        <label for="n">Your name</label><input id="n" name="name" required>
+        <label for="e">Email</label><input id="e" name="email" type="email" required>
+        <label for="w">What have you built or grown, and why this role</label>
+        <textarea id="w" name="why" required></textarea>
+        <div hidden aria-hidden="true">
+          <label for="hp">Company</label><input id="hp" name="website" tabindex="-1">
+        </div>
+        <label for="c"><input id="c" name="compensation" type="checkbox" required> I understand there is no salary for either role currently.</label>
+        <button type="submit">Send application</button>
+      </form>
+      <div id="out"></div>
+      <script>
+        document.getElementById('apply').addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const data = new FormData(event.target);
+          const values = {
+            name: data.get('name'), email: data.get('email'), role: data.get('role'),
+            why: data.get('why'), website: data.get('website') || '',
+            compensationAcknowledged: data.get('compensation') === 'on',
+          };
+          let response;
+          try {
+            response = await fetch('/v1/applications', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(values),
+            });
+            if (!response.ok) throw new Error('refused');
+            const recorded = await response.json();
+            if (recorded.recorded !== true) throw new Error('unconfirmed');
+          } catch {
+            document.getElementById('out').textContent =
+              'Could not reach the server. Check your connection and press it again; nothing you typed is lost.';
+            return;
+          }
+          document.getElementById('apply').remove();
+          document.getElementById('out').textContent =
+            'It is written down. Your application is in the private queue a person reads, oldest first.';
+        });
+      </script>
+    </body></html>`);
+  });
+  const url = new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  return { server, url, received };
+}
+
+const apply: Workflow = {
+  name: 'apply-for-a-founding-role',
+  description: 'Apply for a founding role and confirm the application is recorded.',
+  startPath: '/careers',
+  // Quoted, so the sentence is required on the page character for character.
+  // This is what tools/sitesmoke sends, and the unquoted form is satisfied by
+  // its own words being scattered about a page of prose.
+  expect: ['"It is written down."'],
+};
+
+// Collected rather than asserted one at a time, and that is not a style either.
+//
+// `assert` throws on the first failure, so five assertions after a failing one
+// are unreachable and still look alive. Driving a real browser costs eight
+// seconds a run, so splitting them into six tests would cost a minute; keeping
+// them in one test with a plain `assert` would mean every mutation of any of
+// these lines reported the same first failure, and a mutation table built on
+// that says nothing about which assertion catches which break.
+function problem(into: string[], ok: boolean, said: string) {
+  if (!ok) into.push(said);
+}
+
+test('it completes a form with a radio, a required acknowledgment and an unfamiliar field',
+  { timeout: 120_000 }, async () => {
+    const { server, url, received } = careersForm({ reachable: true });
+    const baseURL = await url;
+    const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+    try {
+      const results = await run({
+        baseURL, artifacts, workflows: [apply], personas: nobody, attempts: 1,
+      });
+      const result = results[0]!;
+      const sent = (received[0] ?? {}) as Record<string, unknown>;
+      const found: string[] = [];
+      problem(found, result.outcome.verdict === 'pass',
+        `the verdict is ${result.outcome.verdict}, not pass: ${result.outcome.detail}`);
+      // The verdict alone would pass on a form that was never sent, because a
+      // page that never changed shows no failure signal either. What proves
+      // the agent completed it is the application the server received.
+      problem(found, received.length === 1,
+        `the server received ${received.length} applications, not one`);
+      problem(found, sent.role === 'founding_engineer', 'no role was chosen from the radio group');
+      problem(found, sent.compensationAcknowledged === true,
+        'the required acknowledgment was not ticked');
+      problem(found, String(sent.why ?? '').length > 0,
+        'the required field nothing recognises was left empty');
+      problem(found, sent.website === '', 'the agent filled the hidden honeypot field');
+      problem(found, String(sent.email ?? '').includes('@'), 'no email address was typed');
+      assert.deepEqual(found, [], `${found.join('\n')}\nsteps:\n${result.steps.join('\n')}`);
+    } finally {
+      server.close();
+    }
+  });
+
+test('a form that cannot reach its server FAILS, and the report quotes what the page said',
+  { timeout: 120_000 }, async () => {
+    // The whole point of this one is the verdict. Before the failure signals
+    // learned this sentence it came back UNVERIFIED, which exits zero, so a
+    // careers form that could not reach its control plane produced a green run
+    // with a sad line in a log.
+    const { server, url, received } = careersForm({ reachable: false });
+    const baseURL = await url;
+    const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+    try {
+      const results = await run({
+        baseURL, artifacts, workflows: [apply], personas: nobody, attempts: 1,
+      });
+      const result = results[0]!;
+      const found: string[] = [];
+      problem(found, result.outcome.verdict === 'fail',
+        `the verdict is ${result.outcome.verdict}, not fail`);
+      problem(found, result.outcome.cause === 'expectation-not-met',
+        `the cause is ${result.outcome.cause}, not expectation-not-met`);
+      problem(found, /Could not reach the server/.test(result.outcome.detail),
+        'the report does not quote the sentence the page showed');
+      problem(found, exitCodeFor([result.outcome]) === 8,
+        `the run exits ${exitCodeFor([result.outcome])}, not 8`);
+      problem(found, received.length === 0, 'a refused server still recorded something');
+      assert.deepEqual(found, [],
+        `${found.join('\n')}\ndetail: ${result.outcome.detail}\nsteps:\n${result.steps.join('\n')}`);
+    } finally {
+      server.close();
+    }
+  });
+
+test('a control plane that takes its time does not make the agent walk away',
+  { timeout: 120_000 }, async () => {
+    // THE FAILURE, and it is the one that turned a working production origin
+    // red about one run in ten. A press returns the instant the click lands,
+    // and this form disables its own fieldset for exactly as long as the
+    // request takes. So the snapshot read a page with no fields and a button
+    // labelled "Recording it", decided nothing there moved the workflow
+    // forward, and followed the "Sign in" link in the header instead. The
+    // agent had filled in a form and then navigated away from it, and the
+    // run reported a careers page that offered nothing.
+    //
+    // `networkidle` cannot see this: it asks whether the CURRENT DOCUMENT has
+    // already reached that state, and a client rendered page reached it
+    // seconds ago and stays there. Nor can waiting for the rendered text to
+    // stop changing, because the text is perfectly stable for the whole time
+    // the page is at its least readable. What settles it is the request
+    // itself, which is what the session now counts.
+    //
+    // A second and a half, which is slower than the deployed control plane on
+    // a good day and well inside what it does on a bad one.
+    const { server, url, received } = careersForm({ reachable: true, answerAfterMs: 1_500 });
+    const baseURL = await url;
+    const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+    try {
+      const results = await run({
+        baseURL, artifacts, workflows: [apply], personas: nobody, attempts: 1,
+      });
+      const result = results[0]!;
+      const found: string[] = [];
+      problem(found, result.outcome.verdict === 'pass',
+        `the verdict is ${result.outcome.verdict}, not pass: ${result.outcome.detail}`);
+      problem(found, received.length === 1,
+        `the server received ${received.length} applications, not one`);
+      problem(found, !result.steps.some((s) => /Press Sign in/.test(s)),
+        'the agent left the form it had filled in and followed the header link');
+      assert.deepEqual(found, [], `${found.join('\n')}\nsteps:\n${result.steps.join('\n')}`);
+    } finally {
+      server.close();
+    }
+  });
