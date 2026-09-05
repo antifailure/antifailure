@@ -1367,7 +1367,7 @@ func runComparison(
 		}
 	}
 
-	findings := comparisonFindings(res.Result.Findings, threshold)
+	findings := comparisonFindings(res.Findings, threshold)
 	body := &ResultBody{
 		Findings: boundFindings(findings),
 		Metrics:  comparisonMetrics(res.Result, threshold),
@@ -1377,9 +1377,9 @@ func runComparison(
 
 	native := report.VerdictPass
 	switch {
-	case oracle.AtLeast(res.Result.Findings, threshold):
+	case oracle.AtLeast(res.Findings, threshold):
 		native = report.VerdictFail
-	case len(res.Result.Findings) > 0:
+	case len(res.Findings) > 0:
 		native = report.VerdictWarn
 	}
 	body.Summary = comparisonSummary(res, threshold, native, hypothesis)

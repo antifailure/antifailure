@@ -613,6 +613,27 @@ survive, such as a locked table, are checked against what a name can actually
 be and replaced when they are not one; removing the line breaks from an
 injection leaves the injection.
 
+## Data out of the copy is not returned either
+
+The branch these tools read is a copy of production, and the whole point of
+masking is that some of what is in it is real until it is not. That is a
+different rule from the one above and it needs its own sentence: the candidate
+rule is about text that could carry an instruction, and this one is about
+values that belong to somebody.
+
+So no tool here returns a value out of the database. `inspect_data_masking`
+reports whether a column changed and how long the value was, never what it was;
+its verification withholds even the redacted excerpt the scanner keeps, because
+an excerpt of real data is real data. `check_data_invariants` reports which
+invariant broke, how many rows came back and what the columns are called, and
+leaves the rows to `af invariants`. `compare_with_previous_release` reports
+which probe and which JSON path differed, which is structure, and drops the two
+values and a row's primary key, which are not.
+
+Each of those results says outright that it withheld something, so an absence is
+never read as "there was nothing there". The CLI still prints all of it, on a
+terminal belonging to somebody who is allowed to see it.
+
 ## Errors
 
 | Code | Means |
