@@ -73,11 +73,11 @@ const GROUPS: { label: string; slug: string; items: Entry[] }[] = [
 
 describe("the operator portal's navigation", () => {
   test("the declaration was read, so nothing below passes over an empty list", () => {
-    // The guard the rest of this file rests on. Twenty two sections in six
+    // The guard the rest of this file rests on. Twenty three sections in six
     // groups, plus the overview above them, is the information architecture;
     // any other number here means the parser has stopped seeing the file and
     // every assertion after it is vacuous.
-    assert.equal(ENTRIES.length, 23, "expected the overview plus twenty two sections");
+    assert.equal(ENTRIES.length, 24, "expected the overview plus twenty three sections");
     assert.equal(GROUPS.length, 6);
     for (const g of GROUPS) {
       assert.ok(g.items.length > 0, `no entries were read out of the ${g.label} group`);
@@ -188,8 +188,8 @@ describe("the operator portal's navigation", () => {
     );
     assert.equal(
       GROUPS.reduce((n, g) => n + g.items.length, 0),
-      22,
-      "the information architecture has twenty two sections in six groups",
+      23,
+      "the information architecture has twenty three sections in six groups",
     );
   });
 });

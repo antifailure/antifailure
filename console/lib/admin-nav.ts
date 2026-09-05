@@ -312,6 +312,13 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     slug: "administration",
     items: [
       {
+        label: "Applications",
+        href: "/admin/administration/applications",
+        Icon: IconOperators,
+        permission: "admin.recruitment.read",
+        summary: "Private applications for founding roles, oldest first. Review or remove applicant details.",
+      },
+      {
         label: "Analytics & Usage",
         href: "/admin/administration/analytics",
         Icon: IconPlan,
