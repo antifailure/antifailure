@@ -17,6 +17,9 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { resetStub, stubRecord } from './posthog-stub'
 
 // ---------------------------------------------------------------------------
@@ -183,26 +186,16 @@ describe('the configuration the published copy describes', () => {
     assert.notEqual(options?.ui_host, options?.api_host)
   })
 
-  it('pins the asset host to the api host, so the recorder cannot come from a vendor', async () => {
-    // The proxy is one mount that splits by path, so these are the same value.
-    // They are pinned rather than left to posthog-js inferring the asset route
-    // from a custom api_host, because that inference is a property of one
-    // version of somebody else's library and the session replay recorder is
-    // the largest and most blockable request it makes. A separate default here
-    // is the one edit that would put that request back on a vendor host
-    // silently, with ingest still looking healthy.
+  it('hands the library no separate host for the script bundles', async () => {
+    // posthog-js routes /static and /array at a custom api_host on its own,
+    // measured on the wire. So an asset host is redundant, and redundant is
+    // not the reason it is absent: it is the single option that would put the
+    // session replay recorder, the largest and most blockable request
+    // posthog-js makes, back on a vendor address while ingest stayed healthy
+    // and every check that reads api_host stayed green.
     const { posthogOptions } = await load()
     const options = posthogOptions('https://www.antifailure.dev')
-    assert.equal(options?.asset_host, 'https://app.antifailure.dev/ph')
-    assert.equal(options?.asset_host, options?.api_host)
-  })
-
-  it('has no second default anybody can point at a vendor', async () => {
-    // POSTHOG_ASSET_HOST falls back to POSTHOG_API_HOST rather than to a
-    // literal of its own. This is the assertion that a future edit adding one
-    // has to break.
-    const posthog = await load()
-    assert.equal(posthog.POSTHOG_ASSET_HOST, posthog.POSTHOG_API_HOST)
+    assert.equal(options?.asset_host, undefined)
   })
 
   it('names no PostHog ingestion host anywhere in what it hands the library', async () => {
@@ -442,5 +435,64 @@ describe('the switch on the privacy page, which has to reach the vendor too', ()
     assert.equal(vendorLoads, 0)
     assert.equal(stubRecord().inits.length, 0)
     unwatch()
+  })
+})
+
+describe('the option that cannot be allowed back, enforced by absence', () => {
+  // WHY A SOURCE SCAN AND NOT A VALUE ASSERTION. Every other rule in this file
+  // is checked by reading what posthogOptions returns, and that is the wrong
+  // instrument for this one: `asset_host: undefined` and no asset_host at all
+  // both read the same from the outside, and the leak is a variable somebody
+  // sets in a deployment rather than a value in this tree. The failure this
+  // guards is one repository variable away from being live, no gate on either
+  // side of the lane reads it because every gate reads api_host, and the
+  // request it moves is the one nobody inspects because ingest keeps working.
+  //
+  // WHAT IS SCANNED. The three directories next.config.ts exports into a
+  // bundle. test/ is excluded for the same reason tools/routecheck excludes it:
+  // an assertion that a string is absent has to be able to name the string, and
+  // nothing under test/ reaches a browser.
+
+  const www = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const shipped = ['lib', 'components', 'app']
+
+  function sourceFiles(): string[] {
+    const out: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          if (['node_modules', '.next', 'out'].includes(entry.name)) continue
+          walk(full)
+        } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) {
+          out.push(full)
+        }
+      }
+    }
+    for (const dir of shipped) walk(path.join(www, dir))
+    return out
+  }
+
+  it('scans a real and non empty set of shipped files, or it proves nothing', () => {
+    // The positive control on the scanner itself. A walk that found no files
+    // would pass both assertions below while checking nothing at all, which is
+    // the shape of instrument this repository keeps having to throw away.
+    const files = sourceFiles()
+    assert.ok(files.length > 40, `only ${files.length} files scanned`)
+    assert.ok(
+      files.some((f) => f.endsWith(path.join('lib', 'posthog.ts'))),
+      'the scan did not reach lib/posthog.ts, so it could not see the option it is about',
+    )
+  })
+
+  it('no shipped file names the asset host option or the variable that would feed it', () => {
+    const offenders: string[] = []
+    for (const file of sourceFiles()) {
+      const text = fs.readFileSync(file, 'utf8')
+      for (const needle of ['asset' + '_host', 'NEXT_PUBLIC_POSTHOG_' + 'ASSET_HOST']) {
+        if (text.includes(needle)) offenders.push(`${path.relative(www, file)} names ${needle}`)
+      }
+    }
+    assert.deepEqual(offenders, [])
   })
 })
