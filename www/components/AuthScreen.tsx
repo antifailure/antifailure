@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useChrome } from "./Chrome";
 import { LogoMark } from "./icons";
-import { CONTROL_PLANE_URL } from "@/lib/site";
+import { controlPlaneUrl } from "@/lib/control-plane-routes";
 import { ctaEngaged } from "@/lib/analytics";
 
 function GitHubMark({ className }: { className?: string }) {
@@ -166,7 +166,7 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
             </p>
 
             <a
-              href={CONTROL_PLANE_URL + "/auth/github"}
+              href={controlPlaneUrl("auth.github")}
               className="mt-6 flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-black text-[15px] font-medium text-white hover:bg-[#292929]"
             >
               <GitHubMark className="h-[18px] w-[18px]" />

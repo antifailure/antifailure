@@ -167,6 +167,7 @@ runner/artifacts/
 /reltar
 /runbookcheck
 /sbomcheck
+/routecheck
 /scanrepo
 /schemadoc
 /sidebarcheck

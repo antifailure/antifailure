@@ -82,6 +82,7 @@ gate: _reports
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "the site calls routes that exist" just routecheck
     run "payment secrets reach the app"  just test-infra-config
     run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
@@ -977,6 +978,35 @@ inputcheck:
 # that has stopped being needed is reported so the file cannot rot.
 wirecheck:
     go run ./tools/wirecheck .
+
+# The site does not call a control plane route that is not there.
+#
+# Somebody filled in the careers form on antifailure.dev and was told "Could not
+# reach the server". The form was right, the route was right, and
+# `POST https://app.antifailure.dev/v1/applications` answered 404: the site
+# publishes on every merge to main and the control plane only moves on a `v*`
+# tag, so the page was live against an API twenty two commits behind it.
+#
+# This is the OFFLINE half, which is what a pull request can prove. It checks
+# that every control plane URL the site builds is declared in
+# www/lib/control-plane-routes.ts and that every route declared there is one
+# this repository's control plane actually mounts. It CANNOT see the failure
+# above, and says so when it finishes: on the day the careers form broke, main's
+# API did declare the route. The half that would have caught it needs a live
+# origin and runs in deploy.yml against the control plane the site is about to
+# be published in front of.
+routecheck:
+    go run ./tools/routecheck -root .
+
+# The same command against a control plane that is actually running.
+#
+# Not part of `just gate`, because it asks the internet and a gate that blocks a
+# merge on a network timeout is a gate people learn to re-run rather than read.
+# deploy.yml runs it before the publish step, which is where the answer matters:
+# the question is not what main declares, it is what the origin this build is
+# about to point browsers at will answer them.
+routecheck-deployed origin="https://app.antifailure.dev":
+    go run ./tools/routecheck -root . -origin {{origin}} -allow-write-probes
 
 # Mocked providers exercise the rendered payment references without cloud access.
 test-infra-config:

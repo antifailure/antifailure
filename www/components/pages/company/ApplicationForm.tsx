@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CONTROL_PLANE_URL } from "@/lib/site";
+import { controlPlaneUrl } from "@/lib/control-plane-routes";
 
 /**
  * The application form, and the four things it refuses to get wrong.
@@ -123,7 +123,7 @@ export function ApplicationForm() {
   async function send(values: Record<string, unknown>, key: string) {
     let response: Response;
     try {
-      response = await fetch(`${CONTROL_PLANE_URL}/v1/applications`, {
+      response = await fetch(controlPlaneUrl("applications.create"), {
         method: "POST",
         // No cookie leaves this browser for the control plane. The endpoint is
         // anonymous, and sending credentials to it would be the only reason it

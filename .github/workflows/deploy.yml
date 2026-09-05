@@ -82,6 +82,13 @@ jobs:
             www/package-lock.json
             docs/package-lock.json
 
+      # For routecheck below, which is the last thing standing between a site
+      # that calls a route and a control plane that does not serve it.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
       - name: Build the marketing site
         # next.config.ts sets output: "export", so this writes static files and
         # needs no server.
@@ -144,6 +151,58 @@ jobs:
             exit 1
           fi
           echo "no documentation link escapes the /docs base"
+
+      - name: The control plane this site is about to call actually serves it
+        # THE FAILURE. Somebody filled in the careers form on antifailure.dev
+        # and was told "Could not reach the server". The form was correct, the
+        # route was correct, and this is what production answered:
+        #
+        #   POST https://app.antifailure.dev/v1/applications  ->  404
+        #   POST https://app.antifailure.dev/v1/leads         ->  400
+        #
+        # The site publishes on every merge to main; the control plane only
+        # moves when a `v*` tag is promoted. The careers page went live the
+        # instant its pull request merged, in front of an API twenty two commits
+        # behind it that had never heard of the route it posts to.
+        #
+        # The step below on the machine-readable surfaces already wrote this
+        # split down and decided it was tolerable, "because the paths are
+        # additive and a caller reading an operation that is not there yet gets
+        # a 404". That is right about openapi.json, which somebody READS. It is
+        # wrong about this site, which is a CALLER, and for a caller a 404 is a
+        # form that does not work.
+        #
+        # It runs HERE rather than in ci.yml because the question is not what
+        # main declares. It is what the origin this build is about to point
+        # browsers at will answer them, and that can change between the merge
+        # and the publish without a commit. It fails closed: an origin that
+        # cannot be reached, that answers 5xx, or whose reply did not come from
+        # the control plane at all is reported as undetermined and fails, never
+        # as a pass it did not earn.
+        #
+        # -allow-write-probes sends the one probe the inventory declares as
+        # writing something: GET /auth/github creates one expiring oauth_states
+        # row, exactly as a person who clicks "Continue with GitHub" and closes
+        # the tab does. There is no request that proves that route is present
+        # without it, so it is declared and paid for rather than skipped.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          control="${NEXT_PUBLIC_CONTROL_PLANE_URL:-https://app.antifailure.dev}"
+
+          # The origin checked has to be the origin the bundle calls. Nothing
+          # here sets NEXT_PUBLIC_CONTROL_PLANE_URL, so the build baked in the
+          # default above, and this proves that rather than assuming it. A gate
+          # that probed a different origin than the one shipped would be a
+          # green tick over the same class of failure.
+          if ! grep -rqF "$control" site/_next 2>/dev/null; then
+            echo "::error::the built site does not contain $control, so routecheck would probe an origin the bundle does not call."
+            exit 1
+          fi
+
+          go run ./tools/routecheck -root . -origin "$control" -allow-write-probes
 
       - name: Publish
         # Skipped, with the job still green, until somebody sets the token.

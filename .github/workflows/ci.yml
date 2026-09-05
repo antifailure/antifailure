@@ -658,6 +658,27 @@ jobs:
         # same reason.
         run: go run ./tools/classcheck .
 
+      - name: The site calls control plane routes that exist
+        # Somebody filled in the careers form on antifailure.dev and was told
+        # "Could not reach the server". The form was correct and the route was
+        # correct: `POST https://app.antifailure.dev/v1/applications` answered
+        # 404, because this site publishes on every merge to main and the
+        # control plane only moves when a `v*` tag is promoted. The page was
+        # live in front of an API twenty two commits behind it.
+        #
+        # This is the half a pull request can prove, and it is deliberately not
+        # the half that catches the failure above: it checks that every control
+        # plane URL the site builds is declared in one module, and that every
+        # route declared there is one this repository's control plane mounts.
+        # On the day the form broke, main's server.ts did declare the route, so
+        # this would have been green. It exists so that the inventory the other
+        # half reads cannot go stale or go quietly incomplete, and it says out
+        # loud when it finishes that what is DEPLOYED was not checked here.
+        #
+        # The half that would have caught it needs a live origin and runs in
+        # deploy.yml, immediately before the publish.
+        run: go run ./tools/routecheck -root .
+
       - name: No animation that never stops
         # If a piece of UI animates on an infinite loop while the user does
         # nothing, it is wrong. Reads the built stylesheet and HTML rather than
