@@ -40,14 +40,14 @@ const OUT = path.join(ROOT, "out");
  * plaintext request to one, but it is the wrong URL in the index and it splits
  * every signal that points at the site between two spellings of it.
  *
- * Both wrong spellings are asserted against, not just the scheme: www is a
- * second live origin serving this same build on its own certificate, so the www
- * origin is reachable, returns 200, and is exactly as wrong to canonicalise to
- * as the http:// one.
+ * The assertions here reach the tags this file parses: canonicals, og:urls,
+ * robots and the sitemaps. The sweep for every OTHER spelling of the site, in
+ * every file the host serves, is in tools/site/assemble.sh, because it has to
+ * read the documentation half of the site and this file never has. See the note
+ * where that check used to be, at the bottom of this file.
  *
  * THIS DOES NOT CONTRADICT AF_SITE_ORIGIN ACCEPTING THE www ORIGIN, and the two
  * arrived within a day of each other so somebody will meet them together.
- *
  * They govern different things. This rule is about what the site PUBLISHES: one
  * spelling in the index, one target for every inbound signal, no split between
  * two addresses for the same page. AF_SITE_ORIGIN is about which page the API
@@ -56,35 +56,8 @@ const OUT = path.join(ROOT, "out");
  * person arrived on is how the marketing site spent a week with every form and
  * every beacon returning 403 to anybody who typed four extra characters. Both
  * rules are right, and holding only one of them is what broke it.
- *
- * THERE IS DELIBERATELY NO EXEMPTION FOR PROSE THAT NAMES THE HOSTNAME, and the
- * changelog is where that bites: `.changes/*.md` is rendered into /changelog,
- * so a release note about a www bug trips this. It was tempting to exempt a
- * mention as opposed to a use, and the reason not to is measured rather than
- * felt. In changelog.html the string sits inside a <code> element and really is
- * inert. In changelog.md and llms-full.txt, which are the surfaces built FOR
- * machines, the backticks are stripped and it appears as a BARE URL. llms-full
- * .txt is what an agent fetches instead of reading the site, so a "mention"
- * there is a link an agent may follow or cite, pointed at the exact origin every
- * rel=canonical on the site asks it to ignore. That is a use.
- *
- * The other reason is this check's own design, in the comment above the
- * assertion: it searches for the wrong answer rather than surveying the right
- * one, so it needs no list of files allowed to mention the site and a file added
- * later cannot fall outside it. An exemption list is the one thing that reopens
- * that hole, and the person who adds the second row is always in a hurry.
- *
- * A note can still be completely specific without emitting the origin: name the
- * hostname, say the header carried it, quote the status code and the message the
- * visitor saw. Going vague to get past this is not the deal. See
- * .changes/the-www-hostname-could-not-talk-to-its-own-api.md for one that does.
  */
 const ORIGIN = "https://antifailure.dev";
-const WRONG_ORIGINS = [
-  "http://antifailure.dev",
-  "http://www.antifailure.dev",
-  "https://www.antifailure.dev",
-];
 
 let failures = 0;
 let checks = 0;
@@ -846,38 +819,21 @@ assert(
 
 // One origin, everywhere, in every file the host will serve.
 //
-// The tag checks above reach canonicals and og:urls. They do not reach a
-// JSON-LD @id, a link written by hand in MDX, a URL baked into a JS chunk, or
-// the markdown twins, and every one of those is a place the site states its own
-// address. This is the assertion that covers all of them at once, and it is
-// deliberately a search for the wrong answer rather than a survey of the right
-// one: it needs no list of the files that are allowed to mention the site, so
-// a file added later cannot fall outside it.
-console.log("\nOne origin");
-const SERVED = /\.(html|md|txt|xml|json|js|webmanifest)$/i;
-function servedFiles(dir) {
-  const found = [];
-  for (const entry of readdirSync(dir)) {
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) found.push(...servedFiles(full));
-    else if (SERVED.test(entry)) found.push(full);
-  }
-  return found;
-}
-const offOrigin = [];
-for (const file of servedFiles(OUT)) {
-  const body = readFileSync(file, "utf8");
-  for (const wrong of WRONG_ORIGINS) {
-    if (body.includes(wrong)) offOrigin.push(`${path.relative(OUT, file)} (${wrong})`);
-  }
-}
-assert(
-  offOrigin.length === 0,
-  `no built file spells the site any way but ${ORIGIN}`,
-  offOrigin.length > 0
-    ? `${offOrigin.length} occurrences: ${offOrigin.slice(0, 5).join(", ")}${offOrigin.length > 5 ? " ..." : ""}`
-    : "",
-);
+// MOVED, to tools/site/assemble.sh, and the move is the point rather than a
+// tidy-up. This assertion used to live here and read OUT, which is www/out. It
+// said "no built file spells the site any way but https://antifailure.dev", and
+// www/out is 307 of the published site's 499 served files: the documentation,
+// the installer and the schemas were never opened by the gate that claimed to
+// have read every one of them.
+//
+// assemble.sh is the only step that has both builds plus the files neither
+// build produces, which is the same reason the trailing-slash policy is
+// asserted there and not here. It also asserts its own reach now, by requiring
+// the canonical origin under site/docs and outside it, so a walk that narrows
+// back to one half fails by name instead of passing over an empty set.
+//
+// Do not put a copy back here. A second, narrower copy of a claim is how the
+// two drift into disagreeing, and the narrower one is the one that goes green.
 
 console.log(`\n${checks - failures}/${checks} passed`);
 if (failures > 0) {

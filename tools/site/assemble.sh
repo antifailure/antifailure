@@ -528,6 +528,145 @@ print(
 )
 SLASH
 
+# One origin, across the whole assembled site.
+#
+# THE FAILURE. This assertion lived in www/scripts/check-seo.mjs, where it read
+# www/out and said, in its own words, "no built file spells the site any way but
+# https://antifailure.dev". The published site is not www/out. It is this tree,
+# and 192 of its 499 served files are the documentation, the installer and the
+# schemas, none of which that gate had ever opened. The sentence was true about
+# three fifths of the site and was written about all of it.
+#
+# Nothing was wrong in the unread three fifths on the day this moved, which is
+# the reason to move it rather than the reason not to: a gate whose claim is
+# wider than its reach is not a gate that has been lucky, it is a gate that has
+# never been asked the question. The deploy step that does read site/docs
+# resolves hrefs and has no opinion about which host a page names, so a
+# documentation page could tell a visitor to go to the wrong address and every
+# stage would stay green.
+#
+# WHY HERE. Same argument the trailing-slash block above makes: this script is
+# the only step that has both builds plus the files neither build produces. The
+# marketing half is not checked twice; check-seo.mjs now points here, and the
+# comment there says why a narrower copy must not come back.
+#
+# THE SPELLINGS ARE DERIVED, NOT LISTED. The old check carried three literals.
+# A list is a survey of the wrong answers somebody thought of, and www is the
+# one that arrived after it was written. This matches any http-or-https,
+# apex-or-www spelling and refuses everything that is not the canonical one, so
+# a fourth spelling is caught by a check nobody had to remember to update.
+# Other subdomains are deliberately untouched: blog.antifailure.dev is a
+# different site, not a different spelling of this one.
+#
+# MENTION VERSUS USE, and this is the fourth instrument in this repository to
+# meet it, so it is worth naming rather than rediscovering. prosecheck refuses
+# an exemption list for em dashes; cspell needed the real tool name tfsec added
+# to a dictionary; gatecheck's action-pin pattern matched `statuses: read`
+# because `statuses:` ends in those five characters; and the origin check could
+# not tell a planning note discussing the www hostname from a page telling a
+# visitor to go there.
+#
+# They are one root cause and three different answers, and pretending they are
+# one answer is how the wrong one gets applied. The root cause: each check
+# matched TEXT while its claim was about a POSITION in a structure. The answers,
+# in the order to try them:
+#
+#   1. Parse the position. gatecheck's was this: an action reference is the
+#      value of a `uses:` key, and a pattern anchored there cannot be fooled by
+#      a word that ends in the same five characters. No exemption was needed
+#      because the mention was never in the position.
+#   2. Narrow the input until every occurrence in it IS a use. This check is
+#      this one. Walking the served tree instead of the repository is what makes
+#      docs/plan/notes/www-tls.md a non-question: it is a planning note, it is
+#      not published, and a gate over published files never sees it. The
+#      distinction the old check could not draw is one it no longer has to.
+#   3. A closed list with a stated reason per row, LAST. cspell's dictionary and
+#      tools/docs/wiring-exemptions.tsv are this, legitimately: spelling and
+#      deploy wiring have no structure left to appeal to, the sets are small,
+#      and a row that has stopped being needed is reported so the list cannot
+#      rot. prosecheck refuses one because for punctuation there is no true
+#      exception to state, and a list with nothing true in it is a place to put
+#      findings nobody understood.
+#
+# Reach for 3 only when 1 and 2 are genuinely unavailable. An exemption is a
+# sentence somebody has to keep being right about; a narrower input is not.
+#
+# THE REACH IS ASSERTED, not assumed, and that is the half that would have
+# caught the original defect. Content assertions cannot: they were green while
+# the gate read three fifths of the site, and they would be green again if
+# somebody narrowed the walk back tomorrow. So this requires the canonical
+# origin to appear BOTH under site/docs and outside it. A run that has stopped
+# reading either half fails by name instead of passing over an empty set.
+python3 - <<'ORIGIN' || exit 1
+import os, re, sys
+
+CANONICAL = "https://antifailure.dev"
+SERVED = re.compile(r"\.(html|md|txt|xml|json|js|webmanifest)$", re.I)
+SPELLING = re.compile(r"https?://(?:www\.)?antifailure\.dev", re.I)
+
+offenders = {}
+served = 0
+canonical_in = {"docs": 0, "www": 0}
+
+for dirpath, _, filenames in os.walk("site"):
+    for name in filenames:
+        if not SERVED.search(name):
+            continue
+        path = os.path.join(dirpath, name)
+        rel = os.path.relpath(path, "site")
+        served += 1
+        with open(path, encoding="utf-8", errors="replace") as f:
+            body = f.read()
+        half = "docs" if rel == "docs" or rel.startswith("docs" + os.sep) else "www"
+        for match in SPELLING.finditer(body):
+            if match.group(0) == CANONICAL:
+                canonical_in[half] += 1
+            else:
+                offenders.setdefault(rel, set()).add(match.group(0))
+
+problems = []
+if served < 200:
+    problems.append(
+        f"read only {served} served files out of site/, which is below the floor. "
+        "A walk that has stopped matching looks exactly like a site with nothing "
+        "in it, and both pass"
+    )
+for half, where in (("www", "outside site/docs"), ("docs", "under site/docs")):
+    if canonical_in[half] == 0:
+        problems.append(
+            f"no file {where} names {CANONICAL} at all, so this check is not "
+            f"reading the {half} half of the assembled site. That is the exact "
+            "defect it was moved here to end: it used to read www/out only, and "
+            "claimed to have read every built file"
+        )
+
+if problems:
+    print("the one-origin check cannot make the claim it makes:")
+    for problem in problems:
+        print("  " + problem)
+    sys.exit(1)
+
+if offenders:
+    total = sum(len(s) for s in offenders.values())
+    print(f"{len(offenders)} served files spell the site as something other than {CANONICAL}:")
+    for rel in sorted(offenders)[:20]:
+        print(f"  {rel}: {', '.join(sorted(offenders[rel]))}")
+    if len(offenders) > 20:
+        print(f"  ... and {len(offenders) - 20} more files")
+    print(
+        f"{total} wrong spellings. Every absolute URL this site emits has to be "
+        f"{CANONICAL}: www and the http form are both live and both split every "
+        "signal that points here between two spellings of one page."
+    )
+    sys.exit(1)
+
+print(
+    f"one origin: {served} served files, {canonical_in['www'] + canonical_in['docs']} "
+    f"occurrences of {CANONICAL}, {canonical_in['docs']} of them under /docs, "
+    "and no other spelling anywhere"
+)
+ORIGIN
+
 # Assert the promises, rather than trusting the copies above. Each of these is
 # an address something already shipped points at.
 for required in \
