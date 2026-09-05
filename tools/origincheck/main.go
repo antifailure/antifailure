@@ -79,14 +79,43 @@ type crossOriginRoute struct {
 	visible string
 }
 
-// Every route on the control plane that answers a cross origin browser. If a
-// fourth is added and is not listed here, this check keeps passing while that
-// route is broken on www, so the list is printed on every run: what was NOT
-// checked has to be as readable as what was.
+// Every route on the control plane that answers a cross origin browser.
+//
+// A SECOND LIST OF THE SAME ROUTES EXISTS and pretending otherwise is how one
+// of them rots. www/lib/control-plane-routes.ts holds the site's inventory of
+// every control plane route it calls, and tools/routecheck refuses any file
+// under www that builds such a URL outside that module, so a call site cannot
+// exist without an entry there. That makes the inventory the better source and
+// this list the derived one: this is the CORS subset of it.
+//
+// Nothing in Go or TypeScript compares the two. One is a value in a .ts file
+// and the other is a slice in a .go file, so a fifth cross origin route added
+// to the inventory would leave this check quietly passing while that route was
+// broken on www, which is this bug wearing a different hat.
+// TestEveryCrossOriginRouteInTheInventoryIsProbed is what compares them, in
+// both directions, and notProbed below is where a route in the inventory that
+// is deliberately not probed states why.
+//
+// The list is also printed on every run: what was NOT checked has to be as
+// readable as what was.
 var crossOriginRoutes = []crossOriginRoute{
 	{"/v1/site/events", "The analytics beacon. A refusal is invisible to the visitor, and silently drops every count from this hostname."},
 	{"/v1/leads", "The enterprise contact form. A refusal shows the visitor \"Could not reach the server\", which is the sentence that form shows for a dropped connection."},
 	{"/v1/applications", "The careers application form. A refusal shows a failure on a form somebody has just filled in."},
+}
+
+// inventoryPath is the site's own list of every control plane route it calls.
+// Read by the test that keeps crossOriginRoutes honest against it.
+const inventoryPath = "www/lib/control-plane-routes.ts"
+
+// Routes the site's inventory declares that this check deliberately does NOT
+// send a preflight to, with the reason each one is allowed to stay that way. A
+// reason is required for the same purpose as every other exemption file here:
+// an exemption with no argument behind it cannot be told apart from somebody
+// silencing a finding they did not understand. A row that stops being needed is
+// reported, so this cannot rot into a permanent allowance.
+var notProbed = map[string]string{
+	"/auth/github": "A top level navigation, not a fetch. The browser follows a link to it and sends no Origin header and no preflight, so there is no CORS answer for this check to assert and no hostname it can be wrong about. It breaks by being absent rather than by refusing an origin, which is exactly what tools/routecheck probes it for.",
 }
 
 func main() {
@@ -103,6 +132,15 @@ func main() {
 	if err := flag.CommandLine.Parse(args[1:]); err != nil {
 		os.Exit(2)
 	}
+	// A positional root after the subcommand, because every other checker in
+	// this repository is invoked as `go run ./tools/<name> .` and muscle memory
+	// is a real interface. Without this, `origincheck origins .` exits 2 with a
+	// usage screen, which reads like the check refusing rather than like the
+	// argument being in the wrong place. -C still works and wins if both are
+	// given, since it is what the justfile recipes were written against.
+	if flag.NArg() > 0 && *root == "." {
+		*root = flag.Arg(0)
+	}
 
 	switch command {
 	case "origins":
@@ -117,6 +155,17 @@ func main() {
 		usage()
 		os.Exit(0)
 	default:
+		// The house convention is `go run ./tools/<name> .`, so somebody will
+		// type that here. Say which subcommand they meant rather than printing
+		// the whole usage screen at a person who is one word away.
+		if command == "." || !strings.HasPrefix(command, "-") {
+			fmt.Fprintf(os.Stderr, "origincheck: %q is not a command. This one takes a subcommand first:\n"+
+				"  origincheck origins %s      the tree alone, no network and no credential\n"+
+				"  origincheck domains %s      what Azure really serves\n"+
+				"  origincheck live %s         what a deployed control plane really answers\n"+
+				"  origincheck all %s          all three\n", command, command, command, command, command)
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "origincheck: unknown command %q\n", command)
 		usage()
 		os.Exit(2)

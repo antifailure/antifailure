@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -325,5 +326,120 @@ func TestDomainsRefusesAHostnameTheTreeClaimsAndAzureDoesNotServe(t *testing.T) 
 	)
 	if code != 1 {
 		t.Fatalf("a claimed hostname Azure does not serve has to be refused, got exit %d", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The site's inventory, against the routes this check probes
+// ---------------------------------------------------------------------------
+
+// inventoryRoutes reads the path literals out of the site's own inventory of
+// control plane routes.
+//
+// A regexp over `path: "..."` rather than a TypeScript parser, which is a risk
+// worth naming: a pattern that stops matching reports nothing and looks exactly
+// like a file with nothing in it. The floor in the test below is what turns
+// that silence into a failure. The interface declaration above the value spells
+// the field `path: string` with no quotes, so it cannot be picked up as a
+// route.
+func inventoryRoutes(t *testing.T) map[string]bool {
+	t.Helper()
+	root := repoRoot(t)
+	b, err := os.ReadFile(filepath.Join(root, inventoryPath))
+	if err != nil {
+		t.Fatalf("could not read %s: %v", inventoryPath, err)
+	}
+	found := map[string]bool{}
+	for _, m := range regexp.MustCompile(`path:\s*"([^"]+)"`).FindAllStringSubmatch(string(b), -1) {
+		found[m[1]] = true
+	}
+	return found
+}
+
+// repoRoot walks up from this package to the directory holding the inventory,
+// so the test does not depend on where `go test` was invoked from.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		if _, err := os.Stat(filepath.Join(dir, inventoryPath)); err == nil {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	t.Fatalf("could not find %s above the test's working directory", inventoryPath)
+	return ""
+}
+
+func TestEveryCrossOriginRouteInTheInventoryIsProbed(t *testing.T) {
+	// THE DUPLICATION THIS EXISTS FOR. The site's inventory and this checker's
+	// crossOriginRoutes are two lists of the same routes, one a value in a .ts
+	// file and one a slice in a .go file. Git passes a route added to only one
+	// of them, and so does tsc, and so does every gate in this repository. A
+	// fifth cross origin route added to the inventory would leave this checker
+	// quietly passing while that route was refused on www, which is the bug it
+	// was written for arriving from a direction it could not see.
+	inventory := inventoryRoutes(t)
+
+	// A FLOOR, because a regexp that stopped matching would make every
+	// assertion below vacuously true, and a check that passes because it read
+	// nothing is the exact defect this repository keeps finding in its own
+	// instruments.
+	if len(inventory) < 4 {
+		t.Fatalf("%s parsed as %d route(s), which reads as a broken pattern rather than a short list: %v",
+			inventoryPath, len(inventory), inventory)
+	}
+
+	probed := map[string]bool{}
+	for _, r := range crossOriginRoutes {
+		probed[r.path] = true
+	}
+
+	// Direction one: everything this checker probes is a route the site really
+	// calls. A path typed wrong here would send preflights at a route nobody
+	// uses and report success about it.
+	for path := range probed {
+		if !inventory[path] {
+			t.Errorf("origincheck probes %s and %s does not list it. Either the site stopped "+
+				"calling it, or the path is a typo and every preflight sent to it proved nothing.",
+				path, inventoryPath)
+		}
+	}
+
+	// Direction two, which is the one that catches the next route. Everything
+	// the site calls is either probed here or has a stated reason not to be.
+	for path := range inventory {
+		if probed[path] || notProbed[path] != "" {
+			continue
+		}
+		t.Errorf("%s lists %s and origincheck neither probes it nor says why not. If a browser on "+
+			"the site calls it cross origin, add it to crossOriginRoutes; if it cannot be wrong "+
+			"about a hostname, add a row to notProbed saying so.", inventoryPath, path)
+	}
+
+	// A reason that has stopped being needed, so notProbed cannot rot into a
+	// permanent allowance the way a hand maintained list does.
+	for path := range notProbed {
+		if !inventory[path] {
+			t.Errorf("notProbed excuses %s and %s no longer lists it, so the row can go",
+				path, inventoryPath)
+		}
+		if probed[path] {
+			t.Errorf("notProbed excuses %s and crossOriginRoutes probes it anyway, so the row is a lie", path)
+		}
+	}
+}
+
+func TestEveryNotProbedRowStatesAReason(t *testing.T) {
+	// The same rule the exemption FILES carry, applied to the exemption map: an
+	// exemption with no argument behind it cannot be told apart from somebody
+	// silencing a finding they did not understand.
+	for path, reason := range notProbed {
+		if len(strings.TrimSpace(reason)) < 40 {
+			t.Errorf("notProbed[%q] has no real reason, just %q", path, reason)
+		}
 	}
 }
