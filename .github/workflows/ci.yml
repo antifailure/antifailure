@@ -1592,3 +1592,50 @@ jobs:
             exit 1
           fi
           echo "every commit in $range is signed off"
+
+      - name: No commit attributes itself to whatever wrote it
+        # CLAUDE.md: "No attribution trailers. No Generated with Claude, no
+        # Co-Authored-By, nothing of that shape, anywhere."
+        #
+        # THE RULE SAID ANYWHERE AND THE ONE INSTRUMENT LOOKED IN ONE PLACE.
+        # tools/prmerge refused three literal trailer keys in the body it was
+        # about to write into a squash commit. It could not see the messages of
+        # the commits a branch already carries, and nothing else could either:
+        # prosecheck reads tracked files and a commit message is not one. So the
+        # ban held exactly where somebody happened to run `just merge`.
+        #
+        # It is the same range as the sign-off step above, computed the same way
+        # and for the same reason: on a pull request the checkout is the merge
+        # commit, so HEAD^1..HEAD^2 is the commits the branch ADDS rather than
+        # everything since its base last moved.
+        #
+        # `-pr` reads the pull request's DESCRIPTION as well, which is a third
+        # surface and the one where the trailer arrives with no key in front of
+        # it. A description is public the moment it is opened, whether or not
+        # anything is ever merged.
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${BASE:-}" ]; then
+            if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
+              range="HEAD^1..HEAD^2"
+            else
+              range="$BASE..HEAD"
+            fi
+          elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="HEAD~0..HEAD"
+          fi
+
+          if [ -n "${NUMBER:-}" ]; then
+            go run ./tools/prmerge -check-attribution "$range" -pr "$NUMBER"
+          else
+            go run ./tools/prmerge -check-attribution "$range"
+          fi

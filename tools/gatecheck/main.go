@@ -686,7 +686,16 @@ var exemptFromGate = map[string]string{
 		"`go test ./tools/prmerge` covers that inside `gate`, including that the " +
 		"request and the struct ask for the same fields. " +
 		"It runs on every pull request in ci.yml. Run it by hand with " +
-		"`just merge <number> -check-fields`.",
+		"`just merge <number> -check-fields`. " +
+		"THIS EXEMPTION COVERS THE FIELD CHECK AND NOT THE WHOLE TOOL, and the " +
+		"distinction matters now that the tool has a second read only mode. " +
+		"`-check-attribution` reads commit messages out of a git range, needs no " +
+		"network and no pull request, and its answer is entirely a function of " +
+		"this tree, so it IS in `gate`, as `just attribution`. This key is the " +
+		"tool rather than the flag, so that recipe pairs and this exemption " +
+		"short circuits it; the exemption is therefore about the field check " +
+		"alone and says so rather than reading as a blanket pass for anything " +
+		"prmerge grows next.",
 
 	"tool vulncheck": "" +
 		"Its answer does not come from this repository. tools/vulncheck asks the " +

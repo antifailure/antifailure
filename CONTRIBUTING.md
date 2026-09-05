@@ -81,6 +81,30 @@ to submit it under this repository's license: MIT everywhere except `ee/`,
 which is under the Antifailure Enterprise License. The full DCO text is at
 https://developercertificate.org. There is deliberately no CLA.
 
+## The sign-off is the only trailer
+
+A commit here carries a `Signed-off-by` and nothing else. No `Co-Authored-By`,
+no `Generated-with`, no session identifier, and no link back to whatever tool
+was open at the time, in the commit message or in the pull request description.
+
+The reason is not modesty. A commit message here exists to explain the failure
+the change fixes, to somebody reading `git log` in two years, and a trailer
+naming a tool run is neither part of that explanation nor true for long: the
+session it points at is gone and the link outlives it. The history of this
+repository is public and permanent, and the remedy for a trailer that reached
+`main` is rewriting `main`, which breaks every clone.
+
+`just attribution` is the check, it runs in `just gate` and on every pull
+request, and it reads three surfaces: the message of every commit your branch
+adds, the pull request's own description, and the body of the squash commit
+`just merge` is about to write. It names which rule it matched and quotes the
+line, so a refusal says what to delete.
+
+If you use an assistant that appends a footer, turn that off rather than
+stripping it by hand each time. The two shapes it usually takes, a
+`Co-Authored-By:` trailer and a `Generated with ...` line, are both refused, and
+so is the bare session URL that arrives with no key in front of it.
+
 ## Branches and pull requests
 
 Branch names are `area/short-description`, for example `masking/fpe-tweak` or
