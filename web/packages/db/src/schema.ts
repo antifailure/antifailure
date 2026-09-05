@@ -415,11 +415,9 @@ export const deviceAuthorizations = pgTable('device_authorizations', {
 export const mcpClients = pgTable('mcp_clients', {
   id: uuid('id').primaryKey().defaultRandom(),
   clientId: text('client_id').notNull(),
-  clientSecretHash: bytea('client_secret_hash'),
   clientName: text('client_name').notNull(),
   redirectUris: text('redirect_uris').array().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
 })
 
 // The single-use code between the consent screen and the token endpoint. Same

@@ -12,6 +12,12 @@ describe('hosted MCP operator measurements', () => {
   let client: string
   let active: string
   let session: { token: string; csrfToken: string }
+  // mcp_clients carries no org_id on purpose, so the operator's client count is
+  // installation wide and every other suite sharing this database contributes
+  // to it. The absolute number is therefore whatever ran first; what this suite
+  // owns is the ONE registration it makes, so the assertion below is a delta.
+  // Asserting the absolute number passed alone and failed in the full run.
+  let clientsBefore: number
   before(async () => {
     h = await startApi()
     h.clock.advance(Date.now() - h.clock.now().getTime())
@@ -24,6 +30,7 @@ describe('hosted MCP operator measurements', () => {
   })
   after(async () => { await h.close() })
   beforeEach(async () => {
+    clientsBefore = (await surface()).counts.clients
     org = await seedOrg(h.admin, 'mcp-management')
     const user = await signInAs(h, org, 'owner')
     client = randomUUID()
@@ -53,7 +60,10 @@ describe('hosted MCP operator measurements', () => {
     return body.result.data
   }
   test('counts only MCP credentials and partitions their standing', async () => {
-    assert.deepEqual((await surface()).counts, { clients: 1, active: 1, revoked: 1, expired: 1 })
+    const counts = (await surface()).counts
+    assert.deepEqual({ clients: counts.clients - clientsBefore, active: counts.active,
+      revoked: counts.revoked, expired: counts.expired },
+    { clients: 1, active: 1, revoked: 1, expired: 1 })
   })
   test('the endpoint comes from configured application origin', async () => {
     assert.equal((await surface()).endpoint, 'http://app.test/mcp')

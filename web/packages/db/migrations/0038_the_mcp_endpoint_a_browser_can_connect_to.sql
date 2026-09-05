@@ -64,11 +64,14 @@ CREATE TABLE mcp_clients (
   -- model, and still unguessable here, because it is the key the policy below
   -- confines this table by.
   client_id           text NOT NULL UNIQUE,
-  -- SHA-256 of the client secret, or NULL for a public client. Claude
-  -- registers as a public client and authenticates with PKCE instead, which is
-  -- what OAuth 2.1 asks of a client that cannot keep a secret. The column
-  -- exists because an organization may supply its own confidential client.
-  client_secret_hash  bytea,
+  -- No client secret column, and that is a decision rather than an omission.
+  -- This server registers PUBLIC clients only: the discovery document
+  -- advertises token_endpoint_auth_methods_supported as ["none"] and PKCE
+  -- S256 is what authenticates the exchange, which is what OAuth 2.1 asks of
+  -- a client that cannot keep a secret, and a browser client cannot. A
+  -- nullable secret hash nothing verifies is worse than no column: it reads
+  -- as support for confidential clients that does not exist. The day one is
+  -- supported it arrives with the code that checks it.
   -- What the client called itself. Shown on the consent screen, so it is the
   -- one string here a person reads, and it is written by whoever registered.
   -- Treated as untrusted text everywhere it is rendered.
@@ -78,7 +81,10 @@ CREATE TABLE mcp_clients (
   -- matching, per OAuth 2.1.
   redirect_uris       text[] NOT NULL,
   created_at          timestamptz NOT NULL DEFAULT now(),
-  last_used_at        timestamptz,
+  -- No last_used_at here either. When a registration was last exercised is
+  -- read off the credentials it produced, which carry engine_tokens.last_used_at
+  -- and are what the operator page shows. A second copy on this row would be
+  -- one more thing to write on every authenticated request and nothing reads it.
   CONSTRAINT mcp_clients_has_a_redirect CHECK (cardinality(redirect_uris) > 0)
 );
 

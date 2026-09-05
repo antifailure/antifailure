@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Badge, Button, Card, CardSkeleton, Confirm, Empty, Field, Loaded, Table,
-  TableWrap, Td, Th, When, inputClass } from "@/components/ui";
+  TableWrap, Td, Th, When, inputClass, toneFor } from "@/components/ui";
 import { AdminPage } from "@/components/admin/primitives";
 import { operatorMay, useAdminContext } from "@/lib/admin";
 import { revokeCredential, useMcpSurface, type McpConnection } from "@/lib/admin-platform";
@@ -54,7 +54,7 @@ export default function PlatformMcpPage() {
                     <Td label="Access"><span className="block text-[16px] sm:text-[13px]">{connection.scopes.includes("mcp:read") ? "Read" : "No read access"}</span><span className="block text-[16px] sm:text-[13px] text-muted">{connection.scopes.includes("mcp:write") ? "Request changes" : "No changes"}</span></Td>
                     <Td label="Last used">{connection.lastAuthenticatedAt ? <When value={connection.lastAuthenticatedAt} /> : <span className="text-muted">Not used yet</span>}</Td>
                     <Td label="Expires"><When value={connection.expiresAt} /></Td>
-                    <Td label="Status"><Badge>{connection.standing}</Badge></Td>
+                    <Td label="Status"><Badge tone={toneFor(connection.standing)}>{connection.standing}</Badge></Td>
                     {mayRevoke ? <Td label="Action">{connection.standing === "active" ? <Button variant="danger" onClick={() => setSelected(connection)}>Revoke<span className="sr-only"> {connection.clientName} for {connection.orgSlug}</span></Button> : <span className="text-[16px] sm:text-[13px] text-muted">Already refused</span>}</Td> : null}
                   </tr>
                 ))}</tbody></Table></TableWrap>

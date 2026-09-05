@@ -951,7 +951,7 @@ const mcpRouter = router({
           count(*) FILTER (WHERE revoked_at IS NULL AND expires_at > ${now}::timestamptz)::text AS active,
           count(*) FILTER (WHERE revoked_at IS NOT NULL)::text AS revoked,
           count(*) FILTER (WHERE revoked_at IS NULL AND expires_at <= ${now}::timestamptz)::text AS expired
-FROM engine_tokens WHERE kind = 'mcp'`)
+        FROM engine_tokens WHERE kind = 'mcp'`)
       const rows = await db.execute<{
         id: string; prefix: string; org_slug: string; client_name: string; user_login: string;
         scopes: string[]; created_at: Date | string; last_used_at: Date | string | null;
@@ -977,21 +977,21 @@ FROM engine_tokens WHERE kind = 'mcp'`)
       }
     })
     return {
-    ...recorded,
-    at: now,
-    endpoint: /^https?:\/\//.test(c.appBaseUrl) ? `${c.appBaseUrl.replace(/\/+$/, '')}/mcp` : null,
-    recordsAnything: true,
-    why: 'Hosted OAuth registrations and credentials are recorded here. Local af mcp sessions stay on the developer\'s machine.',
-    tools: MCP_TOOLS.map((t) => ({
-      name: t.name,
-      does: t.does,
-      refuses: t.refuses,
-      servedBy: t.servedBy,
-    })),
-    registeredIn: MCP_REGISTRATION_FILE,
-    unknownFieldRefusal: MCP_UNKNOWN_FIELD_REFUSAL,
-    command: MCP_ELSEWHERE.command,
-    documentation: MCP_ELSEWHERE.documentation,
+      ...recorded,
+      at: now,
+      endpoint: /^https?:\/\//.test(c.appBaseUrl) ? `${c.appBaseUrl.replace(/\/+$/, '')}/mcp` : null,
+      recordsAnything: true,
+      why: 'Hosted OAuth registrations and credentials are recorded here. Local af mcp sessions stay on the developer\'s machine.',
+      tools: MCP_TOOLS.map((t) => ({
+        name: t.name,
+        does: t.does,
+        refuses: t.refuses,
+        servedBy: t.servedBy,
+      })),
+      registeredIn: MCP_REGISTRATION_FILE,
+      unknownFieldRefusal: MCP_UNKNOWN_FIELD_REFUSAL,
+      command: MCP_ELSEWHERE.command,
+      documentation: MCP_ELSEWHERE.documentation,
     }
   }),
 })

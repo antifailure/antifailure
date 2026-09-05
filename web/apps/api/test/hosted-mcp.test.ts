@@ -11,11 +11,20 @@ describe('hosted MCP authorization and reachable tools', () => {
   let api: ApiHarness
   let org: Org
   let owner: SignedIn
+  // mcp_clients carries no org_id, so dropOrg cannot reach a registration.
+  // Left behind, these accumulate in a shared database forever and inflate the
+  // operator's installation wide client count for whatever runs next.
+  const registered: string[] = []
   before(async () => { api = await startApi(); org = await seedOrg(api.admin, 'hosted-mcp'); owner = await signInAs(api, org, 'owner') })
-  after(async () => { await dropOrg(api.admin, org.orgId); await api.close() })
+  after(async () => {
+    if (registered.length) await api.admin`DELETE FROM mcp_clients WHERE client_id = ANY(${registered})`
+    await dropOrg(api.admin, org.orgId)
+    await api.close()
+  })
 
   async function grant(scopes = 'mcp:read', person = owner, role: Actor['role'] = 'owner') {
     const client = await registerMcpClient(api.pool, { client_name: 'Integration client', redirect_uris: ['https://client.test/callback'] })
+    registered.push(client.client_id)
     const verifier = randomBytes(32).toString('base64url')
     const request = {
       client_id: client.client_id, redirect_uri: 'https://client.test/callback', response_type: 'code',
@@ -57,6 +66,23 @@ describe('hosted MCP authorization and reachable tools', () => {
     const token = await (await grant('mcp:write', viewer, 'viewer')).token()
     const body = await (await rpc(token.access_token, 'tools/call', { name: 'start_environment', arguments: { repository: org.repository } })).json() as RpcReply
     assert.match(body.result.content[0].text, /environments.create permission/)
+  })
+  // The operator page has a "Last authentication" column, and the write that
+  // fills it is an UPDATE inside withTenant on a table whose own presented_mcp_token
+  // policy is SELECT only. If tenant_isolation did not also cover that UPDATE it
+  // would affect zero rows, raise nothing, and the column would read "Not used
+  // yet" forever. The management suite sets the value with admin SQL, so only a
+  // real request through the endpoint can tell a live write from a dead one.
+  test('a real protocol request records when the credential last authenticated', async () => {
+    const token = await (await grant()).token()
+    const hash = createHash('sha256').update(token.access_token).digest()
+    const fresh = await api.admin<{ last_used_at: Date | null }[]>`
+      SELECT last_used_at FROM engine_tokens WHERE token_hash = ${hash}`
+    assert.equal(fresh[0]!.last_used_at, null, 'a credential nobody has used carries a time')
+    assert.equal((await rpc(token.access_token, 'tools/list', {})).status, 200)
+    const used = await api.admin<{ last_used_at: Date | null }[]>`
+      SELECT last_used_at FROM engine_tokens WHERE token_hash = ${hash}`
+    assert.notEqual(used[0]!.last_used_at, null)
   })
   test('a token is bound to the resource that consent approved', async () => {
     const token = await (await grant()).token()
@@ -125,8 +151,9 @@ describe('hosted MCP authorization and reachable tools', () => {
   test('registration returns a usable public-client identifier', async () => {
     const response = await api.fetch('/auth/mcp/register', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ client_name: 'Browser client', redirect_uris: ['https://client.test/callback'] }) })
-    const registered = await response.json() as { client_id: string }
-    assert.match(registered.client_id, /^[A-Za-z0-9_-]{43}$/)
+    const created = await response.json() as { client_id: string }
+    registered.push(created.client_id)
+    assert.match(created.client_id, /^[A-Za-z0-9_-]{43}$/)
   })
   test('authorization cannot redirect a code to an unregistered address', async () => {
     const flow = await grant()
@@ -140,6 +167,61 @@ describe('hosted MCP authorization and reachable tools', () => {
   test('unauthenticated protocol response points clients to authorization discovery', async () => {
     const response = await rpc('invalid', 'tools/list', {})
     assert.match(response.headers.get('www-authenticate') ?? '', /resource_metadata="http:\/\/app.test\/\.well-known\/oauth-protected-resource"/)
+  })
+  // The write half, proved as a dispatch and never as a ready environment.
+  //
+  // Every other write assertion in this file is a REFUSAL: a read token cannot
+  // start anything, a viewer cannot either. A refusal proves the gate and says
+  // nothing about the path behind it, so the tool could have been wired to
+  // nothing and this suite would still have been green. This is the one test
+  // that lets a write through and then reads what actually happened to it.
+  test('an approved write reaches the customer repository as one dispatch', async () => {
+    const token = await (await grant('mcp:read mcp:write')).token()
+    await api.admin`INSERT INTO github_installations (org_id, installation_id, account_login, account_type)
+      VALUES (${org.orgId}, ${Math.floor(Math.random() * 1e9)}, ${org.slug}, 'Organization')`
+    api.github.addWorkflow(org.repository, 'antifailure.yml')
+    const environments = async () => {
+      const listed = await (await rpc(token.access_token, 'tools/call', { name: 'list_environments', arguments: {} })).json() as RpcReply
+      return JSON.parse(listed.result.content[0].text) as unknown
+    }
+    const before = api.github.dispatches.length
+    const environmentsBefore = await environments()
+
+    const body = await (await rpc(token.access_token, 'tools/call', { name: 'start_environment',
+      arguments: { repository: org.repository, branch: 'main', workflow: 'antifailure.yml' } })).json() as RpcReply
+    const result = JSON.parse(body.result.content[0].text) as {
+      dispatched?: boolean; repository?: string; ref?: string; workflow?: string; pending?: unknown
+    }
+
+    // What the tool told the agent.
+    assert.deepEqual({ dispatched: result.dispatched, repository: result.repository, ref: result.ref,
+      workflow: result.workflow, pendingIsStated: typeof result.pending === 'string' && result.pending.length > 0 },
+    { dispatched: true, repository: org.repository, ref: 'main', workflow: 'antifailure.yml', pendingIsStated: true })
+
+    // What GitHub was actually asked for. One dispatch, against the customer's
+    // own repository and workflow, carrying the up command.
+    assert.equal(api.github.dispatches.length - before, 1)
+    const sent = api.github.dispatches[api.github.dispatches.length - 1]!
+    assert.deepEqual({ repository: sent.repository, workflow: sent.workflow, ref: sent.ref, command: sent.inputs.command },
+      { repository: org.repository, workflow: 'antifailure.yml', ref: 'main', command: 'up' })
+
+    // What the organization's own record says a person did.
+    const audited = await api.admin<{ action: string; target_id: string }[]>`
+      SELECT action, target_id FROM audit_entries
+      WHERE org_id = ${org.orgId} AND action = 'environment.requested'`
+    assert.deepEqual(audited.map((row) => [row.action, row.target_id]), [['environment.requested', org.repository]])
+
+    // And the boundary the tool description promises: a dispatch is not a
+    // ready environment. Nothing new is readable until the engine reports it.
+    assert.deepEqual(await environments(), environmentsBefore)
+  })
+  test('a standalone event stream is refused, and says what to use instead', async () => {
+    const token = await (await grant()).token()
+    for (const method of ['GET', 'DELETE']) {
+      const response = await api.fetch('/mcp', { method, headers: { authorization: `Bearer ${token.access_token}` } })
+      assert.deepEqual({ method, status: response.status, allow: response.headers.get('allow') },
+        { method, status: 405, allow: 'POST' })
+    }
   })
   test('authorization response cannot be cached with its usable code', async () => {
     const flow = await grant()
