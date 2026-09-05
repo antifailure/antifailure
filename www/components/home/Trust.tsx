@@ -106,9 +106,18 @@ export function Trust() {
               a baseline and the eye crosses the band at two heights. The rule
               moved onto this group for the same reason: it now measures the
               content instead of pointing at the gap above it. */}
-          <div className="flex w-[480px] flex-col max-xl:w-full">
-            <figure className="mt-auto border-l border-black/12 pl-8 max-lg:pl-6 max-xl:mt-0 max-sm:border-none max-sm:pl-0">
-              <ColumnLabel className="mb-6 max-md:mb-5">What counts as proof</ColumnLabel>
+          <div className="flex w-[480px] flex-col border-l border-black/12 pl-8 max-lg:pl-6 max-xl:w-full max-sm:border-none max-sm:pl-0">
+            {/* The eyebrow belongs at the TOP of this column, level with the
+                one across the band, and the quote belongs at the FOOT of it,
+                level with the two items across the band. It had the label and
+                the quote welded together as one block floating at the bottom,
+                so the two columns opened at two different heights and the rule
+                beside this one started halfway down a section it was supposed
+                to measure. Label at the top, `mt-auto` on the figure, rule on
+                the column rather than on the figure: two eyebrows on one line,
+                two blocks on one baseline, two rules the full height. */}
+            <ColumnLabel className="mb-6 max-md:mb-5">What counts as proof</ColumnLabel>
+            <figure className="mt-auto max-xl:mt-10">
               {/* This was four claims we decline to make, read left to right as
                   "zero rollback, no deployment can ever fail", which is the
                   opposite of what it meant. A block whose first four sentences
@@ -136,7 +145,7 @@ export function Trust() {
                   Measurable evidence, or no claim.
                 </mark>
               </blockquote>
-              <figcaption className="mt-7 text-[13px] tracking-extra-tight text-gray-new-40">
+              <figcaption className="mt-7 font-mono text-[13px] tracking-extra-tight text-gray-new-40">
                 <cite className="not-italic">Product brief, section 18</cite>
               </figcaption>
             </figure>
