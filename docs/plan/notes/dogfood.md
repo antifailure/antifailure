@@ -165,7 +165,7 @@ That path is the whole pipeline in miniature. The manifest sets
 its own success shape and records the message instead of sending it. The agent
 asks for a link, reads it out of the inbox, follows it, and lands signed in.
 Nothing is delivered to anybody, no key is configured, and the run proves that
-an isolated deployment can be signed into — which is a real customer's problem
+an isolated deployment can be signed into, which is a real customer's problem
 as well as ours.
 
 Masking then replaces every address with a synthetic one at `example.test`,
@@ -223,7 +223,7 @@ to be a name a policy can resolve.
 **2. An unclassified free-text column was copied verbatim.**
 `transforms.md` says nullify "is the default for unclassified free text", the
 shipped example's README says the same, and the planner left such a column with
-no transform at all — which `BuildPlan` skips. A `notes` column nobody had
+no transform at all, which `BuildPlan` skips. A `notes` column nobody had
 written a rule for went into every environment unchanged. It was survivable
 because the plan reported the column and the verification scan reads every
 column back, but a report is read once and a default runs every time. Fixed to
@@ -245,7 +245,7 @@ a `BASE TABLE`, so the catalogue held both, and they hold the same rows. Two
 consequences: those rows were masked twice, and because a rule names a table
 and `events` is not `events_2026_08`, the parent got the rules somebody wrote
 while each partition got the fail-closed default. Partitions sort after the
-parent, so they ran last and won — a column explicitly marked `preserve` came
+parent, so they ran last and won. A column explicitly marked `preserve` came
 out emptied, silently. Found by refreshing a golden of the control plane, whose
 `events` table is partitioned by month. Fixed by excluding partitions from the
 catalogue, which is also half the masking time: 19 tables instead of 23, 28
@@ -426,7 +426,7 @@ and `grep` finds zero constructions of either outside their own file. So the
 engine emitted a typed, sequenced, redacted event for everything it did and the
 only consumer was a terminal UI: no machine readable record of a run existed
 anywhere, `af ci` attached no sink at all, and a CI job could only scrape prose.
-This is the dead code shape exactly — the parts are all there and nothing calls
+This is the dead code shape exactly: the parts are all there and nothing calls
 them. Fixed: every command that opens an environment now writes
 `.antifailure/events/<env>.ndjson`, which is what `tools/dogfood` reads its per
 step timings out of.
@@ -437,9 +437,9 @@ nothing outside a test, so the section that tells a reviewer the data was
 proved masked was unreachable. That is the product's central promise and it was
 a field nobody filled in. `af ci` ran no insights either, although it is the
 command whose entire purpose is the pull request check. Fixed: `af ci` reads
-the golden's stored attestation, checks the signature — this is a different
+the golden's stored attestation, checks the signature (this is a different
 process from the one that signed it, which is the whole reason the signature
-exists — and renders the result, plus a new insights section that distinguishes
+exists) and renders the result, plus a new insights section that distinguishes
 "looked and found nothing" from "could not look".
 
 ### Configuration that is read by nothing
@@ -473,7 +473,7 @@ resolve different trees. Generating the lockfile was not the fix: `runner/
 .gitignore` listed `package-lock.json`, so the generated file was invisible to
 git and to a fresh checkout. Changing CI to `npm ci` without noticing that
 would have turned a quiet defect into a red build on the first clone, which is
-the only reason it was found — `git status` showed the file as neither tracked
+the only reason it was found: `git status` showed the file as neither tracked
 nor untracked. Fixed: the ignore line is gone, the lockfile is committed,
 `npm ci` succeeds in `runner/`, and CI keys its cache on the lockfile.
 

@@ -62,14 +62,34 @@ import (
 // trees did not include them and the source extensions did not include Markdown.
 // Nothing was shipping through it, which is the reason to close it now rather
 // than after something is.
-var documents = []string{"docs/src/content/docs", "examples", ".changes", ".", "www", "console"}
+//
+// The entry is `docs` and not `docs/src/content/docs`, which is what it used to
+// be. The content collection is what Astro renders, so it looked like the
+// documentation, and the ADRs, the RFCs, the design documents and the plan notes
+// sitting beside it are prose this project writes that no gate had an opinion
+// about. Twenty-seven tracked `.md` files were outside every list. Four of them
+// carried eighteen defects, and all eighteen were the plain shape this rule
+// exists for: a clause separator, in a sentence, written by somebody here. The
+// remaining twenty-three were already clean, so widening cost eighteen prose
+// edits and bought no exemption.
+var documents = []string{"docs", "examples", ".changes", ".", "www", "console"}
 
 // sources are the trees whose TypeScript carries copy rather than only code.
 //
 // www is the public site and console is the signed-in application. Both write
 // their sentences as string literals and JSX text, so both are prose that this
 // project publishes and neither is documentation with a different extension.
-var sources = []string{"www", "console"}
+//
+// docs is the third for the same reason, and it was missed because the
+// documentation site is the one place where "the documentation" and "the site"
+// are the same tree. Astro builds it, so its pages are TypeScript:
+// `docs/src/pages/llms-full.txt.ts` assembles the plain text twin of the entire
+// manual, and the sentence at the top of it saying what the route serves carried
+// an em dash through every green run this gate has ever had. It was the only
+// literal violation left anywhere outside this checker's reach. The other three
+// `.ts` and `.mjs` files under docs were already clean, which is why this
+// widening reports one line and not a list.
+var sources = []string{"www", "console", "docs"}
 
 // sourceExts are the extensions scanned inside sources.
 //
@@ -105,6 +125,48 @@ var banned = []struct {
 	{regexp.MustCompile(`\x{2013}`), "an en dash", "the word to, or a hyphen in a compound"},
 	{regexp.MustCompile(`\s--\s`), "a double hyphen as punctuation", "a comma, a colon, or a new sentence"},
 }
+
+// THE TWO RULES DO NOT HAVE THE SAME REACH, and only one of them ever can.
+// This is a limit of the double hyphen rule, written down because the obvious
+// next request is to point this checker at the rest of the repository.
+//
+// An em dash is syntax in no language here, so it can be banned anywhere prose
+// is written and the only question is which trees carry prose. A double hyphen
+// is syntax in three places, and each one puts whitespace on both sides of it
+// exactly the way punctuation does, so `\s--\s` cannot tell them apart:
+//
+//	-- the SQL line comment, which is how every migration is annotated
+//	git checkout -- .        the POSIX end of options marker
+//	sh -s -- -b "$path"      the same marker, handing flags to a script
+//
+// Measured across every tracked file this checker does not read, rather than
+// assumed. 1242 lines match the rule as written. 1120 of them are SQL line
+// comments, 853 in the migrations and 267 more inside SQL written as template
+// literals in the api's TypeScript, and 16 are the end of options marker in a
+// real command. None of those can be rewritten, because there the sequence is
+// the syntax. A further 3982 lines begin with `--` in the first column, where
+// there is no character before it for `\s` to match, so the rule cannot see
+// them at all. Almost all are SQL comments too, and the number is here because
+// a count that reaches for the character instead of for this pattern gets a
+// different and much larger answer.
+//
+// The 106 that remain are mostly the genuine defect, in comments, in Go and
+// TypeScript, and that is the honest cost of stopping here rather than a thing
+// left implied: this instrument will never see about a hundred real double
+// hyphens, and nineteen more in Terraform comments. But eight of the 106 cannot
+// be changed either. Two are ASCII table rules in a doc comment, two are SQL
+// injection payloads whose entire point is that `--` opens a comment, one is a
+// captured Postgres error string, one is the Vale rule that names the sequence,
+// and two are this file's own test fixtures.
+//
+// So extending the double hyphen rule needs an exemption list before it can run
+// once, to hold cases that are syntax rather than a decision somebody should
+// have made differently. The comment above `banned` explains why this file has
+// no such list and what would justify adding one. Eight entries that can never
+// be retired is not that: it is a rule being carried past the point where it can
+// express what it means. Catching those hundred needs an instrument that knows
+// a comment from a statement in six languages, which is a parser, not a regexp,
+// and it is not this one.
 
 // escaped are the ways source code writes the same characters without typing
 // them, which a scan for the character itself cannot see.

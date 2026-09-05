@@ -294,6 +294,23 @@ comments, docs, commit messages, and user-facing strings does not use em dashes
 or double hyphens as punctuation. Error messages are written in the second
 person, name the thing that failed, and say what to do next.
 
+`tools/prosecheck` is the gate for that rule, and it does not reach everywhere
+the rule applies, so it is worth knowing what is actually holding you. It reads
+Markdown under `docs`, `examples`, `.changes`, `www`, `console` and the
+repository root, and every file with a `ts`, `tsx` or `mjs` extension under
+`www`, `console` and `docs`. It does not read Go, SQL, Terraform, YAML, or the
+api's and runner's TypeScript. A defect in a Go comment or a Terraform comment
+is yours to catch, and the engine carries four `require.NotContains` assertions
+of its own because nothing else checks the strings the CLI prints.
+
+The double hyphen half of the rule cannot be widened past those trees, and that
+is a limit rather than something nobody has got to yet. `--` is the SQL line
+comment and the POSIX end of options marker, so outside prose it is syntax far
+more often than punctuation: of the 1242 lines outside the gate that match the
+rule, 1120 are SQL comments. An em dash collides with no language here, which
+is why the two halves of one rule do not reach equally far. The measurement and
+the reasoning are in `tools/prosecheck/main.go`.
+
 Every user-facing error carries a code from
 `engine/internal/errors/catalog.yaml`. Adding a code without a catalog entry
 fails the build, and so does a catalog entry that nothing returns.
