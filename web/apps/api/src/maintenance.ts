@@ -66,6 +66,7 @@ export interface MaintenanceRun {
   rolledUp: string[]
   /** Raw analytics events deleted by retention. */
   analyticsPruned: number
+  usageOrganizations: number
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -161,6 +162,9 @@ export async function runMaintenance(
         : { retentionDays: config.analyticsRetentionDays }),
     })
 
+    const usage = await admin<{ count: string }[]>`
+      SELECT roll_up_environment_usage(${now.toISOString()}::timestamptz) AS count`
+
     return {
       created: [...made.created, ...analyticsPartitions.created],
       dropped,
@@ -168,6 +172,7 @@ export async function runMaintenance(
       pruned,
       rolledUp: rolled.days,
       analyticsPruned: rolled.pruned,
+      usageOrganizations: Number(usage[0]?.count ?? 0),
     }
   } finally {
     await admin.end({ timeout: 10 })
@@ -205,6 +210,7 @@ export function startMaintenance(
       if (run.analyticsPruned) {
         log(`pruned ${run.analyticsPruned} raw analytics events past the retention`)
       }
+      if (run.usageOrganizations) log(`rolled up usage for ${run.usageOrganizations} organizations`)
     } catch (err) {
       onError(err)
     }

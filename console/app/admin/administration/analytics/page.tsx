@@ -25,30 +25,7 @@ import {
   type UsageWindow,
 } from "@/lib/admin-administration";
 
-/**
- * What the platform is being used for, measured rather than estimated.
- *
- * THE UNIT IS THE ENVIRONMENT-HOUR, and it is not a unit invented for this
- * page. src/costs.ts defines it as the one thing this system can both measure
- * and charge for: one environment held for one hour. Every plan cap is
- * expressed in it, every run is refused against it, and the arithmetic is two
- * columns on the environments table. A page here reporting "runs" or "activity"
- * would be reporting something no cap is enforced on and no invoice derives
- * from.
- *
- * WHAT THIS PAGE CANNOT SHOW, AND SAYS SO. There is no rollup, aggregate,
- * metric or daily-usage table anywhere in this schema. Every figure below is
- * computed at the moment the page loads, over the rows that still exist. That
- * has three honest consequences and the page states all three at the bottom
- * rather than hiding them: there is no history older than the underlying table,
- * there is no trend line, and the query costs something.
- *
- * The alternative was a growth chart over a series nobody stores. This
- * repository has a check called figurecheck precisely because an invented
- * fidelity score shipped once, drawn client side so that curl found nothing and
- * every cheap audit came back clean. A dashboard over invented numbers is worse
- * than a page that admits a gap.
- */
+/** Recorded environment consumption and scheduled UTC history. */
 export default function AdministrationAnalyticsPage() {
   const [window, setWindow] = useState<UsageWindow>("24h");
   const usage = useAdminUsage(window);
@@ -57,12 +34,12 @@ export default function AdministrationAnalyticsPage() {
   return (
     <AdminPage
       href="/admin/administration/analytics"
-      lede="Measured in environment-hours, the unit every plan cap is enforced in. One environment held for one hour is one."
+      lede="See which organizations use the platform, how their usage changes, and what they spend on models."
     >
       <div className="grid gap-5">
         <Card
           title="Consumption by organization"
-          note="The overlap of each environment with the window, counting one still running up to now. Computed live: there is no rollup table behind this."
+          note="One environment kept for an hour uses one environment-hour. Completed environments remain counted after cleanup."
           actions={
             <div className="min-w-0">
               <Field label="Window">
@@ -80,20 +57,27 @@ export default function AdministrationAnalyticsPage() {
           }
         >
           <Loaded state={usage} skeleton={<TableSkeleton rows={6} cols={6} />}>
-            {(data) => <UsageTable usage={data} />}
+            {(data) => <><UsageTrend usage={data} /><UsageTable usage={data} /></>}
           </Loaded>
         </Card>
 
         <Card
           title="Model spend against budget"
-          note="provider_budgets, which is the one thing in this schema that is genuinely a rollup: one row per organization, provider and period."
+          note="Recorded model spend compared with each organization's budget for that period."
         >
           <Loaded state={spend} skeleton={<TableSkeleton rows={4} cols={5} />}>
             {(data) => <SpendTable spend={data} />}
           </Loaded>
         </Card>
 
-        <NotWired />
+        <Card title="How usage is counted">
+          <p className="max-w-[72ch] px-4 py-4 text-[13px] leading-6 text-muted">
+            Totals include active and completed environments. Cleanup preserves their recorded
+            hours. The daily chart uses saved UTC totals from scheduled maintenance; today's
+            bar is partial. Deleting an organization removes its usage history. Records removed
+            before usage history was introduced cannot be recovered.
+          </p>
+        </Card>
       </div>
     </AdminPage>
   );
@@ -246,51 +230,40 @@ function SpendTable({ spend }: { spend: AdminSpend }) {
   );
 }
 
-/* -------------------------------------------------------------------------
- * The gap, said out loud
- * ---------------------------------------------------------------------- */
-
-/**
- * What this section is not, and what would make it more.
- *
- * On the page rather than in a comment, because the reader is the person who
- * would otherwise assume a trend line is coming or that these numbers reach
- * back further than they do. A section that quietly omits its limits is how a
- * measurement gets used for something it cannot support.
- */
-function NotWired() {
+function UsageTrend({ usage }: { usage: AdminUsage }) {
+  if (!usage.series?.length) return (
+    <p className="border-b border-rule px-4 py-4 text-[13px] text-muted">
+      No saved daily measurements in this window. Current totals, if any, are below.
+    </p>
+  );
+  const maximum = Math.max(...usage.series.map((point) => point.hours), 1);
   return (
-    <Card title="What this page cannot show yet">
-      <div className="px-4 py-4">
-        <p className="max-w-[72ch] text-[13px] leading-6 text-muted">
-          There is no usage rollup in this schema. No aggregate table, no daily metric, no stored
-          series. Every figure above is computed when the page loads, over the rows that still
-          exist, which has three consequences worth naming.
-        </p>
-        <ul className="mt-3 grid max-w-[72ch] gap-2.5 text-[13px] leading-6 text-muted">
-          <li>
-            <span className="font-medium text-ink">No history.</span> Consumption reaches back only
-            as far as the environments table still holds rows. A torn down environment that was
-            pruned took its hours with it.
-          </li>
-          <li>
-            <span className="font-medium text-ink">No trend.</span> There is no series to draw a
-            line through, so this page draws none. A chart here would be describing numbers nobody
-            stored.
-          </li>
-          <li>
-            <span className="font-medium text-ink">A real cost.</span> The consumption query is an
-            aggregate across every tenant, so the window is capped at thirty days and the list at
-            twenty five organizations.
-          </li>
-        </ul>
-        <p className="mt-3 max-w-[72ch] text-[13px] leading-6 text-muted">
-          Making it more would mean a rollup table and a write path that actually runs, on the
-          schedule that already keeps the events partitions ahead of the writes. Model spend is the
-          one place a period series does exist, which is why it is the only thing here with a past.
-        </p>
+    <figure className="border-b border-rule px-4 py-4">
+      <figcaption className="text-[13px] font-medium text-ink">Recorded environment-hours · UTC</figcaption>
+      <p className="mt-1 mb-4 text-[12px] leading-5 text-muted">
+        Calendar days intersecting this window. Partial boundary days differ from the rolling totals below.
+      </p>
+      <p className="mb-2 text-[12px] text-muted">Scale: 0 to {maximum.toLocaleString()} hours</p>
+      <div className="flex h-36 items-end gap-1" aria-hidden="true">
+        {usage.series.map((point) => (
+          <div key={point.day} className="flex h-full min-w-0 flex-1 items-end" title={`${point.day}: ${point.hours} hours`}>
+            <div className="w-full rounded-t bg-ink" style={{ height: `${point.hours / maximum * 100}%` }} />
+          </div>
+        ))}
       </div>
-    </Card>
+      <div className="mt-2 flex justify-between text-[12px] text-muted">
+        <span>{usage.series[0].day}</span><span>{usage.series[usage.series.length - 1].day}</span>
+      </div>
+      <details className="mt-3 text-[13px] text-muted">
+        <summary className="min-h-11 cursor-pointer py-3">Read daily measurements</summary>
+        <TableWrap><Table><thead><tr><Th>Day (UTC)</Th><Th numeric>Hours</Th><Th>Measured</Th></tr></thead>
+          <tbody>{usage.series.map((point) => <tr key={point.day}>
+            <Td>{point.day}</Td><Td numeric label="Hours">{point.hours}</Td>
+            <Td label="Measured">{point.measuredAt ? <When value={point.measuredAt} /> : 'No recorded usage'}</Td>
+          </tr>)}</tbody>
+        </Table></TableWrap>
+      </details>
+    </figure>
   );
 }
 

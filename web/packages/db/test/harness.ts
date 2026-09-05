@@ -425,6 +425,8 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO github_deliveries (delivery_id, org_id, account_login, event, action)
     VALUES (${`delivery-${slug}`}, ${orgId}, ${slug}, 'pull_request', 'opened')`
 
+  await admin`SELECT roll_up_environment_usage(clock_timestamp())`
+
   return {
     orgId, userId, repoId, envId, runId, slug, connectionId, customerId,
     workloadId, workloadVersionId, workloadRunId,
