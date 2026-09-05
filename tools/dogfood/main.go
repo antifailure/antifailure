@@ -279,6 +279,7 @@ func (r *runner) do() *Run {
 
 	r.readVerdicts(run)
 	r.readLoadEvidence(run)
+	r.readExplorationEvidence(run)
 
 	// Only ask about events when the run reached the point of making an
 	// environment. `af ci` refusing a directory with no manifest produces no

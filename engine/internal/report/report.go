@@ -13,6 +13,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/antifailure/antifailure/engine/internal/explore"
 )
 
 // Run is everything one pull request check produced.
@@ -23,6 +25,7 @@ type Run struct {
 	Commit      string
 	Golden      string
 	Workflows   []Workflow
+	Exploration *Exploration
 	// Declared is how many workflows the manifest asked for, which is not the
 	// same number as len(Workflows) and was being read as though it were.
 	//
@@ -64,6 +67,80 @@ type Run struct {
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
 	DocsBase string
+}
+
+// Exploration preserves the actual browser observations separately from
+// declared workflow assertions. Missing goals are incomplete, never clean.
+type Exploration struct {
+	Declared    []string
+	Results     []explore.Exploration
+	Unavailable string
+}
+
+// Incomplete names a configured exploration whose execution was not proved.
+func (e *Exploration) Incomplete() bool {
+	if e == nil {
+		return false
+	}
+	if e.Unavailable != "" || len(e.Declared) == 0 {
+		return true
+	}
+	seen := map[string]bool{}
+	for _, x := range e.Results {
+		if x.Outcome.Verdict != VerdictPass || len(x.Visited) == 0 || x.Evidence.Trace == "" {
+			return true
+		}
+		if seen[x.Name] {
+			return true
+		}
+		seen[x.Name] = true
+	}
+	for _, name := range e.Declared {
+		if !seen[name] {
+			return true
+		}
+	}
+	return len(e.Results) != len(e.Declared)
+}
+
+func (e *Exploration) markdown() string {
+	if e == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("<details><summary>Exploration observations</summary>\n\n")
+	b.WriteString("These are observations, not workflow assertions.\n\n")
+	if e.Incomplete() {
+		b.WriteString("Configured exploration is incomplete. This is not a clean exploration.\n\n")
+	}
+	if e.Unavailable != "" {
+		fmt.Fprintf(&b, "%s\n\n", flatten(e.Unavailable))
+	}
+	for _, name := range e.Declared {
+		found := false
+		for _, x := range e.Results {
+			if x.Name == name {
+				found = true
+			}
+		}
+		if !found {
+			fmt.Fprintf(&b, "Goal `%s` produced no browser result.\n\n", oneLine(name))
+		}
+	}
+	for _, x := range e.Results {
+		fmt.Fprintf(&b, "Goal `%s`: %s visited, %s, %s. %s\n\n", oneLine(x.Name), plural(len(x.Visited), "page", "pages"), plural(len(x.Journey), "move", "moves"), plural(len(x.Findings), "observation", "observations"), flatten(x.Outcome.Detail))
+		for _, f := range x.Findings {
+			fmt.Fprintf(&b, "- %s at %s, step %d: %s\n", f.Kind.Title(), oneLine(f.URL), f.Step, flatten(f.Detail))
+		}
+		for _, missing := range x.Missing {
+			fmt.Fprintf(&b, "Not explored: %s\n\n", flatten(missing))
+		}
+		if x.Evidence.Trace != "" {
+			fmt.Fprintf(&b, "Trace: `%s`\n\n", oneLine(x.Evidence.Trace))
+		}
+	}
+	b.WriteString("</details>\n\n")
+	return b.String()
 }
 
 // Workflow is one agent result.
@@ -253,8 +330,8 @@ type Cleanup struct {
 	Error string
 }
 
-// The six verdicts, worst first. Nothing outside this list is a run verdict,
-// and the order here is the order Verdict resolves them in.
+// The six verdicts. Verdict also refuses to hide an incomplete configured
+// experiment behind an advisory result.
 const (
 	// VerdictFail is a real finding about the change that stops the merge: a
 	// workflow that failed, an invariant that did not hold, or a finding a
@@ -309,6 +386,8 @@ type Scan struct {
 // A failure outranks everything, then flaky, then warn, then blocked. Blocked
 // below all three on purpose: a flaky workflow and a warning are real signals
 // about the application, and a blocked one is a signal about us.
+// A configured exploration that never completed is an exception: it reports
+// blocked before advisories, matching the hosted check's incomplete result.
 //
 // Warn sits under flaky rather than over it only because flaky already has a
 // headline of its own; the findings section lists everything worst first
@@ -322,7 +401,7 @@ func (r Run) Verdict() string {
 	switch {
 	case counts[VerdictFail] > 0, r.InvariantsViolated() > 0, fail > 0:
 		return VerdictFail
-	case r.Load != nil && r.Load.Unavailable != "":
+	case r.Load != nil && r.Load.Unavailable != "", r.Exploration.Incomplete():
 		return VerdictBlocked
 	case counts[VerdictFlaky] > 0:
 		return VerdictFlaky
@@ -409,6 +488,9 @@ func (r Run) Headline() string {
 		return fmt.Sprintf("Nothing failed, and %s to look at.",
 			plural(warns, "finding", "findings"))
 	case VerdictBlocked:
+		if r.Exploration.Incomplete() {
+			return "Configured exploration could not be completed. Nothing here counts against the change."
+		}
 		if len(r.Workflows) == 0 {
 			return "Nothing ran."
 		}
@@ -578,6 +660,7 @@ func (r Run) Markdown() string {
 	}
 
 	b.WriteString(r.findingSection())
+	b.WriteString(r.Exploration.markdown())
 
 	if len(r.Invariants) > 0 {
 		b.WriteString(r.invariantSection())

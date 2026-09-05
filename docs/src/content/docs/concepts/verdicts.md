@@ -26,6 +26,10 @@ check produced a warning or intermittent result. A real failure still wins.
 Completed workflows do not stand in for load that sent no requests or could
 not measure its required baseline.
 
+An incomplete configured exploration is the same exception: it reports
+`blocked` before warnings or flaky workflows, while a real failure still takes
+priority.
+
 ## Blocked is not a failure
 
 `blocked` is the one worth reading twice. It means a browser did not start, an

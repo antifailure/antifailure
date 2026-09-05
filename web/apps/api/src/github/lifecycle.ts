@@ -28,6 +28,7 @@
 // credential and no address, by design.
 
 import { randomBytes, createHash } from 'node:crypto'
+import { explorationIncomplete } from './exploration.ts'
 import { sql } from 'drizzle-orm'
 import type { Db, Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
@@ -1099,6 +1100,7 @@ export function decodeReport(value: unknown): DecodedReport {
   }
 
   const workflows = Array.isArray(run.Workflows) ? run.Workflows : []
+  if (explorationIncomplete(run.Exploration)) counts.blocked += 1
   for (const item of workflows) {
     const workflow = item as { Verdict?: unknown }
     switch (workflow?.Verdict) {

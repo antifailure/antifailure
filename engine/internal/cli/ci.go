@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/egress"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/explore"
 	"github.com/antifailure/antifailure/engine/internal/insights"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
@@ -104,6 +105,7 @@ change.`),
 				Declared: len(m.Workflows),
 			}
 			started := e.Clock.Now()
+			run.Exploration = declaredExploration(m)
 			var migration []report.Finding
 
 			// Teardown runs at most once and it runs BEFORE the report is
@@ -179,6 +181,13 @@ change.`),
 			// into a signup form would otherwise be indistinguishable from a
 			// masking rule that missed.
 			run.Verification = verifyMasking(ctx, e, o, gate, &run)
+
+			// Exploration can submit forms. Run it before Test so the final
+			// invariants observe those writes instead of blessing earlier data.
+			if run.Exploration != nil {
+				e.Out.Section("Exploring configured goals")
+				exploreConfigured(ctx, o, env.ExploreOptions{RunnerPath: runner}, run.Exploration)
+			}
 
 			e.Out.Section("Running workflows")
 			test, testErr := o.Test(ctx, env.TestOptions{Attempts: 2, RunnerPath: runner})
@@ -273,6 +282,46 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+// explorer is the one method exploreConfigured needs, so the wiring below has
+// a test of its own. The defect being repaired was a capability with no caller
+// at all, and a call site inside a command body that needs Docker to reach is
+// a call site nothing can assert.
+type explorer interface {
+	Explore(context.Context, env.ExploreOptions) (*explore.Report, error)
+}
+
+// declaredExploration is the report field an enabled manifest requires.
+//
+// Nil when the manifest did not ask for exploration, because an absent field
+// and an empty one mean different things: nothing was configured, against a
+// configured experiment that produced nothing. Only the second is incomplete.
+func declaredExploration(m *schema.Manifest) *report.Exploration {
+	if m == nil || m.Explore == nil || !m.Explore.Enabled {
+		return nil
+	}
+	x := &report.Exploration{}
+	for _, goal := range m.Explore.Goals {
+		x.Declared = append(x.Declared, goal.Name)
+	}
+	return x
+}
+
+// exploreConfigured runs the goals and folds what the browser saw into the
+// report. A refusal is recorded rather than returned, because an exploration
+// that could not run is an incomplete experiment and not a failed change, and
+// whatever it did manage to observe before refusing is still evidence.
+func exploreConfigured(
+	ctx context.Context, x explorer, opts env.ExploreOptions, into *report.Exploration,
+) {
+	observed, err := x.Explore(ctx, opts)
+	if err != nil {
+		into.Unavailable = err.Error()
+	}
+	if observed != nil {
+		into.Results = observed.Explorations
+	}
 }
 
 // shouldRunLoad honors the manifest and permits an explicit upward override.

@@ -412,6 +412,7 @@ jobs:
             dogfood-report.json
             dogfood-record.json
             .antifailure/logs
+            .antifailure/artifacts
           retention-days: 30
           # Two reasons the event log was never in this artifact, and fixing
           # either alone would have left it empty. The path said
@@ -724,6 +725,7 @@ jobs:
             dogfood-record.json
             dogfood-report.json
             ${{ matrix.manifest }}/.antifailure/logs
+            ${{ matrix.manifest }}/.antifailure/artifacts
           retention-days: 30
           # Same reason as the control plane job above: without this the log is
           # a dotted path and the action skips it silently.

@@ -281,6 +281,18 @@ workflows:
       - "Scope"
     tags: [policy, rbac]
 
+explore:
+  enabled: true
+  goals:
+    - name: find-a-run-as-a-viewer
+      goal: Find a run and read its verdict and evidence.
+      persona: viewer
+      seed: viewer-run-evidence
+      start_path: /environments
+      slow_ms: 3000
+      budget:
+        steps: 12
+
 invariants:
   # Each of these returns the rows that break it rather than a count of them.
   #

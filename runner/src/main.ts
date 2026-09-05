@@ -100,7 +100,7 @@ async function main(): Promise<number> {
       )
     : undefined;
 
-  if (model) {
+  if (model && doc.workflows?.length) {
     const how = cassette
       ? `${cassette.mode === 'record' ? 'recording' : 'replaying'} ${cassette.size()} answers in ${cassette.dir}`
       : 'live';
