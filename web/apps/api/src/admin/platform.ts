@@ -65,6 +65,7 @@ import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
+import { hostedMcpEndpoint } from '../auth/mcp.ts'
 import {
   MCP_ELSEWHERE,
   MCP_REGISTRATION_FILE,
@@ -467,7 +468,7 @@ const repositoriesRouter = router({
 // and a customer can agree which credential they are talking about without
 // either of them holding one.
 
-const KEY_KINDS = ['engine', 'cli', 'oidc'] as const
+const KEY_KINDS = ['engine', 'cli', 'oidc', 'mcp'] as const
 
 const credentialsRouter = router({
   list: adminProcedure('admin.keys.read')
@@ -630,7 +631,9 @@ const credentialsRouter = router({
           effect:
             'The next request presenting this credential is refused. Anything already running ' +
             'keeps running until it next calls the control plane. Nobody can recover the value: ' +
-            'the customer creates a replacement with af token create.',
+            (token.kind === 'mcp'
+              ? 'the customer reconnects their MCP client and approves a new credential.'
+              : 'the customer creates a replacement with af token create.'),
         }
       })
     }),
@@ -936,36 +939,62 @@ const integrationsRouter = router({
 
 const mcpRouter = router({
   /**
-   * What this control plane knows about MCP, which is that it knows nothing.
-   *
-   * `recordsAnything: false` is the answer, sent as a field rather than left
-   * for the console to assume, so the day a write path does exist the page
-   * changes because the server changed. A console that hardcoded the absence
-   * would keep saying it after it stopped being true.
-   *
-   * Everything else here is a checked-in fact about the engine, carrying the
-   * file and symbol it came from. mcp.test.ts opens each one, so a tool renamed
-   * or unregistered in the engine fails this suite rather than leaving a page
-   * describing a product that changed underneath it.
+   * Hosted client registrations and issued credentials, not open sockets or
+   * tool executions. The separate local tool catalog is retained for callers
+   * that link to the checkout protocol; those sessions send no telemetry here.
    */
-  surface: adminProcedure('admin.mcp.read').query(() => ({
-    recordsAnything: false,
-    why:
-      'af mcp binds one checkout, speaks the protocol on standard input and output, and keeps ' +
-      'its runs in that project\'s own state directory. It opens no connection to this control ' +
-      'plane, presents no credential and sends no event, so there is nothing here to list, ' +
-      'count or manage.',
-    tools: MCP_TOOLS.map((t) => ({
-      name: t.name,
-      does: t.does,
-      refuses: t.refuses,
-      servedBy: t.servedBy,
-    })),
-    registeredIn: MCP_REGISTRATION_FILE,
-    unknownFieldRefusal: MCP_UNKNOWN_FIELD_REFUSAL,
-    command: MCP_ELSEWHERE.command,
-    documentation: MCP_ELSEWHERE.documentation,
-  })),
+  surface: adminProcedure('admin.mcp.read').query(async ({ ctx }) => {
+    const c = ctx as AdminContext
+    const now = c.clock.now().toISOString()
+    const recorded = await c.adminDb(async (db) => {
+      const totals = await db.execute<{ clients: string; active: string; revoked: string; expired: string }>(sql`
+        SELECT (SELECT count(*)::text FROM mcp_clients) AS clients,
+          count(*) FILTER (WHERE revoked_at IS NULL AND expires_at > ${now}::timestamptz)::text AS active,
+          count(*) FILTER (WHERE revoked_at IS NOT NULL)::text AS revoked,
+          count(*) FILTER (WHERE revoked_at IS NULL AND expires_at <= ${now}::timestamptz)::text AS expired
+        FROM engine_tokens WHERE kind = 'mcp'`)
+      const rows = await db.execute<{
+        id: string; prefix: string; org_slug: string; client_name: string; user_login: string;
+        scopes: string[]; created_at: Date | string; last_used_at: Date | string | null;
+        expires_at: Date | string; revoked_at: Date | string | null;
+      }>(sql`
+        SELECT t.id, t.prefix, o.slug AS org_slug, cl.client_name,
+          u.github_login AS user_login, t.scopes, t.created_at, t.last_used_at, t.expires_at, t.revoked_at
+        FROM engine_tokens t JOIN organizations o ON o.id = t.org_id
+        JOIN mcp_clients cl ON cl.client_id = t.mcp_client_id
+        JOIN users u ON u.id = t.user_id
+        WHERE t.kind = 'mcp'
+        ORDER BY t.created_at DESC, t.id DESC LIMIT 51`)
+      return {
+        counts: { clients: Number(totals[0]?.clients ?? 0), active: Number(totals[0]?.active ?? 0),
+          revoked: Number(totals[0]?.revoked ?? 0), expired: Number(totals[0]?.expired ?? 0) },
+        hasMore: rows.length > 50,
+        connections: rows.slice(0, 50).map((r) => ({
+          id: r.id, prefix: r.prefix, orgSlug: r.org_slug, clientName: r.client_name,
+          userLogin: r.user_login, scopes: r.scopes, createdAt: iso(r.created_at),
+          lastAuthenticatedAt: isoOrNull(r.last_used_at), expiresAt: iso(r.expires_at),
+          standing: r.revoked_at !== null ? 'revoked' : new Date(r.expires_at).getTime() <= c.clock.now().getTime() ? 'expired' : 'active',
+        })),
+      }
+    })
+    return {
+      ...recorded,
+      at: now,
+      endpoint: hostedMcpEndpoint(c.appBaseUrl),
+      recordsAnything: true,
+      why: 'Hosted OAuth registrations and credentials are recorded here. Local af mcp sessions stay on the developer\'s machine.',
+      tools: MCP_TOOLS.map((t) => ({
+        name: t.name,
+        does: t.does,
+        refuses: t.refuses,
+        servedBy: t.servedBy,
+      })),
+      registeredIn: MCP_REGISTRATION_FILE,
+      unknownFieldRefusal: MCP_UNKNOWN_FIELD_REFUSAL,
+      command: MCP_ELSEWHERE.command,
+      documentation: MCP_ELSEWHERE.documentation,
+    }
+  }),
 })
 
 /**

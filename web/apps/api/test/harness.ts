@@ -92,6 +92,8 @@ export interface ApiHarness {
 }
 
 export interface StartApiOptions {
+  /** Canonical origin for browser and SDK integration against a real listener. */
+  appBaseUrl?: string
   /**
    * Serve cookies the way production does. Defaults false, because the test
    * client speaks plain HTTP.
@@ -264,7 +266,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
     secureCookies: options.secureCookies ?? false,
-    appBaseUrl: 'http://app.test/',
+    appBaseUrl: options.appBaseUrl ?? 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     selfServeSignup: options.selfServeSignup ?? false,
     leadNotifier: options.leadNotifier ?? null,

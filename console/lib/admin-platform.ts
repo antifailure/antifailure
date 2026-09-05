@@ -334,6 +334,11 @@ export function useDeliveries(source: string, unhandledOnly: boolean, search: st
  * ---------------------------------------------------------------------- */
 
 export interface McpSurface {
+  at: string;
+  endpoint: string | null;
+  counts: { clients: number; active: number; revoked: number; expired: number };
+  hasMore: boolean;
+  connections: McpConnection[];
   /** Whether this control plane records anything about MCP at all. Sent by the
    *  server rather than assumed here, so the day a write path exists the page
    *  changes because the server changed. */
@@ -344,6 +349,19 @@ export interface McpSurface {
   unknownFieldRefusal: string;
   command: string;
   documentation: string;
+}
+
+export interface McpConnection {
+  id: string;
+  prefix: string;
+  orgSlug: string;
+  clientName: string;
+  userLogin: string;
+  scopes: string[];
+  createdAt: string;
+  lastAuthenticatedAt: string | null;
+  expiresAt: string;
+  standing: "active" | "revoked" | "expired";
 }
 
 export function useMcpSurface() {

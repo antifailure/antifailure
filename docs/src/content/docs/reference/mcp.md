@@ -10,13 +10,13 @@ Context Protocol. An agent can ask what a migration would do to production
 shaped data, and what the environment reached for on the network, without
 being able to ask for either question to be made easier.
 
-It is started by an MCP client rather than typed by a person. It speaks the
+The local server is started by an MCP client rather than typed by a person. It speaks the
 protocol on standard input and output, so running it in a terminal looks like
 it has hung; that is the protocol waiting for a client.
 
 ## Connecting a local client
 
-In v1.1.1, `af mcp` is a local STDIO server. A client starts the process,
+`af mcp` is a local STDIO server. A client starts the process,
 talks to it over standard input and output, and stops it. The server binds the
 project it starts in and serves only that project, so the client must start it
 in the checkout or pass the checkout with `-C`.
@@ -180,41 +180,53 @@ In Claude Code, `/mcp` lists the configured servers and their state.
 `antifailure.yaml`. The server states it in its handshake instructions and at
 the end of every tool description, so an agent reads it rather than guessing.
 
-## Browser clients and remote bridges
+## Connecting to the control plane
 
-Antifailure v1.1.1 does not provide a hosted MCP endpoint yet. `claude.ai` and
-ChatGPT in a browser cannot start `af mcp` on your machine. Claude custom
-connectors need a remote MCP URL, while ChatGPT web receives remote MCP tools
-through plugins and does not read local Codex configuration.
+The hosted server uses authenticated Streamable HTTP at `/mcp` on the control
+plane's public origin. It reads reported project state and requests work through
+the same permissions and customer-owned execution paths as the console. It does
+not read a checkout on your laptop or impersonate the local rehearsal tools.
 
-A gateway can adapt this local STDIO server to Streamable HTTP. Current
-[Supergateway](https://github.com/supercorp-ai/supergateway) listens on every
-network interface and does not authenticate incoming clients. The command
-below demonstrates the transport conversion only. Run it inside an isolated
-network where port 8000 is unreachable until an authenticating HTTPS proxy is
-in front of it:
+In an MCP client that supports Streamable HTTP and OAuth with PKCE, add the URL
+shown on the operator's MCP management page. Sign in when the client opens the
+browser, check the organization, client name, callback address and requested
+permissions, then choose **Approve**. Declining creates no credential. You do
+not need to copy an API key into the client.
 
-```sh
-npx -y supergateway \
-  --stdio "af -C /absolute/path/to/your/project mcp" \
-  --outputTransport streamableHttp \
-  --port 8000
-```
+The server supports two permissions: `mcp:read` reads projects and recorded
+activity; `mcp:write` requests environments, workflow runs and cleanup. These
+permissions never grant more than your current organization role. A viewer who
+approves write access still cannot start an environment.
 
-That creates the Streamable HTTP endpoint `http://localhost:8000/mcp`.
-Supergateway defaults a STDIO input to SSE when `--outputTransport` is omitted,
-so the shorter command does not create this endpoint.
+An approved credential expires after ninety days. Removing membership or revoking
+the credential stops subsequent requests. Operators can revoke a credential on
+MCP management; an authorized tenant administrator can revoke it in the CLI token
+directory. Reconnect through the client after expiry or revocation.
 
-The command above is a transport adapter, not an authentication boundary. Do
-not publish or tunnel that endpoint as shown. A remote deployment also needs
-authorization for every caller and an isolated checkout and execution host for
-the project it serves. Anyone allowed through can invoke the rehearsal tools,
-which start containers, read the checkout and operate on production shaped
-data. Running that bridge is possible, but it is an operationally sensitive
-service rather than a safe copy and paste connection step.
+| Hosted tool | What it actually does |
+| --- | --- |
+| `list_projects` | Lists repositories connected to your organization. |
+| `list_environments` | Reads recorded environment state, with a bounded page and cursor. |
+| `list_runs` | Reads recorded runs, newest first, with a bounded page. |
+| `get_run` | Reads one recorded run's metadata by UUID, not the local rehearsal evidence contract. |
+| `inspect_recorded_egress` | Reads reported host and mode counts. Missing events are not proof of containment. |
+| `start_environment` | Dispatches an environment request through the repository workflow, subject to permissions and spending limits. |
+| `run_workflows` | Dispatches the manifest's workflows through the repository workflow. |
+| `stop_environment` | Requests cleanup. It does not claim resources disappeared before the runtime confirms it. |
 
-A hosted Antifailure endpoint is not part of v1.1.1. That is the current
-product state, not a permanent limit on the architecture.
+Use the returned project or environment identifiers rather than guessing them.
+A dispatch is not a completed run, and a run without results is not a pass.
+The hosted endpoint does not offer arguments that replace the database URL,
+weaken masking or widen network policy.
+
+An installation must include the hosted server and configure its public origin
+before this URL works. Older installations, including the original v1.1.1
+release, provide the local server only. A `404` from `/mcp` on such an installation
+is not a bad password; update the control plane before connecting remotely.
+
+The rest of this reference describes the four **local rehearsal tools**. Their
+`project_id`, verdict and on-disk run contracts do not apply to the hosted tool
+names above.
 
 ## The division of authority
 
