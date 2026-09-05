@@ -186,18 +186,6 @@ describe('the configuration the published copy describes', () => {
     assert.notEqual(options?.ui_host, options?.api_host)
   })
 
-  it('hands the library no separate host for the script bundles', async () => {
-    // posthog-js routes /static and /array at a custom api_host on its own,
-    // measured on the wire. So an asset host is redundant, and redundant is
-    // not the reason it is absent: it is the single option that would put the
-    // session replay recorder, the largest and most blockable request
-    // posthog-js makes, back on a vendor address while ingest stayed healthy
-    // and every check that reads api_host stayed green.
-    const { posthogOptions } = await load()
-    const options = posthogOptions('https://www.antifailure.dev')
-    assert.equal(options?.asset_host, undefined)
-  })
-
   it('names no PostHog ingestion host anywhere in what it hands the library', async () => {
     // The only posthog.com host allowed in this tree is ui_host, which is a
     // link a person clicks and the browser never fetches.
@@ -440,21 +428,21 @@ describe('the switch on the privacy page, which has to reach the vendor too', ()
 
 describe('the option that cannot be allowed back, enforced by absence', () => {
   // WHY A SOURCE SCAN AND NOT A VALUE ASSERTION. Every other rule in this file
-  // is checked by reading what posthogOptions returns, and that is the wrong
-  // instrument for this one: `asset_host: undefined` and no asset_host at all
-  // both read the same from the outside, and the leak is a variable somebody
-  // sets in a deployment rather than a value in this tree. The failure this
-  // guards is one repository variable away from being live, no gate on either
-  // side of the lane reads it because every gate reads api_host, and the
-  // request it moves is the one nobody inspects because ingest keeps working.
+  // is checked by reading what posthogOptions returns, and that instrument
+  // cannot see this one. An option set to undefined and an option that does not
+  // exist are the same object from outside, and the failure does not arrive as
+  // a value in this tree at all: it arrives as a repository variable somebody
+  // sets, with no code change, no diff to review and no test to go red. Every
+  // check on both sides of this lane reads the ingest host, so all of them stay
+  // green, and the request it moves is the one nobody inspects because events
+  // keep flowing. An option that exists can be set; one that does not, cannot.
   //
-  // WHAT IS SCANNED. The three directories next.config.ts exports into a
-  // bundle. test/ is excluded for the same reason tools/routecheck excludes it:
-  // an assertion that a string is absent has to be able to name the string, and
-  // nothing under test/ reaches a browser.
+  // WHAT IS SCANNED: everything under www except the installed packages and the
+  // build output. That includes this file, which is why the two strings below
+  // are assembled rather than written, and why there is no carve-out to argue
+  // about later.
 
   const www = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const shipped = ['lib', 'components', 'app']
 
   function sourceFiles(): string[] {
     const out: string[] = []
@@ -462,30 +450,38 @@ describe('the option that cannot be allowed back, enforced by absence', () => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name)
         if (entry.isDirectory()) {
-          if (['node_modules', '.next', 'out'].includes(entry.name)) continue
+          // Installed packages and build output. posthog-js names the option in
+          // its own source and its own types, which says nothing about this
+          // tree, and www/out is a copy of what lib already holds.
+          if (['node_modules', '.next', 'out', '.git'].includes(entry.name)) continue
           walk(full)
         } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) {
           out.push(full)
         }
       }
     }
-    for (const dir of shipped) walk(path.join(www, dir))
+    walk(www)
     return out
   }
 
-  it('scans a real and non empty set of shipped files, or it proves nothing', () => {
-    // The positive control on the scanner itself. A walk that found no files
-    // would pass both assertions below while checking nothing at all, which is
-    // the shape of instrument this repository keeps having to throw away.
+  it('scans a real and non empty set of files, including itself, or it proves nothing', () => {
+    // THE POSITIVE CONTROL ON THE SCANNER. A walk that found nothing would pass
+    // the assertion below while checking nothing at all, which is the exact
+    // shape of instrument this repository keeps having to throw away. Naming
+    // this file too is what proves the scope has no carve-out hiding in it.
     const files = sourceFiles()
     assert.ok(files.length > 40, `only ${files.length} files scanned`)
     assert.ok(
       files.some((f) => f.endsWith(path.join('lib', 'posthog.ts'))),
       'the scan did not reach lib/posthog.ts, so it could not see the option it is about',
     )
+    assert.ok(
+      files.some((f) => f.endsWith(path.join('test', 'posthog.test.ts'))),
+      'the scan did not reach the test directory, so a carve-out has crept back in',
+    )
   })
 
-  it('no shipped file names the asset host option or the variable that would feed it', () => {
+  it('no file under www names the asset host option or the variable that would feed it', () => {
     const offenders: string[] = []
     for (const file of sourceFiles()) {
       const text = fs.readFileSync(file, 'utf8')
