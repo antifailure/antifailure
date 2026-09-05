@@ -392,6 +392,26 @@ func TestUp_StopsWhenAMigrationFails(t *testing.T) {
 // policy, and a direct connection that bypasses the proxy entirely. Together
 // they answer the only question that matters about an egress control: does it
 // decide, and can it be walked around.
+//
+// BOTH HOSTS ARE ONE ORGANISATION'S, AND THAT IS A DEPENDENCY WORTH SAYING OUT
+// LOUD. example.com is a reserved domain ICANN and IANA operate, and
+// www.iana.org is IANA's own site. So `engine`, a required context on every
+// pull request in this repository, cannot go green without one organisation
+// being up, and the two fixtures do not fail independently: an IANA outage
+// moves the allowed host and the refused host together.
+//
+// Kept rather than changed, and the reasons are worth having written down.
+// Both are chosen precisely because they are boring, stable and nobody's
+// production service, and a refused host has to be one nothing in any policy
+// here ever names. What the choice costs is measured elsewhere in this file:
+// a guard that skips when either is unreachable, and, for the reachability
+// assertions, a failure that reads the sidecar's own decision log rather than
+// blaming containment for the network.
+//
+// If the coupling is ever worth removing, the change is to move refusedHost to
+// a second organisation's domain, so the two fixtures fail independently. That
+// is a decision about which third parties this repository's merge gate depends
+// on, not a cleanup, which is why it is written here rather than done.
 const (
 	allowedHost = "example.com"
 	refusedHost = "www.iana.org"
@@ -479,42 +499,125 @@ func parseInt(t *testing.T, re *regexp.Regexp, s string) int {
 	return n
 }
 
-// requireInternet skips when the machine cannot reach the hosts these tests
-// decide about, so a laptop on a plane reports a skip rather than a failure
-// that looks like a broken egress control.
-func requireInternet(t *testing.T) {
+// requireInternet skips when the machine cannot reach what these tests depend
+// on, so a laptop on a plane reports a skip rather than a failure that looks
+// like a broken egress control.
+//
+// IT TAKES THE ORIGINS RATHER THAN ASSUMING THEM, and that is the whole point
+// of the parameter. It used to probe `http://example.com/` unconditionally,
+// while TestEgress_HTTPSIsDecidedByHost and five others need HTTPS. On
+// 2026-09-05 `engine`, a required context, went red on a pull request touching
+// no file under engine/: HTTP answered, so nothing skipped, and the HTTPS
+// request then failed. A guard that checks a protocol the test does not use
+// answers a question nobody asked.
+//
+// Pass every origin the test actually depends on, spelled the way the probe
+// spells it, so a copy of the string is what keeps the two in step. A test that
+// needs a host to be UP in order for its refusal to mean anything names that
+// host too: an assertion that a request failed is satisfied by a host that is
+// merely down, which is a pass for the wrong reason and nothing would say so.
+//
+// WHAT IT DELIBERATELY STILL DOES NOT DO. The probe is made from the test
+// process; the test's request is made from inside a container, through the
+// sidecar. Making the guard identical would mean building the environment to
+// decide whether to run the test, and worse, it would make the guard
+// indistinguishable from the assertion, so a real egress regression would
+// report as a skip. The conformance harness states the same reasoning on its
+// own copy. Closing the scheme gap does not close that one, and a probe that
+// fails past the sidecar is told apart by unreachableIsOurs instead.
+//
+// The first origin is a plain parameter and not part of the variadic, so a call
+// that guards on nothing does not compile. A runtime check would have been a
+// check; this is the compiler.
+func requireInternet(t *testing.T, origin string, more ...string) {
 	t.Helper()
-	// Its own transport, closed on the way out. The default one keeps the
-	// connection idle for a minute and a half, and its reader and writer
-	// goroutines are what goleak finds at the end of a run where this was the
-	// only outbound call anything made.
+	for _, origin := range append([]string{origin}, more...) {
+		if err := reachErr(origin); err != nil {
+			// Counted as a skip for the same reason the daemon ones are. A
+			// laptop with no network would otherwise run every containment
+			// test, reach nothing, skip everything and print ok.
+			skipped.Add(1)
+			t.Skipf("skipped: %s is not reachable from this machine: %v", origin, err)
+		}
+	}
+}
+
+// reachErr is one GET, and nil when the origin answered at all.
+//
+// Its own transport, closed on the way out. The default one keeps the
+// connection idle for a minute and a half, and its reader and writer goroutines
+// are what goleak finds at the end of a run where this was the only outbound
+// call anything made.
+//
+// The status is not read. This asks whether the machine can reach the host over
+// this scheme, and a 500 from a host that answered is a reachable host.
+func reachErr(origin string) error {
 	tr := &http.Transport{}
 	defer tr.CloseIdleConnections()
 	c := &http.Client{Timeout: 10 * time.Second, Transport: tr}
-	resp, err := c.Get("http://" + allowedHost + "/")
+	resp, err := c.Get(origin + "/")
 	if err != nil {
-		// Counted as a skip for the same reason the daemon ones are. A laptop
-		// with no network would otherwise run every containment test, reach
-		// nothing, skip everything and print ok.
-		skipped.Add(1)
-		t.Skipf("skipped: %s is not reachable from this machine: %v", allowedHost, err)
+		return err
 	}
 	_ = resp.Body.Close()
+	return nil
+}
+
+// requireGotOut asserts a probe reached a host the policy allows, and when it
+// did not, says which of two very different things happened.
+//
+// `curl ... && exit 0 || exit 9` collapses "the sidecar refused a host the
+// policy allows" and "the host did not answer" into one number, and the message
+// beside it named the first. The sidecar has always known which: it writes one
+// decision per request, allowed or not, and Runtime.Decisions reads them.
+// TestCapture_SendsNothingToTheRealProvider in this file has asserted on that
+// log since it was written. The reachability tests never asked.
+//
+// The rule is in unreachableIsOurs and it is proved there, on fabricated
+// records, without a daemon. Only one of its six rows is the weather, and that
+// row needs the sidecar's own log to say it allowed the connection AND this
+// machine to be unable to reach the host at that moment. A sidecar that logs an
+// allow and then drops the bytes still fails, because the machine outside it
+// can still reach the host.
+func requireGotOut(t *testing.T, r *local.Runtime, id, host, origin string, code int) {
+	t.Helper()
+	if code == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	decisions, err := r.Decisions(ctx, id, 200)
+	require.NoError(t, err, "the probe exited %d and the sidecar's log could not be read", code)
+
+	verdict, d := readVerdict(decisions, host)
+	ours, message := unreachableIsOurs(verdict, d, host, origin, reachErr(origin) == nil)
+	if ours {
+		t.Fatalf("the probe exited %d and %s", code, message)
+	}
+	skipped.Add(1)
+	t.Skipf("skipped: %s", message)
 }
 
 func TestEgress_AllowedHostIsReached(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
-	code := probe(t, r, envID(t, r, "egallow"), &schema.Egress{
+	requireInternet(t, "http://"+allowedHost)
+	id := envID(t, r, "egallow")
+	code := probe(t, r, id, &schema.Egress{
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
 	}, "wget -T 20 -q -O - http://"+allowedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	requireGotOut(t, r, id, allowedHost, "http://"+allowedHost, code)
 	require.Equal(t, 0, code, "a host the policy allows was not reached through the proxy")
 }
 
 func TestEgress_HostWithNoRuleIsRefused(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	// The refused host is named here as well as the allowed one, and that is
+	// not belt and braces. The assertion below is that a request FAILED, and a
+	// host that is merely down satisfies it: the test would pass, for entirely
+	// the wrong reason, and nothing would say so. Guarding on it turns that
+	// into a skip.
+	requireInternet(t, "http://"+allowedHost, "http://"+refusedHost)
 	// The default is block, and the point of this test is that the refusal
 	// comes from the policy rather than from the host being unreachable, which
 	// is why the allowed host in the test above is a real one too.
@@ -531,7 +634,7 @@ const noProxyVars = "env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PRO
 
 func TestEgress_AppliesToAClientThatIgnoresProxyVariables(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost, "http://"+refusedHost)
 	// The property the whole design rests on. Proxy variables are a request,
 	// and a great many clients ignore them: Node has no proxy support at all,
 	// and plenty of SDKs bundle a client that does the same. An egress control
@@ -543,8 +646,10 @@ func TestEgress_AppliesToAClientThatIgnoresProxyVariables(t *testing.T) {
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
 	}
-	allowed := probe(t, r, envID(t, r, "egnovars1"), rules,
+	allowedID := envID(t, r, "egnovars1")
+	allowed := probe(t, r, allowedID, rules,
 		noProxyVars+"wget -T 20 -q -O - http://"+allowedHost+"/ >/dev/null 2>&1 && exit 0 || exit 9")
+	requireGotOut(t, r, allowedID, allowedHost, "http://"+allowedHost, allowed)
 	require.Equal(t, 0, allowed,
 		"a client with no proxy support could not reach a host the policy allows")
 
@@ -556,7 +661,7 @@ func TestEgress_AppliesToAClientThatIgnoresProxyVariables(t *testing.T) {
 
 func TestEgress_CannotBeBypassedByConnectingToAnAddress(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost)
 	// Interception happens through DNS, so the obvious way around it is to
 	// skip DNS. That has to fail, and it does for a reason that has nothing to
 	// do with DNS: the service's network has no route out, so a packet
@@ -570,7 +675,10 @@ func TestEgress_CannotBeBypassedByConnectingToAnAddress(t *testing.T) {
 
 func TestEgress_HTTPSIsDecidedByHost(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	// HTTPS, because that is what the probe below asks for. This guard read
+	// http://example.com/ until 2026-09-05, when HTTP answered, nothing
+	// skipped, and the HTTPS request failed into a required context.
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 	cmd := "curl -sS -o /dev/null --max-time 20 https://" + allowedHost + "/ && exit 0 || exit 9"
 
@@ -579,10 +687,12 @@ func TestEgress_HTTPSIsDecidedByHost(t *testing.T) {
 	// whether the connection happens at all. A rule that names paths or
 	// methods cannot be enforced on HTTPS until the environment certificate
 	// lands, and that limit is stated in the docs rather than papered over.
-	allowed := probeWith(t, r, envID(t, r, "eghttps1"), &schema.Egress{
+	allowedID := envID(t, r, "eghttps1")
+	allowed := probeWith(t, r, allowedID, &schema.Egress{
 		Default: schema.ModeBlock,
 		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
 	}, img, cmd)
+	requireGotOut(t, r, allowedID, allowedHost, "https://"+allowedHost, allowed)
 	require.Equal(t, 0, allowed, "an allowed host was not reachable over HTTPS")
 
 	refused := probeWith(t, r, envID(t, r, "eghttps2"), &schema.Egress{
@@ -593,7 +703,7 @@ func TestEgress_HTTPSIsDecidedByHost(t *testing.T) {
 
 func TestEgress_NoPolicyMeansBlockEverything(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost)
 	// A manifest with no egress section is valid, and it must not mean the
 	// sidecar fails to parse its policy and the environment fails to start.
 	code := probe(t, r, envID(t, r, "egnone"), nil,
@@ -714,7 +824,7 @@ func get(t *testing.T, url string) string {
 
 func TestEgress_HTTPSPathRulesAreEnforcedWhenTheCertificateIsIssued(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 
 	// The thing a host level tunnel cannot do. A rule naming a path needs the
@@ -731,14 +841,16 @@ func TestEgress_HTTPSPathRulesAreEnforcedWhenTheCertificateIsIssued(t *testing.T
 	}
 	// The rule allows every path under root, so this is the positive case and
 	// proves the certificate is trusted and the request is re-originated.
-	code := probeInspected(t, r, envID(t, r, "insp1"), rules, ca, img,
+	id := envID(t, r, "insp1")
+	code := probeInspected(t, r, id, rules, ca, img,
 		"curl -sS -o /dev/null --max-time 25 https://"+allowedHost+"/ && exit 0 || exit 9")
+	requireGotOut(t, r, id, allowedHost, "https://"+allowedHost, code)
 	require.Equal(t, 0, code, "an inspected HTTPS request to an allowed path did not complete")
 }
 
 func TestEgress_HTTPSPathOutsideTheRuleIsRefused(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 
 	ca, err := envcert.Generate("test-inspect2", time.Now())
@@ -840,7 +952,7 @@ func TestCapture_RecordsAMessageAndAnswersAsTheProviderWould(t *testing.T) {
 
 func TestCapture_SendsNothingToTheRealProvider(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 	id := envID(t, r, "capture2")
 
@@ -893,7 +1005,7 @@ func fakeLiveKey() string {
 
 func TestTripwire_RefusesARequestCarryingALiveCredential(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 	id := envID(t, r, "tripwire1")
 
@@ -947,7 +1059,7 @@ func TestTripwire_RefusesARequestCarryingALiveCredential(t *testing.T) {
 
 func TestSandbox_SubstitutesTheCredentialOnTheWayOut(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "https://"+allowedHost)
 	img := curlImage(t)
 	id := envID(t, r, "sandbox1")
 

@@ -223,7 +223,12 @@ func containedPolicy() *schema.Egress {
 
 func TestContainment_NothingEscapesAContainedEnvironment(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	// The escape script's controls reach http://example.com/ and one of its
+	// attacks reaches http://www.iana.org/, so both are named. The second
+	// matters for the same reason it does in local_test.go: "a-host-with-no-rule"
+	// is an attack that must FAIL, and a host that is merely down makes it fail
+	// for a reason that has nothing to do with containment.
+	requireInternet(t, "http://"+allowedHost, "http://"+refusedHost)
 
 	res := runEscapeProbe(t, r, envID(t, r, "containescape"), containedPolicy(), escapeScript)
 
@@ -246,7 +251,7 @@ func TestContainment_TheSameProbeEscapesWithoutIt(t *testing.T) {
 	// without one skips it out loud rather than leaving the contained run
 	// above with no control.
 	requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost, "http://"+refusedHost)
 
 	cli, err := dockerutil.Client()
 	require.NoError(t, err)
@@ -337,7 +342,7 @@ func awaitLooseProbe(t *testing.T, ctx context.Context, id string) string {
 // in sandbox mode, and the decision log recorded it as allowed.
 func TestContainment_ALiveCredentialOverPlainHTTPTripsTheWire(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost)
 	id := envID(t, r, "containtrip")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -408,7 +413,7 @@ func TestContainment_ALiveCredentialOverPlainHTTPTripsTheWire(t *testing.T) {
 // and the link local range is not on it.
 func TestContainment_TheMetadataEndpointIsRefusedUnderDefaultAllow(t *testing.T) {
 	r := requireRuntime(t)
-	requireInternet(t)
+	requireInternet(t, "http://"+allowedHost)
 	id := envID(t, r, "containmeta")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
