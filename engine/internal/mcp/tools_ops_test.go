@@ -449,6 +449,10 @@ func TestPublishedAnnotations_ADestructiveToolSaysSoAndAReadOnlyOneDoesNot(t *te
 	s.Register(newDescribeModelKeyTool(p, nil))
 	s.Register(newVerifyModelKeyTool(p, nil))
 	s.Register(newSendWebhookEventTool(p, nil))
+	// The other two destructive tools live in sibling files and are registered
+	// here so the assertion below holds for every tool that publishes the hint.
+	s.Register(newTeardownTool(p, nil, nil))
+	s.Register(newApplyMaskingTool(p, nil, nil))
 
 	got := converse(t, s, initFrame,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`)
@@ -462,7 +466,7 @@ func TestPublishedAnnotations_ADestructiveToolSaysSoAndAReadOnlyOneDoesNot(t *te
 		published[tool["name"].(string)] = tool["annotations"].(map[string]any)
 	}
 
-	for _, name := range []string{"remove_expired_environments", "remove_old_goldens"} {
+	for _, name := range []string{"remove_expired_environments", "remove_old_goldens", "teardown_environment", "apply_data_masking"} {
 		require.True(t, published[name]["destructiveHint"].(bool),
 			"%s deletes things a caller owns and must publish destructiveHint true", name)
 		require.False(t, published[name]["readOnlyHint"].(bool), name)

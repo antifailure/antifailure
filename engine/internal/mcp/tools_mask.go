@@ -713,7 +713,8 @@ func newApplyMaskingTool(p *Project, eng *Engine, apply maskingApplier) *Tool {
 		Title: "Overwrite this environment's data, irreversibly",
 		// Emphatically not read only. It rewrites every masked column of every
 		// masked table in place.
-		ReadOnly: false,
+		ReadOnly:    false,
+		Destructive: true,
 		Description: "IRREVERSIBLE. This REWRITES this environment's data in place, and " +
 			"once a column is overwritten the original is gone. There is no undo and " +
 			"nothing here restores it. " +
