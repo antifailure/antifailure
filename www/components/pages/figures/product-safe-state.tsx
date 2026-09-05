@@ -440,7 +440,11 @@ export function PSS04() {
 
       <div className="mt-3 rounded-[10px] bg-[#E4F1EB] p-2.5">
         <div className="flex min-w-0 items-center gap-2 text-[#285D49]">
-          <span className="shrink-0 font-mono text-[9px] font-medium uppercase tracking-[0.1em]">Outbound contract</span>
+          {/* Not shrink-0. Holding this label at its full width left the
+              attestation beside it 55px for a word whose min-content is 75px,
+              so at 320px the row ran 10px past the card and the card's
+              overflow-hidden cut it rather than scrolling. Both labels wrap. */}
+          <span className="min-w-0 font-mono text-[9px] font-medium uppercase tracking-[0.1em]">Outbound contract</span>
           <span className="h-px min-w-3 flex-1 bg-[#5D9B80]" aria-hidden="true" />
           <svg viewBox="0 0 18 10" className="h-3 w-5 shrink-0" fill="none" aria-hidden="true">
             <path d="M1 5h15m-4-4 4 4-4 4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />

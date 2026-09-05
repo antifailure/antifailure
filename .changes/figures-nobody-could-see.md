@@ -22,3 +22,14 @@ red that marks it stopped, and the lead paragraph of all four solutions heroes
 rendered in the body grey instead of black. Each of those now emits one class
 for the property, chosen by a ternary or by a prop on the component, so the
 colour on the page is the colour somebody asked for.
+
+Four figures were also cut off at 320px rather than reflowed. A grid item's
+default min-width is auto, so a capability card and a route row refused to go
+narrower than their own content and sat wider than their track; the twin
+lifecycle strip asked for four columns of "01 Validate" in 228px; and the
+outbound contract row held one label at full width and left the attestation
+beside it less room than its longest word needs. Each figure draws itself
+inside overflow-hidden, so none of this scrolled: it was simply cut, and a
+page level check could not see it. The lifecycle strip is two columns before
+sm, the evidence bundle steps its type up at sm instead of changing columns,
+and the rest let their content shrink.

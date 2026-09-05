@@ -222,14 +222,19 @@ export function PTW01() {
         </div>
       </div>
 
-      <ol aria-label="Twin run sequence" className="mt-3 grid grid-cols-4 overflow-hidden border border-black/[0.07] bg-white">
+      {/* Two columns before sm. Four cells of "01 Validate" have a min-content
+          of 243px and the track at 320px is 228px, so the fourth stage was cut
+          off by this element's own overflow-hidden. The separators are the
+          gap showing the container through, which is the one border rule that
+          stays correct when the column count changes. */}
+      <ol aria-label="Twin run sequence" className="mt-3 grid grid-cols-2 gap-px overflow-hidden border border-black/[0.07] bg-black/[0.07] sm:grid-cols-4">
         {[
           ["01", "Build"],
           ["02", "Restore"],
           ["03", "Validate"],
           ["04", "Destroy"],
         ].map(([number, label], index) => (
-          <li key={label} className={cn("min-w-0 px-2 py-2", index > 0 && "border-l border-black/[0.07]", index === 3 && "bg-[#e4f1eb]")}>
+          <li key={label} className={cn("min-w-0 px-2 py-2", index === 3 ? "bg-[#e4f1eb]" : "bg-white")}>
             <span className="font-mono text-[10px] text-black/35">{number}</span>
             <span className="ml-1.5 text-[12px] font-medium text-black">{label}</span>
           </li>
@@ -458,9 +463,14 @@ export function PTW04() {
           </div>
           <div className="p-3">
             <Eyebrow tone="green">evidence bundle</Eyebrow>
-            <div className="mt-2 grid grid-cols-3 gap-0 overflow-hidden border border-black/[0.07] bg-[#f7f7f4]">
+            {/* "invariants" is one word and cannot wrap, so three of these
+                cells had a min-content of 210px against a 202px track and the
+                third was clipped at 320px. The type and padding step up at sm
+                rather than the columns changing, because three named artifacts
+                read wrong in two columns. */}
+            <div className="mt-2 grid grid-cols-3 gap-px overflow-hidden border border-black/[0.07] bg-black/[0.07]">
               {["rows", "traces", "invariants"].map((item) => (
-                <div key={item} className="border-l border-black/[0.07] px-2 py-2.5 text-center font-mono text-[11px] text-black/60 first:border-l-0">{item}</div>
+                <div key={item} className="min-w-0 bg-[#f7f7f4] px-1 py-2.5 text-center font-mono text-[10px] text-black/60 sm:px-2 sm:text-[11px]">{item}</div>
               ))}
             </div>
             <div className="my-2.5 flex justify-center"><Arrow vertical /></div>
