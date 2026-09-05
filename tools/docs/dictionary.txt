@@ -3,6 +3,8 @@
 # line diff a reviewer can read, and so the list stays sorted.
 # Words this project uses that no general dictionary has.
 antifailure
+autocapture
+autocaptured
 autovacuum
 branchable
 bubbletea

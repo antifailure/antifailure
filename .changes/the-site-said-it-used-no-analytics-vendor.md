@@ -18,9 +18,15 @@ enterprise contact form shows fields filling up with asterisks and never the
 name, work email, company or paragraph typed into them. No cookie is set, and
 posthog-js is configured onto sessionStorage rather than its default of a cookie
 plus a year of local storage, because two sentences already published say there
-is no cookie and that nothing here joins two visits. Requests go to this site's
-own origin and are forwarded, so a reader's browser opens no connection to a
-posthog.com host.
+is no cookie and that nothing here joins two visits.
+
+Requests go to an endpoint this project runs on its own domain rather than to a
+posthog.com host, and the copy says in as many words that this is TRANSPORT and
+not a boundary: it changes where the browser connects, not who receives the
+data, and PostHog, Inc. receives it either way. What it buys is a request no
+content blocker's vendor list matches, so the numbers are not silently half
+missing, and a reader's IP address that is never forwarded, at the cost of any
+real geography on those dashboards.
 
 Global Privacy Control, Do Not Track, the switch on the privacy page and a
 browser reporting itself as automated each stop it, and each stops it BEFORE the

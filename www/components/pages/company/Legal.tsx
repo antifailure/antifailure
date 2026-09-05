@@ -212,12 +212,13 @@ export function PrivacyPage() {
             The second is PostHog, for autocapture and session replay, and it is here because the
             first one cannot answer where somebody gave up: it sends no address, no element and no
             ordering, deliberately. There is no Google Analytics, no Datadog, no Sentry and no
-            crash reporter in anything this repository wrote. Two scripts do come from somewhere
-            else and it is worth naming both: PostHog&rsquo;s session replay recorder, and the
-            booking widget on the contact page, which is cal.com&rsquo;s and which runs its own
-            error reporting to Sentry inside its own frame. That is their document doing their
-            thing on their origin, and it is named here because your browser makes the connection
-            and a page listing what it loads should not stop at the ones it likes.
+            crash reporter in anything this repository wrote. Two scripts are fetched while you
+            read, and both are worth naming. PostHog&rsquo;s session replay recorder, which comes
+            from the endpoint we run rather than from any vendor address. And the booking widget on
+            the contact page, which is cal.com&rsquo;s, and whose frame runs its own error
+            reporting to Sentry. That last one is their document doing their thing on their origin,
+            and it is named here because your browser makes the connection and a page listing what
+            it loads should not stop at the ones it likes.
           </p>
           <p>
             Five things leave your browser for the counter: a page shape from a closed list, a
@@ -247,8 +248,26 @@ export function PrivacyPage() {
             Neither of them sets a cookie, and neither keeps an identifier that outlives this tab,
             so nothing here can join two of your visits. PostHog would do both by default, for a
             year; it is configured here not to, and that choice is what keeps the sentence before
-            this one true. Its requests go to this site&rsquo;s own address and are forwarded from
-            there, so your browser opens no connection to a posthog.com host.
+            this one true.
+          </p>
+          <p>
+            <strong>PostHog, Inc. receives all of that, and we will not dress that up.</strong>{" "}
+            Your browser does not talk to a posthog.com host: it talks to an endpoint we run at{" "}
+            <code>app.antifailure.dev</code>, which forwards. That changes where the request goes
+            and not who reads it, so PostHog is on our{" "}
+            <Link prefetch={false} href="/subprocessors">
+              subprocessor list
+            </Link>{" "}
+            with a row of its own saying so. What the arrangement genuinely buys you is two things.
+            A content blocker does not recognise the request, so the numbers are not quietly half
+            missing and nobody here is tempted to guess at the gap. And your IP address is not
+            forwarded, so PostHog never receives it, which costs us any real geography on those
+            dashboards and is worth it.
+          </p>
+          <p>
+            One claim is unaffected and it is a different claim: your production data never leaves
+            your own boundary. That is about the engine and the runner, neither of which has an
+            analytics client to leave with. This section is about a website you are reading.
           </p>
           <p>
             Global Privacy Control and Do Not Track are honoured by both, without asking. The
@@ -1027,13 +1046,16 @@ export function SubprocessorsPage() {
             now. It is listed separately from the two sections above because it is engaged by a
             different thing: no account, organization, repository, policy, run, audit entry or
             piece of your production data reaches it, because nothing that handles any of those
-            calls it.
+            calls it. Its requests go through an endpoint we run rather than to a vendor address,
+            and that is transport rather than a boundary: PostHog, Inc. receives what they carry,
+            which is why it is on this page at all.
           </p>
           <p>
             Every value typed into a form is replaced in the browser before anything is sent, so a
             recording of the careers form or the contact form holds fields filling up with
-            asterisks and not what was written in them. There is no cookie and no identifier that
-            outlives a tab. A reader whose browser sends Global Privacy Control or Do Not Track, or
+            asterisks and not what was written in them. There is no cookie, no identifier that
+            outlives a tab, and no IP address: the endpoint in front of PostHog does not forward
+            one. A reader whose browser sends Global Privacy Control or Do Not Track, or
             who has switched measurement off on the{" "}
             <Link prefetch={false} href="/privacy">
               privacy page

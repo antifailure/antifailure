@@ -35,8 +35,42 @@
  *     four. What a recording shows is a field filling up with asterisks.
  *   ADVERTISING IDENTIFIERS in the URL, through mask_personal_data_properties,
  *     which replaces gclid, fbclid and the rest of that family.
+ *   THE READER'S IP ADDRESS, which the proxy does not forward. That is the
+ *     proxy's doing rather than this file's, and it is the one place the
+ *     arrangement genuinely withholds something from the vendor rather than
+ *     just moving where the request goes. The cost is that PostHog's $geoip
+ *     properties describe our datacenter and not the reader, so any geography
+ *     on a PostHog dashboard is meaningless and should be read that way.
  *   NO COOKIE, and no identifier that outlives the tab. See PERSISTENCE below.
  *   NOTHING AT ALL from a reader who asked not to be measured. See THE GATE.
+ *
+ * THE PROXY IS TRANSPORT AND IT IS NOT A BOUNDARY. SAY SO, EVERY TIME.
+ *
+ * Requests go to an endpoint this project runs on its own domain and are
+ * forwarded to PostHog. That changes the destination the BROWSER connects to.
+ * It does not change WHO RECEIVES THE DATA: PostHog, Inc. receives every event,
+ * every autocaptured interaction and every session recording either way. So the
+ * proxy buys three real things, and nothing else. A content blocker's vendor
+ * list does not match it, so the measurement is not silently half missing. The
+ * recorder bundle, which is the largest and most blockable request posthog-js
+ * makes, arrives rather than failing while ingest looks healthy. And the reader
+ * 's address is dropped on the way through.
+ *
+ * WHAT IT DOES NOT BUY IS THE SENTENCE "no third party sees this". A network
+ * tab that shows no vendor host would make that sentence look verified while it
+ * was false, which is worse than the unproxied version, because the arrangement
+ * it hides is the one a security review is asking about. PostHog is on the
+ * subprocessor list with a row of its own for that reason.
+ *
+ * IT IS SAME SITE, NOT SAME ORIGIN, AND THE DIFFERENCE IS NOT PEDANTRY HERE.
+ * This site is a static export on Azure Static Web Apps with no server at
+ * runtime, and a staticwebapp.config.json route cannot rewrite to an external
+ * host, so the site itself cannot proxy anything. The proxy lives on the
+ * control plane at app.antifailure.dev, which is a DIFFERENT ORIGIN from
+ * antifailure.dev and www.antifailure.dev and the same registrable domain. This
+ * repository has already spent hours on three people calling something cross
+ * site when SameSite=Strict had made it same site only. Copy that says "same
+ * origin" about this is false. "An endpoint we run on our own domain" is true.
  *
  * NEITHER FORM ECHOES A TYPED VALUE BACK AS PAGE TEXT, which is why masking
  * input values is enough and there is no text mask here. ApplicationForm.tsx
@@ -77,41 +111,46 @@ export const POSTHOG_KEY =
   process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "phc_BXsb8vQVdiajf7uG9soRdsEwLtcE7tJWgdAfc4Vvoqau";
 
 /**
- * Where the browser sends events.
+ * Where the browser sends events, and where it fetches the recorder from.
  *
- * A path rather than a host, on purpose. The browser talks to this site's own
- * origin and a reverse proxy forwards it, so no request in a reader's network
- * log names a vendor and no content blocker's vendor list matches it. Set
- * NEXT_PUBLIC_POSTHOG_API_HOST to an absolute URL to bypass the proxy, which is
- * what a fork with no proxy of its own does.
+ * ONE BASE FOR BOTH, WHICH IS WHY THERE IS NO SEPARATE ASSET HOST HERE.
+ * posthog-js classifies a custom api_host as region "custom" and then routes
+ * capture, feature flags, the remote config AND the script bundles at that one
+ * base. Setting `asset_host` alongside it would send the bundles straight to
+ * the vendor's own asset host and undo the whole arrangement, so this file does
+ * not expose one. The proxy serves /static and /array for that reason.
+ *
+ * WRITTEN AS A LITERAL RATHER THAN BUILT FROM CONTROL_PLANE_URL, and that is a
+ * gate constraint rather than a preference. tools/routecheck refuses any file
+ * in www that names CONTROL_PLANE_URL outside the inventory, so the alternative
+ * is an entry in www/lib/control-plane-routes.ts. That entry would fail today:
+ * routecheck checks every declared route against web/apps/api/src/boundary.ts,
+ * which does not register this path yet, and then probes the DEPLOYED control
+ * plane, which moves on the tag clock and is several releases behind the proxy.
+ *
+ * SO WRITE DOWN WHAT THAT COSTS. This is now a call from the site to the
+ * control plane that routecheck cannot see, which is exactly the class of call
+ * that inventory exists to make visible, and the beacon's own entry there says
+ * why it matters more here than for a form: "no reader sees an error". When the
+ * proxy is in a released control plane, this belongs in the inventory.
  */
-export const POSTHOG_API_HOST = process.env.NEXT_PUBLIC_POSTHOG_API_HOST ?? "/ingest";
+export const POSTHOG_API_HOST =
+  process.env.NEXT_PUBLIC_POSTHOG_API_HOST ?? "https://app.antifailure.dev/ph";
 
 /**
  * Where a link in the PostHog toolbar should point.
  *
  * Not the proxy. The proxy answers the ingest API and knows nothing about the
  * application, so without this every "view this in PostHog" link built by the
- * library would point at a path on this site that does not exist.
- */
-export const POSTHOG_UI_HOST =
-  process.env.NEXT_PUBLIC_POSTHOG_UI_HOST ?? "https://us.posthog.com";
-
-/**
- * Where the session replay recorder bundle is fetched from.
+ * library would point at a path that does not exist.
  *
- * SEPARATE FROM THE INGEST HOST BECAUSE POSTHOG SERVES THEM SEPARATELY. Events
- * go to the regional ingest host and `/static/recorder.js` comes from an asset
- * host, so a proxy that forwards only the ingest paths still leaves the browser
- * fetching a script directly from a posthog.com address. That would be a vendor
- * request in a reader's network log, which is the thing the proxy exists to
- * prevent, and it would be invisible to anybody who only checked where the
- * events went.
- *
- * Empty means "derive it from POSTHOG_API_HOST", which is right when the proxy
- * forwards `/static/*` as well. Point it somewhere else when it does not.
+ * THIS IS THE ONE PLACE A VENDOR HOST BELONGS IN THIS TREE. It is a link a
+ * person clicks and the browser never fetches it, which is what separates it
+ * from an ingestion or asset host. One of those appearing anywhere else in www
+ * is a defect, and test/posthog.test.ts is the check that names them.
  */
-export const POSTHOG_ASSET_HOST = process.env.NEXT_PUBLIC_POSTHOG_ASSET_HOST ?? "";
+export const POSTHOG_UI_HOST: string =
+  process.env.NEXT_PUBLIC_POSTHOG_UI_HOST ?? "https://us.posthog.com"; // ui_host
 
 /**
  * An absolute URL for a value that may be a path on this origin.
@@ -152,13 +191,11 @@ export function resolveHost(value: string, origin: string): string | null {
 export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
   const apiHost = resolveHost(POSTHOG_API_HOST, origin);
   if (!apiHost) return null;
-  const assetHost = resolveHost(POSTHOG_ASSET_HOST, origin);
   return {
     api_host: apiHost,
+    // NO asset_host. See POSTHOG_API_HOST above: setting one sends the script
+    // bundles to a posthog.com address and undoes the proxy.
     ui_host: POSTHOG_UI_HOST,
-    // Null is the library's own "derive it from api_host", so an unset asset
-    // host is not a broken one.
-    asset_host: assetHost,
 
     // Pinned rather than left to follow the library. `defaults` is a dated
     // bundle of behaviours and an unpinned one changes what is captured on an

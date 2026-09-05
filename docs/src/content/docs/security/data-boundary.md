@@ -323,13 +323,25 @@ the structure and styling of a page, cursor movement, clicks and scrolling, with
 every input value masked in the browser before it is sent, so the careers form
 and the enterprise contact form record fields filling up with asterisks and not
 the name, work email, company or message typed into them. No cookie is set and
-the identifier expires with the tab. Requests go to the site's own origin and a
-reverse proxy forwards them, so a reader's browser opens no connection to a
-`posthog.com` host. A reader whose browser sends Global Privacy Control or Do Not
-Track, or who has switched measurement off on the privacy page, never fetches
-PostHog's code at all: the refusal happens before the library is loaded rather
-than after, so there is no recorder that read the page and was then stopped.
-`www/lib/posthog.ts` is the whole of the configuration and states the same list.
+the identifier expires with the tab. A reader whose browser sends Global Privacy
+Control or Do Not Track, or who has switched measurement off on the privacy
+page, never fetches PostHog's code at all: the refusal happens before the
+library is loaded rather than after, so there is no recorder that read the page
+and was then stopped. `www/lib/posthog.ts` is the whole of the configuration and
+states the same list.
+
+**The proxy in front of it is transport and it is not a boundary.** The browser
+sends to an endpoint this project runs at `app.antifailure.dev` rather than to a
+`posthog.com` host, and that changes the destination the browser connects to,
+not who receives the data: PostHog, Inc. receives every event, every
+autocaptured interaction and every recording either way. Written down in these
+words because a network capture showing no vendor host would make the opposite
+claim look verified. What the arrangement does buy is that a content blocker's
+vendor list does not match the request, so the measurement is not silently half
+missing, and that the reader's IP address is not forwarded, so PostHog never
+receives one and the geography on those dashboards describes a datacenter. It is
+the same site and not the same origin: the marketing site is a static export
+with no server of its own, so the endpoint lives on the control plane.
 
 **Why that changes nothing about the boundary this page is about.** A person
 reading a web page is not a run. No account, organization, repository, policy,

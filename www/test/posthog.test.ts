@@ -102,6 +102,10 @@ describe('the host the browser is told to send to', () => {
   beforeEach(() => install())
 
   it('turns a path into an absolute URL on this origin, because the library concatenates', async () => {
+    // Not what this site ships, and still reachable: a fork whose host CAN
+    // rewrite to an upstream sets a path here. This site is a static export on
+    // Azure Static Web Apps with no server at runtime, so it cannot, and its
+    // proxy is on the control plane at a different origin instead.
     const { resolveHost } = await load()
     assert.equal(
       resolveHost('/ingest', 'https://www.antifailure.dev'),
@@ -109,11 +113,11 @@ describe('the host the browser is told to send to', () => {
     )
   })
 
-  it('leaves an absolute host alone, which is how a fork with no proxy points at PostHog', async () => {
+  it('leaves an absolute host alone, which is what this site actually ships', async () => {
     const { resolveHost } = await load()
     assert.equal(
-      resolveHost('https://us.i.posthog.com', 'https://www.antifailure.dev'),
-      'https://us.i.posthog.com',
+      resolveHost('https://app.antifailure.dev/ph', 'https://www.antifailure.dev'),
+      'https://app.antifailure.dev/ph',
     )
   })
 
@@ -169,14 +173,35 @@ describe('the configuration the published copy describes', () => {
     assert.equal(posthogOptions('https://www.antifailure.dev')?.respect_dnt, true)
   })
 
-  it('sends to this origin and links to PostHog, which are not the same host', async () => {
+  it('sends to an endpoint we run and links to PostHog, which are not the same host', async () => {
     // ui_host pointing at the proxy would build every "open this in PostHog"
-    // link as a path on this site that does not exist.
+    // link as a path on the proxy that does not exist.
     const { posthogOptions } = await load()
     const options = posthogOptions('https://www.antifailure.dev')
-    assert.equal(options?.api_host, 'https://www.antifailure.dev/ingest')
+    assert.equal(options?.api_host, 'https://app.antifailure.dev/ph')
     assert.equal(options?.ui_host, 'https://us.posthog.com')
     assert.notEqual(options?.ui_host, options?.api_host)
+  })
+
+  it('sets no asset host, because one would send the recorder to a vendor address', async () => {
+    // posthog-js routes the script bundles at api_host when api_host is custom.
+    // An asset_host beside it wins for /static/*, which is the session replay
+    // recorder, so setting one quietly restores the vendor request this whole
+    // arrangement exists to remove, on the largest and most blockable request
+    // posthog-js makes.
+    const { posthogOptions } = await load()
+    const options = posthogOptions('https://www.antifailure.dev')
+    assert.equal(options?.asset_host, undefined)
+  })
+
+  it('names no PostHog ingestion host anywhere in what it hands the library', async () => {
+    // The only posthog.com host allowed in this tree is ui_host, which is a
+    // link a person clicks and the browser never fetches.
+    const { posthogOptions } = await load()
+    const options = posthogOptions('https://www.antifailure.dev')
+    const rest = JSON.stringify({ ...options, ui_host: undefined })
+    assert.ok(!rest.includes('i.posthog.com'), rest)
+    assert.ok(!rest.includes('app.posthog.com'), rest)
   })
 
   it('keeps autocapture and session replay on, which is the whole point of adding it', async () => {
@@ -238,7 +263,7 @@ describe('the gate, which has to refuse before the recorder exists', () => {
     const recording = call.options.session_recording as { maskAllInputs?: boolean }
     assert.equal(recording.maskAllInputs, true)
     assert.equal(call.options.persistence, 'sessionStorage')
-    assert.equal(call.options.api_host, 'https://www.antifailure.dev/ingest')
+    assert.equal(call.options.api_host, 'https://app.antifailure.dev/ph')
   })
 
   it('fetches nothing at all for a browser sending Global Privacy Control', async () => {
