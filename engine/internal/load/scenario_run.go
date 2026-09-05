@@ -154,6 +154,30 @@ func RunScenarios(ctx context.Context, opts ScenarioOptions) ([]ScenarioResult, 
 		},
 	}
 
+	// A finished run does not keep its sockets. Both transports here are
+	// private to the run and set no IdleConnTimeout, so every keep alive
+	// connection the run opened stays open after the last request, with its
+	// readLoop and writeLoop goroutines still parked on it. In production that
+	// is a run holding file descriptors it no longer uses. In the tests it is
+	// why this package goes red at random: `goleak.VerifyTestMain` in
+	// goleak_test.go sees those two goroutines per connection and cannot know
+	// they are idle.
+	//
+	// WHAT IS PROVEN AND WHAT IS NOT. Proven: the CI failure is
+	// nondeterministic rather than caused by the commit it appeared on. The
+	// engine tree is byte identical between d03b6c20, which was green, and
+	// 2f046c9d, which failed here, and the only difference between those two
+	// commits is two .tsx files under www. Also proven: a run that has
+	// returned was holding idle sockets open, because these transports set no
+	// IdleConnTimeout, and that is worth fixing whatever it does to the test.
+	// NOT proven: that this is the cause of that failure. I could not
+	// reproduce it locally in 36 runs, 15 with the fix, 15 with the fix
+	// removed and 6 more under -race with it removed, and all 36 passed. So
+	// this is a correct change with an unproven relationship to the red run.
+	// If load goes red on goleak again, this comment is the place to start,
+	// and the next step is a reproduction rather than another guess.
+	defer client.CloseIdleConnections()
+
 	// One list across every scenario, in offset order, so the scenarios
 	// genuinely overlap on one timeline.
 	type job struct {
