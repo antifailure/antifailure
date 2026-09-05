@@ -6,11 +6,22 @@ import { u } from "../SafetyCards";
 
 /**
  * Waveform of the route mix, measured off the 288x351 reference crop.
- * Local y = 0 is card y = 90. 19 capsules, width 10, pitch 15.5, origin −1
- * so they bleed both card edges. Vertically centered on y = 121.
+ * Local y = 0 is card y = 90. 19 capsules, width 10, vertically centered on
+ * y = 121.
+ *
+ * The bleed used to be a claim rather than a measurement. At pitch 15.5 from
+ * origin −1 the run spanned −1 to 288 across a 288 wide card, so the first
+ * capsule lost one pixel and the last one ended flush against the edge with
+ * nothing cut off it at all. A waveform that stops dead at both edges reads as
+ * a chart that happens to fit, not as a slice out of something longer.
+ *
+ * Origin −5 at pitch 16 puts the run at −5 to 293, so exactly half of the
+ * first capsule and half of the last are outside the card and the overflow
+ * clip on the card takes them. Symmetric by construction: 18 × 16 + 10 = 298,
+ * which is the 288 card plus 5 either side.
  */
-const BAR_LEFT = -1;
-const BAR_PITCH = 15.5;
+const BAR_LEFT = -5;
+const BAR_PITCH = 16;
 const BAR_WIDTH = 10;
 
 /** [top, bottom] per bar, in reference pixels from the top of this box. */

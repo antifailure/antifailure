@@ -227,8 +227,18 @@ export function HeroDemoVideo() {
     void frame.requestFullscreen();
   };
 
+  // `items-end` is what actually makes the two bottoms meet, and `mt-auto` on
+  // the controls alone was never enough. `mt-auto` only works while the film
+  // is the taller of the two, because then the row is the film's height and
+  // the column has slack to push into. Below about 1512 the text column is the
+  // taller one, the row is ITS height, and the film sat at the top of a cell
+  // with all the slack underneath it. Measured on the live site: 1px out at
+  // 1512, 1600, 1728 and 1920, then 41px at 1440 and 131px at 1280, which is
+  // every MacBook anybody is going to open this on. Ending the alignment puts
+  // the film's bottom on the row's bottom as well, so the pair meet at every
+  // width and the slack moves above the picture, where the heading already is.
   return (
-    <div className="relative mt-20 grid w-full grid-cols-[minmax(220px,330px)_minmax(0,1fr)] gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12">
+      <div className="relative mt-20 grid w-full grid-cols-[minmax(220px,330px)_minmax(0,1fr)] items-end gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12">
       {/* Packed to the top rather than spread. `justify-between` stretched this
           column to the film's height and pushed the beats to its foot, so they
           sat level with the bottom of the picture with a hand's width of

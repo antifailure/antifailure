@@ -73,9 +73,18 @@ function PagesClose() {
                 Request hosted access
               </Button>
             </div>
+            {/* The border, the fill and the hover come from the `white`
+                variant now. They were restated here as `border-black/12
+                bg-white hover:bg-[#f7f7f5]` back when the variant set none of
+                them, and when the variant was given Button's outlined theme
+                this element ended up carrying two border colours and two
+                fills. `cn` is a plain join with no tailwind-merge, so both
+                reached the class attribute and Tailwind's emission order
+                picked the winner: classcheck counted 28 elements across the
+                site where `border-black/12` was written and never applied. */}
             <CopyCodeButton
               variant="white"
-              className="w-auto max-w-full border border-black/12 bg-white px-4 hover:bg-[#f7f7f5] max-xl:w-auto max-lg:w-full"
+              className="w-auto max-w-full px-4 max-xl:w-auto max-lg:w-full"
             />
           </div>
         </div>

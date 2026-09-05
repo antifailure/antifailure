@@ -70,51 +70,6 @@ function AuthCover() {
   );
 }
 
-/**
- * What pressing the button does, in the order the control plane does it.
- *
- * Three steps rather than a list of benefits, because a benefit is a claim and
- * a step is checkable. Each of these is one thing in the source: the exchange
- * refuses an account GitHub reports no verified address for, `provision.ts`
- * creates the organization and writes the owner membership, and `PLAN_QUOTAS`
- * is what `environments.create` refuses against.
- */
-const STEPS: { title: string; body: string }[] = [
-  {
-    title: "GitHub confirms who you are",
-    body: "We ask GitHub for your account and a verified email address. An account with no verified address is refused, and no password is created here or anywhere else.",
-  },
-  {
-    title: "You land in your own organization",
-    body: "Named after your GitHub account, on the free plan, with you as its owner. Installing our GitHub App later adopts that same organization rather than making a second one.",
-  },
-  {
-    title: "You connect a repository",
-    body: "From the console. Nothing runs until you do, and runs execute in your cloud with your credentials.",
-  },
-];
-
-function StepList() {
-  return (
-    <ol className="mt-7 space-y-5">
-      {STEPS.map((step, i) => (
-        <li key={step.title} className="flex gap-3.5">
-          <span
-            aria-hidden
-            className="mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-black/15 bg-white text-[12px] font-medium tabular-nums text-black/70"
-          >
-            {i + 1}
-          </span>
-          <span className="min-w-0">
-            <span className="block text-[14px] font-medium leading-6 text-black">{step.title}</span>
-            <span className="mt-0.5 block text-[13.5px] leading-6 text-black/55">{step.body}</span>
-          </span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
   const { openSheet } = useChrome();
   const signUp = mode === "signup";
@@ -173,28 +128,28 @@ export function AuthScreen({ mode }: { mode: "signin" | "signup" }) {
               Continue with GitHub
             </a>
 
+            {/* One paragraph, the same shape as the sign in side, rather than
+                a numbered three step explainer with a divider over it. Those
+                steps ran the column past the viewport on every laptop, so the
+                one page whose entire job is a single button was the one page
+                you had to scroll, while sign in sat still. The facts that
+                earned their place are the two a person decides on: the
+                organization is theirs, and the plan costs nothing. The rest
+                was describing an OAuth round trip to somebody who has done a
+                hundred of them. */}
             {signUp ? (
-              <>
-                <div className="mt-8 flex items-center gap-4" aria-hidden>
-                  <span className="h-px flex-1 bg-black/10" />
-                  <span className="text-[12px] text-black/55">what happens next</span>
-                  <span className="h-px flex-1 bg-black/10" />
-                </div>
-                <StepList />
-
-                <p className="mt-8 text-[13.5px] leading-6 text-black/55">
-                  What the free plan holds, and what it refuses when you reach
-                  it, is on the{" "}
-                  <a
-                    className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
-                    href="/pricing"
-                  >
-                    pricing page
-                  </a>
-                  . Adding people to your organization is a page in the console
-                  once you are in.
-                </p>
-              </>
+              <p className="mt-7 text-[13.5px] leading-6 text-black/55">
+                You land in your own organization, named after your GitHub
+                account, on the free plan, with you as its owner. What that plan
+                holds, and what it refuses when you reach it, is on the{" "}
+                <a
+                  className="text-black underline decoration-black/25 underline-offset-4 hover:decoration-black"
+                  href="/pricing"
+                >
+                  pricing page
+                </a>
+                .
+              </p>
             ) : (
               <p className="mt-7 text-[13.5px] leading-6 text-black/55">
                 No account yet?{" "}

@@ -108,17 +108,32 @@ export function Trust() {
               content instead of pointing at the gap above it. */}
           <div className="flex w-[480px] flex-col max-xl:w-full">
             <figure className="mt-auto border-l border-black/12 pl-8 max-lg:pl-6 max-xl:mt-0 max-sm:border-none max-sm:pl-0">
-              <ColumnLabel className="mb-6 max-md:mb-5">What we will not claim</ColumnLabel>
+              <ColumnLabel className="mb-6 max-md:mb-5">What counts as proof</ColumnLabel>
+              {/* This was four claims we decline to make, read left to right as
+                  "zero rollback, no deployment can ever fail", which is the
+                  opposite of what it meant. A block whose first four sentences
+                  are things that are not true asks the reader to hold a
+                  negation across sixty characters before it pays out, and the
+                  one line that said what we do instead was the fifth. It says
+                  the positive thing now and the marked phrase closes it.
+
+                  The mark is `sage-2`, the band's own darker sibling, rather
+                  than the ochre wash it carried. A warm brown at 20 percent
+                  over a mint ground composites to olive, which is why it read
+                  as a stain rather than as a highlighter. Measured off the
+                  render: the mark computes to rgb(202,230,217) on a band of
+                  rgb(228,241,235), black on it is 15.83:1, and the mark is a
+                  1.15x luminance step down from the band. The step is small on
+                  purpose. The marked words also go from the blockquote's
+                  black/60 to full black, and that is what carries the
+                  emphasis; the fill only has to say where the phrase starts
+                  and stops, so it does not need a border either. */}
               <blockquote className="max-w-[64ch] font-mono text-[15px] leading-7 text-black/60 max-md:text-base max-md:leading-[1.85]">
-                Zero rollback. No deployment can ever fail. Thousands of AI agents behave exactly
-                like humans. One click perfectly clones every cloud.{" "}
-                {/* The marked phrase is the one the section is actually about.
-                    Four refusals set at one weight gave the block nowhere to
-                    land, and the sentence that says what we do instead was
-                    indistinguishable from the four claims we decline to make.
-                    The claims stay dimmed, the instruction is marked. */}
-                <mark className="box-decoration-clone rounded-[3px] bg-ochre/20 px-1 py-0.5 text-black">
-                  Use measurable evidence instead.
+                A verdict is only worth what it carries. Every result on a pull request arrives
+                with the rows it read, the trace it took and the recording of the attempt, so a
+                reviewer can check the finding instead of trusting it.{" "}
+                <mark className="box-decoration-clone rounded-[2px] bg-sage-2 px-1.5 py-1 text-black">
+                  Measurable evidence, or no claim.
                 </mark>
               </blockquote>
               <figcaption className="mt-7 text-[13px] tracking-extra-tight text-gray-new-40">
