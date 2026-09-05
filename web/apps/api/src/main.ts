@@ -14,7 +14,7 @@ import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
 import { sweepDeviceAuthorizations } from './auth/device.ts'
-import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
+import { parseAllowlist, describeAllowlist, signupUrlFrom, sweepOAuthStates } from './auth/signin.ts'
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { leadNotifierFrom } from './enterprise/leads.ts'
 import { siteOriginFrom } from './siteorigin.ts'
@@ -474,6 +474,15 @@ const housekeeping = setInterval(
     // device_authorizations grew for the life of the process.
     void sweepDeviceAuthorizations(pool, systemClock).catch((err) =>
       console.error('device authorization sweep', err),
+    )
+
+    // Beside the other two because it is the same kind of debt, and it is the
+    // one that had no sweeper at all rather than one that could not delete.
+    // A state row is dead ten minutes after it is written and stayed in the
+    // table for good: every abandoned "Continue with GitHub" left one, and so
+    // did every site publish, because the deploy gate probes GET /auth/github.
+    void sweepOAuthStates(pool, systemClock).catch((err) =>
+      console.error('oauth state sweep', err),
     )
 
     // Not housekeeping. This one finishes work a customer asked for and is the

@@ -187,18 +187,21 @@ jobs:
         # without it, so it is declared and paid for rather than skipped.
         #
         # WHAT THAT ROW ACTUALLY COSTS, so this flag is not authorised by a
-        # sentence nobody re-reads. The row is unusable after ten minutes and
-        # it is never DELETED: completeSignIn removes a state on redemption and
-        # nothing sweeps the table, so one row per publish accumulates forever.
-        # That is a debt with an expiry date, not a free probe. It is not this
-        # gate's debt alone, because every abandoned real sign-in leaves the
-        # same row, and the retirement is a sweeper for oauth_states of the
-        # shape migrations 0016 and 0024 already use for devices and sessions.
-        # If that sweeper lands, this comment is the thing to come back and
-        # delete. If a cheaper presence probe is ever added to the control
-        # plane instead, note that it cannot help on the day it is needed: the
-        # gate exists precisely for a DEPLOYED image older than the commit that
-        # would have added it.
+        # sentence nobody re-reads. The row is unusable after ten minutes, and
+        # since sweepOAuthStates it is also deleted: the housekeeping interval
+        # in the control plane removes states a day past their expiry, next to
+        # the sweeps for sessions, devices and sign-in links. Before that
+        # nothing swept the table at all and one row per publish accumulated
+        # forever, which was never a volume problem and was always an unbounded
+        # security relevant table on an unauthenticated path.
+        #
+        # THE SWEEP RUNS IN THE CONTROL PLANE, WHICH MOVES ON THE TAG CLOCK,
+        # and this gate runs against whatever image is DEPLOYED. So a probe
+        # sent at an origin older than that change still leaves a permanent
+        # row, and the cost above is the one to assume until production has
+        # been promoted past it. A cheaper presence probe would not have helped
+        # here for the same reason: the gate exists precisely for a deployed
+        # image older than the commit that would have added it.
         if: ${{ env.TOKEN != '' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
