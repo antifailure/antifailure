@@ -132,7 +132,9 @@ Merge with `just merge <number>` and not with `gh pr merge` by hand.
 
 ```
 just merge 231
-just merge 231 -dry-run     # check everything and merge nothing
+just merge 231 -dry-run       # check everything and merge nothing
+just merge 231 -check-fields  # ask the API whether its field names still exist
+just merge 231 -confirm-only  # prove a merged commit carries the sign-off
 ```
 
 The reason is a deployment outage rather than a style preference. Six pull
@@ -168,7 +170,20 @@ the button typed. `just merge` is that thing:
   command for you to run afterwards;
 * and it reads the commit back off the remote afterwards and fails if the
   trailer is not there, because a tool that intends to sign and cannot prove it
-  did is the defect it was written to prevent.
+  did is the defect it was written to prevent. `-confirm-only` runs that one
+  check on its own against any merged pull request, so the code that decides
+  whether a commit is signed can be exercised on a real commit without merging
+  one to exercise it.
+
+The first version of this command asked `gh pr view` for a field called
+`merged`. There is no such field, and all 25 of its tests passed anyway,
+because every one of them answered from a fixture the suite itself had written.
+The first real invocation died on its first call. So `-check-fields` reads the
+other side of the boundary: it runs the same argument lists the merge path
+runs, against a real pull request, and reports a name the API does not have or
+a key a real response does not carry. It runs on every pull request in
+`.github/workflows/ci.yml` as "the merge command still fits the API", and it
+names what it could not check rather than passing over it.
 
 ## The changelog
 

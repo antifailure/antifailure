@@ -606,12 +606,38 @@ func keys(m map[string]*entry) []string {
 // Workflow supply chain. These live here because gatecheck already reads the
 // workflows, and because the tools module's tests run in CI.
 
+// The false positive that regex earned its boundary from. A permissions block
+// is not an action reference, and `statuses: read` is the line that reads like
+// one, because `statuses:` ends in the five characters `uses:`.
+func TestAPermissionIsNotAnActionReference(t *testing.T) {
+	uses := regexp.MustCompile(`(?:^|\s)uses:\s*(\S+)`)
+	block := "    permissions:\n      contents: read\n      pull-requests: read\n" +
+		"      checks: read\n      statuses: read\n"
+	// statuses is the one that matters here. The others are in the fixture so
+	// that a future permission ending in the same letters is covered too.
+	if found := uses.FindAllStringSubmatch(block, -1); len(found) != 0 {
+		t.Errorf("a permissions block was read as %d action references: %v", len(found), found)
+	}
+	// And the boundary must not have cost it the thing it is for.
+	step := "      - uses: actions/checkout@v4\n"
+	if found := uses.FindAllStringSubmatch(step, -1); len(found) != 1 || found[0][1] != "actions/checkout@v4" {
+		t.Errorf("a real action reference stopped being found: %v", found)
+	}
+}
+
 func TestEveryActionIsPinnedToACommit(t *testing.T) {
 	// A tag is mutable. `actions/checkout@v4` is a promise the publisher can
 	// change after anybody reviewed it, so the thing that was reviewed and the
 	// thing that runs are only the same by the publisher's continued goodwill.
 	// A commit cannot be changed.
-	uses := regexp.MustCompile(`uses:\s*(\S+)`)
+	// Anchored on a boundary, and that is not a detail. `uses:` is a substring
+	// of `statuses:`, so without one this reads the permissions block line
+	// `statuses: read` as an action called `read` pinned to nothing, and
+	// reports a workflow that references no such action. A check that fires on
+	// something that is not the thing is how a check gets ignored and then
+	// deleted, and this one guards a real supply chain property: a tag is
+	// mutable and a commit is not.
+	uses := regexp.MustCompile(`(?:^|\s)uses:\s*(\S+)`)
 	pinned := regexp.MustCompile(`^[\w.-]+/[\w.-]+(/[\w.-]+)*@[0-9a-f]{40}$`)
 
 	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))

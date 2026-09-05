@@ -141,6 +141,7 @@ type fake struct {
 	mergeErr   error
 	configErr  error
 	protErr    error
+	pullErr    error
 
 	issued [][]string
 }
@@ -160,6 +161,9 @@ func (f *fake) run(name string, args ...string) ([]byte, error) {
 		}
 		return []byte(f.email + "\n"), nil
 	case name == "gh" && args[0] == "pr" && args[1] == "view":
+		if f.pullErr != nil {
+			return nil, f.pullErr
+		}
 		if len(f.pulls) == 0 {
 			return nil, errors.New("the test gave no pull request answer")
 		}
@@ -861,4 +865,206 @@ func TestARefusalNamesEveryReasonAtOnce(t *testing.T) {
 			t.Errorf("the refusal does not mention %q: %v", want, err)
 		}
 	}
+}
+
+// THE CONTRACT WITH THE OTHER SIDE OF THE BOUNDARY.
+//
+// Everything above this line answers from a fixture this file wrote. That is
+// how a version of this command shipped asking `gh pr view` for a field called
+// `merged`, which does not exist, with 25 green tests behind it. The tests
+// below are about the shapes the API really produces.
+
+// The half that needs no network, and the half that fails silently. A field
+// the struct reads and the request never asks for decodes as a zero value with
+// no error at all: `isDraft` unasked means every pull request looks ready,
+// `mergedAt` unasked means every merged one looks open.
+func TestTheRequestAndTheStructAskForTheSameFields(t *testing.T) {
+	if drift := fieldDrift(pullFieldNames(), structFieldNames()); len(drift) > 0 {
+		for _, d := range drift {
+			t.Error(d)
+		}
+	}
+	// A positive control on the reflection itself. If structFieldNames stopped
+	// finding tags it would return nothing, agree with everything, and this
+	// file would have a check that cannot say no.
+	if got := len(structFieldNames()); got != len(pullFieldNames()) || got == 0 {
+		t.Fatalf("the struct has %d json tags against %d requested fields",
+			got, len(pullFieldNames()))
+	}
+}
+
+// Both directions of that drift, on synthetic lists, because each one is a
+// different bug and each gets a different sentence.
+func TestFieldDriftNamesBothDirections(t *testing.T) {
+	t.Run("read but never asked for", func(t *testing.T) {
+		drift := fieldDrift([]string{"number"}, []string{"number", "mergedAt"})
+		if len(drift) != 1 || !strings.Contains(drift[0], "zero value") {
+			t.Fatalf("got %v", drift)
+		}
+	})
+	t.Run("asked for but never read", func(t *testing.T) {
+		drift := fieldDrift([]string{"number", "title"}, []string{"number"})
+		if len(drift) != 1 || !strings.Contains(drift[0], "nothing reads it") {
+			t.Fatalf("got %v", drift)
+		}
+	})
+	t.Run("agreement", func(t *testing.T) {
+		if drift := fieldDrift([]string{"a", "b"}, []string{"b", "a"}); len(drift) != 0 {
+			t.Fatalf("agreement was reported as drift: %v", drift)
+		}
+	})
+}
+
+// fieldsFake answers the four reads that -check-fields makes.
+func fieldsFake() *fake {
+	return &fake{
+		pulls:      []string{realOpenPull},
+		protection: protectionBody,
+		checkRuns:  checkRunsBody(green()),
+		statuses:   noStatuses,
+	}
+}
+
+func fields(f *fake) (string, error) {
+	var out bytes.Buffer
+	err := checkFields(hub{runner: f, repo: "antifailure/antifailure"}, 235, &out)
+	return out.String(), err
+}
+
+// The positive control for the contract check, against the payloads gh really
+// returns.
+func TestCheckFieldsPassesOnTheRealShapes(t *testing.T) {
+	out, err := fields(fieldsFake())
+	if err != nil {
+		t.Fatalf("the real shapes were reported as wrong: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"the request and the struct ask the same",
+		"gh has every field pullFields asks for",
+		"a check run carries the five fields read",
+		"protection carries the required list",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("it never reported %q, so it did not check it:\n%s", want, out)
+		}
+	}
+}
+
+// THE EXACT CASE THAT PRODUCED THIS. gh refuses a field it does not have, and
+// the refusal names the field.
+func TestCheckFieldsRefusesAFieldTheAPIDoesNotHave(t *testing.T) {
+	f := fieldsFake()
+	// The words gh really answered with, on the first real run of this command.
+	f.pullErr = errors.New(`gh pr view 235 --repo antifailure/antifailure --json ` +
+		pullFields + `: exit status 1: Unknown JSON field: "merged"`)
+	out, err := fields(f)
+	if err == nil {
+		t.Fatalf("a refused field list was reported as fine:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "refused") {
+		t.Errorf("the failure does not say the field list was refused: %v", err)
+	}
+}
+
+// gh accepted the names and the response does not carry one. Different bug,
+// same consequence: a field read as a zero value.
+func TestCheckFieldsRefusesAResponseMissingAKeyItAskedFor(t *testing.T) {
+	f := fieldsFake()
+	f.pulls = []string{strings.Replace(realOpenPull, `"mergedAt":null,`, ``, 1)}
+	out, err := fields(f)
+	if err == nil {
+		t.Fatalf("a response missing a requested key passed:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "mergedAt") {
+		t.Errorf("the failure does not name the missing key: %v", err)
+	}
+}
+
+// The check run shape, which is where the nine required contexts are read from.
+func TestCheckFieldsRefusesACheckRunMissingAFieldItReads(t *testing.T) {
+	f := fieldsFake()
+	f.checkRuns = `{"total_count":1,"check_runs":[{"id":1,"name":"engine","status":"completed"}]}`
+	out, err := fields(f)
+	if err == nil {
+		t.Fatalf("a check run with no conclusion field passed:\n%s", out)
+	}
+	for _, want := range []string{"conclusion", "started_at"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure does not name %q: %v", want, err)
+		}
+	}
+}
+
+// The required list is the thing every refusal rests on. An empty one would
+// let every merge past the context check.
+func TestCheckFieldsRefusesProtectionWithNoRequiredList(t *testing.T) {
+	f := fieldsFake()
+	f.protection = `{"required_status_checks":{"strict":false,"checks":[]}}`
+	out, err := fields(f)
+	if err == nil {
+		t.Fatalf("protection carrying no required list passed:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "required_status_checks") {
+		t.Errorf("the failure does not name the key it could not find: %v", err)
+	}
+}
+
+// What it could NOT check is named rather than passed over. Reading branch
+// protection needs administration rights, so a token without them reaches this
+// every time, and a check that quietly counted that as a pass would be the
+// defect this repository keeps finding in its own instruments.
+func TestCheckFieldsNamesWhatItCouldNotCheck(t *testing.T) {
+	f := fieldsFake()
+	f.protErr = errors.New("gh: HTTP 403: Resource not accessible by personal access token")
+	out, err := fields(f)
+	if err != nil {
+		t.Fatalf("it failed over a read it never claimed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "not checked") || !strings.Contains(out, "administration rights") {
+		t.Errorf("it did not say which read it could not make:\n%s", out)
+	}
+	// The commit here carries no status, so that gap is named too rather than
+	// counted as a check of the status shape.
+	if !strings.Contains(out, "carries none") {
+		t.Errorf("it did not say the commit status shape went unexamined:\n%s", out)
+	}
+}
+
+// The readback that proves a merge carried its sign-off used to run only after
+// a merge, which meant it only ever ran under a fixture. It runs against any
+// merged pull request now, and both directions are proved: a merge commit that
+// carries the trailer and one that does not. The unsigned case is real, and it
+// is what `337f4b70` and its five siblings look like.
+func TestTheReadbackRunsAgainstAMergedPullRequest(t *testing.T) {
+	own := "Signed-off-by: Vir Sanghavi <67278851+VirSanghavi@users.noreply.github.com>"
+	t.Run("a merge that carried it", func(t *testing.T) {
+		f := ready(green(), "CLEAN")
+		f.pulls = []string{mergedPull("3692ab054444d634939b5df4bac89eb95465acd2")}
+		var out bytes.Buffer
+		if err := confirm(hub{runner: f, repo: "antifailure/antifailure"}, 235, own, 2, 0, &out); err != nil {
+			t.Fatalf("a signed merge commit was reported as unsigned: %v\n%s", err, out.String())
+		}
+		if f.merged() {
+			t.Fatal("the readback merged something")
+		}
+		// It has to SAY it read the commit. A readback that returns quietly is
+		// indistinguishable from one that did not run, which is the whole
+		// reason this path is being exercised on its own.
+		if !strings.Contains(out.String(), "the commit carries the sign-off") {
+			t.Errorf("it never said it had read the commit back:\n%s", out.String())
+		}
+	})
+	t.Run("a merge that did not", func(t *testing.T) {
+		f := ready(green(), "CLEAN")
+		f.pulls = []string{mergedPull("337f4b7000000000000000000000000000000000")}
+		f.commit = commitBody("billing: delivery order could remove paid access (#232)\n")
+		var out bytes.Buffer
+		err := confirm(hub{runner: f, repo: "antifailure/antifailure"}, 232, own, 2, 0, &out)
+		if err == nil {
+			t.Fatalf("an unsigned merge commit was reported as fine:\n%s", out.String())
+		}
+		if !strings.Contains(err.Error(), "LANDED") {
+			t.Errorf("the failure does not say the merge landed unsigned: %v", err)
+		}
+	})
 }

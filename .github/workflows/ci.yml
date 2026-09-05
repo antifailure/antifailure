@@ -1330,6 +1330,54 @@ jobs:
           AF_CHANGECHECK_BEFORE: ${{ github.event.before }}
         run: go run ./tools/changecheck .
 
+  mergefields:
+    name: the merge command still fits the API
+    # Only on a pull request, because it needs one to read: the field list is
+    # checked against a real pull request rather than against a fixture, and on
+    # a push to main there is none to point at.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Reads only, and each one is a read this check makes: the pull request,
+    # the check runs on its head, and the commit statuses on the same commit.
+    # A job level block replaces the workflow level one rather than adding to
+    # it, so `contents` is repeated here on purpose.
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: Every field name the merge command uses is one the API has
+        # tools/prmerge asked `gh pr view` for a field called `merged`. There
+        # is no such field. All 25 of its tests passed, because every one
+        # answered from a fixture the tool's own suite had written, and the
+        # fixture invented the field the code was reading. The first real
+        # invocation died on the first call with `Unknown JSON field:
+        # "merged"`, which meant the command that exists to make merging safe
+        # could not read a pull request at all.
+        #
+        # A suite that builds its own input can be complete and still describe
+        # a system that does not exist. This is the check that reads the other
+        # side of the boundary, and it runs the same argument lists the merge
+        # path runs.
+        #
+        # It does NOT check branch protection here, and it says so rather than
+        # passing over it: that read needs administration rights and this token
+        # has none. That half is proved on the real path instead, because a
+        # wrong key there leaves an empty required list, which refuses every
+        # merge rather than allowing one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run ./tools/prmerge -check-fields -pr ${{ github.event.pull_request.number }}
+
   authorship:
     name: commits are attributed to their author
     runs-on: ubuntu-latest

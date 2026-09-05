@@ -250,8 +250,11 @@ hooks:
 # hooks cannot help: a squash commit is created on GitHub's side, so nothing
 # local runs at the moment the button is pressed.
 #
-# See tools/prmerge for what it refuses and why. `-dry-run` checks everything
-# and merges nothing.
+# See tools/prmerge for what it refuses and why. Three read only modes, all of
+# which merge nothing: `-dry-run` checks everything and prints the command it
+# would run, `-check-fields` asks the real API whether the field names this
+# command reads still exist, and `-confirm-only` reads an already merged pull
+# request and proves its commit carries the sign-off.
 [doc("Squash merge a pull request with a Developer Certificate of Origin sign-off.")]
 merge pr *args:
     go run ./tools/prmerge -pr {{pr}} {{args}}
