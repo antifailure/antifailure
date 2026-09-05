@@ -165,6 +165,10 @@ export async function runMaintenance(
     const usage = await admin<{ count: string }[]>`
       SELECT roll_up_environment_usage(${now.toISOString()}::timestamptz) AS count`
 
+    // Recruitment is separate from analytics and tenant usage. Personal
+    // application details expire even if no operator has reviewed the queue.
+    await admin`DELETE FROM recruitment_applications WHERE created_at < ${new Date(now.getTime() - 180 * DAY_MS).toISOString()}::timestamptz`
+
     return {
       created: [...made.created, ...analyticsPartitions.created],
       dropped,

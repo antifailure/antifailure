@@ -142,6 +142,14 @@ export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
   // through. One a second sustained is far above a person typing a form, and
   // ten at once covers somebody who pressed the button twice and a preflight
   // beside it.
+  'POST /v1/applications': {
+    rate: 1 / 60, burst: 5, key: 'ip',
+    reason: 'An applicant submits once and may retry. Five attempts cover correction without accepting a sustained submission script.',
+  },
+  'OPTIONS /v1/applications': {
+    rate: 1, burst: 10, key: 'ip',
+    reason: 'Application form preflight requests contain no applicant data and may precede corrections.',
+  },
   'POST /v1/leads': {
     rate: 1, burst: 10, key: 'ip',
     reason: 'Filling in a contact form is a human action, once. The row is written by an anonymous caller, so the address is the only key there is, and the burst covers a double press and a retry.',
