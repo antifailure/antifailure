@@ -245,7 +245,7 @@ func run(root string, out io.Writer) error {
 	// Write errors are ignored explicitly, once, with a reason: the verdict of
 	// this tool is its exit code, not its report, so a broken pipe on stdout
 	// changes what a person can read and not whether the build should fail.
-	report := func(format string, args ...any) { fmt.Fprintf(out, format, args...) }
+	report := func(format string, args ...any) { _, _ = fmt.Fprintf(out, format, args...) }
 
 	for _, f := range found {
 		report("%s:%d  %s. Write %s.\n    %s\n", f.file, f.num, f.what, f.instead, strings.TrimSpace(f.line))
