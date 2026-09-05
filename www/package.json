@@ -1,6 +1,6 @@
 {
   "name": "@antifailure/www",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Public Antifailure website: marketing pages, docs, and sign-in.",
   "license": "MIT",
