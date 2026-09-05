@@ -6,6 +6,7 @@ package docs_test
 // does rather than what it is meant to do.
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,20 +41,12 @@ func scan(t *testing.T, env []string, args ...string) run {
 	code := 0
 	var exit *exec.ExitError
 	if err != nil {
-		if !asExit(err, &exit) {
+		if !errors.As(err, &exit) {
 			t.Fatalf("running the scan: %v\n%s", err, out)
 		}
 		code = exit.ExitCode()
 	}
 	return run{code: code, output: string(out)}
-}
-
-func asExit(err error, target **exec.ExitError) bool {
-	e, ok := err.(*exec.ExitError)
-	if ok {
-		*target = e
-	}
-	return ok
 }
 
 // write puts one document in a scratch directory and returns the directory.

@@ -66,7 +66,7 @@ func ParseInventory(path string) ([]Route, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the route inventory: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var (
 		routes  []Route

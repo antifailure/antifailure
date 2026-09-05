@@ -15,17 +15,6 @@ import (
 // A check nobody has proved can fail is a check that passes everything the day
 // it breaks. These build small pairs of files with a known answer.
 
-func write(t *testing.T, root, rel, body string) {
-	t.Helper()
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // ciGates reads a workflow fragment the way main does: as steps of a file.
 func ciGates(t *testing.T, yaml string) map[string]*entry {
 	t.Helper()

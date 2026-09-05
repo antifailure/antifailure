@@ -173,7 +173,7 @@ func report(errOut, out io.Writer, findings []finding, driftOnly bool) int {
 		}
 	}
 	if len(bad) == 0 {
-		fmt.Fprintf(out, "installcheck: %d installed %s the lockfile\n",
+		_, _ = fmt.Fprintf(out, "installcheck: %d installed %s the lockfile\n",
 			len(findings), plural(len(findings), "tree matches", "trees match"))
 		return 0
 	}
@@ -201,43 +201,43 @@ func report(errOut, out io.Writer, findings []finding, driftOnly bool) int {
 	}
 
 	if len(stale) > 0 {
-		fmt.Fprintf(errOut, "installcheck: %d installed %s not what the lockfile says:\n",
+		_, _ = fmt.Fprintf(errOut, "installcheck: %d installed %s not what the lockfile says:\n",
 			len(stale), plural(len(stale), "tree is", "trees are"))
 		for _, f := range stale {
-			fmt.Fprintf(errOut, "  %s\n", f.dir)
+			_, _ = fmt.Fprintf(errOut, "  %s\n", f.dir)
 			for _, d := range f.details {
-				fmt.Fprintf(errOut, "      %s\n", d)
+				_, _ = fmt.Fprintf(errOut, "      %s\n", d)
 			}
 		}
-		fmt.Fprintf(errOut, "\nEverything checked against that tree answered about the wrong "+
+		_, _ = fmt.Fprintf(errOut, "\nEverything checked against that tree answered about the wrong "+
 			"versions, and said so in good faith.\n")
 	}
 	if len(ordered) > 0 {
-		fmt.Fprintf(errOut, "\ninstallcheck: %d %s installed before the workspace it links into:\n",
+		_, _ = fmt.Fprintf(errOut, "\ninstallcheck: %d %s installed before the workspace it links into:\n",
 			len(ordered), plural(len(ordered), "tree was", "trees were"))
 		for _, f := range ordered {
-			fmt.Fprintf(errOut, "  %s\n", f.dir)
+			_, _ = fmt.Fprintf(errOut, "  %s\n", f.dir)
 			for _, d := range f.details {
-				fmt.Fprintf(errOut, "      %s\n", d)
+				_, _ = fmt.Fprintf(errOut, "      %s\n", d)
 			}
 		}
-		fmt.Fprintf(errOut, "\n`npm ci` succeeds in that order and leaves a tree that does not work: "+
+		_, _ = fmt.Fprintf(errOut, "\n`npm ci` succeeds in that order and leaves a tree that does not work: "+
 			"the\nfile: links resolve to source directories whose own dependencies are absent, "+
 			"so\nthe errors land in a file nobody touched.\n")
 	}
 	if len(never) > 0 {
-		fmt.Fprintf(errOut, "\ninstallcheck: %d %s no node_modules at all:\n",
+		_, _ = fmt.Fprintf(errOut, "\ninstallcheck: %d %s no node_modules at all:\n",
 			len(never), plural(len(never), "workspace has", "workspaces have"))
 		for _, f := range never {
-			fmt.Fprintf(errOut, "  %s\n", f.dir)
+			_, _ = fmt.Fprintf(errOut, "  %s\n", f.dir)
 		}
-		fmt.Fprintf(errOut, "\nThat is a fresh checkout rather than drift. `just deps` installs "+
+		_, _ = fmt.Fprintf(errOut, "\nThat is a fresh checkout rather than drift. `just deps` installs "+
 			"every workspace in the tree.\n")
 	}
 
-	fmt.Fprintf(errOut, "\nFix:\n")
+	_, _ = fmt.Fprintf(errOut, "\nFix:\n")
 	for _, f := range bad {
-		fmt.Fprintf(errOut, "  %s\n", f.fixCommand())
+		_, _ = fmt.Fprintf(errOut, "  %s\n", f.fixCommand())
 	}
 	if driftOnly && len(stale) == 0 && len(ordered) == 0 {
 		return 0

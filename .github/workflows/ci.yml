@@ -367,6 +367,24 @@ jobs:
           working-directory: engine
           args: --timeout 15m
 
+      - name: Lint the gates
+        # The step above lints the engine and, until this one existed, that was
+        # the whole of it. tools/ holds prosecheck, gatecheck, changecheck,
+        # routecheck, wirecheck, claimcheck and every other instrument this
+        # repository trusts to say no, and it was the least linted code in the
+        # tree: 122 findings, on the same linter set the engine is held to at
+        # zero.
+        #
+        # Same action, same version, same config, a different working
+        # directory. Two invocations rather than one run over both modules
+        # because they are separate Go modules joined by a workspace, and
+        # golangci-lint runs against one module's package graph at a time.
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          working-directory: tools
+          args: --timeout 15m
+
       - name: The gates themselves
         # errcheck, ldcheck and the generators decide whether a build is
         # allowed to ship, and their own tests were never run here. A gate

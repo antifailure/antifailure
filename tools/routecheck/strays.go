@@ -77,7 +77,7 @@ func FindStrayCallSites(wwwRoot string) ([]Stray, error) {
 		if openErr != nil {
 			return openErr
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		scan := bufio.NewScanner(f)
 		scan.Buffer(make([]byte, 0, 64*1024), 1024*1024)

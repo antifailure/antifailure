@@ -225,9 +225,6 @@ func fakeTfsec(t *testing.T, stdout string, code int) string {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-func itoa(i int) string {
-	return strings.TrimSpace(strings.Fields(strings.Repeat(" ", 0) + string(rune('0'+i)))[0])
-}
 
 // THE FAILURE THAT STARTED ALL OF THIS. A scanner that did not run must not
 // read as a scanner that found nothing.

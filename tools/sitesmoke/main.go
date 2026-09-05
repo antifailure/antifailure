@@ -109,13 +109,13 @@ func run(
 	// pass every deployment.
 	report.WriteString("The sentences this check waits for\n")
 	if err := contractHolds(root, &report); err != nil {
-		fmt.Fprint(out, report.String())
+		_, _ = fmt.Fprint(out, report.String())
 		return exitUndecided, err
 	}
 
 	if len(targets) == 0 {
-		fmt.Fprint(out, report.String())
-		fmt.Fprint(out, "\nNo origin was given, so NO DEPLOYMENT WAS CHECKED.\n"+
+		_, _ = fmt.Fprint(out, report.String())
+		_, _ = fmt.Fprint(out, "\nNo origin was given, so NO DEPLOYMENT WAS CHECKED.\n"+
 			"This half proves only that the sentences above are still the ones this\n"+
 			"repository produces. On the day the careers form broke, this half was green:\n"+
 			"the tree was correct and production was serving a version from before the\n"+
@@ -155,35 +155,35 @@ func run(
 	}
 	workflows := workflowsFor(allowWrites)
 
-	fmt.Fprint(out, report.String())
-	fmt.Fprintf(out, "\nDriving %d %s against %d %s, %d attempts each.\n",
+	_, _ = fmt.Fprint(out, report.String())
+	_, _ = fmt.Fprintf(out, "\nDriving %d %s against %d %s, %d attempts each.\n",
 		len(workflows), plural(len(workflows), "workflow", "workflows"),
 		len(targets), plural(len(targets), "origin", "origins"), attempts)
 	for _, w := range workflows {
 		if w.writes {
-			fmt.Fprintf(out, "  %s WRITES. It files a real job application into the queue a "+
+			_, _ = fmt.Fprintf(out, "  %s WRITES. It files a real job application into the queue a "+
 				"person reads, and it is running because -allow-writes was passed.\n", w.Name)
 		} else {
-			fmt.Fprintf(out, "  %s writes nothing. %s\n", w.Name, w.why)
+			_, _ = fmt.Fprintf(out, "  %s writes nothing. %s\n", w.Name, w.why)
 		}
 	}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 
 	var findings []Finding
 	for _, origin := range targets {
 		for _, w := range workflows {
-			fmt.Fprintf(out, "  %s  %s ...\n", origin, w.Name)
+			_, _ = fmt.Fprintf(out, "  %s  %s ...\n", origin, w.Name)
 			findings = append(findings, r.drive(ctx, origin, w))
 		}
 	}
 
 	answer := verdict(findings)
-	fmt.Fprintf(out, "\n%s\n", summary(findings))
-	fmt.Fprintf(out, "Evidence is in %s\n", artifacts)
+	_, _ = fmt.Fprintf(out, "\n%s\n", summary(findings))
+	_, _ = fmt.Fprintf(out, "Evidence is in %s\n", artifacts)
 
 	switch answer {
 	case Allowed:
-		fmt.Fprintf(out, "\nEvery origin did what a person needs it to do.\n")
+		_, _ = fmt.Fprintf(out, "\nEvery origin did what a person needs it to do.\n")
 		return exitAllowed, nil
 	case Refused:
 		return exitRefused, fmt.Errorf(

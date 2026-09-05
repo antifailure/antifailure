@@ -227,12 +227,12 @@ func TestAWorkedExampleMayNotNameAnOlderPublishedTag(t *testing.T) {
 	const pending = "v1.0.0"
 
 	// Named as `released`, an older published tag is acceptable.
-	if !(published["v0.1.0"] || "v0.1.0" == pending) {
+	if !published["v0.1.0"] && pending != "v0.1.0" {
 		t.Fatal("v0.1.0 should be acceptable to a released pin, and is not")
 	}
 
 	// Named as `current`, only the release being prepared is.
-	if "v0.1.0" == pending {
+	if pending == "v0.1.0" {
 		t.Fatal("the fixture is wrong: v0.1.0 must not equal the pending release")
 	}
 	for _, p := range pins {

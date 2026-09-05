@@ -413,9 +413,10 @@ func parseCSS(src string) map[string]rule {
 		k := j + 1
 		braces := 1
 		for k < len(src) && braces > 0 {
-			if src[k] == '{' {
+			switch src[k] {
+			case '{':
 				braces++
-			} else if src[k] == '}' {
+			case '}':
 				braces--
 			}
 			k++
@@ -540,7 +541,7 @@ func readExemptions(path string) ([]*exemption, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []*exemption
 	sc := bufio.NewScanner(f)
 	n := 0

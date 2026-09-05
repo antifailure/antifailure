@@ -103,16 +103,16 @@ func run(root string, max float64, out *os.File) error {
 	// past the first screen.
 	sort.Slice(reports, func(i, j int) bool { return reports[i].Mean > reports[j].Mean })
 
-	fmt.Fprintf(out, "%-58s %6s %6s %7s %7s\n", "page", "words", "mean", "longest", "flesch")
+	_, _ = fmt.Fprintf(out, "%-58s %6s %6s %7s %7s\n", "page", "words", "mean", "longest", "flesch")
 	over := 0
 	for _, r := range reports {
-		fmt.Fprintf(out, "%-58s %6d %6.1f %7d %7.1f\n", r.Path, r.Words, r.Mean, r.Longest, r.Flesch)
+		_, _ = fmt.Fprintf(out, "%-58s %6d %6.1f %7d %7.1f\n", r.Path, r.Words, r.Mean, r.Longest, r.Flesch)
 		if max > 0 && r.Mean > max {
 			over++
 		}
 	}
 
-	fmt.Fprintf(out, "\nreadability: %d pages, mean sentence %.1f words, hardest page %s\n",
+	_, _ = fmt.Fprintf(out, "\nreadability: %d pages, mean sentence %.1f words, hardest page %s\n",
 		len(reports), overallMean(reports), reports[0].Path)
 	if over > 0 {
 		return fmt.Errorf("%d pages have a mean sentence longer than %.0f words", over, max)

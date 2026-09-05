@@ -194,9 +194,9 @@ func (local) run(name string, args ...string) ([]byte, error) {
 		// The message matters more than the exit code here: `gh` puts the
 		// reason a merge was refused on stderr and nothing else says it.
 		if said := strings.TrimSpace(stderr.String()); said != "" {
-			return out, fmt.Errorf("%s %s: %v: %s", name, strings.Join(args, " "), err, said)
+			return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, said)
 		}
-		return out, fmt.Errorf("%s %s: %v", name, strings.Join(args, " "), err)
+		return out, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
 	return out, nil
 }
@@ -616,7 +616,7 @@ func contexts(sha string, all []check, out io.Writer) []string {
 					"nothing ran, and cancelled is how GitHub spells a timeout, a stopped run "+
 					"and a superseded run alike", name, c.Conclusion, sha))
 		default:
-			fmt.Fprintf(out, "ok  %-40s success\n", name)
+			_, _ = fmt.Fprintf(out, "ok  %-40s success\n", name)
 		}
 	}
 	return problems
@@ -690,7 +690,7 @@ func confirm(h hub, number int, own string, attempts int, interval time.Duration
 					"the merge base of every open pull request. Push a signed commit on top "+
 					"instead", p.MergeCommit.Oid, own)
 			}
-			fmt.Fprintf(out, "ok  %-40s %s\n", "the commit carries the sign-off", p.MergeCommit.Oid)
+			_, _ = fmt.Fprintf(out, "ok  %-40s %s\n", "the commit carries the sign-off", p.MergeCommit.Oid)
 			return nil
 		} else if !p.merged() && p.Closed {
 			return fmt.Errorf("pull request %d is closed and not merged. Nothing landed", number)
@@ -823,39 +823,39 @@ func checkFields(h hub, number int, out io.Writer) error {
 	if drift := fieldDrift(pullFieldNames(), structFieldNames()); len(drift) > 0 {
 		problems = append(problems, drift...)
 	} else {
-		fmt.Fprintf(out, "ok  %-44s %d fields\n", "the request and the struct ask the same", len(pullFieldNames()))
+		_, _ = fmt.Fprintf(out, "ok  %-44s %d fields\n", "the request and the struct ask the same", len(pullFieldNames()))
 	}
 
 	raw, err := h.gh(pullArgs(h.repo, number)...)
 	if err != nil {
 		// gh names the field it does not recognise, which is the whole point.
-		return fmt.Errorf("the pull request field list was refused: %v", err)
+		return fmt.Errorf("the pull request field list was refused: %w", err)
 	}
 	keys, err := keysOf(raw)
 	if err != nil {
-		return fmt.Errorf("reading pull request %d: %v", number, err)
+		return fmt.Errorf("reading pull request %d: %w", number, err)
 	}
 	if absent := missing(keys, pullFieldNames()); len(absent) > 0 {
 		problems = append(problems, fmt.Sprintf(
 			"gh accepted %v and the response carries no such key", absent))
 	} else {
-		fmt.Fprintf(out, "ok  %-44s #%d\n", "gh has every field pullFields asks for", number)
+		_, _ = fmt.Fprintf(out, "ok  %-44s #%d\n", "gh has every field pullFields asks for", number)
 	}
 
 	var p pull
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return fmt.Errorf("reading pull request %d: %v", number, err)
+		return fmt.Errorf("reading pull request %d: %w", number, err)
 	}
 
 	raw, err = h.gh(checkRunArgs(h.repo, p.HeadRefOid)...)
 	if err != nil {
-		return fmt.Errorf("reading the check runs on %s: %v", p.HeadRefOid, err)
+		return fmt.Errorf("reading the check runs on %s: %w", p.HeadRefOid, err)
 	}
 	var runs struct {
 		CheckRuns []map[string]json.RawMessage `json:"check_runs"`
 	}
 	if err := json.Unmarshal(raw, &runs); err != nil {
-		return fmt.Errorf("reading the check runs on %s: %v", p.HeadRefOid, err)
+		return fmt.Errorf("reading the check runs on %s: %w", p.HeadRefOid, err)
 	}
 	switch {
 	case len(runs.CheckRuns) == 0:
@@ -874,19 +874,19 @@ func checkFields(h hub, number int, out io.Writer) error {
 			problems = append(problems, fmt.Sprintf(
 				"a check run carries none of %v, and this command reads them", sortedKeys(absent)))
 		} else {
-			fmt.Fprintf(out, "ok  %-44s %d runs\n", "a check run carries the five fields read", len(runs.CheckRuns))
+			_, _ = fmt.Fprintf(out, "ok  %-44s %d runs\n", "a check run carries the five fields read", len(runs.CheckRuns))
 		}
 	}
 
 	raw, err = h.gh(statusArgs(h.repo, p.HeadRefOid)...)
 	if err != nil {
-		return fmt.Errorf("reading the commit statuses on %s: %v", p.HeadRefOid, err)
+		return fmt.Errorf("reading the commit statuses on %s: %w", p.HeadRefOid, err)
 	}
 	var statuses struct {
 		Statuses []map[string]json.RawMessage `json:"statuses"`
 	}
 	if err := json.Unmarshal(raw, &statuses); err != nil {
-		return fmt.Errorf("reading the commit statuses on %s: %v", p.HeadRefOid, err)
+		return fmt.Errorf("reading the commit statuses on %s: %w", p.HeadRefOid, err)
 	}
 	if keys, err := keysOf(raw); err == nil && !keys["statuses"] {
 		problems = append(problems, "the commit status response carries no `statuses` key, and "+
@@ -895,7 +895,7 @@ func checkFields(h hub, number int, out io.Writer) error {
 		unchecked = append(unchecked, fmt.Sprintf(
 			"the shape of a commit status, because %s carries none. Every required context "+
 				"on this repository is a check run", p.HeadRefOid))
-		fmt.Fprintf(out, "ok  %-44s\n", "the commit status response has its list")
+		_, _ = fmt.Fprintf(out, "ok  %-44s\n", "the commit status response has its list")
 	} else {
 		absent := map[string]bool{}
 		for _, st := range statuses.Statuses {
@@ -909,7 +909,7 @@ func checkFields(h hub, number int, out io.Writer) error {
 			problems = append(problems, fmt.Sprintf(
 				"a commit status carries none of %v, and this command reads them", sortedKeys(absent)))
 		} else {
-			fmt.Fprintf(out, "ok  %-44s %d statuses\n", "a commit status carries the four fields read", len(statuses.Statuses))
+			_, _ = fmt.Fprintf(out, "ok  %-44s %d statuses\n", "a commit status carries the four fields read", len(statuses.Statuses))
 		}
 	}
 
@@ -934,13 +934,13 @@ func checkFields(h hub, number int, out io.Writer) error {
 				"`required_status_checks.contexts`, and that is the list this command refuses on. "+
 				"An empty one would let every merge past the context check")
 		} else {
-			fmt.Fprintf(out, "ok  %-44s %d contexts\n",
+			_, _ = fmt.Fprintf(out, "ok  %-44s %d contexts\n",
 				"protection carries the required list", len(body.RequiredStatusChecks.Contexts))
 		}
 	}
 
 	for _, u := range unchecked {
-		fmt.Fprintf(out, "not checked  %s\n", u)
+		_, _ = fmt.Fprintf(out, "not checked  %s\n", u)
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("the field names this command uses do not match the API.\n  %s",
@@ -1055,7 +1055,7 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "prmerge: #%d %q\n  head %s on %s, base %s, mergeStateStatus %s\n",
+	_, _ = fmt.Fprintf(out, "prmerge: #%d %q\n  head %s on %s, base %s, mergeStateStatus %s\n",
 		p.Number, p.Title, p.HeadRefOid, p.HeadRefName, p.BaseRefName, p.MergeStateStatus)
 
 	var problems []string
@@ -1078,7 +1078,7 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	if drift := listDrift(live); len(drift) > 0 {
 		problems = append(problems, drift...)
 	} else {
-		fmt.Fprintf(out, "ok  %-40s %d contexts on %s\n", "the required list is the live one", len(required), p.BaseRefName)
+		_, _ = fmt.Fprintf(out, "ok  %-40s %d contexts on %s\n", "the required list is the live one", len(required), p.BaseRefName)
 	}
 
 	all, err := h.checks(p.HeadRefOid)
@@ -1088,7 +1088,7 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	problems = append(problems, contexts(p.HeadRefOid, all, out)...)
 
 	if why, ok := willMerge[p.MergeStateStatus]; ok {
-		fmt.Fprintf(out, "ok  %-40s %s, %s\n", "mergeStateStatus", p.MergeStateStatus, why)
+		_, _ = fmt.Fprintf(out, "ok  %-40s %s, %s\n", "mergeStateStatus", p.MergeStateStatus, why)
 	} else if why, known := willNotMerge[p.MergeStateStatus]; known {
 		problems = append(problems, fmt.Sprintf("mergeStateStatus is %s: %s", p.MergeStateStatus, why))
 	} else {
@@ -1121,7 +1121,7 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	}
 
 	if noted := unrequired(all); len(noted) > 0 {
-		fmt.Fprintf(out, "    not required by protection, and not blocking: %s\n", strings.Join(noted, ", "))
+		_, _ = fmt.Fprintf(out, "    not required by protection, and not blocking: %s\n", strings.Join(noted, ", "))
 	}
 
 	if len(problems) > 0 {
@@ -1129,13 +1129,13 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	}
 
 	if dry {
-		fmt.Fprintf(out, "\nwould run: gh %s\n", strings.Join(args, " "))
-		fmt.Fprintf(out, "dry run, so nothing was merged\n")
+		_, _ = fmt.Fprintf(out, "\nwould run: gh %s\n", strings.Join(args, " "))
+		_, _ = fmt.Fprintf(out, "dry run, so nothing was merged\n")
 		return nil
 	}
 
 	if _, err := h.gh(args...); err != nil {
-		return fmt.Errorf("the merge was refused: %v", err)
+		return fmt.Errorf("the merge was refused: %w", err)
 	}
 	if err := confirm(h, number, own, attempts, interval, out); err != nil {
 		return err
@@ -1146,8 +1146,8 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 	// the pull request, so one refusal discards the work. The merge is confirmed
 	// by the time this prints, which is the only point at which deleting is
 	// safe, and a person does it.
-	fmt.Fprintf(out, "\nmerged #%d. The branch is still there, on purpose.\n", number)
-	fmt.Fprintf(out, "  Delete it when you are satisfied: git push origin --delete %s\n", p.HeadRefName)
+	_, _ = fmt.Fprintf(out, "\nmerged #%d. The branch is still there, on purpose.\n", number)
+	_, _ = fmt.Fprintf(out, "  Delete it when you are satisfied: git push origin --delete %s\n", p.HeadRefName)
 	return nil
 }
 
