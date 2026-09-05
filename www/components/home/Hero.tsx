@@ -2,6 +2,7 @@ import { Button } from "@/components/layout/Button";
 import { Container } from "@/components/layout/Container";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { CopyCodeButton } from "./media/CopyCodeButton";
+import { HeroDemoVideo } from "./HeroDemoVideo";
 import { HeroFilm } from "./media/HeroFilm";
 import { HeroServices } from "./HeroServices";
 
@@ -57,6 +58,7 @@ export function Hero() {
         <div className="relative mt-36 max-md:mt-24 max-sm:mt-16">
           <HeroServices />
         </div>
+        <HeroDemoVideo />
       </Container>
 
       <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
