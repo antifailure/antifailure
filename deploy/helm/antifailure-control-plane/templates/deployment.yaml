@@ -111,9 +111,142 @@ spec:
                   name: {{ include "cp.databaseSecretName" . }}
                   key: {{ .Values.database.secretKeys.migrationUrl }}
             {{- end }}
+            {{- if .Values.github.apiBase }}
+            - name: AF_GITHUB_API_BASE
+              value: {{ .Values.github.apiBase | quote }}
+            {{- end }}
+            {{- if .Values.github.appId }}
+            - name: AF_GITHUB_APP_ID
+              value: {{ .Values.github.appId | quote }}
+            - name: AF_GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.githubSecretName" . }}
+                  key: {{ .Values.github.secretKeys.appPrivateKey }}
+            - name: AF_GITHUB_APP_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.githubSecretName" . }}
+                  key: {{ .Values.github.secretKeys.appWebhookSecret }}
+            {{- end }}
+            {{- if .Values.github.installUrl }}
+            - name: AF_GITHUB_APP_INSTALL_URL
+              value: {{ .Values.github.installUrl | quote }}
+            {{- end }}
+            {{- if or .Values.database.adminUrl .Values.database.existingSecret }}
+            # The operator portal's credential, and the only one on this
+            # installation that can read across tenants. Its role holds
+            # BYPASSRLS; the role in AF_DATABASE_URL above must not.
+            - name: AF_ADMIN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.databaseSecretName" . }}
+                  key: {{ .Values.database.secretKeys.adminUrl }}
+                  # Optional, and only here. An operator supplying their own
+                  # Secret has one Secret for the database, and whether it
+                  # carries an operator credential is their decision, not
+                  # something this chart can read off a values file. Absent, the
+                  # operator portal is simply off, which is a supported state
+                  # and the default one. Everywhere else a missing key should
+                  # stop the pod.
+                  optional: true
+            {{- end }}
+            {{- if .Values.config.adminPoolMax }}
+            - name: AF_ADMIN_POOL_MAX
+              value: {{ .Values.config.adminPoolMax | quote }}
+            {{- end }}
+            {{- if .Values.config.publicUrl }}
+            - name: AF_PUBLIC_URL
+              value: {{ .Values.config.publicUrl | quote }}
+            {{- end }}
+            {{- if .Values.config.siteOrigin }}
+            # The one route on this server that answers a cross-origin browser.
+            # Unset, a contact form on a separate marketing host cannot submit
+            # and the visitor is shown a network error for a refusal this
+            # deployment made on purpose.
+            - name: AF_SITE_ORIGIN
+              value: {{ .Values.config.siteOrigin | quote }}
+            {{- end }}
+            {{- if .Values.config.signupUrl }}
+            - name: AF_SIGNUP_URL
+              value: {{ .Values.config.signupUrl | quote }}
+            {{- end }}
+            {{- if .Values.config.productName }}
+            - name: AF_PRODUCT_NAME
+              value: {{ .Values.config.productName | quote }}
+            {{- end }}
+            {{- if .Values.config.modelPrices }}
+            - name: AF_MODEL_PRICES
+              value: {{ .Values.config.modelPrices | quote }}
+            {{- end }}
+            {{- if .Values.config.hostedRequiredPlan }}
+            - name: AF_HOSTED_REQUIRED_PLAN
+              value: {{ .Values.config.hostedRequiredPlan | quote }}
+            {{- end }}
+            {{- if include "cp.hasSecret" (dict "value" .Values.providerKeys.secret "existing" .Values.providerKeys.existingSecret) }}
+            - name: AF_PROVIDER_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.providerKeysSecretName" . }}
+                  key: {{ .Values.providerKeys.secretKeys.secret }}
+            {{- end }}
+            {{- if include "cp.hasSecret" (dict "value" .Values.mail.resendApiKey "existing" .Values.mail.existingSecret) }}
+            - name: AF_RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.mailSecretName" . }}
+                  key: {{ .Values.mail.secretKeys.resendApiKey }}
+            {{- end }}
+            {{- if .Values.mail.from }}
+            - name: AF_MAIL_FROM
+              value: {{ .Values.mail.from | quote }}
+            {{- end }}
+            {{- if .Values.mail.leadNotifyEmail }}
+            - name: AF_LEAD_NOTIFY_EMAIL
+              value: {{ .Values.mail.leadNotifyEmail | quote }}
+            {{- end }}
+            {{- if include "cp.hasSecret" (dict "value" .Values.stripe.secretKey "existing" .Values.stripe.existingSecret) }}
+            - name: AF_STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.stripeSecretName" . }}
+                  key: {{ .Values.stripe.secretKeys.secretKey }}
+            - name: AF_STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.stripeSecretName" . }}
+                  key: {{ .Values.stripe.secretKeys.webhookSecret }}
+            {{- end }}
+            {{- if .Values.stripe.priceTeam }}
+            - name: AF_STRIPE_PRICE_TEAM
+              value: {{ .Values.stripe.priceTeam | quote }}
+            {{- end }}
+            {{- if include "cp.hasSecret" (dict "value" .Values.analytics.surrogateSecret "existing" .Values.analytics.existingSecret) }}
+            - name: AF_ANALYTICS_SURROGATE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cp.analyticsSecretName" . }}
+                  key: {{ .Values.analytics.secretKeys.surrogateSecret }}
+            {{- end }}
+            {{- if .Values.analytics.operatorOrg }}
+            - name: AF_ANALYTICS_OPERATOR_ORG
+              value: {{ .Values.analytics.operatorOrg | quote }}
+            {{- end }}
+            {{- if .Values.analytics.retentionDays }}
+            - name: AF_ANALYTICS_RETENTION_DAYS
+              value: {{ .Values.analytics.retentionDays | quote }}
+            {{- end }}
             # AF_MIGRATE is deliberately absent. Migrations are the bootstrap
             # Job's work, once, and not something every replica races to do on
             # startup.
+            {{- with .Values.extraEnv }}
+            # Last, so an operator can override anything above it: Kubernetes
+            # takes the final entry when a name appears twice. That is the point
+            # of an escape hatch, and it is also why it is not a substitute for
+            # a named value: it can only be aimed by somebody who already knows
+            # the name.
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           startupProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
