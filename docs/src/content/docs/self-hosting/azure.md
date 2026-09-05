@@ -318,19 +318,76 @@ references during deployment and names any missing secret. Verify both Stripe
 credentials before enabling billing, and then verify checkout and its webhook
 through the running application.
 
+**`--value` is the wrong way to do this and it is not in the commands below.**
+`rotating-secrets.md` states the rule for every other credential on this plane
+and these three were the exception: a value passed as `--value` is in your shell
+history and in the argument list of a running process, where `ps` shows it to
+anybody else on the machine. It is also in the environment if it arrived as
+`$STRIPE_SECRET_KEY`, and an environment variable is inherited by every child
+process. The value comes from a file that nothing else can read instead, and the
+file is written by a prompt rather than by a command somebody typed.
+
+`printf '%s'` rather than `echo`, and this is the part that fails silently. A
+webhook signing secret with a trailing newline is a different string, and every
+signature computed with it is wrong, so `POST /webhooks/stripe` answers 401 on
+every real delivery while the endpoint, the deploy and the plan all look
+correct. `echo` appends a newline. `read -r` strips the one your return key
+adds. Both halves are needed.
+
 ```sh
 VAULT="$(terraform output -raw key_vault_name)"
 
-# Billing. The Team price is the switch; there is no Enterprise price and there
-# is not meant to be one, because Enterprise is arranged with a person.
-az keyvault secret set --vault-name "$VAULT" -n stripe-secret-key     --value "$STRIPE_SECRET_KEY"
-az keyvault secret set --vault-name "$VAULT" -n stripe-webhook-secret --value "$STRIPE_WEBHOOK_SECRET"
+# One helper, used for each secret below. The value is typed at a prompt, never
+# echoed, never in an argument, never in the shell history, and written with no
+# trailing byte you did not intend.
+afsecret() {
+  local name="$1" dir file
+  umask 077
+  dir="$(mktemp -d)"
+  file="$dir/value"
+  printf 'Value for %s (input is hidden): ' "$name" >&2
+  IFS= read -rs value
+  printf '\n' >&2
+  printf '%s' "$value" > "$file"
+  unset value
+  az keyvault secret set --vault-name "$VAULT" --name "$name" --file "$file" --output none
+  rm -P "$file" 2> /dev/null || rm -f "$file"
+  rmdir "$dir"
+}
+
+# Billing. The Team price is the switch and it is NOT a secret: it goes in
+# production.tfvars in plain text, because a price identifier is in the checkout
+# URL of everybody who buys. There is no Enterprise price and there is not meant
+# to be one, because Enterprise is arranged with a person.
+afsecret stripe-secret-key       # sk_live_... or sk_test_... from Stripe, Developers, API keys
+afsecret stripe-webhook-secret   # whsec_..., shown once when you create the endpoint
 
 # Signing in with a link, and inviting somebody who is not in your GitHub
 # organization. mail_from is the switch and public_url is then required.
 # READ THE DNS SECTION BELOW FIRST: a verified key is not a domain that can send.
-az keyvault secret set --vault-name "$VAULT" -n resend-api-key --value "$RESEND_API_KEY"
+afsecret resend-api-key
 ```
+
+Confirm both arrived without printing either. The first command prints names,
+the second prints a length and a checksum of what the vault holds, which is
+enough to catch a truncated paste or a stray newline and is not enough to
+reconstruct the value:
+
+```sh
+az keyvault secret list --vault-name "$VAULT" \
+  --query "[?starts_with(name, 'stripe-')].name" -o tsv
+
+for n in stripe-secret-key stripe-webhook-secret; do
+  printf '%s ' "$n"
+  az keyvault secret show --vault-name "$VAULT" --name "$n" --query value -o tsv \
+    | tr -d '\n' | wc -c
+done
+```
+
+Compare each length against the value Stripe shows you, character for character.
+One more than you expect is the trailing newline this section is about, and it
+is the difference between a webhook endpoint that works and one that answers 401
+to every delivery Stripe ever makes.
 
 #### Mail needs DNS before it needs a key
 

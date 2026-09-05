@@ -525,3 +525,130 @@ it refuses cleanly if any of the above was skipped.
   [operations page](/docs/self-hosting/operations) has the command.
 - The [runbooks](/docs/self-hosting/runbooks) are the pages the alerts link to.
   Read the index once now, while nothing is broken.
+
+## Turning billing on
+
+Billing is off on a control plane that has never been told about Stripe, and off
+is a supported state rather than a half-finished one: a self-hosted installation
+takes no money, and every route that would charge answers `PRECONDITION_FAILED`
+naming the settings it needs. What follows turns it on, in the only order that
+works. The four sections below are deliberately not numbered, because this is
+not step sixteen of first setup: it is a separate procedure somebody runs later,
+possibly years later, on a control plane that is already serving. Run them in
+the order they are written.
+
+**Three settings, and two of them are credentials.** `web/apps/api/src/billing/plans.ts`
+requires exactly these:
+
+| Setting | Secret | Where it comes from |
+| --- | --- | --- |
+| `AF_STRIPE_SECRET_KEY` | yes, Key Vault | Stripe, Developers, API keys |
+| `AF_STRIPE_WEBHOOK_SECRET` | yes, Key Vault | shown once, when you create the webhook endpoint |
+| `AF_STRIPE_PRICE_TEAM` | no | `stripe_price_team` in `production.tfvars` |
+
+**Two of three is worse than none.** A partial configuration is reported as a
+refusal, not as a partial success: the process prints `billing is OFF and
+partially configured` with the missing names in it and takes no money at all.
+That is deliberate, because the setting people forget is the webhook secret, and
+an installation missing only that one appears to work right up until the first
+customer pays and never gets what they bought.
+
+**There is no `AF_STRIPE_PRICE_ENTERPRISE` and there is not meant to be one.**
+Enterprise is agreed with a person, so no Stripe price exists behind it. Checkout
+refuses that plan by name and points at the contact route. A plan with no price
+is a plan that is not sold here, not a misconfiguration.
+
+### First, create the webhook endpoint at Stripe
+
+**Your job, in a browser, at `https://dashboard.stripe.com/webhooks`.** This step
+is first because `AF_STRIPE_WEBHOOK_SECRET` does not exist until you do it:
+Stripe generates the signing secret when the endpoint is created and shows it
+once.
+
+| Field | Value |
+| --- | --- |
+| Endpoint URL | `https://app.antifailure.dev/webhooks/stripe` |
+| Listen to | Events on your account |
+| API version | your account default |
+
+Select exactly these nine events, which are the ones `HANDLED_EVENTS` in
+`web/apps/api/src/billing/webhook.ts` acts on:
+
+`customer.subscription.created`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`,
+`invoice.finalized`, `payment_method.attached`, `payment_method.detached`,
+`checkout.session.completed`.
+
+Subscribing to more is harmless and subscribing to fewer is not. An event this
+control plane does not act on is acknowledged and not recorded, so a wider
+selection costs a 200 and nothing else. A narrower one loses an entitlement.
+
+**Do this in test mode first, against a control plane you can afford to be wrong
+about.** Test mode has its own endpoint, its own signing secret, its own keys and
+its own prices, and nothing crosses between the two.
+
+### Then put the two credentials in Key Vault
+
+The vault name is `afcpprod-kv-centralus` for production. Use the `afsecret`
+helper on the [Azure page](/docs/self-hosting/azure), which takes the value at a
+prompt rather than as an argument, writes it with no trailing newline, and
+removes the file afterwards. A signing secret with a trailing newline fails every
+signature and the endpoint answers 401 to every delivery Stripe makes, while the
+plan, the deploy and the dashboard all look correct.
+
+Confirm both are there before going on. This prints names, never values:
+
+```sh
+az keyvault secret list --vault-name afcpprod-kv-centralus \
+  --query "[?starts_with(name, 'stripe-')].name" -o tsv
+```
+
+Two names, or stop here.
+
+### Then set the price, and only then apply
+
+`stripe_price_team` in `production.tfvars` is the switch. Setting it makes the
+container app reference both vault secrets by their versionless ids.
+
+**The plan cannot tell you the secrets are missing, and this is the one place
+that matters.** `keyvault.tf` addresses them by constructed id rather than
+reading them, because the identity that plans production holds nothing on the
+vault and the only way to give it a read is to grant a pull request identity
+access to production's credentials. So a plan is green whether or not the
+secrets exist, Azure discovers a missing one while resolving references during
+deployment, and the revision fails to start on a control plane that was serving
+a moment earlier. Putting the credentials in the vault is not optional and it is not
+reorderable.
+
+Apply, then shift traffic the way every other change to this app is shifted:
+the app runs in `Multiple` revision mode, so the apply creates a revision at zero
+traffic. Probe it at zero, then shift.
+
+### Then prove it, on the running control plane
+
+**A route that answers 200 is not proof that a plan changed.** Four checks, in
+order, each of which can only pass if the one before it did.
+
+The endpoint stops refusing. Before, this is a 503 saying this control plane is
+not configured to take payments; after, it is a 401, because the request is now
+being checked against a signing secret rather than turned away:
+
+```sh
+curl -sS -X POST https://app.antifailure.dev/webhooks/stripe \
+  -H 'content-type: application/json' --data '{}' -w '\n%{http_code}\n'
+```
+
+A 503 here means one of the three settings did not arrive. A 401 means all three
+did, and that the process is verifying signatures.
+
+Then **Send test webhook** from the endpoint's page in the Stripe dashboard. A
+200 proves the signing secret is byte for byte the one Stripe holds, which is the
+half a 401 above cannot distinguish from a wrong secret.
+
+Then buy something in test mode, with Stripe's `4242 4242 4242 4242` card, and
+watch the organization's plan change. Not the checkout page opening: the plan.
+
+Then ask the product for the thing the plan was withholding. Create an
+environment that the free plan's limit of three refused before the purchase. That
+is the only check that cannot be satisfied by a payment path that is connected to
+nothing.
