@@ -647,9 +647,44 @@ export class RealStripeClient implements StripeClient {
   }
 }
 
-/** The version every request pins. Moving it is a deliberate change with a
- *  reading of Stripe's changelog behind it, not something an account setting
- *  does to a running deployment. */
+/**
+ * The version every OUTGOING request pins. Moving it is a deliberate change
+ * with a reading of Stripe's changelog behind it, not something an account
+ * setting does to a running deployment.
+ *
+ * THE READING HAS NOW BEEN DONE, AND THE PIN STAYS. Recorded here so the next
+ * person does not repeat it.
+ *
+ * The question came up because this account's default version is Basil and
+ * its decoders were reading two field paths Basil removed. It is worth being
+ * exact about what moving the pin would and would not have fixed.
+ *
+ * It would have fixed NOTHING about the delivered events. A webhook is
+ * delivered at the version set on its ENDPOINT, or the account default when
+ * that is unset, and neither is this header. So the decoders have to read
+ * both shapes whatever this constant says, and moving it cannot retire that
+ * tolerance. It would only make the two directions agree.
+ *
+ * It would have BROKEN two things that work today, because Basil is one
+ * release with many breaking changes in it and only two of them were the ones
+ * being fixed:
+ *
+ *  - `invoice` was removed from the Charge object, by "Adds support for
+ *    multiple (partial) payments on invoices". `chargeOf` reads it, and the
+ *    admin console's customer view is handed the result. It would have gone
+ *    silently null, which is the same class of defect being fixed here.
+ *  - the singular `coupon` PARAMETER was removed from Subscription#update, by
+ *    "Removes coupon and promotion code parameters with stackable discounts",
+ *    in favour of `discounts`. `applyDiscount` in src/admin/money.ts sends
+ *    exactly that parameter, so an operator applying a discount would have
+ *    been refused.
+ *
+ * So moving the pin buys agreement between the two directions and costs two
+ * live regressions on a money path, one of them silent, neither of them
+ * tested by the change that would cause them. The trade is not worth taking
+ * as a side effect of a decoder fix. Moving it is its own piece of work, and
+ * the two above are its entry conditions.
+ */
 export const STRIPE_API_VERSION = '2024-06-20'
 
 async function decode(res: Response, path: string): Promise<Record<string, unknown> | null> {
@@ -755,8 +790,8 @@ export function subscriptionOf(body: Record<string, unknown>): StripeSubscriptio
     status: text(body.status) ?? 'incomplete',
     priceId: item ? idOf(item.price) : null,
     quantity: item ? count(item.quantity, 1) : 1,
-    currentPeriodStart: instant(body.current_period_start),
-    currentPeriodEnd: instant(body.current_period_end),
+    currentPeriodStart: periodBound(body, item, 'current_period_start'),
+    currentPeriodEnd: periodBound(body, item, 'current_period_end'),
     cancelAtPeriodEnd: body.cancel_at_period_end === true,
     canceledAt: instant(body.canceled_at),
   }
@@ -771,7 +806,7 @@ export function invoiceOf(body: Record<string, unknown>): StripeInvoice | null {
   return {
     id,
     customerId,
-    subscriptionId: idOf(body.subscription),
+    subscriptionId: invoiceSubscriptionOf(body),
     number: text(body.number),
     status: text(body.status) ?? 'draft',
     amountDue: count(body.amount_due, 0),
@@ -781,6 +816,74 @@ export function invoiceOf(body: Record<string, unknown>): StripeInvoice | null {
     periodStart: instant(body.period_start),
     periodEnd: instant(body.period_end),
   }
+}
+
+/**
+ * A subscription's billing period, from whichever level of the object carries it.
+ *
+ * Basil, `2025-03-31.basil`, REMOVED `current_period_start` and
+ * `current_period_end` from the subscription and added them to each
+ * subscription item, so the period on a Basil payload lives only at
+ * `items.data[].current_period_start` and `items.data[].current_period_end`.
+ *
+ * Both shapes are live here at once, and that is not a transitional state that
+ * goes away. A webhook is delivered at the version its ENDPOINT was created
+ * with, which Stripe's versioning page is explicit about, and that is a
+ * different setting from the `stripe-version` header this client sends. So
+ * this decoder reads deliveries of one age and responses to its own requests
+ * of another, and neither shape can be dropped while that is true.
+ *
+ * The top level is tried FIRST, and the reason is about being wrong rather
+ * than about being right, because on a real payload only one of the two is
+ * ever present. It is the field the version pinned on outgoing requests still
+ * sends, so trying it first means this fallback cannot change what the
+ * outgoing path already reads: the new branch is reached only by a payload
+ * that genuinely carries no subscription level period, which is exactly the
+ * Basil delivery that is null without it.
+ *
+ * The item is the FIRST one, the same item `priceId` and `quantity` are read
+ * off above. Basil later allowed items on one subscription to bill on
+ * different intervals, so reading the period off the item the price came from
+ * reports one item's period rather than half of one and half of another.
+ */
+function periodBound(
+  body: Record<string, unknown>,
+  item: Record<string, unknown> | null,
+  field: 'current_period_start' | 'current_period_end',
+): Date | null {
+  return instant(body[field]) ?? (item === null ? null : instant(item[field]))
+}
+
+/**
+ * The subscription an invoice was generated by, from whichever shape carries it.
+ *
+ * Basil, `2025-03-31.basil`, REMOVED `subscription` from the invoice, along
+ * with `quote`, `subscription_details` and `subscription_proration_date`, and
+ * replaced them with one `parent` field that names the upstream object and
+ * says what KIND of object it was.
+ *
+ * `parent.type` is checked rather than assumed, and that check is the point of
+ * this function. An invoice generated by a quote carries `parent.quote_details`
+ * instead, and an unguarded walk to `parent.subscription_details.subscription`
+ * would be reading a field off the wrong branch of a union. Returning null
+ * there is right: an invoice this control plane cannot attribute to a
+ * subscription is stored with no subscription, which is recoverable, and
+ * attributing it to the wrong one is not.
+ *
+ * Every level is guarded separately, the same rule `couponOf` below states,
+ * because every level is legitimately absent: a one off invoice has no parent
+ * at all.
+ */
+function invoiceSubscriptionOf(body: Record<string, unknown>): string | null {
+  const top = idOf(body.subscription)
+  if (top) return top
+  const parent = body.parent
+  if (parent === null || typeof parent !== 'object') return null
+  const generated = parent as { type?: unknown; subscription_details?: unknown }
+  if (generated.type !== 'subscription_details') return null
+  const details = generated.subscription_details
+  if (details === null || typeof details !== 'object') return null
+  return idOf((details as { subscription?: unknown }).subscription)
 }
 
 /** The coupon on a customer's discount, when Stripe sent one.
