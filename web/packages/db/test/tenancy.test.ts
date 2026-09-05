@@ -131,6 +131,17 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
           'migration role, through af-control-plane-backup leads. See migrations/0035.',
       ],
       [
+        'recruitment_applications',
+        'somebody applying for a job, who is not a customer, has no organization and is not ' +
+          'going to get one from applying. It is the same shape as enterprise_leads and for ' +
+          'the same reason: what confines the application role is a GRANT rather than a ' +
+          'policy, INSERT and no SELECT, so the anonymous careers form can write a row and no ' +
+          'query on a public path can read an applicant\'s name, address or answers back even ' +
+          'holding the id. Reading, reviewing and deleting are antifailure_admin through the ' +
+          'operator portal alone. recruitment.test.ts asserts the 42501 on the read. See ' +
+          'migrations/0039.',
+      ],
+      [
         'admin_notes',
         'an operator\'s words about a customer rather than the customer\'s data; ' +
           'the application role holds no grant on it at all, which the test below proves',

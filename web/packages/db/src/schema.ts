@@ -1555,6 +1555,19 @@ export const tenantScopedTables = [
  * SELECT on this table at all.
  * ------------------------------------------------------------------------ */
 
+export const recruitmentApplications = pgTable('recruitment_applications', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  role: text('role').notNull(),
+  projectUrl: text('project_url').notNull().default(''),
+  why: text('why').notNull(),
+  compensationAcknowledged: boolean('compensation_acknowledged').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewedBy: uuid('reviewed_by'),
+})
+
 export const enterpriseLeads = pgTable('enterprise_leads', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull(),
