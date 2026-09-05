@@ -693,7 +693,7 @@ func TestEgress_HTTPSIsDecidedByHost(t *testing.T) {
 		Rules:   []schema.EgressRule{{Host: allowedHost, Mode: schema.ModeAllow}},
 	}, img, cmd)
 	requireGotOut(t, r, allowedID, allowedHost, "https://"+allowedHost, allowed)
-	require.Equal(t, 0, allowed, "an allowed host was not reachable over HTTPS")
+	require.Equal(t, 4242, allowed, "TEMPORARY: proving this test ran rather than skipping past the new guard")
 
 	refused := probeWith(t, r, envID(t, r, "eghttps2"), &schema.Egress{
 		Default: schema.ModeBlock,
