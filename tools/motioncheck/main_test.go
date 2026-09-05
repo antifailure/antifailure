@@ -243,13 +243,13 @@ func TestAnApplicationThatIsNotBuiltFailsAndNamesItself(t *testing.T) {
 // render, which is the second reason a source scan would not have found it.
 func TestAVideoThatAutoplaysOnALoopIsAFinding(t *testing.T) {
 	root := site(t, map[string]string{
-		htmlPath: `<video src="/home/product-walkthrough.mp4" autoplay="" loop="" muted=""></video>`,
+		htmlPath: `<video src="/home/launch-film.mp4" autoplay="" loop="" muted=""></video>`,
 	})
 	code, out := run(root)
 	if code == 0 {
 		t.Fatalf("a video looping forever passed:\n%s", out)
 	}
-	if !strings.Contains(out, "/home/product-walkthrough.mp4") {
+	if !strings.Contains(out, "/home/launch-film.mp4") {
 		t.Errorf("the report does not name the file, so an exemption cannot be copied from it:\n%s", out)
 	}
 }
@@ -260,7 +260,7 @@ func TestAVideoThatAutoplaysOnALoopIsAFinding(t *testing.T) {
 // than against motion that never ends.
 func TestAVideoThatPlaysOnceIsNotAFinding(t *testing.T) {
 	root := site(t, map[string]string{
-		htmlPath: `<video src="/home/product-walkthrough.mp4" autoplay="" muted=""></video>`,
+		htmlPath: `<video src="/home/launch-film.mp4" autoplay="" muted=""></video>`,
 	})
 	if code, out := run(root); code != 0 {
 		t.Fatalf("a video that stops was reported:\n%s", out)
@@ -272,7 +272,7 @@ func TestAVideoThatPlaysOnceIsNotAFinding(t *testing.T) {
 // somebody operates rather than one that operates on them.
 func TestALoopingVideoNobodyStartedIsNotAFinding(t *testing.T) {
 	root := site(t, map[string]string{
-		htmlPath: `<video src="/home/product-walkthrough.mp4" loop="" controls=""></video>`,
+		htmlPath: `<video src="/home/launch-film.mp4" loop="" controls=""></video>`,
 	})
 	if code, out := run(root); code != 0 {
 		t.Fatalf("a video the reader has to start was reported:\n%s", out)

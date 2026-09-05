@@ -18,11 +18,15 @@ function RestartIcon() {
   );
 }
 
+// size-11 is 44 pixels and that is a floor rather than a taste. It was size-10,
+// which is 40, and every video control on this site is one of these, so the
+// whole cluster sat under the minimum tap target on the surface where it
+// matters. The icon inside stays at 16 pixels; it is the target that grew.
 export function VideoRestartButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
-      className="grid size-10 place-items-center rounded-full bg-black/72 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors duration-200 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
+      className="grid size-11 place-items-center rounded-full bg-black/72 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors duration-200 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
       aria-label="Restart video"
       onClick={onClick}
     >
