@@ -637,6 +637,21 @@ func fail(format string, args ...any) {
 // An exemption naming a gate no workflow runs fails the build. See the loop
 // that fills `stale`.
 var exemptFromGate = map[string]string{
+	"tool prmerge": "" +
+		"Its answer does not come from this repository. tools/prmerge asks the " +
+		"GitHub API whether the field names it reads still exist, against a real " +
+		"pull request, so its answer moves when gh or the API moves and it needs " +
+		"the network, which `just gate` must not. It also needs a pull request to " +
+		"point at, and `just gate` runs on a branch that may not have one. " +
+		"It exists because the tool once asked `gh pr view` for a field called " +
+		"`merged`, which does not exist, with 25 green tests behind it: every one " +
+		"of them answered from a fixture the suite itself had written. What IS a " +
+		"function of the tree is every decision the tool makes, and " +
+		"`go test ./tools/prmerge` covers that inside `gate`, including that the " +
+		"request and the struct ask for the same fields. " +
+		"It runs on every pull request in ci.yml. Run it by hand with " +
+		"`just merge <number> -check-fields`.",
+
 	"tool vulncheck": "" +
 		"Its answer does not come from this repository. tools/vulncheck asks the " +
 		"Go vulnerability database which known advisories are reachable from our " +

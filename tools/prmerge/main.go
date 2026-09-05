@@ -81,6 +81,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -262,9 +263,35 @@ type hub struct {
 
 func (h hub) gh(args ...string) ([]byte, error) { return h.runner.run("gh", args...) }
 
+// The four reads this command makes, as the argument lists that make them.
+//
+// Named here rather than written inline so that the field check below runs the
+// SAME calls the merge path runs. A field check against a copy of the call is
+// a check of the copy, and the copy is the thing that stays right while the
+// original drifts.
+func pullArgs(repo string, number int) []string {
+	return []string{"pr", "view", fmt.Sprint(number), "--repo", repo, "--json", pullFields}
+}
+
+func checkRunArgs(repo, sha string) []string {
+	return []string{"api", fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", repo, sha)}
+}
+
+func statusArgs(repo, sha string) []string {
+	return []string{"api", fmt.Sprintf("repos/%s/commits/%s/status?per_page=100", repo, sha)}
+}
+
+func protectionArgs(repo, branch string) []string {
+	return []string{"api", fmt.Sprintf("repos/%s/branches/%s/protection", repo, branch)}
+}
+
+func commitArgs(repo, sha string) []string {
+	return []string{"api", fmt.Sprintf("repos/%s/commits/%s", repo, sha)}
+}
+
 // pull reads one pull request.
 func (h hub) pull(number int) (pull, error) {
-	out, err := h.gh("pr", "view", fmt.Sprint(number), "--repo", h.repo, "--json", pullFields)
+	out, err := h.gh(pullArgs(h.repo, number)...)
 	if err != nil {
 		return pull{}, err
 	}
@@ -282,7 +309,7 @@ func (h hub) pull(number int) (pull, error) {
 // what blocks a merge, and merging on a list nobody confirmed is exactly the
 // gate this command is supposed to be.
 func (h hub) protection(branch string) ([]string, error) {
-	out, err := h.gh("api", fmt.Sprintf("repos/%s/branches/%s/protection", h.repo, branch))
+	out, err := h.gh(protectionArgs(h.repo, branch)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading the required contexts on %s: %w\n"+
 			"  This command will not merge on a required list it could not confirm. "+
@@ -301,7 +328,7 @@ func (h hub) protection(branch string) ([]string, error) {
 
 // checks is everything that reported on a commit, check runs and statuses both.
 func (h hub) checks(sha string) ([]check, error) {
-	out, err := h.gh("api", fmt.Sprintf("repos/%s/commits/%s/check-runs?per_page=100", h.repo, sha))
+	out, err := h.gh(checkRunArgs(h.repo, sha)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading the check runs on %s: %w", sha, err)
 	}
@@ -322,7 +349,7 @@ func (h hub) checks(sha string) ([]check, error) {
 		all = append(all, check{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion, At: r.StartedAt, ID: r.ID})
 	}
 
-	out, err = h.gh("api", fmt.Sprintf("repos/%s/commits/%s/status?per_page=100", h.repo, sha))
+	out, err = h.gh(statusArgs(h.repo, sha)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading the commit statuses on %s: %w", sha, err)
 	}
@@ -353,7 +380,7 @@ func (h hub) checks(sha string) ([]check, error) {
 
 // commitMessage is the full message of a commit on the remote.
 func (h hub) commitMessage(sha string) (string, error) {
-	out, err := h.gh("api", fmt.Sprintf("repos/%s/commits/%s", h.repo, sha))
+	out, err := h.gh(commitArgs(h.repo, sha)...)
 	if err != nil {
 		return "", fmt.Errorf("reading the commit %s: %w", sha, err)
 	}
@@ -682,12 +709,263 @@ func confirm(h hub, number int, own string, attempts int, interval time.Duration
 		"git fetch origin && git log -1 --format='%%B' origin/main", last)
 }
 
+// pullFieldNames is the request's field list, split.
+func pullFieldNames() []string { return strings.Split(pullFields, ",") }
+
+// structFieldNames is every json tag on the pull struct.
+//
+// Read by reflection rather than listed, because a list would be the third
+// place the same names live and the one nobody updates.
+func structFieldNames() []string {
+	var out []string
+	t := reflect.TypeOf(pull{})
+	for i := 0; i < t.NumField(); i++ {
+		if tag := t.Field(i).Tag.Get("json"); tag != "" && tag != "-" {
+			out = append(out, strings.Split(tag, ",")[0])
+		}
+	}
+	return out
+}
+
+// fieldDrift compares what the struct reads against what the request asks for.
+//
+// This is the half of the contract that needs no network, and it is the half
+// that goes wrong silently. A field asked for and never read is dead weight; a
+// field READ and never asked for decodes as a zero value with no error at all,
+// which is a merge command quietly believing a pull request is not a draft, or
+// not merged, because nobody requested the field that says so.
+//
+// The other half, whether the API has these fields at all, cannot be answered
+// from here: gh answers it, by refusing an unknown name. That is what
+// -check-fields is for, and it is why the two exist separately.
+func fieldDrift(asked, read []string) []string {
+	inAsked, inRead := map[string]bool{}, map[string]bool{}
+	for _, f := range asked {
+		inAsked[f] = true
+	}
+	for _, f := range read {
+		inRead[f] = true
+	}
+	var problems []string
+	for _, f := range read {
+		if !inAsked[f] {
+			problems = append(problems, fmt.Sprintf(
+				"the pull struct reads %q and pullFields never asks for it, so it decodes as a "+
+					"zero value with no error. Add it to pullFields", f))
+		}
+	}
+	for _, f := range asked {
+		if !inRead[f] {
+			problems = append(problems, fmt.Sprintf(
+				"pullFields asks for %q and nothing reads it. Remove it, or add the field that "+
+					"needs it", f))
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+// keysOf returns the top level keys of a JSON object, and says so when the
+// bytes were not an object at all.
+func keysOf(raw []byte) (map[string]bool, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, fmt.Errorf("the response was not a JSON object: %w", err)
+	}
+	keys := map[string]bool{}
+	for k := range object {
+		keys[k] = true
+	}
+	return keys, nil
+}
+
+// missing names the fields a response does not carry.
+func missing(keys map[string]bool, want []string) []string {
+	var absent []string
+	for _, f := range want {
+		if !keys[f] {
+			absent = append(absent, f)
+		}
+	}
+	return absent
+}
+
+// checkFields asks the real API whether this command's field names exist.
+//
+// WHY IT EXISTS. This command asked `gh pr view` for a field called `merged`.
+// There is no such field. All 25 of its tests passed, because every one
+// answered from a fixture this file had written and the fixture invented the
+// field the code was reading. The first real invocation died on the first call
+// with `Unknown JSON field: "merged"`. A suite that builds its own input can be
+// complete and still describe a system that does not exist.
+//
+// So this is the check that reads the other side of the boundary. It runs the
+// same argument lists the merge path runs, against a real pull request, and
+// reports a name the API does not have or a key a real response does not carry.
+//
+// WHAT IT DOES NOT CLAIM. Branch protection needs administration rights, so a
+// token without them cannot read it. That is reported as NOT CHECKED by name
+// rather than passed over, and the same for a commit that carries no check run
+// or no commit status: an element shape cannot be examined in a list with no
+// elements. The rule this repository holds to is to say what was not checked,
+// and the claim this makes is exactly the reads it managed.
+//
+// It is worth knowing that all four reads already fail CLOSED on the merge
+// path. A wrong name in pullFields makes gh refuse; a wrong key under
+// check-runs or status leaves an empty list, which reads as a required context
+// that never reported; a wrong key under protection leaves an empty required
+// list, which reads as nine contexts protection no longer requires. Every one
+// of those refuses the merge. This exists so that the refusal arrives before
+// somebody is standing at a merge button, and so that it names the field.
+func checkFields(h hub, number int, out io.Writer) error {
+	var problems, unchecked []string
+
+	if drift := fieldDrift(pullFieldNames(), structFieldNames()); len(drift) > 0 {
+		problems = append(problems, drift...)
+	} else {
+		fmt.Fprintf(out, "ok  %-44s %d fields\n", "the request and the struct ask the same", len(pullFieldNames()))
+	}
+
+	raw, err := h.gh(pullArgs(h.repo, number)...)
+	if err != nil {
+		// gh names the field it does not recognise, which is the whole point.
+		return fmt.Errorf("the pull request field list was refused: %v", err)
+	}
+	keys, err := keysOf(raw)
+	if err != nil {
+		return fmt.Errorf("reading pull request %d: %v", number, err)
+	}
+	if absent := missing(keys, pullFieldNames()); len(absent) > 0 {
+		problems = append(problems, fmt.Sprintf(
+			"gh accepted %v and the response carries no such key", absent))
+	} else {
+		fmt.Fprintf(out, "ok  %-44s #%d\n", "gh has every field pullFields asks for", number)
+	}
+
+	var p pull
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("reading pull request %d: %v", number, err)
+	}
+
+	raw, err = h.gh(checkRunArgs(h.repo, p.HeadRefOid)...)
+	if err != nil {
+		return fmt.Errorf("reading the check runs on %s: %v", p.HeadRefOid, err)
+	}
+	var runs struct {
+		CheckRuns []map[string]json.RawMessage `json:"check_runs"`
+	}
+	if err := json.Unmarshal(raw, &runs); err != nil {
+		return fmt.Errorf("reading the check runs on %s: %v", p.HeadRefOid, err)
+	}
+	switch {
+	case len(runs.CheckRuns) == 0:
+		unchecked = append(unchecked, fmt.Sprintf(
+			"the shape of a check run, because %s carries none", p.HeadRefOid))
+	default:
+		absent := map[string]bool{}
+		for _, r := range runs.CheckRuns {
+			for _, f := range []string{"id", "name", "status", "conclusion", "started_at"} {
+				if _, ok := r[f]; !ok {
+					absent[f] = true
+				}
+			}
+		}
+		if len(absent) > 0 {
+			problems = append(problems, fmt.Sprintf(
+				"a check run carries none of %v, and this command reads them", sortedKeys(absent)))
+		} else {
+			fmt.Fprintf(out, "ok  %-44s %d runs\n", "a check run carries the five fields read", len(runs.CheckRuns))
+		}
+	}
+
+	raw, err = h.gh(statusArgs(h.repo, p.HeadRefOid)...)
+	if err != nil {
+		return fmt.Errorf("reading the commit statuses on %s: %v", p.HeadRefOid, err)
+	}
+	var statuses struct {
+		Statuses []map[string]json.RawMessage `json:"statuses"`
+	}
+	if err := json.Unmarshal(raw, &statuses); err != nil {
+		return fmt.Errorf("reading the commit statuses on %s: %v", p.HeadRefOid, err)
+	}
+	if keys, err := keysOf(raw); err == nil && !keys["statuses"] {
+		problems = append(problems, "the commit status response carries no `statuses` key, and "+
+			"this command reads one. A required context reported as a status would be invisible")
+	} else if len(statuses.Statuses) == 0 {
+		unchecked = append(unchecked, fmt.Sprintf(
+			"the shape of a commit status, because %s carries none. Every required context "+
+				"on this repository is a check run", p.HeadRefOid))
+		fmt.Fprintf(out, "ok  %-44s\n", "the commit status response has its list")
+	} else {
+		absent := map[string]bool{}
+		for _, st := range statuses.Statuses {
+			for _, f := range []string{"id", "context", "state", "created_at"} {
+				if _, ok := st[f]; !ok {
+					absent[f] = true
+				}
+			}
+		}
+		if len(absent) > 0 {
+			problems = append(problems, fmt.Sprintf(
+				"a commit status carries none of %v, and this command reads them", sortedKeys(absent)))
+		} else {
+			fmt.Fprintf(out, "ok  %-44s %d statuses\n", "a commit status carries the four fields read", len(statuses.Statuses))
+		}
+	}
+
+	raw, err = h.gh(protectionArgs(h.repo, p.BaseRefName)...)
+	switch {
+	case err != nil:
+		unchecked = append(unchecked, fmt.Sprintf(
+			"the shape of branch protection on %s, because this token cannot read it. That "+
+				"read needs administration rights, and it is proved on the real path instead: "+
+				"a wrong key there leaves an empty required list, which refuses every merge",
+			p.BaseRefName))
+	default:
+		var body struct {
+			RequiredStatusChecks struct {
+				Contexts []string `json:"contexts"`
+			} `json:"required_status_checks"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			problems = append(problems, fmt.Sprintf("reading branch protection: %v", err))
+		} else if len(body.RequiredStatusChecks.Contexts) == 0 {
+			problems = append(problems, "branch protection carries no "+
+				"`required_status_checks.contexts`, and that is the list this command refuses on. "+
+				"An empty one would let every merge past the context check")
+		} else {
+			fmt.Fprintf(out, "ok  %-44s %d contexts\n",
+				"protection carries the required list", len(body.RequiredStatusChecks.Contexts))
+		}
+	}
+
+	for _, u := range unchecked {
+		fmt.Fprintf(out, "not checked  %s\n", u)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("the field names this command uses do not match the API.\n  %s",
+			strings.Join(problems, "\n  "))
+	}
+	return nil
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func main() {
 	repo := flag.String("repo", "", "owner/name, defaulting to the repository gh resolves here")
 	number := flag.Int("pr", 0, "the pull request to merge")
 	bodyText := flag.String("body", "", "the squash body, which this command appends the sign-off to")
 	bodyFile := flag.String("body-file", "", "read the squash body from a file")
 	dry := flag.Bool("dry-run", false, "check everything and print the merge command without running it")
+	fields := flag.Bool("check-fields", false, "ask the real API whether this command's field names exist, and merge nothing")
+	only := flag.Bool("confirm-only", false, "read an already merged pull request and prove its commit carries the sign-off")
 	attempts := flag.Int("confirm-attempts", 10, "how many times to ask whether the merge landed")
 	interval := flag.Duration("confirm-interval", 3*time.Second, "how long to wait between asks")
 	flag.Parse()
@@ -720,7 +998,42 @@ func main() {
 		*repo = strings.TrimSpace(string(out))
 	}
 
-	if err := merge(hub{runner: r, repo: *repo}, r, *number, *bodyText, *dry, *attempts, *interval, os.Stdout); err != nil {
+	h := hub{runner: r, repo: *repo}
+
+	// Two read only modes, both of which merge nothing.
+	//
+	// -check-fields exists because this command once asked gh for a field that
+	// does not exist and every test passed anyway. -confirm-only exists
+	// because the readback that proves a merge carried its sign-off used to
+	// run only after a merge, which meant it only ever ran under a fixture. It
+	// runs against any merged pull request now, so the code path that decides
+	// whether a commit is signed can be exercised on a real commit without
+	// merging anything to exercise it.
+	switch {
+	case *fields:
+		if err := checkFields(h, *number, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "\nprmerge: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("prmerge: every field name this command uses is one the API has\n")
+		return
+	case *only:
+		name, email, err := identity(r)
+		if err != nil {
+			fail("%v", err)
+		}
+		own, err := trailer(name, email)
+		if err != nil {
+			fail("%v", err)
+		}
+		if err := confirm(h, *number, own, *attempts, *interval, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "\nprmerge: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if err := merge(h, r, *number, *bodyText, *dry, *attempts, *interval, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "\nprmerge: %v\n", err)
 		os.Exit(1)
 	}
