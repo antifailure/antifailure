@@ -42,10 +42,25 @@ func RunnerHome() (string, error) {
 // caller got and it does not say whether node is missing, the dependencies are,
 // or there is no runner at all, which are three different things to do next.
 type RunnerCheckJSON struct {
-	Path     string                `json:"path"`
-	Node     string                `json:"node"`
-	Complete bool                  `json:"complete"`
-	Checks   []RunnerCheckItemJSON `json:"checks"`
+	Path string `json:"path"`
+	Node string `json:"node"`
+	// Verdict is ready, blocked or undetermined. Read this rather than
+	// Complete when the difference between "no" and "I could not tell"
+	// matters, which for anything deciding whether to start a run it does.
+	Verdict RunnerVerdict `json:"verdict"`
+	// Complete is true only for a ready verdict.
+	//
+	// It used to be true for an undetermined one as well, because it was
+	// computed as "nothing proved a blockage". A runner whose package.json
+	// could not be parsed was reported complete, and a script reading this
+	// field was told a tree nobody could inspect was fine.
+	Complete bool `json:"complete"`
+	// Unanswered names the deciding questions that went unanswered, empty
+	// unless Verdict is undetermined. A caller that has to act on this needs
+	// to know WHICH question, and re-deriving it from Checks means knowing
+	// which of them decide.
+	Unanswered []string              `json:"unanswered,omitempty"`
+	Checks     []RunnerCheckItemJSON `json:"checks"`
 }
 
 // RunnerCheckItemJSON is one question and its answer.
@@ -205,11 +220,79 @@ func lockState(locked bool) string {
 // under every failure, including a missing node, where installing again does
 // nothing.
 type runnerCheck struct {
-	label   string
-	symbol  string
-	detail  string
-	remedy  string
-	blocker bool // a false answer here means af test cannot run at all
+	label  string
+	symbol string
+	detail string
+	remedy string
+	// decides marks a question whose answer settles whether af test can run.
+	//
+	// It used to be spelled `blocker` and set only on the branches that had
+	// PROVED a failure, and the verdict was computed from it as "no blocker,
+	// therefore ready". That reads as an answer and is not one. A runner whose
+	// package.json cannot be parsed produces a dependencies line of `skip`, no
+	// blocker was set because nothing was proved, and `af runner check`
+	// reported complete about a tree it had just said it could not read.
+	//
+	// The field names the QUESTION rather than the answer, so the three cases
+	// stay apart: a deciding question answered ok is readiness, answered fail
+	// is a blockage, and not answered at all is neither. The browser is not a
+	// deciding question, because a missing browser degrades a workflow to
+	// unverified rather than stopping the run, so a browser nobody could look
+	// for does not make the whole verdict unknown.
+	decides bool
+}
+
+// RunnerVerdict is what af runner check concluded, in three states rather than
+// two.
+//
+// `complete: true` and `complete: false` cannot express "I could not tell",
+// and the boolean was being derived in a way that folded the third case into
+// the first. Two of the states below are the two the boolean had; the third is
+// the one it was quietly reporting as ready.
+type RunnerVerdict string
+
+const (
+	// VerdictReady means every deciding question was asked and answered ok.
+	VerdictReady RunnerVerdict = "ready"
+	// VerdictBlocked means one of them was answered, and the answer was no.
+	VerdictBlocked RunnerVerdict = "blocked"
+	// VerdictUndetermined means one of them could not be answered, so nothing
+	// is claimed either way. It beats nothing and loses to a proven blockage:
+	// a reader with a real failure in front of them should be told about the
+	// failure, not about the question that went unasked beside it.
+	VerdictUndetermined RunnerVerdict = "undetermined"
+)
+
+// runnerVerdict reduces the findings to one of three answers.
+//
+// Blocked wins over undetermined deliberately. Both mean "do not proceed", and
+// between them the actionable one is the proof.
+func runnerVerdict(results []runnerCheck) RunnerVerdict {
+	verdict := VerdictReady
+	for _, r := range results {
+		if !r.decides {
+			continue
+		}
+		switch r.symbol {
+		case SymbolFail:
+			return VerdictBlocked
+		case SymbolSkip:
+			verdict = VerdictUndetermined
+		}
+	}
+	return verdict
+}
+
+// unanswered names the deciding questions that could not be answered, so a
+// refusal can say what it did not look at rather than only that it gave up.
+func unanswered(results []runnerCheck) []string {
+	var out []string
+	for _, r := range results {
+		if r.decides && r.symbol == SymbolSkip {
+			out = append(out, r.label+": "+r.detail)
+		}
+	}
+	return out
 }
 
 // checkRunner answers what it can about an installed runner without executing
@@ -241,10 +324,10 @@ func checkRunner(ctx context.Context, target string) []runnerCheck {
 			label: "runner", symbol: SymbolFail,
 			detail:  "no runner at " + target,
 			remedy:  "Install it with: af runner install",
-			blocker: true,
+			decides: true,
 		})
 	}
-	out = append(out, runnerCheck{label: "runner", symbol: SymbolOK, detail: target})
+	out = append(out, runnerCheck{label: "runner", symbol: SymbolOK, detail: target, decides: true})
 	out = append(out, dependencyCheck(state))
 	out = append(out, nodeCheck(nodeVersion(ctx), state))
 	out = append(out, browserCheck())
@@ -337,7 +420,7 @@ func dependencyCheck(s runnerpath.State) runnerCheck {
 		return runnerCheck{
 			label: "dependencies", symbol: SymbolSkip,
 			detail:  "not checked: " + s.Undetermined,
-			blocker: false,
+			decides: true,
 		}
 	}
 	if s.NoModules && s.Declared > 0 {
@@ -345,7 +428,7 @@ func dependencyCheck(s runnerpath.State) runnerCheck {
 			label: "dependencies", symbol: SymbolFail,
 			detail:  "node_modules is missing",
 			remedy:  "Install them with: af runner install",
-			blocker: true,
+			decides: true,
 		}
 	}
 	if len(s.Missing) > 0 {
@@ -353,7 +436,7 @@ func dependencyCheck(s runnerpath.State) runnerCheck {
 			label: "dependencies", symbol: SymbolFail,
 			detail:  "missing " + strings.Join(s.Missing, ", "),
 			remedy:  "Install them with: af runner install",
-			blocker: true,
+			decides: true,
 		}
 	}
 	// Present is not the same as pinned, and this command exists because
@@ -367,12 +450,14 @@ func dependencyCheck(s runnerpath.State) runnerCheck {
 			label: "dependencies", symbol: SymbolWarn,
 			detail: fmt.Sprintf("%d declared, all present, and not pinned: no package-lock.json",
 				s.Declared),
-			remedy: "Reinstall from a release that ships the lockfile: af runner install",
+			remedy:  "Reinstall from a release that ships the lockfile: af runner install",
+			decides: true,
 		}
 	}
 	return runnerCheck{
 		label: "dependencies", symbol: SymbolOK,
-		detail: fmt.Sprintf("%d declared, all present, pinned by package-lock.json", s.Declared),
+		detail:  fmt.Sprintf("%d declared, all present, pinned by package-lock.json", s.Declared),
+		decides: true,
 	}
 }
 
@@ -389,7 +474,7 @@ func nodeCheck(found string, s runnerpath.State) runnerCheck {
 		return runnerCheck{
 			label: "node", symbol: SymbolFail, detail: detail,
 			remedy:  "Install node from https://nodejs.org, then run af runner check again.",
-			blocker: true,
+			decides: true,
 		}
 	}
 	// A requirement nobody could read is not a requirement that was met. The
@@ -398,11 +483,12 @@ func nodeCheck(found string, s runnerpath.State) runnerCheck {
 	if s.Undetermined != "" {
 		return runnerCheck{
 			label: "node", symbol: SymbolSkip,
-			detail: found + ", not checked against a requirement: " + s.Undetermined,
+			detail:  found + ", not checked against a requirement: " + s.Undetermined,
+			decides: true,
 		}
 	}
 	if want == "" {
-		return runnerCheck{label: "node", symbol: SymbolOK, detail: found}
+		return runnerCheck{label: "node", symbol: SymbolOK, detail: found, decides: true}
 	}
 	ok, comparable := nodeSatisfies(found, want)
 	if !comparable {
@@ -410,7 +496,8 @@ func nodeCheck(found string, s runnerpath.State) runnerCheck {
 		// would put this back where it started.
 		return runnerCheck{
 			label: "node", symbol: SymbolSkip,
-			detail: found + ", against an unreadable requirement of " + want,
+			detail:  found + ", against an unreadable requirement of " + want,
+			decides: true,
 		}
 	}
 	if !ok {
@@ -418,10 +505,14 @@ func nodeCheck(found string, s runnerpath.State) runnerCheck {
 			label: "node", symbol: SymbolFail,
 			detail:  found + ", and the runner needs " + want,
 			remedy:  "Upgrade node to " + want + ", then run af runner check again.",
-			blocker: true,
+			decides: true,
 		}
 	}
-	return runnerCheck{label: "node", symbol: SymbolOK, detail: found + ", which satisfies " + want}
+	return runnerCheck{
+		label: "node", symbol: SymbolOK,
+		detail:  found + ", which satisfies " + want,
+		decides: true,
+	}
 }
 
 // nodeSatisfies handles the one range shape the runner declares, ">=x.y[.z]".
@@ -539,7 +630,15 @@ is reported as not checked rather than as ok, because a check that answers ok
 about something it never examined is worse than one that admits the gap: this
 command used to report "ok runner" whenever src/main.ts existed, which was true
 of an install with no dependencies at all, and the real failure surfaced much
-later inside af test as a node error about a module it could not resolve.`),
+later inside af test as a node error about a module it could not resolve.
+
+The verdict has three values and not two, for the same reason. Ready means
+every question that decides whether af test can run was asked and answered ok,
+and exits 0. Blocked means one of them was answered no, and exits 3. Undetermined
+means one of them could not be answered at all, which is neither, and exits 9,
+the code reference/errors.md publishes as "nothing was measured".
+A runner whose package.json cannot be parsed used to land in the first of those
+and report itself complete.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target, passedOver, err := runnerToCheck(e.WorkDir)
@@ -548,12 +647,9 @@ later inside af test as a node error about a module it could not resolve.`),
 			}
 			results := append(passedOverChecks(passedOver), checkRunner(cmd.Context(), target)...)
 
-			ready := true
+			verdict := runnerVerdict(results)
 			node := ""
 			for _, r := range results {
-				if r.blocker && r.symbol != SymbolOK {
-					ready = false
-				}
 				if r.label == "node" && r.symbol != SymbolFail {
 					node = strings.SplitN(r.detail, ",", 2)[0]
 				}
@@ -568,15 +664,15 @@ later inside af test as a node error about a module it could not resolve.`),
 				// the code and prints nothing, which is the only thing that
 				// can follow a JSON document without corrupting it.
 				if err := e.Out.JSON(RunnerCheckJSON{
-					Path: target, Node: node, Complete: ready,
-					Checks: checksJSON(results),
+					Path: target, Node: node,
+					Verdict:    verdict,
+					Complete:   verdict == VerdictReady,
+					Unanswered: unanswered(results),
+					Checks:     checksJSON(results),
 				}); err != nil {
 					return err
 				}
-				if !ready {
-					return &silentError{code: aferrors.ExitConfiguration}
-				}
-				return nil
+				return runnerCheckExit(verdict)
 			}
 			for _, r := range results {
 				e.Out.Status(r.symbol, r.label, r.detail)
@@ -593,7 +689,20 @@ later inside af test as a node error about a module it could not resolve.`),
 					e.Out.Printf("  %s\n", r)
 				}
 			}
-			if !ready {
+			if verdict == VerdictUndetermined {
+				// No remedy, because there is nothing to repair: something
+				// this command has to read could not be read, and the reader
+				// is owed the question rather than a guess at the answer.
+				// Reaching for "af runner install" here would send somebody to
+				// reinstall over a tree whose manifest is the thing that is
+				// wrong with it.
+				e.Out.Println("")
+				e.Out.Printf("  Not ready and not broken: %s\n",
+					strings.Join(unanswered(results), "; "))
+				e.Out.Printf("  Nothing above proves this runner cannot run. Nothing proves it can.\n")
+				return runnerCheckExit(verdict)
+			}
+			if verdict == VerdictBlocked {
 				// The trailing hint used to print unconditionally, and the
 				// commonest failure of all is a machine with no runner, whose
 				// only remedy is that same sentence. So the first command a
@@ -605,10 +714,43 @@ later inside af test as a node error about a module it could not resolve.`),
 					e.Out.Println("")
 					e.Out.Hint("Install it with", "af runner install")
 				}
-				return &silentError{code: aferrors.ExitConfiguration}
 			}
-			return nil
+			return runnerCheckExit(verdict)
 		},
+	}
+}
+
+// runnerCheckExit maps the three verdicts onto three exit codes.
+//
+// A script asking "can I run af test here" gets a different answer from each,
+// which is the whole point of there being three. Undetermined used to exit 0
+// alongside `complete: true`, so a caller was told a tree nobody could inspect
+// was fine.
+//
+// Undetermined exits 9, which the published table in reference/errors.md calls
+// "Nothing was measured. No workflow reached a verdict, or a workload did not
+// finish". That is this case exactly: nothing about this runner was concluded.
+// af ci already lands there through AF-AGT-007 on the same reasoning, that a
+// run in which every workflow was blocked "has not declined to blame the
+// application; it has not looked at it, and exiting zero tells the pipeline
+// that it did".
+//
+// READ THE CODE OFF THE CATALOG AND NOT OFF THE CONSTANT'S NAME. 9 is spelled
+// ExitInterruptedClean in errors.go and nothing returns it for an interrupt: a
+// second interrupt exits 10, and the only entries carrying 9 are AF-AGT-007
+// and AF-WLD-014. tools/errgen carries that correction in a comment, because
+// the page it generates once published a sentence describing something the
+// binary never does. ExitVerification, 7, was the first choice here and is
+// wrong for the same reason in reverse: its published meaning is
+// "Verification failed", which is an answer, and this is the absence of one.
+func runnerCheckExit(v RunnerVerdict) error {
+	switch v {
+	case VerdictBlocked:
+		return &silentError{code: aferrors.ExitConfiguration}
+	case VerdictUndetermined:
+		return &silentError{code: aferrors.ExitInterruptedClean}
+	default:
+		return nil
 	}
 }
 

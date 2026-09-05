@@ -67,13 +67,18 @@ func TestATreeInstalledWithNoLockfileIsNotReportedAsPinned(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "package-lock.json")); err != nil {
 		t.Fatal(err)
 	}
-	deps := find(t, checkRunner(t.Context(), dir), "dependencies")
+	results := checkRunner(t.Context(), dir)
+	deps := find(t, results, "dependencies")
 
 	if deps.symbol != SymbolWarn {
 		t.Errorf("dependencies reported %q on an unpinned tree, want warn", deps.symbol)
 	}
-	if deps.blocker {
-		t.Error("an unpinned tree is treated as a blocker, but the runner does run")
+	// Asserted on the verdict rather than on a field, because the verdict is
+	// what a caller acts on and it used to be derived from the field in a way
+	// that lost a case. The runner DOES run on an unpinned tree; it just runs
+	// versions nobody chose.
+	if v := runnerVerdict(results); v != VerdictReady {
+		t.Errorf("an unpinned tree gave the verdict %q, want ready: the runner does run", v)
 	}
 	if !strings.Contains(deps.detail, "package-lock.json") {
 		t.Errorf("detail %q does not name what is missing", deps.detail)
@@ -116,8 +121,8 @@ func TestTheTreeInstallShLeftBehindDoesNotPass(t *testing.T) {
 	if deps.symbol != SymbolFail {
 		t.Errorf("dependencies reported %q on a tree with no node_modules, want fail", deps.symbol)
 	}
-	if !deps.blocker {
-		t.Error("missing dependencies is not treated as a blocker, so the command exits 0")
+	if v := runnerVerdict(results); v != VerdictBlocked {
+		t.Errorf("a tree with no node_modules gave the verdict %q, want blocked, so the command exits 0", v)
 	}
 	if !strings.Contains(deps.detail, "node_modules") {
 		t.Errorf("detail %q does not say what is missing", deps.detail)
@@ -172,28 +177,49 @@ func TestNoRunnerAtAllIsOneClearFailure(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("want one finding when there is no runner, got %d: %v", len(results), results)
 	}
-	if results[0].symbol != SymbolFail || !results[0].blocker {
-		t.Errorf("no runner reported %q, blocker=%v", results[0].symbol, results[0].blocker)
+	if results[0].symbol != SymbolFail || !results[0].decides {
+		t.Errorf("no runner reported %q, decides=%v", results[0].symbol, results[0].decides)
+	}
+	if v := runnerVerdict(results); v != VerdictBlocked {
+		t.Errorf("no runner at all gave the verdict %q, want blocked", v)
 	}
 }
 
 // A package.json that cannot be read is a question this did not answer, and
 // answering ok anyway is the defect being fixed rather than a smaller version.
+//
+// THE ASSERTION THIS TEST WAS MISSING, and it is why `complete: true` came
+// back about a tree nobody could inspect. It said an unanswered question must
+// not be reported as a proven failure, which is right and is kept below. It
+// said nothing about what the whole command then concluded, and the verdict
+// was computed as "nothing proved a blockage, therefore ready". The test was
+// asserting the right thing about the finding and had no opinion about the
+// answer, so the answer was free to be wrong.
 func TestAnUnreadableManifestIsReportedAsUnchecked(t *testing.T) {
 	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
 	dir := brokenTree(t)
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deps := find(t, checkRunner(t.Context(), dir), "dependencies")
+	results := checkRunner(t.Context(), dir)
+	deps := find(t, results, "dependencies")
 	if deps.symbol != SymbolSkip {
 		t.Errorf("reported %q for an unparseable package.json, want skip", deps.symbol)
 	}
-	if deps.blocker {
-		t.Error("an unanswered question must not be a blocker; it is not a known failure")
+	if deps.symbol == SymbolFail {
+		t.Error("an unanswered question was reported as a proven failure; it is not one")
+	}
+	if deps.remedy != "" {
+		t.Errorf("an unanswered question carries the remedy %q, which claims to fix something nobody diagnosed", deps.remedy)
 	}
 	if !strings.Contains(deps.detail, "not checked") {
 		t.Errorf("detail %q does not say the question went unanswered", deps.detail)
+	}
+	if v := runnerVerdict(results); v != VerdictUndetermined {
+		t.Errorf("a runner whose manifest could not be read gave the verdict %q, want undetermined", v)
+	}
+	if got := unanswered(results); len(got) == 0 {
+		t.Error("the verdict is undetermined and nothing names the question that went unanswered")
 	}
 }
 
@@ -274,8 +300,8 @@ func TestAMissingBrowserWarnsWithoutBlocking(t *testing.T) {
 	if got.symbol != SymbolWarn {
 		t.Errorf("reported %q for a missing browser, want warn", got.symbol)
 	}
-	if got.blocker {
-		t.Error("a missing browser blocks the run, which is stricter than af test is")
+	if got.decides {
+		t.Error("the browser is treated as deciding whether af test can run, which is stricter than af test is")
 	}
 	if !strings.Contains(got.remedy, "af runner install") {
 		t.Errorf("remedy %q does not say what to do", got.remedy)
