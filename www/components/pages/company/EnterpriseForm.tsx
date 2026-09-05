@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
-import { CONTROL_PLANE_URL } from "@/lib/site";
+import { controlPlaneUrl } from "@/lib/control-plane-routes";
 import { leadSubmitted } from "@/lib/analytics";
 
 /**
@@ -62,7 +62,7 @@ export function EnterpriseForm() {
 
     let response: Response;
     try {
-      response = await fetch(`${CONTROL_PLANE_URL}/v1/leads`, {
+      response = await fetch(controlPlaneUrl("leads.create"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

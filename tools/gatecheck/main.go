@@ -557,6 +557,18 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// is the moment a lapsed certificate is worth knowing about. Run it by
 		// hand with `just check-tls`.
 		"check-tls": true,
+		// The deployed route contract. The same shape as check-tls and out for
+		// the same reason: its answer is not a function of the tree. It asks
+		// the control plane that is running right now whether it serves the
+		// routes the marketing site calls, so the same commit is green today
+		// and red the moment the site publishes ahead of a control plane that
+		// has not been promoted, which is the failure it exists for. It needs
+		// the network, which `just gate` must not, and it runs in deploy.yml
+		// immediately before the publish, which is the moment the answer can
+		// still stop something. What IS a function of the tree is that the
+		// inventory it reads is complete and names routes this repository
+		// serves, and `just routecheck` covers that inside `gate`.
+		"routecheck-deployed": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
