@@ -14,6 +14,243 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.2.0
+
+Merging deploys staging. Only a tag deploys production, so everything below has
+been on `main` for days and none of it exists for anybody outside this
+repository until this tag is pushed. The careers page is the clearest case and
+it is why this release was cut when it was. The page is served by the website,
+which publishes on every merge to `main`; the form on it posts to
+`/v1/applications` on the control plane, which does not. Somebody filling that
+form in was told the server could not be reached, and the server was answering
+correctly: the route it was asked for did not exist in the build it was running.
+
+**An agent in a browser can reach this product.** `af mcp` served the rehearsal
+tools over standard input and output to a process the client started, which
+covers every coding agent and covers neither claude.ai nor chatgpt.com, because
+a web page cannot start a process on somebody's laptop. There is now an HTTPS
+endpoint speaking Streamable HTTP and authorized by OAuth, with dynamic client
+registration, PKCE, a consent screen that names the requesting client, its
+permissions, its registered return address and the lifetime of the access
+before anybody approves anything, and an operator page that lists every
+credential the registration produced and can revoke one through the existing
+audited action. The access token is a fourth kind on the token table this
+control plane already had rather than a fourth table, so it inherits hashing,
+expiry and revocation that were already tested, and the audience check is a
+`WHERE` clause in both directions: an `af login` token replayed at `/mcp` is
+refused, and an MCP token replayed at `/v1/whoami` is refused.
+
+**`af update`, because the command line knew it was out of date and could only
+tell you to go and find the fix.** Upgrading meant returning to the website and
+running the install script by hand, landing on whatever version the page
+happened to serve. `af update` reads the published release, checks the archive
+against the SHA256 in `checksums.txt` before unpacking anything, unpacks beside
+the binary, and replaces the binary last by a rename, so a failure at any
+earlier step leaves the installation that was already working. It refuses a
+package managed installation, an enterprise binary and a downgrade rather than
+guessing. `af doctor` now reports whether this binary is current and whether
+the project's manifest is valid, and it no longer signs off with "This machine
+can run Antifailure" while carrying a check that has just said it could not
+tell.
+
+**The hosted control plane can take payment, and pushing this tag is not what
+turns it on.** The checkout and webhook routes that answered 503 are wired, the
+price is set in `production.tfvars`, and the two Stripe credentials are
+addressed by versionless Key Vault reference and resolved by the application's
+identity, so no Terraform plan ever reads either value. What enables billing is
+an apply with both secrets already in the vault, which is a deliberate act by a
+person and not something a tag performs. Team is a flat price for the
+organization rather than per seat, which is why checkout sends a quantity of
+exactly one. `hosted_required_plan` stays empty on purpose: turning payment on
+so somebody can buy is a different act from requiring everybody already here to
+buy, and the second one locks out every organization on the plane the moment it
+applies.
+
+**And another run of defects that every instrument was green about.** A
+manifest could enable load and exploration while the pull request check skipped
+both, and the report presented that absence as a clean result rather than as
+something it had not looked at. The hosted check ignored policy findings
+whenever the browser workflows passed. The console could show a workflow as
+passed after the engine had already marked it unverified for using a response a
+model invented. An installation whose analytics had stopped said exactly what
+an installation that never started says, and only one of those is a fault. Two
+billing decoders read Stripe field paths that Stripe had moved a version
+earlier, coerced the missing field to null, and wrote rows that looked
+complete. In each case something was checking, and it was answering a nearby
+question.
+
+### What moves when this tag is pushed
+
+The tag deploys the control plane image and applies the migrations production
+has not seen, in the bootstrap job, before any traffic moves. Three are new
+since v1.1.1 and all three are additive: `0037` retains an environment's
+recorded consumption through cleanup, `0038` adds the two tables and the token
+kind the MCP endpoint needs, and `0039` adds the private application queue
+behind the careers form. Nothing in them drops a column, drops a table, renames
+anything, or makes an existing column NOT NULL, which is the property that lets
+the revision currently serving keep running against the new schema if traffic
+has to go back to it. Migrations are not rolled back; traffic is.
+
+It also publishes the binary that the install script hands to a stranger, and
+the installer follows `releases/latest`, so the download changes the moment the
+release is created.
+
+The two Terraform `image_tag` defaults keep naming v1.1.1 until this tag has
+published. They are read by an apply from `main` with no `ignore_changes`, so
+naming an unpublished tag produces a failed apply on the stack that runs the
+product rather than a stale deployment. They move in their own commit
+afterwards.
+
+### Behaviour you may depend on that changed
+
+- **`af init` no longer treats a Dockerfile as a service without runtime
+  evidence.** An image used only to execute isolated snippets was being
+  detected as a web server, and a repository's Alembic migration was assigned
+  to it even though the image contained neither Alembic nor the schema. A
+  framework or a Compose command supplies that evidence. A migration command
+  outside a unique service directory now requires an explicit image owner, and
+  an unattended run refuses to guess rather than choosing wrongly and reporting
+  success.
+- **Enabled load and exploration goals now run during pull request checks.** A
+  manifest could turn either on while CI skipped it. Load now sends a bounded
+  read only smoke to the literal safe routes when no traffic source exists, and
+  reports the request counts; an incomplete load experiment is inconclusive
+  rather than a pass. If your manifest enables either, your checks now do work
+  they were silently skipping.
+- **A failing policy finding fails the hosted pull request check.** It was
+  ignored whenever the browser workflows passed. A check that was green may now
+  be red, and that is the defect being fixed rather than a new one.
+- **Checkout sends a quantity of exactly one.** The old request omitted
+  quantity, and its test required that omission. An older client sending a seat
+  count no longer multiplies the price by the number of members.
+- **Removing an environment or a repository no longer erases its recorded
+  consumption.** Usage retains each environment's interval through cleanup, so
+  operator analytics and the rolling cost cap survive a teardown. Deleting an
+  organization still erases its history, and history already deleted cannot be
+  recovered.
+- **`af doctor` fails for an outdated stable release**, and reports unknown
+  rather than current for a development build, for a version newer than
+  anything published, and for a lookup that could not complete. A version check
+  that cannot reach the network and answers "current" is worse than no check.
+- **`just merge` performs the merge now.** `gh pr merge --squash --body ""`
+  creates a commit with no `Signed-off-by` trailer, which fails a required
+  context on `main`, which makes the deploy workflow refuse. Six merged pull
+  requests sat undeployed behind one missing line. No hook can reach this,
+  because a squash commit is created on GitHub's side.
+
+<!-- relnotes:omit -->
+
+### Added
+
+- An MCP endpoint a browser based client can connect to, with dynamic client
+  registration, PKCE, and hosted tools that use the same tenant permissions and
+  execution paths as the console (#234).
+- The MCP consent screen shows the requesting client, its permissions, its
+  registered return address and the access lifetime before asking for approval.
+  Signing in returns to the request without approving it, declining grants no
+  access, and an incomplete or mismatched request cannot be approved (#234).
+- `af update`, which installs the latest release rather than telling you how
+  to. It verifies the archive before unpacking, replaces the binary last by a
+  rename, refuses a package managed installation, an enterprise binary and a
+  downgrade, and finishes an interrupted update on the next run. Asking for
+  `--check` reports the latest release and changes no file (#241).
+- Founding engineering and growth roles have a careers page with compensation
+  stated upfront, a private application form, and an operator review queue.
+  Applications expire after 180 days through maintenance (#238).
+- The hosted control plane can take payment. `stripe_price_team` turns on the
+  two Key Vault secret references, the three environment variables the process
+  reads, and the checkout and webhook routes that were answering 503. There is
+  deliberately no enterprise price: checkout refuses that plan by name rather
+  than reaching Stripe with an empty identifier (#239).
+- The runbook for turning payment on, in the order that works, and a test that
+  walks one organization through the whole path rather than each hop of it: a
+  refused fourth environment, checkout, a delivery signed over raw bytes, the
+  plan, the subscription row, the same request now allowed, and what the
+  billing screen shows a signed in browser (#244).
+
+### Fixed
+
+- The billing decoders read two Stripe field paths that Stripe had removed. A
+  webhook is delivered at the version its endpoint was created with, and no
+  version older than Basil is on offer when a destination is created, so every
+  delivered event arrived in a shape the decoders read one version too early.
+  Neither failure threw: both coerced the missing field to null and wrote a row
+  that looked complete, so a cancelling customer lost the entitlement window
+  they had paid for and every invoice lost its link to its subscription (#246).
+- Billing could remove a paid plan when a newer canceled subscription arrived,
+  choose a plan by webhook arrival time, or miss a payment event while its
+  customer was being attached (#232).
+- Checkout sent no quantity for a licensed recurring price, and its test
+  required that omission (#227).
+- Enabling Stripe made a production Terraform plan read the payment
+  credentials. It constructs Key Vault references instead and lets the
+  application's identity resolve them at deployment, so the planning identity
+  keeps its existing permissions (#227).
+- Enabled load and exploration goals never ran during pull request checks, and
+  their absence was reported as a clean result. Explicit safe pages filtered
+  away the only default route. Exploration only runs no longer claim to be
+  using a model merely because a model key is configured, and one unreadable
+  exploration result no longer discards the evidence from the others (#243).
+- The hosted pull request check ignored policy findings whenever the browser
+  workflows passed (#243).
+- The console could show a workflow as passed after the engine had marked it
+  unverified for using a response a model invented (#228).
+- An installation that recorded analytics and then stopped said exactly what an
+  installation that never recorded says. The absent variable cannot detect its
+  own absence, so the question is asked of the database instead, which is the
+  one party a rollback does not move (#237).
+- Analytics could omit midnight events and assign funnels to the wrong week
+  when PostgreSQL used a local timezone (#232).
+- Removing an environment or a repository erased its consumption from operator
+  analytics and could reset the rolling cost cap (#229).
+- An expiry sweep removed its target and reported lifecycle events under the
+  checkout's environment name (#233).
+- An image used only to execute isolated snippets was detected as a web server,
+  and a repository's Alembic migration was assigned to it. Initialization now
+  requires runtime evidence before treating a Dockerfile as a service, and a
+  migration command outside a unique service directory requires an explicit
+  image owner (#224).
+- A successful HTTP response with a missing tRPC result left console cards
+  loading forever (#226).
+- The console's first result guide stopped at commands that prepare a manifest
+  and inspect the machine, without ever executing a test (#226).
+- The operator MCP page did not show registered clients or issued credentials,
+  and presented local checkout sessions as hosted measurements (#234).
+- The first operator required a hand built container job and a database URL on
+  the command line. `just operator-init production` opens secure interactive
+  setup in the running deployment, using its existing credential (#231).
+- The operator sidebar and mobile menu shared their section identifiers, which
+  made both navigations' accessible labels ambiguous, and success badges used a
+  translucent green fill that put text contrast below 4.5:1 (#225).
+- A squash merge made without a sign off stopped deployments, and nothing could
+  have caught it before it landed. `just merge` performs the merge now (#235).
+- Continuous deployment left the scheduled maintenance job on the image from
+  the last Terraform apply, so production served v1.1.0 while maintenance still
+  ran v1.0.0. A revision whose private address cannot be read now refuses
+  promotion instead of skipping the candidate health check (#230).
+- The npm advisory gate discarded the reason an audit endpoint refused a
+  request, and a slow registry could exhaust the Security job without ever
+  writing a report (#221).
+- The self hosting guide explained the zero percent revision trap with the
+  wrong mechanism. Terraform does send a traffic block; `ignore_changes`
+  decides which one. The stored state file keeps the old revision suffix
+  indefinitely, so what is serving comes from Azure and not from `terraform
+  state show` (#236).
+- The Azure page told an operator to pass both Stripe credentials on the
+  command line, which the rotating secrets page forbids by name for every other
+  credential on this plane (#244).
+
+### Changed
+
+- The product and solutions pages draw the run they describe. Six figures and
+  the homepage's twin lifecycle were redrawn from the shared figure kit, each
+  carrying the caption it needs, so a number chosen for an illustration reads
+  as chosen and every figure that reads as a measurement names its source. Four
+  classes that set a property another class had already set were doing nothing,
+  and four figures were cut off at 320px rather than reflowed (#223).
+
+<!-- relnotes:end -->
+
 ## v1.1.1
 
 A patch release, cut for one reason: two fixes that only take effect once the
