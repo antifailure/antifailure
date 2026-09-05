@@ -17,6 +17,21 @@
 /** Whether the vendor receives data on every run, or only under a condition. */
 export type Engagement = "always" | "conditional";
 
+/**
+ * Which of the two things here engages the vendor.
+ *
+ * A FIELD RATHER THAN A SENTENCE, because the distinction is the one a security
+ * review is actually asking about and prose cannot be relied on to carry it.
+ * `product` is the hosted control plane and what runs a customer's checks;
+ * `website` is antifailure.dev, which a person reads. PostHog is engaged by the
+ * second and by nothing in the first, and the page groups on this so that
+ * cannot be lost by somebody inserting a row in the wrong place: without it,
+ * PostHog sorted into the conditional group and rendered under the heading
+ * "Model providers receive nothing unless you give us a key", which is a
+ * sentence about a different thing entirely.
+ */
+export type Scope = "product" | "website";
+
 export type Subprocessor = {
   /** The contracting party, as a security review expects to read it. */
   name: string;
@@ -29,6 +44,8 @@ export type Subprocessor = {
   /** Where the processing happens. */
   location: string;
   engagement: Engagement;
+  /** Whether the product engages this vendor or the marketing site does. */
+  scope: Scope;
   /** For a conditional vendor, exactly what turns it on. */
   condition?: string;
   /** The code that proves the row, so it can be re-checked rather than trusted. */
@@ -38,6 +55,7 @@ export type Subprocessor = {
 export const SUBPROCESSORS: Subprocessor[] = [
   {
     name: "Microsoft Corporation",
+    scope: "product",
     service:
       "Azure Container Apps, Azure Database for PostgreSQL, Azure Key Vault, Azure Blob Storage, Azure Table Storage, Azure Log Analytics, Azure Static Web Apps",
     purpose:
@@ -50,6 +68,7 @@ export const SUBPROCESSORS: Subprocessor[] = [
   },
   {
     name: "GitHub, Inc.",
+    scope: "product",
     service: "GitHub OAuth, GitHub Apps, GitHub Container Registry",
     purpose:
       "Signs people in, reads the repository and membership metadata an organization grants, and stores the control plane's container image.",
@@ -59,7 +78,22 @@ export const SUBPROCESSORS: Subprocessor[] = [
     evidence: "web/apps/api/src/auth/github.ts, web/apps/api/src/github/app.ts",
   },
   {
+    name: "PostHog, Inc.",
+    scope: "website",
+    service: "PostHog Cloud US: product analytics, autocapture and session replay",
+    purpose:
+      "Answers where somebody gave up on the marketing website. The first party counter beside it cannot: it sends no address, no element and no ordering, by design, so it can say how many people reached the pricing page and never why they left it.",
+    data: "The marketing website only. The page address including its query string, the referrer, one page view per route, autocaptured clicks and form submissions carrying the element's tag, classes, ids and visible label text, the browser, operating system, device type and screen size, the country PostHog derives from the connecting address at ingest, and a session recording of the pages visited. A recording holds the page structure and styling, cursor movement, clicks and scrolls. EVERY INPUT VALUE IS MASKED IN THE BROWSER BEFORE IT IS SENT, so a recording of the careers form or the enterprise contact form shows fields filling up with asterisks and never the name, work email, company, links or message typed into them. No cookie is set, and the identifier lives in sessionStorage for one tab, so nothing here joins two visits. No account, organization, repository, policy, run, audit entry or production data reaches PostHog: this row is about the website and not about the product.",
+    location:
+      "United States. The browser sends to this site's own origin and a reverse proxy forwards it, so a reader's browser opens no connection to a posthog.com address. Where that proxy is not deployed the requests fail and are dropped; nothing falls back to sending them to PostHog directly.",
+    engagement: "conditional",
+    condition:
+      "Only for a person browsing the marketing website, and only where that person is being measured. Global Privacy Control, Do Not Track, the switch on the privacy page and a browser that reports itself as automated each stop it, and each of them stops it BEFORE the library is fetched rather than after: a reader who has said no causes no request for PostHog's code at all, so there is no recorder to have read the page. Nothing in the hosted control plane, the engine, the runner or the command line calls PostHog.",
+    evidence: "www/lib/posthog.ts, www/components/ProductAnalytics.tsx, www/lib/beacon.ts",
+  },
+  {
     name: "Anthropic PBC",
+    scope: "product",
     service: "The Claude API",
     purpose:
       "Model-driven planning: deciding the next action an exploratory user takes, and synthesizing a response for a third-party API that is not reachable from the twin.",
@@ -72,6 +106,7 @@ export const SUBPROCESSORS: Subprocessor[] = [
   },
   {
     name: "OpenAI",
+    scope: "product",
     service: "The OpenAI chat completions API",
     purpose: "The same model-driven planning, when an organization chooses OpenAI instead.",
     data: "The same categories as the Anthropic entry above.",
@@ -115,8 +150,8 @@ export const NOT_ENGAGED: [string, string][] = [
     "Two different things share this heading and only one of them is conditional. A customer application's own outbound message, to Resend, SendGrid, Postmark, Amazon SES, Twilio or Slack, is intercepted by the side-effect firewall, recorded locally and never delivered, and that is unconditional. Separately, the control plane itself can send one kind of mail, a sign-in link, through Resend, and that path is active when AF_RESEND_API_KEY, AF_MAIL_FROM and a public URL are all set. Where they are, Resend receives the address the link is sent to and is a subprocessor for that deployment; setting some of the three and not all of them stops the process at startup rather than half enabling it. This entry used to say nothing in the product could send a message, which described the firewall correctly and the control plane's own mail not at all.",
   ],
   [
-    "Analytics and error tracking",
-    "No third party sees anything. There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin. What it does do is count page views itself: a channel from a closed list, a page shape from a closed list, and a random identifier that lives in sessionStorage for one browsing session and cannot join two visits. That session ends after thirty minutes of inactivity and after a day whatever happens, so the identifier is shorter lived than the tab. The referrer, the URL and your browser identification are turned into those bounded values in your browser and never sent. There is no cookie. The counter turns itself off if you have set Global Privacy Control or Do Not Track, and one value does outlive the tab: if you switch measurement off, a single flag saying so is kept in this browser and is never sent anywhere. The control plane exposes metrics for an operator to scrape and exports nothing.",
+    "Error tracking, and the rest of the analytics question",
+    "PostHog IS engaged now, for product analytics and session replay on the marketing website, and it has its own row on the list above rather than a softened sentence here. THIS ENTRY USED TO SAY THERE WAS NO POSTHOG. That was true when it was written and stopped being true the day the marketing site started sending, which is the same failure the payment and email entries above record about themselves. What is still true is everything the row above is careful to exclude: PostHog is a vendor for the WEBSITE, and no account, organization, repository, policy, run, audit entry or piece of production data reaches it. There is no Sentry, no Datadog, no Bugsnag, no Google Analytics, no Mixpanel, no Amplitude and no Plausible in anything this repository wrote, and there is no crash reporter in the engine, the runner, the command line or the control plane, none of which calls any analytics vendor at all. The first party counter described on the privacy page still runs beside PostHog and still sends what it always sent: a channel and a page shape from closed lists, and a random identifier that lives in sessionStorage for one browsing session. The control plane exposes metrics for an operator to scrape and exports nothing. TWO SCRIPTS DO COME FROM ANOTHER ORIGIN, and this entry used to say none did: PostHog's session replay recorder, and the cal.com booking widget on the contact page, which loads app.cal.com/embed/embed.js and an iframe behind it when a reader scrolls near it. That iframe reports its own errors to a Sentry host, which is cal.com's document doing cal.com's error tracking on cal.com's origin rather than anything here, and it is named because a reader's browser opens the connection either way.",
   ],
   [
     "Other model providers",
@@ -129,7 +164,7 @@ export const NOT_ENGAGED: [string, string][] = [
 ];
 
 /** When the list above was last checked against the code. */
-export const SUBPROCESSORS_REVIEWED = "30 August 2026";
+export const SUBPROCESSORS_REVIEWED = "5 September 2026";
 
 /**
  * Every change to the list, newest first.
@@ -139,6 +174,11 @@ export const SUBPROCESSORS_REVIEWED = "30 August 2026";
  * adding a row above, not a separate courtesy.
  */
 export const SUBPROCESSOR_CHANGES: { date: string; change: string }[] = [
+  {
+    date: "5 September 2026",
+    change:
+      "PostHog, Inc. added, for product analytics and session replay on the marketing website only. Named rather than quietly added: the entry below the list said in as many words that there was no PostHog, and a company that sells boundary discipline does not get to soften that by deleting the sentence. Every input value is masked before it leaves the browser, no cookie is set, and a reader who has asked not to be tracked never fetches the library at all.",
+  },
   {
     date: "30 August 2026",
     change:

@@ -5,6 +5,7 @@ import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { SiteJsonLd } from "@/lib/jsonld";
 import { PageViews } from "@/components/PageViews";
+import { ProductAnalytics } from "@/components/ProductAnalytics";
 import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL, pageTitle } from "@/lib/site";
 
 const inter = Inter({
@@ -99,10 +100,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         {children}
-        {/* One page view per route, and nothing else. No cookie, no vendor, no
-            script from another origin. www/lib/analytics.ts is the whole of
-            what is sent and the whole of what is not. */}
+        {/* One page view per route, and nothing else. No cookie and no vendor:
+            www/lib/beacon.ts is the whole of what this one sends and the whole
+            of what it does not. */}
         <PageViews />
+        {/* The other half, and the one with a vendor in it. Autocapture and
+            session replay through PostHog, behind the same switch and the same
+            browser signals as the beacon above, with every input value masked.
+            www/lib/posthog.ts lists what a recording holds and what it never
+            sees. It fetches nothing at all for a reader who has opted out. */}
+        <ProductAnalytics />
       </body>
     </html>
   );

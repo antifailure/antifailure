@@ -808,3 +808,116 @@ describe('what the beacon puts on the wire', () => {
     assert.equal(events()[0]!.payload.source, 'referral')
   })
 })
+
+describe('the decision is announced, so a second producer cannot be left running', () => {
+  beforeEach(() => install())
+
+  // WHY THIS EXISTS. PostHog is a second producer, it holds a session recorder,
+  // and it is not in this file's queue. The switch on the privacy page has to
+  // stop it at the same instant it stops the beacon, and the only way that is
+  // true without this file importing a vendor is for the decision to be
+  // announced. Every ordering below is one this subscription actually meets.
+
+  it('tells a subscriber when the reader switches measurement off', async () => {
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    beacon.setMeasurement(false)
+    assert.deepEqual(seen, [false])
+  })
+
+  it('tells a subscriber when the reader switches it back on', async () => {
+    const beacon = await loadBeacon()
+    beacon.setMeasurement(false)
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    beacon.setMeasurement(true)
+    assert.deepEqual(seen, [true])
+  })
+
+  it('announces the recomputed answer, not the argument, so Global Privacy Control still wins', async () => {
+    // THE ORDERING THAT MATTERS MOST. A reader whose browser sends GPC opens
+    // the privacy page and presses the switch. setMeasurement is called with
+    // true, and the honest answer is still false, because the browser's signal
+    // outranks the site's switch. A subscriber told `true` here would start a
+    // session recorder for a reader who asked not to be tracked, and the
+    // recorder would have captured the page before anything could stop it.
+    install({ gpc: true })
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    beacon.setMeasurement(true)
+    assert.deepEqual(seen, [false])
+  })
+
+  it('does not call a subscriber on registration', async () => {
+    // Whoever subscribes has just read the current answer and acted on it.
+    // Calling them again with the same answer is how a recorder starts twice.
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    assert.deepEqual(seen, [])
+  })
+
+  it('stops telling a subscriber that unsubscribed', async () => {
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    const stop = beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    stop()
+    beacon.setMeasurement(false)
+    assert.deepEqual(seen, [])
+  })
+
+  it('lets no subscriber stop the next one, or the opt out itself', async () => {
+    // A subscriber is a vendor library. One that throws must not leave the
+    // second producer running, and must not throw out of the click handler on
+    // the privacy page, where it would read as an opt out that failed.
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged(() => {
+      throw new Error('a vendor threw')
+    })
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    beacon.setMeasurement(false)
+    assert.deepEqual(seen, [false])
+    assert.equal(beacon.measurementStatus().measuring, false)
+  })
+})
+
+describe('the query switch and the announcement do not eat each other', () => {
+  // THE CYCLE. measurementAllowed runs applyQuerySwitch, applyQuerySwitch calls
+  // setMeasurement, and setMeasurement announces the answer measurementAllowed
+  // gives. Unguarded that is unbounded recursion, and the try around the URL
+  // parse in applyQuerySwitch swallows the overflow, so the page carries on
+  // looking exactly right while every load on an opt out link burns the stack.
+
+  it('a visit on an opt out link terminates, and announces once', async () => {
+    install({ href: 'https://antifailure.dev/pricing?af-analytics=off' })
+    const beacon = await loadBeacon()
+    const seen: boolean[] = []
+    beacon.onMeasurementChanged((measuring) => seen.push(measuring))
+    // The first read is what runs the query switch. Unguarded this throws a
+    // RangeError out of measurementStatus, or returns after thousands of frames.
+    const status = beacon.measurementStatus()
+    assert.deepEqual(status, { measuring: false, off: 'reader' })
+    assert.deepEqual(seen, [false], 'the announcement did not happen exactly once')
+  })
+
+  it('a visit on an opt in link terminates too', async () => {
+    install({ href: 'https://antifailure.dev/pricing?af-analytics=on' })
+    const beacon = await loadBeacon()
+    assert.deepEqual(beacon.measurementStatus(), { measuring: true, off: null })
+  })
+
+  it('still sends after an opt out link is followed by an ordinary page', async () => {
+    // The negative control on the guard: it must not leave the flag stuck.
+    install({ href: 'https://antifailure.dev/pricing?af-analytics=off' })
+    const beacon = await loadBeacon()
+    beacon.pageViewed('pricing')
+    advance(10_000)
+    await settle()
+    assert.equal(events().length, 0)
+    beacon.setMeasurement(true)
+    assert.equal(beacon.measurementStatus().measuring, false, 'the link is still in the URL')
+  })
+})

@@ -34,31 +34,31 @@ import {
 /** Named separately from the render so an unhandled state cannot compile. */
 const REASONS: Record<MeasurementOff, { state: string; detail: string }> = {
   reader: {
-    state: "Not counting this visit.",
+    state: "Not counting or recording this visit.",
     detail:
-      "You switched measurement off in this browser. The only thing kept is the flag that says so, it stays on this device, and it is never sent anywhere.",
+      "You switched measurement off in this browser. What is kept is the flag that says so, and, if you switched off part way through a visit, a second one PostHog keeps for the same reason. Both stay on this device and neither is ever sent anywhere. On a visit that starts this way PostHog’s code is not fetched at all.",
   },
   browser: {
-    state: "Not counting this visit.",
+    state: "Not counting or recording this visit.",
     detail:
-      "Your browser sends Global Privacy Control or Do Not Track, and this site honours it. That decision is the browser’s, so the switch cannot turn counting back on while it stands.",
+      "Your browser sends Global Privacy Control or Do Not Track, and this site honours it in both measurements. That decision is the browser’s, so the switch cannot turn counting back on while it stands, and PostHog’s code is never fetched, so nothing recorded this page before being told not to.",
   },
   automated: {
-    state: "Not counting this visit.",
+    state: "Not counting or recording this visit.",
     detail:
       "This browser reports itself as a crawler or an automated session. Those are left out of the numbers rather than counted as readers, which is why a bot cannot inflate them.",
   },
   build: {
-    state: "Not counting anybody.",
+    state: "Not counting or recording anybody.",
     detail:
-      "This build of the site has no measurement endpoint configured, so nothing here is counting, for anyone, however this switch is set.",
+      "This build of the site has no measurement endpoint configured, so nothing here is counting or recording, for anyone, however this switch is set.",
   },
 };
 
 const ON = {
-  state: "Counting this visit.",
+  state: "Counting and recording this visit.",
   detail:
-    "A page shape and a channel, both from closed lists, and an identifier that lives in this tab and expires after thirty minutes idle. No cookie, no referrer, no address, nothing that joins two visits. Switching it off stops this browser sending immediately, including anything captured and not yet sent.",
+    "Two measurements. The counter sends a page shape and a channel, both from closed lists, and nothing else. PostHog sends the page addresses, what you clicked, and a session recording, with every value you type masked in the page before it is sent. Neither sets a cookie and neither keeps an identifier past this tab. Switching it off stops both immediately, ends the recording, and throws away anything captured and not yet sent.",
 };
 
 const READING = {
@@ -98,7 +98,12 @@ export function MeasurementSwitch() {
           <div className="font-mono text-[11px] font-medium uppercase tracking-snug text-[#1A1A1A]">
             This browser
           </div>
-          <p className="mt-2 text-[17px] leading-snug tracking-extra-tight text-black max-md:text-[16px]">
+          {/* text-balance because these sentences got longer when PostHog was
+              added and the longest of them wraps at 390px. Balanced, it breaks
+              into two even lines; unbalanced, it left the word "it." alone on
+              the second line beside the switch, which reads as a layout fault
+              rather than as a sentence. */}
+          <p className="mt-2 text-pretty text-[17px] leading-snug tracking-extra-tight text-black max-md:text-balance max-md:text-[16px]">
             {words.state}
           </p>
         </div>

@@ -297,14 +297,53 @@ outbound request line and a bounded piece of its body.
 
 ## Telemetry, analytics and crash reporting
 
-There is none, and the sweep rather than the assurance is the evidence.
+There is none in the product, there is now PostHog on the marketing website, and
+the two are different claims about different code. This section used to make the
+first one and let a reader take it for the second.
 
-Searching the whole repository for PostHog, Sentry, Plausible, Google Analytics,
-Mixpanel, Amplitude, Datadog and Bugsnag returns test fixtures, an egress rule
-example, and a published vendor page saying they are absent. There is no client for
-any of them. The engine has no version check and no update ping: the only
-external address in the command line code is a control plane, and the only other
-addresses are documentation links printed inside error messages.
+**The product sends nothing, and the sweep rather than the assurance is the
+evidence.** Search the engine, the runner, the command line and the control
+plane for PostHog, Sentry, Plausible, Google Analytics, Mixpanel, Amplitude,
+Datadog and Bugsnag and what comes back is test fixtures and an egress rule
+example. There is no client for any of them. The engine has no version check and
+no update ping: the only external address in the command line code is a control
+plane, and the only other addresses are documentation links printed inside error
+messages. Nothing here reports a crash to anybody.
+
+The marketing site embeds one other third party and it is named for the same
+reason: the contact page loads cal.com's booking widget when a reader scrolls
+near it, and that iframe reports its own errors to a Sentry host. It is
+cal.com's document on cal.com's origin, not a client in this repository, and it
+is written down because a reader's browser opens the connection either way.
+
+**The marketing website at antifailure.dev does send, to PostHog Cloud US, for
+product analytics and session replay.** It is on the subprocessor list under
+PostHog, Inc. with the categories written out. What a session recording holds is
+the structure and styling of a page, cursor movement, clicks and scrolling, with
+every input value masked in the browser before it is sent, so the careers form
+and the enterprise contact form record fields filling up with asterisks and not
+the name, work email, company or message typed into them. No cookie is set and
+the identifier expires with the tab. Requests go to the site's own origin and a
+reverse proxy forwards them, so a reader's browser opens no connection to a
+posthog.com host. A reader whose browser sends Global Privacy Control or Do Not
+Track, or who has switched measurement off on the privacy page, never fetches
+PostHog's code at all: the refusal happens before the library is loaded rather
+than after, so there is no recorder that read the page and was then stopped.
+`www/lib/posthog.ts` is the whole of the configuration and states the same list.
+
+**Why that changes nothing about the boundary this page is about.** A person
+reading a web page is not a run. No account, organization, repository, policy,
+run, audit entry, check report, event stream or piece of a customer's production
+data reaches PostHog, because nothing that handles any of those calls it. The
+website and the product share a repository and a domain and nothing else, and
+every claim above about what never leaves your machine is a claim about the
+engine and the runner, neither of which has an analytics client to leave it
+with.
+
+`engine/internal/detect/thirdparty.go` lists PostHog's hosts, and that is
+unrelated and stays unrelated: it is this PRODUCT detecting third party
+analytics inside a CUSTOMER's application so the egress firewall can block it.
+It was correct before this change and it is correct after it.
 
 OpenTelemetry tracing is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` or its traces
 variant is set. `engine/internal/telemetry/otel.go` returns a no-op tracer

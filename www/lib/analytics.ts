@@ -21,6 +21,7 @@ export {
   ctaEngaged,
   leadSubmitted,
   measurementStatus,
+  onMeasurementChanged,
   pageViewed,
   retryDelay,
   routeIdFor,

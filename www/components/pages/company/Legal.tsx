@@ -203,28 +203,60 @@ export function PrivacyPage() {
       <PageSection tone="ruled">
         <PageHeading
           kicker="This site"
-          title="<strong>It counts page views itself,</strong> and it will stop if you say so."
+          title="<strong>It counts page views itself,</strong> PostHog watches the rest, and both stop if you say so."
         />
         <Prose className="mt-10">
           <p>
-            There is no Google Analytics here, no PostHog, no Sentry, and no script from any other
-            origin. What there is, is a counter this repository wrote, sending to this project&rsquo;s
-            own control plane. It exists so that the question &ldquo;does anybody read the docs&rdquo;
-            has an answer, and it is built to answer that question and no other.
+            There are two measurements on this site and one of them has a vendor in it. The first
+            is a counter this repository wrote, sending to this project&rsquo;s own control plane.
+            The second is PostHog, for autocapture and session replay, and it is here because the
+            first one cannot answer where somebody gave up: it sends no address, no element and no
+            ordering, deliberately. There is no Google Analytics, no Datadog, no Sentry and no
+            crash reporter in anything this repository wrote. Two scripts do come from somewhere
+            else and it is worth naming both: PostHog&rsquo;s session replay recorder, and the
+            booking widget on the contact page, which is cal.com&rsquo;s and which runs its own
+            error reporting to Sentry inside its own frame. That is their document doing their
+            thing on their origin, and it is named here because your browser makes the connection
+            and a page listing what it loads should not stop at the ones it likes.
           </p>
           <p>
-            Five things leave your browser: a page shape from a closed list, a channel from a closed
-            list, a random identifier for one browsing session, a timestamp, and a campaign tag when
-            you followed a link carrying one. The referrer and the URL are turned into those bounded
-            values <em>in your browser</em>, so the address you came from is never put on the
-            network at all. There is no cookie. The session identifier lives in{" "}
-            <code>sessionStorage</code>, ends after thirty minutes of inactivity and after a day
-            whatever happens, and nothing here can join two of your visits together.
+            Five things leave your browser for the counter: a page shape from a closed list, a
+            channel from a closed list, a random identifier for one browsing session, a timestamp,
+            and a campaign tag when you followed a link carrying one. The referrer and the URL are
+            turned into those bounded values <em>in your browser</em>, so the address you came from
+            is never put on the network at all.
           </p>
           <p>
-            Global Privacy Control and Do Not Track are both honoured without asking. The switch
-            below is for everybody else, and it takes effect on the page you are reading rather than
-            on the next one: anything captured and not yet sent is thrown away with it.
+            PostHog sees more, and this is the whole of it: the address of the page you are on
+            including its query string, the page you arrived from, each route you move to, the
+            clicks and form submissions you make along with the tag, classes and visible label of
+            what you clicked, your browser, operating system, device type and screen size, the
+            country PostHog works out from your connection, and a recording of the pages you
+            visit. A recording holds their structure and styling, your cursor, your clicks and
+            your scrolling.
+          </p>
+          <p>
+            <strong>Every value you type is masked before it leaves your browser.</strong> The
+            careers form and the contact form ask for a name, a work email, a company and a
+            paragraph in your own words, and a recording of either one shows the fields filling up
+            with asterisks and never what you wrote. It is not withheld on receipt and it is not
+            deleted afterwards: it is replaced in the page, so there is nothing in the recording
+            that could be unmasked later.
+          </p>
+          <p>
+            Neither of them sets a cookie, and neither keeps an identifier that outlives this tab,
+            so nothing here can join two of your visits. PostHog would do both by default, for a
+            year; it is configured here not to, and that choice is what keeps the sentence before
+            this one true. Its requests go to this site&rsquo;s own address and are forwarded from
+            there, so your browser opens no connection to a posthog.com host.
+          </p>
+          <p>
+            Global Privacy Control and Do Not Track are honoured by both, without asking. The
+            switch below is for everybody else, and it takes effect on the page you are reading
+            rather than on the next one: anything captured and not yet sent is thrown away with
+            it, and the recording ends. If you arrive with any of those already set, PostHog&rsquo;s
+            code is never fetched at all, so there is no recorder that read this page before
+            something told it not to.
           </p>
         </Prose>
         <MeasurementSwitch />
@@ -899,8 +931,16 @@ export function DpaPage() {
 }
 
 export function SubprocessorsPage() {
-  const always = SUBPROCESSORS.filter((s) => s.engagement === "always");
-  const conditional = SUBPROCESSORS.filter((s) => s.engagement === "conditional");
+  // THE SCOPE FILTER IS LOAD BEARING, not tidying. Before it, this page grouped
+  // on `engagement` alone, so PostHog, which is conditional, rendered under the
+  // heading "Model providers receive nothing unless you give us a key" and the
+  // paragraph under that heading saying "these two". A row inserted in the
+  // wrong place is not a thing to be careful about on a subprocessor page; it
+  // is a thing to make impossible, so the page reads the field.
+  const product = SUBPROCESSORS.filter((s) => s.scope === "product");
+  const always = product.filter((s) => s.engagement === "always");
+  const conditional = product.filter((s) => s.engagement === "conditional");
+  const website = SUBPROCESSORS.filter((s) => s.scope === "website");
 
   return (
     <PageShell>
@@ -957,6 +997,51 @@ export function SubprocessorsPage() {
           </p>
         </Prose>
         {conditional.map((vendor) => (
+          <div key={vendor.name} className="mt-14 max-md:mt-10">
+            <h3 className="mb-5 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[19px]">
+              {vendor.name}
+            </h3>
+            <SpecTable
+              rows={[
+                ["Services", vendor.service],
+                ["Purpose", vendor.purpose],
+                ["Data received", vendor.data],
+                ["Where", vendor.location],
+                ["Engaged when", vendor.condition ?? ""],
+                ["Established from", vendor.evidence],
+              ]}
+            />
+          </div>
+        ))}
+      </PageSection>
+      <PageSection>
+        <PageHeading
+          kicker="Engaged by this website, and by nothing in the product"
+          title="<strong>One vendor sees this website.</strong> It sees nothing a customer runs."
+        />
+        <Prose className="mt-10">
+          <p>
+            This site counts page views itself and always will, but a counter that sends no
+            address, no element and no ordering cannot say where somebody gave up on it. PostHog
+            answers that, with autocapture and session replay, for the pages you are reading right
+            now. It is listed separately from the two sections above because it is engaged by a
+            different thing: no account, organization, repository, policy, run, audit entry or
+            piece of your production data reaches it, because nothing that handles any of those
+            calls it.
+          </p>
+          <p>
+            Every value typed into a form is replaced in the browser before anything is sent, so a
+            recording of the careers form or the contact form holds fields filling up with
+            asterisks and not what was written in them. There is no cookie and no identifier that
+            outlives a tab. A reader whose browser sends Global Privacy Control or Do Not Track, or
+            who has switched measurement off on the{" "}
+            <Link prefetch={false} href="/privacy">
+              privacy page
+            </Link>
+            , never fetches PostHog&rsquo;s code at all.
+          </p>
+        </Prose>
+        {website.map((vendor) => (
           <div key={vendor.name} className="mt-14 max-md:mt-10">
             <h3 className="mb-5 text-[22px] leading-snug tracking-extra-tight text-black max-md:text-[19px]">
               {vendor.name}

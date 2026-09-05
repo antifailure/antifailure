@@ -347,6 +347,77 @@ export function setMeasurement(on: boolean): void {
   // and sending them because they were captured a moment before the reader
   // objected is the disclosure the control was pressed to prevent.
   if (!on) discardCapture();
+  // And everything that is not this file's queue is told, in the same call.
+  //
+  // WHY A LIST AND NOT A CALL. This file is the only place the decision is
+  // made, and it is imported by a plain test runner precisely because it pulls
+  // in no framework and no vendor. Calling posthog-js from here would end both
+  // of those properties. So the decision is announced and the vendor subscribes
+  // to it, which also means a producer added later cannot be the one somebody
+  // forgets to switch off: there is one announcement and every subscriber gets
+  // it, rather than one more line to remember at each new call site.
+  //
+  // The announced value is the RECOMPUTED one rather than the argument. Turning
+  // the switch on under Global Privacy Control does not start anything, because
+  // measurementAllowed still says no, and a subscriber told "on" in that case
+  // would start recording a reader whose browser has asked it not to.
+  //
+  // GUARDED, BECAUSE THERE IS EXACTLY ONE RE-ENTRANT PATH AND IT IS THIS ONE.
+  // measurementAllowed runs applyQuerySwitch, applyQuerySwitch calls this
+  // function, and this function asks measurementAllowed for the recomputed
+  // answer. A visit to ?af-analytics=off therefore recursed until the stack
+  // gave out, and it did so INVISIBLY: the only try in the loop is the one
+  // around the URL parse in applyQuerySwitch, which swallowed the overflow and
+  // let the page carry on looking correct. Found by reading the cycle rather
+  // than by a red test, because there is no red test to have.
+  if (announcing) return;
+  announcing = true;
+  try {
+    announceMeasurement(measurementAllowed());
+  } finally {
+    announcing = false;
+  }
+}
+
+/** True while the announcement above is being made, so the query switch cannot
+ *  re-enter it. See the comment at the call site for the cycle. */
+let announcing = false;
+
+/** Anything that has to start and stop with the reader's decision. */
+type MeasurementListener = (measuring: boolean) => void;
+
+const measurementListeners = new Set<MeasurementListener>();
+
+/**
+ * Subscribes to the decision above, and returns the way to stop.
+ *
+ * Exported for lib/posthog.ts. A subscriber is called on every change and is
+ * not called on registration: whoever registers has just read the current
+ * answer, and calling them again with it is how a recorder gets started twice.
+ */
+export function onMeasurementChanged(listener: MeasurementListener): () => void {
+  measurementListeners.add(listener);
+  return () => {
+    measurementListeners.delete(listener);
+  };
+}
+
+/**
+ * Tells every subscriber, and lets none of them stop the others.
+ *
+ * A subscriber that throws is a vendor library that threw. It must not prevent
+ * the next subscriber from being switched off, and it must not propagate out of
+ * setMeasurement into the click handler on the privacy page, because a control
+ * that throws where the reader can see it reads as an opt out that failed.
+ */
+function announceMeasurement(measuring: boolean): void {
+  for (const listener of measurementListeners) {
+    try {
+      listener(measuring);
+    } catch {
+      // See above. There is no recovery and nothing to report to a reader.
+    }
+  }
 }
 
 /** Set by the query switch when storage refused the write, so an opt out is at
