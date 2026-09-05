@@ -827,7 +827,7 @@ func TestCompareReleases_TheComparisonNamesWhatItDeclinedToLookAt(t *testing.T) 
 	t.Parallel()
 	// An oracle that silently skips reads exactly like one that found nothing.
 	res := oracleResultWith(nil)
-	res.Result.Ignored = oracle.Ignored{
+	res.Ignored = oracle.Ignored{
 		Headers: []string{"date", "etag"}, FloatTolerance: 0.0001,
 	}
 
