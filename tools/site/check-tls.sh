@@ -40,7 +40,18 @@
 
 set -uo pipefail
 
-hosts=${AF_TLS_HOSTS:-"antifailure.dev www.antifailure.dev"}
+# The hostnames come from tools/site/hostnames.txt rather than from a default
+# written here. Two lists of hostnames in two files is how one of them goes
+# stale in silence, and that is not hypothetical: this script named www and
+# site_origin in production.tfvars did not, so www had a healthy certificate and
+# a control plane that refused every call the page made. `just check-origins`
+# is what keeps the file honest against the domains actually bound in Azure.
+here=$(cd "$(dirname "$0")" && pwd)
+hosts=${AF_TLS_HOSTS:-$(sed 's/#.*//' "$here/hostnames.txt" | tr -s '[:space:]' ' ')}
+if [ -z "${hosts// /}" ]; then
+  printf 'no hostnames to check: %s/hostnames.txt is empty\n' "$here" >&2
+  exit 1
+fi
 
 # Azure renews a managed certificate well before expiry, so a certificate still
 # inside this window is not yet an outage. It is the signal that a renewal that

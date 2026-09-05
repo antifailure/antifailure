@@ -83,6 +83,7 @@ gate: _reports
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
     run "the site calls routes that exist" just routecheck
+    run "every hostname has an origin"   just origincheck
     run "payment secrets reach the app"  just test-infra-config
     run "no unfinished merge"            just conflictcheck
     run "prose reads like a person"      just prosecheck
@@ -706,6 +707,27 @@ seo:
 check-tls:
     tools/site/check-tls.sh
 
+# The live half of `just origincheck`: what Azure really serves, and what the
+# deployed control plane really answers.
+#
+# Not in `just gate`, for the same reason as `check-tls`. Its answer is not a
+# function of the tree: it asks Azure which custom domains are bound to af-site
+# and asks a deployed control plane to answer a real CORS preflight from each of
+# them, so the same commit is green today and red the morning somebody binds a
+# hostname in the portal. That is exactly the case it exists for, and it needs
+# both a signed in Azure CLI and the network, which `just gate` must not.
+#
+# It exits 2, not 0, when it cannot reach Azure. A check that reports success
+# for a question it never asked is how the next hostname somebody binds becomes
+# invisible all over again.
+#
+# Point it somewhere else with --api, which is how a local plane carrying a
+# change is checked before it is deployed:
+#
+#     go run ./tools/origincheck live --api http://127.0.0.1:8791
+check-origins:
+    go run ./tools/origincheck all --api https://app.antifailure.dev
+
 # The getting started path, run in order and timed.
 #
 # Not in `just gate`. It needs a Docker daemon and it takes minutes, because it
@@ -1007,6 +1029,26 @@ routecheck:
 # about to point browsers at will answer them.
 routecheck-deployed origin="https://app.antifailure.dev":
     go run ./tools/routecheck -root . -origin {{origin}} -allow-write-probes
+
+# Every hostname the marketing site is served on is one the control plane will
+# answer a browser from.
+#
+# THE FAILURE. antifailure.dev and www.antifailure.dev are two custom domains on
+# one Azure Static Web App, both Ready, both serving every page, and neither
+# redirects to the other because a Static Web Apps route rule matches on PATH
+# and its schema has no hostname condition at all. site_origin in
+# production.tfvars held one value, the apex. So every call the site makes was
+# refused 403 whenever a visitor had arrived on www: the analytics beacon, the
+# enterprise contact form, the careers application form. It was found on a
+# phone, by a person, on the live site, and every check anybody had run was
+# green because they all asked the apex.
+#
+# This is the offline half and it is the one that runs on every branch: the
+# hostnames in tools/site/hostnames.txt against site_origin in each control
+# plane tfvars, in both directions. `just check-origins` is the other half, and
+# it is what keeps hostnames.txt from being a list somebody typed.
+origincheck:
+    go run ./tools/origincheck origins
 
 # Mocked providers exercise the rendered payment references without cloud access.
 test-infra-config:

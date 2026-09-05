@@ -3,13 +3,24 @@ import { bodyLimit } from 'hono/body-limit'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { applicationInput, recordApplication } from './applications.ts'
+import { matchSiteOrigin } from '../siteorigin.ts'
 
-export function mountApplicationRoutes<E extends Env>(app: Hono<E>, options: { pool: Pool; clock: Clock; siteOrigin?: string }) {
+export function mountApplicationRoutes<E extends Env>(
+  app: Hono<E>,
+  options: { pool: Pool; clock: Clock; siteOrigins?: readonly string[] },
+) {
   function origin(c: Context<E>) {
     c.header('cache-control', 'no-store')
+    // Sent whether or not a header follows, and it matters more now than it did
+    // with one allowed origin: a shared cache that did not vary on this can
+    // serve the apex's allow header to a request that arrived on www, or a
+    // refusal to a request that should have been allowed.
     c.header('vary', 'origin')
-    if (!options.siteOrigin || c.req.header('origin') !== options.siteOrigin) return false
-    c.header('access-control-allow-origin', options.siteOrigin)
+    // The same comparison the beacon and the lead route make, in the same
+    // function, so a route cannot drift into a rule of its own.
+    const matched = matchSiteOrigin(c.req.header('origin'), options.siteOrigins ?? [])
+    if (!matched) return false
+    c.header('access-control-allow-origin', matched)
     return true
   }
   app.options('/v1/applications', (c) => {

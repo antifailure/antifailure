@@ -480,3 +480,65 @@ jobs:
           echo "The live site is a manual snapshot until it is. To wire it up:"
           echo "  az staticwebapp secrets list -n af-site -g af-web --query properties.apiKey -o tsv \\"
           echo "    | gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN"
+
+  # ---------------------------------------------------------------------------
+  # Every hostname the site is served on is one the control plane will answer.
+  #
+  # A SEPARATE JOB, and the separation is the point. This is the only thing here
+  # that needs Azure credentials, and the publishing job above holds a Static Web
+  # Apps deployment token and nothing else. Giving that job an Azure federated
+  # identity so one step could list custom domains would widen what a compromised
+  # site build can reach, for a check that does not need to run inside it.
+  #
+  # WHAT IT ASKS THAT `just gate` CANNOT. The gate compares two files in this
+  # repository. This asks Azure which custom domains are really bound to af-site,
+  # and asks the deployed control plane to answer a real CORS preflight from each
+  # of them. A hostname somebody binds in the portal never touches this
+  # repository, so a check that read only the tree would go green over it forever,
+  # which is the same bug wearing a different hat.
+  #
+  # THE FAILURE. antifailure.dev and www.antifailure.dev are two custom domains on
+  # this one Static Web App, both Ready, both serving every page, and neither
+  # redirects to the other because a route rule matches on PATH and the
+  # configuration schema has no hostname condition. site_origin held one value,
+  # the apex, so the control plane refused every call a page on www made: the
+  # beacon silently, the enterprise contact form as "Could not reach the server",
+  # the careers form on something somebody had just filled in. Found on a phone.
+  #
+  # IT EXITS 2 RATHER THAN 0 WHEN IT CANNOT TELL. A run that could not reach Azure
+  # has not established anything, and reporting that as a pass is how the next
+  # hostname becomes invisible. `continue-on-error` is deliberately absent.
+  #
+  # EXPECT THIS RED ON THE MERGE THAT ADDS IT, AND THAT IS THE CORRECT ANSWER.
+  # Merging to main deploys the site and the STAGING control plane. Production
+  # moves only when a v* tag is pushed. So on the commit that first configures
+  # the second origin, the deployed production plane still refuses www and this
+  # job says so by name. It goes green when somebody tags, which is the whole
+  # point: the alternative is a green check on a merge that fixed nothing a
+  # visitor can see yet.
+  # ---------------------------------------------------------------------------
+  origins:
+    name: origins
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: site
+    if: ${{ github.repository == 'antifailure/antifailure' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: Azure serves no hostname the control plane refuses
+        run: go run ./tools/origincheck all --api https://app.antifailure.dev

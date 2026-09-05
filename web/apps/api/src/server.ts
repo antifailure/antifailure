@@ -45,6 +45,7 @@ import { actorOf } from './admin/trpc.ts'
 // LIST with optional ports, and Postgres refuses every one of those shapes on
 // an inet column. See clientaddress.ts.
 import { clientAddress, clientIP } from './clientaddress.ts'
+import { matchSiteOrigin } from './siteorigin.ts'
 import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
 import { mountHostedMcp } from './mcp.ts'
@@ -299,20 +300,27 @@ export interface ServerOptions {
    */
   analyticsOperatorOrgSlug?: string | null
   /**
-   * Where the marketing site is served from, for the endpoints a browser on it
-   * calls cross-origin. Null refuses every one of them rather than reflecting
-   * whatever Origin arrives, which is what a permissive default would do.
+   * Every origin the marketing site is served from, for the endpoints a browser
+   * on it calls cross-origin. Empty refuses every one of them rather than
+   * reflecting whatever Origin arrives, which is what a permissive default
+   * would do.
    *
-   * TWO ROUTES READ THIS and they arrived a week apart: the analytics beacon
-   * and POST /v1/leads. One value rather than two, because two variables naming
-   * the same origin is two chances for a deployment to allow the marketing site
-   * to do one of those things and not the other, which would present as the
-   * contact form failing with a network error on a site whose analytics work.
-   * It is validated once in main.ts by siteOriginFrom, which refuses a value
-   * carrying a path: a browser sends only scheme, host and port, so such a
-   * value could never match and would allow nobody while looking configured.
+   * THREE ROUTE FAMILIES READ THIS and they arrived weeks apart: the analytics
+   * beacon, POST /v1/leads, and POST /v1/applications. One value rather than
+   * three, because three variables naming the same origins is three chances for
+   * a deployment to allow the marketing site to do one of those things and not
+   * the others, which presents as one form failing with a network error on a
+   * site whose analytics work.
+   *
+   * A LIST rather than one string, because the site is served on both the apex
+   * and www and Static Web Apps cannot redirect one to the other. Every reader
+   * goes through matchSiteOrigin, which compares for exact equality and returns
+   * the single entry to echo. It is validated once in main.ts by
+   * siteOriginsFrom, which refuses a value carrying a path: a browser sends only
+   * scheme, host and port, so such a value could never match and would allow
+   * nobody while looking configured.
    */
-  siteOrigin?: string | null
+  siteOrigins?: readonly string[]
 }
 
 /**
@@ -437,6 +445,10 @@ export function createServer(options: ServerOptions) {
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
   const operatorSetsPlan = options.operatorSetsPlan ?? false
+  // Every cross origin route on this server reads THIS, through matchSiteOrigin
+  // and nothing else. Empty means no browser on another origin is answered,
+  // which is the refusing default rather than a reflected Origin.
+  const siteOrigins: readonly string[] = options.siteOrigins ?? []
   // Read once. It is the bounded set of label values, and reading it per
   // request would be the metrics endpoint doing work proportional to traffic.
   const declaredRoutes = Object.keys(ENDPOINT_LIMITS)
@@ -531,9 +543,8 @@ export function createServer(options: ServerOptions) {
   app.use('/v1/applications', async (c, next) => {
     c.header('cache-control', 'no-store')
     c.header('vary', 'origin')
-    if (options.siteOrigin && c.req.header('origin') === options.siteOrigin) {
-      c.header('access-control-allow-origin', options.siteOrigin)
-    }
+    const matched = matchSiteOrigin(c.req.header('origin'), siteOrigins)
+    if (matched) c.header('access-control-allow-origin', matched)
     await next()
   })
   const buckets = new Map<string, RateLimiter>()
@@ -1682,20 +1693,23 @@ export function createServer(options: ServerOptions) {
    *  set, so the OPTIONS handler can refuse plainly rather than answering a
    *  preflight it has no intention of honouring. */
   function allowLeadOrigin(c: Context): boolean {
-    const allowed = options.siteOrigin
-    if (!allowed) return false
-    // Exact match on the whole origin, never a suffix test. `endsWith` on a
-    // domain is how `evil-antifailure.dev` gets allowed, and it is the mistake
-    // that is invisible in review because the string looks right.
-    if (c.req.header('origin') !== allowed) return false
-    c.header('access-control-allow-origin', allowed)
+    // matchSiteOrigin rather than a comparison written here. Exact match on the
+    // whole origin, never a suffix test: `endsWith` on a domain is how
+    // `evil-antifailure.dev` gets allowed, and it is the mistake that is
+    // invisible in review because the string looks right. It returns the ONE
+    // entry that matched, because Access-Control-Allow-Origin carries a single
+    // origin and a browser rejects a header holding two.
+    const matched = matchSiteOrigin(c.req.header('origin'), siteOrigins)
+    if (!matched) return false
+    c.header('access-control-allow-origin', matched)
     // Two different caches key on this and both matter: without it a proxy can
     // serve the response it built for one origin to a request from another.
+    // With more than one allowed origin this stopped being a precaution.
     c.header('vary', 'origin')
     return true
   }
 
-  mountApplicationRoutes(app, { pool: options.pool, clock, ...(options.siteOrigin ? { siteOrigin: options.siteOrigin } : {}) })
+  mountApplicationRoutes(app, { pool: options.pool, clock, siteOrigins })
 
   app.options('/v1/leads', (c) => {
     if (!allowLeadOrigin(c)) return c.body(null, 403)
@@ -2874,7 +2888,7 @@ export function createServer(options: ServerOptions) {
     // The preflight. Answered here rather than by a wildcard handler, because a
     // wildcard OPTIONS handler answers for every route on the server and that
     // is how an endpoint nobody meant to expose becomes reachable from a page.
-    if (!beaconCors(c, options.siteOrigin ?? null)) return c.body(null, 403)
+    if (!beaconCors(c, siteOrigins)) return c.body(null, 403)
     return c.body(null, 204)
   })
 
@@ -2882,7 +2896,7 @@ export function createServer(options: ServerOptions) {
     // The origin check comes first and refuses rather than answering without
     // the header. A browser would refuse the response anyway; a non-browser
     // caller would not, and this is the line that bounds it to the site.
-    if (!beaconCors(c, options.siteOrigin ?? null)) {
+    if (!beaconCors(c, siteOrigins)) {
       return c.json({ error: 'This endpoint serves the marketing site only.' }, 403)
     }
     let body: unknown

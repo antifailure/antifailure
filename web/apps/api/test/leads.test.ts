@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { validateLead, leadMessage, leadNotifierFrom } from '../src/enterprise/leads.ts'
 import { listLeads, handleLead, LeadsRefused } from '../src/enterprise/leadstore.ts'
-import { siteOriginFrom } from '../src/siteorigin.ts'
+import { siteOriginFrom, siteOriginsFrom, matchSiteOrigin } from '../src/siteorigin.ts'
 import { RecordingMailer } from '../src/auth/mail.ts'
 import { available, startApi, adminUrl, type ApiHarness } from './harness.ts'
 
@@ -122,7 +122,7 @@ describe('what a person typed, checked before it is written', () => {
   })
 })
 
-describe('the origin allowed to post one', () => {
+describe('the origins allowed to post one', () => {
   it('normalises an origin and refuses anything that is not one', () => {
     assert.equal(siteOriginFrom('https://Example.COM'), 'https://example.com')
     assert.equal(siteOriginFrom('https://example.com:443'), 'https://example.com')
@@ -130,12 +130,63 @@ describe('the origin allowed to post one', () => {
     assert.equal(siteOriginFrom('  '), undefined)
     // A path can never equal an Origin header, so a value carrying one would
     // allow nobody while looking configured. That is the failure worth a throw.
-    assert.throws(() => siteOriginFrom('https://example.com/contact'), /origin and nothing more/)
+    assert.throws(() => siteOriginFrom('https://example.com/contact'), /origins and nothing more/)
     assert.throws(() => siteOriginFrom('example.com'), /absolute http or https/)
     assert.throws(() => siteOriginFrom('ftp://example.com'), /absolute http or https/)
     // There is no value meaning "any origin", and asserting that is what stops
     // somebody adding one as a convenience.
     assert.throws(() => siteOriginFrom('*'), /absolute http or https/)
+  })
+
+  it('takes more than one, because the site is served on the apex and on www', () => {
+    // THE FAILURE THIS FILE NOW GUARDS. site_origin held one value, the apex,
+    // and www.antifailure.dev is a second custom domain on the same Static Web
+    // App answering 200 for every page. A visitor who typed www sent
+    // origin: https://www.antifailure.dev and every call the site makes was
+    // refused 403 while every check anybody ran, all on the apex, was green.
+    assert.deepEqual(
+      siteOriginsFrom('https://antifailure.dev,https://www.antifailure.dev'),
+      ['https://antifailure.dev', 'https://www.antifailure.dev'],
+    )
+    // Whitespace around a separator is somebody formatting a tfvars file, not
+    // a different origin.
+    assert.deepEqual(
+      siteOriginsFrom(' https://a.test , https://b.test '),
+      ['https://a.test', 'https://b.test'],
+    )
+    // One value with no comma is the shape every deployment already has, so
+    // upgrading must not require anybody to touch their configuration.
+    assert.deepEqual(siteOriginsFrom('https://antifailure.dev'), ['https://antifailure.dev'])
+    assert.deepEqual(siteOriginsFrom(undefined), [])
+    assert.deepEqual(siteOriginsFrom('   '), [])
+    // The same origin written twice is a mistake, not two origins. Echoing
+    // which copy matched must not depend on which one was reached first.
+    assert.deepEqual(siteOriginsFrom('https://a.test,https://A.test:443'), ['https://a.test'])
+    // A stray comma is a typo. Dropping it silently would let ",,," read as a
+    // configured list, which is the "looks configured, allows nobody" failure
+    // the single value version already refused for a path.
+    assert.throws(() => siteOriginsFrom('https://a.test,'), /empty entry/)
+    assert.throws(() => siteOriginsFrom(',https://a.test'), /empty entry/)
+    // One bad entry stops the process rather than being dropped, so a deploy
+    // cannot come up half configured with nobody told.
+    assert.throws(() => siteOriginsFrom('https://a.test,nonsense'), /absolute http or https/)
+    assert.throws(() => siteOriginsFrom('https://a.test,*'), /absolute http or https/)
+  })
+
+  it('matches a whole origin exactly, and never a suffix of one', () => {
+    const allowed = ['https://antifailure.dev', 'https://www.antifailure.dev']
+    assert.equal(matchSiteOrigin('https://antifailure.dev', allowed), 'https://antifailure.dev')
+    // The point of returning the matched entry rather than a boolean: an
+    // Access-Control-Allow-Origin header carries ONE origin, so the www request
+    // must be echoed www and not the first entry in the list.
+    assert.equal(matchSiteOrigin('https://www.antifailure.dev', allowed), 'https://www.antifailure.dev')
+    // The mistake that is invisible in review because the string looks right.
+    assert.equal(matchSiteOrigin('https://evil-antifailure.dev', allowed), null)
+    assert.equal(matchSiteOrigin('https://antifailure.dev.evil.test', allowed), null)
+    assert.equal(matchSiteOrigin('http://antifailure.dev', allowed), null)
+    assert.equal(matchSiteOrigin(undefined, allowed), null)
+    // Nothing configured refuses everybody rather than reflecting what arrived.
+    assert.equal(matchSiteOrigin('https://antifailure.dev', []), null)
   })
 })
 
@@ -186,7 +237,7 @@ describe('posting one, over HTTP, from the origin the site is on', {
   before(async () => {
     mailer = new RecordingMailer()
     h = await startApi({
-      siteOrigin: SITE,
+      siteOrigins: [SITE],
       leadNotifier: { mailer, to: 'sales@example.test', productName: 'Antifailure' },
     })
   })
@@ -302,7 +353,7 @@ describe('the deployment with nowhere to send it', {
     // No notifier, which is our own production today: antifailure.dev publishes
     // no mail exchanger and an SPF policy authorizing no sender, so there is
     // nowhere for a notification to go.
-    h = await startApi({ siteOrigin: SITE })
+    h = await startApi({ siteOrigins: [SITE] })
   })
   after(async () => {
     for (const id of written) {
@@ -339,7 +390,7 @@ describe('reading the leads back, on a credential the server does not have', {
   let operatorEmail: string
 
   before(async () => {
-    h = await startApi({ siteOrigin: SITE })
+    h = await startApi({ siteOrigins: [SITE] })
     operatorEmail = `leads-operator-${randomUUID().slice(0, 8)}@example.test`
     await h.admin`
       INSERT INTO admin_users (email, name, role) VALUES (${operatorEmail}, 'Leads Operator', 'super_admin')`

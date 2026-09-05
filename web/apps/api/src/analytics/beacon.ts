@@ -35,6 +35,7 @@
 import type { Context as HonoContext } from 'hono'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
+import { matchSiteOrigin } from '../siteorigin.ts'
 import type { Analytics, AnalyticsEvent, RecordOutcome } from './record.ts'
 
 /**
@@ -189,20 +190,26 @@ function envelopeProblem(item: WireEvent, now: Date, skew: number): string | nul
 }
 
 /**
- * The cross-origin answer, for the one origin the site is served from.
+ * The cross-origin answer, for the origins the site is served from.
  *
  * Reflecting the request's own Origin is the usual shortcut and it is wrong
  * here: it makes every page on the internet able to post to this endpoint from
- * a reader's browser. So the configured origin is compared and echoed, or
- * nothing is echoed and the browser refuses the request itself.
+ * a reader's browser. So the request's origin is matched against the configured
+ * list and the ONE entry that matched is echoed, or nothing is echoed and the
+ * browser refuses the request itself.
+ *
+ * The list is why this delegates to matchSiteOrigin rather than comparing here.
+ * The site is served on the apex and on www, this was written against one
+ * origin, and a beacon from www was refused 403 by this line while everything
+ * anybody checked was on the apex.
  *
  * No credentials, ever. The beacon carries no cookie, and saying so in the
  * headers is what stops a future change from quietly adding one.
  */
-export function beaconCors(c: HonoContext, siteOrigin: string | null): boolean {
-  const origin = c.req.header('origin')
-  if (!siteOrigin || !origin || origin !== siteOrigin) return false
-  c.header('access-control-allow-origin', siteOrigin)
+export function beaconCors(c: HonoContext, siteOrigins: readonly string[]): boolean {
+  const matched = matchSiteOrigin(c.req.header('origin'), siteOrigins)
+  if (!matched) return false
+  c.header('access-control-allow-origin', matched)
   c.header('access-control-allow-methods', 'POST, OPTIONS')
   c.header('access-control-allow-headers', 'content-type')
   // A day, so a browser is not asking permission before every page view.
