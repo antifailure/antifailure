@@ -183,15 +183,26 @@ describe('the configuration the published copy describes', () => {
     assert.notEqual(options?.ui_host, options?.api_host)
   })
 
-  it('sets no asset host, because one would send the recorder to a vendor address', async () => {
-    // posthog-js routes the script bundles at api_host when api_host is custom.
-    // An asset_host beside it wins for /static/*, which is the session replay
-    // recorder, so setting one quietly restores the vendor request this whole
-    // arrangement exists to remove, on the largest and most blockable request
-    // posthog-js makes.
+  it('pins the asset host to the api host, so the recorder cannot come from a vendor', async () => {
+    // The proxy is one mount that splits by path, so these are the same value.
+    // They are pinned rather than left to posthog-js inferring the asset route
+    // from a custom api_host, because that inference is a property of one
+    // version of somebody else's library and the session replay recorder is
+    // the largest and most blockable request it makes. A separate default here
+    // is the one edit that would put that request back on a vendor host
+    // silently, with ingest still looking healthy.
     const { posthogOptions } = await load()
     const options = posthogOptions('https://www.antifailure.dev')
-    assert.equal(options?.asset_host, undefined)
+    assert.equal(options?.asset_host, 'https://app.antifailure.dev/ph')
+    assert.equal(options?.asset_host, options?.api_host)
+  })
+
+  it('has no second default anybody can point at a vendor', async () => {
+    // POSTHOG_ASSET_HOST falls back to POSTHOG_API_HOST rather than to a
+    // literal of its own. This is the assertion that a future edit adding one
+    // has to break.
+    const posthog = await load()
+    assert.equal(posthog.POSTHOG_ASSET_HOST, posthog.POSTHOG_API_HOST)
   })
 
   it('names no PostHog ingestion host anywhere in what it hands the library', async () => {
@@ -200,6 +211,7 @@ describe('the configuration the published copy describes', () => {
     const { posthogOptions } = await load()
     const options = posthogOptions('https://www.antifailure.dev')
     const rest = JSON.stringify({ ...options, ui_host: undefined })
+    assert.ok(!rest.includes('us-assets'), rest)
     assert.ok(!rest.includes('i.posthog.com'), rest)
     assert.ok(!rest.includes('app.posthog.com'), rest)
   })

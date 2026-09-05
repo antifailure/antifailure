@@ -125,9 +125,10 @@ export const POSTHOG_KEY =
  * ONE BASE FOR BOTH, WHICH IS WHY THERE IS NO SEPARATE ASSET HOST HERE.
  * posthog-js classifies a custom api_host as region "custom" and then routes
  * capture, feature flags, the remote config AND the script bundles at that one
- * base. Setting `asset_host` alongside it would send the bundles straight to
- * the vendor's own asset host and undo the whole arrangement, so this file does
- * not expose one. The proxy serves /static and /array for that reason.
+ * base, and the proxy serves /static and /array for that reason. POSTHOG_ASSET_HOST
+ * below pins that rather than leaving it to the library's inference, and it
+ * defaults to this value so there is no second default anybody can point at a
+ * vendor.
  *
  * WRITTEN AS A LITERAL RATHER THAN BUILT FROM CONTROL_PLANE_URL, and that is a
  * gate constraint rather than a preference. tools/routecheck refuses any file
@@ -145,6 +146,28 @@ export const POSTHOG_KEY =
  */
 export const POSTHOG_API_HOST =
   process.env.NEXT_PUBLIC_POSTHOG_API_HOST ?? "https://app.antifailure.dev/ph";
+
+/**
+ * Where the script bundles come from, pinned rather than inferred.
+ *
+ * DEFAULTED TO THE API HOST ITSELF, WHICH IS THE WHOLE POINT. posthog-js
+ * already routes /static and /array at a custom api_host, and this was measured
+ * rather than assumed: with no asset host set at all, the recorder, the dead
+ * click bundle and the web vitals bundle every one arrived through the proxy.
+ * So this option is redundant TODAY, and it is here because "redundant today"
+ * is a statement about one version of somebody else's inference. Pinning it
+ * makes the session replay recorder's address a thing this file decides.
+ *
+ * IT CANNOT DEFAULT TO A VENDOR ADDRESS, and that is deliberate rather than
+ * incidental. A separate default here is the one edit that would put the
+ * largest and most blockable request posthog-js makes back on a posthog.com
+ * host, silently, with ingest still looking healthy and no reader able to see
+ * it in a network log. There is no second default to get wrong: unset, this is
+ * the API host, and a test asserts the two are equal and that neither names a
+ * vendor host.
+ */
+export const POSTHOG_ASSET_HOST =
+  process.env.NEXT_PUBLIC_POSTHOG_ASSET_HOST ?? POSTHOG_API_HOST;
 
 /**
  * Where a link in the PostHog toolbar should point.
@@ -202,8 +225,10 @@ export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
   if (!apiHost) return null;
   return {
     api_host: apiHost,
-    // NO asset_host. See POSTHOG_API_HOST above: setting one sends the script
-    // bundles to a posthog.com address and undoes the proxy.
+    // The same mount. The proxy splits by path, so this is the api host unless
+    // somebody sets it, and it can never fall back to a vendor address. See
+    // POSTHOG_ASSET_HOST above for why that matters more than it looks.
+    asset_host: resolveHost(POSTHOG_ASSET_HOST, origin),
     ui_host: POSTHOG_UI_HOST,
 
     // Pinned rather than left to follow the library. `defaults` is a dated
