@@ -50,15 +50,18 @@ function FirewallFigure({
   const captionId = `${id.toLowerCase()}-caption`;
   return (
     <figure aria-labelledby={captionId} className="w-full min-w-0">
+      {/* One padding scale, one radius and one inner padding is emitted, never
+          two of any. Written side by side the compact values did not replace
+          the defaults, they only hoped to be later in the stylesheet, and the
+          radii were `!` utilities racing a class the components write
+          themselves, which no ternary here could have settled. */}
       <SageWell
-        className={cn(
-          "w-full !min-h-0 !px-3 !py-4 sm:!px-4 sm:!py-5",
-          compact && "!rounded-[24px] !px-2.5 !py-3 sm:!px-3 sm:!py-4",
-        )}
+        radius={compact ? 24 : 32}
+        className={cn("w-full !min-h-0", compact ? "!px-2.5 !py-3 sm:!px-3 sm:!py-4" : "!px-3 !py-4 sm:!px-4 sm:!py-5")}
       >
-        <FloatWindow className="w-full min-w-0 overflow-hidden !rounded-[13px]">
+        <FloatWindow radius={13} className="w-full min-w-0 overflow-hidden">
           <FigureChrome id={id} tab={tab} rail={rail} />
-          <div className={cn("min-w-0 p-3 sm:p-4", compact && "p-2.5 sm:p-3")}>{children}</div>
+          <div className={cn("min-w-0", compact ? "p-2.5 sm:p-3" : "p-3 sm:p-4")}>{children}</div>
         </FloatWindow>
       </SageWell>
       <figcaption id={captionId} className="sr-only">
@@ -137,8 +140,8 @@ function Seal({ label, detail, tone = "sage" }: { label: string; detail: string;
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-3 rounded-[9px] border bg-white px-3 py-2.5",
-        tone === "sage" ? "border-[#83B39F]/30" : "border-[#C43D3D]/24 bg-[#fbefef]",
+        "flex min-w-0 items-center gap-3 rounded-[9px] border px-3 py-2.5",
+        tone === "sage" ? "border-[#83B39F]/30 bg-white" : "border-[#C43D3D]/24 bg-[#fbefef]",
       )}
     >
       <span

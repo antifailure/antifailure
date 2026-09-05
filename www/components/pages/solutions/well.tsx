@@ -6,19 +6,31 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { PageJsonLd } from "@/lib/jsonld";
 import { cn } from "@/lib/cn";
 
+// `radius` is a prop for the same reason `chrome` below is one. A caller that
+// wants a tighter corner cannot get it from className: `cn` is a plain join, so
+// the well's own rounded-[32px] lands on the element beside it and the cascade,
+// not the caller, decides. Only one radius class is ever written from here.
+const wellRadius = {
+  32: "rounded-[32px]",
+  24: "rounded-[24px]",
+} as const;
+
 export function SageWell({
   children,
   className,
   compact = false,
+  radius = 32,
 }: {
   children: ReactNode;
   className?: string;
   compact?: boolean;
+  radius?: keyof typeof wellRadius;
 }) {
   return (
     <div
       className={cn(
-        "relative flex flex-col justify-center overflow-hidden rounded-[32px] bg-sage",
+        "relative flex flex-col justify-center overflow-hidden bg-sage",
+        wellRadius[radius],
         compact
           ? "min-h-0 max-h-[380px] px-5 py-5 max-md:max-h-[300px] max-md:px-4 max-md:py-4 md:px-7 md:py-6"
           : "min-h-[520px] px-6 py-8 max-md:min-h-[360px] max-md:px-4 max-md:py-5 md:px-10 md:py-12",
@@ -35,20 +47,27 @@ export function SageWell({
 // here: both land on the element and the cascade picks, and the receipt tape
 // spent three `!` utilities that were never emitted trying to win that race.
 // Only one of these two strings is ever written, so there is no race.
+const windowRadius = {
+  16: "rounded-[16px]",
+  13: "rounded-[13px]",
+} as const;
+
 export function FloatWindow({
   children,
   className,
   chrome = true,
+  radius = 16,
 }: {
   children: ReactNode;
   className?: string;
   chrome?: boolean;
+  radius?: keyof typeof windowRadius;
 }) {
   return (
     <div
       className={cn(
         chrome &&
-          "rounded-[16px] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.10),0_2px_8px_rgba(0,0,0,0.04)]",
+          cn(windowRadius[radius], "bg-white shadow-[0_24px_64px_rgba(0,0,0,0.10),0_2px_8px_rgba(0,0,0,0.04)]"),
         className,
       )}
     >
@@ -157,11 +176,15 @@ function HeroCopy({
         {paragraphs.map((p, index) => (
           <p
             key={p}
+            // One size, one leading and one colour is emitted, never two of
+            // any. The lead paragraph asked for text-black beside the shared
+            // text-gray-new-40 and lost the cascade, so the paragraph the page
+            // is built around rendered in the same grey as the rest.
             className={cn(
-              "text-[16px] leading-7 tracking-extra-tight text-gray-new-40",
+              "tracking-extra-tight",
               index === 0
                 ? "text-[19px] leading-[1.55] text-black"
-                : "mt-4 border-t border-black/[0.07] pt-4",
+                : "mt-4 border-t border-black/[0.07] pt-4 text-[16px] leading-7 text-gray-new-40",
             )}
           >
             {p}
