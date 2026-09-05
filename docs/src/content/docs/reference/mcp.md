@@ -229,6 +229,18 @@ is not a bad password; update the control plane before connecting remotely.
 The rest of this reference describes the **local tools**. Their `project_id`,
 verdict and on-disk run contracts do not apply to the hosted tool names above.
 
+One name appears on both servers and it does not mean the same thing on each.
+`start_environment` on the hosted server dispatches a request through the
+repository workflow, subject to permissions and spending limits, and returns
+before anything is running; `start_environment` on the local server builds the
+environment for the checked out branch on the machine the server runs on. The
+local destroy is `teardown_environment`, where the hosted one is
+`stop_environment`. Where a local tool is the counterpart of a hosted one it
+carries a distinguishing word rather than the bare name, which is why the local
+reads are `get_rehearsal_run` and `inspect_egress_firewall` and the local
+workflow run is `run_browser_workflows`. A client connected to both servers
+sees both sets, so read the server a tool came from before believing a name.
+
 ## The division of authority
 
 The agent chooses the hypothesis. Antifailure chooses the safety controls.
