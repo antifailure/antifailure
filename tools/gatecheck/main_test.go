@@ -479,6 +479,22 @@ _generated:
 	}
 }
 
+func TestOperatorInitializationIsNotRunByTheSourceGate(t *testing.T) {
+	got := uncalled(`
+gate:
+    run "errors" just errcheck
+
+errcheck:
+    go run ./tools/errcheck .
+
+operator-init environment:
+    node deploy/cd/operator-init.mjs production
+`)
+	if len(got) != 0 {
+		t.Fatalf("operator creation was required in the source gate: %v", got)
+	}
+}
+
 func TestAConvenienceRecipeIsNotReported(t *testing.T) {
 	// `just fmt` writes files and `just db` starts a container. Neither
 	// belongs in a gate, and reporting them would teach people to ignore this.

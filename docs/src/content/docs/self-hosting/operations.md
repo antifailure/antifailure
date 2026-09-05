@@ -15,6 +15,39 @@ acknowledgement means, and what to do first for each class of page. The
 [status page](/docs/self-hosting/status-page) is what a customer reads while
 you read this one; it is not the pager and does not substitute for it.
 
+## Create the first operator
+
+From this repository, with the Azure CLI signed into the deployment's
+subscription, run one command:
+
+```sh
+just operator-init production
+```
+
+Use `staging` instead to target staging. The command reads that environment's
+checked-in deployment identifiers, verifies the exact resource group carries
+the Antifailure project tag, and opens setup in the running application. It
+does not create a container job or fetch the database password to your machine.
+The application image must include `af-operator`; an older image refuses the
+command rather than falling back to another account-creation path.
+
+Enter the operator email, display name and password. Password entry and its
+confirmation are hidden. The runtime uses its existing `AF_ADMIN_DATABASE_URL`,
+and the account can sign in at `/admin`. This is separate from GitHub customer
+sign-in. Setup refuses an existing root operator and never resets its password.
+
+For another container host, open a terminal in the serving container and run:
+
+```sh
+af-operator init
+```
+
+Automation may supply the email and display name as arguments and pipe the
+password on standard input. A password or database URL is never a command
+argument. A successful Azure connection alone is not a successful setup: the
+wrapper also requires the runtime's completion acknowledgement. Always finish
+by signing in and opening an operator-only page.
+
 ## The first thirty seconds
 
 Three questions, in this order, because the answer to each changes which of the

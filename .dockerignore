@@ -31,6 +31,7 @@ deploy
 !deploy/docker/control-plane.Dockerfile
 !deploy/docker/bootstrap.mjs
 !deploy/docker/maintenance.mjs
+!deploy/docker/af-operator
 !deploy/docker/personas.mjs
 ee
 web/node_modules

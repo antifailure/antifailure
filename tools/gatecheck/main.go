@@ -576,6 +576,10 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// property it helps with -- every commit carrying a sign-off -- is
 		// already a gate in CI that does not depend on anybody having run it.
 		"hooks": true,
+		// Creates the first privileged operator in a chosen live deployment.
+		// Running account creation as part of a source check would be a write
+		// to production, not verification. Its tests run inside test-web.
+		"operator-init": true,
 	}
 
 	var uncalled []string

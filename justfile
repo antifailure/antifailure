@@ -879,6 +879,10 @@ sidebarcheck:
 runbookcheck:
     go run ./tools/runbookcheck .
 
+# Create the first operator using the deployment's existing database credential.
+operator-init environment:
+    node deploy/cd/operator-init.mjs {{quote(environment)}}
+
 # STATUS.md keeps the rule it states about itself.
 #
 # That file opens by saying every component carries one of a fixed set of
