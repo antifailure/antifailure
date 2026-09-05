@@ -181,10 +181,24 @@ jobs:
         # as a pass it did not earn.
         #
         # -allow-write-probes sends the one probe the inventory declares as
-        # writing something: GET /auth/github creates one expiring oauth_states
-        # row, exactly as a person who clicks "Continue with GitHub" and closes
-        # the tab does. There is no request that proves that route is present
+        # writing something: GET /auth/github creates one oauth_states row,
+        # exactly as a person who clicks "Continue with GitHub" and closes the
+        # tab does. There is no request that proves that route is present
         # without it, so it is declared and paid for rather than skipped.
+        #
+        # WHAT THAT ROW ACTUALLY COSTS, so this flag is not authorised by a
+        # sentence nobody re-reads. The row is unusable after ten minutes and
+        # it is never DELETED: completeSignIn removes a state on redemption and
+        # nothing sweeps the table, so one row per publish accumulates forever.
+        # That is a debt with an expiry date, not a free probe. It is not this
+        # gate's debt alone, because every abandoned real sign-in leaves the
+        # same row, and the retirement is a sweeper for oauth_states of the
+        # shape migrations 0016 and 0024 already use for devices and sessions.
+        # If that sweeper lands, this comment is the thing to come back and
+        # delete. If a cheaper presence probe is ever added to the control
+        # plane instead, note that it cannot help on the day it is needed: the
+        # gate exists precisely for a DEPLOYED image older than the commit that
+        # would have added it.
         if: ${{ env.TOKEN != '' }}
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}

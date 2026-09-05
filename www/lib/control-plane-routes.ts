@@ -130,7 +130,7 @@ export const CONTROL_PLANE_ROUTES = {
       "'Continue with GitHub' lands on a 404 page. It is the primary conversion path off this site.",
     probeEffect: "writes",
     probeReason:
-      "auth/signin.ts beginSignIn inserts one row into oauth_states unconditionally, and nothing in front of the handler refuses a request that carries no credential. A probe therefore creates one expiring state row, exactly as a person who clicks the button and then closes the tab does. There is no request that proves this route is present without doing that, so it is declared rather than hidden.",
+      "auth/signin.ts beginSignIn inserts one row into oauth_states unconditionally, and nothing in front of the handler refuses a request that carries no credential. A probe therefore creates one state row, exactly as a person who clicks the button and then closes the tab does. There is no request that proves this route is present without doing that, so it is declared rather than hidden. SAY WHAT THE ROW COSTS EXACTLY, because the imprecise version of this sentence said the row was 'expiring' and invited a reader to assume it cleans itself up. It does not. completeSignIn deletes a state ON REDEMPTION and nothing sweeps the table, so an unredeemed row is unusable after OAUTH_STATE_TTL_MS but stays in the table indefinitely. That is a real debt and it is not this gate's alone: every person who clicks the button and closes the tab leaves the same row. The retirement is a sweeper for oauth_states, of the shape migrations 0016 and 0024 already use for devices and sessions, which is worth building on its own account.",
   },
 } as const satisfies Record<string, ControlPlaneRoute>;
 
