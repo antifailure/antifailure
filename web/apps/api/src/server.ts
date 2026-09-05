@@ -157,6 +157,7 @@ import { createAnalytics, type Analytics } from './analytics/record.ts'
 import { beaconCors, siteBeacon } from './analytics/beacon.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
+import { mountApplicationRoutes } from './recruitment/routes.ts'
 import {
   limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
@@ -526,6 +527,15 @@ export function createServer(options: ServerOptions) {
   // the one that has never been load tested, and answering 500 to it is a bug
   // report while leaving it open is an outage.
   // -------------------------------------------------------------------------
+  // A rate refusal must remain readable by the careers form's allowed origin.
+  app.use('/v1/applications', async (c, next) => {
+    c.header('cache-control', 'no-store')
+    c.header('vary', 'origin')
+    if (options.siteOrigin && c.req.header('origin') === options.siteOrigin) {
+      c.header('access-control-allow-origin', options.siteOrigin)
+    }
+    await next()
+  })
   const buckets = new Map<string, RateLimiter>()
   function limiterFor(limit: EndpointLimit): RateLimiter {
     const signature = `${limit.key}:${limit.rate}:${limit.burst}`
@@ -1684,6 +1694,8 @@ export function createServer(options: ServerOptions) {
     c.header('vary', 'origin')
     return true
   }
+
+  mountApplicationRoutes(app, { pool: options.pool, clock, ...(options.siteOrigin ? { siteOrigin: options.siteOrigin } : {}) })
 
   app.options('/v1/leads', (c) => {
     if (!allowLeadOrigin(c)) return c.body(null, 403)

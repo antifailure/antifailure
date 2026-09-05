@@ -408,6 +408,23 @@ export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
     grounds: 'not-an-endpoint',
     reason: 'The preflight for the route above. A browser sends it; nothing calls it.',
   },
+  'POST /v1/applications': {
+    audience: 'excluded',
+    grounds: 'console-transport',
+    reason:
+      'The careers form on the marketing site posts it. Like the lead route above it is a cross origin browser call from one configured origin, it takes no credential, and nothing integrates with it. Publishing it would invite a client to post applications at us, which is the opposite of what a review queue read by one person is for.',
+  },
+  'OPTIONS /v1/applications': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason: 'The preflight for the route above. A browser sends it; nothing calls it.',
+  },
+  'ALL /v1/applications': {
+    audience: 'excluded',
+    grounds: 'not-an-endpoint',
+    reason:
+      'Not a handler. It is how Hono registers the middleware in front of the route above: the origin guard, the body limit, and the header that keeps a rate refusal readable by the form that was refused. Nothing answers it on its own.',
+  },
   'GET /exports/deletion': {
     audience: 'excluded',
     grounds: 'different-credential',

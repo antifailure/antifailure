@@ -26,6 +26,8 @@ export const ADMIN_PERMISSIONS = [
   // every role has it, because a role that can sign in and then sees nothing
   // is indistinguishable from a broken deployment.
   'admin.portal.access',
+  'admin.recruitment.read',
+  'admin.recruitment.write',
 
   // The operator directory: who can reach this portal, and with what role.
   'admin.operators.read',
@@ -238,6 +240,8 @@ export type AdminRole = (typeof ADMIN_ROLES)[number]
  * lists would disagree and the documentation is the one that would be wrong.
  */
 export const ADMIN_PERMISSION_DESCRIPTIONS: Record<AdminPermission, string> = {
+  'admin.recruitment.read': 'Read private applications for founding roles.',
+  'admin.recruitment.write': 'Mark applications reviewed or delete applicant personal data.',
   'admin.portal.access': 'Sign in to the operator portal and see its navigation.',
   'admin.operators.read': 'See who holds an operator account and what role they have.',
   'admin.operators.write': 'Create operators, change their role, and suspend them.',
