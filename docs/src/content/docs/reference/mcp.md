@@ -171,8 +171,9 @@ and still not be found. Write the absolute path instead when that happens, and
 
 The server writes nothing to standard output except protocol frames, so a
 terminal is the wrong place to look. The client's own log is the right one, and
-a connected server lists four tools: `rehearse_migration_safety`,
-`inspect_egress_firewall`, `get_rehearsal_run` and `cancel_rehearsal_run`.
+a connected server lists the tools below, including
+`rehearse_migration_safety`, `inspect_egress_firewall`, `explain_error` and
+`get_rehearsal_run`.
 
 In Claude Code, `/mcp` lists the configured servers and their state.
 
@@ -224,7 +225,7 @@ before this URL works. Older installations, including the original v1.1.1
 release, provide the local server only. A `404` from `/mcp` on such an installation
 is not a bad password; update the control plane before connecting remotely.
 
-The rest of this reference describes the four **local rehearsal tools**. Their
+The rest of this reference describes the **local rehearsal tools**. Their
 `project_id`, verdict and on-disk run contracts do not apply to the hosted tool
 names above.
 
@@ -297,6 +298,145 @@ Asking is free and needs no running environment.
 If the decision log cannot be read, the verdict is `INCONCLUSIVE` and every
 count is absent rather than zero. A zero nobody measured is the most dangerous
 number this tool could print.
+
+### `assess_environment_fidelity`
+
+How much of this environment is production's own thing and how much is a stand
+in, component by component. Synchronous and read only.
+
+Six dimensions are reported separately, and that is the part to read: a change
+to billing depends on the third party hosts and not on traffic, a migration
+depends on the database and on neither, and one averaged number hides whichever
+of those is yours. The score carries its own definition, and anything that could
+not be measured is named and excluded from it rather than counted as either
+answer.
+
+The verdict comes from the manifest's `fidelity.require`. A project that
+requires nothing cannot fail here, and the summary says so outright, so a `PASS`
+is not read as a clean bill of health.
+
+### `explain_error`
+
+What an Antifailure failure means and what to do about it.
+
+Every user facing failure in this product carries a stable code of the form
+`AF-DB-006`. Give this the code, the whole error text to have the codes read out
+of it, or just the process exit status, and it returns the meaning, the one next
+step, whether retrying unchanged could succeed, and the documentation page.
+
+It reads a fixed catalog, so it needs no environment and cannot itself fail. A
+code this build does not have is reported as unknown rather than answered with
+an invented entry. The text you pass is never echoed back and only the codes in
+it are used.
+
+### `explain_effective_configuration`
+
+The settings this project actually runs under, with every default filled in.
+
+The most common configuration bug is a default nobody knew about, so an absent
+block still reports what it resolves to. Narrow it with `section` to services,
+database, egress, checks, policy, personas, invariants or workflows.
+
+It never reports a secret. A variable name and where a value would come from are
+configuration; the values are not. The text of a `migrate` or `seed` command, an
+invariant's SQL and an oracle probe's body are withheld too, because they are
+free form text from the repository, and the result names what it withheld rather
+than leaving an absence a reader would take for "the manifest does not set it".
+
+### `plan_checks_for_change`
+
+Which checks exercise what a diff touches, and what nothing is going to look at.
+
+The cheapest thing in the product: it reads git, builds no image and starts no
+database, so run it first to find out whether the expensive rehearsals are worth
+starting. A check that is `selected` and not `available` is the line worth
+reading.
+
+It reports no verdict, deliberately. `af change` never says a change is safe or
+risky and neither does this. A path no rule recognises selects every check
+rather than none, and that case is reported as `everything_selected` rather than
+hidden, because a thorough answer and a fallback are not the same answer.
+
+### `check_data_invariants`
+
+Whether the data is still correct after the change ran.
+
+An invariant is a statement that must return no rows, so rows coming back means
+the data is wrong: an order with no customer, a balance that does not reconcile.
+This is the check for a flow that appeared to SUCCEED while corrupting data,
+which no assertion about a screen can catch. Every statement runs inside a
+transaction Postgres opened `READ ONLY`, so a write is refused by the database
+rather than trusted not to happen.
+
+The rows are not returned. It reports which invariant broke, how many rows came
+back and what the columns are called; the rows are data out of a copy of
+production, and `af invariants` prints them.
+
+A project that declares no invariants gets `INCONCLUSIVE` and not `PASS`, because
+a check that examined nothing has not passed.
+
+### `compare_with_previous_release`
+
+This change run beside the version it replaces, with every difference reported.
+
+It brings a second environment up from the baseline revision, branches one
+golden for both so they start from identical rows, sends both the same requests
+in the same order, and compares the responses and the database contents. It
+ranks directionally: a field or a row the candidate STOPPED returning is
+critical, because losing something is almost never intended, while an extra
+field is minor because that is what a feature branch does all day.
+
+It takes many minutes and costs a second environment, so it returns a `run_id`
+and is polled with `get_rehearsal_run`. The threshold that decides a failure is
+the manifest's `oracle.fail_on`, and a project whose threshold is none is told
+in the summary that nothing was judged.
+
+The two differing values are not returned. A JSON path is structure and survives;
+a row's primary key is a value and does not. The baseline environment is always
+torn down, and there is no argument that leaves it running.
+
+### `inspect_data_masking`
+
+What masking does to this environment's data, without changing any of it. Three
+questions, chosen with `question`.
+
+`plan` says what masking WOULD do, column by column, compiled from the live
+schema rather than from a checked in list, and names every column no rule covers,
+which is the list somebody has to answer: left alone, a column called
+`customer_notes` means the notes ship. `sample` transforms a few rows in memory
+to show whether the rules actually fire. `verify` reads the data back and runs
+the same detectors that would find the data if it leaked.
+
+**No value is ever returned by any of the three.** Masking is a privacy boundary,
+and a preview that showed the values it is deciding about would leak exactly the
+data being removed, to a model, into a transcript. What comes back is the shape
+of the change: the column, the transform, whether the value changed at all, its
+length before and after, and which detector still recognises something.
+
+That is enough to find the failure this is for, which is a rule that names a
+column and then does nothing to it. `sample` fails when any sampled column kept
+its value, which is invisible in a plan because a plan says what was ASSIGNED
+rather than what happened. `verify` withholds even the redacted excerpt the
+scanner keeps, because an excerpt of real data is real data, and it reports a
+column it could not read as `INCONCLUSIVE` rather than as clean.
+
+### `apply_data_masking`
+
+**Irreversible.** It rewrites this environment's data in place, and once a
+column is overwritten the original is gone.
+
+It is a separate tool from `inspect_data_masking` for that reason alone: a
+caller must never arrive at this one believing it is the read only one, and a
+single tool with a mode argument is exactly how that happens. It also takes
+`acknowledge_irreversible`, which has exactly one accepted value, so reaching it
+is a deliberate act rather than a default.
+
+It rewrites every row of every masked table, so it returns a `run_id` and is
+polled with `get_rehearsal_run`. A plan with unresolved problems is refused
+before anything is written rather than partly applied, because a half masked
+table is neither real nor safe and nothing says which rows are which. The result
+carries counts and no values, and it says plainly that finishing is not proof the
+data is safe: `inspect_data_masking` with `verify` is what proves that.
 
 ### `get_rehearsal_run` and `cancel_rehearsal_run`
 
