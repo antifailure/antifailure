@@ -37,6 +37,8 @@
 // name, in both directions. This is about the machine readable contract
 // specifically: what a generated client can call.
 
+import { postHogBoundary } from './analytics/posthog.ts'
+
 /** Every reason a route may be kept out of the published document, in one
  *  place so the set can be counted and the count can be checked. */
 export const GROUNDS = [
@@ -105,6 +107,10 @@ export interface RouteBoundary {
  * for something else, which is the same reason ENDPOINT_LIMITS forbids them.
  */
 export const ROUTE_BOUNDARY: Record<string, RouteBoundary> = {
+  // The PostHog proxy. Generated beside its limits from the same allowlist, so
+  // adding a forwarded path cannot leave it unclassified. See postHogBoundary.
+  ...postHogBoundary(),
+
   // ---------------------------------------------------------------------
   // The published contract.
   // ---------------------------------------------------------------------

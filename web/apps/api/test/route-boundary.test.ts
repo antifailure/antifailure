@@ -42,6 +42,7 @@ import { createServer } from '../src/server.ts'
 import { GROUNDS, ROUTE_BOUNDARY, boundaryFor, documentPath } from '../src/boundary.ts'
 import { listProcedures, openApiDocument } from '../src/openapi.ts'
 import type { GitHubClient } from '../src/auth/github.ts'
+import { POSTHOG_REGIONS } from '../src/analytics/posthog.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const publishedPath = path.join(here, '..', '..', '..', '..', 'www', 'public', 'openapi.json')
@@ -87,7 +88,13 @@ const EXCLUDED_PROCEDURES: string[] = ['admin.']
  *  Every optional feature is switched on. Email sign-in registers two routes
  *  only when a mailer is configured, and a classification that covered the
  *  default configuration alone would leave the two routes that carry a
- *  sign-in link unclassified on exactly the deployments that have them. */
+ *  sign-in link unclassified on exactly the deployments that have them.
+ *
+ *  The PostHog proxy is the second of those and it arrived after this comment
+ *  was written, which is the proof the comment was worth writing: its eleven
+ *  routes exist only when a region is configured, so a server built without one
+ *  would have left every forwarded path unclassified on precisely the
+ *  deployment that serves them. */
 function servedRoutes(): string[] {
   const { app } = createServer({
     pool: {} as unknown as Pool,
@@ -97,6 +104,7 @@ function servedRoutes(): string[] {
       from: 'antifailure@example.com',
       appBaseUrl: 'https://console.example.com/',
     } as never,
+    postHog: { bases: POSTHOG_REGIONS.us },
   })
   const routes = (app.routes as { method: string; path: string }[]).map(
     (r) => `${r.method} ${r.path}`,

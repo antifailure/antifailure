@@ -510,6 +510,37 @@ anybody can recompute, which is an organization identifier with extra steps.
 | `AF_ANALYTICS_OPERATOR_ORG` | unset | The slug of the organization that operates this control plane. Its owners and admins may read the analytics dashboard; nobody else may, whatever permissions they hold in their own organization. Unset means nobody, and the route says which variable to set. |
 | `AF_ANALYTICS_RETENTION_DAYS` | unset | Delete raw analytics events older than this many days. The daily aggregates computed from them are kept, because a count of page views by channel has nothing in it that identifies anybody. Unset keeps the raw events forever, which is the default because retention is an operator's decision. |
 | `AF_SITE_ORIGIN` | unset | Every origin the marketing site is served from, comma separated, for the endpoints a browser calls cross origin. Unset refuses every beacon rather than reflecting whatever `Origin` arrives, which is what a permissive default would do. |
+| `AF_POSTHOG_REGION` | unset | `us` or `eu`, and nothing else. Mounts the PostHog proxy at `/ph`, so the marketing site sends its product analytics to this control plane and this control plane forwards it, and a reader's browser opens no connection to a posthog.com host. Unset mounts nothing, so a site configured to send analytics here is answered 404 rather than quietly reaching a vendor the operator did not choose. The two values select a pair of fixed upstream hosts: there is no setting of any kind that makes this forward to a host outside that pair, which is what stops it being an open forwarder. A PostHog project API key does not carry its region, so read it off the cloud rather than guessing: post the key to `https://us.i.posthog.com/flags/?v=2` and to the `eu` host beside it, and the one that answers 200 rather than `authentication_failed` is the region to set. `AF_SITE_ORIGIN` still governs which origins may call it. |
+
+### The PostHog proxy
+
+Mounted only when `AF_POSTHOG_REGION` is set. It exists so that a reader of the
+marketing site contacts our own infrastructure and nothing else: the site is a
+static export with no server of its own, so the forwarding has to happen on the
+one process this product already runs on its own hostname.
+
+It is **same site, not same origin**. The site is served on an apex and a `www`
+hostname, this control plane answers on a third, and those are three different
+origins sharing one registrable domain. Every forwarded route therefore answers
+a CORS preflight and echoes exactly one allowed origin from `AF_SITE_ORIGIN`.
+
+Three separate things keep it from becoming a general forwarder, and none of
+them replaces the others:
+
+- The upstream host comes from a closed set of two regions. No request, header
+  or setting can name a different one.
+- The paths that reach PostHog are an allowlist. A path under `/ph` that is not
+  on it is not a route at all, so it is answered 404 rather than forwarded.
+- A redirect from the upstream is refused rather than followed, so PostHog
+  cannot steer this process at another server.
+
+Nothing of the browser's is passed upstream except `content-type`: no cookie, no
+`authorization`, and **not the visitor's address**. That last one is deliberate
+and it has a cost. PostHog geolocates from the source address, and behind this
+every event arrives from one container, so the `$geoip_*` properties describe
+the deployment rather than the reader. Forwarding the address would send every
+visitor's IP to a third party, which is the disclosure this proxy exists to
+avoid, and it is the one direction that cannot be undone afterwards.
 
 ### What is recorded, and what is not
 

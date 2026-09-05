@@ -38,6 +38,7 @@ import {
   hostedRequiredPlanFrom,
   operatorSetsPlanFrom,
 } from './hosted.ts'
+import { POSTHOG_REGIONS, postHogRegionFrom, postHogSummary } from './analytics/posthog.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -195,6 +196,14 @@ const siteOrigins = siteOriginsFrom(process.env.AF_SITE_ORIGIN)
 console.log(siteOriginsSummary(siteOrigins))
 const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
 console.log(leads.summary)
+
+// The marketing site's analytics, forwarded from this process so that a
+// reader's browser never opens a connection to posthog.com. Read at start-up so
+// an unknown region stops the process here rather than on the first page view,
+// and said out loud either way: a proxy that is not mounted looks exactly like
+// one that is, right up until every event 404s.
+const postHogRegion = postHogRegionFrom(process.env.AF_POSTHOG_REGION)
+console.log(postHogSummary(postHogRegion))
 
 // Said out loud at startup, every time. Whether an instance is open to the
 // world is not something anybody should have to infer from a deployment
@@ -398,6 +407,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   selfServeSignup,
+  postHog: postHogRegion ? { bases: POSTHOG_REGIONS[postHogRegion] } : null,
   leadNotifier: leads.notifier,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
