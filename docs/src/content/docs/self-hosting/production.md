@@ -375,12 +375,27 @@ and never shows it again. Note the numeric **App ID** at the top of the page.
 Three of these replace placeholders Terraform seeded; two are ones Terraform
 deliberately does not own.
 
+Two of them are credentials and go in through the `afsecret` helper on the
+[Azure page](/docs/self-hosting/azure), which takes the value at a prompt rather
+than as an argument. `rotating-secrets.md` states the rule for every other
+credential on this plane: a value passed as `--value` is in your shell history
+and in the argument list of a running process, where `ps` shows it to anybody
+else on the machine.
+
+The client id is not a credential and stays as an argument. `keyvault.tf` says
+so itself, in the comment about what tfsec reports over these three: an OAuth
+client id is in the address bar of every person who signs in. Putting it behind
+a hidden prompt would suggest to the next reader that it is the same kind of
+thing as the two below it.
+
 ```sh
 VAULT=afcpprod-kv-centralus
 
-az keyvault secret set --vault-name "$VAULT" --name github-client-id     --value '<oauth client id>'
-az keyvault secret set --vault-name "$VAULT" --name github-client-secret --value '<oauth client secret>'
-az keyvault secret set --vault-name "$VAULT" --name github-app-webhook-secret --value '<webhook secret>'
+az keyvault secret set --vault-name "$VAULT" --name github-client-id --value '<oauth client id>'
+
+afsecret github-client-secret
+afsecret github-app-webhook-secret
+
 az keyvault secret set --vault-name "$VAULT" --name github-app-private-key --file ~/Downloads/<app>.private-key.pem
 ```
 
