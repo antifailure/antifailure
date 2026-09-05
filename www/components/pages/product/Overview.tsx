@@ -1,6 +1,6 @@
 import { Faq, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split, Steps, type FaqItem } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { POV01, POV02, POV03, POV04 } from "@/components/pages/figures/product";
+import { POV01, POV02, POV03, POV04 } from "@/components/pages/figures/product-overview";
 import { MonoLabel, StatusPill } from "@/components/home/visuals/primitives";
 
 const MODULES: {

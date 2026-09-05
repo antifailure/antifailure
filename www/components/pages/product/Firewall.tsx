@@ -1,6 +1,6 @@
 import { Callout, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
 import { Illustrative } from "@/components/layout/Illustrative";
-import { PFW01, PFW02, PFW03, PFW04, PFW05, PFW06 } from "@/components/pages/figures/product";
+import { PFW01, PFW02, PFW03, PFW04, PFW05, PFW06 } from "@/components/pages/figures/product-firewall";
 
 const CONTROLS = [
   { title: "No default egress", body: "There is no default public internet route from the twin." },

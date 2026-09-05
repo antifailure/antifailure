@@ -1,6 +1,6 @@
 import { Illustrative } from "@/components/layout/Illustrative";
 import { Callout, FeatureGrid, PageHeading, PageHero, PageSection, PageShell, RelatedGrid, Split } from "@/components/pages/kit";
-import { PSS01, PSS02, PSS03, PSS04 } from "@/components/pages/figures/product";
+import { PSS01, PSS02, PSS03, PSS04 } from "@/components/pages/figures/product-safe-state";
 
 export function SafeStatePage() {
   return (

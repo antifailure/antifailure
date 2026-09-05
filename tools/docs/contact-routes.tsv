@@ -65,3 +65,4 @@ www/components/home/visuals/hero/StateFilm.tsx	ajay@acme.com	not-a-route	a row o
 .github/workflows/ci.yml	security@antifailure.dev	records-a-defect	the other half of the same comment.
 justfile	conduct@antifailure.dev	records-a-defect	named in the comment above the contactcheck recipe as the defect the recipe exists for, with the DNS reason beside it.
 justfile	security@antifailure.dev	records-a-defect	the other half of the same comment.
+www/components/pages/figures/product-firewall.tsx	checkout@twin.local	not-a-route	the sender on the mail header the capture figure draws. The twin rendered this message and held it; nothing was sent, and .local does not resolve.
