@@ -1227,6 +1227,30 @@ jobs:
         # that is documented, read, and unreachable by every apply passes both.
         run: go run ./tools/wirecheck .
 
+      - name: Every hostname the site is served on is an origin the plane answers
+        # antifailure.dev and www.antifailure.dev are two custom domains on one
+        # Azure Static Web App. Both are Ready, both serve every page, and
+        # neither redirects to the other: a Static Web Apps route rule matches
+        # on PATH and the configuration schema has no hostname condition at all.
+        # site_origin in production.tfvars held one value, the apex.
+        #
+        # So the control plane refused every call the site makes whenever the
+        # visitor had arrived on www. The analytics beacon, silently. The
+        # enterprise contact form, as "Could not reach the server". The careers
+        # application form, on a form somebody had just filled in. It was
+        # reported from a phone, on the live site, while every check anybody had
+        # run was green, because every one of them asked the apex and the apex
+        # was perfect.
+        #
+        # This step is the half that needs no credential: the hostnames in
+        # tools/site/hostnames.txt against site_origin in each control plane
+        # tfvars, in BOTH directions, because an allowed origin with no hostname
+        # behind it is a widened CORS boundary that reads like a leftover. The
+        # half that asks Azure which domains are really bound runs after a
+        # publish in deploy.yml, which is what keeps hostnames.txt from being a
+        # list somebody typed.
+        run: go run ./tools/origincheck origins
+
       - name: No file carries an unfinished merge
         # One reached main and stayed there through a release being prepared:
         # literal `<<<<<<< HEAD`, `=======` and `>>>>>>>` around six rows of the

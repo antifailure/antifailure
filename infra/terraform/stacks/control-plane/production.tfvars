@@ -340,13 +340,28 @@ alerting_enabled = true
 # argument, and it is a step somebody runs after this applies.
 operator_portal_enabled = true
 
-# Where the marketing site is served from, for the two endpoints a browser
-# calls cross origin: the contact form that writes a lead, and the analytics
-# beacon. Unset refuses every one of them rather than reflecting whatever
-# Origin arrives, which is the right default and the wrong answer for the plane
-# that antifailure.dev actually talks to. Unset here presents to a visitor as a
-# network error on the contact form with no explanation anywhere.
-site_origin = "https://antifailure.dev"
+# EVERY hostname the marketing site is served on, for the three endpoints a
+# browser calls cross origin: the contact form that writes a lead, the careers
+# form that writes an application, and the analytics beacon. Unset refuses every
+# one of them rather than reflecting whatever Origin arrives, which is the right
+# default and the wrong answer for the plane that antifailure.dev actually talks
+# to. Unset here presents to a visitor as a network error on the contact form
+# with no explanation anywhere.
+#
+# BOTH HOSTNAMES, AND THIS LINE HELD ONLY THE APEX. antifailure.dev and
+# www.antifailure.dev are two custom domains on the same Azure Static Web App,
+# both Ready, both answering 200 for every page, and Static Web Apps cannot
+# redirect one to the other because a route rule matches on PATH and its schema
+# carries no hostname condition. So everybody who typed www, followed an old
+# link, or was handed the www page by a search engine had the beacon, the
+# contact form and the careers form refused 403, and nothing on the page said
+# why. Reported from a phone on the live site while every check was green,
+# because every check asked the apex.
+#
+# tools/site/hostnames.txt is the same set written once. `just check-origins`
+# refuses when this value, that file and the domains actually bound to af-site
+# disagree.
+site_origin = "https://antifailure.dev,https://www.antifailure.dev"
 
 # ---------------------------------------------------------------------------
 # The acquisition dashboard, and who it belongs to.

@@ -17,7 +17,7 @@ import { sweepDeviceAuthorizations } from './auth/device.ts'
 import { parseAllowlist, describeAllowlist, signupUrlFrom } from './auth/signin.ts'
 import { selfServeSignupFrom, describeSelfServeSignup } from './auth/provision.ts'
 import { leadNotifierFrom } from './enterprise/leads.ts'
-import { siteOriginFrom } from './siteorigin.ts'
+import { siteOriginsFrom, siteOriginsSummary } from './siteorigin.ts'
 import { sealingKeyFrom } from './providers/seal.ts'
 import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
@@ -191,12 +191,8 @@ const emailSignIn = emailSignInFromEnv()
 // exactly like working software. A deployment with a lead route and no notifier
 // records leads nobody is told about; a deployment with no site origin serves a
 // form that a browser refuses to submit and reports as a network error.
-const siteOrigin = siteOriginFrom(process.env.AF_SITE_ORIGIN) ?? null
-console.log(
-  siteOrigin
-    ? `the marketing site at ${siteOrigin} may post analytics beacons and enterprise leads`
-    : 'AF_SITE_ORIGIN is not set: no other origin may post a beacon or an enterprise lead, so a form on the marketing site cannot submit',
-)
+const siteOrigins = siteOriginsFrom(process.env.AF_SITE_ORIGIN)
+console.log(siteOriginsSummary(siteOrigins))
 const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
 console.log(leads.summary)
 
@@ -421,12 +417,12 @@ const { app, ingestLimiter, authLimiter } = createServer({
   consoleBuild,
   analyticsSecret,
   analyticsOperatorOrgSlug,
-  // The one origin the marketing site may call from, read and validated above
-  // rather than taken raw from the environment: siteOriginFrom refuses a value
+  // Every origin the marketing site may call from, read and validated above
+  // rather than taken raw from the environment: siteOriginsFrom refuses a value
   // carrying a path, which could never match an Origin header and would allow
-  // nobody while looking configured. Unset refuses every beacon and every lead
-  // rather than reflecting whatever Origin arrives.
-  siteOrigin,
+  // nobody while looking configured. Unset refuses every beacon, every lead and
+  // every application rather than reflecting whatever Origin arrives.
+  siteOrigins,
   githubApi,
   ...(emailSignIn ? { emailSignIn } : {}),
 })

@@ -512,13 +512,25 @@ resource "azurerm_container_app" "this" {
         }
       }
 
-      # The one origin the marketing site's beacon may be called from.
+      # Every origin the marketing site is served from, for the beacon, the
+      # enterprise lead form and the careers application form.
       #
       # Dynamic, and this one is worth checking rather than assuming, because it
       # is a CORS decision and the dangerous default would be permissive. It is
-      # not: the application compares the arriving Origin against this value and
-      # refuses when it is falsy, so unset and empty both refuse every beacon
-      # and neither reflects whatever Origin arrives. Absent is the safe end.
+      # not: the application compares the arriving Origin against these values
+      # for exact equality and refuses when none matches, so unset and empty
+      # both refuse every beacon and neither reflects whatever Origin arrives.
+      # Absent is the safe end.
+      #
+      # SEVERAL ORIGINS TRAVEL IN THIS ONE VARIABLE, comma separated, and the
+      # module does nothing to the string. AF_SITE_ORIGIN is what the process
+      # parses and var.site_origin is what an operator writes, and them being the
+      # same bytes means there is no translation here to get wrong. A single
+      # origin with no comma parses to a list of one, so an installation that
+      # already sets this needs no change. A second variable would have been a
+      # second chance to configure the beacon and the forms differently, which
+      # presents as one form failing with a network error on a site whose
+      # analytics work.
       dynamic "env" {
         for_each = var.site_origin == "" ? [] : [var.site_origin]
         content {

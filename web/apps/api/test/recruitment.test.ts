@@ -31,7 +31,7 @@ describe('a careers application reaches a real private queue', () => {
     method: 'POST', headers, body: JSON.stringify({ id }),
   })
   before(async () => {
-    h = await startApi({ siteOrigin: SITE })
+    h = await startApi({ siteOrigins: [SITE] })
     h.clock.now = () => new Date()
     const password = 'careers-local-test-only'
     const { hash, salt } = await hashPassword(password)

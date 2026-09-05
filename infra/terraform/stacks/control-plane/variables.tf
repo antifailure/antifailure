@@ -371,10 +371,16 @@ variable "analytics_retention_days" {
   description = "Delete raw analytics events older than this many days. Null keeps them forever."
 }
 
+# Every hostname the marketing site is served on, as whole origins separated by
+# commas. MORE THAN ONE, because the site answers on the apex and on www and
+# Azure Static Web Apps cannot redirect one to the other: a route rule matches on
+# PATH and its schema has no hostname condition. See tools/site/hostnames.txt,
+# which is the same set written once, and tools/origincheck, which refuses when
+# the two disagree.
 variable "site_origin" {
   type        = string
   default     = ""
-  description = "The origin the marketing site is served from. Empty refuses every beacon."
+  description = "Every origin the marketing site is served from, separated by commas. Empty refuses every beacon, lead and application."
 }
 
 variable "github_app_install_url" {

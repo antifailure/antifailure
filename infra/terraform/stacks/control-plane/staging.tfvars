@@ -137,7 +137,9 @@ deployer_principal_id = "3537595b-8059-4839-9cd8-04325c824291"
 operator_portal_enabled = true
 admin_pool_max          = 2
 
-# The same origin as production. Staging is not what antifailure.dev posts to,
+# The same origins as production. Staging is not what antifailure.dev posts to,
 # so nothing depends on this here; it is set so the cross origin path is one
-# that has been exercised rather than one first tried in production.
-site_origin = "https://antifailure.dev"
+# that has been exercised rather than one first tried in production. Both
+# hostnames, for the same reason: a list of one here would mean the two origin
+# path is first exercised on the plane a visitor is standing on.
+site_origin = "https://antifailure.dev,https://www.antifailure.dev"

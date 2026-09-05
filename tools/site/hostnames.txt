@@ -1,0 +1,30 @@
+# Every hostname the marketing site is served on, one per line.
+#
+# THIS FILE IS A CLAIM, NOT A SOURCE OF TRUTH, and the difference is the whole
+# reason it can be trusted. The real set is the custom domains bound to the
+# Azure Static Web App af-site in resource group af-web, and a hostname somebody
+# binds in the portal never touches this repository. So `tools/origincheck
+# domains` asks Azure and refuses when what it finds is not exactly what is
+# written here. A row that stops being real is reported; a hostname that appears
+# in Azure and not here is reported. Neither direction is silent.
+#
+# What it is FOR is the checks that cannot reach Azure. tools/site/check-tls.sh
+# asks each of these for its certificate, and `tools/origincheck origins` asks
+# whether the control plane's site_origin covers each of them, and that one
+# runs on every pull request with no credential at all.
+#
+# THE FAILURE THAT PUT IT HERE. site_origin in production.tfvars held one value,
+# the apex, and www is a second custom domain answering 200 for every page. The
+# control plane refused every cross origin call that arrived from www: the
+# analytics beacon, the enterprise contact form, the careers application form,
+# all 403. It was reported from a phone, on the live site, while every check
+# anybody had run was green, because they all asked the apex. There were two
+# hostnames in check-tls.sh and one origin in the tfvars and nothing compared
+# them.
+#
+# Adding a hostname here is not what makes the site answer on it. Bind the
+# custom domain, add the line, add the origin to site_origin in
+# production.tfvars and staging.tfvars, and run `just check-origins`.
+
+antifailure.dev
+www.antifailure.dev

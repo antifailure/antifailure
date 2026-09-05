@@ -569,6 +569,17 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// inventory it reads is complete and names routes this repository
 		// serves, and `just routecheck` covers that inside `gate`.
 		"routecheck-deployed": true,
+		// The live half of the origin check. Same reasoning as check-tls, and
+		// the same shape: its answer is not a function of the tree. It asks
+		// Azure which custom domains are bound to the Static Web App and asks a
+		// deployed control plane to answer a real CORS preflight from each one,
+		// so the same commit is green today and red the morning somebody binds
+		// a hostname in the portal. That is the case it exists for. It needs a
+		// signed in Azure CLI and the network, which `just gate` must not, and
+		// it runs in deploy.yml after a publish. The half that IS a function of
+		// the tree, hostnames.txt against the tfvars, is the `origincheck`
+		// recipe and that one is in `gate`.
+		"check-origins": true,
 	}
 
 	// Recipes that are gates rather than conveniences. A recipe that mutates
