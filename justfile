@@ -78,6 +78,7 @@ gate: _reports
     run "runbook numbers agree"          just runbookcheck
     run "spoken variables are documented" just varcheck
     run "STATUS keeps its own rule"      just statuscheck
+    run "no commit attributes itself"    just attribution
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
     run "self-hosting inputs are stable" just inputcheck
@@ -574,6 +575,33 @@ licensecheck:
 
 prosecheck:
     go run ./tools/prosecheck .
+
+# No commit on this branch attributes itself to whatever wrote it.
+#
+# CLAUDE.md: "No attribution trailers. No Generated with Claude, no
+# Co-Authored-By, nothing of that shape, anywhere." prosecheck cannot see a
+# commit message, because a commit message is not a tracked file, and the check
+# inside prmerge only ever saw the body prmerge itself was about to write. This
+# reads the commits the branch adds, which is the surface where the trailer is
+# actually appended.
+#
+# Local and offline, unlike prmerge's other modes: no pull request to point at
+# and nothing asked of the API, which is why this one belongs in `gate` and the
+# field check does not.
+#
+# The range falls back to the last commit when origin/main is not fetched, so a
+# shallow or offline clone checks something rather than erroring. It says which
+# range it used either way.
+attribution:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if base=$(git merge-base origin/main HEAD 2>/dev/null); then
+      range="${base}..HEAD"
+    else
+      echo "origin/main is not here, so this checks HEAD alone. Fetch it to check the branch."
+      range="HEAD~0..HEAD"
+    fi
+    go run ./tools/prmerge -check-attribution "$range"
 
 # Every number on the site that reads as a measurement has a stated source.
 #

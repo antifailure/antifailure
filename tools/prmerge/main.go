@@ -76,6 +76,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -163,9 +164,99 @@ var banned = []struct {
 	{regexp.MustCompile(`\s--\s`), "a double hyphen as punctuation"},
 }
 
-// attribution are the trailers this repository does not put in a commit, in
-// the shape a key is matched: at the start of a line, case insensitively.
-var attribution = regexp.MustCompile(`(?im)^(Co-authored-by|Generated-with|Generated-by):`)
+// attributionRules are the shapes this repository refuses in a commit message,
+// a pull request description and a merge body. CLAUDE.md states the rule as
+// "No attribution trailers. No Generated with Claude, no Co-Authored-By,
+// nothing of that shape, anywhere", and this list is the instrument for it.
+//
+// THE RULE SAID "NOTHING OF THAT SHAPE" AND THIS MATCHED THREE KEYS. That gap
+// is why the list exists as a list. A harness instructed this session to end
+// every commit message with `Claude-Session: <url>` and every pull request
+// description with the bare url, and the old expression, three literal keys
+// anchored to a line, saw neither. The rule was right and the gate was narrower
+// than the rule, which is the exact shape of defect this repository keeps
+// finding in its own instruments.
+//
+// THE BARE URL IS THE ONE THAT MATTERS. A pull request description was to carry
+// the session link with NO KEY IN FRONT OF IT, so every key anchored rule in
+// this file, present and future, is blind to it by construction. It is matched
+// as a url anywhere in the text instead, which is the only way to see a trailer
+// that is not shaped like a trailer.
+//
+// BROAD ON PURPOSE, AND THE ASYMMETRY IS THE ARGUMENT. A false positive costs
+// somebody one rephrased line before a merge. A miss puts a permanent
+// attribution trailer in the history of a public repository, where the remedy
+// is rewriting main and breaking every clone. The error names which rule fired,
+// so a wrong refusal is legible rather than mysterious.
+var attributionRules = []struct {
+	name    string
+	pattern *regexp.Regexp
+	why     string
+}{
+	{
+		"a co-author trailer",
+		regexp.MustCompile(`(?im)^[ \t]*Co-authored-by[ \t]*:`),
+		"a commit here is authored by the person who wrote it and signed off by the person relaying it, and nothing else names a second author",
+	},
+	{
+		"a generator trailer",
+		regexp.MustCompile(`(?im)^[ \t]*Generated-(?:with|by)[ \t]*:`),
+		"what generated a commit is not a fact about the change, and the message is for the failure the change fixes",
+	},
+	{
+		"an assistant session trailer",
+		regexp.MustCompile(`(?im)^[ \t]*[A-Za-z][A-Za-z0-9]*-Session[ \t]*:`),
+		"a session identifier attributes the commit to a tool run rather than describing the change, and it outlives the session it names",
+	},
+	{
+		"a link to an assistant session",
+		regexp.MustCompile(`(?i)\bclaude\.ai/code/(?:session|artifact)`),
+		"the same attribution with the key taken off, which is how it arrives in a pull request description, where no key anchored rule can see it",
+	},
+	{
+		"the generated-with footer",
+		regexp.MustCompile(`(?im)^.*\bGenerated with[ \t]+\[?(?:Claude|Cursor|Copilot|Codex)\b`),
+		"the prose half of the same footer, which is a sentence rather than a trailer and which a key anchored rule therefore misses",
+	},
+}
+
+// fenced is a fenced code block, and code is an inline backtick span. Both are
+// removed before a text is judged.
+//
+// THE RULE COULD NOT TELL A MENTION FROM A USE, AND IT REFUSED ITS OWN PULL
+// REQUEST. The description explaining these rules quoted the shapes they
+// refuse, as any description of them has to, and the check read the quotes as
+// the thing itself. prosecheck already settled this question for the
+// punctuation ban the same way: a fenced block is exempt, because a document
+// that cannot show you the character it bans cannot teach you the rule.
+//
+// The evasion this admits is writing the trailer inside backticks and hoping
+// git reads it anyway. That is worth saying rather than leaving implied, and it
+// is a trade rather than an oversight: the alternative is a rule no document
+// can describe, which is the rule people delete. A commit message is rendered
+// as plain text and nobody writes a fence in one by accident, so the shape this
+// admits is deliberate evasion, which no scanner catches anyway.
+var (
+	fenced = regexp.MustCompile("(?s)```.*?```")
+	code   = regexp.MustCompile("`[^`\n]*`")
+)
+
+// attributionIn reports every rule a text breaks, as sentences a person can act
+// on. Every rule is reported rather than only the first, because a footer
+// carries the prose line and the trailer together and fixing one at a time is
+// two refused merges instead of one.
+func attributionIn(what, text string) []string {
+	var problems []string
+	prose := code.ReplaceAllString(fenced.ReplaceAllString(text, ""), "")
+	for _, r := range attributionRules {
+		if found := r.pattern.FindString(prose); found != "" {
+			problems = append(problems, fmt.Sprintf(
+				"the %s carries %s, %q. This repository puts no attribution trailer in a commit: %s",
+				what, r.name, strings.TrimSpace(found), r.why))
+		}
+	}
+	return problems
+}
 
 // signOffLine finds any sign-off trailer in a body, so one naming somebody
 // else can be refused rather than merged alongside the merger's own.
@@ -494,9 +585,8 @@ func subjectFor(title string, number int) string {
 // and the CI gate disagree about it.
 func bodyFor(given, own string) (string, error) {
 	given = strings.TrimRight(strings.ReplaceAll(given, "\r\n", "\n"), "\n \t")
-	if found := attribution.FindString(given); found != "" {
-		return "", fmt.Errorf("the body carries %q. This repository puts no attribution trailer "+
-			"in a commit", strings.TrimSuffix(strings.TrimSpace(found), ":"))
+	if problems := attributionIn("body", given); len(problems) > 0 {
+		return "", errors.New(strings.Join(problems, "\n  "))
 	}
 	for _, line := range signOffLine.FindAllString(given, -1) {
 		if strings.TrimSpace(line) != own {
@@ -817,6 +907,90 @@ func missing(keys map[string]bool, want []string) []string {
 // list, which reads as nine contexts protection no longer requires. Every one
 // of those refuses the merge. This exists so that the refusal arrives before
 // somebody is standing at a merge button, and so that it names the field.
+// checkAttribution refuses an attribution trailer in every commit a range adds
+// and, when a pull request is named, in its description as well.
+//
+// THREE SURFACES, AND ONLY ONE OF THEM WAS GUARDED. bodyFor guards the body
+// this command writes into a squash commit. It cannot see the messages of the
+// commits a branch already carries, and it cannot see the pull request's own
+// description, which is public the moment it is opened and stays public whether
+// or not anything is merged. A rule that holds only where this command happens
+// to be looking is a rule somebody satisfies by not running this command.
+//
+// So this runs in CI, on the range the pull request adds, beside the sign-off
+// check that already computes that range and already knows how to compute it
+// correctly: HEAD^1..HEAD^2 on the merge commit a pull request checkout is,
+// which is the commits the branch ADDS rather than everything since its base
+// moved.
+//
+// MERGE COMMITS ARE SKIPPED for the same reason the sign-off step skips them.
+// A merge is not a contribution and its message is written by git.
+//
+// It reports every offending commit rather than stopping at the first, because
+// a branch instructed to add a trailer added it to all of them, and fixing them
+// one refused run at a time is the slowest possible way to learn that.
+func checkAttribution(r runner, h hub, rang string, number int, out io.Writer) error {
+	var problems []string
+	// examined counts SURFACES asked for, not commits found. A range that
+	// holds no commits has still been examined, and on `main` that is the
+	// normal answer rather than a check that ran over nothing: the count is
+	// printed either way so the difference is visible instead of implied.
+	examined, commits := 0, 0
+
+	if rang != "" {
+		examined++
+		listed, err := r.run("git", "rev-list", "--no-merges", rang)
+		if err != nil {
+			return fmt.Errorf("listing the commits in %s: %w", rang, err)
+		}
+		for _, sha := range strings.Fields(string(listed)) {
+			message, err := r.run("git", "log", "-1", "--format=%B", sha)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", sha, err)
+			}
+			commits++
+			problems = append(problems, attributionIn("message of "+short(sha), string(message))...)
+		}
+		// The ok line comes AFTER the verdict for this surface, not before it.
+		// It printed first and said "no commit attributes itself" three lines
+		// above the list of commits that did, which is a check reporting a
+		// pass it had not earned in the same breath as the failure.
+		if len(problems) == 0 {
+			_, _ = fmt.Fprintf(out, "ok  %-44s %d commit(s)\n", "no commit in "+rang+" attributes itself", commits)
+		}
+	}
+
+	if number > 0 {
+		raw, err := h.gh("pr", "view", fmt.Sprint(number), "--repo", h.repo, "--json", "body", "--jq", ".body")
+		if err != nil {
+			return fmt.Errorf("reading the description of pull request %d: %w", number, err)
+		}
+		before := len(problems)
+		examined++
+		problems = append(problems, attributionIn(fmt.Sprintf("description of pull request %d", number), string(raw))...)
+		if len(problems) == before {
+			_, _ = fmt.Fprintf(out, "ok  %-44s\n", fmt.Sprintf("description of pull request %d attributes nothing", number))
+		}
+	}
+
+	if examined == 0 {
+		return errors.New("no surface was named, so nothing was checked. Pass -check-attribution <range>, a -pr, or both.\n" +
+			"  A check that examined nothing and printed ok is worse than no check")
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "\n  "))
+	}
+	return nil
+}
+
+// short is a sha as a person reads one.
+func short(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
 func checkFields(h hub, number int, out io.Writer) error {
 	var problems, unchecked []string
 
@@ -965,6 +1139,7 @@ func main() {
 	bodyFile := flag.String("body-file", "", "read the squash body from a file")
 	dry := flag.Bool("dry-run", false, "check everything and print the merge command without running it")
 	fields := flag.Bool("check-fields", false, "ask the real API whether this command's field names exist, and merge nothing")
+	attrib := flag.String("check-attribution", "", "a git range whose commit messages must carry no attribution trailer, and merge nothing")
 	only := flag.Bool("confirm-only", false, "read an already merged pull request and prove its commit carries the sign-off")
 	attempts := flag.Int("confirm-attempts", 10, "how many times to ask whether the merge landed")
 	interval := flag.Duration("confirm-interval", 3*time.Second, "how long to wait between asks")
@@ -975,6 +1150,29 @@ func main() {
 			fail("%q is not a pull request number", flag.Args()[0])
 		}
 	}
+
+	// -check-attribution runs on a RANGE and needs no pull request, which is
+	// why it is handled before the number is demanded. A push to main has a
+	// range and no pull request, and that is exactly the case where an
+	// attribution trailer would otherwise land unread.
+	if *attrib != "" {
+		r := local{}
+		repoName := *repo
+		if repoName == "" && *number > 0 {
+			out, err := r.run("gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+			if err != nil {
+				fail("working out which repository this is: %v\n  Pass -repo owner/name.", err)
+			}
+			repoName = strings.TrimSpace(string(out))
+		}
+		if err := checkAttribution(r, hub{runner: r, repo: repoName}, *attrib, *number, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "\nprmerge: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("prmerge: nothing here attributes itself to whatever wrote it\n")
+		return
+	}
+
 	if *number <= 0 {
 		fail("prmerge needs a pull request. Pass its number: just merge 231")
 	}
