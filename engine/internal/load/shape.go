@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -186,8 +187,8 @@ func (p *Picker) Interval(perSecond float64) time.Duration {
 
 // DefaultShape is what a project with no traffic source gets.
 //
-// A guess, and it says so. It exercises the root and a health path, which
-// every application has, at a rate low enough to be pointless as a load test
+// A guess, and it says so. It exercises the root
+// at a rate low enough to be pointless as a load test
 // and useful as a smoke test. The report says the source was a default so
 // nobody mistakes it for production's shape.
 func DefaultShape() Shape {
@@ -198,6 +199,54 @@ func DefaultShape() Shape {
 			{Method: "GET", Path: "/", Weight: 10},
 		},
 	}
+}
+
+// ShapeFromSafeRoutes builds a mix out of the routes the manifest named safe.
+//
+// DefaultShape only names the root. Filtering it through an explicit list of
+// pages previously removed every route, so naming safe routes prevented any
+// traffic. With no telemetry, those literal read routes are the available
+// smoke shape, equally weighted and explicitly not a production measurement.
+// Globs cannot be expanded into real URLs. A methodless route becomes GET;
+// neither a methodless allowance nor a safe write route invents write traffic.
+//
+// ok is false when nothing concrete survives, so the caller falls back to the
+// default rather than running against an empty mix.
+func ShapeFromSafeRoutes(safe []string) (Shape, bool) {
+	shape := Shape{Source: "safe_routes", RequestsPerSecond: 5}
+	seen := map[string]bool{}
+	for _, p := range safe {
+		method, path, hasMethod := strings.Cut(strings.TrimSpace(p), " ")
+		if !hasMethod {
+			path, method = method, "GET"
+		}
+		path = strings.TrimSpace(path)
+		if path == "" || !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "* \t\r\n#\\") {
+			continue
+		}
+		if _, err := url.ParseRequestURI(path); err != nil {
+			continue
+		}
+		method = strings.ToUpper(strings.TrimSpace(method))
+		// GET and HEAD only. A safe list is about what may be CALLED, and a
+		// project that lists `POST /search` because a person may safely press
+		// the button has not agreed to four hundred of them a second. The
+		// route is still allowed through Safe when a real source carries it;
+		// what is refused is inventing traffic for it out of nothing.
+		if method != "GET" && method != "HEAD" {
+			continue
+		}
+		route := Route{Method: method, Path: path, Weight: 1}
+		if seen[route.String()] {
+			continue
+		}
+		seen[route.String()] = true
+		shape.Routes = append(shape.Routes, route)
+	}
+	if len(shape.Routes) == 0 {
+		return Shape{}, false
+	}
+	return shape, true
 }
 
 // FromAccessLog reads a shape out of a combined format access log.

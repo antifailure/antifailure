@@ -31,10 +31,23 @@ load:
 | --- | --- |
 | `otel` | An OpenTelemetry trace export in OTLP/JSON, at `source_config.path` |
 | `access_log` | A combined format log file, at `source_config.path` |
-| `none` | No shape; a default that exercises the root, and says so |
+| `none` | Equal-weight literal safe GET and HEAD routes, or the root when none can be derived. Reported as an assumed smoke, not production traffic. |
 
 Both file sources are read from the repository, so no credential and no
 outbound call is involved in deciding what traffic to send.
+
+`af ci` runs load when `load.enabled` is true. The `--load` flag also requests
+it when the block is absent or disabled. With no telemetry, literal read routes
+in `safe_routes` become a five-request-per-second smoke before `scale` applies.
+Glob patterns are filters, not URLs, and write methods are never invented.
+`unsafe_routes` still overrides every allowance. If filtering leaves no route,
+the report is inconclusive, not a pass. Each completed route's request and
+error counts appear in the report.
+
+A smoke counts 4xx responses as errors: a literal page you named must exist.
+An observed production mix retains its recorded 4xx semantics. Neither generator
+follows redirects, because a response cannot authorize another route
+or an external destination.
 
 ```
 AF-LOD-012 There is no load source called datadog.

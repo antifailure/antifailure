@@ -27,7 +27,7 @@ af change --diff pr.patch          against a diff you already have
   run   migration    migrations/20260824_add_billing_status.sql: the path is inside a migrations directory
   run   invariants   migrations/20260824_add_billing_status.sql: the path is inside a migrations directory
   run   workflows    api/billing.ts: the manifest declares the service api at the repository root, so every file in the repository is part of it (and 6 more)
-  gap   load         load is off in the manifest, and af ci generates it only with --load
+  gap   load         load is off in the manifest, so af ci runs it only when it is handed --load
   run   egress       api/billing.ts: an added line names api.stripe.com, which the manifest routes to mode mock (and 1 more)
   skip  masking      nothing this change touches is exercised by it
 ```

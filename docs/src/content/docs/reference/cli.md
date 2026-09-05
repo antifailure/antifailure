@@ -108,6 +108,9 @@ migrations are rehearsed against a throwaway branch of the golden, and what the
 environment reached for is summarised. Every finding is ranked by the manifest's
 policy block, which decides what fails the check and what is only reported.
 
+Load runs when the manifest enables it. A missing traffic source produces a
+read-only smoke from the literal safe routes, not a production benchmark.
+
 Teardown happens whatever the outcome, including a failure and including an
 interrupt, because an environment that outlives its pull request is the leak
 this product exists to prevent. It happens before the report is written, so a
@@ -135,7 +138,7 @@ af ci --report report.md --report-json report.json --keep
 | `--branch` | - | Branch to check, defaulting to the checked out one. |
 | `--docs` | - | Where documentation links point. |
 | `--keep` | `false` | Leave the environment up, for debugging a failure. |
-| `--load` | `false` | Generate load as well as running the workflows. |
+| `--load` | `false` | Generate load even when the manifest's load block is off. |
 | `--report` | - | Write the report here as well as to the terminal. |
 | `--report-json` | - | Write the same report here as JSON, for a program to read. |
 | `--runner` | - | Path to the runner's entry point. |

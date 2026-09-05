@@ -827,6 +827,18 @@ func (o *Orchestrator) Thresholds() (p95Increase, errorRate float64) {
 func (o *Orchestrator) trafficShape() (load.Shape, error) {
 	cfg := o.opts.Manifest.Load
 	if cfg == nil || cfg.Source == "" || cfg.Source == schema.LoadNone {
+		// The safe list before the default, because a project that wrote one
+		// has said more about its own traffic than the default knows. The
+		// default's only route is `GET /`, and Safe below can only remove
+		// routes, so a manifest naming four pages and no source produced an
+		// empty mix and AF-LOD-010 on every run. Falling back when nothing
+		// concrete survives keeps the smoke test for a manifest whose safe
+		// list is a single glob.
+		if cfg != nil {
+			if shape, ok := load.ShapeFromSafeRoutes(cfg.SafeRoutes); ok {
+				return shape, nil
+			}
+		}
 		return load.DefaultShape(), nil
 	}
 
