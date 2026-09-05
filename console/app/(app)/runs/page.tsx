@@ -14,6 +14,7 @@ import {
   CellLink,
   Empty,
   Field,
+  LinkButton,
   Loaded,
   Page,
   Row,
@@ -245,9 +246,10 @@ function Start({ onStarted }: { onStarted: () => void }) {
           const live = data.environments.filter((e) => e.state !== "torn_down");
           if (live.length === 0) {
             return (
-              <Empty title="No environment to run against">
-                A run needs an environment that is up. Ask for one on the
-                Environments page, and this fills when the engine reports it.
+              <Empty title="Create an environment first" action={<LinkButton href="/environments" variant="secondary">Set up an environment</LinkButton>}>
+                A run executes workflows against an isolated copy of your app.
+                Create that environment first, then return here to start a run
+                from its configured GitHub workflow.
               </Empty>
             );
           }
@@ -404,10 +406,9 @@ function Runs() {
         <Loaded state={state} skeleton={<TableSkeleton rows={6} cols={5} />}>
           {(data) =>
             data.length === 0 ? (
-              <Empty title="No runs yet">
-                A run appears the first time the engine exercises an
-                environment. Nothing here means nothing has run, not that
-                something is broken.
+              <Empty title="No runs yet" action={<LinkButton href="/cli#first-run" variant="secondary">Run your first workflow</LinkButton>}>
+                Creating an environment does not test it. Execute the workflows
+                in your manifest to get verdicts and evidence here.
               </Empty>
             ) : (
               <>

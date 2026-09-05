@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { query, useApi } from "@/lib/api";
-import { Bar, Empty, ErrorState, selectClass } from "@/components/ui";
+import { Bar, Empty, ErrorState, LinkButton, selectClass } from "@/components/ui";
 import type { ReactNode } from "react";
 
 export interface Repository {
@@ -49,9 +49,10 @@ export function WithRepository({
   const repos = state.data ?? [];
   if (repos.length === 0) {
     return (
-      <Empty title="No repositories connected">
-        Masking rules and network policy belong to a repository. One appears
-        here when the GitHub App reports an installation that includes it.
+      <Empty title="Choose an application first" action={<LinkButton href="/environments" variant="secondary">Set up an environment</LinkButton>}>
+        Masking rules and network policy belong to your application repository.
+        Start with an environment to connect a repository or run its checkout
+        from your terminal, then return here to review its policy.
       </Empty>
     );
   }

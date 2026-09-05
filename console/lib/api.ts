@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { trpcData } from "@/lib/wire";
+import { ApiError, trpcResponse } from "@/lib/wire";
 import { isCurrentResponse } from "@/lib/session-freshness";
+
+export { ApiError } from "@/lib/wire";
 
 /**
  * Where the API is.
@@ -48,17 +50,6 @@ export interface Session {
   hostedAccess?: boolean;
 }
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  constructor(message: string, status: number, code: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-  }
-}
-
 async function readError(res: Response): Promise<ApiError> {
   let message = `The control plane answered ${res.status}.`;
   let code = "UNKNOWN";
@@ -99,7 +90,7 @@ export async function query<T>(path: string, input?: unknown): Promise<T> {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw await readError(res);
-  return trpcData<T>(await res.json());
+  return trpcResponse<T>(res);
 }
 
 /**
@@ -127,7 +118,7 @@ export async function mutate<T>(
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await readError(res);
-  return trpcData<T>(await res.json());
+  return trpcResponse<T>(res);
 }
 
 /** A plain JSON endpoint on the control plane, for the few things that are not
