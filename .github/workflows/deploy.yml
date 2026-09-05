@@ -495,8 +495,24 @@ jobs:
         env:
           TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
         run: |
-          npm --prefix runner ci --no-audit --no-fund
+          # BOTH COMMANDS RUN INSIDE runner, and that is the whole of this fix.
+          #
+          # This step used to install the runner with `npm --prefix runner ci`
+          # and then run `npx playwright install` from the repository ROOT.
+          # There is no package.json at the root, so npx did not resolve the
+          # runner's pinned playwright at all: it fetched the latest one from
+          # the registry and downloaded browsers for THAT version. The runner
+          # then launched its own `^1.49.0` and looked for a revision nothing
+          # had installed, `chromium_headless_shell-1234`.
+          #
+          # The smoke reported COULD NOT TELL and exited 2 rather than passing,
+          # which is the behaviour it was built for, so this cost a red rather
+          # than a false green. dogfood.yml has run both commands with
+          # `working-directory: runner` since it was written; this matches it.
+          cd runner
+          npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+          cd ..
           go run ./tools/sitesmoke -root . \
             -origin https://antifailure.dev \
             -origin https://www.antifailure.dev \
