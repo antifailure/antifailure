@@ -333,6 +333,17 @@ export const ROUTES: readonly Route[] = [
     schemaType: "ContactPage",
   },
 
+  {
+    path: "/careers",
+    title: pageTitle("Careers"),
+    description: "Two founding roles. Founding engineer: 0.5% to 2% equity. Founding growth: 0.25% to 2% equity. No salary for either currently. Read the terms and apply on the page.",
+    summary: "Two founding roles, the current compensation stated before the work, and a private application form.",
+    section: "company",
+    indexable: true,
+    priority: 0.6,
+    parent: "/",
+  },
+
   // Sign-up and sign-in.
   //
   // These two entries said "Join the waitlist" and "There is no hosted control

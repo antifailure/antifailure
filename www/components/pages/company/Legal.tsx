@@ -141,6 +141,10 @@ export function PrivacyPage() {
                 "Raw snapshots, secrets, captured request bodies until redacted, raw logs and traces, sanitization, provisioning, egress enforcement, and cleanup.",
               ],
               [
+                "Careers applications",
+                "Name, email, selected role, an optional work link, your introduction, and acknowledgment of the current compensation. These are stored separately for recruitment review by an authorized operator, not added to customer analytics or a mailing list. No applicant IP address or browser user agent is stored in the application record. Applications expire through scheduled maintenance after 180 days, or an operator can delete them sooner. Backups expire separately. Contact us privately to request removal and include your application reference.",
+              ],
+              [
                 "This site",
                 "Nothing, until you use the contact form. That writes your name, work email, company, an optional seat count and your message into the control plane's own database, with the page it came from and the time. The role that serves public requests can insert into that table and cannot read it back, so no request to this site can ever return somebody else's contact details.",
               ],
@@ -1207,6 +1211,10 @@ export function DataRetentionPage() {
               [
                 "Contact form messages",
                 "Kept until you ask for removal, which is carried out by hand: the role serving public requests holds insert and no select on that table, so there is deliberately no endpoint that reads one back or deletes one. An operator reads the queue on a separate credential and marks each one handled, which is how a request for removal reaches somebody.",
+              ],
+              [
+                "Careers applications",
+                "Removed from the live database by the scheduled maintenance pass once they are older than 180 days, whether reviewed or not. An operator can remove an application sooner. If maintenance fails, removal waits for the next successful pass. Audit records retain a record identifier and action, not the applicant's answers. Existing backups expire on their separate recovery schedule.",
               ],
               [
                 "Database backups",
