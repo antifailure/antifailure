@@ -38,7 +38,7 @@ function FooterLink({ href, children }: { href: string; children: string }) {
     );
   }
   return (
-    <Link className={className} href={href}>
+    <Link prefetch={false} className={className} href={href}>
       {children}
     </Link>
   );
@@ -54,7 +54,7 @@ export function SiteFooter() {
                 alone in its grid cell with nothing to overlap, so the padding
                 buys the hit area and the negative margin gives back the space,
                 which is the same trade the header logo makes. */}
-            <Link href="/" aria-label="Antifailure home" className="inline-flex p-2 -m-2">
+            <Link prefetch={false} href="/" aria-label="Antifailure home" className="inline-flex p-2 -m-2">
               <svg viewBox="0 0 18 18" className="h-7 w-7" fill="none" aria-hidden>
                 <path
                   d="M1.8 6.4V1.8H6.4M11.6 1.8H16.2V6.4M16.2 11.6V16.2H11.6M6.4 16.2H1.8V11.6"
@@ -92,7 +92,7 @@ export function SiteFooter() {
           className="flex flex-wrap items-center gap-x-6 gap-y-6 pb-10 text-[13px] tracking-tight text-[#8a8a8a] max-md:gap-x-5 max-md:pb-[max(2rem,env(safe-area-inset-bottom))]"
         >
           {LEGAL_LINKS.map((item) => (
-            <Link
+            <Link prefetch={false}
               key={item.href}
               // `leading-5` before the padding, and it is load bearing rather
               // than tidy. 13px text inherits the 1.5 line height, so the line

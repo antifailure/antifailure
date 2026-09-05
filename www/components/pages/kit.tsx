@@ -402,7 +402,7 @@ export function RelatedGrid({
       <ul className="grid grid-cols-3 gap-x-16 gap-y-10 max-xl:grid-cols-2 max-xl:gap-x-10 max-md:grid-cols-1">
         {items.map((item) => (
           <li key={item.href}>
-            <Link href={item.href} className="group block min-w-0">
+            <Link prefetch={false} href={item.href} className="group block min-w-0">
               <span className="block text-[18px] tracking-extra-tight text-black">{item.title}</span>
               <span className="mt-2 block text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
                 {item.description}

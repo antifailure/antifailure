@@ -53,7 +53,7 @@ export function DirectoryList({
     <ul className="divide-y divide-black/12 border-y border-black/12 text-left">
       {items.map((item) => (
         <li key={item.href}>
-          <Link href={item.href} className="group block py-8 max-md:py-6">
+          <Link prefetch={false} href={item.href} className="group block py-8 max-md:py-6">
             {item.metric ? (
               <span className="font-mono text-[11px] tracking-extra-tight text-black/40">{item.metric}</span>
             ) : null}

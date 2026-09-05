@@ -30,7 +30,7 @@ function HeaderLink({
     );
   }
   return (
-    <Link href={href} className={className} onClick={onClick}>
+    <Link prefetch={false} href={href} className={className} onClick={onClick}>
       {children}
     </Link>
   );
@@ -322,14 +322,22 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               >
                 {sections.length > 0 && (
                   <Container className="overflow-visible pt-8 pb-10" size="1920">
-                    <div className="flex items-start gap-x-20 pl-[195px] xl:gap-x-16 xl:pl-[143px] max-xl:pl-0">
+                    {/* `justify-between` rather than a fixed gap, so the cards
+                        sit against the right of the panel instead of floating
+                        in the middle of it with the whole right half empty. */}
+                    <div className="flex items-start justify-between gap-x-20 pl-[195px] xl:gap-x-16 xl:pl-[143px] max-xl:pl-0">
                       <ul className="flex shrink-0 gap-x-16">
                         {sections.map((section) => (
-                          <li key={section.title} className="w-[240px]">
+                          <li key={section.title} className="w-[240px] data-[wide]:w-[544px]" data-wide={section.items.length > 4 ? "" : undefined}>
                             <span className="mb-6 block text-[11px] font-medium uppercase leading-none tracking-[0.1em] text-black/55">
                               {section.title}
                             </span>
-                            <ul className="flex flex-col gap-y-6">
+                            {/* A column of six ran the panel far taller than
+                                the two cards beside it and left the bottom
+                                third of it empty. Six or more go two across,
+                                which is three rows, and a shorter section is
+                                one column as before. */}
+                            <ul className="flex flex-col gap-y-6 data-[wide]:grid data-[wide]:grid-cols-2 data-[wide]:gap-x-16" data-wide={section.items.length > 4 ? "" : undefined}>
                               {section.items.map((item) => (
                                 <li key={item.href}>
                                   <HeaderLink href={item.href} className="group block" onClick={closeNow}>
@@ -350,7 +358,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                         <div className="w-[540px] max-w-full shrink-0">
                           <div className="flex flex-col gap-3">
                             {menu.featured.map((card) => (
-                              <Link
+                              <Link prefetch={false}
                                 key={card.href}
                                 href={card.href}
                                 onClick={closeNow}
@@ -453,7 +461,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
                       ))}
                       {menu.featured?.length
                         ? menu.featured.map((card) => (
-                            <Link
+                            <Link prefetch={false}
                               key={card.href}
                               href={card.href}
                               onClick={closeNow}
@@ -471,7 +479,7 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
             })}
             <div className="mt-8 flex flex-col gap-3">
               {FOOTER_MENUS[0].items.map((item) => (
-                <Link key={item.href} href={item.href} className="text-[16px] text-gray-new-40" onClick={closeNow}>
+                <Link prefetch={false} key={item.href} href={item.href} className="text-[16px] text-gray-new-40" onClick={closeNow}>
                   {item.text}
                 </Link>
               ))}

@@ -37,10 +37,9 @@ export function Hero() {
           <Button href="/signup" theme="outlined">
             Request hosted access
           </Button>
-          <CopyCodeButton
-            variant="white"
-            className="w-auto max-w-full border border-black/12 bg-white px-5 hover:bg-[#f7f7f5] max-xl:w-auto max-md:w-full"
-          />
+          {/* No fill and no border of its own: the variant now carries Button's
+              outlined theme, so this only has to stop being 34.2% of the row. */}
+          <CopyCodeButton variant="white" className="w-auto max-w-full max-xl:w-auto max-md:w-full" />
         </div>
         {/* The state of the product, on the page that sends the most people to
             /signup. This button said "Get started" and led to an invitation

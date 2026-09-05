@@ -56,7 +56,7 @@ export function Breadcrumbs({ path }: { path: string }) {
                   {label}
                 </span>
               ) : (
-                <Link
+                <Link prefetch={false}
                   href={route.path}
                   className="underline decoration-black/15 underline-offset-4 transition-colors hover:text-black hover:decoration-black/40"
                 >

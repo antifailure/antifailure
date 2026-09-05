@@ -62,11 +62,23 @@ function PauseIcon() {
   );
 }
 
+// lucide's RotateCcw, its own geometry at its own 24 unit viewBox and stroke
+// width. The hand drawn arc it replaces started and ended in the wrong places,
+// so the arrowhead pointed off the circle rather than around it.
 function RestartIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-4" fill="none" aria-hidden>
-      <path d="M6.2 6.1a5.8 5.8 0 1 1-.7 6.7" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
-      <path d="M6.2 3.9v2.9H3.3" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
     </svg>
   );
 }
@@ -221,7 +233,7 @@ export function HeroDemoVideo() {
           column to the film's height and pushed the beats to its foot, so they
           sat level with the bottom of the picture with a hand's width of
           nothing above them. They belong under the sentence they continue. */}
-      <div className="flex max-w-[390px] flex-col max-xl:max-w-[720px]">
+      <div className="flex h-full max-w-[390px] flex-col max-xl:h-auto max-xl:max-w-[720px]">
         <div>
           {/* NO EYEBROW. It said "THE FILM" in tracked uppercase sans over a
               heading that already says what this is, and this site does not
@@ -240,7 +252,7 @@ export function HeroDemoVideo() {
             <strong className="font-normal text-black-pure">A risky pull request, stopped before it merges.</strong>{" "}
             Eighty five seconds.
           </h2>
-          <p className="mt-7 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
+          <p className="mt-6 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
             Antifailure makes a copy of production, the same size and the same
             shape and the same load, with every real name replaced. Your change
             runs there first, on every pull request, before it merges, whether a
@@ -250,7 +262,7 @@ export function HeroDemoVideo() {
         {/* The site's own list mark, which is SectionLabel's arrow in the neon
             token, rather than a two pixel disc in #668f5d. That colour is in
             no palette in this repository and was written here once. */}
-        <ul className="mt-8 space-y-4 max-md:mt-7">
+        <ul className="mt-7 space-y-3.5 max-md:mt-7 max-md:space-y-4">
           {DEMO_STEPS.map((step) => (
             <li key={step} className="flex items-start gap-x-3 text-base tracking-extra-tight text-black">
               <BeatMark />
@@ -270,7 +282,12 @@ export function HeroDemoVideo() {
             row they broke three and one, which is a ragged edge rather than a
             group. Between `xl` and `sm` the column is the full width of the
             page and a row fits, so it is a row there. */}
-        <div className="mt-8 grid grid-cols-2 gap-2 max-md:mt-7 max-xl:flex max-xl:flex-wrap max-xl:items-center max-sm:grid max-sm:grid-cols-2">
+        {/* `mt-auto` pins these to the foot of the column, so their bottom edge
+            lines up with the bottom edge of the film beside them. The words
+            above stay where they are; only the gap between them and the
+            controls grows to whatever the picture's height leaves. Below `xl`
+            the column is not beside anything, so it goes back to a fixed gap. */}
+        <div className="mt-auto grid grid-cols-2 gap-2 pt-6 max-md:mt-0 max-md:pt-7 max-xl:mt-0 max-xl:flex max-xl:flex-wrap max-xl:items-center max-xl:pt-8 max-sm:grid max-sm:grid-cols-2">
           <FilmControl onClick={togglePlay} label={playing ? "Pause" : "Play"}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </FilmControl>

@@ -128,7 +128,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
           <ul className="mt-8 grid grid-cols-2 gap-x-12 gap-y-8 max-md:grid-cols-1">
             {others.map((other) => (
               <li key={other.slug}>
-                <Link href={`/blog/${other.slug}`} className="group block">
+                <Link prefetch={false} href={`/blog/${other.slug}`} className="group block">
                   <h3 className="text-[20px] leading-snug tracking-extra-tight text-black group-hover:underline decoration-black/25 underline-offset-4 max-md:text-[18px]">
                     {other.title}
                   </h3>

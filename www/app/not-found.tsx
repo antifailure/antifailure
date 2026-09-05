@@ -107,7 +107,7 @@ export default function NotFound() {
                     {inner}
                   </a>
                 ) : (
-                  <Link href={r.href} className={cls}>
+                  <Link prefetch={false} href={r.href} className={cls}>
                     {inner}
                   </Link>
                 )}

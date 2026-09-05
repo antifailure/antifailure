@@ -30,14 +30,14 @@ export default function BlogIndexPage() {
                   <span>{post.tags[0]}</span>
                 </div>
                 <h2 className="mt-4 max-w-[900px] text-[36px] leading-dense tracking-tighter text-black max-lg:text-[28px] max-md:text-[24px]">
-                  <Link href={`/blog/${post.slug}`} className="hover:underline decoration-black/25 underline-offset-[6px]">
+                  <Link prefetch={false} href={`/blog/${post.slug}`} className="hover:underline decoration-black/25 underline-offset-[6px]">
                     {post.title}
                   </Link>
                 </h2>
                 <p className="mt-4 max-w-[680px] text-[17px] leading-relaxed tracking-extra-tight text-gray-new-40 max-md:text-[15px]">
                   {post.dek}
                 </p>
-                <Link
+                <Link prefetch={false}
                   href={`/blog/${post.slug}`}
                   className="mt-5 inline-flex items-center gap-x-2 text-[15px] tracking-extra-tight text-black underline decoration-black/20 underline-offset-4 hover:decoration-black"
                 >

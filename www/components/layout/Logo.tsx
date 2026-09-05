@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 
 export function Logo({ className }: { className?: string }) {
   return (
-    <Link
+    <Link prefetch={false}
       href="/"
       // `h-11` rather than the 32px the mark and wordmark happen to occupy:
       // this is the only link in the phone header besides the menu button, and

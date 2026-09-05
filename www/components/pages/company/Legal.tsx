@@ -187,7 +187,7 @@ export function PrivacyPage() {
             integration, and it is active only where <code>AF_STRIPE_SECRET_KEY</code> and{" "}
             <code>AF_STRIPE_WEBHOOK_SECRET</code> are set. Where they are, Stripe holds the
             customer, subscription and invoice records for that deployment and is a processor for
-            it, listed on the <Link href="/subprocessors">subprocessor page</Link>. Where they are
+            it, listed on the <Link prefetch={false} href="/subprocessors">subprocessor page</Link>. Where they are
             not, the billing routes refuse and name the missing variables, and an organization
             carries nothing but a plan name, which sets its rate limits and quotas. The control
             plane says which of the two it is on the first line it logs when it starts.
@@ -240,9 +240,9 @@ export function PrivacyPage() {
             Signing in creates a session record and grants membership of the organization the
             GitHub App was installed on. The three documents that a security review asks for
             by name are now drafted rather than promised: the{" "}
-            <Link href="/dpa">Data Processing Agreement</Link>, the{" "}
-            <Link href="/subprocessors">subprocessor list</Link>, and the{" "}
-            <Link href="/data-retention">retention and deletion commitments</Link>. Read them as the
+            <Link prefetch={false} href="/dpa">Data Processing Agreement</Link>, the{" "}
+            <Link prefetch={false} href="/subprocessors">subprocessor list</Link>, and the{" "}
+            <Link prefetch={false} href="/data-retention">retention and deletion commitments</Link>. Read them as the
             current shape of the answer, not as a signed one.
           </p>
         </Prose>
@@ -441,8 +441,8 @@ export function TermsPage() {
           <p>
             When a hosted control plane is generally available, these pages will be replaced with
             dated legal documents that name a contracting entity and a governing law. The{" "}
-            <Link href="/acceptable-use">acceptable use policy</Link> and the{" "}
-            <Link href="/developer-policy">developer policy</Link> are drafted already, because
+            <Link prefetch={false} href="/acceptable-use">acceptable use policy</Link> and the{" "}
+            <Link prefetch={false} href="/developer-policy">developer policy</Link> are drafted already, because
             both describe what the software does rather than what a company has decided. Until
             then, treat every safety report as evidence about the conditions the run actually
             reproduced, a pass or a fail, not as insurance.
@@ -819,7 +819,7 @@ export function DpaPage() {
           <p>
             The point of listing these is that a security review will find every one of them. Better
             it finds them here, next to the measures that are real, than in a questionnaire answer
-            that has to be walked back. The <Link href="/sla">service levels page</Link> sets out what
+            that has to be walked back. The <Link prefetch={false} href="/sla">service levels page</Link> sets out what
             would have to change first.
           </p>
           <p>

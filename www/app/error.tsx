@@ -55,7 +55,7 @@ export default function Error({
           >
             Try again
           </button>
-          <Link
+          <Link prefetch={false}
             href="/docs"
             className="inline-flex h-11 items-center justify-center rounded-full border border-black/40 bg-black/[0.02] px-7 text-center text-[15px] leading-none tracking-extra-tight text-black transition-colors duration-200 hover:border-black"
           >

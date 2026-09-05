@@ -41,7 +41,7 @@ export function MovedPage({ to, label }: { to: string; label: string }) {
       <main id="main" tabIndex={-1} className="flex min-h-svh items-center justify-center px-6">
         <p className="text-[15px] tracking-extra-tight text-gray-new-40">
           This page moved to{" "}
-          <Link href={to} className="text-black underline decoration-black/20 underline-offset-4">
+          <Link prefetch={false} href={to} className="text-black underline decoration-black/20 underline-offset-4">
             {label}
           </Link>
           .

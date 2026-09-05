@@ -120,7 +120,7 @@ export function AboutPage() {
               </p>
               <p className="mt-5">
                 See the <a href={`${REPO_URL}/blob/main/ee/LICENSE.md`}>open-core license boundary</a> and the{" "}
-                <Link href="/product/architecture">control-plane architecture</Link>.
+                <Link prefetch={false} href="/product/architecture">control-plane architecture</Link>.
               </p>
             </Prose>
           </div>
@@ -134,7 +134,7 @@ export function AboutPage() {
                 footnotes added after a result.
               </p>
               <p className="mt-5">
-                Read the <Link href="/terms">terms and stated limits</Link> or the{" "}
+                Read the <Link prefetch={false} href="/terms">terms and stated limits</Link> or the{" "}
                 <a href="/docs/security/releases">release-security model</a>.
               </p>
             </Prose>
