@@ -228,13 +228,14 @@ export function PrivacyPage() {
             is never put on the network at all.
           </p>
           <p>
-            PostHog sees more, and this is the whole of it: the address of the page you are on
-            including its query string, the page you arrived from, each route you move to, the
-            clicks and form submissions you make along with the tag, classes and visible label of
-            what you clicked, your browser, operating system, device type and screen size, the
-            country PostHog works out from your connection, and a recording of the pages you
-            visit. A recording holds their structure and styling, your cursor, your clicks and
-            your scrolling.
+            PostHog sees more, and this is the whole of it: the address and title of the page you
+            are on including its query string, the page you arrived from, each route you move to,
+            how far down each one you got before leaving it, the clicks and form submissions you
+            make along with the tag, classes and visible label of what you clicked, your browser,
+            operating system, device type, screen and window size, browser language and timezone,
+            and a recording of the pages you visit. A recording holds their structure and styling,
+            your cursor, your clicks and your scrolling. Not your raw browser identification
+            string, which is stripped before anything is sent, and not your address.
           </p>
           <p>
             <strong>Every value you type is masked before it leaves your browser.</strong> The

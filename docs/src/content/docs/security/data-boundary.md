@@ -318,8 +318,13 @@ is written down because a reader's browser opens the connection either way.
 
 **The marketing website at antifailure.dev does send, to PostHog Cloud US, for
 product analytics and session replay.** It is on the subprocessor list under
-PostHog, Inc. with the categories written out. What a session recording holds is
-the structure and styling of a page, cursor movement, clicks and scrolling, with
+PostHog, Inc. with the categories written out: page addresses and titles, the
+referrer, scroll depth, autocaptured clicks and form submissions, browser,
+operating system, device type, screen size, language and timezone, and a session
+recording. The raw user agent string is stripped before anything is sent, which
+`www/lib/bots.ts` had already made a published promise about for the first party
+counter. What a session recording holds is the structure and styling of a page,
+cursor movement, clicks and scrolling, with
 every input value masked in the browser before it is sent, so the careers form
 and the enterprise contact form record fields filling up with asterisks and not
 the name, work email, company or message typed into them. No cookie is set and

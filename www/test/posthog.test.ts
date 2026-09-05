@@ -212,6 +212,29 @@ describe('the configuration the published copy describes', () => {
     assert.equal(options?.capture_pageview, 'history_change')
   })
 
+  it('captures no heatmap and no page timing, which the remote config had turned on', async () => {
+    // NEITHER OF THESE IS IN THE OPTIONS BY DEFAULT AND BOTH WERE HAPPENING.
+    // One visit produced two $$heatmap events and three $web_vitals events
+    // because the PROJECT's remote config enables them and remote config beats
+    // an option nobody set, so the published list of what is captured was two
+    // event types short the moment it was written. Found by decoding the wire,
+    // not by reading the configuration.
+    const { posthogOptions } = await load()
+    const options = posthogOptions('https://www.antifailure.dev')
+    assert.equal(options?.capture_heatmaps, false)
+    assert.equal(options?.capture_performance, false)
+  })
+
+  it('never sends the raw user agent, which this repository promises elsewhere', async () => {
+    // lib/bots.ts says the user agent is read in the page and never put on the
+    // network, and that is the reason its crawler filter runs in the browser at
+    // all. posthog-js attaches $raw_user_agent to every event, so without this
+    // a claim made in another file would have quietly become false.
+    const { posthogOptions } = await load()
+    const denied = posthogOptions('https://www.antifailure.dev')?.property_denylist ?? []
+    assert.ok(denied.includes('$raw_user_agent'), JSON.stringify(denied))
+  })
+
   it('does not record inside a cross origin frame, because /contact embeds somebody else’s form', async () => {
     const { posthogOptions } = await load()
     assert.equal(posthogOptions('https://www.antifailure.dev')?.session_recording?.recordCrossOriginIframes, false)

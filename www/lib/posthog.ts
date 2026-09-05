@@ -13,16 +13,25 @@
  * describe, and it is written here beside the configuration that produces it so
  * the two cannot drift.
  *
- *   the page address including its path and query string, and the referrer
- *   a page view on first load and on every client side route change
+ *   the page address including its path and query string, its title, and the
+ *     referrer
+ *   a page view on first load and on every client side route change, and how
+ *     far down each page the reader got before leaving it
  *   autocaptured interactions: clicks, taps, and form submissions, with the
  *     element's tag, its css classes and ids, and its visible label text
  *   a session recording: the structure and styling of the page, cursor
  *     movement, clicks, scrolls, and the shape of every form field with its
  *     value replaced by asterisks
- *   browser, operating system, device type, screen size, and the country
- *     PostHog derives from the connecting address at ingest
+ *   browser, operating system, device type, screen and viewport size, browser
+ *     language, and timezone
  *   an anonymous identifier that lives in sessionStorage for one tab
+ *
+ * THAT LIST WAS SHORT BY FOUR THINGS UNTIL SOMEBODY READ THE WIRE. Title,
+ * scroll depth, language and timezone are all sent by posthog-js on properties
+ * nothing in this file mentions, so a list written from the configuration alone
+ * was wrong on the day it was written. It is written from a decoded payload
+ * now. Two whole event types were missing the same way: see capture_heatmaps
+ * and capture_performance below, which the project's remote config had on.
  *
  * WHAT IS MASKED OR NEVER SENT.
  *
@@ -271,6 +280,29 @@ export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
     disable_web_experiments: true,
     capture_exceptions: false,
     opt_in_site_apps: false,
+
+    // OFF, AND THEY WERE ON, WHICH IS THE POINT OF WATCHING THE WIRE RATHER
+    // THAN READING THE CONFIGURATION. Neither of these appears anywhere in this
+    // file's options, and one visit produced two `$$heatmap` events and three
+    // `$web_vitals` events anyway, because the project's REMOTE CONFIG turns
+    // them on and remote config beats an option nobody set. Heatmaps carry
+    // click coordinates and web vitals carry page timings, so the published
+    // list of what is captured was short by two event types the moment it was
+    // written. Nobody asked for either. Turned off here rather than added to
+    // the copy, because a promise this file can keep is better than a longer
+    // one it has to track.
+    capture_heatmaps: false,
+    capture_performance: false,
+
+    // THE READER'S USER AGENT STRING, WHICH THIS SITE HAS PUBLISHED A PROMISE
+    // ABOUT. lib/bots.ts says the user agent is read in the page and never put
+    // on the network, and that is a real property of the beacon and the reason
+    // its crawler filter runs in the browser at all. posthog-js attaches
+    // `$raw_user_agent` to every event, so leaving it would have quietly
+    // falsified a claim made somewhere else in the tree. `$browser`, `$os` and
+    // `$device_type` are derived from it and are kept: they are the part that
+    // answers a question, and none of them is the string itself.
+    property_denylist: ["$raw_user_agent"],
   };
 }
 
