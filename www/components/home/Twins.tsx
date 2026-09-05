@@ -47,7 +47,7 @@ const FEATURES = [
 export function Twins() {
   return (
     <section
-      className="relative scroll-mt-[60px] overflow-hidden pt-8 pb-4 safe-paddings max-xl:pt-6 max-xl:pb-4 max-lg:scroll-mt-0 max-lg:pt-5 max-lg:pb-3 max-md:pt-4 max-md:pb-2"
+      className="relative scroll-mt-[60px] overflow-hidden pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="twins"
     >
       <Container

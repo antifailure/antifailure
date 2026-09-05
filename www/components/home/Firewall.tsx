@@ -5,7 +5,7 @@ import { FailClosedScene } from "./visuals/FailClosedScene";
 export function Firewall() {
   return (
     <section
-      className="relative scroll-mt-[60px] pb-32 safe-paddings max-xl:pb-24 max-lg:scroll-mt-0 max-lg:pb-20 max-md:pb-16"
+      className="relative scroll-mt-[60px] pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="firewall"
     >
       <Container

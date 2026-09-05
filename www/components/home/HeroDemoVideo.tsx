@@ -217,7 +217,11 @@ export function HeroDemoVideo() {
 
   return (
     <div className="relative mt-20 grid w-full grid-cols-[minmax(220px,330px)_minmax(0,1fr)] gap-x-16 max-xl:mt-16 max-xl:grid-cols-1 max-xl:gap-y-8 max-md:mt-12">
-      <div className="flex h-full max-w-[390px] flex-col justify-between max-xl:max-w-[720px] max-xl:gap-y-8">
+      {/* Packed to the top rather than spread. `justify-between` stretched this
+          column to the film's height and pushed the beats to its foot, so they
+          sat level with the bottom of the picture with a hand's width of
+          nothing above them. They belong under the sentence they continue. */}
+      <div className="flex max-w-[390px] flex-col max-xl:max-w-[720px]">
         <div>
           {/* NO EYEBROW. It said "THE FILM" in tracked uppercase sans over a
               heading that already says what this is, and this site does not
@@ -233,8 +237,8 @@ export function HeroDemoVideo() {
               over gray-new-40 continuation is how every other section head on
               this page reads. */}
           <h2 className="text-[34px] font-normal leading-dense tracking-tighter text-gray-new-40 max-lg:text-[28px] max-md:text-[26px]">
-            <strong className="font-normal text-black-pure">Watch a risky pull request get stopped before release.</strong>{" "}
-            Eighty five seconds, end to end.
+            <strong className="font-normal text-black-pure">A risky pull request, stopped before it merges.</strong>{" "}
+            Eighty five seconds.
           </h2>
           <p className="mt-7 text-base tracking-extra-tight text-gray-new-40 max-md:mt-5">
             Antifailure makes a copy of production, the same size and the same
@@ -246,7 +250,7 @@ export function HeroDemoVideo() {
         {/* The site's own list mark, which is SectionLabel's arrow in the neon
             token, rather than a two pixel disc in #668f5d. That colour is in
             no palette in this repository and was written here once. */}
-        <ul className="mt-10 space-y-4 max-xl:mt-0">
+        <ul className="mt-8 space-y-4 max-md:mt-7">
           {DEMO_STEPS.map((step) => (
             <li key={step} className="flex items-start gap-x-3 text-base tracking-extra-tight text-black">
               <BeatMark />
@@ -254,6 +258,32 @@ export function HeroDemoVideo() {
             </li>
           ))}
         </ul>
+        {/* IN THIS COLUMN, UNDER THE BEATS, and not under the picture.
+            They were three translucent discs on the frame, then a row beneath
+            it, which left a band of empty page under the film exactly as tall
+            as the controls and put them a long way from the words they belong
+            with. The film burns its captions along the bottom of the frame, so
+            they cannot sit on it; this column is where a control that carries
+            a word belongs, and the picture keeps its own edges. */}
+        {/* TWO BY TWO, because this column is at most 330 pixels and four
+            controls at 44 tall with mono labels want about 450. As a wrapping
+            row they broke three and one, which is a ragged edge rather than a
+            group. Between `xl` and `sm` the column is the full width of the
+            page and a row fits, so it is a row there. */}
+        <div className="mt-8 grid grid-cols-2 gap-2 max-md:mt-7 max-xl:flex max-xl:flex-wrap max-xl:items-center max-sm:grid max-sm:grid-cols-2">
+          <FilmControl onClick={togglePlay} label={playing ? "Pause" : "Play"}>
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </FilmControl>
+          <FilmControl onClick={restartVideo} label="Restart">
+            <RestartIcon />
+          </FilmControl>
+          <FilmControl onClick={toggleVolume} label={muted ? "Sound on" : "Sound off"}>
+            <VolumeIcon on={!muted} />
+          </FilmControl>
+          <FilmControl onClick={openFullscreen} label="Fullscreen">
+            <FullscreenIcon />
+          </FilmControl>
+        </div>
       </div>
       <div className="min-w-0">
         <div
@@ -316,29 +346,6 @@ export function HeroDemoVideo() {
           )}
         </div>
 
-        {/* UNDER THE FRAME, NOT FLOATING ON IT, and a phone is what decides it.
-            These were three translucent discs in the corner of the picture. The
-            film burns its captions along the bottom of the frame, centred, so
-            at 350 pixels "Last year, developers" ran straight underneath them,
-            and moving them to the other corner only picks a different shot to
-            cover. A control that sits outside the picture covers no frame of
-            it at any width, and it can carry a word, which is the other half:
-            a circular arrow on a still that has never played reads as restart,
-            and there was nothing anywhere that said play. */}
-        <div className="mt-4 flex flex-wrap items-center gap-2 max-sm:mt-3 max-sm:grid max-sm:grid-cols-2">
-          <FilmControl onClick={togglePlay} label={playing ? "Pause" : "Play"}>
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </FilmControl>
-          <FilmControl onClick={restartVideo} label="Restart">
-            <RestartIcon />
-          </FilmControl>
-          <FilmControl onClick={toggleVolume} label={muted ? "Sound on" : "Sound off"}>
-            <VolumeIcon on={!muted} />
-          </FilmControl>
-          <FilmControl onClick={openFullscreen} label="Fullscreen">
-            <FullscreenIcon />
-          </FilmControl>
-        </div>
       </div>
     </div>
   );

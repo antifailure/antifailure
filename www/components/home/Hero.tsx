@@ -25,18 +25,23 @@ export function Hero() {
             engine is MIT licensed and the quickstart needs no account, so that
             is the action, and the install line under it is the first command
             of it rather than a third call to action. */}
-        <div className="mt-8 flex gap-x-5 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:gap-y-3 max-md:[&_a]:w-full">
+        {/* THREE CONTROLS ON ONE LINE. The install command sat on its own row
+            below the two buttons, square where they are round, which read as a
+            leftover rather than as the third thing you can do here. It is the
+            first command of the quickstart beside it, so it belongs beside it.
+            Below `md` all three stack full width, as the buttons already did. */}
+        <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 max-lg:mt-7 max-lg:gap-x-4 max-md:flex-col max-md:items-stretch max-md:gap-y-3 max-md:[&_a]:w-full">
           <Button href="/docs/getting-started/quickstart" theme="filled">
             Start the quickstart
           </Button>
           <Button href="/signup" theme="outlined">
             Request hosted access
           </Button>
+          <CopyCodeButton
+            variant="white"
+            className="w-auto max-w-full border border-black/12 bg-white px-5 hover:bg-[#f7f7f5] max-xl:w-auto max-md:w-full"
+          />
         </div>
-        <CopyCodeButton
-          variant="white"
-          className="mt-5 w-auto max-w-full border border-black/12 bg-white px-4 hover:bg-[#f7f7f5] max-xl:w-auto max-lg:w-full"
-        />
         {/* The state of the product, on the page that sends the most people to
             /signup. This button said "Get started" and led to an invitation
             wall, and the only page that admitted it was /pricing, which most
@@ -46,7 +51,7 @@ export function Hero() {
 
             The two sentences are now in the order a visitor needs them: what
             they can have, then what they cannot have yet. */}
-        <p className="mt-6 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-5 max-lg:max-w-[520px] max-md:text-[14px]">
+        <p className="mt-5 max-w-[760px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40 max-lg:mt-4 max-lg:max-w-[520px] max-md:text-[14px]">
           The engine is open source and runs in your own continuous integration
           today, with no account.
           {/* Broken at the sentence, the same way the h1 above is, rather than
@@ -55,7 +60,10 @@ export function Hero() {
           <br className="max-lg:hidden" />{" "}
           The hosted control plane is invitation only while it is in development.
         </p>
-        <div className="relative mt-36 max-md:mt-24 max-sm:mt-16">
+        {/* mt-36 was 144 pixels of nothing between two short sentences and the
+            five things this product is. The gap is the section rhythm now, and
+            the same one the film below it uses. */}
+        <div className="relative mt-20 max-lg:mt-16 max-md:mt-14 max-sm:mt-12">
           <HeroServices />
         </div>
         <HeroDemoVideo />

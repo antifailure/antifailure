@@ -41,7 +41,7 @@ export function CopyCodeButton({
         "group inline-flex min-h-11 max-w-full cursor-pointer items-center gap-x-3 overflow-hidden font-mono text-[13px] font-medium tracking-extra-tight whitespace-nowrap",
         "max-lg:text-[12px] max-sm:min-h-10 max-sm:gap-x-2 max-sm:text-[10.5px]",
         variant === "white" &&
-          "w-[34.2%] justify-between rounded-none bg-white px-4 text-black hover:bg-[#F6FDFA] max-xl:w-[300px] max-lg:w-[36%] max-lg:px-3 max-sm:w-full",
+          "w-[34.2%] justify-between rounded-full bg-white px-4 text-black hover:bg-[#F6FDFA] max-xl:w-[300px] max-lg:w-[36%] max-lg:px-3 max-sm:w-full",
         variant === "green" &&
           "justify-between rounded-full bg-[#34d59a] px-7 text-black hover:bg-[#47d18c] max-lg:px-5 max-sm:px-4",
         // For the dark panel: sized to its content, so the command is readable

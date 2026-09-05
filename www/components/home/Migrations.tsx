@@ -6,7 +6,7 @@ import { MigrationBento } from "@/components/home/visuals/MigrationBento";
 export function Migrations() {
   return (
     <section
-      className="relative scroll-mt-16 pt-32 pb-12 safe-paddings max-xl:pt-[88px] max-xl:pb-10 max-lg:scroll-mt-0 max-lg:pt-20 max-lg:pb-8 max-md:pt-16 max-md:pb-8"
+      className="relative scroll-mt-16 pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="migrations"
     >
       <Container

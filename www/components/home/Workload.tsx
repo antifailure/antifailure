@@ -6,7 +6,7 @@ import { WorkloadIdeStage } from "./visuals/WorkloadIdeStage";
 export function Workload() {
   return (
     <section
-      className="relative scroll-mt-[60px] overflow-hidden pt-12 pb-16 safe-paddings max-xl:pt-10 max-xl:pb-14 max-lg:scroll-mt-0 max-lg:pt-8 max-lg:pb-12 max-md:pt-8 max-md:pb-12"
+      className="relative scroll-mt-[60px] overflow-hidden pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="workload"
     >
       <Container

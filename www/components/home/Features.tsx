@@ -5,7 +5,7 @@ import { SafetyCards } from "./visuals/SafetyCards";
 export function Features() {
   return (
     <section
-      className="relative scroll-mt-[60px] pb-8 safe-paddings max-xl:pb-6 max-lg:scroll-mt-0 max-lg:pb-5 max-md:pb-4"
+      className="relative scroll-mt-[60px] pt-10 pb-10 max-xl:pt-8 max-xl:pb-8 max-lg:pt-7 max-lg:pb-7 max-md:pt-6 max-md:pb-6 safe-paddings max-lg:scroll-mt-0"
       id="features"
     >
       <Container
