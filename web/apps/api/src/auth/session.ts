@@ -301,7 +301,7 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
  * sweeper has none of the three, so the DELETE matched no row and reported
  * success. A statement that matches nothing does not raise.
  *
- * withSessionSweeper enters a role of its own for the length of this
+ * withExpirySweeper enters a role of its own for the length of this
  * transaction. The policy admitting that role restricts it to rows already
  * expired by the DATABASE's clock, and the WHERE below restricts it to rows
  * expired by the APPLICATION's. A row has to be past both to be deleted, so
@@ -314,7 +314,7 @@ export async function revokeSession(pool: Pool, token: string): Promise<void> {
  * would be refused, which is the right refusal in the wrong place.
  */
 export async function sweepSessions(pool: Pool, clock: Clock): Promise<number> {
-  return pool.withSessionSweeper(async (db) => {
+  return pool.withExpirySweeper(async (db) => {
     const rows = await db.execute<{ n: string }>(sql`
       WITH gone AS (
         DELETE FROM sessions WHERE expires_at <= ${clock.now().toISOString()} RETURNING 1
