@@ -325,7 +325,7 @@ and the enterprise contact form record fields filling up with asterisks and not
 the name, work email, company or message typed into them. No cookie is set and
 the identifier expires with the tab. Requests go to the site's own origin and a
 reverse proxy forwards them, so a reader's browser opens no connection to a
-posthog.com host. A reader whose browser sends Global Privacy Control or Do Not
+`posthog.com` host. A reader whose browser sends Global Privacy Control or Do Not
 Track, or who has switched measurement off on the privacy page, never fetches
 PostHog's code at all: the refusal happens before the library is loaded rather
 than after, so there is no recorder that read the page and was then stopped.
