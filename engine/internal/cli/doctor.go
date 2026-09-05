@@ -178,6 +178,10 @@ func renderDoctor(env *Env, report DoctorReport) error {
 	}
 	env.Out.Println("")
 	if report.OK {
+		if len(problems) > 0 {
+			env.Out.Printf("  %s\n", env.Out.S(StyleWarn, "Checks completed with warnings. Review the items above."))
+			return nil
+		}
 		env.Out.Printf("  %s\n", env.Out.S(StyleGood, "This machine can run Antifailure."))
 		return nil
 	}
@@ -237,6 +241,8 @@ func silent(err error) error {
 // through with a confusing message.
 func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
 	checks := []func(context.Context, *Env, Prober) CheckResult{
+		checkCLIRelease,
+		checkProjectManifest,
 		checkDocker,
 		checkDockerPlatform,
 		checkDiskSpace,

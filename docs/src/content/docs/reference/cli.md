@@ -2028,6 +2028,27 @@ af up --rebuild --hud
 | `--hud` | `false` | Watch the run on a live dashboard, or a line per event where there is no terminal. |
 | `--rebuild` | `false` | Build every image again, even when an identical one exists. |
 
+### `af update`
+
+Install the latest verified CLI release in place.
+
+Downloads the latest stable community release for this platform, verifies the published SHA256 checksum, and replaces this binary and its bundled runner source. It leaves shell profiles and project files alone. Package-managed installations must be upgraded through their package manager; enterprise binaries must use their enterprise distribution. The check option reads the latest release without changing files. For a legacy installer with a separate binary directory, the prefix option names its original installation prefix.
+
+```
+af update [flags]
+```
+
+```
+af update
+# Check the latest release without replacing any file.
+af update --check -o json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--check` | `false` | Show the latest release without changing files. |
+| `--prefix` | - | Installer prefix for a legacy custom binary directory. |
+
 ### `af version`
 
 Print the version, commit, and edition.

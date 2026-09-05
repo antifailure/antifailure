@@ -48,6 +48,7 @@ var commandExamples = map[string]string{
 		"# setting passes -C with the absolute checkout in its configuration.\n" +
 		"af mcp",
 	"af doctor": "af doctor\naf doctor -o json",
+	"af update": "af update\n# Check the latest release without replacing any file.\naf update --check -o json",
 	"af start": "" +
 		"# Where you are on the first run, and the one command that moves you on.\n" +
 		"af start\n" +
