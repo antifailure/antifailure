@@ -99,14 +99,15 @@ func parseAnswers(raw []string) map[string]string {
 
 // InitReport is the JSON form of af init.
 type InitReport struct {
-	ManifestPath string            `json:"manifest_path"`
-	Created      bool              `json:"created"`
-	Services     []string          `json:"services"`
-	EgressRules  int               `json:"egress_rules"`
-	Questions    []detect.Question `json:"questions,omitempty"`
-	Assumed      map[string]string `json:"assumed,omitempty"`
-	Findings     int               `json:"findings"`
-	Partial      bool              `json:"partial"`
+	ManifestPath     string            `json:"manifest_path"`
+	Created          bool              `json:"created"`
+	Services         []string          `json:"services"`
+	EgressRules      int               `json:"egress_rules"`
+	Questions        []detect.Question `json:"questions,omitempty"`
+	Assumed          map[string]string `json:"assumed,omitempty"`
+	Findings         int               `json:"findings"`
+	Partial          bool              `json:"partial"`
+	UnassignedImages []string          `json:"unassigned_images,omitempty"`
 }
 
 func runInit(ctx context.Context, env *Env, opts initOptions) error {
@@ -152,6 +153,11 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	if err != nil {
 		return err
 	}
+	for _, q := range res.Questions {
+		if q.Migration != "" && assumed[q.ID] != "" {
+			body = append([]byte("# "+strings.ReplaceAll(assumed[q.ID], "\n", "\n# ")+"\n"), body...)
+		}
+	}
 	if _, err := manifest.Parse(body, manifestPath, env.WorkDir); err != nil {
 		// The refusal has to say that nothing was written. Wrapping the
 		// validator's own error let AF-MAN-002 reach the user unchanged, and
@@ -181,7 +187,8 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	report := InitReport{
 		ManifestPath: manifestPath, Created: true, Services: names,
 		EgressRules: len(res.Draft.Egress.Rules), Questions: res.Questions,
-		Assumed: assumed, Findings: len(res.Findings), Partial: res.Partial,
+		UnassignedImages: res.UnassignedImages,
+		Assumed:          assumed, Findings: len(res.Findings), Partial: res.Partial,
 	}
 	if env.Out.Format == FormatJSON {
 		return env.Out.JSON(report)
@@ -269,6 +276,23 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 			return aferrors.Coded(aferrors.AFDET004,
 				"question", q.Prompt,
 				"id", q.ID)
+		}
+		if q.Migration != "" {
+			if answer == "manual:configure" {
+				assumed[q.ID] = "Not configured: " + q.Migration + ". Configure migrations before af up."
+				continue
+			}
+			applied := false
+			for j := range res.Draft.Services {
+				if res.Draft.Services[j].Name == answer && res.Draft.Services[j].Migrate == "" {
+					res.Draft.Services[j].Migrate = q.Migration
+					applied = true
+				}
+			}
+			if !applied {
+				return aferrors.Coded(aferrors.AFDET006, "id", q.ID+"="+answer, "known", strings.Join(q.Options, ", "))
+			}
+			continue
 		}
 		_ = applyAnswer(res.Draft, q.ID, answer)
 	}
@@ -429,6 +453,13 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 	env.Out.Table([]Column{
 		Col("SERVICE"), Col("KIND"), Num("PORT"), Col("PATH"), Flex("COMMAND"),
 	}, rows)
+	if len(res.UnassignedImages) > 0 {
+		env.Out.Section("Images without a detected service")
+		for _, dockerfile := range res.UnassignedImages {
+			env.Out.Printf("  %s\n", dockerfile)
+		}
+		env.Out.Note(StyleWarn, "These images were not added. No command or port established their runtime; a base image may supply one. If an image runs part of your application, declare that service and its command in Compose or in this manifest before af up.")
+	}
 
 	if len(res.Draft.Egress.Rules) > 0 {
 		env.Out.Section("Network policy")
