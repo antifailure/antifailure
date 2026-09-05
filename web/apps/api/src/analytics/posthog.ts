@@ -1,6 +1,28 @@
 // The marketing site's product analytics, forwarded from here, so that a
 // reader's browser never opens a connection to posthog.com.
 //
+// THIS IS TRANSPORT AND IT IS NOT A BOUNDARY. SAY SO EVERY TIME, INCLUDING IN
+// A COMMIT MESSAGE AND IN A TEST'S FAILURE TEXT.
+//
+// What this changes is the destination the BROWSER CONNECTS TO. It does not
+// change WHO RECEIVES THE DATA. PostHog, Inc. receives every event, every
+// autocaptured interaction and every session recording, in their US cloud,
+// exactly as it would if the browser had called them directly. Three real
+// things are bought and nothing else: a content blocker's vendor list does not
+// match the request, so the measurement is not silently half missing; the
+// recorder bundle, which is the largest and most blockable thing posthog-js
+// fetches, arrives rather than failing while ingestion goes on looking healthy;
+// and the reader's address is dropped on the way through, which is the one
+// place this arrangement genuinely withholds something rather than moving where
+// a request goes.
+//
+// WHAT IT DOES NOT BUY IS THE SENTENCE "no third party sees this". A network
+// tab showing no vendor host would make that sentence look VERIFIED while it
+// was false, which is worse than not proxying at all, because the arrangement
+// it hides is the one a security review is asking about. PostHog is on the
+// published subprocessor list with a row of its own for that reason, and
+// legal-facts.test.ts fails if that row stops saying who receives the data.
+//
 // WHY THIS IS ON THE CONTROL PLANE AND NOT ON THE SITE. www is a Next.js static
 // export (`output: "export"`, see www/next.config.ts) published to an Azure
 // Static Web App. It has no server at runtime. Static Web Apps route rules
@@ -111,7 +133,8 @@ export function postHogSummary(region: PostHogRegion | null): string {
   }
   const bases = POSTHOG_REGIONS[region]
   return `the PostHog proxy is mounted at ${POSTHOG_MOUNT} and forwards to ${bases.ingestion} ` +
-    `and ${bases.assets}, so the marketing site contacts no posthog.com host from a browser`
+    `and ${bases.assets}, so a browser on the marketing site contacts no posthog.com host. ` +
+    'PostHog still receives the data: this moves the connection, not the recipient'
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,17 @@
 The marketing site's product analytics goes through the control plane, so a
 reader's browser never opens a connection to posthog.com.
 
+That is transport and it is not a boundary. It changes the destination the
+browser connects to, not who receives the data: PostHog, Inc. receives every
+event, every autocaptured interaction and every session recording either way, in
+their US cloud. What it buys is that a content blocker's vendor list does not
+match the request, so the measurement is not silently half missing; that the
+recorder bundle, the largest and most blockable thing posthog-js fetches,
+arrives rather than failing while ingestion looks healthy; and that the reader's
+address is dropped in passing. It does not buy the sentence "no third party sees
+this", and PostHog is on the published subprocessor list with a row of its own
+saying so.
+
 The site is a static export on Azure Static Web Apps. It has no server at
 runtime and its route rules cannot rewrite to an external host, so the site
 itself cannot forward anything and the alternative was a browser talking
@@ -30,6 +41,13 @@ and overrides it from the remote config, which for this project returns
 `/i/v0/e/`. A proxy built from the documented default alone would have forwarded
 the flag call, served the script, passed every check anybody ran, and lost every
 single event.
+
+One prefix, two upstreams: the script and remote config paths go to the region's
+asset host and everything else to its ingestion host. Both are needed, and the
+asset half is the one that fails quietly: posthog-js sends every target at a
+custom api_host, so a proxy that forwarded only ingestion would leave the
+recorder bundle being fetched from the vendor directly, where a blocker kills
+replay while ingestion goes on looking healthy.
 
 The legal gate that held the site to "no analytics and no third-party script"
 was rewritten rather than deleted. It now keys on whether posthog-js is actually

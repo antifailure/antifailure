@@ -514,10 +514,20 @@ anybody can recompute, which is an organization identifier with extra steps.
 
 ### The PostHog proxy
 
-Mounted only when `AF_POSTHOG_REGION` is set. It exists so that a reader of the
-marketing site contacts our own infrastructure and nothing else: the site is a
-static export with no server of its own, so the forwarding has to happen on the
-one process this product already runs on its own hostname.
+Mounted only when `AF_POSTHOG_REGION` is set. A reader's browser then connects to
+this control plane rather than to a posthog.com host: the site is a static export
+with no server of its own, so the forwarding has to happen on the one process
+this product already runs on its own hostname.
+
+**It is transport and it is not a boundary.** It changes the destination the
+browser connects to, not who receives the data. PostHog, Inc. receives every
+event, every autocaptured interaction and every session recording either way.
+What it buys is that a content blocker's vendor list does not match the request,
+so the measurement is not silently half missing; that the recorder bundle, the
+largest and most blockable request the library makes, arrives rather than failing
+while ingestion looks healthy; and that the reader's address is dropped in
+passing. It does not buy the sentence "no third party sees this", and the
+published subprocessor list says so.
 
 It is **same site, not same origin**. The site is served on an apex and a `www`
 hostname, this control plane answers on a third, and those are three different
