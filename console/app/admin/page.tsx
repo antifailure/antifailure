@@ -5,7 +5,6 @@ import {
   Badge,
   Bar,
   Card,
-  CardSkeleton,
   Empty,
   Loaded,
   Table,
@@ -130,11 +129,11 @@ export default function AdminOverviewPage() {
         </Loaded>
       ) : null}
 
-      <div className="mt-7 grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="grid min-w-0 gap-5">
-          {mayReadTenants ? (
-            <Card title="What needs an operator">
-              <Loaded state={standing} skeleton={<CardSkeleton count={2} />}>
+      <div className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        {mayReadTenants ? (
+          <Card title="What needs an operator" className="flex flex-col">
+            <div className="flex flex-1 flex-col justify-center">
+              <Loaded state={standing} skeleton={<AttentionSkeleton />}>
                 {(data) => (
                   <Attention
                     standing={data}
@@ -145,45 +144,44 @@ export default function AdminOverviewPage() {
                   />
                 )}
               </Loaded>
-            </Card>
-          ) : null}
+            </div>
+          </Card>
+        ) : null}
 
-          {mayReadAudit ? (
-            <Card
-              title="Recent operator actions"
-              note="Writes only. Reads are counted and left out."
-              actions={
-                <Link
-                  href="/admin/security/audit"
-                  className="inline-flex min-h-11 items-center text-[13px] text-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
-                >
-                  Full chain
-                </Link>
-              }
-            >
-              <Loaded state={activity} skeleton={<TableSkeleton rows={4} cols={4} />}>
-                {(data) => <RecentActions activity={data} />}
-              </Loaded>
-            </Card>
-          ) : null}
-        </div>
-
-        <div className="grid min-w-0 gap-5">
-          {mayReadTenants ? (
-            <Card title="The installation">
-              <Loaded state={standing} skeleton={<FiguresSkeleton />}>
-                {(data) => (
-                  <Figures
-                    standing={data}
-                    activity={mayReadAudit ? activity.data : null}
-                    installation={mayReadInfra ? installation.data : null}
-                  />
-                )}
-              </Loaded>
-            </Card>
-          ) : null}
-        </div>
+        {mayReadTenants ? (
+          <Card title="The installation">
+            <Loaded state={standing} skeleton={<FiguresSkeleton />}>
+              {(data) => (
+                <Figures
+                  standing={data}
+                  activity={mayReadAudit ? activity.data : null}
+                  installation={mayReadInfra ? installation.data : null}
+                />
+              )}
+            </Loaded>
+          </Card>
+        ) : null}
       </div>
+
+      {mayReadAudit ? (
+        <Card
+          className="mt-5"
+          title="Recent operator actions"
+          note="Writes only. Reads are counted and left out."
+          actions={
+            <Link
+              href="/admin/security/audit"
+              className="inline-flex min-h-11 items-center text-[13px] text-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
+            >
+              Full chain
+            </Link>
+          }
+        >
+          <Loaded state={activity} skeleton={<TableSkeleton rows={4} cols={4} />}>
+            {(data) => <RecentActions activity={data} />}
+          </Loaded>
+        </Card>
+      ) : null}
 
       <h2 className="mt-9 text-[13px] font-medium uppercase tracking-[0.08em] text-dim">
         Everything this role can reach
@@ -199,18 +197,12 @@ export default function AdminOverviewPage() {
           </div>
         </Card>
       ) : (
-        // items-start, so a card ends where its content ends. Grid items
-        // stretch to the tallest in their row by default, and the groups have
-        // three entries and five, so Customers was drawn as tall as Product
-        // with two hundred pixels of nothing inside it. That reads as a
-        // section that failed to load rather than as a short one.
-        //
-        // mt-3 is the administration lane's, separating the directory from the
-        // statement above it that this page now leads with.
-        <div className="mt-3 grid items-start gap-5 lg:grid-cols-2">
+        // Each row shares a bottom edge even when its groups contain different
+        // numbers of links. Mobile keeps the natural single-column height.
+        <div className="mt-3 grid gap-5 lg:grid-cols-2">
           {groups.map((group) => (
-            <Card key={group.slug} title={group.label}>
-              <ul>
+            <Card key={group.slug} title={group.label} className="flex flex-col">
+              <ul className="lg:grid lg:flex-1 lg:auto-rows-fr">
                 {group.items.map((item) => (
                   <SectionLink key={item.href} item={item} />
                 ))}
@@ -364,6 +356,20 @@ interface Item {
   href: string;
   action: string;
   tone: "fail" | "warn";
+}
+
+function AttentionSkeleton() {
+  return (
+    <div className="grid gap-6 px-4 py-6" aria-label="Loading operator tasks">
+      {[0, 1].map((row) => (
+        <div key={row} className="grid gap-2">
+          <Bar className="h-3.5 w-40 max-w-full" />
+          <Bar className="h-3 w-full" />
+          <Bar className="h-3 w-2/3" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -661,7 +667,7 @@ function SectionLink({ item }: { item: AdminNavItem }) {
     <li className="border-b border-rule last:border-b-0">
       <Link
         href={item.href}
-        className="flex min-h-11 items-start gap-3 px-4 py-3 transition-colors hover:bg-[rgba(16,16,16,0.035)]"
+        className="flex min-h-11 items-start gap-3 px-4 py-3 transition-colors hover:bg-[rgba(16,16,16,0.035)] lg:h-full lg:items-center"
       >
         <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted" />
         <span className="min-w-0">
