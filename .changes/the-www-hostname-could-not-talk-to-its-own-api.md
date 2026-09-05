@@ -8,8 +8,9 @@ Static Web App. Both are Ready, both serve every page, and neither redirects to
 the other, because a Static Web Apps route rule matches on a PATH and its
 configuration schema has no hostname condition at all. `AF_SITE_ORIGIN` held one
 origin, the apex. So a visitor who typed `www`, followed an old link, or was
-handed the `www` page by a search engine sent `origin: https://www.antifailure.dev`
-and the control plane answered 403 to every cross origin call the page makes:
+handed the `www` page by a search engine arrived on the `www.antifailure.dev`
+hostname, sent it as their `Origin`, and the control plane answered 403 to every
+cross origin call the page makes:
 the analytics beacon silently, the enterprise contact form as "Could not reach
 the server", and the careers application form on something somebody had just
 filled in.
