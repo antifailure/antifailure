@@ -580,6 +580,13 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// Running account creation as part of a source check would be a write
 		// to production, not verification. Its tests run inside test-web.
 		"operator-init": true,
+		// Merges a pull request. It writes to main, which is the furthest
+		// thing there is from a check on a tree, and the property it exists
+		// for, a squash commit carrying a sign-off, is already a required
+		// context in CI. It is here for the same reason `hooks` is: the
+		// convenience is what makes the gate satisfiable, not a substitute
+		// for it. `go test ./tools/prmerge` is what runs in `gate`.
+		"merge": true,
 	}
 
 	var uncalled []string
