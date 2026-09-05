@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -59,7 +60,61 @@ operated and authenticated Streamable HTTP bridge.`),
 				Clock:   env.Clock,
 				Getenv:  env.Getenv,
 				Version: Version,
+				// The two machine checks are handed in rather than called from
+				// inside the server, because they live here and this package
+				// imports that one. Reimplementing either over there would
+				// give two instruments that can disagree about the same
+				// machine, which is the failure this repository keeps finding
+				// in its own gates. Left nil, the tool reports NOT CHECKED
+				// rather than a pass.
+				Diagnose:    func(ctx context.Context) (mcp.Diagnosis, error) { return diagnose(ctx, env) },
+				RunnerReady: func(ctx context.Context) (mcp.RunnerReadiness, error) { return runnerReady(ctx, env) },
 			})
 		},
 	}
+}
+
+// diagnose runs the machine checks for the MCP server.
+//
+// The same RunDoctor af doctor and af support bundle call, so a tool call and
+// a terminal cannot disagree about whether this machine can run anything.
+func diagnose(ctx context.Context, env *Env) (mcp.Diagnosis, error) {
+	report := RunDoctor(ctx, env, systemProber{getenv: env.Getenv})
+	out := mcp.Diagnosis{OK: report.OK, Platform: report.Platform}
+	for _, c := range report.Checks {
+		out.Checks = append(out.Checks, mcp.DiagnosticCheck{
+			Name: c.Name, Status: string(c.Status),
+			Detail: c.Detail, Remediation: c.Remediation,
+		})
+	}
+	return out, nil
+}
+
+// runnerReady inspects the browser agent runner for the MCP server.
+//
+// The same checks and the same three way verdict af runner check reports,
+// including the runners it went past, because a report about a directory the
+// reader did not mean is how this check came to say a runner was ready while
+// the run took a different copy.
+func runnerReady(ctx context.Context, env *Env) (mcp.RunnerReadiness, error) {
+	target, passedOver, err := runnerToCheck(env.WorkDir)
+	if err != nil {
+		return mcp.RunnerReadiness{}, err
+	}
+	results := append(passedOverChecks(passedOver), checkRunner(ctx, target)...)
+
+	out := mcp.RunnerReadiness{
+		Verdict:    string(runnerVerdict(results)),
+		Path:       target,
+		Unanswered: unanswered(results),
+	}
+	for _, r := range results {
+		if r.label == "node" && r.symbol != SymbolFail {
+			out.Node = strings.SplitN(r.detail, ",", 2)[0]
+		}
+		out.Checks = append(out.Checks, mcp.DiagnosticCheck{
+			Name: r.label, Status: r.symbol, Detail: r.detail, Remediation: r.remedy,
+		})
+	}
+	return out, nil
 }

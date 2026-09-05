@@ -45,6 +45,18 @@ type Tool struct {
 	// ReadOnly marks a tool that observes without changing anything. It is
 	// published as a hint so a client can decide what to prompt for.
 	ReadOnly bool
+	// Destructive marks a tool that removes something the caller owns and
+	// cannot get back by calling again.
+	//
+	// It is published as the protocol's destructiveHint, which is what a
+	// client uses to decide whether to stop and ask a person. That makes it a
+	// claim rather than a label: the hint used to be false on every tool, with
+	// a comment saying nothing here destroys anything a caller owns, which was
+	// true while every tool made a throwaway environment and removed it again.
+	// A tool that deletes somebody's environments or their masked copies of
+	// production breaks that, and publishing false for one of those would be
+	// this server telling a client it is safe to run unattended.
+	Destructive bool
 }
 
 // Call is the per call context handed to a handler.
@@ -304,9 +316,12 @@ func (s *Server) handleToolsList(req request) {
 		}
 		entry["annotations"] = map[string]any{
 			"readOnlyHint": t.ReadOnly,
-			// Nothing here destroys anything a caller owns: an experiment
-			// creates a throwaway environment and removes it again.
-			"destructiveHint": false,
+			// Declared per tool rather than fixed. Most of them destroy
+			// nothing a caller owns, because an experiment creates a
+			// throwaway environment and removes it again; the few that sweep
+			// away environments or masked copies of production say so, so a
+			// client can prompt before one runs.
+			"destructiveHint": t.Destructive,
 			"openWorldHint":   false,
 		}
 		list = append(list, entry)

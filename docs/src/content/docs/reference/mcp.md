@@ -173,8 +173,9 @@ and still not be found. Write the absolute path instead when that happens, and
 The server writes nothing to standard output except protocol frames, so a
 terminal is the wrong place to look. The client's own log is the right one, and
 a connected server lists the local tools named under
-[The tools](#the-tools) below, including `rehearse_migration_safety`,
-`start_environment`, `explain_error` and `get_rehearsal_run`.
+[The tools](#the-tools) below, including `check_prerequisites`,
+`rehearse_migration_safety`, `start_environment`, `explain_error` and
+`get_rehearsal_run`.
 
 In Claude Code, `/mcp` lists the configured servers and their state.
 
@@ -240,6 +241,10 @@ carries a distinguishing word rather than the bare name, which is why the local
 reads are `get_rehearsal_run` and `inspect_egress_firewall` and the local
 workflow run is `run_browser_workflows`. A client connected to both servers
 sees both sets, so read the server a tool came from before believing a name.
+
+The hosted `list_environments` and the local `inspect_environments` are
+different things: the hosted one reads what the control plane was told, and the
+local one reads the runtime that is actually holding the containers.
 
 ## The division of authority
 
@@ -551,6 +556,114 @@ before anything is written rather than partly applied, because a half masked
 table is neither real nor safe and nothing says which rows are which. The result
 carries counts and no values, and it says plainly that finishing is not proof the
 data is safe: `inspect_data_masking` with `verify` is what proves that.
+### `check_prerequisites`
+
+Answers whether this machine can run anything, before anything expensive is
+attempted. It runs the same checks `af doctor` and `af runner check` run, so a
+tool call and a terminal cannot disagree about the same machine, and every
+failing check carries what to do about it.
+
+The verdict has three values and not two. `ready` means every deciding question
+was asked and answered yes. `blocked` means one was answered no. `undetermined`
+means one could not be answered at all, which is neither, and is never reported
+as ready: a check that did not run is not a check that passed. Anything this
+build could not look at is listed under `not_checked` rather than left out,
+because a section that vanishes reads as a section that passed.
+
+### `inspect_environments`
+
+Reports what is running: the services for this branch and where to reach them,
+every environment the runtime is holding, or the control plane's own record of
+one. It reads the runtime rather than a registry, because a registry can be
+wrong and a container either exists or it does not.
+
+The machine listing says whose each environment is. A runtime is shared: on a
+local daemon it holds every project on the machine, and a listing that does not
+say whose presents another repository's environment as though this project could
+remove it.
+
+### `remove_expired_environments` and `remove_old_goldens`
+
+These two DESTROY things, and they are the only local tools that publish
+`destructiveHint: true`.
+
+Both plan by default. A call with no confirmation lists exactly what it would
+remove, changes nothing, and hands back the confirmation argument in
+`confirm_with`. Carrying the plan out means passing that list back, naming every
+environment or version one by one. A set that has changed in between is refused
+rather than swept, so nothing is removed that the plan did not show you. Neither
+accepts a wildcard and there is no force argument.
+
+What they will not do is not a matter of what a caller asks for.
+`remove_expired_environments` only ever considers an environment past the
+lifetime stamped on its own resources, defers one something is running against,
+and never touches one with no stated lifetime. `remove_old_goldens` only ever
+considers versions made for this project, and can remove neither a version an
+environment is still branched from nor the newest verified one, because a
+project with nothing left to branch cannot bring an environment up at all.
+
+An environment somebody is still using is kept with
+`extend_environment_lifetime`, which moves an expiry and is bounded by the
+project's own `runtime.max_ttl` measured from when the environment was created.
+Asking for more than that grants the ceiling and says so.
+
+### `inspect_goldens` and `prepare_golden`
+
+`inspect_goldens` answers whether this project has a masked copy of production it
+can branch, which is the thing whose absence stops everything else. A version
+made for another project, and a version that failed verification, are reported
+and are not offered: the engine refuses both rather than branching them.
+
+`prepare_golden` produces one, in one of three ways. `pull` brings a copy this
+project already published onto this machine and verifies it here. `refresh`
+reads production through the masking pipeline and is the only operation in the
+product that touches unmasked data. `verify` re-checks a version that already
+exists. None of them can skip verification or publish a version that failed it.
+It takes minutes, so it returns a `run_id` and is polled with
+`get_rehearsal_run`.
+
+The values the detectors matched are never reproduced. They are the unmasked
+production data the check exists to keep out of a copy, and a report that quoted
+them would be the leak.
+
+### `read_captured_messages`, `list_webhook_events` and `send_webhook_event`
+
+`read_captured_messages` reads the mail and messages the application tried to
+send. Nothing is delivered to anybody: a captured provider records the message
+instead, so a sign up, a magic link or a one time code can be finished inside
+the environment. The link and the code are extracted, so there is no HTML to
+parse.
+
+`wait_seconds` waits for a message that has not been sent yet. It checks what
+already arrived first, because the message has usually been sent before anybody
+starts waiting for it. It is bounded and it always returns: nothing arriving is
+reported as `found: false` and is never an error.
+
+`send_webhook_event` sends one signed provider callback into the environment, as
+the provider itself would. It has a real effect: the application handles the
+event and does whatever it does, which for a payment or subscription event means
+creating, changing or cancelling records. The signing secret is resolved by the
+server from the same variable the application reads, and there is no argument
+that carries one. `list_webhook_events` has the exact event names, so a name
+that merely looks right is refused before anything is sent.
+
+### `describe_model_key`, `verify_model_key` and `describe_control_plane_account`
+
+`describe_model_key` reports whether the browser driving agents have a model to
+reason with, which endpoint a run would call, where the key was found, and
+whether a monthly spending cap actually applies to it. No key is a supported
+answer and not a failure: runs fall back to a deterministic planner.
+
+`verify_model_key` proves the key works with one real completion of a single
+token. It costs a fraction of a cent and counts against the account's rate
+limits, which is why it is not marked read only. It tells the failures apart: a
+rejected key, an empty balance, a model the endpoint does not serve, a throttle,
+an outage and an endpoint nothing answers on have different fixes.
+
+`describe_control_plane_account` says who this machine is signed in as and what
+the credential is allowed to do. It asks the control plane rather than reading
+the copy on disk, because a credential whose membership was revoked still looks
+perfectly good locally.
 
 ### `get_rehearsal_run` and `cancel_rehearsal_run`
 
@@ -562,6 +675,30 @@ response as `evidence_cursor` to read the next page.
 than a kill: the experiment stops at the next point it can do so safely and
 tears down the environment it created, because an environment abandoned mid run
 is the leak this product exists to prevent.
+
+## Credentials never pass through this server
+
+No tool here reads, returns, stores or removes a credential, and that is a
+property of what is served rather than a rule the tools follow.
+
+There is no tool for `af secret`, `af token`, `af login`, `af logout`,
+`af provider set`, `af provider rm`, `af model set` or `af model rm`. What a
+result carries instead is what those commands publish for the purpose: a
+fingerprint of a model key, the last four characters of a stored provider key, a
+token prefix. `af provider budget` is not served either, because a monthly
+spending cap is a threshold, and a tool that let a model raise its own ceiling
+would be the one kind of argument this server refuses to have.
+
+`af support bundle` is not served. A bundle collects the application's own logs
+and every outbound request it made, redacted against the values the engine knows
+about, and that is content for a person to open and send rather than content to
+put through a model's context. `check_prerequisites` names the command when
+something is wrong and does not collect one.
+
+Free form text on its way into a result passes the engine's redactor as well as
+the neutraliser. That is defence in depth rather than the main control: it is
+what catches a provider quoting back the key it just rejected, or a runtime
+complaint carrying a connection string.
 
 ## Repeating a submission
 
@@ -587,6 +724,21 @@ Results carry the verdict, then the summary, then at most forty findings worst
 first, then ranked metrics, then a page of evidence references. Every
 truncation is explicit and states the true total, so a caller never has to
 infer how much it was not shown.
+
+## The application under test is untrusted too
+
+A captured message is composed by the code being tested, from data in a
+sanitized copy of production, so its subject and body are attacker
+influenceable in exactly the way a migration's file name is.
+
+So the body is withheld unless a caller deliberately asks for it, everything
+repeated is bounded and stripped of anything that could forge a field boundary,
+and every result carries a note saying whose words these are. The extracted link
+is the one destination this server repeats, and it is parsed rather than pattern
+matched: `http` and `https` only, so a `javascript:` or `data:` URL in a
+captured message cannot arrive looking like somewhere to go. A one time code
+that is a sentence rather than a code is withheld, because removing the line
+breaks from an injection leaves the injection.
 
 ## The candidate repository and the running application are untrusted
 

@@ -151,8 +151,9 @@ func runBringUp(
 // newTeardownTool builds teardown_environment.
 func newTeardownTool(p *Project, eng *Engine, down tearDown) *Tool {
 	return &Tool{
-		Name:  "teardown_environment",
-		Title: "Destroy the environment for a named branch",
+		Name:        "teardown_environment",
+		Destructive: true,
+		Title:       "Destroy the environment for a named branch",
 		// Not read only, and the one tool here that destroys. There is no
 		// wildcard and no way to name somebody else's environment: the branch
 		// is asserted and checked against the checkout, so it can refuse and
