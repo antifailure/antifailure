@@ -55,11 +55,16 @@ function FigureShell({
   );
 }
 
-function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+// The green is a prop rather than something a caller adds through className.
+// `cn` is a plain join, so text-[#285D49] passed in landed beside the eyebrow's
+// own text-black/50 and lost the cascade: three eyebrows meant to carry the
+// sage signal rendered in the same grey as the ones that carry none.
+function Eyebrow({ children, className, tone = "muted" }: { children: ReactNode; className?: string; tone?: "muted" | "sage" }) {
   return (
     <span
       className={cn(
-        "font-mono text-[8px] font-medium uppercase tracking-[0.12em] text-black/50 sm:text-[9px]",
+        "font-mono text-[8px] font-medium uppercase tracking-[0.12em] sm:text-[9px]",
+        tone === "sage" ? "text-[#285D49]" : "text-black/50",
         className,
       )}
     >
@@ -139,15 +144,20 @@ function TopologyNode({
   return (
     <div
       className={cn(
-        "min-w-0 border-l-2 px-2.5 py-2",
+        "min-w-0 border-l-2 px-2 py-2",
         tone === "plain" && "border-black/[0.14] bg-[#F8FAF8]",
         tone === "mint" && "border-[#285D49] bg-[#F1F7F4]",
         tone === "danger" && "border-[#B93838] bg-[#FFF3F3]",
       )}
     >
-      <div className="flex items-center gap-1.5">
+      {/* The label gets 58px here, and "Candidate" needs 58.5px at 12px, so
+          break-words did its last-resort job and split the word into
+          "Candidat" and "e" on every desktop render of this figure. 11px needs
+          53.6px, which fits with room left. The narrow gap and padding buy the
+          rest. */}
+      <div className="flex items-center gap-1">
         <StateDot tone={tone === "danger" ? "danger" : tone === "mint" ? "active" : "muted"} />
-        <span className="min-w-0 break-words text-[10px] font-medium leading-4 text-black sm:text-[12px]">{label}</span>
+        <span className="min-w-0 break-words text-[10px] font-medium leading-4 text-black sm:text-[11px]">{label}</span>
       </div>
       <p className="mt-1 font-mono text-[8px] leading-3.5 text-black/48 sm:text-[9px]">{detail}</p>
     </div>
@@ -181,7 +191,7 @@ export function POV01() {
 
         <section className="relative min-w-0 border-x border-[#285D49]/16 px-3" aria-label="Isolated twin boundary">
           <div className="flex items-center justify-between gap-2">
-            <Eyebrow className="text-[#285D49]">Isolated run boundary</Eyebrow>
+            <Eyebrow tone="sage">Isolated run boundary</Eyebrow>
             <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#285D49]/70">temporary</span>
           </div>
 
@@ -290,7 +300,7 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
 
       <section className="mt-3 border-t border-[#285D49]/18 pt-3" aria-label="Closed decision loop">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Eyebrow className="text-[#285D49]">Closed decision loop</Eyebrow>
+          <Eyebrow tone="sage">Closed decision loop</Eyebrow>
           <StatusPill tone="FAIL">PR gate</StatusPill>
         </div>
         <ol className="mt-2.5 grid grid-cols-4 gap-1 border border-[#285D49]/14 bg-[#F1F7F4] p-1.5" aria-label="Twin decision sequence">
@@ -537,7 +547,7 @@ export function POV04() {
         <div className="flex items-start gap-2.5">
           <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center font-mono text-[9px] font-semibold text-[#285D49]" aria-hidden="true">i</span>
           <div className="min-w-0">
-            <Eyebrow className="text-[#285D49]">lint · safer sequence</Eyebrow>
+            <Eyebrow tone="sage">lint · safer sequence</Eyebrow>
             <p className="mt-1 text-[9px] leading-4 text-[#285D49] sm:text-[10px]">
               Add a second column of the new type, backfill it, then drop the old one.
             </p>

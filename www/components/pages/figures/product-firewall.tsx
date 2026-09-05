@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { FloatWindow, SageWell } from "@/components/pages/solutions/well";
 import { cn } from "@/lib/cn";
 
-const MODES = ["MOCK", "CAPTURE", "DENY"] as const;
+// BLOCK, not DENY. The manifest's egress modes are block, allow, capture,
+// mock, sandbox and synth, so a figure of a manifest driven run that offers
+// DENY names an outcome the validator would refuse.
+const MODES = ["MOCK", "CAPTURE", "BLOCK"] as const;
 
 type Tone = "plain" | "sage" | "success" | "danger" | "muted";
 
@@ -50,15 +53,18 @@ function FirewallFigure({
   const captionId = `${id.toLowerCase()}-caption`;
   return (
     <figure aria-labelledby={captionId} className="w-full min-w-0">
+      {/* One padding scale, one radius and one inner padding is emitted, never
+          two of any. Written side by side the compact values did not replace
+          the defaults, they only hoped to be later in the stylesheet, and the
+          radii were `!` utilities racing a class the components write
+          themselves, which no ternary here could have settled. */}
       <SageWell
-        className={cn(
-          "w-full !min-h-0 !px-3 !py-4 sm:!px-4 sm:!py-5",
-          compact && "!rounded-[24px] !px-2.5 !py-3 sm:!px-3 sm:!py-4",
-        )}
+        radius={compact ? 24 : 32}
+        className={cn("w-full !min-h-0", compact ? "!px-2.5 !py-3 sm:!px-3 sm:!py-4" : "!px-3 !py-4 sm:!px-4 sm:!py-5")}
       >
-        <FloatWindow className="w-full min-w-0 overflow-hidden !rounded-[13px]">
+        <FloatWindow radius={13} className="w-full min-w-0 overflow-hidden">
           <FigureChrome id={id} tab={tab} rail={rail} />
-          <div className={cn("min-w-0 p-3 sm:p-4", compact && "p-2.5 sm:p-3")}>{children}</div>
+          <div className={cn("min-w-0", compact ? "p-2.5 sm:p-3" : "p-3 sm:p-4")}>{children}</div>
         </FloatWindow>
       </SageWell>
       <figcaption id={captionId} className="sr-only">
@@ -133,28 +139,37 @@ function Direction({ danger = false }: { danger?: boolean }) {
   );
 }
 
+// The detail wraps on its own full width line rather than truncating beside
+// the dot. This figure draws 560px wide inside its Split at every width from
+// sm up, which leaves each seal 87px of content, and the dot and its gap were
+// taking 40px of that: "CAPTURE; rendered artifact" needs 156px on one line,
+// so it was cut to "CAPTUR..." and told the reader nothing. Its longest word
+// needs 48px and the column had 45, so even un-truncating it would have
+// overflowed. Below the label the whole 87px is available, at 9px, and the
+// sentence fits. The seals at 320px were already showing this text in full,
+// which is how the desktop layout was identifiable as the thing at fault.
 function Seal({ label, detail, tone = "sage" }: { label: string; detail: string; tone?: "sage" | "danger" }) {
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-3 rounded-[9px] border bg-white px-3 py-2.5",
-        tone === "sage" ? "border-[#83B39F]/30" : "border-[#C43D3D]/24 bg-[#fbefef]",
+        "min-w-0 rounded-[9px] border px-3 py-2.5",
+        tone === "sage" ? "border-[#83B39F]/30 bg-white" : "border-[#C43D3D]/24 bg-[#fbefef]",
       )}
     >
-      <span
-        className={cn(
-          "grid size-7 shrink-0 place-items-center rounded-full border",
-          tone === "sage" ? "border-[#285D49]/30 bg-[#E4F1EB]" : "border-[#C43D3D]/25 bg-white",
-        )}
-        aria-hidden
-      >
-        <span className={cn("size-2 rounded-full", tone === "sage" ? "bg-[#285D49]" : "bg-[#C43D3D]")} />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[12px] font-medium leading-4 text-black">{label}</span>
-        <span className={cn("block truncate font-mono text-[10px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
-          {detail}
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "grid size-5 shrink-0 place-items-center rounded-full border",
+            tone === "sage" ? "border-[#285D49]/30 bg-[#E4F1EB]" : "border-[#C43D3D]/25 bg-white",
+          )}
+          aria-hidden
+        >
+          <span className={cn("size-1.5 rounded-full", tone === "sage" ? "bg-[#285D49]" : "bg-[#C43D3D]")} />
         </span>
+        <span className="min-w-0 text-[12px] font-medium leading-4 text-black">{label}</span>
+      </div>
+      <span className={cn("mt-1 block font-mono text-[9px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
+        {detail}
       </span>
     </div>
   );
@@ -195,7 +210,12 @@ export function PFW01() {
       <div className="mt-4 grid min-w-0 grid-cols-1 items-stretch sm:grid-cols-[minmax(0,0.95fr)_28px_minmax(0,1.08fr)_28px_minmax(0,1fr)]">
         <section className="min-w-0 rounded-[12px] bg-[#f7f7f5] p-4" aria-label="Candidate application attempts">
           <SectionTitle eyebrow="candidate" title="Application attempts an external effect" />
-          <div className="mt-4 space-y-2 font-mono text-[10px] leading-4 text-black/70">
+          {/* break-words, because an endpoint is one unbreakable token and this
+              column is 106px wide at every width from sm up. Without it the two
+              hostnames ran 68px past the card and crossed into the arrow
+              gutter, which only happened on desktop and so survived every
+              mobile check. */}
+          <div className="mt-4 space-y-2 break-words font-mono text-[10px] leading-4 text-black/70">
             <div>POST api.stripe.com/v1/charges</div>
             <div>POST api.sendgrid.com/v3/mail/send</div>
             <div className="text-[#A73737]">TCP 18.4.2.9:443</div>
@@ -214,11 +234,11 @@ export function PFW01() {
         <Direction />
 
         <section className="min-w-0 rounded-[12px] border border-black/[0.07] bg-white p-4" aria-label="Contained outcomes">
-          <SectionTitle eyebrow="contained outcomes" title="Mock, capture, or deny without public egress" />
+          <SectionTitle eyebrow="contained outcomes" title="Mock, capture, or block without public egress" />
           <div className="mt-4 space-y-2">
             <Seal label="Stripe pack" detail="MOCK; stateful response" />
             <Seal label="Mail inbox" detail="CAPTURE; rendered artifact" />
-            <Seal label="Unknown host" detail="DENY; no route out" tone="danger" />
+            <Seal label="Unknown host" detail="BLOCK; no route out" tone="danger" />
           </div>
         </section>
       </div>
@@ -400,8 +420,8 @@ const LEDGER_ROWS = [
   { method: "POST", target: "api.sendgrid.com/v3/mail/send", mode: "CAPTURE", receipt: "msg_sim_2a91", result: "handled" },
   { method: "POST", target: "hooks.slack.com/services/T0/B0", mode: "CAPTURE", receipt: "req_sim_91c0", result: "handled" },
   { method: "POST", target: "api.openai.com/v1/chat/completions", mode: "MOCK", receipt: "mock_5b12", result: "handled" },
-  { method: "GET", target: "api.prod.internal/v1/health", mode: "DENY", receipt: "deny_01", result: "blocked" },
-  { method: "CONNECT", target: "example.com:443", mode: "DENY", receipt: "deny_02", result: "blocked" },
+  { method: "GET", target: "api.prod.internal/v1/health", mode: "BLOCK", receipt: "deny_01", result: "blocked" },
+  { method: "CONNECT", target: "example.com:443", mode: "BLOCK", receipt: "deny_02", result: "blocked" },
 ] as const;
 
 function OutcomeDot({ blocked }: { blocked: boolean }) {

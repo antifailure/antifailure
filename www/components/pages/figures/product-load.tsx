@@ -154,7 +154,7 @@ function Verdict({ delta }: { delta: number | null }) {
   const deltaText = delta === null ? "no baseline" : `+${Math.round(delta * 100)}%`;
 
   return (
-    <div className="flex items-center justify-between gap-2 sm:block sm:text-right">
+    <div className="flex items-center gap-2 sm:block sm:text-right">
       <span
         className={cn(
           "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
@@ -176,11 +176,19 @@ function RouteRow({ datum, index }: { datum: RouteDatum; index: number }) {
   return (
     <li
       className={cn(
-        "rounded-[10px] border px-3 py-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]",
+        // min-w-0, because a grid item's default min-width is auto and this row
+        // then refuses to go narrower than its own content. At 320px that put
+        // the row 87px wider than the track and the figure's overflow-hidden
+        // cut the verdict badge and the p95 reading off mid word.
+        "min-w-0 rounded-[10px] border px-3 py-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]",
         breach ? "border-[#C95B5B]/24 bg-[#FFF8F7]" : "border-black/[0.06] bg-white",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      {/* Stacked below sm. Side by side, the verdict took half of a 176px row
+          and the route name truncated to "PO..." and "GET /ap...", so a figure
+          whose entire subject is which route breached could not say which one
+          on a 320px phone. Stacked, the name has the full width and fits. */}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
@@ -267,7 +275,7 @@ export function PLD01() {
             <h4 id="route-results-heading" className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-black/62">
               Route mix + p95 comparison
             </h4>
-            <p className="mt-0.5 font-mono text-[9px] text-black/35">weighted arrivals · baseline marker in black · 0–450ms scale</p>
+            <p className="mt-0.5 font-mono text-[9px] text-black/35">weighted arrivals · baseline marker in black · 0 to 450ms scale</p>
           </div>
           <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-black/35">candidate vs production</span>
         </div>
@@ -351,9 +359,13 @@ function CapabilityMark({ value }: { value: string }) {
 
 function CapabilityCard({ capability }: { capability: (typeof CAPABILITIES)[number] }) {
   return (
-    <li className="rounded-[10px] border border-black/[0.06] bg-white p-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="font-mono text-[10px] font-medium tracking-extra-tight text-black">{capability.name}</div>
+    // min-w-0 for the same reason RouteRow above carries it: a grid item's
+    // default min-width is auto, so this card refused to go narrower than its
+    // own header. At 320px it sat 19px wider than its track and the figure's
+    // overflow-hidden cut the capability marks off rather than scrolling.
+    <li className="min-w-0 rounded-[10px] border border-black/[0.06] bg-white p-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 font-mono text-[10px] font-medium tracking-extra-tight text-black">{capability.name}</div>
         <div className="flex shrink-0 gap-1.5">
           <CapabilityMark value={capability.otel} />
           <CapabilityMark value={capability.access} />
