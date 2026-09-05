@@ -7,6 +7,27 @@ import type { Actor } from '../src/trpc.ts'
 
 const resource = 'http://app.test/mcp'
 interface RpcReply { result: { serverInfo?: { name: string }; content: [{ text: string }] } }
+// A configured origin is operator input and arrives with whatever punctuation
+// the operator typed. Stripping its trailing slashes used to be `/\/+$/`, which
+// CodeQL flags as polynomial: on a value that does not end in a slash the
+// engine retries from every slash in it. The rewrite has to keep the behaviour,
+// so the behaviour is asserted rather than the shape of the code.
+describe('the hosted audience is stripped of what an operator typed', () => {
+  test('trailing slashes do not reach the published resource', async () => {
+    const api = await startApi({ appBaseUrl: 'http://slashes.test///' })
+    try {
+      const body = await (await api.fetch('/.well-known/oauth-protected-resource')).json() as { resource: string }
+      assert.equal(body.resource, 'http://slashes.test/mcp')
+    } finally { await api.close() }
+  })
+  test('an installation with no configured origin serves no endpoint at all', async () => {
+    const api = await startApi({ appBaseUrl: '' })
+    try {
+      assert.equal((await api.fetch('/mcp', { method: 'POST' })).status, 404)
+    } finally { await api.close() }
+  })
+})
+
 describe('hosted MCP authorization and reachable tools', () => {
   let api: ApiHarness
   let org: Org

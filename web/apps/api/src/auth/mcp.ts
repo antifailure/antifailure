@@ -8,6 +8,27 @@ import type { Actor } from '../trpc.ts'
 import { ROLES } from '../permissions.ts'
 
 export const MCP_SCOPES = ['mcp:read', 'mcp:write'] as const
+
+/**
+ * The hosted endpoint an installation serves, or null when it serves none.
+ *
+ * One function rather than the same three rules written twice. The server used
+ * to compute this to mount the route and decide the OAuth audience, and the
+ * operator page computed it again to print on screen, so a change to either
+ * could leave the page naming an address the server does not answer on.
+ *
+ * The trailing slashes are stripped with a bounded loop rather than with
+ * `/\/+$/`, which CodeQL flags as polynomial and is: on a value that does NOT
+ * end in a slash the engine retries the match from every slash in it, so the
+ * cost is quadratic in the length of a configured URL. A loop is linear and
+ * says what it does.
+ */
+export function hostedMcpEndpoint(appBaseUrl: string): string | null {
+  if (!/^https?:\/\//.test(appBaseUrl)) return null
+  let origin = appBaseUrl
+  while (origin.endsWith('/')) origin = origin.slice(0, -1)
+  return `${origin}/mcp`
+}
 const CODE_TTL_MS = 5 * 60 * 1000
 const TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const digest = (value: string): Buffer => createHash('sha256').update(value).digest()

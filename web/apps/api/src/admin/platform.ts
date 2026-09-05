@@ -65,6 +65,7 @@ import { sql } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 import { router } from '../trpc.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
+import { hostedMcpEndpoint } from '../auth/mcp.ts'
 import {
   MCP_ELSEWHERE,
   MCP_REGISTRATION_FILE,
@@ -979,7 +980,7 @@ const mcpRouter = router({
     return {
       ...recorded,
       at: now,
-      endpoint: /^https?:\/\//.test(c.appBaseUrl) ? `${c.appBaseUrl.replace(/\/+$/, '')}/mcp` : null,
+      endpoint: hostedMcpEndpoint(c.appBaseUrl),
       recordsAnything: true,
       why: 'Hosted OAuth registrations and credentials are recorded here. Local af mcp sessions stay on the developer\'s machine.',
       tools: MCP_TOOLS.map((t) => ({

@@ -9,8 +9,9 @@ import { appRouter } from './routers/index.ts'
 import type { Actor, Context } from './trpc.ts'
 import { readCookie, SESSION_COOKIE, CSRF_HEADER, csrfMatches } from './auth/session.ts'
 import {
-  MCP_SCOPES, McpAuthorizationError, registerMcpClient, describeMcpAuthorization,
-  approveMcpAuthorization, redeemMcpAuthorization, identifyMcpToken,
+  MCP_SCOPES, McpAuthorizationError, hostedMcpEndpoint, registerMcpClient,
+  describeMcpAuthorization, approveMcpAuthorization, redeemMcpAuthorization,
+  identifyMcpToken,
 } from './auth/mcp.ts'
 
 type BaseContext = Omit<Context, 'actor'>
@@ -89,10 +90,10 @@ function toolServer(context: Context, scopes: string[]) {
 
 export function mountHostedMcp(app: Hono<any>, options: Options): void {
   const { base } = options
-  const origin = base.appBaseUrl.replace(/\/+$/, '')
   // No request-derived issuer: a Host header must never mint its own audience.
-  if (!/^https?:\/\//.test(origin)) return
-  const resource = `${origin}/mcp`
+  const resource = hostedMcpEndpoint(base.appBaseUrl)
+  if (!resource) return
+  const origin = resource.slice(0, -'/mcp'.length)
   const metadata = `${origin}/.well-known/oauth-protected-resource`
   const boundedBody = bodyLimit({ maxSize: 32 * 1024,
     onError: (c) => c.json({ error: 'invalid_request', error_description: 'The request is larger than 32 KiB.' }, 413) })

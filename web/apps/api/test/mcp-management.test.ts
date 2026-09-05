@@ -68,6 +68,14 @@ describe('hosted MCP operator measurements', () => {
   test('the endpoint comes from configured application origin', async () => {
     assert.equal((await surface()).endpoint, 'http://app.test/mcp')
   })
+  // The operator page prints an address and the server answers on one. They
+  // used to be computed from appBaseUrl twice, in two files, so a change to
+  // either could leave this page naming somewhere nothing is served. Read both
+  // and compare, rather than asserting the same literal in two suites.
+  test('the printed endpoint is the audience the server actually publishes', async () => {
+    const discovery = await (await h.fetch('/.well-known/oauth-protected-resource')).json() as { resource: string }
+    assert.equal((await surface()).endpoint, discovery.resource)
+  })
   test('connections show identity, scopes and authentication without token hashes', async () => {
     const data = await surface()
     const row = data.connections.find((r: { id: string }) => r.id === active)
