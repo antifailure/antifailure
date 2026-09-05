@@ -471,6 +471,34 @@ jobs:
         run: node scripts/indexnow.mjs --submit
         working-directory: www
 
+      - name: A person can still use the careers form
+        # A PUBLISH IS NOT A WORKING FORM, and this is the assertion level the
+        # steps above deliberately do not reach. routecheck asked the control
+        # plane whether the route exists and got a status line. The API answers
+        # step asked whether the function app is alive and got a JSON body.
+        # Neither of them opens the page, runs its JavaScript, or makes a cross
+        # origin request from the hostname somebody typed, and "Could not reach
+        # the server" is what a person read while every one of those was green.
+        #
+        # After the publish rather than before it, on purpose. It drives the
+        # site that is now live; a check against the previous build would be
+        # answering about something nobody is using any more. Nothing here can
+        # stop the publish, and that is the honest position: this deployment
+        # split is what it is, and what this buys is that main goes red within
+        # minutes instead of somebody finding out by filling in the form.
+        #
+        # It files no job applications. See tools/sitesmoke.
+        if: ${{ env.TOKEN != '' }}
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          npm --prefix runner ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          go run ./tools/sitesmoke -root . \
+            -origin https://antifailure.dev \
+            -origin https://www.antifailure.dev \
+            -artifacts "${RUNNER_TEMP}/sitesmoke"
+
       - name: Say so when it was not published
         if: ${{ env.TOKEN == '' }}
         env:

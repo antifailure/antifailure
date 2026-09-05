@@ -20,6 +20,8 @@ class FakePage implements Page {
 
   async goto(url: string) { this.visited.push(url); this.current = url; }
   async fill(field: RegExp, value: string) { this.filled[field.source] = value; }
+  checked: string[] = [];
+  async check(field: RegExp) { this.checked.push(field.source); }
   async has(_field: RegExp) {
     if (this.signInAt === null) return true;
     return this.signInAt.some((p) => this.current.endsWith(p));

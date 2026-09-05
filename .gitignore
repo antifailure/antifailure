@@ -169,6 +169,7 @@ runner/artifacts/
 /runbookcheck
 /sbomcheck
 /routecheck
+/sitesmoke
 /scanrepo
 /schemadoc
 /sidebarcheck

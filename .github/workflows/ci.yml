@@ -679,6 +679,20 @@ jobs:
         # deploy.yml, immediately before the publish.
         run: go run ./tools/routecheck -root .
 
+      - name: The production smoke waits for sentences we still produce
+        # tools/sitesmoke drives the deployed careers form with the product's
+        # own agent and asserts on what a PERSON sees: the confirmation when it
+        # works, and the page's own error sentence when it does not. That half
+        # runs on a schedule and after a deploy, in sitesmoke.yml, because it
+        # asks the internet.
+        #
+        # This is its offline half. It reads the sentences that check waits for
+        # out of the files that are supposed to render them, because an
+        # expectation waiting for words the site no longer shows fails every
+        # deployment, and one satisfied by the wrong page passes every one. It
+        # says out loud when it finishes that NO DEPLOYMENT WAS CHECKED.
+        run: go run ./tools/sitesmoke -root .
+
       - name: No animation that never stops
         # If a piece of UI animates on an infinite loop while the user does
         # nothing, it is wrong. Reads the built stylesheet and HTML rather than
