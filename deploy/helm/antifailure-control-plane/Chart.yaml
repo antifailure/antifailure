@@ -16,8 +16,8 @@ type: application
 # values.yaml keeps its name, its type, and whether it is required for the whole
 # of chart 1.x, tools/inputcheck holds this chart to that, and 0.1.1 would now
 # be telling an operator the opposite of what is true.
-version: 1.1.1
-appVersion: "v1.1.1"
+version: 1.2.0
+appVersion: "v1.2.0"
 
 home: https://antifailure.dev
 sources:
