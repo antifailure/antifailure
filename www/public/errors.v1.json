@@ -685,6 +685,17 @@
       "planned": false
     },
     {
+      "code": "AF-GH-004",
+      "area": "GH",
+      "areaName": "GitHub",
+      "message": "The github block could not be added to {path}, so the manifest was left as it was: {detail}",
+      "resolution": "Add 'github: {mode: actions, comment: true, fork_policy: label}' to the manifest by hand, then run 'af explain' to check it.",
+      "docs": "https://antifailure.dev/docs/getting-started/pull-requests",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-INF-002",
       "area": "INF",
       "areaName": "Infrastructure",
@@ -806,17 +817,6 @@
       "planned": false
     },
     {
-      "code": "AF-MAN-004",
-      "area": "MAN",
-      "areaName": "Manifest",
-      "message": "'af init' has questions to ask and this session has no terminal to ask them on.",
-      "resolution": "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.",
-      "docs": "https://antifailure.dev/docs/reference/cli#af-init",
-      "retryable": false,
-      "exitCode": 2,
-      "planned": false
-    },
-    {
       "code": "AF-MAN-005",
       "area": "MAN",
       "areaName": "Manifest",
@@ -869,6 +869,17 @@
       "docs": "https://antifailure.dev/docs/concepts/verification",
       "retryable": false,
       "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-MSK-012",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "There is already a masking file at {path}, and 'af mask init' would overwrite the rules in it.",
+      "resolution": "Edit the file, or pass --force to replace it with rules written from the schema.",
+      "docs": "https://antifailure.dev/docs/concepts/masking",
+      "retryable": false,
+      "exitCode": 3,
       "planned": false
     },
     {

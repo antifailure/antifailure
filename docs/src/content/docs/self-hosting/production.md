@@ -296,7 +296,7 @@ Repository permissions, and what each one is actually for:
 | Permission | Access | What uses it |
 | --- | --- | --- |
 | Metadata | Read-only | Mandatory for every App. |
-| Contents | Read-only | Reading the manifest and the workflow file. |
+| Contents | Read and write | Reading the manifest and the workflow file, and the pull request that adds the workflow file to a newly installed repository. The write lands on a branch of its own, `antifailure/setup`, never on the default branch. |
 | Pull requests | Read and write | The one comment per pull request, and the pull request a masking rule change becomes. |
 | Actions | Read and write | The console's **Create environment**, **Run agents**, **Run load** and **Tear down**, and cancelling the run that holds an environment when a pull request closes. |
 | Checks | Read and write | The one check run per commit that a branch protection rule can require. |
@@ -360,6 +360,15 @@ as it took somebody to look at the installation rather than at the App.
    without anybody accepting anything; only the permission needs step 3.
 3. For every account the App is installed on: its **Installed GitHub Apps**
    settings, the App, **Review request**, **Accept new permissions**.
+
+Contents write is the third such widening, after Actions and Checks, and it is
+the one the setup pull request needs. Until an installation accepts it, the
+App can still read the repository and cannot write the workflow file, so the
+control plane records the refusal rather than retrying it, and the console's
+Environments page shows the repository under **Getting connected** as needing
+the permission, with the two steps above as the remedy. The
+`new_permissions_accepted` delivery that follows the acceptance is what puts
+the setup back in the queue; nothing has to be restarted.
 
 An installation token minted before step 3 is cached for an hour and carries
 none of the new grant, so a permission accepted at 00:38 can still be refused at

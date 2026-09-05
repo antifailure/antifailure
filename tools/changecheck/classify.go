@@ -90,6 +90,7 @@ var surfaces = []surface{
 	{"deploy/docker/", "the container a self-hosted control plane runs"},
 	{"deploy/helm/", "the chart a self-hosted control plane installs from"},
 	{"install.sh", "how the CLI gets onto a machine"},
+	{"action.yml", "the composite action every customer's workflow runs, with uses: antifailure/antifailure@v1"},
 }
 
 // notASurface is everything else in the repository root, with the reason it

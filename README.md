@@ -89,6 +89,18 @@ observed on this machine right now and names the one command to run next, so a
 first run you walked away from is one you can walk back into. It runs nothing
 and writes nothing.
 
+When the checkout has a GitHub remote, `af init` also writes the workflow that
+checks every pull request, and installing the GitHub App opens a pull request
+adding the same file. The whole of it is one job that calls a reusable
+workflow, so no secret has to exist before the first check runs:
+
+```yaml
+jobs:
+  check:
+    uses: antifailure/antifailure/.github/workflows/check.yml@v1
+    secrets: inherit
+```
+
 The manifest is the whole configuration surface. Nothing about an environment
 is configured anywhere else.
 
@@ -128,8 +140,9 @@ workflows:
 
 That manifest is `examples/next-app/antifailure.yaml`, and it runs. Beside it
 are `examples/go-api` and `examples/django-api`, and
-`examples/github-workflow.yml` is the same run inside GitHub Actions, which
-leaves one comment on the pull request and edits it in place.
+`examples/github-workflow.yml` is the file that turns the same run on inside
+GitHub Actions: one job calling `.github/workflows/check.yml`, which runs
+`action.yml` and leaves one comment on the pull request that it edits in place.
 
 ## Your coding agent can run it
 

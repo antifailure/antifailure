@@ -465,9 +465,12 @@ func TestInit_ReportsWhenNothingWasDetected(t *testing.T) {
 	require.Contains(t, got.stderr, "by hand")
 }
 
-// A question needs somewhere to ask it. Without a terminal the read blocks
-// forever, which in CI looks exactly like a hang.
-func TestInit_RefusesToPromptWithNoTerminal(t *testing.T) {
+// A question needs somewhere to ask it. Without a terminal the read would
+// block forever, which in CI looks exactly like a hang, and the first answer
+// to that was a refusal telling the reader to pass --non-interactive. That is
+// the only thing a CI job could have done anyway, so now a run with no
+// terminal takes the defaults, says so, and lists them under Assumed.
+func TestInit_NoTerminalTakesTheDefaultsAndSaysSo(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"),
@@ -477,9 +480,12 @@ func TestInit_RefusesToPromptWithNoTerminal(t *testing.T) {
 	go func() { done <- runCLI(t, dir, nil, "init") }()
 	select {
 	case got := <-done:
-		require.NotZero(t, got.code)
-		require.Contains(t, got.stderr, "AF-MAN-004")
-		require.Contains(t, got.stderr, "non-interactive")
+		require.Zero(t, got.code, got.stderr)
+		require.NotContains(t, got.stderr, "AF-MAN-004",
+			"the refusal whose only remedy was the flag the situation implies")
+		require.Contains(t, prose(got.stdout), "no terminal to ask on")
+		require.Contains(t, got.stdout, "Assumed")
+		require.FileExists(t, filepath.Join(dir, "antifailure.yaml"))
 	case <-time.After(20 * time.Second):
 		t.Fatal("af init blocked waiting for input that will never arrive")
 	}
@@ -511,10 +517,12 @@ func TestInit_ADockerfileAndAMismatchedPackageNameProduceOneService(t *testing.T
 	require.Zero(t, explained.code, explained.stderr)
 }
 
-// An error that instructs the reader to do the thing they just did is a dead
-// end. --non-interactive used to answer a question it could not default with
-// "pass --non-interactive".
-func TestInit_AQuestionWithNoDefaultNamesTheFlagThatAnswersIt(t *testing.T) {
+// A port nothing in the repository names used to be a question with no
+// default, so an unattended run refused with AF-DET-004 and, for a pull
+// request check, that meant no check at all. Every question carries a default
+// now: the language's own port, or 3000 when the language is unknown, listed
+// under Assumed so the guess is visible.
+func TestInit_APortNothingNamesTakesTheLanguagesDefault(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
@@ -536,12 +544,13 @@ func TestInit_AQuestionWithNoDefaultNamesTheFlagThatAnswersIt(t *testing.T) {
 			}
 
 			got := runCLI(t, dir, nil, args...)
-			require.NotZero(t, got.code)
-			require.Contains(t, got.stderr, "AF-DET-004")
-			require.Contains(t, got.stderr, "--answer service."+filepath.Base(dir)+".port=")
-			require.NotContains(t, got.stderr, "Pass --non-interactive",
-				"the run already passed it")
-			require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+			require.Zero(t, got.code, got.stderr)
+			require.NotContains(t, got.stderr, "AF-DET-004")
+			body, err := os.ReadFile(filepath.Join(dir, "antifailure.yaml"))
+			require.NoError(t, err)
+			require.Contains(t, string(body), "port: 3000")
+			require.Contains(t, prose(got.stdout), "service."+filepath.Base(dir)+".port 3000",
+				"a default that was taken has to be listed under Assumed")
 		})
 	}
 }
@@ -565,8 +574,8 @@ func TestInit_TheFlagTheRefusalNamesActuallyAnswersTheQuestion(t *testing.T) {
 // /dev/null has the character device bit set, so the old terminal test said
 // yes to it. `af init < /dev/null`, which is how a CI job runs a command it
 // does not intend to answer, asked every question into nowhere, read end of
-// file for each one, and took the defaults silently. On a question with no
-// default it then wrote nothing and blamed Antifailure for the invalid draft.
+// file for each one, and took the defaults silently. It still takes the
+// defaults, and now it says so rather than asking into a stream nobody reads.
 func TestInit_DevNullIsNotATerminal(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -589,14 +598,14 @@ func TestInit_DevNullIsNotATerminal(t *testing.T) {
 	}()
 	select {
 	case code := <-done:
-		require.NotZero(t, code)
-		require.Contains(t, errW.String(), "AF-MAN-004")
+		require.Zero(t, code, errW.String())
 		require.NotContains(t, out.String(), "Which port",
 			"a question was asked into a stream nobody is reading")
+		require.Contains(t, prose(out.String()), "no terminal to ask on")
 	case <-time.After(20 * time.Second):
 		t.Fatal("af init blocked on input that will never arrive")
 	}
-	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
+	require.FileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
 // Two Dockerfiles in different directories both exposing 3000 is a real

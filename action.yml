@@ -1,0 +1,332 @@
+# The Antifailure GitHub Action.
+#
+#   - uses: antifailure/antifailure@v1
+#
+# Installs `af`, works out what the change touches, runs the check on a
+# disposable copy of production, and leaves one comment on the pull request
+# that it edits in place. Most repositories never write this line themselves:
+# `.github/workflows/check.yml` in this repository calls it, and
+# `examples/github-workflow.yml` calls that. Use the action directly when the
+# job needs something of its own, such as a service container or a runner
+# with a particular label.
+#
+# Every input reaches a script through `env:`, never through `${{ }}` inside
+# a `run:` block, because the runner substitutes the expression before bash
+# sees it and an input carrying a quote would become a command.
+name: Antifailure
+description: Check a pull request on a disposable copy of production, with masked data and a sealed network.
+author: Antifailure
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  version:
+    description: The Antifailure release to install, such as v1.2.1. Empty installs the latest release.
+    required: false
+    default: ''
+  command:
+    description: >-
+      What to run. `ci` on a pull request. The hosted control plane sends
+      `up`, `down`, `agents`, `load`, `scenario` or `explore` through the
+      `dispatch` input instead, and that wins when both are set.
+    required: false
+    default: 'ci'
+  dispatch:
+    description: >-
+      The caller's workflow_dispatch inputs as JSON, `toJSON(inputs)`. Empty
+      or `{}` means this is a pull request and the command is `ci`.
+    required: false
+    default: '{}'
+  control-plane:
+    description: >-
+      Address of a hosted control plane. Empty skips both calls to it and the
+      job comments for itself, which is the self-hosted and no-account path.
+    required: false
+    default: ''
+  secrets:
+    description: >-
+      The caller's secrets as JSON, `toJSON(secrets)`, from a reusable
+      workflow. Only the variables the manifest names are exported, by
+      name, after `af change` reports which those are. Leave it empty and
+      pass secrets through `env:` on the step instead.
+    required: false
+    default: ''
+  report:
+    description: Where to write the report that becomes the comment.
+    required: false
+    default: 'report.md'
+  runner:
+    description: >-
+      Whether to install the agent runner, which drives a real browser and
+      needs node. `auto` installs it for the commands that run agents.
+      `always` and `never` do what they say.
+    required: false
+    default: 'auto'
+
+outputs:
+  command:
+    description: The command that ran.
+    value: ${{ steps.plan.outputs.command }}
+  environment:
+    description: Whether `af change` selected an environment for this change.
+    value: ${{ steps.change.outputs.environment }}
+  selected:
+    description: The checks `af change` selected, comma separated.
+    value: ${{ steps.change.outputs.selected }}
+  handled:
+    description: Whether a control plane took the report.
+    value: ${{ steps.publish.outputs.handled }}
+
+runs:
+  using: composite
+  steps:
+    # Which command, from the dispatch JSON when there is one.
+    - id: plan
+      shell: bash
+      env:
+        AF_DISPATCH: ${{ inputs.dispatch }}
+        AF_COMMAND_INPUT: ${{ inputs.command }}
+        AF_RUNNER_INPUT: ${{ inputs.runner }}
+      run: |
+        set -euo pipefail
+        dispatch="${AF_DISPATCH:-{}}"
+        if [ "$dispatch" = "null" ] || [ -z "$dispatch" ]; then dispatch='{}'; fi
+        pick() { printf '%s' "$dispatch" | jq -r --arg k "$1" '.[$k] // empty'; }
+        command=$(pick command)
+        command="${command:-${AF_COMMAND_INPUT:-ci}}"
+        case "$command" in
+          ci|up|down|agents|load|scenario|explore) ;;
+          *) echo "::error::unknown command $command"; exit 2 ;;
+        esac
+        {
+          echo "command=$command"
+          echo "workflows=$(pick workflows)"
+          echo "duration=$(pick duration)"
+          echo "scale=$(pick scale)"
+          echo "seed=$(pick seed)"
+          echo "concurrency=$(pick concurrency)"
+          echo "run_id=$(pick run_id)"
+        } >> "$GITHUB_OUTPUT"
+        runner=no
+        case "$AF_RUNNER_INPUT" in
+          always) runner=yes ;;
+          never) runner=no ;;
+          *) case "$command" in ci|agents|explore) runner=yes ;; esac ;;
+        esac
+        echo "runner=$runner" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      if: steps.plan.outputs.runner == 'yes'
+      with:
+        node-version: 22
+
+    - name: Install Antifailure
+      shell: bash
+      env:
+        AF_VERSION_INPUT: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -n "$AF_VERSION_INPUT" ]; then export AF_VERSION="$AF_VERSION_INPUT"; fi
+        curl -fsSL https://antifailure.dev/install.sh | sh
+        # The installer writes GITHUB_PATH, which reaches later steps only.
+        echo "$HOME/.antifailure/bin" >> "$GITHUB_PATH"
+
+    - name: Install the agent runner
+      if: steps.plan.outputs.runner == 'yes'
+      shell: bash
+      run: af runner install
+
+    # Introduce this job to the control plane, if there is one.
+    #
+    # Every failure here is survived. A run that cannot say what it did is
+    # still a run, and the comment below reports it either way. The two
+    # ACTIONS_ID_TOKEN_REQUEST variables are set by the runner after
+    # expressions are evaluated, so they are read from the environment with
+    # a default rather than declared under env, and a fork sets neither.
+    - id: claim
+      if: inputs.control-plane != ''
+      shell: bash
+      env:
+        AF_CONTROL_PLANE: ${{ inputs.control-plane }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        request_token="${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+        request_url="${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+        if [ -z "$request_token" ] || [ -z "$request_url" ]; then
+          echo "This job was granted no workflow identity, so it cannot introduce itself."
+          echo "On a pull request from a fork GitHub withholds one, which is deliberate."
+          exit 0
+        fi
+        identity=$(curl -sS -H "Authorization: Bearer $request_token" \
+          "${request_url}&audience=antifailure-control-plane" |
+          jq -r '.value // empty' || true)
+        if [ -z "$identity" ]; then
+          echo "GitHub would not mint a workflow identity for this job."
+          exit 0
+        fi
+        token=$(curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/callback-token" \
+          -H "Authorization: Bearer ${identity}" \
+          -H 'content-type: application/json' \
+          -d "{\"head_sha\":\"${HEAD_SHA}\"}" |
+          jq -r '.token // empty' || true)
+        if [ -z "$token" ]; then
+          echo "The control plane issued no callback credential for ${HEAD_SHA}."
+          echo "This run reports through the comment below instead."
+          exit 0
+        fi
+        echo "::add-mask::$token"
+        echo "token=$token" >> "$GITHUB_OUTPUT"
+
+    # What this change touches, and which variables the manifest reads.
+    #
+    # With no manifest in the repository `af change` drafts one from the
+    # repository and says so in the report, so a repository that has only
+    # this workflow still gets a check.
+    - id: change
+      name: Work out what this change touches
+      shell: bash
+      env:
+        AF_REPORT: ${{ inputs.report }}
+      run: af change --write "$AF_REPORT"
+
+    - name: Run the check
+      if: steps.plan.outputs.command != 'ci' || github.event_name != 'pull_request' || steps.change.outputs.environment == 'true'
+      shell: bash
+      env:
+        AF_COMMAND: ${{ steps.plan.outputs.command }}
+        AF_WORKFLOWS: ${{ steps.plan.outputs.workflows }}
+        AF_DURATION: ${{ steps.plan.outputs.duration }}
+        AF_SCALE: ${{ steps.plan.outputs.scale }}
+        AF_SEED: ${{ steps.plan.outputs.seed }}
+        AF_CONCURRENCY: ${{ steps.plan.outputs.concurrency }}
+        AF_RUN_ID: ${{ steps.plan.outputs.run_id }}
+        AF_REPORT: ${{ inputs.report }}
+        AF_SECRETS_JSON: ${{ inputs.secrets }}
+        AF_SECRET_NAMES: ${{ steps.change.outputs.secrets }}
+        # Where the engine reports its own event stream. Unset, it attaches
+        # no control plane sink and the run is unaffected. No token: the
+        # engine trades this job's identity for a short lived credential the
+        # same way the claim step did.
+        AF_CONTROL_PLANE_URL: ${{ inputs.control-plane }}
+      run: |
+        set -euo pipefail
+        # Export exactly the variables the manifest names, out of the JSON a
+        # reusable workflow passed. Anything the caller set through env: is
+        # already here and is left alone. The JSON is dropped before the
+        # engine starts, so it never reaches a build or a container.
+        if [ -n "$AF_SECRETS_JSON" ] && [ -n "$AF_SECRET_NAMES" ]; then
+          IFS=',' read -ra names <<< "$AF_SECRET_NAMES" || true
+          for name in "${names[@]:-}"; do
+            [ -n "$name" ] || continue
+            if [ -n "${!name:-}" ]; then continue; fi
+            value=$(printf '%s' "$AF_SECRETS_JSON" | jq -r --arg k "$name" '.[$k] // empty')
+            if [ -n "$value" ]; then export "$name=$value"; fi
+          done
+        fi
+        unset AF_SECRETS_JSON
+        # The four the workflow has always mapped, under the names the
+        # engine reads, when the caller's secrets carry them.
+        if [ -z "${STRIPE_SECRET_KEY:-}" ] && [ -n "${STRIPE_TEST_SECRET_KEY:-}" ]; then
+          export STRIPE_SECRET_KEY="$STRIPE_TEST_SECRET_KEY"
+        fi
+        case "$AF_COMMAND" in
+          ci)
+            af ci --report "$AF_REPORT" --report-json report.json
+            ;;
+          up)
+            af up
+            ;;
+          down)
+            af workload teardown --result teardown-result.json
+            ;;
+          scenario)
+            args=()
+            IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+            for name in "${names[@]:-}"; do
+              if [ -n "$name" ]; then args+=(--only "$name"); fi
+            done
+            if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+            if [ -n "$AF_CONCURRENCY" ]; then args+=(--concurrency "$AF_CONCURRENCY"); fi
+            af load scenario ${args[@]+"${args[@]}"}
+            ;;
+          explore)
+            args=()
+            IFS=',' read -ra names <<< "$AF_WORKFLOWS" || true
+            for name in "${names[@]:-}"; do
+              if [ -n "$name" ]; then args+=(--only "$name"); fi
+            done
+            if [ -n "$AF_SEED" ]; then args+=(--seed "$AF_SEED"); fi
+            af explore ${args[@]+"${args[@]}"}
+            ;;
+          *)
+            af workload run \
+              --kind "$AF_COMMAND" \
+              --select "$AF_WORKFLOWS" \
+              --duration "$AF_DURATION" \
+              --scale "$AF_SCALE" \
+              --seed "$AF_SEED" \
+              --concurrency "$AF_CONCURRENCY" \
+              --run-id "$AF_RUN_ID" \
+              --result workload-result.json
+            ;;
+        esac
+
+    # Tell the control plane what this commit did, with the credential the
+    # claim step already holds. The control plane then publishes one check
+    # run and maintains one comment, both fenced on the commit.
+    - id: publish
+      if: always() && steps.claim.outputs.token != '' && hashFiles('report.json') != ''
+      shell: bash
+      env:
+        AF_CONTROL_PLANE: ${{ inputs.control-plane }}
+        AF_REPORT: ${{ inputs.report }}
+        TOKEN: ${{ steps.claim.outputs.token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+        jq -n --arg sha "$HEAD_SHA" \
+              --rawfile markdown "$AF_REPORT" \
+              --slurpfile report report.json \
+              '{head_sha: $sha, markdown: $markdown, report: $report[0]}' > payload.json
+        curl -sS -X POST "${AF_CONTROL_PLANE}/v1/pr/report" \
+          -H "Authorization: Bearer ${TOKEN}" \
+          -H 'content-type: application/json' \
+          --data-binary @payload.json
+        echo "handled=true" >> "$GITHUB_OUTPUT"
+
+    - name: Keep the workload result
+      if: always() && hashFiles('workload-result.json') != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: workload-result
+        path: workload-result.json
+        retention-days: 30
+
+    # One comment, edited in place. Always, because the report of a failing
+    # run is the one worth reading. Not when the manifest says no comment,
+    # and not when a control plane took the report and maintains its own.
+    - name: Leave the report on the pull request
+      if: >-
+        always() && github.event_name == 'pull_request'
+        && hashFiles(inputs.report) != ''
+        && steps.change.outputs.comment != 'false'
+        && steps.publish.outputs.handled != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        AF_REPORT: ${{ inputs.report }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        marker='<!-- antifailure:report -->'
+        existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+          --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty")
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" \
+            -F body=@"$AF_REPORT" > /dev/null
+        else
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            -F body=@"$AF_REPORT" > /dev/null
+        fi

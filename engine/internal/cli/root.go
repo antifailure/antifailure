@@ -516,6 +516,7 @@ recoverable by replay.`),
 	root.AddCommand(
 		newStartCommand(env),
 		newInitCommand(env),
+		newGitHubCommand(env),
 		newUpCommand(env),
 		newDownCommand(env),
 		newStatusCommand(env),

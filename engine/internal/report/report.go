@@ -67,6 +67,17 @@ type Run struct {
 	// DocsBase is where links point, so a self hosted instance can point at
 	// its own copy rather than at ours.
 	DocsBase string
+	// Drafted reports that the run used a manifest drafted from the
+	// repository, because there was none to read. The comment says so before
+	// anything else, since every line under it describes a configuration
+	// nobody wrote.
+	Drafted bool `json:"drafted"`
+	// EmptySource reports that the golden this run branched was built from
+	// nothing: database.source_url_env named nothing and no seed ran, so the
+	// migrations built the schema and there were no rows. Said before the
+	// workflow table, because a run against an empty database looks exactly
+	// like one against production to everything except the data.
+	EmptySource bool `json:"empty_source"`
 }
 
 // Exploration preserves the actual browser observations separately from
@@ -447,7 +458,17 @@ func (r Run) Headline() string {
 		counts[read(w.Verdict)]++
 	}
 	_, warns := r.Counts()
-	switch r.Verdict() {
+	verdict := r.Verdict()
+	// A drafted manifest's workflows are guesses about what the application
+	// does, and a run of them that reached no verdict has verified nothing
+	// about it. The blocked and unverified headlines below say "could not be
+	// carried through", which is about the runner, and this is about the
+	// configuration, so it is said in its own words.
+	if r.Drafted && r.NothingVerified() && len(r.Workflows) > 0 &&
+		(verdict == VerdictBlocked || verdict == VerdictUnverified) {
+		return "Nothing was verified. The workflows were drafted, not written for this application."
+	}
+	switch verdict {
 	case VerdictPass:
 		if len(r.Invariants) > 0 {
 			return fmt.Sprintf("All %d workflows passed, and %s held.",
@@ -621,8 +642,22 @@ func (r Run) Markdown() string {
 		fmt.Fprintf(&b, "**This check did not run.** %s\n\n", flatten(r.Skipped))
 	}
 
+	// Right after the headline, because every line under it describes a
+	// configuration nobody wrote, and the one command that changes that is
+	// worth more to the reader than the run.
+	if r.Drafted {
+		b.WriteString(DraftedSentence + "\n\n")
+	}
+
 	if r.URL != "" {
 		fmt.Fprintf(&b, "Environment `%s` is at %s\n\n", r.Environment, r.URL)
+	}
+
+	// Before the workflow table. A workflow that passed against no rows has
+	// not passed against production's shape, and a reader who takes the
+	// table first takes away the wrong thing.
+	if r.EmptySource {
+		b.WriteString(EmptySourceSentence + "\n\n")
 	}
 
 	if len(r.Workflows) > 0 {
@@ -868,6 +903,19 @@ func short(commit string) string {
 	}
 	return commit
 }
+
+// DraftedSentence is the block that opens a report run against a drafted
+// manifest.
+const DraftedSentence = "**No antifailure.yaml in this repository.** This run used a manifest " +
+	"Antifailure drafted from the repository. Run `af init` and commit the file to make it yours."
+
+// EmptySourceSentence is the block that precedes the workflow table when the
+// golden held no production data. The same words the engine prints during
+// `af up`, so a reader who saw it in a terminal recognises it here.
+const EmptySourceSentence = "**This ran on an empty database.** `database.source_url_env` names " +
+	"nothing, so the migrations built the schema and no production data was masked or " +
+	"branched. Set `database.source_url_env: PRODUCTION_DATABASE_URL` and add that secret " +
+	"to the repository."
 
 // Marker identifies this comment so an update replaces it.
 //

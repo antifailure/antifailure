@@ -1,0 +1,83 @@
+# The reusable workflow behind every customer's .github/workflows/antifailure.yml.
+#
+# A customer's file is about twenty five lines and calls this one with
+# `secrets: inherit`. That inheritance is the reason this exists as a workflow
+# and not only as an action: a composite action cannot read the caller's
+# secrets, so every customer would have to name each one in their own file,
+# and the one that matters most, the production database, has a name only
+# their manifest knows. Here the secrets arrive as one JSON value and the
+# action exports exactly the ones the manifest reads, by name, after `af
+# change` has said which those are.
+#
+# This file runs on the CALLER's event, with the caller's `github` context,
+# so the fork label gate and the concurrency group below read the caller's
+# pull request, which is where they belong.
+#
+# Nothing here is the product. `examples/github-workflow.yml` is what a
+# customer sees, `action.yml` is what does the work, and this is the join.
+name: Antifailure check
+
+on:
+  workflow_call:
+    inputs:
+      dispatch:
+        description: >-
+          The workflow_dispatch inputs of the caller as JSON, which is what
+          `toJSON(inputs)` produces. Empty or `{}` on a pull request, and
+          then the command is `ci`.
+        type: string
+        required: false
+        default: '{}'
+      control-plane:
+        description: >-
+          Address of a hosted control plane, usually `vars.AF_CONTROL_PLANE`.
+          Empty skips the two calls to it and the job comments for itself.
+        type: string
+        required: false
+        default: ''
+      version:
+        description: >-
+          The Antifailure release to install, such as v1.2.1. Empty installs
+          the latest release.
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  antifailure:
+    name: Antifailure
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A `labeled` or `unlabeled` event that is not the approval label skips
+    # the job. Everything else runs, including `unlabeled` of the approval
+    # label, so a withdrawn approval reaches `af ci` and is refused there
+    # rather than leaving the last result standing.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'antifailure:allow'
+    # One check per branch. A push while the last run is still building
+    # cancels it on a pull request. A dispatch from the control plane is
+    # never cancelled, because "Run agents" must not kill the environment
+    # "Create environment" is building.
+    concurrency:
+      group: antifailure-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `af change` diffs against the merge base, and the default one
+          # commit deep clone has none.
+          fetch-depth: 0
+      - uses: antifailure/antifailure@v1
+        with:
+          version: ${{ inputs.version }}
+          dispatch: ${{ inputs.dispatch }}
+          control-plane: ${{ inputs['control-plane'] }}
+          # Every secret of the caller, as JSON. The action exports only the
+          # ones the manifest names, and GitHub masks the values in the log.
+          secrets: ${{ toJSON(secrets) }}

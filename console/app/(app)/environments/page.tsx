@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ago, when } from "@/lib/format";
 import { mutate, query, useApi, usePages } from "@/lib/api";
 import { may } from "@/lib/roles";
+import { describeSetup, stillConnecting, type RepositorySetup } from "@/lib/setup";
 import { useSessionContext } from "@/components/session";
 import { More } from "@/components/pagination";
 import {
@@ -26,6 +27,7 @@ import {
   When,
   inputClass,
   toneFor,
+  type Tone,
 } from "@/components/ui";
 
 interface Repository {
@@ -160,6 +162,73 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
 }
 
 
+const statusTone: Record<Tone, string> = {
+  pass: "text-pass",
+  warn: "text-warn",
+  fail: "text-fail",
+  neutral: "text-muted",
+};
+
+/**
+ * Which repositories are connected and not yet checked.
+ *
+ * "Connected" and "checked" are different things, and the gap between them
+ * used to be invisible: installing the App listed a repository here, no
+ * workflow file existed in it, and no check ever ran on any pull request. The
+ * App now opens a pull request that adds the file, and this is where that
+ * pull request is found. One line per repository, and the card is gone once
+ * every repository has the file, because at that point there is nothing to
+ * get connected about.
+ *
+ * Nothing here loads visibly. The list is secondary to the form under it, and
+ * a skeleton for a card that usually does not render would be a flash on
+ * every visit. It appears when it has something to say.
+ */
+function Connecting() {
+  const state = useApi<RepositorySetup[]>(() => query("repositories.setup"), []);
+  if (state.status !== "ready" || !stillConnecting(state.data)) return null;
+  return (
+    <div className="mb-6">
+      <Card
+        title="Getting connected"
+        note="The App opens a pull request that adds its workflow to each repository. Merging it is what turns a connected repository into a checked one."
+      >
+        <ul className="divide-y divide-rule">
+          {state.data.map((row) => {
+            const line = describeSetup(row);
+            return (
+              <li key={row.id} className="px-4 py-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                  <span className="min-w-0 truncate font-mono text-[13px] text-ink">
+                    {row.repository}
+                  </span>
+                  {line.href ? (
+                    <a
+                      className="shrink-0 text-[12.5px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+                      href={line.href}
+                      rel="noreferrer noopener"
+                    >
+                      {line.label}
+                    </a>
+                  ) : (
+                    // Text rather than a Badge: the badge is uppercase and
+                    // tracked, and "Needs Contents: write on the App
+                    // installation" set that way is a shout, not a status.
+                    <span className={`shrink-0 text-[12.5px] ${statusTone[line.tone]}`}>{line.label}</span>
+                  )}
+                </div>
+                {line.detail ? (
+                  <p className="mt-1.5 max-w-[64ch] text-[12px] leading-5 text-muted">{line.detail}</p>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
 /** What the control plane found out about a repository before anybody asked
  *  it for anything. `unknown` is GitHub not having answered, and renders as
  *  nothing: a warning nobody can act on is worse than silence. */
@@ -239,10 +308,10 @@ function Create({ onRequested }: { onRequested: () => void }) {
                 </div>
               }
             >
-              For checks in GitHub, install the App on your repository and
-              configure its Antifailure workflow. For a first local check, use
-              the application checkout you already have. Connecting a repository
-              alone does not start an environment.
+              For checks in GitHub, install the App on your repository. It
+              opens a pull request that adds the Antifailure workflow, and
+              merging that is what starts the checks. For a first local check,
+              use the application checkout you already have.
             </Empty>
           ) : (
             <form
@@ -515,6 +584,8 @@ function Environments() {
           <Detail envId={selected} onClose={() => router.push("/environments")} />
         </div>
       ) : null}
+
+      <Connecting />
 
       {may(session.data?.role, "environments.create") ? (
         <div className="mb-6">

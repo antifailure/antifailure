@@ -1,6 +1,7 @@
 package report_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -274,4 +275,79 @@ func TestMoreRowsThanKeptIsSaidRatherThanImplied(t *testing.T) {
 		}},
 	}
 	require.Contains(t, run.Markdown(), "More rows than these.")
+}
+
+// A run on a drafted manifest says so before anything else, because every
+// line under the headline describes a configuration nobody wrote.
+func TestMarkdown_ADraftedManifestIsSaidRightUnderTheHeadline(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "sign-up", Verdict: "pass"})
+	r.Drafted = true
+	body := r.Markdown()
+
+	require.Contains(t, body, report.DraftedSentence)
+	headline := strings.Index(body, "### Antifailure:")
+	sentence := strings.Index(body, report.DraftedSentence)
+	table := strings.Index(body, "| Workflow |")
+	require.Less(t, headline, sentence)
+	require.Less(t, sentence, table, "the sentence has to come before the table, not after it")
+	require.Contains(t, report.DraftedSentence, "`af init`", "the one command that changes it")
+
+	require.NotContains(t, run().Markdown(), "drafted",
+		"a run on a committed manifest must not be described as drafted")
+}
+
+// A drafted manifest whose workflows reached no verdict verified nothing, and
+// the headline must not read as though the runner was at fault.
+func TestHeadline_ADraftedRunThatVerifiedNothingSaysSo(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "sign-up", Verdict: "unverified"})
+	r.Drafted = true
+	require.Equal(t, "Nothing was verified. The workflows were drafted, not written for this application.", r.Headline())
+
+	blocked := run(report.Workflow{Name: "sign-up", Verdict: "blocked"})
+	blocked.Drafted = true
+	require.Contains(t, blocked.Headline(), "Nothing was verified")
+
+	passed := run(report.Workflow{Name: "sign-up", Verdict: "pass"})
+	passed.Drafted = true
+	require.Equal(t, "All 1 workflows passed.", passed.Headline(),
+		"a verdict is a verdict whichever manifest asked for it")
+
+	require.Equal(t, "Nothing ran.", (&report.Run{Drafted: true}).Headline(),
+		"with no workflows at all the ordinary headline already says nothing ran")
+}
+
+// An empty database is said before the workflow table. A workflow that
+// passed against no rows has not passed against production's shape, and a
+// reader who takes the table first takes away the wrong thing.
+func TestMarkdown_AnEmptySourceIsSaidBeforeTheWorkflowTable(t *testing.T) {
+	t.Parallel()
+	r := run(report.Workflow{Name: "checkout", Verdict: "pass"})
+	r.EmptySource = true
+	body := r.Markdown()
+
+	require.Contains(t, body, report.EmptySourceSentence)
+	require.Less(t, strings.Index(body, report.EmptySourceSentence), strings.Index(body, "| Workflow |"))
+	require.Contains(t, report.EmptySourceSentence, "source_url_env: PRODUCTION_DATABASE_URL")
+	require.NotContains(t, run().Markdown(), "empty database")
+}
+
+// The JSON a control plane reads carries both facts under the names it
+// expects, and false is written rather than omitted so an absent key cannot
+// be read as false by accident.
+func TestJSON_CarriesDraftedAndEmptySource(t *testing.T) {
+	t.Parallel()
+	body, err := json.Marshal(report.Run{Drafted: true, EmptySource: true})
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(body, &decoded))
+	require.Equal(t, true, decoded["drafted"])
+	require.Equal(t, true, decoded["empty_source"])
+
+	body, err = json.Marshal(report.Run{})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(body, &decoded))
+	require.Equal(t, false, decoded["drafted"])
+	require.Equal(t, false, decoded["empty_source"])
 }

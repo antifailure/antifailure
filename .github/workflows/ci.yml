@@ -1178,6 +1178,15 @@ jobs:
         # the security one was a promise to researchers.
         run: go run ./tools/claimcheck .
 
+      - name: The three GitHub surfaces agree
+        # A customer's workflow calls check.yml, which calls action.yml, and
+        # GitHub reads each at a different moment. A `with:` key one passes
+        # and the next does not declare fails on the customer's pull request
+        # naming our file. The example is also embedded twice, for `af init`
+        # and for the pull request the App opens, and a drifted copy is the
+        # file a customer gets.
+        run: go run ./tools/actioncheck .
+
       - name: The sidebar order is a decision rather than an accident
         # Starlight breaks a tie in sidebar.order on file name, which the
         # person editing a page cannot see and nothing else reports. 27 of the

@@ -23,7 +23,7 @@ and come later.
     <span class="af-home-card-kicker">Then</span>
     <span class="af-home-card-title">An environment per pull request</span>
     <span class="af-home-card-body">The same run inside GitHub Actions, with one comment on the pull request
-    that is edited in place. Two commands and no server.</span>
+    that is edited in place. One file, which af init already wrote, and no server.</span>
   </a>
   <a class="af-home-card" href="/docs/getting-started/hosted">
     <span class="af-home-card-kicker">When you need it</span>
