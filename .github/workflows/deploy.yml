@@ -566,6 +566,36 @@ jobs:
   # ---------------------------------------------------------------------------
   origins:
     name: origins
+    # THE GRANT THIS JOB NEEDS, AND WHERE IT IS, because the job cannot run
+    # without it and nothing in the tree said so.
+    #
+    # `origincheck` asks Azure which custom domains are actually bound to the
+    # Static Web App rather than trusting a list in this repository, and the
+    # app is `af-site` in `af-web`, which is NOT either control plane's group.
+    # `af-infra-ci` held Contributor on af-cp-centralus and af-cp-prod-centralus
+    # and nothing at all on af-web, so `az staticwebapp hostname list` returned
+    # AuthorizationFailed and the middle of three stages could not run.
+    #
+    # The tool did the right thing with that: it printed
+    # "origincheck: NOT CHECKED. This is not a pass." and exited 2, rather than
+    # reporting a pass over a question it never asked. So this was a red on
+    # main that named its own cause, which is the only reason it took minutes
+    # rather than a morning.
+    #
+    # af-infra-ci now holds READER on the af-web resource group. Read only, and
+    # af-web holds the public marketing site and the public DNS zone, so there
+    # is nothing there this identity can see that a visitor cannot. It is a
+    # role assignment made by hand, like the DNS Zone Contributor grant that
+    # domain.tf documents and deliberately does not create, and for the same
+    # reason: a stack scoped to its own group that could grant itself access to
+    # another group would defeat the point of scoping it. Both grants are
+    # therefore written down here and in domain.tf rather than expressed in
+    # Terraform, which is a trade this project has made twice now.
+    #
+    #   az role assignment create --role Reader \
+    #     --assignee-object-id <af-infra-ci object id> \
+    #     --assignee-principal-type ServicePrincipal \
+    #     --scope /subscriptions/<id>/resourceGroups/af-web
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: site
