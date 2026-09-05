@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -140,5 +143,104 @@ func TestAWholeReportReadsBack(t *testing.T) {
 	}
 	if counts["passed"] != 6 {
 		t.Errorf("passed read back as %d, want 6", counts["passed"])
+	}
+}
+
+// runnerStarts is the assertion af runner check deliberately does not make.
+//
+// The check reads a directory and reports what is in it. On 2026-09-05 it
+// reported ready while the run resolved a DIFFERENT directory, so this
+// walkthrough learned about a runner with no dependencies three steps later,
+// from inside af test, as ERR_MODULE_NOT_FOUND on playwright. Loading the
+// runner the check NAMED puts that failure at the step whose job is to answer
+// the question.
+//
+// Written against a real runner source and a real node, because a test that
+// only proved the function contains the right words would prove nothing about
+// whether node agrees.
+func runnerTree(t *testing.T, withDependency bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	main := "import './dep.ts';\nprocess.stderr.write('af-runner: expected a job document on standard input\\n');\nprocess.exit(2);\n"
+	if err := os.WriteFile(filepath.Join(dir, "src", "main.ts"), []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The import that fails, standing in for runner/src/browser.ts importing
+	// playwright, which is the line the real failure came from.
+	if err := os.WriteFile(filepath.Join(dir, "src", "dep.ts"), []byte("import 'af-walkthrough-fixture';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"type":"module"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if withDependency {
+		pkg := filepath.Join(dir, "node_modules", "af-walkthrough-fixture")
+		if err := os.MkdirAll(pkg, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkg, "package.json"),
+			[]byte(`{"name":"af-walkthrough-fixture","version":"1.0.0","type":"module","main":"index.js"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkg, "index.js"), []byte("export default 1;\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func needsNode(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("node"); err != nil {
+		// Said rather than passed. A skip that reads as a pass is the thing
+		// this repository keeps finding in its own instruments.
+		t.Skip("node is not on this machine, so the runner cannot be started and this proves nothing")
+	}
+}
+
+func TestRunnerStartsRefusesARunnerNodeCannotLoad(t *testing.T) {
+	needsNode(t)
+	dir := runnerTree(t, false)
+
+	err := runnerStarts(t.Context(), dir)
+	if err == nil {
+		t.Fatal("a runner whose import cannot be resolved was reported as starting, " +
+			"which is exactly the tree af runner check called ready")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("the refusal does not name the runner it tried: %v", err)
+	}
+	// The specific message, not just some error. A generic "did not start"
+	// would also fire here, and it does not tell the reader that the check
+	// called this tree ready, which is the whole finding.
+	if !strings.Contains(err.Error(), "node cannot load it") {
+		t.Errorf("the refusal reads %q, which does not say the check called an unloadable "+
+			"runner ready", err)
+	}
+}
+
+func TestRunnerStartsAcceptsARunnerThatRefusesForWantOfAJobDocument(t *testing.T) {
+	needsNode(t)
+
+	// The real runner exits non zero here, because there is no job document on
+	// standard input. That is the runner working, and treating a non zero exit
+	// as failure would fail every walkthrough.
+	if err := runnerStarts(t.Context(), runnerTree(t, true)); err != nil {
+		t.Errorf("a runner that started and asked for a job document was refused: %v", err)
+	}
+}
+
+func TestRunnerStartsRefusesWhenTheCheckNamedNoPath(t *testing.T) {
+	err := runnerStarts(t.Context(), "")
+	if err == nil {
+		t.Fatal("an empty path was treated as a runner that starts")
+	}
+	// Named, rather than reaching node with a relative path and coming back
+	// with whatever node says about a file called src/main.ts.
+	if !strings.Contains(err.Error(), "named no path") {
+		t.Errorf("the refusal reads %q, which does not say the check named nothing", err)
 	}
 }

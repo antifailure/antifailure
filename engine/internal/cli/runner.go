@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -10,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -235,10 +233,10 @@ type runnerCheck struct {
 // cannot be determined, because answering ok about something unexamined is the
 // defect being fixed rather than a smaller version of it.
 func checkRunner(ctx context.Context, target string) []runnerCheck {
+	state := runnerpath.Inspect(target)
 	out := []runnerCheck{}
 
-	entry := filepath.Join(target, "src", "main.ts")
-	if _, err := os.Stat(entry); err != nil {
+	if !state.Exists() {
 		return append(out, runnerCheck{
 			label: "runner", symbol: SymbolFail,
 			detail:  "no runner at " + target,
@@ -247,43 +245,76 @@ func checkRunner(ctx context.Context, target string) []runnerCheck {
 		})
 	}
 	out = append(out, runnerCheck{label: "runner", symbol: SymbolOK, detail: target})
-
-	manifest, manifestErr := readRunnerManifest(filepath.Join(target, "package.json"))
-	if manifestErr != nil {
-		out = append(out, runnerCheck{
-			label: "dependencies", symbol: SymbolSkip,
-			detail:  "not checked: " + manifestErr.Error(),
-			blocker: false,
-		})
-	} else {
-		out = append(out, dependencyCheck(target, manifest))
-	}
-
-	out = append(out, nodeCheck(nodeVersion(ctx), manifest))
+	out = append(out, dependencyCheck(state))
+	out = append(out, nodeCheck(nodeVersion(ctx), state))
 	out = append(out, browserCheck())
 	return out
 }
 
-// runnerManifest is the part of the runner's package.json this reads. Its own
-// manifest rather than a constant here, so the requirement cannot drift from
-// the thing that declares it.
-type runnerManifest struct {
-	Engines struct {
-		Node string `json:"node"`
-	} `json:"engines"`
-	Dependencies map[string]string `json:"dependencies"`
+// passedOverChecks names the runners nearer than the one being reported on
+// that a run would go past, and why.
+//
+// Without these lines the command would answer about ~/.antifailure/runner
+// while standing in a checkout whose own runner/ is the thing the reader is
+// editing, and say nothing about the difference. Reporting the truth about a
+// directory the reader did not mean is how this went wrong in the first place.
+//
+// A warning rather than a failure, because the run does work: it uses the one
+// below. The remedy deliberately does not say af runner install, which
+// populates ~/.antifailure/runner and would not touch this directory.
+func passedOverChecks(passed []runnerpath.State) []runnerCheck {
+	out := make([]runnerCheck, 0, len(passed))
+	for _, p := range passed {
+		out = append(out, runnerCheck{
+			label:  "passed over",
+			symbol: SymbolWarn,
+			detail: p.Dir + " " + p.Why() + ", so af test goes past it",
+			remedy: "If that is the runner you meant to run, install its dependencies: " +
+				"npm ci in " + p.Dir,
+		})
+	}
+	return out
 }
 
-func readRunnerManifest(path string) (runnerManifest, error) {
-	var m runnerManifest
-	blob, err := os.ReadFile(path)
+// runnerToCheck is the runner this command should report on: the one a run
+// started in dir would use.
+//
+// It used to be ~/.antifailure/runner unconditionally, which is where
+// af runner install puts its copy and NOT where a run looks first. On
+// 2026-09-05 the walkthrough installed a runner, was told by this command that
+// the runner was ready, and then died in the next command because the run had
+// taken the checkout's runner/ instead. Both answers were true about the
+// directory each looked at, and nothing compared them.
+//
+// When nothing runnable was found, the nearest runner IN THE CHECKOUT is
+// reported instead, so the reader is told what is wrong with the tree they
+// have rather than that a path they have never heard of is empty.
+//
+// Only the checkout's. A release keeps its runner source at
+// $PREFIX/share/antifailure/runner and expects af runner install to resolve it
+// somewhere else, so on a machine that has installed af and not yet run that
+// command there is always a blocked runner there. Reporting on it would answer
+// the commonest first run of all with "node_modules is missing" under a path
+// nobody has heard of, when the true and useful answer is that the runner has
+// not been installed yet. So that case falls through to Home, whose finding is
+// "no runner at ~/.antifailure/runner" and whose remedy is the command the
+// installer already printed.
+func runnerToCheck(dir string) (target string, passedOver []runnerpath.State, err error) {
+	choice := runnerpath.Choose(dir)
+	if choice.Runner.Exists() {
+		return choice.Runner.Dir, choice.InCheckout(), nil
+	}
+	if reported := choice.InCheckout(); len(reported) > 0 {
+		// The nearest one is the subject of the report, so it is dropped from
+		// the list of ones gone past. Printing it in both places describes a
+		// machine that does not exist.
+		return reported[0].Dir, reported[1:], nil
+	}
+	home, err := RunnerHome()
 	if err != nil {
-		return m, fmt.Errorf("package.json could not be read")
+		return "", nil, aferrors.Wrap(err, aferrors.AFAGT004, "detail", err.Error())
 	}
-	if err := json.Unmarshal(blob, &m); err != nil {
-		return m, fmt.Errorf("package.json could not be parsed")
-	}
-	return m, nil
+	return home, nil, nil
 }
 
 // dependencyCheck is the one that would have caught the reproduced tree.
@@ -292,9 +323,24 @@ func readRunnerManifest(path string) (runnerManifest, error) {
 // directory existing on its own is not enough: an interrupted npm install
 // leaves one behind, and a check that stops at "node_modules is there" is the
 // same shape of lie as the one that stopped at "src/main.ts is there".
-func dependencyCheck(target string, m runnerManifest) runnerCheck {
-	modules := filepath.Join(target, "node_modules")
-	if _, err := os.Stat(modules); err != nil {
+//
+// The reading is runnerpath.Inspect's, not a second one written here. The
+// search a run uses has to skip a runner that cannot resolve its dependencies,
+// and this has to report the same fact about the same directory. Two readings
+// that agree today are two readings that can disagree tomorrow, and the
+// symptom last time was a check reporting ready about a tree the run never used.
+func dependencyCheck(s runnerpath.State) runnerCheck {
+	// A manifest that could not be read is a question this did not answer.
+	// Answering ok anyway is the defect being fixed rather than a smaller
+	// version of it.
+	if s.Undetermined != "" {
+		return runnerCheck{
+			label: "dependencies", symbol: SymbolSkip,
+			detail:  "not checked: " + s.Undetermined,
+			blocker: false,
+		}
+	}
+	if s.NoModules && s.Declared > 0 {
 		return runnerCheck{
 			label: "dependencies", symbol: SymbolFail,
 			detail:  "node_modules is missing",
@@ -302,19 +348,10 @@ func dependencyCheck(target string, m runnerManifest) runnerCheck {
 			blocker: true,
 		}
 	}
-	var missing []string
-	for name := range m.Dependencies {
-		// filepath.Join handles the scoped @scope/name form, which is two
-		// directory levels on disk rather than one.
-		if _, err := os.Stat(filepath.Join(modules, filepath.FromSlash(name))); err != nil {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
+	if len(s.Missing) > 0 {
 		return runnerCheck{
 			label: "dependencies", symbol: SymbolFail,
-			detail:  "missing " + strings.Join(missing, ", "),
+			detail:  "missing " + strings.Join(s.Missing, ", "),
 			remedy:  "Install them with: af runner install",
 			blocker: true,
 		}
@@ -325,25 +362,25 @@ func dependencyCheck(target string, m runnerManifest) runnerCheck {
 	// no idea which versions they are, so it says so rather than reporting the
 	// same ok as a pinned one. A warning rather than a failure: the runner does
 	// run, it just runs something nobody chose.
-	if _, err := os.Stat(filepath.Join(target, "package-lock.json")); err != nil {
+	if !s.Pinned {
 		return runnerCheck{
 			label: "dependencies", symbol: SymbolWarn,
 			detail: fmt.Sprintf("%d declared, all present, and not pinned: no package-lock.json",
-				len(m.Dependencies)),
+				s.Declared),
 			remedy: "Reinstall from a release that ships the lockfile: af runner install",
 		}
 	}
 	return runnerCheck{
 		label: "dependencies", symbol: SymbolOK,
-		detail: fmt.Sprintf("%d declared, all present, pinned by package-lock.json", len(m.Dependencies)),
+		detail: fmt.Sprintf("%d declared, all present, pinned by package-lock.json", s.Declared),
 	}
 }
 
 // nodeCheck compares against the range the runner declares rather than only
 // reporting what it found. The old line printed the version and called it ok,
 // so a node too old to run the runner passed a check named after readiness.
-func nodeCheck(found string, m runnerManifest) runnerCheck {
-	want := m.Engines.Node
+func nodeCheck(found string, s runnerpath.State) runnerCheck {
+	want := s.Node
 	if found == "" {
 		detail := "not found"
 		if want != "" {
@@ -353,6 +390,15 @@ func nodeCheck(found string, m runnerManifest) runnerCheck {
 			label: "node", symbol: SymbolFail, detail: detail,
 			remedy:  "Install node from https://nodejs.org, then run af runner check again.",
 			blocker: true,
+		}
+	}
+	// A requirement nobody could read is not a requirement that was met. The
+	// dependencies line already says the manifest could not be read; saying ok
+	// here would quietly claim this node was compared against something.
+	if s.Undetermined != "" {
+		return runnerCheck{
+			label: "node", symbol: SymbolSkip,
+			detail: found + ", not checked against a requirement: " + s.Undetermined,
 		}
 	}
 	if want == "" {
@@ -480,6 +526,13 @@ func newRunnerCheckCommand(e *Env) *cobra.Command {
 Reports each thing af test needs from the runner separately: the source, the
 dependencies it declares, a node new enough to run it, and the browser.
 
+It reports on the runner af test would actually use from here, which is the
+nearest one that can run rather than the nearest one that exists. Any runner it
+went past is named, with what is wrong with it, because a report about a
+directory the reader did not mean is how this command came to say a runner was
+ready while the run took a different copy and died on a module it could not
+resolve.
+
 It does not claim the runner executes. Knowing that means starting node and
 launching a browser, which is what af test is. Anything this cannot determine
 is reported as not checked rather than as ok, because a check that answers ok
@@ -489,11 +542,11 @@ of an install with no dependencies at all, and the real failure surfaced much
 later inside af test as a node error about a module it could not resolve.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			target, err := RunnerHome()
+			target, passedOver, err := runnerToCheck(e.WorkDir)
 			if err != nil {
 				return err
 			}
-			results := checkRunner(cmd.Context(), target)
+			results := append(passedOverChecks(passedOver), checkRunner(cmd.Context(), target)...)
 
 			ready := true
 			node := ""
@@ -507,10 +560,23 @@ later inside af test as a node error about a module it could not resolve.`),
 			}
 
 			if e.Out.Format == FormatJSON {
-				return e.Out.JSON(RunnerCheckJSON{
+				// The document first, then the same verdict the rendered
+				// report gives. This used to return here, so `-o json` exited
+				// 0 on a runner it had just described as incomplete, and any
+				// script that read the exit code rather than parsing the
+				// document was told the runner was ready. silentError carries
+				// the code and prints nothing, which is the only thing that
+				// can follow a JSON document without corrupting it.
+				if err := e.Out.JSON(RunnerCheckJSON{
 					Path: target, Node: node, Complete: ready,
 					Checks: checksJSON(results),
-				})
+				}); err != nil {
+					return err
+				}
+				if !ready {
+					return &silentError{code: aferrors.ExitConfiguration}
+				}
+				return nil
 			}
 			for _, r := range results {
 				e.Out.Status(r.symbol, r.label, r.detail)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/antifailure/antifailure/engine/internal/runnerpath"
 )
 
 // af runner check reported "ok runner" on a tree with no node_modules.
@@ -138,7 +140,7 @@ func TestAnEmptyNodeModulesDoesNotPass(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	got := dependencyCheck(dir, runnerManifest{Dependencies: map[string]string{"playwright": "^1.49.0"}})
+	got := dependencyCheck(runnerpath.Inspect(dir))
 	if got.symbol != SymbolFail {
 		t.Errorf("reported %q for an empty node_modules, want fail", got.symbol)
 	}
@@ -198,8 +200,7 @@ func TestAnUnreadableManifestIsReportedAsUnchecked(t *testing.T) {
 // The old line printed the version it found and called it ok, so a node too
 // old to run the runner passed a check named after readiness.
 func TestNodeIsComparedAgainstWhatTheRunnerDeclares(t *testing.T) {
-	m := runnerManifest{}
-	m.Engines.Node = ">=22.6"
+	m := runnerpath.State{Node: ">=22.6"}
 
 	cases := []struct {
 		found  string
@@ -229,8 +230,7 @@ func TestNodeIsComparedAgainstWhatTheRunnerDeclares(t *testing.T) {
 // A range this cannot read is reported as unread. Treating it as satisfied
 // would put the check back where it started.
 func TestAnUnreadableNodeRangeIsNotTreatedAsSatisfied(t *testing.T) {
-	m := runnerManifest{}
-	m.Engines.Node = "^22 || ^24"
+	m := runnerpath.State{Node: "^22 || ^24"}
 	got := nodeCheck("v24.2.0", m)
 	if got.symbol != SymbolSkip {
 		t.Errorf("reported %q for a range it cannot parse, want skip", got.symbol)
@@ -307,8 +307,7 @@ func TestEveryFailureCarriesARemedyThatFitsIt(t *testing.T) {
 			t.Errorf("%s reported %q with no remedy", r.label, r.symbol)
 		}
 	}
-	m := runnerManifest{}
-	m.Engines.Node = ">=22.6"
+	m := runnerpath.State{Node: ">=22.6"}
 	if got := nodeCheck("", m).remedy; !strings.Contains(got, "nodejs.org") {
 		t.Errorf("a missing node advises %q, which does not say where to get node", got)
 	}
@@ -326,7 +325,15 @@ func TestTheRemedyIsNotPrintedTwiceOnAMachineWithNoRunner(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	var buf bytes.Buffer
-	e := &Env{Out: NewOutput(&buf, &buf), Getenv: func(string) string { return "" }}
+	// WorkDir matters now: the command reports on the runner a run started
+	// HERE would use, so a test that means "a machine with no runner" has to
+	// stand somewhere with no runner rather than in this checkout, which has
+	// one.
+	e := &Env{
+		Out:     NewOutput(&buf, &buf),
+		WorkDir: t.TempDir(),
+		Getenv:  func(string) string { return "" },
+	}
 	cmd := newRunnerCheckCommand(e)
 	if err := cmd.RunE(cmd, nil); err == nil {
 		t.Fatal("af runner check exited 0 against a home with no runner in it")
