@@ -84,19 +84,41 @@ const protectionBody = `{"required_status_checks":{"strict":false,"contexts":` +
 	`"known vulnerabilities","no credentials in the tree",` +
 	`"commits are attributed to their author"]}}`
 
+// The two payloads below are the bytes `gh pr view --json ...` really returned,
+// for pull request 235 while it was open and for 228 after it was merged, with
+// only the number, title and branch names changed. They earned being real: an
+// earlier revision asked gh for a field called `merged`, every test in this
+// file passed against a fixture that invented it, and the first run against the
+// real API failed with "Unknown JSON field: merged". A fixture nobody compared
+// against the real thing tests this file's imagination.
+//
+// `mergeable` is added to both on purpose: it is the field that must NOT be
+// what decides anything, and leaving it out would make that untestable.
+const realOpenPull = `{"baseRefName":"main","closed":false,` +
+	`"headRefName":"fix/merge-carries-signoff",` +
+	`"headRefOid":"58e901e968577e69f3f959e27bc47e1c9032612a","isDraft":false,` +
+	`"mergeCommit":null,"mergeStateStatus":"BLOCKED","mergedAt":null,"number":235,` +
+	`"state":"OPEN","title":"merge: a squash merge could not carry a sign-off"}`
+
+const realMergedPull = `{"baseRefName":"main","closed":true,` +
+	`"headRefName":"fix/final-verdict-reporting",` +
+	`"headRefOid":"0f63b8c399c2337330304365708c02d1b3275c51","isDraft":false,` +
+	`"mergeCommit":{"oid":"64e67a86cd981a08651a0692df75bd029e21d254"},` +
+	`"mergeStateStatus":"UNKNOWN","mergedAt":"2026-09-05T02:46:31Z","number":228,` +
+	`"state":"MERGED","title":"engine: the console received a pass"}`
+
 // openPull is a pull request in the state one is in when it is ready to merge.
-// `mergeable` is in it on purpose: it is the field that must not be what
-// decides anything, and leaving it out would make that untestable.
 func openPull(status string) string {
 	return fmt.Sprintf(`{"number":231,"title":"operator: first sign-in needed a hand-built job",`+
-		`"state":"OPEN","isDraft":false,"merged":false,"mergeable":"MERGEABLE",`+
+		`"state":"OPEN","isDraft":false,"closed":false,"mergedAt":null,"mergeable":"MERGEABLE",`+
 		`"mergeStateStatus":%q,"headRefOid":"550534a6aa0e5c9b5f1a0f2e1d4c3b2a19087766",`+
 		`"headRefName":"fix/operator-bootstrap-command","baseRefName":"main","mergeCommit":null}`, status)
 }
 
 func mergedPull(oid string) string {
 	return fmt.Sprintf(`{"number":231,"title":"operator: first sign-in needed a hand-built job",`+
-		`"state":"MERGED","isDraft":false,"merged":true,"mergeable":"MERGEABLE",`+
+		`"state":"MERGED","isDraft":false,"closed":true,"mergedAt":"2026-09-05T02:46:31Z",`+
+		`"mergeable":"MERGEABLE",`+
 		`"mergeStateStatus":"UNKNOWN","headRefOid":"550534a6aa0e5c9b5f1a0f2e1d4c3b2a19087766",`+
 		`"headRefName":"fix/operator-bootstrap-command","baseRefName":"main",`+
 		`"mergeCommit":{"oid":%q}}`, oid)
@@ -210,6 +232,40 @@ func (f *fake) argument(flag string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// The payloads gh really returns, decoded by the real struct. This is the test
+// that would have caught asking for a field gh does not have: the value it
+// reads is compared against what the API actually said, rather than against a
+// fixture written to match the code.
+func TestTheRealPayloadsGhReturnsAreUnderstood(t *testing.T) {
+	f := &fake{pulls: []string{realOpenPull, realMergedPull}}
+	h := hub{runner: f, repo: "antifailure/antifailure"}
+
+	open, err := h.pull(235)
+	if err != nil {
+		t.Fatalf("the real open pull request did not decode: %v", err)
+	}
+	if open.merged() {
+		t.Error("an open pull request was read as merged")
+	}
+	if open.Closed || open.State != "OPEN" || open.MergeStateStatus != "BLOCKED" {
+		t.Errorf("the open pull request decoded wrong: %+v", open)
+	}
+	if open.HeadRefOid != "58e901e968577e69f3f959e27bc47e1c9032612a" {
+		t.Errorf("the head sha decoded wrong: %q", open.HeadRefOid)
+	}
+
+	done, err := h.pull(228)
+	if err != nil {
+		t.Fatalf("the real merged pull request did not decode: %v", err)
+	}
+	if !done.merged() {
+		t.Error("a merged pull request was read as not merged, which is how a merge goes unconfirmed")
+	}
+	if done.MergeCommit.Oid != "64e67a86cd981a08651a0692df75bd029e21d254" {
+		t.Errorf("the merge commit decoded wrong: %q", done.MergeCommit.Oid)
+	}
 }
 
 // THE POSITIVE CONTROL, and it is load bearing. A command that refused

@@ -202,23 +202,40 @@ func (local) run(name string, args ...string) ([]byte, error) {
 
 // pull is the part of a pull request this command reasons about.
 type pull struct {
-	Number           int    `json:"number"`
-	Title            string `json:"title"`
-	State            string `json:"state"`
-	IsDraft          bool   `json:"isDraft"`
-	Merged           bool   `json:"merged"`
-	MergeStateStatus string `json:"mergeStateStatus"`
-	HeadRefOid       string `json:"headRefOid"`
-	HeadRefName      string `json:"headRefName"`
-	BaseRefName      string `json:"baseRefName"`
+	Number           int        `json:"number"`
+	Title            string     `json:"title"`
+	State            string     `json:"state"`
+	IsDraft          bool       `json:"isDraft"`
+	Closed           bool       `json:"closed"`
+	MergedAt         *time.Time `json:"mergedAt"`
+	MergeStateStatus string     `json:"mergeStateStatus"`
+	HeadRefOid       string     `json:"headRefOid"`
+	HeadRefName      string     `json:"headRefName"`
+	BaseRefName      string     `json:"baseRefName"`
 	MergeCommit      struct {
 		Oid string `json:"oid"`
 	} `json:"mergeCommit"`
 }
 
+// merged reports whether the pull request has been merged.
+//
+// `mergedAt` rather than `merged`, and that is not a preference. This asked gh
+// for a field called `merged` first, every test passed against a fixture that
+// invented it, and the first run against the real API failed with "Unknown
+// JSON field: merged". gh exposes `mergedAt`, which is null until the merge
+// happens and a timestamp afterwards, and `state`, which becomes MERGED. The
+// timestamp is the fact and the state corroborates it.
+//
+// The fixtures in the tests are now the bytes gh really returned for an open
+// pull request and for a merged one, because a fixture nobody compared against
+// the real thing is a test of this file's imagination.
+func (p pull) merged() bool { return p.MergedAt != nil || p.State == "MERGED" }
+
 // pullFields is the exact `--json` list, kept in one place so the struct above
-// and the request cannot drift apart.
-const pullFields = "number,title,state,isDraft,merged,mergeStateStatus,headRefOid,headRefName,baseRefName,mergeCommit"
+// and the request cannot drift apart. Every name in it is one gh accepts; an
+// invented one is not a silent nil, it is an error that names the field.
+const pullFields = "number,title,state,isDraft,closed,mergedAt,mergeStateStatus," +
+	"headRefOid,headRefName,baseRefName,mergeCommit"
 
 // check is one reported context on a commit, whether it arrived as a check run
 // or as a commit status.
@@ -632,7 +649,7 @@ func confirm(h hub, number int, own string, attempts int, interval time.Duration
 		p, err := h.pull(number)
 		if err != nil {
 			last = err
-		} else if p.Merged && p.MergeCommit.Oid != "" {
+		} else if p.merged() && p.MergeCommit.Oid != "" {
 			message, err := h.commitMessage(p.MergeCommit.Oid)
 			if err != nil {
 				return err
@@ -648,11 +665,11 @@ func confirm(h hub, number int, own string, attempts int, interval time.Duration
 			}
 			fmt.Fprintf(out, "ok  %-40s %s\n", "the commit carries the sign-off", p.MergeCommit.Oid)
 			return nil
-		} else if !p.Merged && p.State == "CLOSED" {
+		} else if !p.merged() && p.Closed {
 			return fmt.Errorf("pull request %d is closed and not merged. Nothing landed", number)
 		} else {
-			last = fmt.Errorf("pull request %d reports merged=%v with merge commit %q",
-				number, p.Merged, p.MergeCommit.Oid)
+			last = fmt.Errorf("pull request %d reports state %s with merge commit %q",
+				number, p.State, p.MergeCommit.Oid)
 		}
 		if attempt < attempts {
 			time.Sleep(interval)
@@ -730,7 +747,7 @@ func merge(h hub, r runner, number int, given string, dry bool, attempts int, in
 
 	var problems []string
 	switch {
-	case p.Merged:
+	case p.merged():
 		return fmt.Errorf("pull request %d is already merged", number)
 	case p.State != "OPEN":
 		return fmt.Errorf("pull request %d is %s, not OPEN", number, p.State)
