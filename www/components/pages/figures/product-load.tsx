@@ -355,9 +355,13 @@ function CapabilityMark({ value }: { value: string }) {
 
 function CapabilityCard({ capability }: { capability: (typeof CAPABILITIES)[number] }) {
   return (
-    <li className="rounded-[10px] border border-black/[0.06] bg-white p-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="font-mono text-[10px] font-medium tracking-extra-tight text-black">{capability.name}</div>
+    // min-w-0 for the same reason RouteRow above carries it: a grid item's
+    // default min-width is auto, so this card refused to go narrower than its
+    // own header. At 320px it sat 19px wider than its track and the figure's
+    // overflow-hidden cut the capability marks off rather than scrolling.
+    <li className="min-w-0 rounded-[10px] border border-black/[0.06] bg-white p-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 font-mono text-[10px] font-medium tracking-extra-tight text-black">{capability.name}</div>
         <div className="flex shrink-0 gap-1.5">
           <CapabilityMark value={capability.otel} />
           <CapabilityMark value={capability.access} />

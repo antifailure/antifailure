@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { FloatWindow, SageWell } from "@/components/pages/solutions/well";
 import { cn } from "@/lib/cn";
 
-const MODES = ["MOCK", "CAPTURE", "DENY"] as const;
+// BLOCK, not DENY. The manifest's egress modes are block, allow, capture,
+// mock, sandbox and synth, so a figure of a manifest driven run that offers
+// DENY names an outcome the validator would refuse.
+const MODES = ["MOCK", "CAPTURE", "BLOCK"] as const;
 
 type Tone = "plain" | "sage" | "success" | "danger" | "muted";
 
@@ -198,7 +201,12 @@ export function PFW01() {
       <div className="mt-4 grid min-w-0 grid-cols-1 items-stretch sm:grid-cols-[minmax(0,0.95fr)_28px_minmax(0,1.08fr)_28px_minmax(0,1fr)]">
         <section className="min-w-0 rounded-[12px] bg-[#f7f7f5] p-4" aria-label="Candidate application attempts">
           <SectionTitle eyebrow="candidate" title="Application attempts an external effect" />
-          <div className="mt-4 space-y-2 font-mono text-[10px] leading-4 text-black/70">
+          {/* break-words, because an endpoint is one unbreakable token and this
+              column is 106px wide at every width from sm up. Without it the two
+              hostnames ran 68px past the card and crossed into the arrow
+              gutter, which only happened on desktop and so survived every
+              mobile check. */}
+          <div className="mt-4 space-y-2 break-words font-mono text-[10px] leading-4 text-black/70">
             <div>POST api.stripe.com/v1/charges</div>
             <div>POST api.sendgrid.com/v3/mail/send</div>
             <div className="text-[#A73737]">TCP 18.4.2.9:443</div>
@@ -217,11 +225,11 @@ export function PFW01() {
         <Direction />
 
         <section className="min-w-0 rounded-[12px] border border-black/[0.07] bg-white p-4" aria-label="Contained outcomes">
-          <SectionTitle eyebrow="contained outcomes" title="Mock, capture, or deny without public egress" />
+          <SectionTitle eyebrow="contained outcomes" title="Mock, capture, or block without public egress" />
           <div className="mt-4 space-y-2">
             <Seal label="Stripe pack" detail="MOCK; stateful response" />
             <Seal label="Mail inbox" detail="CAPTURE; rendered artifact" />
-            <Seal label="Unknown host" detail="DENY; no route out" tone="danger" />
+            <Seal label="Unknown host" detail="BLOCK; no route out" tone="danger" />
           </div>
         </section>
       </div>
@@ -403,8 +411,8 @@ const LEDGER_ROWS = [
   { method: "POST", target: "api.sendgrid.com/v3/mail/send", mode: "CAPTURE", receipt: "msg_sim_2a91", result: "handled" },
   { method: "POST", target: "hooks.slack.com/services/T0/B0", mode: "CAPTURE", receipt: "req_sim_91c0", result: "handled" },
   { method: "POST", target: "api.openai.com/v1/chat/completions", mode: "MOCK", receipt: "mock_5b12", result: "handled" },
-  { method: "GET", target: "api.prod.internal/v1/health", mode: "DENY", receipt: "deny_01", result: "blocked" },
-  { method: "CONNECT", target: "example.com:443", mode: "DENY", receipt: "deny_02", result: "blocked" },
+  { method: "GET", target: "api.prod.internal/v1/health", mode: "BLOCK", receipt: "deny_01", result: "blocked" },
+  { method: "CONNECT", target: "example.com:443", mode: "BLOCK", receipt: "deny_02", result: "blocked" },
 ] as const;
 
 function OutcomeDot({ blocked }: { blocked: boolean }) {
