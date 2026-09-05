@@ -766,6 +766,39 @@ func TestEveryAttributionShapeIsRefused(t *testing.T) {
 	}
 }
 
+// THE RULE REFUSED THE PULL REQUEST THAT INTRODUCED IT. The description had to
+// quote the shapes it refuses, because a description of them has to, and the
+// check read the quotes as the thing itself. A document that cannot show you
+// what it bans cannot teach you the rule, which is the same conclusion
+// prosecheck reached about the punctuation ban.
+//
+// Both directions, because exempting code without proving the plain form is
+// still refused would turn the whole rule off.
+func TestQuotingTheBannedShapeIsNotCarryingIt(t *testing.T) {
+	t.Run("a description explaining the rule passes", func(t *testing.T) {
+		body := "A harness asked for `Claude-Session: <url>` at the end of every commit,\n" +
+			"and for the bare link `https://claude.ai/code/session_01B` in the description.\n\n" +
+			"```\nCo-Authored-By: Somebody <nobody@example.com>\n" +
+			"\U0001F916 Generated with [Claude Code](https://claude.ai/code)\n```\n"
+		if problems := attributionIn("body", body); len(problems) > 0 {
+			t.Errorf("a description of the rule was read as a breach of it:\n  %s",
+				strings.Join(problems, "\n  "))
+		}
+	})
+
+	t.Run("the same shapes unquoted are still refused", func(t *testing.T) {
+		for _, text := range []string{
+			"www: a change\n\nClaude-Session: https://claude.ai/code/session_01B",
+			"Lands the thing.\n\nhttps://claude.ai/code/session_01B",
+			"www: a change\n\nCo-Authored-By: Somebody <nobody@example.com>",
+		} {
+			if problems := attributionIn("body", text); len(problems) == 0 {
+				t.Errorf("exempting code turned the rule off for plain text too: %q", text)
+			}
+		}
+	})
+}
+
 // A RULE THAT REFUSES HONEST PROSE IS A RULE SOMEBODY DELETES, which is the
 // lesson this repository already wrote down about matching `loop` as a
 // substring. These are the sentences a commit message here really does carry.

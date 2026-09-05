@@ -35,3 +35,12 @@ matches a whole trailer rather than the word "session", so a commit about
 check deliberately does not, because this mode needs no network and no pull
 request to point at. The exemption in `tools/gatecheck` now says that the
 exemption is about the field check rather than about the whole tool.
+
+It refused its own pull request on the first run, which is the honest way to
+find the last thing wrong with it. The description explaining these rules quoted
+the shapes they refuse, because a description of them has to, and the check read
+the quotes as the thing itself. Fenced blocks and inline code spans are exempt
+now, which is the answer `prosecheck` already reached about the punctuation ban:
+a document that cannot show you the character it bans cannot teach you the rule.
+Both directions are tested, because exempting code without proving the plain
+form is still refused would turn the whole rule off.

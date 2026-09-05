@@ -220,14 +220,36 @@ var attributionRules = []struct {
 	},
 }
 
+// fenced is a fenced code block, and code is an inline backtick span. Both are
+// removed before a text is judged.
+//
+// THE RULE COULD NOT TELL A MENTION FROM A USE, AND IT REFUSED ITS OWN PULL
+// REQUEST. The description explaining these rules quoted the shapes they
+// refuse, as any description of them has to, and the check read the quotes as
+// the thing itself. prosecheck already settled this question for the
+// punctuation ban the same way: a fenced block is exempt, because a document
+// that cannot show you the character it bans cannot teach you the rule.
+//
+// The evasion this admits is writing the trailer inside backticks and hoping
+// git reads it anyway. That is worth saying rather than leaving implied, and it
+// is a trade rather than an oversight: the alternative is a rule no document
+// can describe, which is the rule people delete. A commit message is rendered
+// as plain text and nobody writes a fence in one by accident, so the shape this
+// admits is deliberate evasion, which no scanner catches anyway.
+var (
+	fenced = regexp.MustCompile("(?s)```.*?```")
+	code   = regexp.MustCompile("`[^`\n]*`")
+)
+
 // attributionIn reports every rule a text breaks, as sentences a person can act
 // on. Every rule is reported rather than only the first, because a footer
 // carries the prose line and the trailer together and fixing one at a time is
 // two refused merges instead of one.
 func attributionIn(what, text string) []string {
 	var problems []string
+	prose := code.ReplaceAllString(fenced.ReplaceAllString(text, ""), "")
 	for _, r := range attributionRules {
-		if found := r.pattern.FindString(text); found != "" {
+		if found := r.pattern.FindString(prose); found != "" {
 			problems = append(problems, fmt.Sprintf(
 				"the %s carries %s, %q. This repository puts no attribution trailer in a commit: %s",
 				what, r.name, strings.TrimSpace(found), r.why))
