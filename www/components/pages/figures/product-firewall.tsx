@@ -139,28 +139,37 @@ function Direction({ danger = false }: { danger?: boolean }) {
   );
 }
 
+// The detail wraps on its own full width line rather than truncating beside
+// the dot. This figure draws 560px wide inside its Split at every width from
+// sm up, which leaves each seal 87px of content, and the dot and its gap were
+// taking 40px of that: "CAPTURE; rendered artifact" needs 156px on one line,
+// so it was cut to "CAPTUR..." and told the reader nothing. Its longest word
+// needs 48px and the column had 45, so even un-truncating it would have
+// overflowed. Below the label the whole 87px is available, at 9px, and the
+// sentence fits. The seals at 320px were already showing this text in full,
+// which is how the desktop layout was identifiable as the thing at fault.
 function Seal({ label, detail, tone = "sage" }: { label: string; detail: string; tone?: "sage" | "danger" }) {
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-3 rounded-[9px] border px-3 py-2.5",
+        "min-w-0 rounded-[9px] border px-3 py-2.5",
         tone === "sage" ? "border-[#83B39F]/30 bg-white" : "border-[#C43D3D]/24 bg-[#fbefef]",
       )}
     >
-      <span
-        className={cn(
-          "grid size-7 shrink-0 place-items-center rounded-full border",
-          tone === "sage" ? "border-[#285D49]/30 bg-[#E4F1EB]" : "border-[#C43D3D]/25 bg-white",
-        )}
-        aria-hidden
-      >
-        <span className={cn("size-2 rounded-full", tone === "sage" ? "bg-[#285D49]" : "bg-[#C43D3D]")} />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[12px] font-medium leading-4 text-black">{label}</span>
-        <span className={cn("block truncate font-mono text-[10px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
-          {detail}
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            "grid size-5 shrink-0 place-items-center rounded-full border",
+            tone === "sage" ? "border-[#285D49]/30 bg-[#E4F1EB]" : "border-[#C43D3D]/25 bg-white",
+          )}
+          aria-hidden
+        >
+          <span className={cn("size-1.5 rounded-full", tone === "sage" ? "bg-[#285D49]" : "bg-[#C43D3D]")} />
         </span>
+        <span className="min-w-0 text-[12px] font-medium leading-4 text-black">{label}</span>
+      </div>
+      <span className={cn("mt-1 block font-mono text-[9px] leading-4", tone === "sage" ? "text-[#285D49]" : "text-[#A73737]")}>
+        {detail}
       </span>
     </div>
   );

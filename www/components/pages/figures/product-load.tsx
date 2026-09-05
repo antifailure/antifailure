@@ -154,7 +154,7 @@ function Verdict({ delta }: { delta: number | null }) {
   const deltaText = delta === null ? "no baseline" : `+${Math.round(delta * 100)}%`;
 
   return (
-    <div className="flex items-center justify-between gap-2 sm:block sm:text-right">
+    <div className="flex items-center gap-2 sm:block sm:text-right">
       <span
         className={cn(
           "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
@@ -184,7 +184,11 @@ function RouteRow({ datum, index }: { datum: RouteDatum; index: number }) {
         breach ? "border-[#C95B5B]/24 bg-[#FFF8F7]" : "border-black/[0.06] bg-white",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      {/* Stacked below sm. Side by side, the verdict took half of a 176px row
+          and the route name truncated to "PO..." and "GET /ap...", so a figure
+          whose entire subject is which route breached could not say which one
+          on a 320px phone. Stacked, the name has the full width and fits. */}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span
