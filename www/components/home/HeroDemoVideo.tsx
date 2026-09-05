@@ -1,7 +1,76 @@
-export function HeroDemoVideo() {
+"use client";
+
+import { useRef, useState } from "react";
+
+function VolumeIcon({ on }: { on: boolean }) {
   return (
-    <div className="mx-auto mt-20 max-w-[1180px] max-xl:mt-16 max-md:mt-12">
-      <div className="relative overflow-hidden rounded-[28px] border border-black/[0.08] bg-[#f3f2ec] p-2 shadow-[0_28px_90px_rgba(0,0,0,0.08)] max-md:rounded-[20px]">
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" aria-hidden>
+      <path
+        d="M3.2 7.4v5.2h3.1l4.3 3.2V4.2L6.3 7.4H3.2Z"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinejoin="round"
+      />
+      {on ? (
+        <>
+          <path d="M13.1 7.1a4.2 4.2 0 0 1 0 5.8" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+          <path d="M15.4 5.2a7 7 0 0 1 0 9.6" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" opacity="0.7" />
+        </>
+      ) : (
+        <path d="M13.1 7.2 17 11.1M17 7.2l-3.9 3.9" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
+function FullscreenIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-4" fill="none" aria-hidden>
+      <path
+        d="M7.8 4.2H4.2v3.6M12.2 4.2h3.6v3.6M15.8 12.2v3.6h-3.6M4.2 12.2v3.6h3.6"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function HeroDemoVideo() {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
+
+  const toggleVolume = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const nextMuted = !video.muted;
+    video.muted = nextMuted;
+    video.volume = nextMuted ? 0 : 1;
+    setMuted(nextMuted);
+    void video.play();
+  };
+
+  const openFullscreen = () => {
+    const frame = frameRef.current;
+    if (!frame) return;
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+      return;
+    }
+
+    void frame.requestFullscreen();
+  };
+
+  return (
+    <div className="relative left-1/2 mt-20 w-screen max-w-[1500px] -translate-x-1/2 px-8 max-xl:mt-16 max-md:mt-12 max-md:px-5">
+      <div
+        ref={frameRef}
+        className="group relative overflow-hidden rounded-[24px] bg-[#f3f2ec] shadow-[0_30px_100px_rgba(0,0,0,0.08)] transition-shadow duration-300 max-md:rounded-[18px] [&:fullscreen]:rounded-none [&:fullscreen]:bg-black [&:fullscreen]:p-0"
+      >
         <div
           className="pointer-events-none absolute inset-0 opacity-70"
           style={{
@@ -10,30 +79,34 @@ export function HeroDemoVideo() {
           }}
           aria-hidden
         />
-        <div className="relative overflow-hidden rounded-[22px] border border-black/[0.08] bg-white max-md:rounded-[16px]">
-          <div className="flex h-10 items-center justify-between border-b border-black/[0.07] bg-white/88 px-4 max-sm:h-9 max-sm:px-3">
-            <div className="flex items-center gap-2">
-              <span className="size-2 rounded-full bg-[#668f5d]" aria-hidden />
-              <span className="text-[12px] font-medium tracking-tight text-black/62">
-                Antifailure product demo
-              </span>
-            </div>
-            <span className="text-[11px] font-medium tracking-tight text-black/36">
-              Safe run preview
-            </span>
-          </div>
-          <div className="bg-black/[0.03] p-1.5">
-            <video
-              className="block aspect-video w-full rounded-[16px] bg-white object-cover max-md:rounded-[12px]"
-              src="/home/option-4.mp4"
-              autoPlay
-              muted
-              loop
-              playsInline
-              preload="metadata"
-              aria-label="A product demo video showing Antifailure validating a deployment before release."
-            />
-          </div>
+        <video
+          ref={videoRef}
+          className="relative block aspect-video w-full rounded-[24px] bg-white object-cover max-md:rounded-[18px] [&:fullscreen]:h-screen [&:fullscreen]:rounded-none [&:fullscreen]:object-contain"
+          src="/home/option-4.mp4"
+          autoPlay
+          muted={muted}
+          loop
+          playsInline
+          preload="metadata"
+          aria-label="A product demo video showing Antifailure validating a deployment before release."
+        />
+        <div className="absolute right-4 bottom-4 z-10 flex items-center gap-2 max-sm:right-3 max-sm:bottom-3">
+          <button
+            type="button"
+            className="grid size-10 place-items-center rounded-full bg-black/72 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors duration-200 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
+            aria-label={muted ? "Turn video sound on" : "Mute video"}
+            onClick={toggleVolume}
+          >
+            <VolumeIcon on={!muted} />
+          </button>
+          <button
+            type="button"
+            className="grid size-10 place-items-center rounded-full bg-black/72 text-white shadow-[0_10px_28px_rgba(0,0,0,0.18)] backdrop-blur-md transition-colors duration-200 hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/80"
+            aria-label="Open video fullscreen"
+            onClick={openFullscreen}
+          >
+            <FullscreenIcon />
+          </button>
         </div>
       </div>
     </div>
