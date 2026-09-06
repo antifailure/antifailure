@@ -88,12 +88,49 @@ process that owns it and is only settled when that process is gone, a tool
 refused by the branch lock names the holder instead of listing causes that
 were not the cause, and the read only tools take no lock at all.
 
+**`af mask verify` said clean about columns it never read.** The scan read six
+text types, so a `bytea`, an array or an enum was not read, not skipped and not
+counted: a column holding sealed key material was invisible to the one check
+that gates publication, while `af mask plan` on the same database listed it as
+copied unchanged. The credential detector knew Stripe's secret key prefixes and
+not its object identifiers, so `cus_` and `sub_` values, which are live pointers
+into real accounts and identical in every environment, tripped nothing. And the
+count of columns copied unchanged was printed once at the bottom of a plan and
+carried nowhere. The scan now reads every column it can read as text, decodes
+`bytea` where it decodes, lists by type what it cannot read, and fails rather
+than passes when such a column has no rule and a name that says it holds a
+secret. The count travels into apply, refresh, the attestation, `af golden
+list` and the MCP tools, and says "not recorded" rather than zero for a golden
+the older scanner verified.
+
+**A twin carried production's roles and none of their privileges.** The copy is
+taken with ownership and privileges dropped, which is right for ownership and
+throws away every other role's grants with the owner's. So this repository's own
+session sweeper was refused `DELETE FROM sessions` with SQLSTATE 42501 in the
+first minute of every environment, because the grants a migration made are in
+the ledger and nothing runs that migration again. The copy now carries the
+source's privileges on tables, sequences, views, columns, functions, types,
+schemas and default privileges, for the roles it carries and for PUBLIC, with
+the grant option where the source had it, and revokes what production revoked
+instead of letting a fresh object hand it back.
+
+**Three token commands broke the exit code contract they document.** The error
+reference invites a script to branch on exit 4 for an authentication failure.
+`af whoami` and `af provider list` honoured it; `af token list`, `create` and
+`rm` caught the same error three lines away, printed a bare sentence with no
+code and no link, and exited 1. Every command that reads a stored sign in now
+refuses through one function and one of four codes, all exit 4. `af init` on an
+existing manifest named no remedy, and `af env list --output json` called the
+services column `name`.
+
 <!-- relnotes:omit -->
 Also: the footer asked every visitor to request access, on all forty nine
 pages, months after the invitation wall came down; the render boundary added
-in v1.3.3 promised a reference it showed only when the error carried one; and
-the version bump rewrote a dependency that happened to share our version
-number, which no runner would have noticed and every laptop would.
+in v1.3.3 promised a reference it showed only when the error carried one; the
+version bump rewrote a dependency that happened to share our version
+number, which no runner would have noticed and every laptop would; two figures
+on the site printed a flag that has never existed; and the variable the App
+writes into a customer's workflow was documented on no page.
 <!-- relnotes:end -->
 
 ## v1.3.3
