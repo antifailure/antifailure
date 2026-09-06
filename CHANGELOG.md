@@ -14,6 +14,69 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.4
+
+The second half of the launch readiness work. v1.3.3 carried what a customer
+would hit in the first hour; this carries what the same review found in the
+surfaces underneath, and the instruments that were answering the wrong
+question about them.
+
+**Five destructive buttons asked nothing before they fired.** Cancelling a
+subscription, tearing an environment down, removing a runtime, revoking a
+provider key and revoking a credential all acted on the first click, while
+every comparable action in the console already opened a confirmation. They
+go through the same dialog now, which names the thing and the consequence.
+
+**A user who hit an error had nothing to quote.** The control plane mints a
+request id and returns it in a header, and the console talks to it through a
+transport that dropped the id from every error body, so the card a person
+read carried nothing to send to support and the log had nothing to search on.
+The id now travels in the error, appears under the message as a reference,
+and stands beside the code and the path in the log. Six cross-site refusals
+that logged nothing at all now log one line each, without any cookie or token
+value in it.
+
+**An unsigned body of any size was read in full before it was refused.** Both
+webhook routes buffered the whole request before checking the signature and
+nothing capped the rest, so a stranger could make the server read as much as
+they liked. Every endpoint now has a limit from one catalogue, sized to what
+that endpoint honestly receives, applied before any route runs. Two list
+procedures that had no bound now page at two hundred like their neighbours,
+and a renamed or transferred repository keeps its history instead of forking
+it into an orphan row.
+
+**`af env prune` removed nine environments on a bare command**, with help
+text that promised it would print what it would do first. It prints the plan
+and removes nothing without `--yes`, and `af env reap` and `af golden gc`,
+which had the same shape, do too.
+
+**The migration rehearsal could not see this repository's own migrations.**
+It recognised a fixed set of migration tools, and a project that applies
+numbered SQL with its own runner got "no migration tool was recognised" and a
+verdict that said nothing. `database.migrations` declares the directory, the
+format and the ledger table, a numbered SQL directory is recognised without
+one, and every Postgres the local provider starts now preloads the statistics
+module so the timings are real.
+
+**The twin could not receive the webhooks a launch depends on.** The engine
+derives a signing secret per environment and the application reads a
+differently named variable, so nothing could be delivered and no billing or
+installation ordering was ever rehearsed. The derived secrets now resolve
+through the manifest, and the simulator learned the installation event, the
+event header, distinct delivery ids and a pinned event id, so a retry can be
+rehearsed on purpose.
+
+**The home page failed contrast fifty six times**, and the header said Docs
+twice. The grey that carried most of it was retuned once, in the token, and
+the pages that hand-picked their own greys now use it.
+
+<!-- relnotes:omit -->
+Also: the footer asked every visitor to request access, on all forty nine
+pages, months after the invitation wall came down, and the render boundary
+added in v1.3.3 promised a reference it showed only when the error carried
+one.
+<!-- relnotes:end -->
+
 ## v1.3.3
 
 The launch morning release. A readiness team of twenty two evaluators, half
