@@ -40,8 +40,9 @@ Three things to try, in order:
 1. **`af env list`**, then **`af down`** on the ones nobody is looking at. A
    pull request that merged last week usually still has an environment. This is
    almost always the answer.
-2. **`af env prune --older-than 24h`** to do that in bulk. It prints what it
-   would remove before removing it, and refuses to run without a cutoff.
+2. **`af env prune`** to do that in bulk. Run bare it lists everything on the
+   machine older than a day and removes nothing; `af env prune --yes` removes
+   exactly what it listed.
 3. **`af golden gc`** if the goldens have accumulated. Every refresh publishes
    a new version and the old ones stay until something collects them. A version
    an environment came from is refused rather than collected, so this cannot

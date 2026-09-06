@@ -42,8 +42,8 @@ because the conformance suite has a behaviour that requires it.
 
 ```sh
 af env list                        # what exists, read from the daemon
-af env prune --older-than 0        # remove all of it
-af env prune --older-than 24h --dry-run   # or see what would go first
+af env prune --older-than 0s       # list all of it; nothing is removed
+af env prune --older-than 0s --yes # remove exactly what that listed
 ```
 
 The check that matters compares what the provider holds against what the
@@ -70,14 +70,14 @@ took it, so a stale one is recognisable.
 AF-RUN-011 The local state database at ~/.antifailure/state.db is corrupt.
   Next: A backup was written to ~/.antifailure/state.db.bak. The database was
   rebuilt, so it now tracks nothing: run 'af env list' to see what is still
-  running and 'af env prune --older-than 0' to remove all of it.
+  running and 'af env prune --older-than 0s --yes' to remove all of it.
 ```
 
 The old file is kept rather than deleted, and the reconcile is the important
 half: a rebuilt journal knows about nothing, so anything still running is now
 untracked. `af env list` reads the daemon rather than the journal, which is what
-makes it the right tool here, and `af env prune --older-than 0` removes what it
-finds. That is the one situation where reading the provider matters more than
+makes it the right tool here, and `af env prune --older-than 0s` lists what it
+finds, and removes it with `--yes`. That is the one situation where reading the provider matters more than
 reading the record.
 
 ## Where it lives

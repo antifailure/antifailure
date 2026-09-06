@@ -33,12 +33,13 @@ with a two hour lifetime cannot remove somebody else's week long environment.
 ## Removing what has expired
 
 ```sh
-af env reap
-af env reap --dry-run
+af env reap        # lists what has expired; nothing is removed
+af env reap --yes  # removes exactly what that listed
 ```
 
-`af env reap` removes every environment on this machine that has passed its
-stated lifetime, and nothing else.
+`af env reap` finds every environment on this machine that has passed its
+stated lifetime, and nothing else. Run bare it lists them and stops; `--yes`
+removes them, and a scheduled job passes `--yes`.
 
 It is not `af env prune`, and the difference is who chose the cutoff. `af env
 prune --older-than 48h` takes a cutoff from you and applies it to everything on

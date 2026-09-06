@@ -214,9 +214,9 @@ Subcommands:
 
 - [`af env extend`](#af-env-extend) Keep an environment past its lifetime, up to its maximum.
 - [`af env list`](#af-env-list) List the environments this machine is holding.
-- [`af env prune`](#af-env-prune) Remove environments older than a cutoff.
+- [`af env prune`](#af-env-prune) List the environments older than a cutoff, and remove them with --yes.
 - [`af env pull`](#af-env-pull) Read an environment's record from the control plane.
-- [`af env reap`](#af-env-reap) Remove the environments whose lifetime has ended.
+- [`af env reap`](#af-env-reap) List the environments whose lifetime has ended, and remove them with --yes.
 
 ### `af env extend`
 
@@ -263,30 +263,44 @@ af env list -o json
 
 ### `af env prune`
 
-Remove environments older than a cutoff.
+List the environments older than a cutoff, and remove them with --yes.
 
 An environment nobody tore down holds a database branch, a network, and a
 container per service, and the machine that accumulates a dozen of them is a
 machine somebody reboots to fix.
 
-It refuses to remove anything without a cutoff, and prints what it would do
-before doing it, because removing somebody's environment while they are looking
-at it is the kind of help nobody wants.
+Run bare, it removes nothing. It lists every environment on this machine that
+is older than the cutoff, whichever repository created it, and stops with the
+command that would remove them. Removal needs --yes, and what --yes removes is
+exactly what the bare run listed. --dry-run means the same as running bare and
+is kept so that a script which passes it keeps working.
+
+The cutoff is --older-than, a day when not given, and the plan prints it, so
+the default is never something a reader has to remember. The scope is the
+whole machine on purpose: this is the command for a laptop that is full, and
+the daemon does not record which repository made what, so a cutoff from here
+reaches every project's environments. For a sweep that reads each
+environment's own lifetime instead, see af env reap.
 
 ```
 af env prune [flags]
 ```
 
 ```
-# Nothing is removed until you drop --dry-run.
-af env prune --dry-run
-af env prune --older-than 24h
+# Lists what is older than a day, on this machine, and removes nothing.
+af env prune
+# Removes exactly what that listed.
+af env prune --yes
+# Everything on this machine, whatever its age: look, then remove.
+af env prune --older-than 0s
+af env prune --older-than 0s --yes
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--dry-run` | `false` | Print what would be removed without removing it. |
-| `--older-than` | `24h0m0s` | Only remove environments older than this. |
+| `--dry-run` | `false` | List what would be removed and stop, which is also what running bare does. |
+| `--older-than` | `24h0m0s` | Only consider environments older than this. |
+| `--yes` | `false` | Remove what the plan lists. Without it nothing is removed. |
 
 ### `af env pull`
 
@@ -318,10 +332,12 @@ af env pull af-orders-feature-checkout-05ca6c
 
 ### `af env reap`
 
-Remove the environments whose lifetime has ended.
+List the environments whose lifetime has ended, and remove them with --yes.
 
-Removes every environment on this machine that has passed the lifetime it was
-created with, and nothing else.
+Finds every environment on this machine that has passed the lifetime it was
+created with, and nothing else. Run bare, it lists them and removes nothing;
+--yes removes them, and a scheduled job passes --yes. --dry-run means the same
+as running bare.
 
 The lifetime is read off each environment's own resources, stamped there when
 it was created from that repository's runtime.ttl. It is never taken from the
@@ -342,15 +358,16 @@ af env reap [flags]
 ```
 
 ```
-# Only environments past the lifetime they were created with, and
-# nothing is removed until you drop --dry-run.
-af env reap --dry-run
+# Only environments past the lifetime they were created with. The
+# bare run lists them and removes nothing; a scheduled job passes --yes.
 af env reap
+af env reap --yes
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--dry-run` | `false` | Print what would be removed without removing it. |
+| `--dry-run` | `false` | List what would be removed and stop, which is also what running bare does. |
+| `--yes` | `false` | Remove what the plan lists. Without it nothing is removed. |
 
 ### `af explain`
 
@@ -521,7 +538,7 @@ af golden list
 
 Subcommands:
 
-- [`af golden gc`](#af-golden-gc) Remove old goldens, keeping the newest.
+- [`af golden gc`](#af-golden-gc) List the goldens past the retention count, and remove them with --yes.
 - [`af golden list`](#af-golden-list) List the goldens that exist.
 - [`af golden pull`](#af-golden-pull) Bring a published golden onto this machine.
 - [`af golden refresh`](#af-golden-refresh) Copy production, mask it, verify it, and publish it.
@@ -529,11 +546,16 @@ Subcommands:
 
 ### `af golden gc`
 
-Remove old goldens, keeping the newest.
+List the goldens past the retention count, and remove them with --yes.
 
 How many to keep comes from database.golden.retain in the manifest, so that
 every machine and every runner collects the same way. --keep overrides it for
 one run.
+
+Run bare, it lists which versions it would remove and which it would keep, and
+removes nothing. --yes removes what the bare run listed. A golden is shared by
+every branch of this project on the machine, so the list is worth a look
+before it goes.
 
 Two versions are never removed. One is any version an environment is still
 branched from: taking away the copy something is running on breaks the
@@ -547,14 +569,17 @@ af golden gc [flags]
 ```
 
 ```
+# Lists which versions would go and which stay, and removes nothing.
 af golden gc
-af golden gc --keep 3
+af golden gc --yes
+af golden gc --keep 3 --yes
 ```
 
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch context to use, defaulting to the checked out one. |
 | `--keep` | `0` | How many of the newest goldens to keep, overriding database.golden.retain. |
+| `--yes` | `false` | Remove what the plan lists. Without it nothing is removed. |
 
 ### `af golden list`
 

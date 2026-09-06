@@ -77,8 +77,8 @@ environment on.
 ```
 
 Usually environments that were never torn down. `af env list` shows them and
-`af env prune --older-than 24h` removes the old ones after printing what it
-would do.
+`af env prune` lists the ones older than a day and removes nothing, and
+`af env prune --yes` removes what it listed.
 
 Databases are published from 43000 and services from 46000. `af doctor` probes
 twenty ports of each range and says how many are free. `AF_PORT_RANGE_START`

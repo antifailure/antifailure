@@ -269,7 +269,7 @@ errors:
     planned: true
     area: DB
     message: "The storage pool has {available} free and the operation needs {needed}."
-    next_step: "Run 'af golden gc' to reclaim unreferenced versions, or grow the pool."
+    next_step: "Run 'af golden gc' to see which versions nothing references, then 'af golden gc --yes' to reclaim them, or grow the pool."
     docs: concepts/goldens
     retryable: false
     exit_code: 5
@@ -590,7 +590,7 @@ errors:
     planned: true
     area: RUN
     message: "The local state database at {path} is corrupt."
-    next_step: "A backup was written to {backup}. The database was rebuilt, so it now tracks nothing: run 'af env list' to see what is still running and 'af env prune --older-than 0' to remove all of it."
+    next_step: "A backup was written to {backup}. The database was rebuilt, so it now tracks nothing: run 'af env list' to see what is still running and 'af env prune --older-than 0s --yes' to remove all of it."
     docs: concepts/journal
     retryable: false
     exit_code: 1

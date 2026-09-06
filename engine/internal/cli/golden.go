@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -256,16 +257,51 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 	return cmd
 }
 
+// GoldenGCJSON is one af golden gc, plan or removal.
+//
+// would_remove is filled by a bare run and removed by a run with --yes; the
+// two are never both filled, and dry_run says which happened.
+type GoldenGCJSON struct {
+	Keep     int    `json:"keep"`
+	KeepFrom string `json:"keep_from"`
+	DryRun   bool   `json:"dry_run"`
+	// WouldRemove names the versions a bare run would take.
+	WouldRemove []string `json:"would_remove"`
+	// Removed counts versions that went; Kept counts the ones the sweep chose
+	// to keep, whichever mode. Refused names versions the provider would not
+	// release, with its reason.
+	Removed       int      `json:"removed"`
+	Kept          int      `json:"kept"`
+	Refused       []string `json:"refused"`
+	OtherProjects int      `json:"other_projects"`
+	Proceed       string   `json:"proceed,omitempty"`
+}
+
+// goldenSweep is what af golden gc decided, before anything is destroyed.
+type goldenSweep struct {
+	decisions []golden.Decision
+	keep      int
+	source    string
+	// skipped counts other projects' versions, left alone.
+	skipped int
+}
+
 func newGoldenGCCommand(env *Env) *cobra.Command {
 	var branch string
 	var keep int
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "gc",
-		Short: "Remove old goldens, keeping the newest",
+		Short: "List the goldens past the retention count, and remove them with --yes",
 		Long: strings.TrimSpace(`
 How many to keep comes from database.golden.retain in the manifest, so that
 every machine and every runner collects the same way. --keep overrides it for
 one run.
+
+Run bare, it lists which versions it would remove and which it would keep, and
+removes nothing. --yes removes what the bare run listed. A golden is shared by
+every branch of this project on the machine, so the list is worth a look
+before it goes.
 
 Two versions are never removed. One is any version an environment is still
 branched from: taking away the copy something is running on breaks the
@@ -316,57 +352,92 @@ bring an environment up at all, which is worse than the disk it saved.`),
 					ID: g.ID, CreatedAt: g.CreatedAt, Verified: g.Verified,
 				})
 			}
-			decisions := golden.Sweep(versions, effective)
-
-			removed, kept := 0, 0
-			var refused []string
-			for _, d := range decisions {
-				if !d.Remove {
-					kept++
-					continue
-				}
-				if err := o.DestroyGolden(cmd.Context(), d.Version.ID); err != nil {
-					// Almost always AF-DB-005: something is still branched from
-					// it. Reported with the version so somebody can run af down
-					// on the environment holding it.
-					refused = append(refused, d.Version.ID+": "+err.Error())
-					continue
-				}
-				removed++
-			}
-
-			if env.Out.Format == FormatJSON {
-				return env.Out.JSON(map[string]any{
-					"removed": removed, "kept": kept, "keep": effective,
-					"keep_from": source, "refused": refused,
-					"other_projects": skipped,
-				})
-			}
-			env.Out.Printf("Removed %d, kept %d, keeping %d from %s.\n",
-				removed, kept, effective, source)
-			if skipped > 0 {
-				env.Out.Printf("  %d belong to other projects on this machine and were left alone.\n",
-					skipped)
-			}
-			for _, d := range decisions {
-				if !d.Remove {
-					env.Out.Printf("  %s %s: %s\n",
-						env.Out.S(StyleGood, SymbolOK), d.Version.ID, d.Reason)
-				}
-			}
-			for _, r := range refused {
-				env.Out.Printf("  %s %s\n", env.Out.S(StyleWarn, SymbolWarn), r)
-			}
-			if len(refused) > 0 {
-				return aferrors.Coded(aferrors.AFRUN030, "count", fmt.Sprint(len(refused)))
-			}
-			return nil
+			return runGoldenGC(cmd.Context(), env, goldenSweep{
+				decisions: golden.Sweep(versions, effective),
+				keep:      effective, source: source, skipped: skipped,
+			}, o.DestroyGolden, yes)
 		},
 	}
 	cmd.Flags().IntVar(&keep, "keep", 0,
 		"How many of the newest goldens to keep, overriding database.golden.retain")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch context to use, defaulting to the checked out one")
+	cmd.Flags().BoolVar(&yes, "yes", false,
+		"Remove what the plan lists. Without it nothing is removed")
 	return cmd
+}
+
+// runGoldenGC prints the sweep's decisions, and destroys only with --yes.
+//
+// The decisions are made once, before this is called, so the versions --yes
+// removes are the ones a bare run listed.
+func runGoldenGC(
+	ctx context.Context, env *Env, sweep goldenSweep,
+	destroy func(context.Context, string) error, remove bool,
+) error {
+	doc := GoldenGCJSON{
+		Keep: sweep.keep, KeepFrom: sweep.source, DryRun: !remove,
+		WouldRemove: []string{}, Refused: []string{}, OtherProjects: sweep.skipped,
+	}
+	for _, d := range sweep.decisions {
+		if !d.Remove {
+			doc.Kept++
+			continue
+		}
+		if !remove {
+			doc.WouldRemove = append(doc.WouldRemove, d.Version.ID)
+			continue
+		}
+		if err := destroy(ctx, d.Version.ID); err != nil {
+			// Almost always AF-DB-005: something is still branched from
+			// it. Reported with the version so somebody can run af down
+			// on the environment holding it.
+			doc.Refused = append(doc.Refused, d.Version.ID+": "+err.Error())
+			continue
+		}
+		doc.Removed++
+	}
+	const proceed = "af golden gc --yes"
+	if !remove && len(doc.WouldRemove) > 0 {
+		doc.Proceed = proceed
+	}
+
+	if env.Out.Format == FormatJSON {
+		if err := env.Out.JSON(doc); err != nil {
+			return err
+		}
+	} else if remove {
+		env.Out.Printf("Removed %d, kept %d, keeping %d from %s.\n",
+			doc.Removed, doc.Kept, sweep.keep, sweep.source)
+	} else {
+		env.Out.Printf("Would remove %d, keeping %d from %s. Nothing has been removed.\n",
+			len(doc.WouldRemove), sweep.keep, sweep.source)
+	}
+	if env.Out.Format != FormatJSON {
+		if sweep.skipped > 0 {
+			env.Out.Printf("  %d belong to other projects on this machine and were left alone.\n",
+				sweep.skipped)
+		}
+		for _, d := range sweep.decisions {
+			switch {
+			case !d.Remove:
+				env.Out.Printf("  %s %s: %s\n",
+					env.Out.S(StyleGood, SymbolOK), d.Version.ID, d.Reason)
+			case !remove:
+				env.Out.Printf("  would remove %s: %s\n", d.Version.ID, d.Reason)
+			}
+		}
+		for _, r := range doc.Refused {
+			env.Out.Printf("  %s %s\n", env.Out.S(StyleWarn, SymbolWarn), r)
+		}
+		if doc.Proceed != "" {
+			env.Out.Println("")
+			env.Out.Hint("Remove exactly these with", proceed)
+		}
+	}
+	if len(doc.Refused) > 0 {
+		return aferrors.Coded(aferrors.AFRUN030, "count", fmt.Sprint(len(doc.Refused)))
+	}
+	return nil
 }
 
 func newGoldenPullCommand(env *Env) *cobra.Command {

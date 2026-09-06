@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -49,13 +50,15 @@ type ReapSummaryJSON struct {
 // only shape that is safe to run unattended and on a machine holding more than
 // one project's environments.
 func newEnvReapCommand(e *Env) *cobra.Command {
-	var dryRun bool
+	var dryRun, yes bool
 	cmd := &cobra.Command{
 		Use:   "reap",
-		Short: "Remove the environments whose lifetime has ended",
+		Short: "List the environments whose lifetime has ended, and remove them with --yes",
 		Long: strings.TrimSpace(`
-Removes every environment on this machine that has passed the lifetime it was
-created with, and nothing else.
+Finds every environment on this machine that has passed the lifetime it was
+created with, and nothing else. Run bare, it lists them and removes nothing;
+--yes removes them, and a scheduled job passes --yes. --dry-run means the same
+as running bare.
 
 The lifetime is read off each environment's own resources, stamped there when
 it was created from that repository's runtime.ttl. It is never taken from the
@@ -76,16 +79,30 @@ An environment you are still using can be kept with 'af env extend'.`),
 			if err != nil {
 				return err
 			}
-			result, err := o.Reap(cmd.Context(), dryRun)
-			if err != nil {
-				return err
-			}
-			return reportReap(e, result, dryRun)
+			return runReap(cmd.Context(), e, o.Reap, pruneRemoves(dryRun, yes))
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
-		"Print what would be removed without removing it")
+		"List what would be removed and stop, which is also what running bare does")
+	cmd.Flags().BoolVar(&yes, "yes", false,
+		"Remove what the plan lists. Without it nothing is removed")
 	return cmd
+}
+
+// reapSweep is what the orchestrator does on a sweep, planning when dryRun is
+// set. A function type so that the stop before --yes can be tested against a
+// fake that records which it was asked for.
+type reapSweep func(ctx context.Context, dryRun bool) (*env.ReapResult, error)
+
+// runReap plans always and removes only when asked to. The plan is the
+// orchestrator's own dry run, which uses the same predicate as the real sweep,
+// so what a bare run lists is what --yes takes.
+func runReap(ctx context.Context, e *Env, sweep reapSweep, remove bool) error {
+	result, err := sweep(ctx, !remove)
+	if err != nil {
+		return err
+	}
+	return reportReap(e, result, !remove)
 }
 
 func reportReap(e *Env, result *env.ReapResult, dryRun bool) error {
@@ -131,7 +148,8 @@ func reportReap(e *Env, result *env.ReapResult, dryRun bool) error {
 	}
 
 	if len(docs) == 0 {
-		e.Out.Printf("Nothing has expired. %d environments on this machine.\n", result.Scanned)
+		e.Out.Printf("Nothing has expired. %d environments on this machine. Nothing was removed.\n",
+			result.Scanned)
 		return nil
 	}
 	rows := make([][]string, 0, len(docs))
@@ -150,8 +168,9 @@ func reportReap(e *Env, result *env.ReapResult, dryRun bool) error {
 	}, rows)
 	e.Out.Println("")
 	if dryRun {
-		e.Out.Printf("  %d environments would be removed. Run without --dry-run to do it.\n",
-			len(docs))
+		e.Out.Printf("  %s would be removed. Nothing has been removed.\n",
+			plural(len(docs), "environment", "environments"))
+		e.Out.Hint("Remove exactly these with", "af env reap --yes")
 		return nil
 	}
 	e.Out.Printf("  %d of %d environments removed, %d resources.\n",

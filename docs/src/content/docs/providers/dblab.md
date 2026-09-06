@@ -304,7 +304,8 @@ refused early with `AF-DB-006` rather than a clone that fails to start.
 ## Cleaning up after a killed run
 
 Environments and goldens are removed by `af down` and `af golden gc`, and
-`af env prune --older-than 24h` does the first in bulk.
+`af env prune --yes` does the first in bulk, after `af env prune` has listed
+what would go.
 
 Candidates are the one thing removed without being asked. A candidate exists
 for the minutes between cloning the base and committing it, and nothing ever

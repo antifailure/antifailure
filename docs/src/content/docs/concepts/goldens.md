@@ -31,7 +31,8 @@ two refreshes in the same second distinct.
 af golden list          # what exists, newest first
 af golden refresh       # build a new version from the source
 af golden verify <ver>  # rescan an existing one
-af golden gc            # remove versions nothing came from
+af golden gc            # list versions nothing came from; nothing is removed
+af golden gc --yes      # remove exactly what that listed
 af golden pull [ver]    # bring a published one onto this machine
 ```
 
@@ -234,7 +235,8 @@ what makes a golden small enough to move.
 
 ## Collection
 
-`af golden gc` removes versions nothing branched from. A version an environment
+`af golden gc` lists the versions nothing branched from and removes them with
+`--yes`. A version an environment
 came from is refused:
 
 ```
@@ -262,7 +264,8 @@ because a pin is a version that can never be collected.
 
 ```
 AF-DB-010 The storage pool has 1.2 GiB free and the operation needs 4.0 GiB.
-  Next: Run 'af golden gc' to reclaim unreferenced versions, or grow the pool.
+  Next: Run 'af golden gc' to see which versions nothing references, then
+        'af golden gc --yes' to reclaim them, or grow the pool.
 ```
 
 With the Docker provider each golden is an image and they accumulate. `retain`

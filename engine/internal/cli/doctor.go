@@ -374,8 +374,9 @@ const pruneCutoff = 24 * time.Hour
 // somebody to read past both.
 func checkLeftoverEnvironments(ctx context.Context, env *Env, _ Prober) CheckResult {
 	r := CheckResult{Name: "Leftover environments"}
-	r.Remediation = "Remove them with 'af env prune', which takes anything older than a day, " +
-		"or one at a time with 'af down --branch <branch>'. 'af env list' shows what is held."
+	r.Remediation = "'af env prune' lists anything older than a day and removes nothing; " +
+		"'af env prune --yes' removes what it listed. One at a time is 'af down --branch <branch>'. " +
+		"'af env list' shows what is held."
 
 	envs, err := listEnvironments(ctx, env)
 	if err != nil {

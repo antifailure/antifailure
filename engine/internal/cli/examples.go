@@ -59,14 +59,18 @@ var commandExamples = map[string]string{
 		"af env list\n" +
 		"af env list -o json",
 	"af env prune": "" +
-		"# Nothing is removed until you drop --dry-run.\n" +
-		"af env prune --dry-run\n" +
-		"af env prune --older-than 24h",
+		"# Lists what is older than a day, on this machine, and removes nothing.\n" +
+		"af env prune\n" +
+		"# Removes exactly what that listed.\n" +
+		"af env prune --yes\n" +
+		"# Everything on this machine, whatever its age: look, then remove.\n" +
+		"af env prune --older-than 0s\n" +
+		"af env prune --older-than 0s --yes",
 	"af env reap": "" +
-		"# Only environments past the lifetime they were created with, and\n" +
-		"# nothing is removed until you drop --dry-run.\n" +
-		"af env reap --dry-run\n" +
-		"af env reap",
+		"# Only environments past the lifetime they were created with. The\n" +
+		"# bare run lists them and removes nothing; a scheduled job passes --yes.\n" +
+		"af env reap\n" +
+		"af env reap --yes",
 	"af env extend": "" +
 		"# The ceiling is measured from when the environment was created, so\n" +
 		"# extending twice does not buy twice the time.\n" +
@@ -90,8 +94,10 @@ var commandExamples = map[string]string{
 		"af github init --force",
 	"af golden": "af golden list",
 	"af golden gc": "" +
+		"# Lists which versions would go and which stay, and removes nothing.\n" +
 		"af golden gc\n" +
-		"af golden gc --keep 3",
+		"af golden gc --yes\n" +
+		"af golden gc --keep 3 --yes",
 	"af golden list": "af golden list",
 	"af golden pull": "" +
 		"af golden pull\n" +

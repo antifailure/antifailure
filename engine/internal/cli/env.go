@@ -181,6 +181,14 @@ func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
 	if err != nil {
 		return nil, err
 	}
+	return groupEnvironments(items), nil
+}
+
+// groupEnvironments turns the daemon's flat inventory into environments.
+//
+// Pure, so that af env prune's plan can be driven by a test from a list of
+// resources rather than from a daemon holding real ones for a day.
+func groupEnvironments(items []provider.Resource) []environment {
 	byEnv := map[string]*environment{}
 	for _, item := range items {
 		id := item.EnvID
@@ -215,7 +223,7 @@ func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
 	// Oldest first, because the one worth removing is the one that has been
 	// there longest and the one somebody forgot.
 	sort.Slice(out, func(i, j int) bool { return out[i].Oldest.Before(out[j].Oldest) })
-	return out, nil
+	return out
 }
 
 func newEnvListCommand(e *Env) *cobra.Command {
@@ -258,87 +266,277 @@ func newEnvListCommand(e *Env) *cobra.Command {
 			}, rows)
 			e.Out.Println("")
 			e.Out.Hint("Remove one with", "af down --branch <branch>")
-			e.Out.Hint("Remove everything older than a day with", "af env prune")
+			e.Out.Hint("List what is older than a day, and how to remove it, with", "af env prune")
 			return nil
 		},
 	}
 }
 
+// PruneEnvJSON is one environment af env prune named, either as something it
+// would remove or as something it removed.
+type PruneEnvJSON struct {
+	EnvID     string   `json:"env_id"`
+	CreatedAt string   `json:"created_at"`
+	AgeHours  float64  `json:"age_hours"`
+	Resources int      `json:"resources"`
+	Running   int      `json:"running"`
+	Services  []string `json:"services"`
+	// Removed and Pending are filled only for an environment that was
+	// removed. Error is why one was not, or empty.
+	Removed int    `json:"removed,omitempty"`
+	Pending int    `json:"pending,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// PruneJSON is the whole of one af env prune.
+//
+// The plan and the removal are one document with two lists, so that a caller
+// cannot mistake one for the other: a bare run fills would_remove and leaves
+// removed empty, and a run with --yes does the reverse. dry_run says which.
+type PruneJSON struct {
+	// OlderThan is the cutoff, as the flag was given or defaulted.
+	OlderThan string `json:"older_than"`
+	// Scope is always "machine": the daemon does not know which repository
+	// made what, so the cutoff applies to every project's environments.
+	Scope       string         `json:"scope"`
+	DryRun      bool           `json:"dry_run"`
+	WouldRemove []PruneEnvJSON `json:"would_remove"`
+	Removed     []PruneEnvJSON `json:"removed"`
+	// ResourcesRemoved and Pending total across Removed.
+	ResourcesRemoved int `json:"resources_removed"`
+	Pending          int `json:"pending"`
+	// Proceed is the command that removes exactly what would_remove lists,
+	// present only when there is something to remove and nothing was.
+	Proceed string `json:"proceed,omitempty"`
+}
+
+// pruner is what af env prune reads and what it destroys through.
+//
+// An interface rather than the runtime itself, so that the decision, the plan
+// and the stop before --yes can be driven by a test without a daemon. The
+// failure that made this worth pinning: a bare `af env prune` in an empty
+// directory removed nine environments belonging to other sessions on a shared
+// machine, because the only gate was a default cutoff and the help text
+// promised a preview that did not exist.
+type pruner interface {
+	environments(ctx context.Context) ([]environment, error)
+	down(ctx context.Context, envID string) (provider.Teardown, error)
+	close() error
+}
+
+// runtimePruner is the real one, over the runtime that holds this machine's
+// environments.
+type runtimePruner struct{ rt provider.Runtime }
+
+func (p runtimePruner) environments(ctx context.Context) ([]environment, error) {
+	items, err := p.rt.Inventory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return groupEnvironments(items), nil
+}
+
+func (p runtimePruner) down(ctx context.Context, envID string) (provider.Teardown, error) {
+	return p.rt.Down(ctx, envID)
+}
+
+func (p runtimePruner) close() error { return p.rt.Close() }
+
+// pruneOptions is what the flags decided.
+type pruneOptions struct {
+	olderThan time.Duration
+	// remove is true only when --yes was given and --dry-run was not. Every
+	// other combination plans and stops.
+	remove bool
+}
+
 func newEnvPruneCommand(e *Env) *cobra.Command {
 	var olderThan time.Duration
-	var dryRun bool
+	var dryRun, yes bool
 	cmd := &cobra.Command{
 		Use:   "prune",
-		Short: "Remove environments older than a cutoff",
+		Short: "List the environments older than a cutoff, and remove them with --yes",
 		Long: strings.TrimSpace(`
 An environment nobody tore down holds a database branch, a network, and a
 container per service, and the machine that accumulates a dozen of them is a
 machine somebody reboots to fix.
 
-It refuses to remove anything without a cutoff, and prints what it would do
-before doing it, because removing somebody's environment while they are looking
-at it is the kind of help nobody wants.`),
+Run bare, it removes nothing. It lists every environment on this machine that
+is older than the cutoff, whichever repository created it, and stops with the
+command that would remove them. Removal needs --yes, and what --yes removes is
+exactly what the bare run listed. --dry-run means the same as running bare and
+is kept so that a script which passes it keeps working.
+
+The cutoff is --older-than, a day when not given, and the plan prints it, so
+the default is never something a reader has to remember. The scope is the
+whole machine on purpose: this is the command for a laptop that is full, and
+the daemon does not record which repository made what, so a cutoff from here
+reaches every project's environments. For a sweep that reads each
+environment's own lifetime instead, see af env reap.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			envs, err := listEnvironments(cmd.Context(), e)
-			if err != nil {
-				return err
-			}
-			var stale []environment
-			for _, env := range envs {
-				if e.Clock.Since(env.Oldest) > olderThan {
-					stale = append(stale, env)
-				}
-			}
-			if len(stale) == 0 {
-				e.Out.Printf("Nothing is older than %s.\n", humanAge(olderThan))
-				return nil
-			}
-
 			rt, err := inventoryRuntime(e)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = rt.Close() }()
-
-			removed, pending := 0, 0
-			for _, env := range stale {
-				if dryRun {
-					e.Out.Printf("  would remove %s (%s old, %d resources)\n",
-						env.ID, humanAge(e.Clock.Since(env.Oldest)), env.Resources)
-					continue
-				}
-				td, downErr := rt.Down(cmd.Context(), env.ID)
-				removed += td.Removed
-				pending += len(td.Pending)
-				if downErr != nil {
-					e.Out.Printf("  %s %s: %v\n", e.Out.S(StyleWarn, SymbolWarn), env.ID, downErr)
-					continue
-				}
-				e.Out.Printf("  removed %s (%d resources)\n", env.ID, td.Removed)
-			}
-
-			if e.Out.Format == FormatJSON {
-				return e.Out.JSON(map[string]any{
-					"environments": len(stale), "resources_removed": removed,
-					"pending": pending, "dry_run": dryRun,
-				})
-			}
-			if dryRun {
-				e.Out.Printf("\n  %d environments would be removed. Run without --dry-run to do it.\n",
-					len(stale))
-				return nil
-			}
-			e.Out.Printf("\n  %d environments removed, %d resources.\n", len(stale), removed)
-			if pending > 0 {
-				return aferrors.Coded(aferrors.AFRUN030, "count", fmt.Sprint(pending))
-			}
-			return nil
+			return runPrune(cmd.Context(), e, pruneOptions{
+				olderThan: olderThan, remove: pruneRemoves(dryRun, yes),
+			}, runtimePruner{rt: rt})
 		},
 	}
-	cmd.Flags().DurationVar(&olderThan, "older-than", 24*time.Hour, "Only remove environments older than this")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without removing it")
+	cmd.Flags().DurationVar(&olderThan, "older-than", pruneCutoff,
+		"Only consider environments older than this")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
+		"List what would be removed and stop, which is also what running bare does")
+	cmd.Flags().BoolVar(&yes, "yes", false,
+		"Remove what the plan lists. Without it nothing is removed")
 	return cmd
+}
+
+// pruneRemoves is the one decision the flags make. --dry-run beats --yes,
+// because somebody who typed both is asking to look.
+func pruneRemoves(dryRun, yes bool) bool { return yes && !dryRun }
+
+// runPrune plans, prints the plan, and removes only when asked to.
+//
+// The plan is computed once and the removal walks that same list, so the
+// environments --yes removes are the ones a bare run printed, not a second
+// reading that could differ.
+func runPrune(ctx context.Context, e *Env, opts pruneOptions, p pruner) error {
+	defer func() { _ = p.close() }()
+
+	envs, err := p.environments(ctx)
+	if err != nil {
+		return err
+	}
+	var stale []environment
+	for _, env := range envs {
+		if e.Clock.Since(env.Oldest) > opts.olderThan {
+			stale = append(stale, env)
+		}
+	}
+	cutoff := pruneCutoffLabel(opts.olderThan)
+	proceed := fmt.Sprintf("af env prune --older-than %s --yes", cutoff)
+
+	doc := PruneJSON{
+		OlderThan: cutoff, Scope: "machine", DryRun: !opts.remove,
+		WouldRemove: []PruneEnvJSON{}, Removed: []PruneEnvJSON{},
+	}
+	for _, env := range stale {
+		doc.WouldRemove = append(doc.WouldRemove, pruneEnvJSON(e, env))
+	}
+
+	if !opts.remove {
+		if len(stale) > 0 {
+			doc.Proceed = proceed
+		}
+		if e.Out.Format == FormatJSON {
+			return e.Out.JSON(doc)
+		}
+		if len(stale) == 0 {
+			e.Out.Printf("Nothing on this machine is older than %s. Nothing was removed.\n", cutoff)
+			return nil
+		}
+		e.Out.Printf("Older than %s on this machine, from every repository that has built here:\n\n", cutoff)
+		printPrunePlan(e, stale)
+		e.Out.Println("")
+		e.Out.Printf("  %s would be removed, %d resources. Nothing has been removed.\n",
+			plural(len(stale), "environment", "environments"), countResources(stale))
+		e.Out.Hint("Remove exactly these with", proceed)
+		return nil
+	}
+
+	if len(stale) == 0 {
+		if e.Out.Format == FormatJSON {
+			return e.Out.JSON(doc)
+		}
+		e.Out.Printf("Nothing on this machine is older than %s. Nothing was removed.\n", cutoff)
+		return nil
+	}
+
+	pending := 0
+	for _, env := range stale {
+		td, downErr := p.down(ctx, env.ID)
+		item := pruneEnvJSON(e, env)
+		item.Removed, item.Pending = td.Removed, len(td.Pending)
+		doc.ResourcesRemoved += td.Removed
+		pending += len(td.Pending)
+		if downErr != nil {
+			item.Error = downErr.Error()
+			e.Out.Printf("  %s %s: %v\n", e.Out.S(StyleWarn, SymbolWarn), env.ID, downErr)
+		} else {
+			e.Out.Printf("  removed %s (%d resources)\n", env.ID, td.Removed)
+		}
+		doc.Removed = append(doc.Removed, item)
+	}
+	doc.Pending = pending
+	// The plan list is what was acted on, and the acted list now carries it,
+	// so the document says the same thing once.
+	doc.WouldRemove = []PruneEnvJSON{}
+
+	if e.Out.Format == FormatJSON {
+		if err := e.Out.JSON(doc); err != nil {
+			return err
+		}
+	} else {
+		e.Out.Printf("\n  %s removed, %d resources.\n",
+			plural(len(stale), "environment", "environments"), doc.ResourcesRemoved)
+	}
+	if pending > 0 {
+		return aferrors.Coded(aferrors.AFRUN030, "count", fmt.Sprint(pending))
+	}
+	return nil
+}
+
+// printPrunePlan is the table a bare run shows. It is the same shape as
+// af env list, because that is the table a reader has already learned.
+func printPrunePlan(e *Env, envs []environment) {
+	rows := make([][]string, 0, len(envs))
+	for _, env := range envs {
+		rows = append(rows, []string{
+			env.ID, fmt.Sprint(env.Resources), fmt.Sprint(env.Running),
+			humanAge(e.Clock.Since(env.Oldest)), strings.Join(env.Services, ", "),
+		})
+	}
+	e.Out.Table([]Column{
+		Col("ENVIRONMENT"), Num("RESOURCES"), Num("RUNNING"), Num("AGE"), Flex("SERVICES"),
+	}, rows)
+}
+
+func pruneEnvJSON(e *Env, env environment) PruneEnvJSON {
+	services := env.Services
+	if services == nil {
+		services = []string{}
+	}
+	return PruneEnvJSON{
+		EnvID: env.ID, CreatedAt: env.Oldest.UTC().Format(time.RFC3339),
+		AgeHours: e.Clock.Since(env.Oldest).Hours(), Resources: env.Resources,
+		Running: env.Running, Services: services,
+	}
+}
+
+func countResources(envs []environment) int {
+	n := 0
+	for _, env := range envs {
+		n += env.Resources
+	}
+	return n
+}
+
+// pruneCutoffLabel writes a duration the way it can be passed back to
+// --older-than, and the way somebody would say it: 24h rather than 24h0m0s,
+// and 0s rather than "just now".
+func pruneCutoffLabel(d time.Duration) string {
+	switch {
+	case d == 0:
+		return "0s"
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d%time.Minute == 0:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return d.String()
+	}
 }
 
 // humanAge reads the way somebody would say it.
