@@ -196,9 +196,13 @@ function FirstRun() {
           <CommandBlock command="af up" said="af up copied to the clipboard" />
           <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
             Builds and starts a copy of your app with its own database and
-            network policy. If you use production data, review the masking
-            rules first: masking replaces sensitive values in the copy before
-            tests use it. The source database is read, not rewritten.
+            network policy. If the manifest names a production database, set
+            that variable and run{" "}
+            <code className="font-mono">af golden refresh</code> once first:
+            it makes the masked copy every branch is made from, and masking
+            replaces sensitive values before tests use it. The source database
+            is read, not rewritten. With no source, or once a golden exists,
+            this is the next command.
           </p>
           <LinkButton href="https://antifailure.dev/docs/concepts/masking" variant="secondary">
             Understand masking

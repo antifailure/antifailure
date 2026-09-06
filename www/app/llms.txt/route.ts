@@ -75,15 +75,24 @@ export function GET() {
   );
   lines.push("");
 
-  lines.push("## The whole thing in four commands");
+  lines.push("## The whole thing in four commands, five with a production database");
   lines.push("");
   lines.push("```bash");
   lines.push("curl -fsSL https://antifailure.dev/install.sh | sh");
-  lines.push("af init          # reads your repo, writes antifailure.yaml");
-  lines.push("af up            # masked database branch, built services, sealed network");
-  lines.push("af test          # agents run your workflows and return verdicts with evidence");
-  lines.push("af down          # every resource it created, gone");
+  lines.push("af init            # reads your repo, writes antifailure.yaml");
+  lines.push("af golden refresh  # only if the manifest names a production database: set");
+  lines.push("                   # that variable first, and this makes the masked copy once");
+  lines.push("af up              # database branch from the golden, built services, sealed network");
+  lines.push("af test            # agents run your workflows and return verdicts with evidence");
+  lines.push("af down            # every resource it created, gone");
   lines.push("```");
+  lines.push("");
+  lines.push(
+    "af init writes database.source_url_env only when the repository already names its",
+    "production variable. With no source, or once a verified golden for the project exists",
+    "on the machine, af up is the next command. af start reports every step as observed on",
+    "the machine and names the next one.",
+  );
   lines.push("");
   lines.push(
     "The installer puts af under ~/.antifailure and puts that on your PATH by appending",

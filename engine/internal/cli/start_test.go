@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // af start is a status command, so the thing worth testing is not that it
@@ -103,8 +106,56 @@ func startProbeFor(t *testing.T, home string) startProbe {
 		},
 		environments: func(context.Context, *Env) ([]environment, error) { return nil, nil },
 		home:         func() (string, error) { return home, nil },
+		// A daemon that answers and holds no goldens, so the rung is answered
+		// rather than declined. The tests about the pool hand this their own
+		// images.
+		goldens: func(context.Context, *Env, *schema.Manifest) ([]provider.GoldenVersion, error) {
+			return nil, nil
+		},
 	}
 }
+
+// goldensOf makes the probe list exactly these images.
+func goldensOf(p startProbe, goldens ...provider.GoldenVersion) startProbe {
+	p.goldens = func(context.Context, *Env, *schema.Manifest) ([]provider.GoldenVersion, error) {
+		return goldens, nil
+	}
+	return p
+}
+
+// identityOf is what a golden has to record for this directory's manifest to
+// branch it, computed by the code af up uses, so a test that wants a golden to
+// count as this project's does not paraphrase the rule it is testing.
+func identityOf(t *testing.T, dir string) string {
+	t.Helper()
+	e, _ := startEnv(t, dir)
+	m, root, st := manifestState(e)
+	if m == nil {
+		t.Fatalf("no manifest to compute an identity from: %s", st.detail)
+	}
+	o, err := env.New(env.Options{Root: root, Manifest: m, Clock: e.Clock, Getenv: e.Getenv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := o.GoldenIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// dockerWithSource is the manifest that produced the failure: a Docker
+// database copied from a variable that this shell does not hold, with masking
+// rules on disk, on a machine that already has a verified golden for it.
+const dockerWithSource = `
+database:
+  provider: docker
+  version: 17
+  source_url_env: AF_START_TEST_SOURCE_URL
+  masking_rules: masking.yaml
+`
+
+var madeYesterday = time.Date(2026, 9, 5, 23, 37, 4, 0, time.UTC)
 
 // startEnv is a working directory with nothing else in it, plus a fixed clock,
 // so the leftover check reasons about a time this test chose.
@@ -293,34 +344,226 @@ func TestAManifestWithWorkflowsCountsThem(t *testing.T) {
 	}
 }
 
-// The golden rung is the one this command refuses to answer, and the refusal is
-// the feature. Listing goldens goes through Orchestrator.open, which creates
-// .antifailure, takes this branch's lock and migrates the state database, so a
-// status command that asked would be unusable while af up was running. It must
-// never claim a golden exists, and it must always say what to run instead.
-func TestTheGoldenRungNeverClaimsAGoldenExists(t *testing.T) {
+// The golden rung answers for Docker, and it answers with af up's own rule.
+//
+// It used to decline, because Orchestrator.Goldens goes through open and takes
+// this branch's lock. The Docker provider's listing is an ImageList and never
+// needed the lock, so a machine holding five verified goldens for the project
+// was told "whether a golden exists was not checked" and sent to set a secret.
+// Answering brings the other risk back: a rung that says "a golden" over an
+// image af up would refuse. So the two refusals af up makes are asserted here,
+// one image each: made for another project, and never verified.
+func TestTheGoldenRungNeverClaimsAnotherProjectsOrAnUnverifiedGolden(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+dockerWithSource)
+	write(t, dir, "masking.yaml", "version: 1\nrules: []\n")
+	mine := identityOf(t, dir)
+	e, _ := startEnv(t, dir)
+	probe := goldensOf(startProbeFor(t, t.TempDir()),
+		provider.GoldenVersion{ID: "gv_20260906000000_other000", Verified: true,
+			Provenance: mine + "-not", CreatedAt: madeYesterday},
+		provider.GoldenVersion{ID: "gv_20260906000001_unverif0", Verified: false,
+			Provenance: mine, CreatedAt: madeYesterday},
+	)
+	stages := firstRun(t.Context(), e, probe)
+
+	g := stageNamed(t, stages, "a golden")
+	if g.state == StageDone {
+		t.Fatalf("the golden rung is done over another project's golden and an unverified one: %s", g.detail)
+	}
+	if g.state != StagePending {
+		t.Errorf("the golden rung is %q, want pending: %s", g.state, g.detail)
+	}
+	if g.command != "af golden refresh" {
+		t.Errorf("the golden rung offers %q, want af golden refresh", g.command)
+	}
+	if !strings.Contains(g.detail, "1 belongs to other projects") {
+		t.Errorf("the detail %q does not count the golden made for something else", g.detail)
+	}
+	if !strings.Contains(g.detail, "1 is unverified") {
+		t.Errorf("the detail %q does not count the unverified golden", g.detail)
+	}
+	// And with no usable golden, an unset source is still a blocker, because
+	// af up would refuse with nothing to branch.
+	src := stageNamed(t, stages, "the database source")
+	if src.state != StageBlocked {
+		t.Errorf("with no usable golden the unset source is %q, want blocked: %s", src.state, src.detail)
+	}
+	if next, _ := nextStep(stages); next == nil || next.command != "af secret set AF_START_TEST_SOURCE_URL" {
+		t.Errorf("the next step is %v, want the secret", next)
+	}
+}
+
+// The failure itself. A verified golden made for this project exists, the
+// variable naming production is unset, and af up would run: it branches the
+// golden that is there and skips the scheduled refresh while the source holds
+// nothing. So the golden rung is done and names the golden, the source rung is
+// a warning about the next refresh rather than a blocker, and Next is af up.
+func TestAVerifiedGoldenForThisProjectMakesAnUnsetSourceAWarningAndNextIsAfUp(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+dockerWithSource+`  golden:
+    schedule: "0 3 * * *"
+`)
+	write(t, dir, "masking.yaml", "version: 1\nrules: []\n")
+	mine := identityOf(t, dir)
+	e, out := startEnv(t, dir)
+	probe := goldensOf(startProbeFor(t, t.TempDir()),
+		provider.GoldenVersion{ID: "gv_20260906043704_d1c46d45", Verified: true,
+			Provenance: mine, CreatedAt: madeYesterday})
+	stages := firstRun(t.Context(), e, probe)
+
+	g := stageNamed(t, stages, "a golden")
+	if g.state != StageDone {
+		t.Fatalf("a verified golden for this project leaves the rung %q, want done: %s", g.state, g.detail)
+	}
+	if !strings.Contains(g.detail, "gv_20260906043704_d1c46d45") {
+		t.Errorf("the detail %q does not name the golden", g.detail)
+	}
+	if !strings.Contains(g.detail, "made for this project") {
+		t.Errorf("the detail %q does not say whose golden it is", g.detail)
+	}
+	if !strings.Contains(g.detail, madeYesterday.Local().Format("2006-01-02 15:04")) {
+		t.Errorf("the detail %q does not say when it was made", g.detail)
+	}
+	if !strings.Contains(g.detail, "masking.yaml") {
+		t.Errorf("the detail %q does not say which rules a branch is masked by", g.detail)
+	}
+
+	src := stageNamed(t, stages, "the database source")
+	if src.state != StageWarn {
+		t.Fatalf("an unset source beside a usable golden is %q, want a warning: %s", src.state, src.detail)
+	}
+	if !strings.Contains(src.detail, "next refresh needs it") {
+		t.Errorf("the detail %q does not say what the source is now for", src.detail)
+	}
+	if !strings.Contains(src.detail, "0 3 * * *") {
+		t.Errorf("the detail %q does not mention the refresh schedule the manifest sets", src.detail)
+	}
+	if src.command != "af secret set AF_START_TEST_SOURCE_URL" {
+		t.Errorf("the warning offers %q, want the command that clears it", src.command)
+	}
+
+	next, blocked := nextStep(stages)
+	if blocked {
+		t.Error("a machine that can run af up is reported as blocked")
+	}
+	if next == nil || next.command != "af up" {
+		t.Errorf("the next step is %v, want af up", next)
+	}
+	if err := renderStart(e, stages); err != nil {
+		t.Errorf("a warning made af start exit non zero: %v", err)
+	}
+	body := collapse(out.String())
+	if !strings.Contains(body, "af secret set AF_START_TEST_SOURCE_URL") {
+		t.Errorf("the text form does not print the command that clears the warning:\n%s", out.String())
+	}
+}
+
+// With the source set, the same machine reports the source as done, and the
+// value is never printed.
+func TestASetSourceIsDoneAndNeverPrinted(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+dockerWithSource)
+	write(t, dir, "masking.yaml", "version: 1\nrules: []\n")
+	const value = "postgres://reader:notarealpassword@prod.example.test/app"
+	e, out := startEnv(t, dir)
+	e.Getenv = func(k string) string {
+		if k == "AF_START_TEST_SOURCE_URL" {
+			return value
+		}
+		return ""
+	}
+	stages := firstRun(t.Context(), e, startProbeFor(t, t.TempDir()))
+	_ = renderStart(e, stages)
+	src := stageNamed(t, stages, "the database source")
+	if src.state != StageDone {
+		t.Errorf("a set source is %q, want done: %s", src.state, src.detail)
+	}
+	if strings.Contains(out.String(), "notarealpassword") {
+		t.Fatal("af start printed the source connection string")
+	}
+}
+
+// No source named and no golden: af up makes the first golden itself, so the
+// rung must not send the reader to a refresh the run would do for them.
+func TestNoSourceAndNoGoldenPointsAtAfUp(t *testing.T) {
 	dir := t.TempDir()
 	writeManifest(t, dir, startManifest+`
 database:
   provider: docker
   version: 17
-  masking_rules: masking.yaml
 `)
-	write(t, dir, "masking.yaml", "version: 1\nrules: []\n")
 	e, _ := startEnv(t, dir)
+	stages := firstRun(t.Context(), e, startProbeFor(t, t.TempDir()))
+	g := stageNamed(t, stages, "a golden")
+	if g.state != StagePending {
+		t.Fatalf("no golden is %q, want pending: %s", g.state, g.detail)
+	}
+	if g.command != "af up" {
+		t.Errorf("with no source the golden rung offers %q, want af up", g.command)
+	}
+	if next, blocked := nextStep(stages); blocked || next == nil || next.command != "af up" {
+		t.Errorf("the next step is %v (blocked %v), want af up", next, blocked)
+	}
+}
 
+// A hosted provider's listing needs credentials and the lock, so that rung is
+// still declined, still says why, and still names the command that answers.
+func TestAHostedProviderGoldenRungIsDeclinedWithItsReason(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+`
+database:
+  provider: neon
+  project: proj-1234
+  version: 17
+`)
+	e, _ := startEnv(t, dir)
 	g := stageNamed(t, firstRun(t.Context(), e, startProbeFor(t, t.TempDir())), "a golden")
 	if g.state != StageUnchecked {
-		t.Errorf("the golden rung is %q, want unchecked; nothing here can know whether one exists", g.state)
-	}
-	if g.command != "af golden list" {
-		t.Errorf("the golden rung offers %q, want af golden list", g.command)
+		t.Errorf("the neon golden rung is %q, want unchecked: %s", g.state, g.detail)
 	}
 	if !strings.Contains(g.why, "lock") {
 		t.Errorf("the reason %q does not say why this command will not ask", g.why)
 	}
+	if g.command != "af golden list" {
+		t.Errorf("the golden rung offers %q, want af golden list", g.command)
+	}
 	if g.downstream {
 		t.Error("the golden rung is marked as waiting on something, but it was declined on purpose")
+	}
+}
+
+// A daemon that does not answer is reported as not checked, never as no
+// golden, because "none" would send somebody to a refresh against a daemon
+// that is down.
+func TestADaemonThatDoesNotListIsNotChecked(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+dockerWithSource)
+	e, _ := startEnv(t, dir)
+	probe := startProbeFor(t, t.TempDir())
+	probe.goldens = func(context.Context, *Env, *schema.Manifest) ([]provider.GoldenVersion, error) {
+		return nil, errors.New("dial unix /var/run/docker.sock: connect: no such file")
+	}
+	g := stageNamed(t, firstRun(t.Context(), e, probe), "a golden")
+	if g.state != StageUnchecked {
+		t.Errorf("a daemon that did not list is %q, want unchecked: %s", g.state, g.detail)
+	}
+	if !strings.Contains(g.why, "docker.sock") {
+		t.Errorf("the reason %q does not carry the daemon's error", g.why)
+	}
+}
+
+func TestAWarningIsNeverTheNextStepAndNeverBlocks(t *testing.T) {
+	stages := []stage{
+		{name: "warned", state: StageWarn, command: "a"},
+		{name: "required", state: StagePending, command: "b"},
+	}
+	next, blocked := nextStep(stages)
+	if blocked {
+		t.Error("a warning was reported as blocking")
+	}
+	if next == nil || next.name != "required" {
+		t.Errorf("the next step is %v, want the pending rung", next)
 	}
 }
 
@@ -364,8 +607,8 @@ database:
 	if !strings.Contains(g.detail, "masking.yaml") {
 		t.Errorf("with the rules present the detail %q does not name them", g.detail)
 	}
-	if g.state != StageUnchecked {
-		t.Errorf("the golden rung is %q, want unchecked either way: %s", g.state, g.detail)
+	if g.state == StageBlocked {
+		t.Errorf("the golden rung is blocked with the rules present: %s", g.detail)
 	}
 }
 
@@ -662,6 +905,34 @@ database:
 	}
 	if !strings.Contains(s.detail, "masking.yaml") {
 		t.Errorf("the detail %q does not name the file", s.detail)
+	}
+}
+
+// The same demotion the source rung got. With a usable golden, af up branches
+// it whatever masking.yaml says, so an absent file is a warning about the next
+// refresh and never the next command.
+func TestAnAbsentMaskingFileBesideAUsableGoldenIsAWarningNotTheNextStep(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+dockerWithSource)
+	mine := identityOf(t, dir)
+	e, _ := startEnv(t, dir)
+	probe := goldensOf(startProbeFor(t, t.TempDir()),
+		provider.GoldenVersion{ID: "gv_20260906043704_d1c46d45", Verified: true,
+			Provenance: mine, CreatedAt: madeYesterday})
+	stages := firstRun(t.Context(), e, probe)
+
+	s := stageNamed(t, stages, "masking rules")
+	if s.state != StageWarn {
+		t.Fatalf("an absent masking file beside a usable golden is %q, want a warning: %s", s.state, s.detail)
+	}
+	if s.command != "af mask init" {
+		t.Errorf("the warning offers %q, want af mask init", s.command)
+	}
+	if !strings.Contains(s.detail, "next refresh") {
+		t.Errorf("the detail %q does not say the file is for the next refresh", s.detail)
+	}
+	if next, _ := nextStep(stages); next == nil || next.command != "af up" {
+		t.Errorf("the next step is %v, want af up", next)
 	}
 }
 

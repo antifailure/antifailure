@@ -70,8 +70,10 @@ against a baseline saved on the base branch.
 
 ## Try it
 
-Docker and a Postgres connection string you are allowed to read from. No
-account, no control plane, nothing calls home.
+Docker. No account, no control plane, nothing calls home. A Postgres
+connection string you are allowed to read from is optional: with one, every
+environment holds a masked copy of that database; without one it holds the
+schema your migrations create.
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
@@ -79,10 +81,17 @@ curl -fsSL https://antifailure.dev/install.sh | sh
 af start          # where you are on this machine, and the single next command
 af runner install # the agent runner, which drives a real browser and needs node
 af init           # reads your repo, writes antifailure.yaml
-af up             # masked database branch, built services, sealed network
+af golden refresh # only if the manifest names a production database: set that
+                  # variable first, and this makes the masked copy once
+af up             # database branch from the golden, built services, sealed network
 af test           # agents run your workflows and return verdicts with evidence
 af down           # every resource it created, gone
 ```
+
+The refresh is the one conditional step. `af init` writes
+`database.source_url_env` only when the repository already names its
+production variable; with no source, or once a verified golden exists on the
+machine, `af up` is the next command, and `af start` says which.
 
 `af start` is the one to remember. It reports every step of that list as
 observed on this machine right now and names the one command to run next, so a

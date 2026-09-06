@@ -760,7 +760,8 @@ export function IdePlay() {
             </div>
             <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
               Three commands. af init reads the repository and writes the manifest, af up builds the
-              twin around a masked branch, af ci runs it and attaches the report.
+              twin around a branch of the golden, af test runs the workflows and returns verdicts
+              with evidence. With a production database, af golden refresh once before af up.
             </p>
             <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#f4f4f2] p-2.5 font-mono text-[10.5px] leading-[17px]">
               <span className="mb-1 block text-[10px] text-black/35">terminal</span>
@@ -769,8 +770,8 @@ export function IdePlay() {
               <span className={DIM}>{"$ "}</span>
               <span className={VAR}>{"af up\n"}</span>
               <span className={DIM}>{"$ "}</span>
-              <span className={VAR}>{"af ci\n"}</span>
-              <span className={CM}>{"# pass or fail, with evidence"}</span>
+              <span className={VAR}>{"af test\n"}</span>
+              <span className={CM}>{"# verdicts, with evidence"}</span>
             </pre>
             <ul className="mt-3 space-y-2 px-3.5 text-[12.5px]">
               {CHECKS.map((item, i) => (

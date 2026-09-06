@@ -604,6 +604,17 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 		env.Out.Note(e.style, e.text)
 	}
 	env.Out.Println("")
+	// The next command depends on the manifest just written. With a source
+	// named, af up refuses until a golden exists, so sending the reader to it
+	// first is sending them to be told about the refresh by the second
+	// command instead of the first. af start knows about a golden that is
+	// already there; this is a freshly written manifest and it does not.
+	if db := res.Draft.Database; db != nil && db.SourceURLEnv != "" {
+		env.Out.Hint(fmt.Sprintf("Read it, edit anything that looks wrong, set %s, then run",
+			db.SourceURLEnv), "af golden refresh")
+		env.Out.Hint("Then bring an environment up with", "af up")
+		return
+	}
 	env.Out.Hint("Read it, edit anything that looks wrong, then run", "af up")
 }
 

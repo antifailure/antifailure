@@ -1014,6 +1014,30 @@ func (o *Orchestrator) Goldens(ctx context.Context) ([]provider.GoldenVersion, e
 	return s.dbProv.ListGoldens(ctx)
 }
 
+// SelectGolden is the golden af up would branch, out of a listing, for the
+// project whose identity is want. It returns nil when none is usable, and
+// beside it the number of verified goldens that were refused because they were
+// made for something else.
+//
+// Exported so that af start answers "is there a golden" with the SAME rule the
+// run uses rather than a paraphrase of it. The doctor lists the Docker
+// provider's images directly, because Goldens above goes through open and
+// takes this branch's lock, and a status command that copied the selection
+// rule into its own file would be one refactor away from reporting a golden
+// the run then refuses: unverified, or another project's.
+func SelectGolden(goldens []provider.GoldenVersion, want string) (*provider.GoldenVersion, int) {
+	id, refused := pickGolden(goldens, want)
+	if id == "" {
+		return nil, refused
+	}
+	for i := range goldens {
+		if goldens[i].ID == id {
+			return &goldens[i], refused
+		}
+	}
+	return nil, refused
+}
+
 // DestroyGolden removes one.
 func (o *Orchestrator) DestroyGolden(ctx context.Context, version string) error {
 	s, err := o.open(ctx, "af golden gc")

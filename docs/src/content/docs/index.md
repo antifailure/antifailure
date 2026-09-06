@@ -37,11 +37,16 @@ and come later.
 
 ```bash
 curl -fsSL https://antifailure.dev/install.sh | sh
-af init          # reads your repo, writes antifailure.yaml
-af up            # masked database branch, built services, sealed network
-af test          # agents run your workflows and return verdicts with evidence
-af down          # every resource it created, gone
+af init            # reads your repo, writes antifailure.yaml
+af golden refresh  # only if the manifest names a production database: set
+                   # that variable first, and this makes the masked copy once
+af up              # database branch from the golden, built services, sealed network
+af test            # agents run your workflows and return verdicts with evidence
+af down            # every resource it created, gone
 ```
+
+`af start` reports each of those as observed on this machine and names the
+next one, so it is the command to run when you are unsure where you are.
 
 The installer puts `af` under `~/.antifailure` and puts that on your PATH by
 appending one line to the startup file your login shell reads, printing the line

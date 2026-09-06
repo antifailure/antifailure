@@ -10,10 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/model"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -41,15 +44,20 @@ import (
 // A command that only observes cannot make that mistake, and the observation is
 // the part that was missing.
 //
-// Every rung reports one of four states and never collapses one into another:
+// Every rung reports one of five states and never collapses one into another:
 //
 //	done         observed to be true
 //	not yet      observed to be false, and that is where you are
+//	warning      observed to be missing, and the next command works without it
 //	blocked      observed to be wrong, and it has to be fixed before the next
 //	not checked  deliberately not looked at, with the reason and the command
 //
-// The fourth is the one that matters. Two rungs cannot be answered here without
-// side effects, and answering them with a guess would be worse than the gap.
+// The last is the one that matters. A rung that cannot be answered here without
+// side effects says so, and answering it with a guess would be worse than the
+// gap. The warning exists because the source rung used to be blocked whenever
+// the variable naming production was unset, on a machine holding five verified
+// goldens for the project: af up would have run, and the command whose job is
+// to say so named a secret instead.
 
 // StageState is what af start observed about one rung of the first run.
 type StageState string
@@ -60,6 +68,10 @@ const (
 	// StagePending means the rung was observed not to be finished, which is
 	// where the reader is rather than something wrong.
 	StagePending StageState = "pending"
+	// StageWarn means something is missing that the next command does not
+	// need, so it is said, with what would need it, and it never stands
+	// between the reader and that command.
+	StageWarn StageState = "warning"
 	// StageBlocked means something has to be fixed before the next command
 	// can work.
 	StageBlocked StageState = "blocked"
@@ -139,6 +151,11 @@ with the reason and the command that does answer them. That is the point rather
 than a gap: a step reported as fine because nothing looked at it is how a green
 run over nothing happens.
 
+A step reported as a warning is missing and does not stop the next command. The
+variable naming production is the one that earns it: when a verified golden for
+this project already exists, af up branches that golden, and the variable is
+needed by the next refresh rather than by you now.
+
 Exit 0 means every step is either done or simply not reached yet, which is the
 normal state of a first run in progress. Exit 3 means a step is broken and the
 next command cannot work until it is fixed.`),
@@ -165,6 +182,12 @@ type startProbe struct {
 	// rather than through os.UserHomeDir so that a test can put a fixture
 	// install somewhere and have every rung agree about where it is.
 	home func() (string, error)
+	// goldens lists the Docker provider's golden images, which needs a live
+	// daemon and nothing else: no lock, no .antifailure directory and no
+	// state database. The selection out of the list is production code and
+	// is not injectable, so a test can hand this any images it likes and the
+	// rung still has to refuse the ones af up would refuse.
+	goldens func(context.Context, *Env, *schema.Manifest) ([]provider.GoldenVersion, error)
 }
 
 func systemStartProbe(e *Env) startProbe {
@@ -172,7 +195,29 @@ func systemStartProbe(e *Env) startProbe {
 		Prober:       systemProber{getenv: e.Getenv},
 		environments: listEnvironments,
 		home:         os.UserHomeDir,
+		goldens:      dockerGoldens,
 	}
+}
+
+// dockerGoldens lists the golden images on the daemon, the way the provider
+// itself does and without going through the orchestrator.
+//
+// Orchestrator.Goldens goes through open, which creates .antifailure, takes
+// this branch's lock file and migrates the state database, and that is why
+// this rung reported "not checked" for a year. The provider's own ListGoldens
+// is an ImageList filtered on the golden repository: it needs the daemon and
+// nothing else, so a status command can ask it while af up holds the lock.
+func dockerGoldens(ctx context.Context, e *Env, m *schema.Manifest) ([]provider.GoldenVersion, error) {
+	version := 0
+	if m.Database != nil {
+		version = m.Database.Version
+	}
+	p, err := dockerdb.New(dockerdb.Options{Version: version, Clock: e.Clock, Getenv: e.Getenv})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = p.Close() }()
+	return p.ListGoldens(ctx)
 }
 
 // firstRun walks the path in order and reports each rung.
@@ -183,14 +228,18 @@ func systemStartProbe(e *Env) startProbe {
 // their node is too old, twice in a row.
 func firstRun(ctx context.Context, e *Env, p startProbe) []stage {
 	m, root, manifestStage := manifestState(e)
+	// Looked up once and read by two rungs. The source rung comes first in
+	// the list and needs the answer, because whether an unset source blocks
+	// depends on whether there is already a golden to branch.
+	g := findGolden(ctx, e, m, root, p)
 	return []stage{
 		installState(e, p),
 		dockerState(ctx, e, p),
 		runnerState(ctx, e, p),
 		manifestStage,
-		databaseState(ctx, e, m),
-		maskingRulesState(m, root),
-		goldenState(e, m, root),
+		databaseState(ctx, e, m, g),
+		maskingRulesState(m, root, g),
+		goldenState(e, m, root, g),
 		environmentState(ctx, e, m, p),
 		workflowState(m),
 		modelState(ctx, e),
@@ -426,7 +475,7 @@ func waitingOnManifest(name string) stage {
 // project and the key it names. Getting those wrong is the failure a first run
 // actually hits, and it is decidable from the manifest and the secret chain
 // with nothing created.
-func databaseState(ctx context.Context, e *Env, m *schema.Manifest) stage {
+func databaseState(ctx context.Context, e *Env, m *schema.Manifest, g goldenFinding) stage {
 	if m == nil {
 		return waitingOnManifest("the database source")
 	}
@@ -450,7 +499,7 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest) stage {
 	// empty golden from it, and now refuses with AF-DB-016, so the command
 	// whose whole job is to say where you are was the last thing still saying
 	// this was fine.
-	if src := sourceState(ctx, e, m, string(provider)); src != nil {
+	if src := sourceState(ctx, e, m, string(provider), g); src != nil {
 		return *src
 	}
 	if provider == schema.DBDocker {
@@ -498,7 +547,12 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest) stage {
 // no source there is no schema to write rules from, so the rung is answered
 // by the source rung above it and says so rather than pretending to a
 // decision of its own.
-func maskingRulesState(m *schema.Manifest, root string) stage {
+//
+// A warning, not pending, when a usable golden already exists: af up branches
+// that golden whatever the file says, and the file is read by the next
+// refresh. Left pending, this rung made af mask init the next command on a
+// machine that could run af up, which is the same defect the source rung had.
+func maskingRulesState(m *schema.Manifest, root string, g goldenFinding) stage {
 	if m == nil {
 		return waitingOnManifest("masking rules")
 	}
@@ -524,6 +578,16 @@ func maskingRulesState(m *schema.Manifest, root string) stage {
 			why:    "database.source_url_env names nothing, so there is no schema to write rules from yet",
 		}
 	}
+	if g.usable != nil {
+		return stage{
+			name: "masking rules", state: StageWarn, command: "af mask init",
+			detail: rules + " is not there; af up branches the golden made " + madeAt(g.usable) +
+				" as it is, and the built in rules decide every column of the next refresh",
+			prose: "Reads the schema of the database named by " + m.Database.SourceURLEnv +
+				" and writes one rule per column, before the next af golden refresh. " +
+				"The golden that is already here is not changed by it.",
+		}
+	}
 	return stage{
 		name: "masking rules", state: StagePending, command: "af mask init",
 		detail: rules + " is not there, so the built in rules decide every column",
@@ -532,53 +596,146 @@ func maskingRulesState(m *schema.Manifest, root string) stage {
 	}
 }
 
-// goldenState is one of the two rungs this command will not answer.
+// goldenFinding is what af start learned about the golden pool, once, for the
+// two rungs that read it.
+type goldenFinding struct {
+	// checked is false when the listing was declined or failed, and why says
+	// which.
+	checked bool
+	why     string
+	// usable is the golden af up would branch: the newest one that is verified
+	// and records this project's identity. Nil when there is none.
+	usable *provider.GoldenVersion
+	// refused counts verified goldens on this machine made for something else,
+	// and unverified counts the ones no run may branch. Both are said so that
+	// "none for this project" beside a listing of five is not a contradiction.
+	refused    int
+	unverified int
+}
+
+// findGolden lists the pool and selects from it the way af up does.
 //
-// Whether a golden exists is knowable only through the orchestrator, and
-// Orchestrator.Goldens goes through open: it creates .antifailure, takes this
-// branch's lock file, and migrates the state database. A status command that
-// does that is one somebody cannot run while af up is halfway through, and it
-// would be the second thing on this machine to fail with AF-RUN-003 for a
-// reason nobody could see. So this reports the golden CONFIGURATION, which is
-// decidable from the manifest, and says plainly that existence was not checked.
-func goldenState(e *Env, m *schema.Manifest, root string) stage {
-	s := stage{
-		name: "a golden",
-		why: "listing goldens takes this branch's lock, so a command meant to be safe to " +
-			"run while af up is in flight cannot ask",
-		command: "af golden list",
+// Only for the Docker provider. Listing a hosted provider's goldens needs its
+// credentials and goes through the same open that takes the lock, and that
+// refusal keeps its honest reason. Docker's listing is an ImageList, so the
+// reason never applied to it, and for a year this command refused to look at
+// the one pool it could have read for free.
+func findGolden(ctx context.Context, e *Env, m *schema.Manifest, root string, p startProbe) goldenFinding {
+	if m == nil || m.Database == nil {
+		return goldenFinding{}
 	}
+	kind := m.Database.Provider
+	if kind == "" {
+		kind = schema.DBDocker
+	}
+	if kind != schema.DBDocker {
+		return goldenFinding{why: fmt.Sprintf("listing %s goldens needs its credentials and this "+
+			"branch's lock, so a command meant to be safe to run while af up is in flight cannot ask", kind)}
+	}
+	if p.goldens == nil {
+		return goldenFinding{why: "this build has no way to list the daemon's images"}
+	}
+	// The identity af up compares against, from the same code that computes
+	// it for the run. env.New takes no lock and writes nothing; it is open
+	// that does both, and nothing here opens.
+	o, err := env.New(env.Options{Root: root, Manifest: m, Clock: e.Clock, Getenv: e.Getenv})
+	if err != nil {
+		return goldenFinding{why: "this project's golden identity could not be computed: " + err.Error()}
+	}
+	want, err := o.GoldenIdentity()
+	if err != nil {
+		return goldenFinding{why: "this project's golden identity could not be computed: " + err.Error()}
+	}
+	goldens, err := p.goldens(ctx, e, m)
+	if err != nil {
+		return goldenFinding{why: "the Docker daemon did not list its images: " + err.Error()}
+	}
+	f := goldenFinding{checked: true}
+	f.usable, f.refused = env.SelectGolden(goldens, want)
+	for _, g := range goldens {
+		if !g.Verified {
+			f.unverified++
+		}
+	}
+	return f
+}
+
+// madeAt is when a golden was made, in the form af golden list prints.
+func madeAt(g *provider.GoldenVersion) string {
+	return g.CreatedAt.Local().Format("2006-01-02 15:04")
+}
+
+// goldenState reports whether there is a golden af up would branch.
+//
+// For the Docker provider it is answered from the daemon, selected by the
+// rule the run uses, so this rung can never claim a golden the run would
+// refuse: another project's, or one that was never verified. For a hosted
+// provider it is declined, with the reason, because the listing needs
+// credentials and takes this branch's lock.
+//
+// The masking rules a branch would be masked by are still said. An absent
+// masking file is not a defect: env/golden.go treats os.IsNotExist on that
+// path as "use the built in rules", and the first version of this rung called
+// every freshly initialised repository broken for it.
+func goldenState(e *Env, m *schema.Manifest, root string, g goldenFinding) stage {
+	s := stage{name: "a golden"}
 	if m == nil {
 		return waitingOnManifest("a golden")
 	}
 	if m.Database == nil {
 		s.state, s.detail = StageDone, "no database, so nothing is branched from a golden"
-		s.why, s.command = "", ""
 		return s
 	}
-	// Reported, not judged. The first version of this rung called an absent
-	// masking file a blocker, which was a false finding and the one thing a
-	// gate cannot afford: env/golden.go reads that path and treats
-	// os.IsNotExist as "use the built in rules", saying in its own comment that
-	// a missing file is the common case and not an error. So a manifest that
-	// af init has just written, which names masking.yaml by way of the
-	// normaliser's default and does not create it, was reported as broken on
-	// every first run.
-	//
-	// What is worth saying is which rules a branch would be masked by, because
-	// the two are different and neither is visible from the manifest alone: the
-	// file names a path whether or not anybody wrote one.
 	rules := m.Database.MaskingRules
 	path := rules
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, rules)
 	}
-	s.state = StageUnchecked
+	masked := "masked by " + rules
 	if _, err := os.Stat(path); err != nil {
-		s.detail = "masked by the built in rules, since " + rules + " is not there"
+		masked = "masked by the built in rules, since " + rules + " is not there"
+	}
+
+	if !g.checked {
+		s.state, s.why, s.command = StageUnchecked, g.why, "af golden list"
+		s.detail = masked + "; whether a golden exists was not checked"
 		return s
 	}
-	s.detail = "masked by " + rules + "; whether a golden exists was not checked"
+	if g.usable != nil {
+		s.state = StageDone
+		s.detail = fmt.Sprintf("%s, verified and made for this project, %s, %s",
+			g.usable.ID, madeAt(g.usable), masked)
+		return s
+	}
+
+	s.state = StagePending
+	s.detail = "none for this project"
+	var others []string
+	if g.refused > 0 {
+		others = append(others, plural(g.refused, "belongs", "belong")+" to other projects")
+	}
+	if g.unverified > 0 {
+		others = append(others, plural(g.unverified, "is", "are")+" unverified")
+	}
+	if len(others) > 0 {
+		s.detail += ", and of the goldens on this machine " + strings.Join(others, " and ")
+	}
+	if m.Database.SourceURLEnv == "" {
+		// No production to copy, so af up makes the first golden itself, from
+		// the seed command or empty, and this rung must not send the reader
+		// to a refresh the run would do for them.
+		s.command = "af up"
+		s.detail += "; af up makes one on its first run, " + masked
+		s.prose = "No source database is named, so the first af up builds the golden itself: " +
+			"the schema your migrations create, filled by database.seed if the manifest " +
+			"sets one and otherwise empty. Every branch after that is made from it."
+		return s
+	}
+	s.command = "af golden refresh"
+	s.detail += "; a refresh makes one, " + masked
+	s.prose = "Copies the database named by " + m.Database.SourceURLEnv + ", " + masked +
+		", verifies that nothing sensitive survived, and commits the copy as the golden " +
+		"every branch is made from. Reads production once; nothing is written back."
 	return s
 }
 
@@ -795,6 +952,28 @@ func renderStart(e *Env, stages []stage) error {
 				"every resource it created.", 2))
 	}
 
+	// A warning is printed under its own heading, with the command that
+	// clears it, because the ladder line carries the sentence and not the
+	// remedy, and a warning whose remedy is nowhere on the page is one the
+	// reader meets again as a blocker on the day the refresh is due.
+	var warnings []stage
+	for _, s := range stages {
+		if s.state == StageWarn {
+			warnings = append(warnings, s)
+		}
+	}
+	if len(warnings) > 0 {
+		e.Out.Section("Not blocking, and worth doing")
+		for _, s := range warnings {
+			e.Out.Printf("  %s\n", e.Out.S(StyleBold, s.name))
+			e.Out.Printf("  %s\n", e.Out.Wrap(s.prose, 2))
+			if s.command != "" {
+				e.Out.Hint("  Fix with", s.command)
+			}
+			e.Out.Println("")
+		}
+	}
+
 	var unchecked []stage
 	for _, s := range stages {
 		if s.state == StageUnchecked && !s.downstream {
@@ -824,7 +1003,8 @@ func renderStart(e *Env, stages []stage) error {
 // The first blocked rung wins over the first pending one wherever both exist,
 // because a blocked rung is what would make the pending one fail. An optional
 // rung is never the next step: it is offered in the list and never stands
-// between somebody and their first verdict.
+// between somebody and their first verdict. Neither is a warning, by
+// definition: it names something the next command does not need.
 func nextStep(stages []stage) (next *stage, blocked bool) {
 	var pending *stage
 	for i := range stages {
@@ -880,6 +1060,8 @@ func symbolForStage(s StageState) string {
 		return SymbolFail
 	case StagePending:
 		return SymbolPending
+	case StageWarn:
+		return SymbolWarn
 	default:
 		return SymbolSkip
 	}
@@ -892,7 +1074,7 @@ func symbolForStage(s StageState) string {
 // the two cannot describe different places. A step that said the value was in
 // .env while the refresh looked only at the shell would be the same defect
 // pointing the other way.
-func sourceState(ctx context.Context, e *Env, m *schema.Manifest, provider string) *stage {
+func sourceState(ctx context.Context, e *Env, m *schema.Manifest, provider string, g goldenFinding) *stage {
 	name := m.Database.SourceURLEnv
 	if name == "" {
 		return nil
@@ -903,6 +1085,21 @@ func sourceState(ctx context.Context, e *Env, m *schema.Manifest, provider strin
 	case err != nil:
 		s.state, s.why = StageUnchecked, "a source in the chain could not be read: "+err.Error()
 		s.detail = "not checked"
+	case (!found || strings.TrimSpace(value.Reveal()) == "") && g.usable != nil:
+		// Unset, and af up does not need it today. The run branches the
+		// golden that is already there and the scheduled refresh is skipped
+		// while the source holds nothing, so this is a warning about the
+		// NEXT refresh rather than a blocker in front of the next command.
+		// Before this it was blocked, and the machine it was blocked on held
+		// five verified goldens for the project.
+		s.state = StageWarn
+		s.detail = fmt.Sprintf("%s is not set; af up branches the golden made %s, and the next "+
+			"refresh needs it%s", name, madeAt(g.usable), scheduleClause(m, g.usable))
+		s.prose = fmt.Sprintf(
+			"Put production's read only connection string in %s, in this shell, in .env, "+
+				"or in the encrypted store, before the next af golden refresh. Until then "+
+				"every branch is made from the golden that is already here.", name)
+		s.command = "af secret set " + name
 	case !found || strings.TrimSpace(value.Reveal()) == "":
 		s.state = StageBlocked
 		s.detail = fmt.Sprintf(
@@ -922,4 +1119,28 @@ func sourceState(ctx context.Context, e *Env, m *schema.Manifest, provider strin
 			provider, name, res.Source)
 	}
 	return &s
+}
+
+// scheduleClause says when the manifest's refresh schedule next comes due
+// after the golden that exists, or nothing when there is no schedule.
+//
+// It is the same arithmetic af golden list prints as "Next scheduled refresh",
+// and it is worth a clause here because the schedule is exactly what the unset
+// source affects: RefreshDue skips a due schedule while the source holds
+// nothing, so a reader who set a nightly refresh and never set the variable
+// would otherwise learn that from a golden that quietly stopped moving.
+func scheduleClause(m *schema.Manifest, g *provider.GoldenVersion) string {
+	if m.Database == nil || m.Database.Golden == nil || m.Database.Golden.Schedule == "" {
+		return ""
+	}
+	sched, err := golden.ParseSchedule(m.Database.Golden.Schedule)
+	if err != nil || sched.Zero() {
+		return ""
+	}
+	next := sched.Next(g.CreatedAt)
+	if next.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(": the schedule %s next comes due %s and is skipped until it is set",
+		sched, next.In(sched.Location()).Format("2006-01-02 15:04 MST"))
 }

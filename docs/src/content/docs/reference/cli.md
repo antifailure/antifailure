@@ -1908,6 +1908,11 @@ with the reason and the command that does answer them. That is the point rather
 than a gap: a step reported as fine because nothing looked at it is how a green
 run over nothing happens.
 
+A step reported as a warning is missing and does not stop the next command. The
+variable naming production is the one that earns it: when a verified golden for
+this project already exists, af up branches that golden, and the variable is
+needed by the next refresh rather than by you now.
+
 Exit 0 means every step is either done or simply not reached yet, which is the
 normal state of a first run in progress. Exit 3 means a step is broken and the
 next command cannot work until it is fixed.

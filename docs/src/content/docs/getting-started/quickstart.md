@@ -6,9 +6,28 @@ sidebar:
 ---
 
 This goes from nothing to a running environment on your own machine. It needs
-Docker and a Postgres connection string you are allowed to read from. It does
-not need an account, a control plane, or a cloud provider: everything here runs
-locally, and the hosted pieces are optional and come later.
+Docker. A Postgres connection string you are allowed to read from is optional:
+with one, every environment holds a masked copy of that database, and without
+one it holds the schema your migrations create. It does not need an account, a
+control plane, or a cloud provider: everything here runs locally, and the
+hosted pieces are optional and come later.
+
+The whole sequence, which every page and every command in this product states
+the same way:
+
+```bash
+curl -fsSL https://antifailure.dev/install.sh | sh
+af runner install  # the agent runner, which drives a real browser and needs node
+af init            # reads your repo, writes antifailure.yaml
+af golden refresh  # only if the manifest names a production database: set
+                   # that variable first, and this makes the masked copy once
+af up              # database branch from the golden, built services, sealed network
+af test            # agents run your workflows and return verdicts with evidence
+af down            # every resource it created, gone
+```
+
+The refresh is the one conditional step, and `af start` says whether it is
+yours. The rest of this page is what each command did.
 
 ## Install
 
@@ -94,13 +113,19 @@ changes nothing. Every answer comes from the machine rather than from a record
 of what it last did, which is why it is still right after you close the laptop,
 switch branches, or tear an environment down by hand.
 
-Four states, and it never collapses one into another. `ok` was observed to be
-finished. `...` was observed not to be, and is where you are. `fail` is
-something broken that has to be fixed before the next command can work. `skip`
-is a step it deliberately did not look at, and it says why and what to run
-instead: whether a golden exists is one of those, because listing goldens takes
-this branch's lock and a status command that took locks could not be run while
-`af up` was in flight.
+Five states, and it never collapses one into another. `ok` was observed to be
+finished. `...` was observed not to be, and is where you are. `warn` is
+something missing that the next command does not need: the variable naming
+production, when a verified golden for this project already exists, because
+`af up` branches that golden and only the next refresh needs the variable.
+`fail` is something broken that has to be fixed before the next command can
+work. `skip` is a step it deliberately did not look at, and it says why and
+what to run instead. With the Docker provider the golden step is answered from
+the daemon, selected by the same rule `af up` uses, so it never names a golden
+made for another project or one that was never verified; with a hosted provider
+it is skipped, because that listing needs credentials and this branch's lock,
+and a status command that took locks could not be run while `af up` was in
+flight.
 
 Exit 0 means every step is either done or not reached yet, which is the normal
 state of a first run in progress. Exit 3 means something is broken.
@@ -178,17 +203,7 @@ A failed browser download is not fatal. The runner is usable the moment a
 browser arrives, and until then a workflow that needs a page read comes back
 `unverified` rather than guessed at.
 
-Then finish the agent runner, which is the third step the installer prints:
-
-```bash
-af runner install
-```
-
-The runner drives a real browser, so it needs Node and a copy of Chromium that
-the install script deliberately does not download for you. It reports what it
-copied and what it fetched, and once it says it is ready, `af test` finds it
-without a flag. Everything up to `af up` works without it; only `af test` needs
-it.
+Everything up to `af up` works without the runner; only `af test` needs it.
 
 ## Describe the repository
 
@@ -221,6 +236,30 @@ Read the manifest before going further. It is meant to be audited rather than
 trusted, and the [manifest reference](/docs/reference/manifest) explains every
 key.
 
+## Name the database to copy, if there is one
+
+`af init` writes `database.source_url_env` only when the repository already
+names its production variable, so read the `database` block it wrote. If it
+names a variable, put production's read only connection string there, in this
+shell, in `.env`, or in the encrypted store, and build the golden once:
+
+```bash
+af secret set PRODUCTION_DATABASE_URL   # reads the value without echoing it
+af golden refresh                       # copies, masks, verifies, and commits it
+```
+
+The value is read on this machine for one `pg_dump` and never written anywhere
+an environment can reach. The refresh runs `masking.yaml` over the copy, or the
+built in rules when there is no file, and refuses to commit a golden the
+verifier found sensitive data in. [Goldens](/docs/concepts/goldens) and
+[masking](/docs/concepts/masking) cover both.
+
+If the block names no variable, skip this. The first `af up` builds the golden
+itself, from `database.seed` when the manifest sets one and otherwise empty, and
+every branch after that is made from it. Skip it as well when
+`af start` reports a golden already made for this project: `af up` branches that
+one, and the variable is needed by the next refresh rather than by you now.
+
 ## Look at what would happen
 
 ```bash
@@ -238,10 +277,10 @@ that a setting does not mean what you assumed.
 af up
 ```
 
-That builds the services, creates a masked branch of the golden, and starts
-everything inside a network namespace that reaches nothing except the hosts your
-policy allows. The first run is the slow one, because the golden has to be built
-and masked before anything can branch from it. Later runs branch from what
+That builds the services, creates a branch of the golden, and starts everything
+inside a network namespace that reaches nothing except the hosts your policy
+allows. The first run is the slow one, because the images are built, and when no
+source is named the golden is built here too. Later runs branch from what
 already exists.
 
 While it runs, or afterwards:
