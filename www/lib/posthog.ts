@@ -200,6 +200,16 @@ export function posthogOptions(origin: string): Partial<PostHogConfig> | null {
   const apiHost = resolveHost(POSTHOG_API_HOST, origin);
   if (!apiHost) return null;
   return {
+    // No session recording sample rate is set here, and that is a decision
+    // rather than an omission. Unset, posthog-js records every visit, which
+    // is what the owner asked for at launch, and it leaves the sample rate
+    // control in the PostHog project interface live, so recording can be
+    // turned down later without a deploy. A value set here, including 1,
+    // would record the same today and would make that control do nothing,
+    // silently. The cost of every visit is stated in PROGRESS.md: the free
+    // allowance is 5,000 recordings a month, spent in arrival order, so above
+    // about 167 visits a day recording stops near day 25 and resumes on the
+    // first. If that arrives, change it in the interface, not here.
     api_host: apiHost,
     // NO SEPARATE HOST FOR THE SCRIPT BUNDLES, AND ITS ABSENCE IS THE POINT.
     // posthog-js routes /static and /array at a custom api_host on its own,
