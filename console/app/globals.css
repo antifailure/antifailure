@@ -100,6 +100,21 @@ body {
   background-attachment: local, local, scroll, scroll;
 }
 
+/*
+ * The cover pane of the first sign-in walk, byte for byte the one behind the
+ * sign-in and sign-up screens on the marketing site (www/app/globals.css,
+ * .auth-honeycomb). Copied rather than shared for the reason the logo mark is
+ * copied: two builds, two lockfiles, and a package for one pattern is a
+ * workspace to maintain forever. A person arrives here from that screen, and
+ * the pane they just looked at is the pane they should see.
+ */
+.auth-honeycomb {
+  background-image:
+    radial-gradient(rgba(0, 0, 0, 0.14) 0.7px, transparent 0.85px),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='34' height='60' viewBox='0 0 34 60'><path d='M17 2 L32 11 L32 29 L17 38 L2 29 L2 11 Z' fill='none' stroke='rgba(0,0,0,0.12)' stroke-width='0.7'/><path d='M17 32 L32 41 L32 59' fill='none' stroke='rgba(0,0,0,0.12)' stroke-width='0.7'/><path d='M17 32 L2 41 L2 59' fill='none' stroke='rgba(0,0,0,0.12)' stroke-width='0.7'/></svg>");
+  background-size: 16px 16px, 34px 60px;
+}
+
 /* Numbers in a table have to line up, and proportional digits do not. */
 .tnum {
   font-variant-numeric: tabular-nums;

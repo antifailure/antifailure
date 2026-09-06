@@ -374,6 +374,7 @@ export function Button({
   disabled = false,
   busy = false,
   full = false,
+  pressed,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -381,6 +382,10 @@ export function Button({
   variant?: "primary" | "secondary" | "danger";
   disabled?: boolean;
   busy?: boolean;
+  /** A toggle's state, for a button that stays on once pressed, such as a
+   *  setup card's Done. Absent on an ordinary button, so a screen reader is
+   *  not told an action has a state it does not have. */
+  pressed?: boolean;
   /** Fills its container. `LinkButton` has had this since it was written and
    *  `Button` did not, which is why a sign-in form's submit rendered as a
    *  narrow box in the middle of a full-width field. The two components are
@@ -406,6 +411,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
+      aria-pressed={pressed}
       className={`${base} ${variants[variant]} ${full ? "w-full" : ""}`}
     >
       {children}
