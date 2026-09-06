@@ -1,6 +1,6 @@
 {
   "name": "@antifailure/runner",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "private": true,
   "description": "Drives an application the way a person does, and returns a verdict with evidence.",
   "license": "MIT",

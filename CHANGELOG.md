@@ -14,6 +14,69 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.3
+
+The launch morning release. A readiness team of twenty two evaluators, half
+of them using nothing but this product, went over the whole system in the
+hours before launch, and this is what they found and what changed.
+
+**A buyer who came back from Stripe early could pay twice.** Nothing read the
+checkout return, the only guard was a local row the webhook had to write
+first, and the same Subscribe button was still there. The API now asks Stripe
+itself before opening a session and refuses when a subscription is active,
+trialing, past due, unpaid or a checkout is still in flight; the plan page
+shows the payment as received and activating, and polls until the plan is
+live.
+
+**The rate limiter trusted the address the caller wrote.** Behind Azure
+Container Apps the true client is the last entry of X-Forwarded-For and the
+first is whatever the caller sent, so one header walked around every limit
+on sign in and poisoned the sign in audit trail. The trusted entry is counted
+from the right, with `AF_TRUSTED_PROXY_HOPS` for deployments behind more than
+one proxy.
+
+**The twin could not be built for two days and nothing turned red.** The copy
+recreated only the roles that policies name; migrations then granted to
+roles the copy never had and every branch died on the first of them. The copy
+now carries every role the source names in a grant, and the memberships
+between them. The dogfood job seeds its source from the pull request's base
+commit so the head's migrations run inside the twin, the ordering a
+customer's golden always produces. A second `af up` after an edit no longer
+keeps the previous build serving.
+
+**`af start` failed a machine that could already come up.** With five
+verified goldens on the machine it reported the database source as a fail
+and would not look at the goldens because listing took the branch lock. The
+golden rung answers without the lock, an unset source beside a usable golden
+is a warning, and Next says `af up`. The first run sequence is now the same
+in the README, the docs, the site, the console and the `af init` hint.
+
+**The product misreported itself to an agent.** `check_prerequisites` said
+BLOCKED about checks it had skipped; MCP errors pointed at a server log the
+caller could not read where the CLI printed the code, the holder's pid and a
+remedy; an unreadable stored credential printed a raw decode error; `af
+doctor` held every line behind its slowest check. All four are fixed, and
+`af start` now says when billing and the GitHub App are off in the
+environment under rehearsal.
+
+**A slow control plane paged nobody.** Ten alert rules and none on latency.
+A `slow-responses` rule reads the app's response time and pages at severity 1
+when the average stays above the threshold for fifteen minutes; production's
+first release ran six replicas on an undeclared concurrency of ten, and now
+declares forty with a ceiling of twelve.
+
+**Nobody could find the status page, and it always said checked seconds
+ago.** It is linked from the footer, `/status` redirects to it, every age is
+recomputed against the reader's clock, and a page older than its probe
+interval says so.
+
+<!-- relnotes:omit -->
+Also: the Details link on a pull request check opened the runs list rather
+than the run; the console had no error boundary; the site said the hosted
+control plane was invitation only and sold Team by booking a call; the CI
+engine job runs the two cluster copy proof instead of skipping it.
+<!-- relnotes:end -->
+
 ## v1.3.2
 
 v1.3.1 fixed the transport check that refused an operator's customer
