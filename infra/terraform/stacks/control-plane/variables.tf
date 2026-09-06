@@ -383,6 +383,21 @@ variable "site_origin" {
   description = "Every origin the marketing site is served from, separated by commas. Empty refuses every beacon, lead and application."
 }
 
+# The PostHog proxy at /ph, and what this process reports its own hosted usage
+# under. Both were documented in the control plane reference and read by the
+# application while no apply could set them.
+variable "posthog_region" {
+  type        = string
+  default     = ""
+  description = "us or eu. Mounts the PostHog proxy at /ph. Empty mounts nothing."
+}
+
+variable "posthog_project_key" {
+  type        = string
+  default     = ""
+  description = "The PostHog project API key this process reports its own usage under. Public by design. Empty reports nothing."
+}
+
 variable "github_app_install_url" {
   type        = string
   default     = ""

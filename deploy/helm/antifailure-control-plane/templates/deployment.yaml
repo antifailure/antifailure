@@ -167,6 +167,14 @@ spec:
             - name: AF_SITE_ORIGIN
               value: {{ .Values.config.siteOrigin | quote }}
             {{- end }}
+            {{- if .Values.config.posthogRegion }}
+            - name: AF_POSTHOG_REGION
+              value: {{ .Values.config.posthogRegion | quote }}
+            {{- end }}
+            {{- if .Values.config.posthogProjectKey }}
+            - name: AF_POSTHOG_PROJECT_KEY
+              value: {{ .Values.config.posthogProjectKey | quote }}
+            {{- end }}
             {{- if .Values.config.signupUrl }}
             - name: AF_SIGNUP_URL
               value: {{ .Values.config.signupUrl | quote }}

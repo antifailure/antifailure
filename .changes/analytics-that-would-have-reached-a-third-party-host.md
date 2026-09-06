@@ -57,3 +57,9 @@ row for it. Two more gates beside it refuse any posthog.com ingestion host in th
 site's source, require the configured `api_host` to be the mount this repository
 actually serves, and fail if PostHog starts without consulting the measurement
 flag the published page promises a reader can switch off.
+
+Both settings can be delivered by the supported deploy paths: `posthog_region`
+and `posthog_project_key` on the Terraform module and stack, and
+`config.posthogRegion` and `config.posthogProjectKey` on the Helm chart. They
+were documented and read by the application before either path could set them,
+and the gate that holds the reference to the deploy paths is what found it.

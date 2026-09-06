@@ -159,6 +159,18 @@ config:
   # THIS WAS UNREACHABLE FROM THIS CHART UNTIL IT WAS ADDED, along with the rest
   # of the settings above and below it. See the note at the top of extraEnv.
   siteOrigin: ""
+  # us or eu. Mounts the PostHog proxy at /ph, so a marketing site sends its
+  # product analytics to this process and this process forwards it, and a
+  # reader's browser opens no connection to a posthog.com host. Empty mounts
+  # nothing and a site pointed here is answered 404. The two values select a
+  # fixed pair of upstream hosts; nothing makes this forward anywhere else.
+  posthogRegion: ""
+  # The PostHog project API key this process reports its own hosted MCP and
+  # model usage under. Public by design, like every PostHog project key, which
+  # is why it is a plain value and not a secret. Empty reports nothing, which is
+  # the right default for a self-hosted installation whose usage is its own.
+  # Needs posthogRegion as well.
+  posthogProjectKey: ""
   # Where somebody the sign-in allowlist refuses is sent instead. Empty is the
   # self-hosted default and means the refusal page offers no link: an operator
   # running an allowlist has their own way of being asked, and pointing their

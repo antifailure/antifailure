@@ -44,6 +44,8 @@ helm	value	config.modelPrices	string	optional
 helm	value	config.operatorSetsPlan	bool	optional
 helm	value	config.poolMax	number	optional
 helm	value	config.port	number	optional
+helm	value	config.posthogProjectKey	string	optional
+helm	value	config.posthogRegion	string	optional
 helm	value	config.productName	string	optional
 helm	value	config.publicUrl	string	optional
 helm	value	config.selfServeSignup	bool	optional
@@ -232,6 +234,8 @@ terraform:modules/control-plane	variable	operator_portal_enabled	bool	optional
 terraform:modules/control-plane	variable	operator_sets_plan	bool	optional
 terraform:modules/control-plane	variable	pool_max	number	optional
 terraform:modules/control-plane	variable	postgres_version	string	optional
+terraform:modules/control-plane	variable	posthog_project_key	string	optional
+terraform:modules/control-plane	variable	posthog_region	string	optional
 terraform:modules/control-plane	variable	product_name	string	optional
 terraform:modules/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:modules/control-plane	variable	public_url	string	optional
@@ -318,6 +322,8 @@ terraform:stacks/control-plane	variable	name	string	optional
 terraform:stacks/control-plane	variable	operator_portal_enabled	bool	optional
 terraform:stacks/control-plane	variable	operator_sets_plan	bool	optional
 terraform:stacks/control-plane	variable	pool_max	number	optional
+terraform:stacks/control-plane	variable	posthog_project_key	string	optional
+terraform:stacks/control-plane	variable	posthog_region	string	optional
 terraform:stacks/control-plane	variable	product_name	string	optional
 terraform:stacks/control-plane	variable	provider_key_secret_enabled	bool	optional
 terraform:stacks/control-plane	variable	public_url	string	optional
