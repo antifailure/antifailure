@@ -180,3 +180,26 @@ export const IconSecurity = stroke(
 /** Data governance: a records box with a label. Governance is custody of what
  *  is kept, and this is the shape of custody. */
 export const IconGovernance = stroke("M2.6 3h10.8v2.6H2.6zM3.6 5.6h8.8v7.4H3.6zM6.4 8.6h3.2");
+
+/* -------------------------------------------------------------------------
+ * The first sign-in walk
+ *
+ * Three of its concepts already have a glyph here and reuse it: the terminal
+ * is IconTerminal, the agent's connector is IconMcp, and the environments,
+ * runs and audit benefits are the rail's own entries, so what a person is
+ * told the control plane gives them is drawn the way the rail draws it. The
+ * three below are the ones that had no glyph, on the same grid and stroke.
+ * ---------------------------------------------------------------------- */
+
+/** A pull request: the branch that leaves the trunk and the arrow bringing it
+ *  back, which is the shape every forge draws for one. */
+export const IconPullRequest = stroke(
+  "M4.6 5.6v7.2M4.6 5.6a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM4.6 14.4a1.5 1.5 0 1 0 0-3.2 1.5 1.5 0 0 0 0 3.2ZM11.4 11.2V7.6a2 2 0 0 0-2-2H7.2M8.8 3.8 7.2 5.6l1.6 1.8M11.4 14.4a1.5 1.5 0 1 0 0-3.2 1.5 1.5 0 0 0 0 3.2Z",
+);
+
+/** A tick, for a setup card that has been marked done. */
+export const IconCheck = stroke("M3.4 8.4 6.6 11.6 12.6 4.8");
+
+/** The machine the engine runs on, for the sentence that says nothing breaks
+ *  when the control plane is away: the work is here, not there. */
+export const IconMachine = stroke("M3.2 3.6h9.6v6.4H3.2zM1.6 12.4h12.8M6.4 10v2.4M9.6 10v2.4");

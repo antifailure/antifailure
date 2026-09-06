@@ -452,7 +452,28 @@ export function Shell({ children }: { children: ReactNode }) {
   if (!me.signedIn) return <SignIn session={me} />;
   if (!me.orgId) return <NoOrganization session={me} />;
 
+  // The first sign-in walk is the whole window, the way the sign-in screen it
+  // follows is the whole window: a cover pane and a column of steps, with no
+  // rail beside it. It still needs everything above this line, because a
+  // person who is signed out or in no organization has nothing to set up yet,
+  // and it stays inside this group so the session is fetched once and read
+  // from context rather than a second time. The lapsed plan screens below
+  // still win: an organization whose access has closed is not being asked
+  // where it will use the product.
   const needsPlan = me.hostedRequiredPlan && me.hostedAccess === false;
+  if (pathname === "/start" && !needsPlan) {
+    return (
+      <div className="min-h-dvh">
+        {session.refreshError ? (
+          <div className="px-5 pt-5 sm:px-8">
+            <SessionRefreshNotice />
+          </div>
+        ) : null}
+        {children}
+      </div>
+    );
+  }
+
   // The billing page answers under billing.manage, which only an owner holds.
   // An admin, member or viewer sent to /plan gets a refusal, so this screen
   // used to offer everybody exactly one action and offer three of the four
