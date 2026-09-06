@@ -1,10 +1,13 @@
 package lock_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -197,4 +200,94 @@ func writeLock(t *testing.T, path string, o lock.Owner) {
 	b, err := json.Marshal(o)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, b, 0o600))
+}
+
+func TestAcquire_RefusalNamesTheHoldersCommand(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	held, err := lock.Acquire(path, clock.NewFake(epoch), "af up")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, held.Release()) }()
+
+	_, err = lock.Acquire(path, clock.NewFake(epoch), "af mcp")
+	require.True(t, lock.IsHeld(err))
+	var coded *aferrors.Error
+	require.True(t, errors.As(err, &coded))
+	require.Equal(t, "af up", coded.Fields["command"],
+		"a caller that cannot see a process table needs to know what is holding the branch")
+	require.Equal(t, strconv.Itoa(os.Getpid()), coded.Fields["pid"])
+}
+
+func TestAcquireWithin_QueuesBehindAShortHolder(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	held, err := lock.Acquire(path, clock.NewFake(epoch), "af down")
+	require.NoError(t, err)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = held.Release()
+	}()
+
+	start := time.Now()
+	l, err := lock.AcquireWithin(context.Background(), path, clock.NewFake(epoch), "af mcp", 5*time.Second)
+	require.NoError(t, err, "the holder released inside the wait")
+	defer func() { require.NoError(t, l.Release()) }()
+	require.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond,
+		"it waited rather than took the lock away from a live holder")
+}
+
+func TestAcquireWithin_RefusesALongHolderNamingIt(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	held, err := lock.Acquire(path, clock.NewFake(epoch), "af explore")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, held.Release()) }()
+
+	start := time.Now()
+	_, err = lock.AcquireWithin(context.Background(), path, clock.NewFake(epoch), "af mcp", 400*time.Millisecond)
+	require.True(t, lock.IsHeld(err), "a live holder is never preempted: %v", err)
+	require.GreaterOrEqual(t, time.Since(start), 400*time.Millisecond)
+	var coded *aferrors.Error
+	require.True(t, errors.As(err, &coded))
+	require.Equal(t, "af explore", coded.Fields["command"])
+	require.Equal(t, os.Getpid(), held.Owner().PID, "the holder still holds it")
+}
+
+func TestAcquireWithin_ZeroWaitIsAcquire(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	held, err := lock.Acquire(path, clock.NewFake(epoch), "af up")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, held.Release()) }()
+
+	start := time.Now()
+	_, err = lock.AcquireWithin(context.Background(), path, clock.NewFake(epoch), "af golden list", 0)
+	require.True(t, lock.IsHeld(err))
+	require.Less(t, time.Since(start), 200*time.Millisecond, "a terminal caller is told at once")
+}
+
+func TestAcquireWithin_StopsWhenTheContextEnds(t *testing.T) {
+	t.Parallel()
+	path := lockPath(t)
+	held, err := lock.Acquire(path, clock.NewFake(epoch), "af up")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, held.Release()) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = lock.AcquireWithin(ctx, path, clock.NewFake(epoch), "af mcp", time.Minute)
+	require.True(t, lock.IsHeld(err))
+	require.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestAlive_IsTheOneLivenessRule(t *testing.T) {
+	t.Parallel()
+	host, _ := os.Hostname()
+	require.True(t, lock.Alive(lock.Owner{PID: os.Getpid(), Host: host}))
+	cmd := exec.Command("sh", "-c", "exit 0")
+	require.NoError(t, cmd.Run())
+	require.False(t, lock.Alive(lock.Owner{PID: cmd.Process.Pid, Host: host}))
+	require.True(t, lock.Alive(lock.Owner{PID: cmd.Process.Pid, Host: "another-host"}),
+		"a process on another host cannot be checked, so it is treated as live")
 }

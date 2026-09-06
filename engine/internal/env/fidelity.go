@@ -35,7 +35,9 @@ import (
 
 // Fidelity takes the inventory of what this environment reproduces.
 func (o *Orchestrator) Fidelity(ctx context.Context) (fidelity.Inventory, error) {
-	s, err := o.open(ctx, "af fidelity")
+	// An observation, so no lock. The runtime is opened by observeRuntime on
+	// its own, and the database provider is all this session is for.
+	s, err := o.openReading(ctx)
 	if err != nil {
 		return fidelity.Inventory{}, err
 	}

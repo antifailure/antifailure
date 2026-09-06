@@ -218,6 +218,26 @@ CREATE INDEX mcp_runs_status ON mcp_runs(status);
 CREATE INDEX mcp_runs_project ON mcp_runs(project);
 `,
 	},
+	{
+		Version: 4,
+		Name:    "mcp_runs_owner",
+		SQL: `
+-- Which process is running a run.
+--
+-- Two af mcp processes on one checkout share this table, and until this
+-- column existed a process starting up settled every run recorded as in
+-- flight as "the server stopped", including the ones another live process was
+-- in the middle of. The owner is what lets startup tell an interrupted run
+-- from a running one: it settles a run only when the process that owns it is
+-- gone, by the same liveness rule the branch lock uses.
+--
+-- A row written before this column carries a zero owner. Nothing can be
+-- running it, because every build that writes rows records itself here, so a
+-- zero owner is settled as interrupted.
+ALTER TABLE mcp_runs ADD COLUMN owner_pid INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mcp_runs ADD COLUMN owner_host TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 // SchemaVersion is the version a new database is created at.

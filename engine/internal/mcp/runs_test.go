@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/state"
 )
@@ -214,11 +217,23 @@ func TestFail_RecordsInconclusiveRatherThanNothing(t *testing.T) {
 	require.Equal(t, string(FaultSafetyUnavailable), got.ErrorCode)
 }
 
+// deadOwner is a process that has really exited, so the identifier is
+// genuinely dead rather than merely unlikely to exist.
+func deadOwner(t *testing.T) lock.Owner {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "exit 0")
+	require.NoError(t, cmd.Run())
+	host, _ := os.Hostname()
+	return lock.Owner{PID: cmd.Process.Pid, Host: host}
+}
+
 func TestRecoverInterrupted_SettlesRunsLeftByADeadProcess(t *testing.T) {
 	t.Parallel()
 	s, _ := newStore(t)
 	ctx := context.Background()
 
+	// The runs were submitted by a process that is gone.
+	s.owner = deadOwner(t)
 	queued, _, _ := s.Submit(ctx, "cli", "repo", "rehearse", "a", args("n", "1"))
 	running, _, _ := s.Submit(ctx, "cli", "repo", "rehearse", "b", args("n", "2"))
 	require.NoError(t, s.Start(ctx, running.ID, "applying"))
@@ -237,6 +252,9 @@ func TestRecoverInterrupted_SettlesRunsLeftByADeadProcess(t *testing.T) {
 		require.Equal(t, StatusFailed, got.Status)
 		require.Equal(t, VerdictInconclusive, got.Verdict,
 			"an interrupted experiment proves nothing about the change")
+		require.Equal(t, string(FaultSafetyUnavailable), got.ErrorCode)
+		require.Contains(t, got.ErrorDetail, "The server stopped while this run was in progress",
+			"the process that owned it exited, which is the one case this sentence is for")
 	}
 
 	// A run that had already finished keeps its verdict. Recovery settles
@@ -245,6 +263,72 @@ func TestRecoverInterrupted_SettlesRunsLeftByADeadProcess(t *testing.T) {
 	require.Nil(t, fault)
 	require.Equal(t, StatusFinished, got.Status)
 	require.Equal(t, VerdictPass, got.Verdict)
+}
+
+// The ordering that produced the 2026-09-06 failures: A is running, B starts.
+func TestRecoverInterrupted_LeavesARunAnotherLiveProcessIsRunning(t *testing.T) {
+	t.Parallel()
+	a, dir := newStore(t)
+	ctx := context.Background()
+	run, _, _ := a.Submit(ctx, "cli", "repo", "rehearse", "a", args("n", "1"))
+	require.NoError(t, a.Start(ctx, run.ID, "driving the browser"))
+
+	db, err := state.Open(ctx, dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	b := NewStore(db, clock.NewFake(time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)))
+	// B is a different process in every way that matters except the one the
+	// rule checks: its owner is alive. This test's own process stands in for
+	// A, so A's owner is alive by construction.
+	settled, running, err := b.RecoverInterruptedReporting(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, settled, "A is alive, so nothing of A's was interrupted")
+	require.Equal(t, 1, running, "B is told how many runs it left to A")
+
+	got, fault := b.Get(ctx, "cli", "repo", run.ID)
+	require.Nil(t, fault)
+	require.Equal(t, StatusRunning, got.Status)
+	require.Equal(t, "driving the browser", got.Phase, "B reads A's progress from the shared store")
+	require.Empty(t, got.ErrorDetail, "no sentence about a stopped server for a server that did not stop")
+}
+
+// B arrives while A is between runs: nothing is in flight, nothing is
+// settled, and A's finished run keeps its verdict.
+func TestRecoverInterrupted_BetweenRunsSettlesNothing(t *testing.T) {
+	t.Parallel()
+	a, dir := newStore(t)
+	ctx := context.Background()
+	run, _, _ := a.Submit(ctx, "cli", "repo", "rehearse", "a", args("n", "1"))
+	require.NoError(t, a.Start(ctx, run.ID, "x"))
+	require.NoError(t, a.Finish(ctx, run.ID, report.VerdictPass, map[string]any{}))
+
+	db, err := state.Open(ctx, dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	b := NewStore(db, clock.New())
+	settled, running, err := b.RecoverInterruptedReporting(ctx)
+	require.NoError(t, err)
+	require.Zero(t, settled)
+	require.Zero(t, running)
+	got, _ := b.Get(ctx, "cli", "repo", run.ID)
+	require.Equal(t, VerdictPass, got.Verdict)
+}
+
+// A row written before the owner column exists carries a zero owner. No
+// build that records owners wrote it, so nothing alive is running it.
+func TestRecoverInterrupted_SettlesARunWithNoRecordedOwner(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	ctx := context.Background()
+	s.owner = lock.Owner{}
+	run, _, _ := s.Submit(ctx, "cli", "repo", "rehearse", "a", args("n", "1"))
+	require.NoError(t, s.Start(ctx, run.ID, "x"))
+
+	settled, err := s.RecoverInterrupted(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, settled)
+	got, _ := s.Get(ctx, "cli", "repo", run.ID)
+	require.Equal(t, StatusFailed, got.Status)
 }
 
 func TestRunStateSurvivesTheProcessThatCreatedIt(t *testing.T) {

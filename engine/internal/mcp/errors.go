@@ -95,6 +95,15 @@ const (
 	FaultRunNotCancellable FaultCode = "RUN_NOT_CANCELLABLE"
 	// FaultUnsupported is a documented capability this build does not serve.
 	FaultUnsupported FaultCode = "UNSUPPORTED"
+	// FaultBranchLocked is a branch another Antifailure process holds.
+	//
+	// Separate from SAFETY_UNAVAILABLE because nothing is missing: the lock
+	// that would contain this call is held by a live process, another
+	// af mcp server or a command at a terminal, and the call was refused
+	// rather than allowed to fight it. The detail names that process and
+	// what it is doing, in the words the command line prints for the same
+	// refusal. It is retryable: the holder finishes and the branch clears.
+	FaultBranchLocked FaultCode = "BRANCH_LOCKED"
 	// FaultInternal is a defect in this server.
 	//
 	// The detail is a fixed sentence. Whatever went wrong is written to
@@ -257,6 +266,12 @@ func withCause(detail string, err error) string {
 		return detail
 	}
 	reason := explainCause(err)
+	if reason != "" && strings.Contains(detail, reason) {
+		// A detail that already carries the explanation, the lock refusal
+		// writes it in because a stored run keeps nothing else, is not given
+		// it a second time.
+		return detail
+	}
 	if reason == "" {
 		reason = "The cause was written to this server's standard error, which no tool " +
 			"here reads; the same command at a terminal prints it."

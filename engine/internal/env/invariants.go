@@ -43,7 +43,10 @@ func (o *Orchestrator) RunInvariants(ctx context.Context) ([]InvariantResult, er
 		return nil, nil
 	}
 
-	s, err := o.open(ctx, "af test invariants")
+	// A read of the branch, so no lock. af test takes none either, and an
+	// invariant check that waited on af down would hold up the teardown to
+	// ask about data that is about to be gone.
+	s, err := o.openReading(ctx)
 	if err != nil {
 		return nil, err
 	}

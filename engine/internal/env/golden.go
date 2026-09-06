@@ -971,10 +971,14 @@ func (o *Orchestrator) MaskVerify(ctx context.Context) (verify.Report, error) {
 	})
 }
 
-// connectBranch opens a session and a connection to this environment's
-// database, and returns a function that closes both.
+// connectBranch opens a reading session and a connection to this
+// environment's database, and returns a function that closes both.
+//
+// Its callers, the mask plan and the mask verification, read the branch and
+// write nothing, so the session holds no lock. MaskApply, which writes, opens
+// its own locked session and connects through that.
 func (o *Orchestrator) connectBranch(ctx context.Context) (*pgx.Conn, func(), error) {
-	s, err := o.open(ctx, "af mask")
+	s, err := o.openReading(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1005,8 +1009,11 @@ func connectSession(ctx context.Context, o *Orchestrator, s *session) (*pgx.Conn
 }
 
 // Goldens lists what exists.
+//
+// A read, so it takes no lock: the list is most wanted while af up is
+// branching one of them.
 func (o *Orchestrator) Goldens(ctx context.Context) ([]provider.GoldenVersion, error) {
-	s, err := o.open(ctx, "af golden list")
+	s, err := o.openReading(ctx)
 	if err != nil {
 		return nil, err
 	}

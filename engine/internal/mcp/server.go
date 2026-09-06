@@ -371,6 +371,7 @@ func (s *Server) handleToolsCall(ctx context.Context, req request) {
 	call := &Call{Caller: caller, Project: s.project}
 	result, fault := tool.Handler(ctx, call, args)
 	if fault != nil {
+		fault = refineLockFault(fault)
 		s.logf("%s refused: %s", p.Name, fault.Error())
 		if fault.wrapped != nil {
 			s.logf("%s cause: %v", p.Name, fault.wrapped)

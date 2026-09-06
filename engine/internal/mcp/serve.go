@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/env"
@@ -86,16 +87,25 @@ func Serve(ctx context.Context, cfg Config) error {
 	defer func() { _ = db.Close() }()
 
 	store := NewStore(db, cfg.Clock)
-	settled, err := store.RecoverInterrupted(ctx)
+	settled, running, err := store.RecoverInterruptedReporting(ctx)
 	if err != nil {
 		// Not fatal. A store that could not be tidied still answers every
 		// question correctly except the status of runs a dead process left,
 		// and refusing to start would be a worse answer than that.
 		_, _ = fmt.Fprintf(cfg.Log, "af mcp: settling interrupted runs: %v\n", err)
-	} else if settled > 0 {
+	}
+	if settled > 0 {
 		_, _ = fmt.Fprintf(cfg.Log,
-			"af mcp: settled %d run(s) left in flight by an earlier process, "+
+			"af mcp: settled %d run(s) left in flight by a process that has exited, "+
 				"each reported INCONCLUSIVE\n", settled)
+	}
+	if running > 0 {
+		// Left alone, and said so. Another af mcp process on this checkout is
+		// running them; this one answers get_rehearsal_run for them from the
+		// shared store and cancel_rehearsal_run reaches them the same way.
+		_, _ = fmt.Fprintf(cfg.Log,
+			"af mcp: %d run(s) are in flight in another af mcp process on this "+
+				"checkout and were left to it\n", running)
 	}
 
 	// The experiments run under a context that outlives any one call, so a
@@ -156,6 +166,15 @@ func Serve(ctx context.Context, cfg Config) error {
 	return serveErr
 }
 
+// mcpLockWait is how long a tool waits for another process to release the
+// branch before refusing with BRANCH_LOCKED.
+//
+// Long enough to sit out af down or a masking apply on a small database,
+// which is the case worth queueing for, and short enough that a caller
+// polling a run behind a ten minute exploration in another window is told
+// who holds the branch instead of being kept waiting for it.
+const mcpLockWait = 15 * time.Second
+
 // orchestratorFactory builds an orchestrator per call.
 //
 // Per call rather than once, because an orchestrator holds no connections
@@ -183,6 +202,11 @@ func (f *orchestratorFactory) build() (*env.Orchestrator, error) {
 		Getenv:     f.cfg.Getenv,
 		Redactor:   r,
 		Version:    f.cfg.Version,
+		// A second server on this checkout queues behind a short operation
+		// the first is in the middle of, and is refused, naming the holder,
+		// when it is a long one. A command line caller gets no wait, because
+		// a person at a terminal is told at once and decides for themselves.
+		LockWait: mcpLockWait,
 		Progress: func(line string) {
 			// To the log, never to the protocol stream. This is the single
 			// most dangerous line in the package: the engine emits progress

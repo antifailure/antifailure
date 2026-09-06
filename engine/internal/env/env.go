@@ -106,6 +106,15 @@ type Options struct {
 	PinGolden string
 	// Rebuild forces images to be built even when an identical one exists.
 	Rebuild bool
+	// LockWait is how long a session waits for another process to release
+	// the branch lock before refusing with AF-RUN-003.
+	//
+	// Zero, the default and what every command line caller wants, refuses at
+	// once: a person at a terminal is told who holds the branch and decides.
+	// The MCP server sets it, so that a second server on the same checkout
+	// queues behind a short operation the first is in the middle of and is
+	// refused, naming the holder, only when it is a long one.
+	LockWait time.Duration
 	// Verbose streams the full build output.
 	//
 	// Off by default. A Docker build prints a line per instruction and a line
@@ -391,7 +400,8 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 
 	// The lock comes first. Two af up runs on one branch would otherwise race
 	// on the same container names and both fail in ways neither explains.
-	l, err := lock.Acquire(filepath.Join(stateDir, lockName+".lock"), o.opts.Clock, command)
+	l, err := lock.AcquireWithin(ctx, filepath.Join(stateDir, lockName+".lock"),
+		o.opts.Clock, command, o.opts.LockWait)
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +461,39 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 		Clock: o.opts.Clock, Redactor: o.opts.Redactor, NoCache: o.opts.Rebuild,
 		Getenv: o.opts.Getenv,
 	}); err != nil {
+		s.close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// openReading opens a session that reads and holds no lock.
+//
+// The state database and the database provider, and nothing else: no lock,
+// no bus, no journal, no runtime, no builder. It is for the questions whose
+// answer is most wanted while the branch is busy: which goldens exist, what
+// the invariants say, what the mask left behind, how faithful the environment
+// is. Every one of them reads. Until this existed each took the branch lock
+// through open and was refused with AF-RUN-003 for the whole of an af up, and
+// the MCP tools asking the same questions from a second window answered
+// "unavailable" about a branch that was merely being used.
+//
+// A read while another process writes may see a golden half made or a branch
+// not yet reachable. Both come back as the provider's own error or as an
+// honest partial answer, never as a corrupted write, because this session
+// cannot write. Anything that can, MaskApply, DestroyGolden, MaskPreview
+// through the masking key it may mint, stays on open.
+func (o *Orchestrator) openReading(ctx context.Context) (*session, error) {
+	s := &session{}
+	stateDir := filepath.Join(o.opts.Root, StateDir)
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
+	}
+	var err error
+	if s.db, err = state.Open(ctx, stateDir); err != nil {
+		return nil, err
+	}
+	if s.dbProv, err = o.newDatabaseProvider(ctx); err != nil {
 		s.close()
 		return nil, err
 	}

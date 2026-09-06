@@ -824,6 +824,7 @@ terminal belonging to somebody who is allowed to see it.
 | `IDEMPOTENCY_CONFLICT` | A key reused with different arguments. |
 | `PATH_REJECTED` | A `repository_file` that does not resolve to a regular file inside the checkout. |
 | `SAFETY_UNAVAILABLE` | A subsystem the experiment needs could not be established, so it did not run. |
+| `BRANCH_LOCKED` | Another Antifailure process holds this branch, a second `af mcp` server or a command at a terminal. The detail names its process id, its command and when it took the lock, in the words `af` prints for AF-RUN-003. A short operation is waited for; a long one is refused. Retry once it finishes. |
 | `RUN_NOT_CANCELLABLE` | A cancel of a run that already finished. |
 | `UNSUPPORTED` | A tool this build does not serve. |
 | `INTERNAL` | A defect in the server. The cause is written to the server log, not returned. |

@@ -171,6 +171,7 @@ func (e *Engine) start(runID, tool string, exp Experiment) {
 				e.logf("marking %s cancelled: %v", runID, err)
 			}
 		case fault != nil:
+			fault = refineLockFault(fault)
 			e.logf("%s failed: %s", runID, fault.Error())
 			if fault.wrapped != nil {
 				e.logf("%s cause: %v", runID, fault.wrapped)

@@ -15,7 +15,9 @@
 package lock
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,10 +82,8 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 			reclaimed = true
 			continue
 		}
-		if alive(holder) {
-			return nil, aferrors.Coded(aferrors.AFRUN003,
-				"pid", fmt.Sprint(holder.PID),
-				"since", holder.AcquiredAt.Format(time.RFC3339))
+		if Alive(holder) {
+			return nil, heldBy(holder)
 		}
 		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
 			return nil, fmt.Errorf("lock: reclaim the stale lock at %s: %w", path, rmErr)
@@ -97,9 +97,64 @@ func Acquire(path string, c clock.Clock, command string) (*Lock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lock: acquire %s: %w", path, err)
 	}
-	return nil, aferrors.Coded(aferrors.AFRUN003,
+	return nil, heldBy(holder)
+}
+
+// heldBy is the refusal for a lock a live process holds.
+//
+// The command is carried as a field even though the catalog sentence does not
+// print it, so that a caller rendering the refusal somewhere other than a
+// terminal, the MCP server in particular, can name what is holding the branch
+// rather than only which process number is.
+func heldBy(holder Owner) error {
+	return aferrors.Coded(aferrors.AFRUN003,
 		"pid", fmt.Sprint(holder.PID),
+		"command", holder.Command,
 		"since", holder.AcquiredAt.Format(time.RFC3339))
+}
+
+// AcquireWithin is Acquire with a bounded wait for a live holder to finish.
+//
+// A second MCP server asking a short question while the first is between
+// steps of a short operation should queue behind it rather than refuse, so
+// this retries a refusal caused by a live holder until wait has elapsed or
+// ctx ends. The last refusal is returned unchanged, so the caller still learns
+// who holds the lock. A wait of zero or less is exactly Acquire, which is
+// what every command line caller wants: a person at a terminal is told at
+// once and decides for themselves.
+func AcquireWithin(
+	ctx context.Context, path string, c clock.Clock, command string, wait time.Duration,
+) (*Lock, error) {
+	// A wait of zero puts the deadline in the past, which is what makes it
+	// exactly Acquire: the first refusal is returned without a pause.
+	deadline := time.Now().Add(wait)
+	for {
+		l, err := Acquire(path, c, command)
+		if err == nil || !IsHeld(err) {
+			return l, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, err
+		}
+		pause := acquirePoll
+		if pause > remaining {
+			pause = remaining
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(pause):
+		}
+	}
+}
+
+// acquirePoll is how often AcquireWithin retries.
+const acquirePoll = 250 * time.Millisecond
+
+// IsHeld reports whether err is the refusal for a lock a live process holds.
+func IsHeld(err error) bool {
+	return errors.Is(err, aferrors.Coded(aferrors.AFRUN003))
 }
 
 func writeOwner(f *os.File, path string, me Owner) error {
@@ -186,13 +241,18 @@ func read(path string) (Owner, error) {
 	return o, nil
 }
 
-// alive reports whether the recorded process is still running.
+// Alive reports whether the recorded process is still running.
 //
 // A lock from another host cannot be checked this way, so it is treated as
 // live. Preferring a false "someone is working" over a false "the coast is
 // clear" is the right way round: the first costs a wait, the second costs two
 // processes fighting over one environment.
-func alive(o Owner) bool {
+//
+// Exported because it is the one liveness rule this engine has, and the MCP
+// run store needs the same answer to the same question: a run recorded as in
+// flight is interrupted only if the process that owns it is gone. A second
+// rule written there would be a second answer to whether a process exists.
+func Alive(o Owner) bool {
 	host, _ := os.Hostname()
 	if o.Host != "" && host != "" && o.Host != host {
 		return true

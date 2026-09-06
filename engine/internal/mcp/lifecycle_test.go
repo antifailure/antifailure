@@ -32,7 +32,14 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), state.DirName)
+	return newHarnessAt(t, filepath.Join(t.TempDir(), state.DirName))
+}
+
+// newHarnessAt is newHarness over a named state directory, so that a second
+// server can be opened over the same one: that is what two af mcp processes
+// on one checkout are.
+func newHarnessAt(t *testing.T, dir string) *harness {
+	t.Helper()
 	db, err := state.Open(context.Background(), dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })

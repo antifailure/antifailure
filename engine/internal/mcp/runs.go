@@ -13,7 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"os"
+
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/state"
 )
@@ -127,6 +130,13 @@ type Run struct {
 type Store struct {
 	db    *state.DB
 	clock clock.Clock
+	// owner is the process runs submitted through this store are run by.
+	//
+	// Recorded on every run so that another process opening the same store
+	// can tell a run this process is still running from one a dead process
+	// left behind. Two af mcp processes on one checkout, two editor windows
+	// or a shared preview on one laptop, share one state directory.
+	owner lock.Owner
 }
 
 // NewStore wraps an open state database.
@@ -134,7 +144,8 @@ func NewStore(db *state.DB, c clock.Clock) *Store {
 	if c == nil {
 		c = clock.New()
 	}
-	return &Store{db: db, clock: c}
+	host, _ := os.Hostname()
+	return &Store{db: db, clock: c, owner: lock.Owner{PID: os.Getpid(), Host: host}}
 }
 
 // canonicalSHA hashes the arguments of a call in a form two equal calls share.
@@ -285,11 +296,12 @@ func (s *Store) Submit(
 INSERT INTO mcp_runs
     (id, caller, project, tool, idem_key, inputs_sha, status, phase,
      verdict, native_verdict, result, error_code, error_detail,
-     cancel_requested, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', 0, ?, ?)`,
+     cancel_requested, created_at, updated_at, owner_pid, owner_host)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', 0, ?, ?, ?, ?)`,
 			id, caller, project, tool, idemKey, sum,
 			string(StatusQueued), phaseAccepted,
-			now.UnixMilli(), now.UnixMilli()); err != nil {
+			now.UnixMilli(), now.UnixMilli(),
+			s.owner.PID, s.owner.Host); err != nil {
 			return err
 		}
 		run = Run{
@@ -465,31 +477,91 @@ WHERE id = ? AND status NOT IN (?, ?)`,
 // INCONCLUSIVE, which is the honest report: the experiment did not finish, so
 // it says nothing about the change.
 //
+// Only a run whose owning process is gone is interrupted. Until the owner was
+// recorded, this settled every run in flight, and with two af mcp processes on
+// one checkout the second to start told every caller of the first that "the
+// server stopped" while the first was still driving a browser through the
+// run. The liveness rule is the branch lock's, so the two cannot disagree
+// about whether a process exists. A run owned by a live process is left
+// exactly as it is, and the count of those is returned separately so the
+// operator's log can say that another server is running them.
+//
 // This is the reason the store is durable at all. A server that forgot its
 // runs on restart would answer RUN_NOT_FOUND for work that really happened;
 // one that remembered them but never settled them would answer "running" for
 // work that stopped hours ago. Both are worse than saying so.
 func (s *Store) RecoverInterrupted(ctx context.Context) (int, error) {
+	settled, _, err := s.recoverInterrupted(ctx)
+	return settled, err
+}
+
+// RecoverInterruptedReporting is RecoverInterrupted with the count of runs
+// it left alone because a live process owns them.
+func (s *Store) RecoverInterruptedReporting(ctx context.Context) (settled, running int, err error) {
+	return s.recoverInterrupted(ctx)
+}
+
+func (s *Store) recoverInterrupted(ctx context.Context) (settled, running int, err error) {
 	now := s.clock.Now().UnixMilli()
-	var settled int64
-	err := s.db.Tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
-UPDATE mcp_runs SET status = ?, phase = ?, verdict = ?, error_code = ?,
-                    error_detail = ?, updated_at = ?
-WHERE status IN (?, ?)`,
-			string(StatusFailed), phaseComplete, string(VerdictInconclusive),
-			string(FaultSafetyUnavailable),
-			"The server stopped while this run was in progress, so the experiment "+
-				"did not finish and proves nothing about the change. Submit it again.",
-			now, string(StatusQueued), string(StatusRunning))
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT id, owner_pid, owner_host FROM mcp_runs WHERE status IN (?, ?)`,
+			string(StatusQueued), string(StatusRunning))
 		if err != nil {
 			return err
 		}
-		settled, _ = res.RowsAffected()
+		var dead []string
+		running = 0
+		for rows.Next() {
+			var id, host string
+			var pid int64
+			if err := rows.Scan(&id, &pid, &host); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			// A zero owner predates the column: no build that records owners
+			// wrote it, so no live process is running it. See migration 4.
+			if pid > 0 && lock.Alive(lock.Owner{PID: int(pid), Host: host}) {
+				running++
+				continue
+			}
+			dead = append(dead, id)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range dead {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE mcp_runs SET status = ?, phase = ?, verdict = ?, error_code = ?,
+                    error_detail = ?, updated_at = ?
+WHERE id = ? AND status IN (?, ?)`,
+				string(StatusFailed), phaseComplete, string(VerdictInconclusive),
+				string(FaultSafetyUnavailable), interruptedDetail, now,
+				id, string(StatusQueued), string(StatusRunning)); err != nil {
+				return err
+			}
+			settled++
+		}
 		return nil
 	})
-	return int(settled), err
+	if err != nil {
+		return 0, 0, err
+	}
+	return settled, running, nil
 }
+
+// interruptedDetail is what a run whose process exited mid flight says.
+//
+// This sentence is reserved for that case. A run another live process is
+// still running is never given it, because a caller reading "the server
+// stopped" about a server that did not stop cannot tell a crash from a second
+// window, and the one remedy it names, resubmitting, is the one thing that
+// makes a second window worse.
+const interruptedDetail = "The server stopped while this run was in progress, so the experiment " +
+	"did not finish and proves nothing about the change. Submit it again."
 
 // phase names are stable strings a caller may branch on.
 const (
