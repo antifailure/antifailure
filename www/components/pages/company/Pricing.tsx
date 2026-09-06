@@ -257,7 +257,7 @@ export function PricingPage() {
         path="/pricing"
         eyebrow="Pricing"
         title="Operational value, not AI personalities."
-        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a flat platform fee per organization plus run usage. Enterprise adds volume, policy, and governance. Those bands are illustrative, not a quote."
+        lead="Community is the local engine. It is free, it is MIT licensed, and it works today with no account. Team is a flat platform fee per organization plus run usage. Enterprise adds volume, policy, and governance, and its band is the illustrative one: Community and Team are the prices you pay."
         actions={
           <>
             {/* The quickstart still leads, which is this page's own decision

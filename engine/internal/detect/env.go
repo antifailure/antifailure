@@ -387,6 +387,16 @@ func (a *MigrationAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, erro
 	numberedFile := regexp.MustCompile(`^[0-9]`)
 	for _, d := range dirs {
 		files := append([]string(nil), sqlDirs[d]...)
+		// Redundant, deliberately, and not observable from any fixture. The
+		// paths come out of the repository index, which NewRepo sorts and
+		// Exists binary searches, so they arrive in name order already;
+		// removing this line turns no test red, which is how it was found.
+		// It stays because the order it guarantees is the order a database
+		// replays these files in, and applying migrations out of order
+		// against a real one can corrupt it in a way no later check would
+		// notice. The guarantee itself is checked where it is made, by
+		// TestNewRepo_TheIndexIsSortedRatherThanInWalkOrder, on the one
+		// fixture where the walk and the sort disagree.
 		sort.Strings(files)
 		numbered := len(files) > 0
 		for _, f := range files {

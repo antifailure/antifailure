@@ -1027,3 +1027,51 @@ var errBoom = errorString("boom")
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+// NewRepo's own comment says the index is sorted and that this is what makes
+// detection independent of the order the filesystem returns entries in. Two
+// things rest on it and neither was checked. Exists binary searches the slice,
+// so an index in walk order does not fail loudly, it answers "no" about a file
+// that is there. And the plain SQL migration analyzer builds a psql command
+// with one -f per file in the order it reads them, which is the order a real
+// database would replay them in.
+//
+// The fixture is the minimal pair where the walk and the sort disagree.
+// fs.WalkDir visits a directory's entries in lexical order, so "a" comes
+// before "a.txt" and the walk descends into the directory first, yielding
+// a/b.txt and then a.txt. Sorting the full paths puts a.txt first, because '.'
+// is 0x2E and '/' is 0x2F. Any fixture whose files all sit in one directory
+// cannot tell the two apart, which is why the mutation that removes the sort
+// survives every test built from one.
+func indexOrderFixture() fstest.MapFS {
+	return fstest.MapFS{
+		"a/b.txt": &fstest.MapFile{Data: []byte("inside the directory")},
+		"a.txt":   &fstest.MapFile{Data: []byte("beside it")},
+	}
+}
+
+func TestNewRepo_TheIndexIsSortedRatherThanInWalkOrder(t *testing.T) {
+	t.Parallel()
+	repo, err := detect.NewRepo(indexOrderFixture(), ".")
+	require.NoError(t, err)
+	require.Equal(t, []string{"a.txt", "a/b.txt"}, repo.Files(),
+		"the index is in the order the walk produced, so every lookup and every "+
+			"analyzer that reads it in order is at the mercy of the filesystem")
+}
+
+func TestRepoExists_FindsAFileTheWalkYieldedOutOfSortedOrder(t *testing.T) {
+	t.Parallel()
+	repo, err := detect.NewRepo(indexOrderFixture(), ".")
+	require.NoError(t, err)
+	require.True(t, repo.Exists("a.txt"),
+		"Exists binary searches the index, so an unsorted index makes it deny a "+
+			"file that is indexed rather than fail")
+}
+
+func TestRepoExists_FindsTheFileTheWalkYieldedFirst(t *testing.T) {
+	t.Parallel()
+	repo, err := detect.NewRepo(indexOrderFixture(), ".")
+	require.NoError(t, err)
+	require.True(t, repo.Exists("a/b.txt"),
+		"the file the walk yielded first is not in the index, or the search cannot find it")
+}
