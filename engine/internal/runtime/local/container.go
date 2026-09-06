@@ -64,33 +64,53 @@ func (r *Runtime) startService(
 	// A container left by an interrupted run holds the name. Reusing a running
 	// one keeps Up idempotent; replacing a stopped one is what makes a second
 	// Up after a crash work rather than fail on a name conflict.
+	//
+	// Reused only when it runs the image this Up would start. The image
+	// reference carries a digest of the build context, so a tree edited since
+	// the container started names a different image, and a container from
+	// the old one kept answering every probe with the old code while `af up`
+	// printed ready. A fix was rehearsed that way against the build it was
+	// fixing, and the rehearsal passed. The comparison is on image IDs rather
+	// than tags, because --rebuild produces a new image under the same tag.
+	//
+	// The reused container also used to return here, ready, with no URL and
+	// without the ingress being looked up, so a repeat Up printed a service
+	// with no address. It now takes the same path as a fresh one from the
+	// ingress onwards.
+	var id string
 	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		if existing.State != nil && existing.State.Running {
-			running.ContainerID = existing.ID
-			running.State = "running"
-			running.Ready = true
-			return running, nil
-		}
-		if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
-			return running, rmErr
+		switch {
+		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image):
+			id = existing.ID
+		case existing.State != nil && existing.State.Running:
+			progress(fmt.Sprintf("%s: replacing the running container, which runs an image this tree no longer builds", s.Name))
+			fallthrough
+		default:
+			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+				return running, rmErr
+			}
 		}
 	}
 
-	id, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
-	if err != nil {
-		return running, err
+	if id == "" {
+		created, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
+		if err != nil {
+			return running, err
+		}
+		id = created
+		running.ContainerID = id
+
+		if err := r.installCA(ctx, id, spec); err != nil {
+			return running, err
+		}
+
+		if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
+			running.State = "failed to start"
+			return running, aferrors.Wrap(err, aferrors.AFRUN040,
+				"detail", fmt.Sprintf("starting %s: %v", s.Name, err))
+		}
 	}
 	running.ContainerID = id
-
-	if err := r.installCA(ctx, id, spec); err != nil {
-		return running, err
-	}
-
-	if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
-		running.State = "failed to start"
-		return running, aferrors.Wrap(err, aferrors.AFRUN040,
-			"detail", fmt.Sprintf("starting %s: %v", s.Name, err))
-	}
 	running.State = "running"
 
 	// The service itself is on a network with no route out, which is also a
@@ -129,6 +149,24 @@ func (r *Runtime) startService(
 		progress(fmt.Sprintf("%s: ready", s.Name))
 	}
 	return running, nil
+}
+
+// runsImage reports whether a container runs the image ref names now.
+//
+// By image ID, resolved through the daemon, so that a rebuilt image under an
+// unchanged tag reads as a change. When the reference cannot be resolved the
+// answer is false: the container is then replaced and the create that follows
+// says why the image is missing, which is a better message than a stale
+// container reported ready.
+func (r *Runtime) runsImage(ctx context.Context, existing container.InspectResponse, ref string) bool {
+	if ref == "" {
+		return false
+	}
+	img, err := r.cli.ImageInspect(ctx, ref)
+	if err != nil {
+		return false
+	}
+	return img.ID != "" && img.ID == existing.Image
 }
 
 // create makes a container without starting it.

@@ -245,6 +245,50 @@ func TestUp_IsIdempotentForTheSameEnvironment(t *testing.T) {
 	require.Equal(t, first.NetworkID, second.NetworkID)
 }
 
+// A running container is reused only while it runs the image the tree builds
+// now. Before this, any running container with the right name was reported
+// ready, so an `af up` after an edit kept serving the previous build and a fix
+// was rehearsed against the code it was fixing.
+func TestUp_ReplacesARunningContainerWhoseImageChanged(t *testing.T) {
+	r := requireRuntime(t)
+	id := envID(t, r, "replace1")
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+
+	specFor := func(img string, progress *[]string) provider.EnvSpec {
+		return provider.EnvSpec{EnvID: id, Services: []provider.ServiceSpec{{
+			Name: "web", Image: img, Kind: "web", Port: 8080,
+		}}, Progress: func(l string) { *progress = append(*progress, l) }}
+	}
+
+	var first, again, replaced []string
+	firstImage := tinyWebImage(t, 8080, "the first build")
+	before, err := r.Up(ctx, specFor(firstImage, &first))
+	require.NoError(t, err)
+	require.Equal(t, "the first build", get(t, before.URL()))
+
+	// The same image again keeps the container, and still names the address:
+	// the reused path used to return early with no URL at all.
+	same, err := r.Up(ctx, specFor(firstImage, &again))
+	if err != nil {
+		require.Contains(t, err.Error(), "already", "a repeat Up must not create a second network")
+	}
+	require.Equal(t, before.Services[0].ContainerID, same.Services[0].ContainerID,
+		"an unchanged image keeps the running container")
+	require.NotEmpty(t, same.URL(), "a reused service still has an address")
+
+	after, err := r.Up(ctx, specFor(tinyWebImage(t, 8080, "the second build"), &replaced))
+	if err != nil {
+		require.Contains(t, err.Error(), "already", "a repeat Up must not create a second network")
+	}
+	require.NotEqual(t, before.Services[0].ContainerID, after.Services[0].ContainerID,
+		"a changed image replaces the running container")
+	require.Equal(t, "the second build", get(t, after.URL()),
+		"the address serves the build from this tree, not the previous one")
+	require.Contains(t, strings.Join(replaced, "\n"), "replacing the running container",
+		"the replacement is said, so a log explains why the container id moved")
+}
+
 func TestUp_ReportsAServiceThatExitsImmediately(t *testing.T) {
 	r := requireRuntime(t)
 	id := envID(t, r, "crash1")
