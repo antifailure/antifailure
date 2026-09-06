@@ -26,6 +26,7 @@ func TestFiresOnBehaviourSomebodyCanSee(t *testing.T) {
 		"deploy/docker/control-plane.Dockerfile",
 		"deploy/helm/antifailure-control-plane/Chart.yaml",
 		"install.sh",
+		"action.yml", // what every customer's workflow runs, through uses:
 	} {
 		if _, ok := Requires(p); !ok {
 			t.Errorf("%s changes what somebody sees and should need a fragment", p)

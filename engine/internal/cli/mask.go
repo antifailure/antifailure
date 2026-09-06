@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,11 +81,92 @@ silent: the new column holds real addresses and nothing says so.
 A column no rule covers is reported rather than left alone. Left alone, for a
 column called customer_notes, means the notes ship.`),
 	}
+	cmd.AddCommand(newMaskInitCommand(env))
 	cmd.AddCommand(newMaskPlanCommand(env))
 	cmd.AddCommand(newMaskApplyCommand(env))
 	cmd.AddCommand(newMaskVerifyCommand(env))
 	cmd.AddCommand(newMaskPreviewCommand(env))
 	return cmd
+}
+
+// maskingWritten is what af mask init did, for the two commands that report it.
+type maskingWritten struct {
+	Path    string `json:"path"`
+	Source  string `json:"source"`
+	Tables  int    `json:"tables"`
+	Columns int    `json:"columns"`
+	Rules   int    `json:"rules"`
+}
+
+func newMaskInitCommand(env *Env) *cobra.Command {
+	var branch string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Read the schema and write masking.yaml with a rule for every column",
+		Long: strings.TrimSpace(`
+Reads the schema of the database source, or of this environment's branch when
+one is up, decides every column the way the built in rules would, and writes
+the result to masking.yaml as one explicit rule per column.
+
+The file it writes leaves the plan with nothing to ask. A column a built in
+rule recognises gets that rule restated with its reason. A column nothing
+recognises gets a rule that empties it, with a reason saying it was
+unrecognised and is emptied until somebody says otherwise. Numbers, times and
+identifiers get no rule, because nothing is done to them.
+
+It refuses to replace a file that is already there unless --force is passed,
+because the rules somebody edited are the most valuable thing in it.`),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			written, err := writeMaskingRules(cmd.Context(), env, branch, force)
+			if err != nil {
+				return err
+			}
+			if env.Out.Format == FormatJSON {
+				return env.Out.JSON(written)
+			}
+			env.Out.Status(env.Out.S(StyleGood, SymbolOK), "masking rules",
+				fmt.Sprintf("written from %d tables, %d columns", written.Tables, written.Columns))
+			env.Out.Printf("  %s, read from %s\n", short(env.WorkDir, written.Path), written.Source)
+			env.Out.Hint("Read it, then see what it does column by column with", "af mask plan")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&branch, "branch", "", "Branch whose environment to read, defaulting to the checked out one")
+	cmd.Flags().BoolVar(&force, "force", false, "Replace a masking file that is already there")
+	return cmd
+}
+
+// writeMaskingRules is the work behind af mask init, shared with af init.
+func writeMaskingRules(ctx context.Context, env *Env, branch string, force bool) (*maskingWritten, error) {
+	o, err := orchestrator(env, branch, false)
+	if err != nil {
+		return nil, err
+	}
+	path := o.MaskingRulesPath()
+	if _, statErr := os.Stat(path); statErr == nil && !force {
+		return nil, aferrors.Coded(aferrors.AFMSK012, "path", path)
+	}
+	res, err := o.MaskDraft(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rules := masking.DraftRules(res.Tables, res.Assignments)
+	columns := 0
+	for _, t := range res.Tables {
+		columns += len(t.Columns)
+	}
+	body := masking.RulesFile(rules, res.Source, len(res.Tables), columns)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("mask init: create %s: %w", filepath.Dir(path), err)
+	}
+	if err := writeAtomic(path, []byte(body), 0o644); err != nil {
+		return nil, err
+	}
+	return &maskingWritten{
+		Path: path, Source: res.Source, Tables: len(res.Tables), Columns: columns, Rules: len(rules),
+	}, nil
 }
 
 func newMaskPlanCommand(env *Env) *cobra.Command {

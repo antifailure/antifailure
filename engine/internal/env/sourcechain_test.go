@@ -139,7 +139,7 @@ func TestUp_ANamedSourceThatNothingHoldsIsNamedByTheFirstCommand(t *testing.T) {
 	o, s, _ := refreshFixture(t,
 		&schema.Database{SourceURLEnv: "PRODUCTION_DATABASE_URL"}, nil)
 
-	_, _, _, _, err := o.database(t.Context(), s)
+	_, _, _, _, _, err := o.database(t.Context(), s)
 	require.Equal(t, aferrors.AFDB016, codeOf(err),
 		"the reader was counted other projects' goldens at instead of being told "+
 			"which variable to set")
@@ -152,7 +152,7 @@ func TestUp_ASourceThatIsThereAndNoGoldenIsStillAFailedSelection(t *testing.T) {
 	writeDotEnv(t, o.opts.Root,
 		"PRODUCTION_DATABASE_URL=postgres://reader:secret@db.internal:5432/app\n")
 
-	_, _, _, _, err := o.database(t.Context(), s)
+	_, _, _, _, _, err := o.database(t.Context(), s)
 	require.Equal(t, aferrors.AFDB012, codeOf(err),
 		"a source that is there and no golden is the refusal AF-DB-012 was written for")
 }

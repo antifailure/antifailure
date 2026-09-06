@@ -46,13 +46,6 @@ errors:
     docs: reference/manifest
     retryable: false
     exit_code: 3
-  - code: AF-MAN-004
-    area: MAN
-    message: "'af init' has questions to ask and this session has no terminal to ask them on."
-    next_step: "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default."
-    docs: reference/cli#af-init
-    retryable: false
-    exit_code: 2
   - code: AF-MAN-005
     area: MAN
     message: "The manifest at {path} is larger than the {limit} limit."
@@ -624,6 +617,13 @@ errors:
     docs: concepts/verification
     retryable: false
     exit_code: 7
+  - code: AF-MSK-012
+    area: MSK
+    message: "There is already a masking file at {path}, and 'af mask init' would overwrite the rules in it."
+    next_step: "Edit the file, or pass --force to replace it with rules written from the schema."
+    docs: concepts/masking
+    retryable: false
+    exit_code: 3
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."
@@ -956,6 +956,13 @@ errors:
     docs: getting-started/pull-requests
     retryable: false
     exit_code: 6
+  - code: AF-GH-004
+    area: GH
+    message: "The github block could not be added to {path}, so the manifest was left as it was: {detail}"
+    next_step: "Add 'github: {mode: actions, comment: true, fork_policy: label}' to the manifest by hand, then run 'af explain' to check it."
+    docs: getting-started/pull-requests
+    retryable: false
+    exit_code: 3
 
   # Control plane
   - code: AF-CP-001

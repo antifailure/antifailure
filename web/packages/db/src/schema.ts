@@ -1283,6 +1283,32 @@ export const teardownRequests = pgTable('teardown_requests', {
 }, (t) => [index('teardown_requests_org_idx').on(t.orgId, t.requestedAt)])
 
 /**
+ * The pull request the App opens to add the workflow file, one row per
+ * repository, ever. A queue with a lease, like teardownRequests, because the
+ * webhook handler that enqueues it may not make GitHub calls. See
+ * migrations/0040 and github/setup.ts.
+ */
+export const repositorySetups = pgTable('repository_setups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orgId: uuid('org_id').notNull(),
+  repositoryId: uuid('repository_id').notNull(),
+  state: text('state').notNull().default('queued'),
+  attempts: integer('attempts').notNull().default(0),
+  leaseHolder: text('lease_holder'),
+  leasedUntil: timestamp('leased_until', { withTimezone: true }),
+  branch: text('branch'),
+  pullRequestNumber: integer('pull_request_number'),
+  pullRequestUrl: text('pull_request_url'),
+  lastError: text('last_error'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('repository_setups_repository_key').on(t.repositoryId),
+  index('repository_setups_org_idx').on(t.orgId, t.requestedAt),
+])
+
+/**
  * What an operator wrote down about an account.
  *
  * Deliberately NOT tenant scoped, and deliberately not reachable by the
@@ -1535,7 +1561,7 @@ export const tenantScopedTables = [
   workloadRouteMetrics, workloadThresholdVerdicts, workloadEvidence,
   runtimeCommands,
 
-  githubDeliveries, pullRequests, prGenerations, teardownRequests,
+  githubDeliveries, pullRequests, prGenerations, teardownRequests, repositorySetups,
   oidcRepositoryBindings,
   entitlementOverrides, featureFlagTargets, adminOperations,
 ] as const

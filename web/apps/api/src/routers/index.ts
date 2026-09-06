@@ -399,6 +399,44 @@ const repositoriesRouter = router({
           ORDER BY full_name`),
       )
     }),
+
+  /**
+   * What happened to the pull request the App opens on each repository.
+   *
+   * The console shows this above the environments form, because "connected"
+   * and "checked" are different things and the gap between them used to be
+   * invisible: a repository listed here with no workflow file looked exactly
+   * like one that was working. A row per repository, oldest request first, so
+   * the list reads in the order the repositories were connected.
+   *
+   * The same permission as list, because it is the same fact about the same
+   * rows: which repositories this organization has, and whether each one can
+   * run a check yet.
+   */
+  setup: orgProcedure('environments.view').query(async ({ ctx }) => {
+    const c = ctx as OrgContext
+    return c.pool.withTenant(c.tenant, async (db) =>
+      db.execute<{
+        id: string
+        repository: string
+        state: string
+        attempts: number
+        branch: string | null
+        pull_request_number: number | null
+        pull_request_url: string | null
+        last_error: string | null
+        requested_at: string
+        finished_at: string | null
+      }>(sql`
+        SELECT s.id, r.full_name AS repository, s.state, s.attempts, s.branch,
+               s.pull_request_number, s.pull_request_url, s.last_error,
+               s.requested_at, s.finished_at
+        FROM repository_setups s
+        JOIN repositories r ON r.id = s.repository_id
+        WHERE r.archived_at IS NULL
+        ORDER BY s.requested_at, r.full_name`),
+    )
+  }),
 })
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,23 @@ change.`),
 			}
 
 			o, m, err := orchestratorWithManifest(e, branch)
+			var drafted *draft
+			if isNoManifest(err) {
+				// No manifest is not the end of the check. The repository
+				// has the workflow file, which is the one thing that could
+				// not be drafted for it, and everything else can be. A
+				// draft that cannot be made is a skipped run and not a red
+				// one, for the reason every skipped run exits zero: nothing
+				// was learned about the change.
+				drafted, err = draftManifest(ctx, e, gitRoot(e.WorkDir))
+				if err != nil {
+					announceComment(e)
+					return skippedRun(e, undraftableRun(e, branch, docsBase, err), output, jsonOutput)
+				}
+				o, m, err = orchestratorWithManifest2(e, lifecycleOptions{
+					branch: branch, manifest: drafted.Manifest, root: drafted.Root,
+				})
+			}
 			if err != nil {
 				return err
 			}
@@ -103,6 +120,14 @@ change.`),
 				// many it was supposed to run. Reading it later would put it
 				// behind exactly the failures it exists to describe.
 				Declared: len(m.Workflows),
+				Drafted:  drafted != nil,
+			}
+			if drafted != nil {
+				e.Out.Section("No antifailure.yaml here, so one was drafted")
+				for _, n := range drafted.notes() {
+					e.Out.Printf("  %s\n", n)
+				}
+				run.Notes = append(run.Notes, drafted.notes()...)
 			}
 			started := e.Clock.Now()
 			run.Exploration = declaredExploration(m)
@@ -166,7 +191,7 @@ change.`),
 			e.Out.Section("Bringing up " + o.EnvID())
 			up, upErr := o.Up(ctx)
 			if up != nil {
-				run.URL, run.Golden = up.URL, up.Golden
+				run.URL, run.Golden, run.EmptySource = up.URL, up.Golden, up.EmptySource
 			}
 			if upErr != nil {
 				// The environment did not come up, which is not evidence about
@@ -282,6 +307,23 @@ change.`),
 	cmd.Flags().StringVar(&saveBaseline, "save-baseline", "",
 		"Save this run's queries and plans, to compare a later branch against")
 	return cmd
+}
+
+// undraftableRun is the report for a repository with no manifest and nothing
+// a manifest could be drafted from.
+//
+// Skipped, not failed, and the next command is named. The reader is somebody
+// who installed the workflow and opened a pull request, and what they need
+// is the one command that finishes the setup rather than a code.
+func undraftableRun(e *Env, branch, docsBase string, cause error) report.Run {
+	// Drafted stays false. The sentence it turns on says a drafted manifest
+	// was used, and none was.
+	return report.Run{
+		Branch: branchName(e, branch), Commit: commitSHA(e), DocsBase: docsBase,
+		Skipped: "There is no antifailure.yaml in this repository and one could not be " +
+			"drafted from it: " + validationDetail(cause) + " Run `af init` in the repository " +
+			"root, answer what it asks, and commit the file.",
+	}
 }
 
 // explorer is the one method exploreConfigured needs, so the wiring below has

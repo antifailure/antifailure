@@ -130,6 +130,7 @@ runner/artifacts/
 /changecheck
 /cigate
 /claimcheck
+/actioncheck
 /classcheck
 /conflictcheck
 /constcheck

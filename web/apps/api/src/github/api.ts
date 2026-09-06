@@ -163,6 +163,49 @@ export interface RepositoryApi {
     repository: string,
     runId: number,
   ): Promise<WorkflowRunStatus | null>
+
+  // The five below exist for one job: the pull request that adds the workflow
+  // file to a newly installed repository. See github/setup.ts. Together they
+  // are the first thing this control plane WRITES into a customer's repository
+  // contents, and they write exactly one file on a branch of their own, never
+  // on the default branch.
+
+  /** Whether a file exists at a path on a ref. A 404 is false, not a failure. */
+  fileExists(installationId: number, repository: string, path: string, ref: string): Promise<boolean>
+  /** The commit a branch points at. */
+  branchHead(installationId: number, repository: string, branch: string): Promise<string>
+  /** Creates a branch at a commit. A branch that already exists is reused
+   *  rather than refused: a sweeper that died between creating the branch and
+   *  committing to it comes back through here. */
+  createBranch(installationId: number, repository: string, branch: string, sha: string): Promise<void>
+  /** Writes one file on a branch, creating or replacing it. */
+  putFile(installationId: number, repository: string, input: PutFileInput): Promise<void>
+  /** Opens a pull request, or finds the open one that already has this head. */
+  createPullRequest(
+    installationId: number,
+    repository: string,
+    input: PullRequestInput,
+  ): Promise<OpenedPullRequest>
+}
+
+export interface PutFileInput {
+  path: string
+  branch: string
+  message: string
+  /** The file's bytes, as text. Encoded on the way out. */
+  content: string
+}
+
+export interface PullRequestInput {
+  title: string
+  head: string
+  base: string
+  body: string
+}
+
+export interface OpenedPullRequest {
+  number: number
+  url: string
 }
 
 export interface RepositoryApiConfig {
@@ -464,6 +507,185 @@ export class RealRepositoryApi implements RepositoryApi {
       status: typeof json.status === 'string' ? json.status : 'unknown',
       conclusion: typeof json.conclusion === 'string' ? json.conclusion : null,
       headSha: typeof json.head_sha === 'string' ? json.head_sha : '',
+    }
+  }
+
+  private static contentsPath(repository: string, path: string, ref?: string): string {
+    const encoded = path.split('/').map(encodeURIComponent).join('/')
+    return RealRepositoryApi.path(
+      repository,
+      `/contents/${encoded}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`,
+    )
+  }
+
+  async fileExists(
+    installationId: number,
+    repository: string,
+    path: string,
+    ref: string,
+  ): Promise<boolean> {
+    // `contents: read`, not write. The read is the first call the setup makes
+    // and it is the one every installation can already answer, so a refusal
+    // here would name a permission the App has held since it was created.
+    const res = await this.call(
+      installationId,
+      'GET',
+      RealRepositoryApi.contentsPath(repository, path, ref),
+      undefined,
+      'contents: read',
+    )
+    if (res.status === 404) return false
+    if (!res.ok) await RealRepositoryApi.refuse(res, `read ${path} in ${repository}@${ref}`)
+    return true
+  }
+
+  async branchHead(installationId: number, repository: string, branch: string): Promise<string> {
+    const res = await this.call(
+      installationId,
+      'GET',
+      RealRepositoryApi.path(repository, `/git/ref/heads/${encodeURIComponent(branch)}`),
+      undefined,
+      'contents: read',
+    )
+    if (!res.ok) await RealRepositoryApi.refuse(res, `read the head of ${repository}@${branch}`)
+    const json = (await res.json()) as { object?: { sha?: unknown } }
+    const sha = json.object?.sha
+    if (typeof sha !== 'string' || sha === '') {
+      throw new GitHubApiError(`GitHub answered for ${branch} and named no commit.`, 502)
+    }
+    return sha
+  }
+
+  async createBranch(
+    installationId: number,
+    repository: string,
+    branch: string,
+    sha: string,
+  ): Promise<void> {
+    const res = await this.call(
+      installationId,
+      'POST',
+      RealRepositoryApi.path(repository, '/git/refs'),
+      { ref: `refs/heads/${branch}`, sha },
+      'contents: write',
+    )
+    if (res.status === 201) return
+    // 422 "Reference already exists" is a sweeper that died after this call
+    // last time, or a person who made the branch themselves. Either way the
+    // branch is there, which is what was asked for.
+    if (res.status === 422) {
+      const body = await res.text().catch(() => '')
+      if (body.includes('Reference already exists')) return
+      throw new GitHubApiError(
+        `GitHub refused to create ${branch} in ${repository}: 422. ${body.slice(0, 200)}`,
+        422,
+      )
+    }
+    await RealRepositoryApi.refuse(res, `create the branch ${branch} in ${repository}`)
+  }
+
+  async putFile(installationId: number, repository: string, input: PutFileInput): Promise<void> {
+    // The write needs the blob sha of what it replaces, so a file already on
+    // the branch is read first. A 404 is the ordinary answer on a fresh branch.
+    let sha: string | null = null
+    const existing = await this.call(
+      installationId,
+      'GET',
+      RealRepositoryApi.contentsPath(repository, input.path, input.branch),
+      undefined,
+      'contents: read',
+    )
+    if (existing.ok) {
+      const json = (await existing.json()) as { sha?: unknown }
+      if (typeof json.sha === 'string') sha = json.sha
+    } else if (existing.status !== 404) {
+      await RealRepositoryApi.refuse(existing, `read ${input.path} in ${repository}@${input.branch}`)
+    }
+
+    const res = await this.call(
+      installationId,
+      'PUT',
+      RealRepositoryApi.contentsPath(repository, input.path),
+      {
+        message: input.message,
+        content: Buffer.from(input.content, 'utf8').toString('base64'),
+        branch: input.branch,
+        ...(sha ? { sha } : {}),
+      },
+      'contents: write',
+    )
+    if (!res.ok) await RealRepositoryApi.refuse(res, `write ${input.path} in ${repository}`)
+  }
+
+  async createPullRequest(
+    installationId: number,
+    repository: string,
+    input: PullRequestInput,
+  ): Promise<OpenedPullRequest> {
+    const res = await this.call(
+      installationId,
+      'POST',
+      RealRepositoryApi.path(repository, '/pulls'),
+      { title: input.title, head: input.head, base: input.base, body: input.body },
+      'pull requests: write',
+    )
+    if (res.status === 422) {
+      // "A pull request already exists for owner:branch." A sweeper that died
+      // between opening the pull request and writing its number down comes
+      // back through here, and opening a second one would be the exact thing
+      // this table's unique constraint exists to prevent. Find the one that is
+      // open instead.
+      const body = await res.text().catch(() => '')
+      if (body.includes('already exists')) {
+        const found = await this.findOpenPullRequest(installationId, repository, input.head)
+        if (found) return found
+      }
+      throw new GitHubApiError(
+        `GitHub refused to open a pull request in ${repository}: 422. ${body.slice(0, 200)}`,
+        422,
+      )
+    }
+    if (!res.ok) await RealRepositoryApi.refuse(res, `open a pull request in ${repository}`)
+    return RealRepositoryApi.openedFrom(await res.json(), repository)
+  }
+
+  private async findOpenPullRequest(
+    installationId: number,
+    repository: string,
+    head: string,
+  ): Promise<OpenedPullRequest | null> {
+    const owner = repository.split('/')[0] ?? ''
+    const res = await this.call(
+      installationId,
+      'GET',
+      RealRepositoryApi.path(
+        repository,
+        `/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}&per_page=1`,
+      ),
+      undefined,
+      'pull requests: write',
+    )
+    if (!res.ok) return null
+    const json = await res.json()
+    if (!Array.isArray(json) || json.length === 0) return null
+    try {
+      return RealRepositoryApi.openedFrom(json[0], repository)
+    } catch {
+      return null
+    }
+  }
+
+  private static openedFrom(json: unknown, repository: string): OpenedPullRequest {
+    const row = json as { number?: unknown; html_url?: unknown }
+    if (typeof row.number !== 'number') {
+      throw new GitHubApiError('GitHub opened a pull request and did not say which one.', 502)
+    }
+    return {
+      number: row.number,
+      url:
+        typeof row.html_url === 'string'
+          ? row.html_url
+          : `https://github.com/${repository}/pull/${row.number}`,
     }
   }
 }

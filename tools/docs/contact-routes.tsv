@@ -66,3 +66,4 @@ www/components/home/visuals/hero/StateFilm.tsx	ajay@acme.com	not-a-route	a row o
 justfile	conduct@antifailure.dev	records-a-defect	named in the comment above the contactcheck recipe as the defect the recipe exists for, with the DNS reason beside it.
 justfile	security@antifailure.dev	records-a-defect	the other half of the same comment.
 www/components/pages/figures/product-firewall.tsx	checkout@twin.local	not-a-route	the sender on the mail header the capture figure draws. The twin rendered this message and held it; nothing was sent, and .local does not resolve.
+engine/internal/cli/github.go	git@github.com	not-a-route	the ssh user and host of a GitHub remote URL, git@github.com:owner/repo, which af init reads out of .git/config to decide whether to write the workflow. It is a spelling the code recognises, not an address anybody is sent to.

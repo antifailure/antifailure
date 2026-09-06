@@ -23,14 +23,17 @@ import (
 
 // UpJSON is the machine readable form of af up.
 type UpJSON struct {
-	EnvID    string        `json:"env_id"`
-	URL      string        `json:"url,omitempty"`
-	Golden   string        `json:"golden,omitempty"`
-	Proxied  bool          `json:"proxied"`
-	Built    int           `json:"built"`
-	Cached   int           `json:"cached"`
-	Duration string        `json:"duration"`
-	Services []ServiceJSON `json:"services"`
+	EnvID  string `json:"env_id"`
+	URL    string `json:"url,omitempty"`
+	Golden string `json:"golden,omitempty"`
+	// EmptySource says the golden was built from nothing, which the text
+	// form says in a sentence during the run.
+	EmptySource bool          `json:"empty_source"`
+	Proxied     bool          `json:"proxied"`
+	Built       int           `json:"built"`
+	Cached      int           `json:"cached"`
+	Duration    string        `json:"duration"`
+	Services    []ServiceJSON `json:"services"`
 }
 
 // ServiceJSON is one service in the JSON forms of up and status.
@@ -77,6 +80,11 @@ type lifecycleOptions struct {
 	// screen when it is running, and a Printf into a Bubble Tea frame corrupts
 	// it, so the same information travels as events instead.
 	silent bool
+	// manifest, when set, is used instead of one read from disk, and root is
+	// the directory it describes. This is how a command that drafted a
+	// manifest in memory runs on it without writing a file nobody committed.
+	manifest *schema.Manifest
+	root     string
 }
 
 // orchestrator loads the manifest and prepares the lifecycle for this repo.
@@ -114,15 +122,18 @@ func progressFor(e *Env) *Progress {
 
 func orchestratorWithManifest2(env2 *Env, opts lifecycleOptions) (*env.Orchestrator, *schema.Manifest, error) {
 	branch, rebuild := opts.branch, opts.rebuild
-	path, err := manifest.Find(env2.WorkDir)
-	if err != nil {
-		return nil, nil, err
+	m, root := opts.manifest, opts.root
+	if m == nil {
+		path, err := manifest.Find(env2.WorkDir)
+		if err != nil {
+			return nil, nil, err
+		}
+		m, err = manifest.Load(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		root = repoRoot(path)
 	}
-	m, err := manifest.Load(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	root := repoRoot(path)
 	if branch == "" {
 		branch = currentBranch(root)
 	}
@@ -395,7 +406,8 @@ interrupt at any point leaves something af down can clean up.`),
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(UpJSON{
 					EnvID: res.EnvID, URL: res.URL, Golden: res.Golden, Proxied: res.Proxied,
-					Built: res.Built, Cached: res.Cached,
+					EmptySource: res.EmptySource,
+					Built:       res.Built, Cached: res.Cached,
 					Duration: res.Duration.Round(1e9).String(),
 					Services: servicesJSON(res.Services),
 				})

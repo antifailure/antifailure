@@ -196,6 +196,9 @@ const (
 	AFGH002 Code = "AF-GH-002"
 	// Nothing ran, because of the fork policy on the base branch. {detail}
 	AFGH003 Code = "AF-GH-003"
+	// The github block could not be added to {path}, so the manifest was
+	// left as it was: {detail}
+	AFGH004 Code = "AF-GH-004"
 
 	// Infrastructure
 	// The cloud API returned a quota error for {quota} in {region}.
@@ -233,9 +236,6 @@ const (
 	// The manifest at {path} declares schema version {found}, which this
 	// build does not understand.
 	AFMAN003 Code = "AF-MAN-003"
-	// 'af init' has questions to ask and this session has no terminal to
-	// ask them on.
-	AFMAN004 Code = "AF-MAN-004"
 	// The manifest at {path} is larger than the {limit} limit.
 	AFMAN005 Code = "AF-MAN-005"
 	// The path {path} in the manifest resolves outside the repository.
@@ -266,6 +266,9 @@ const (
 	// Verification could not read {table}.{column}, so the golden was not
 	// verified: {detail}
 	AFMSK011 Code = "AF-MSK-011"
+	// There is already a masking file at {path}, and 'af mask init' would
+	// overwrite the rules in it.
+	AFMSK012 Code = "AF-MSK-012"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -1067,6 +1070,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
 	},
+	AFGH004: {
+		Code:      AFGH004,
+		Area:      "GH",
+		Message:   "The github block could not be added to {path}, so the manifest was left as it was: {detail}",
+		NextStep:  "Add 'github: {mode: actions, comment: true, fork_policy: label}' to the manifest by hand, then run 'af explain' to check it.",
+		Docs:      "getting-started/pull-requests",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
 	AFINF001: {
 		Code:      AFINF001,
 		Area:      "INF",
@@ -1193,15 +1205,6 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
-	AFMAN004: {
-		Code:      AFMAN004,
-		Area:      "MAN",
-		Message:   "'af init' has questions to ask and this session has no terminal to ask them on.",
-		NextStep:  "Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.",
-		Docs:      "reference/cli#af-init",
-		Retryable: false,
-		ExitCode:  ExitUsage,
-	},
 	AFMAN005: {
 		Code:      AFMAN005,
 		Area:      "MAN",
@@ -1300,6 +1303,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/verification",
 		Retryable: false,
 		ExitCode:  ExitVerification,
+	},
+	AFMSK012: {
+		Code:      AFMSK012,
+		Area:      "MSK",
+		Message:   "There is already a masking file at {path}, and 'af mask init' would overwrite the rules in it.",
+		NextStep:  "Edit the file, or pass --force to replace it with rules written from the schema.",
+		Docs:      "concepts/masking",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFNET001: {
 		Code:      AFNET001,

@@ -45,6 +45,16 @@ A guess presented as a fact is worse than a question. Anything inferred rather
 than read is listed under **Assumed**, so the things worth a second look are
 the short list rather than the whole file.
 
+Every question has a default, so a run with nobody at the terminal still
+finishes. A port with no evidence defaults per language: 3000 for node and
+ruby, 8000 for python, 8080 for go. A start command with no evidence defaults
+to the conventional one where the language has one, such as `npm start` or
+`go run .`, and a service where nothing can be guessed is dropped from the
+draft with a note rather than failing the command. When standard input is not
+a terminal, `af init` behaves as `--non-interactive` does: it takes every
+default and lists each one under **Assumed**, which is also what `af ci` does
+when it drafts a manifest for a repository that has none.
+
 ## When it cannot decide
 
 ```

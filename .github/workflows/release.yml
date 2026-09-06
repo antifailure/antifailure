@@ -345,3 +345,32 @@ jobs:
           # list, and the step above produces the notes a person should read.
           generate_release_notes: false
           body_path: release-notes.md
+
+      - name: Move the major tag to this release
+        # `uses: antifailure/antifailure@v1` is the line every customer's
+        # workflow carries, once in their own file for the reusable workflow
+        # and once inside it for the action. A tag that never moves is a
+        # customer pinned to the first release forever, with no line in their
+        # repository to change, so v1 is a moving tag and this is what moves
+        # it: after the release exists, and only then, because a major tag
+        # pointing at a commit whose release failed to publish is a customer
+        # running a build that has no release notes and no signed checksums.
+        #
+        # Only a final release moves it. A prerelease tag such as v1.3.0-rc.1
+        # still publishes above, and must not carry every customer with it,
+        # so anything with a suffix is refused here rather than filtered in
+        # the trigger, where a glob cannot say "no suffix". The push is a
+        # force push by design: the tag is meant to move, and it moves to the
+        # same commit the checksums above were signed for.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "$TAG is not a final release, so the major tag stays where it is."
+            exit 0
+          fi
+          major="${TAG%%.*}"
+          git tag -f "$major" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$major"
+          echo "$major now names $GITHUB_SHA, the commit $TAG was released from."

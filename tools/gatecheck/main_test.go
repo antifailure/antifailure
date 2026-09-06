@@ -646,6 +646,17 @@ func TestEveryActionIsPinnedToACommit(t *testing.T) {
 			if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "docker://") {
 				continue
 			}
+			// This repository's own action and reusable workflow are the one
+			// reference that must NOT be a commit. Customers write
+			// `antifailure/antifailure@v1`, release.yml moves v1 on every
+			// release, and check.yml calls the action at the same moving
+			// tag so a customer's file and the action it reaches are always
+			// the same release. Pinning it here would pin every customer to
+			// whichever commit this file last named. tools/actioncheck holds
+			// the two refs equal to each other.
+			if strings.HasPrefix(ref, "antifailure/antifailure@") {
+				continue
+			}
 			checked++
 			if !pinned.MatchString(ref) {
 				t.Errorf("%s: %s is pinned to a tag, not a commit.\n"+

@@ -6041,6 +6041,70 @@
         }
       }
     },
+    "/trpc/repositories.setup": {
+      "get": {
+        "operationId": "trpc_repositories_setup",
+        "summary": "repositories.setup",
+        "description": "Requires the environments.view permission, held by: owner, admin, member, viewer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tRPC result envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input did not satisfy this route's validator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role does not hold environments.view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The route threw. tRPC formats this one, so it is a tRPC envelope rather than the ServerFailure body, and the stack is withheld: it names internal paths and table names to anyone who can provoke an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrpcFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/trpc/runs.artifacts": {
       "get": {
         "operationId": "trpc_runs_artifacts",

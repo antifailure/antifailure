@@ -27,6 +27,7 @@ import type { GitHubClient } from '../auth/github.ts'
 import { grantMembership } from '../auth/signin.ts'
 import { verifySignature } from './app.ts'
 import { slugFor } from '../slug.ts'
+import { requestSetups, retryRefusedSetups } from './setup.ts'
 
 // `WebhookError` used to be declared here and thrown from exactly one place,
 // `slugFor`, which has moved to src/slug.ts and throws `SlugError` instead.
@@ -159,6 +160,14 @@ export async function handleDelivery(
       // suspension. See rememberInstallation.
       const orgId = await rememberInstallation(pool, clock, account, id, deps.analytics, { live: true })
       await rememberRepositories(pool, clock, account.login, orgId, repos)
+      // The pull request that adds the workflow file, asked for and not done:
+      // this handler is leased for two minutes and GitHub times a delivery out
+      // at ten seconds, so the four GitHub calls belong to sweepSetups. A
+      // permission grant is the one action that can change the answer for a
+      // setup GitHub already refused, so it puts those back in the queue too.
+      const setups = await requestSetupsFor(pool, clock, account.login, orgId, repos, {
+        retryRefused: action === 'new_permissions_accepted',
+      })
       const adopted = await adoptInstaller(pool, clock, deps.github ?? null, {
         orgId,
         account,
@@ -171,6 +180,8 @@ export async function handleDelivery(
         handled: true,
         detail:
           `installation ${id} for ${account.login}, ${repos.length} repositories` +
+          (setups.queued ? `, ${setups.queued} setup pull requests queued` : '') +
+          (setups.retried ? `, ${setups.retried} refused setups retried` : '') +
           (adopted ? `, ${adopted} adopted` : ''),
       }
     }
@@ -189,6 +200,9 @@ export async function handleDelivery(
         ? (payload.repositories_removed as Repo[])
         : []
       await rememberRepositories(pool, clock, account.login, orgId, added)
+      const setups = await requestSetupsFor(pool, clock, account.login, orgId, added, {
+        retryRefused: false,
+      })
       // Archived rather than deleted. A repository removed from an installation
       // still has runs, verdicts and artifacts that happened, and deleting the
       // row would cascade them away: the history of what this product found is
@@ -199,7 +213,9 @@ export async function handleDelivery(
         event,
         action,
         handled: true,
-        detail: `${added.length} added, ${removed.length} archived`,
+        detail:
+          `${added.length} added, ${removed.length} archived` +
+          (setups.queued ? `, ${setups.queued} setup pull requests queued` : ''),
       }
     }
 
@@ -373,6 +389,33 @@ async function rememberRepositories(
           updated_at = ${clock.now().toISOString()}`)
     }
   })
+}
+
+/**
+ * Enqueues the setup pull request for each repository, on the delivery's own
+ * account scope, and on a permission grant puts the refused ones back.
+ *
+ * Runs AFTER rememberRepositories on purpose: the enqueue joins the repository
+ * rows, so a repository this delivery is the first to name has to exist before
+ * it can be queued. An installation_repositories delivery that arrives before
+ * the installation event therefore queues its repositories itself, and the
+ * installation event that follows lands on the same rows and queues nothing
+ * twice.
+ */
+async function requestSetupsFor(
+  pool: Pool,
+  clock: Clock,
+  login: string,
+  orgId: string,
+  repos: Repo[],
+  options: { retryRefused: boolean },
+): Promise<{ queued: number; retried: number }> {
+  const names = repos.map((r) => r?.full_name).filter((n): n is string => Boolean(n))
+  if (names.length === 0 && !options.retryRefused) return { queued: 0, retried: 0 }
+  return pool.withGitHubAccount(login, async (db) => ({
+    queued: await requestSetups(db, clock, orgId, names),
+    retried: options.retryRefused ? await retryRefusedSetups(db, clock, orgId) : 0,
+  }))
 }
 
 async function archiveRepositories(

@@ -23,6 +23,7 @@ import { findConsoleBuild } from './console/static.ts'
 import { appConfigFrom, InstallationTokens } from './github/app.ts'
 import { RealRepositoryApi } from './github/api.ts'
 import { sweepGenerations, sweepTeardowns, type LifecycleDeps } from './github/lifecycle.ts'
+import { sweepSetups } from './github/setup.ts'
 import { pricesFrom } from './providers/pricing.ts'
 import { retentionFromEnv, startMaintenance } from './maintenance.ts'
 import { freshness, recordingStopped } from './analytics/read.ts'
@@ -530,11 +531,18 @@ if (githubApi) {
     () => {
       void sweepGenerations(lifecycle).catch((err) => console.error('generation sweep', err))
       void sweepTeardowns(lifecycle).catch((err) => console.error('teardown sweep', err))
+      // The pull request that adds the workflow file to a newly installed
+      // repository. Same deps, same interval, same reason it is started here:
+      // a queue nothing sweeps is a table of rows that say "queued" forever.
+      void sweepSetups(lifecycle).catch((err) => console.error('setup sweep', err))
     },
     60 * 1000,
   )
   lifecycleSweep.unref()
-  console.log('the pull request lifecycle is running: checks, one comment per pull request, teardown')
+  console.log(
+    'the pull request lifecycle is running: checks, one comment per pull request, teardown, ' +
+      'and the setup pull request for a newly installed repository',
+  )
 } else {
   console.log(
     'no GitHub App: pull request checks and comments are not published, and no teardown ' +

@@ -39,6 +39,10 @@ func TestEveryCommandInTheWorkflowsExists(t *testing.T) {
 	root := cli.RootForDocs()
 	var problems []string
 	checked := 0
+	// How many of the invocations came out of the action, so that the action
+	// dropping out of the list, or its pattern stopping matching, is a
+	// failure here rather than a quieter gate.
+	fromAction := 0
 
 	for _, file := range files {
 		body, err := os.ReadFile(file)
@@ -51,6 +55,9 @@ func TestEveryCommandInTheWorkflowsExists(t *testing.T) {
 				continue
 			}
 			checked++
+			if rel == "action.yml" {
+				fromAction++
+			}
 			problem := checkInvocation(root, line)
 			if problem == "" {
 				problem = checkFlagValues(line)
@@ -68,6 +75,11 @@ func TestEveryCommandInTheWorkflowsExists(t *testing.T) {
 	require.Greater(t, checked, 3,
 		"only %d af invocations were found in the workflows; the pattern has probably stopped matching",
 		checked)
+	// The action runs every command the product has a verb for, so anything
+	// under five means either the file is not being read or the pattern has
+	// stopped seeing the lines inside its run blocks.
+	require.GreaterOrEqual(t, fromAction, 5,
+		"only %d af invocations were found in action.yml, which runs the whole product", fromAction)
 
 	sort.Strings(problems)
 	require.Empty(t, problems,
@@ -145,10 +157,17 @@ func preRunFor(cmd *cobra.Command) func(*cobra.Command, []string) error {
 func repoRoot() string { return filepath.Join("..", "..", "..") }
 
 // workflowFiles are the YAML files that may run af: the examples a customer
-// copies, and this repository's own workflows, which dogfood the same commands.
+// copies, this repository's own workflows, which dogfood the same commands,
+// and the composite action at the repository root, which is what every
+// customer's workflow actually runs. The action is the file with the most af
+// invocations in the tree and it was outside this gate, so a renamed flag
+// would have broken every customer at once and shown up in no test.
 func workflowFiles(t *testing.T) []string {
 	t.Helper()
 	var out []string
+	if action := filepath.Join(repoRoot(), "action.yml"); fileExists(action) {
+		out = append(out, action)
+	}
 	for _, dir := range []string{
 		filepath.Join(repoRoot(), "examples"),
 		filepath.Join(repoRoot(), ".github", "workflows"),
@@ -174,4 +193,9 @@ func workflowFiles(t *testing.T) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
