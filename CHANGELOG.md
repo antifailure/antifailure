@@ -88,6 +88,27 @@ process that owns it and is only settled when that process is gone, a tool
 refused by the branch lock names the holder instead of listing causes that
 were not the cause, and the read only tools take no lock at all.
 
+**A stranger's first run came up broken and the test blamed the workflow.**
+`af init` on a repository whose migrations are numbered SQL files wrote a
+manifest with no migrate key. The detection was there and had nowhere to go: a
+numbered SQL directory was recognised, at low confidence, and reported as a
+note to a step that only reads notes for one other purpose, so every other
+migration tool reached the manifest and this one did not. `af up` then reported
+the service healthy, because the health check runs `SELECT 1` and a database
+with no tables answers it, while the page itself returned 500. `af init` now
+proposes the psql invocation a numbered directory implies, one file at a time
+in name order, owned by the service that builds from the same directory. A
+directory whose files are not numbered has no ordering evidence and is still
+reported as a question, because guessing an order can corrupt a real database
+in a way a blank key never could.
+
+And `af test` never mentioned the 500. The runner had Playwright's response in
+hand on every navigation and discarded it, so nothing downstream could tell a
+crashed page from an unmatched expectation, and three rewrites of the wording
+all came back "unverified" with a note blaming the wording. A page that answers
+400 or above is now reported failed, naming the status and the page, and only a
+page that rendered falls through to the text judgement.
+
 **`af mask verify` said clean about columns it never read.** The scan read six
 text types, so a `bytea`, an array or an enum was not read, not skipped and not
 counted: a column holding sealed key material was invisible to the one check
