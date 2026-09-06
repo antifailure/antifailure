@@ -217,3 +217,57 @@ export async function revokeEngineToken(
     return { found: true, name: row.name, alreadyRevoked: false }
   })
 }
+
+/**
+ * How long an expired workflow identity is kept before the sweep removes it.
+ *
+ * A day, against a credential that lives fifteen minutes. See migration 0041
+ * for the argument: this number decides how much of a person's own continuous
+ * integration history is still on the screen when they open /cli, and a day
+ * covers everything anybody can still be asking about.
+ *
+ * The same number is written into the policy in 0041, and the two are not
+ * redundant. This one is the application's clock and can only narrow; that one
+ * is the database's and cannot be argued past. A row has to be past both.
+ */
+export const WORKFLOW_TOKEN_GRACE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Removes workflow identities that expired more than a day ago.
+ *
+ * HOUSEKEEPING, NOT ENFORCEMENT. authenticateEngine checks expires_at on every
+ * request, so one of these has been refused since the minute it expired and a
+ * sweeper that is late costs table size and nothing else. What it was costing
+ * was the only screen in the product that shows what can act as an
+ * organization: eight of these are minted per continuous integration run, they
+ * had no sweeper at all, and on the hosted installation they had buried the
+ * reader's own signed in terminal under three days of dead machine credentials.
+ *
+ * WHAT IT CANNOT REACH, and none of these is enforced by the statement below.
+ * The policy in 0041 admits an `oidc` row that expired over a day ago by the
+ * DATABASE's clock and was never revoked, and admits nothing else, so a live
+ * credential, a revoked one, a person's `cli` terminal and a pasted `engine`
+ * secret are all out of reach of this connection no matter what cutoff it is
+ * handed. The predicates repeated in the WHERE clause are a second statement of
+ * the same intent rather than the thing that makes it true: they are there so
+ * that a future migration that widened the policy by accident would have to get
+ * past this line as well, and so that a column grant withdrawn from under it
+ * fails loudly with 42501 instead of quietly sweeping more.
+ *
+ * The count comes from RETURNING a constant rather than a column, because the
+ * sweeper may read three columns of this table and id is not one of them.
+ */
+export async function sweepExpiredWorkflowTokens(pool: Pool, clock: Clock): Promise<number> {
+  const cutoff = new Date(clock.now().getTime() - WORKFLOW_TOKEN_GRACE_MS)
+  return pool.withExpirySweeper(async (db) => {
+    const rows = await db.execute<{ n: string }>(sql`
+      WITH gone AS (
+        DELETE FROM engine_tokens
+        WHERE kind = 'oidc'
+          AND revoked_at IS NULL
+          AND expires_at <= ${cutoff.toISOString()}
+        RETURNING 1
+      ) SELECT count(*) AS n FROM gone`)
+    return Number(rows[0]?.n ?? 0)
+  })
+}

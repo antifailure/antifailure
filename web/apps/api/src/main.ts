@@ -31,6 +31,7 @@ import { surrogateSecretFrom } from './analytics/record.ts'
 import { analyticsRetentionFromEnv } from './analytics/rollup.ts'
 import { ResendMailer } from './auth/mail.ts'
 import { sweepEmailSignInTokens } from './auth/email.ts'
+import { sweepExpiredWorkflowTokens } from './tokens.ts'
 import { resumeDeletions } from './enterprise/deletion.ts'
 import type { EmailSignInConfig } from './auth/email.ts'
 import { PRICE_ENV, RealStripeClient, stripeConfigFrom } from './billing/index.ts'
@@ -480,6 +481,24 @@ const housekeeping = setInterval(
     // did every site publish, because the deploy gate probes GET /auth/github.
     void sweepOAuthStates(pool, systemClock).catch((err) =>
       console.error('oauth state sweep', err),
+    )
+
+    // The fourth of the same kind, on the table that holds credentials.
+    //
+    // A GitHub Actions run trades its workflow identity for an engine token
+    // once per engine session, so a single continuous integration run mints
+    // about eight of them, each good for fifteen minutes. Nothing had ever
+    // removed one. Three days of this repository's own pull requests had put
+    // seven hundred dead rows on /cli, which is the one screen a person can
+    // read to find out what can act as their organization, and it had buried
+    // their own signed in terminal near the bottom of it.
+    //
+    // It cannot reach a live credential, a revoked one, a person's terminal or
+    // a pasted engine secret: the policy in 0041 admits expired workflow
+    // identities and nothing else, and it decides on the database's clock
+    // rather than on the cutoff passed from here.
+    void sweepExpiredWorkflowTokens(pool, systemClock).catch((err) =>
+      console.error('workflow token sweep', err),
     )
 
     // Not housekeeping. This one finishes work a customer asked for and is the

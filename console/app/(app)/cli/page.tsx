@@ -5,6 +5,13 @@ import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import { may } from "@/lib/roles";
 import {
+  groupHistory,
+  kindLabel,
+  stateOf,
+  type TokenRow,
+  type TokenState,
+} from "@/lib/tokens";
+import {
   Badge,
   Bar,
   Button,
@@ -74,17 +81,6 @@ function useOrigin(): string | null {
   const [origin, setOrigin] = useState<string | null>(null);
   useEffect(() => setOrigin(window.location.origin), []);
   return origin;
-}
-
-interface TokenRow {
-  id: string;
-  name: string;
-  prefix: string;
-  kind: string;
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  expires_at: string | null;
 }
 
 function Install() {
@@ -317,13 +313,69 @@ function ForCI({ origin }: { origin: string | null }) {
 }
 
 /**
- * Every credential this organization has handed out, of both kinds.
+ * Every credential this organization has handed out, of every kind.
  *
- * The two are shown together and told apart, because they are one question with
- * two answers: what can act as us. A terminal is a person who ran af login; an
- * engine token is a secret somebody pasted into a build machine. Revoking
- * either takes effect on the next request, since every route re-reads the row.
+ * The two kinds this was written for are one question with two answers: what
+ * can act as us. A terminal is a person who ran af login; an engine token is a
+ * secret somebody pasted into a build machine. Revoking either takes effect on
+ * the next request, since every route re-reads the row.
+ *
+ * WHAT WENT WRONG WITH SAYING IT AS ONE FLAT LIST. A third kind arrived that
+ * neither of those descriptions fits, and it arrives in bulk. Every engine
+ * session in a GitHub Actions job trades the job's workflow identity for a
+ * fifteen minute credential, and one `af ci` run opens about eight sessions, so
+ * a run leaves eight rows. This table showed all of them, newest first, with no
+ * grouping and no bound. On the hosted installation it had reached roughly seven
+ * hundred rows of `antifailure/antifailure run <id>` / `expired`, three days
+ * deep, and the reader's own signed in terminal was near the bottom of it. The
+ * page whose job is to walk somebody through installing the command line ended
+ * in a wall of dead machine credentials.
+ *
+ * THE SHAPE THIS USES INSTEAD, and the rule behind it is that the page answers
+ * two different questions and they deserve different treatment.
+ *
+ * The first question is "what can act as us right now", and it is the one that
+ * matters. So everything live is at the top, in full, ungrouped, one row each,
+ * with the button that takes it away. Nothing live is ever grouped, counted,
+ * collapsed or held back behind a disclosure, because this page is also how
+ * somebody notices a credential they did not expect, and a tidier page bought
+ * by hiding one of those would be a worse page. It stays short on its own: a
+ * workflow identity is dead fifteen minutes after it is issued, so the live
+ * list is a person's terminals, their engine tokens, and whatever is running
+ * this minute.
+ *
+ * The second question is "what has acted as us", and it is history. It is
+ * behind a disclosure, closed, with its count on the label, so a reader chooses
+ * to open it. Inside, workflow identities are grouped by the run that minted
+ * them, because the run is the thing that happened and the eight credentials
+ * are one fact about it, and the group carries how many of the eight were ever
+ * used, which is worth seeing. Everything else is listed one row each.
+ *
+ * SO IT READS THE SAME AT FIVE ROWS AND AT FIVE THOUSAND. At five the
+ * disclosure holds two lines and the top of the page is the whole story. At
+ * five thousand the top of the page is unchanged and the disclosure holds a
+ * few hundred grouped rows rather than five thousand ungrouped ones. Migration
+ * 0041 removes an expired workflow identity a day after it dies, so the second
+ * number is now what a busy day looks like rather than what all of history
+ * looks like, and the cap below is the guard for an installation that is
+ * running this without that sweep.
  */
+
+/** Rows past this many are not rendered, and the reader is told so.
+ *
+ *  Grouping already takes a day of this repository's own continuous integration
+ *  from about eight hundred rows to about a hundred, so this is not reached in
+ *  ordinary use. It is here because "ordinary" is an assumption about somebody
+ *  else's continuous integration, and the failure it prevents is a browser tab
+ *  that stops responding on the page a new user is being taught from. */
+const HISTORY_LIMIT = 200;
+
+function StateBadge({ state }: { state: TokenState }) {
+  if (state === "revoked") return <Badge tone="fail">revoked</Badge>;
+  if (state === "expired") return <Badge tone="neutral">expired</Badge>;
+  return <Badge tone="pass">live</Badge>;
+}
+
 function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
   const state = useApi<TokenRow[]>(() => query<TokenRow[]>("tokens.list"), []);
   const [busy, setBusy] = useState<string | null>(null);
@@ -353,63 +405,72 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
         </p>
       ) : null}
       <Loaded state={state} skeleton={<TableSkeleton rows={3} cols={5} />}>
-        {(rows) =>
-          rows.length === 0 ? (
-            <Empty title="No terminal is signed in">
-              Nothing outside a browser can act as this organization yet. Run
-              the sign-in command above on a machine and it appears here.
-            </Empty>
-          ) : (
-            <TableWrap>
-              {/* Five columns, one of them a button. The kind rides under the
-                  name rather than taking a column of its own, which is what the
-                  members table does with a login and a display name: six
-                  columns did not fit at a tablet width, and the one that got
-                  squeezed was the one holding Revoke. */}
-              <Table className="sm:min-w-[600px]">
-                <thead>
-                  <tr>
-                    <Th>Name</Th>
-                    <Th>Prefix</Th>
-                    <Th>Last used</Th>
-                    <Th>State</Th>
-                    <Th>
-                      <span className="sr-only">Actions</span>
-                    </Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((t) => {
-                    const revoked = Boolean(t.revoked_at);
-                    const expired =
-                      !revoked &&
-                      Boolean(t.expires_at) &&
-                      new Date(t.expires_at as string).getTime() <= Date.now();
-                    return (
-                      <Row key={t.id}>
-                        <Td>
-                          <span className="block text-ink">{t.name}</span>
-                          <span className="block text-[12px] text-dim">
-                            {t.kind === "cli" ? "terminal" : t.kind === "mcp" ? "MCP client" : t.kind === "oidc" ? "workflow identity" : "engine token"}
-                          </span>
-                        </Td>
-                        <Td label="Prefix" mono>
-                          {t.prefix}
-                        </Td>
-                        <Td label="Last used">
-                          {t.last_used_at ? <When value={t.last_used_at} /> : "never"}
-                        </Td>
-                        <Td label="State">
-                          {revoked ? (
-                            <Badge tone="fail">revoked</Badge>
-                          ) : expired ? (
-                            <Badge tone="neutral">expired</Badge>
-                          ) : (
-                            <Badge tone="pass">live</Badge>
-                          )}
-                        </Td>
-                        <Td className="w-px whitespace-nowrap">
-                          {revoked || expired ? null : (
+        {(rows) => {
+          // Read once per render rather than per row, so that two rows either
+          // side of an expiry are judged against the same instant.
+          const now = Date.now();
+          const live = rows.filter((t) => stateOf(t, now) === "live");
+          const history = groupHistory(rows, now);
+          const shown = history.slice(0, HISTORY_LIMIT);
+          const dead = rows.length - live.length;
+
+          if (rows.length === 0) {
+            return (
+              <Empty title="No terminal is signed in">
+                Nothing outside a browser can act as this organization yet. Run
+                the sign-in command above on a machine and it appears here.
+              </Empty>
+            );
+          }
+
+          return (
+            <>
+              {live.length === 0 ? (
+                // The rule is on the wrapper and the measure on the paragraph,
+                // for the reason the note at the foot of this card gives.
+                <div className="border-b border-rule px-4 py-4">
+                  <p className="max-w-[74ch] text-[13px] leading-6 text-muted">
+                    Nothing outside a browser can act as this organization right
+                    now. Everything below has expired or been revoked. Run the
+                    sign-in command above on a machine and it appears here.
+                  </p>
+                </div>
+              ) : (
+                <TableWrap>
+                  {/* Five columns, one of them a button. The kind rides under
+                      the name rather than taking a column of its own, which is
+                      what the members table does with a login and a display
+                      name: six columns did not fit at a tablet width, and the
+                      one that got squeezed was the one holding Revoke. */}
+                  <Table className="sm:min-w-[600px]">
+                    <thead>
+                      <tr>
+                        <Th>Name</Th>
+                        <Th>Prefix</Th>
+                        <Th>Last used</Th>
+                        <Th>State</Th>
+                        <Th>
+                          <span className="sr-only">Actions</span>
+                        </Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {live.map((t) => (
+                        <Row key={t.id}>
+                          <Td>
+                            <span className="block text-ink">{t.name}</span>
+                            <span className="block text-[12px] text-dim">{kindLabel(t.kind)}</span>
+                          </Td>
+                          <Td label="Prefix" mono>
+                            {t.prefix}
+                          </Td>
+                          <Td label="Last used">
+                            {t.last_used_at ? <When value={t.last_used_at} /> : "never"}
+                          </Td>
+                          <Td label="State">
+                            <StateBadge state="live" />
+                          </Td>
+                          <Td className="w-px whitespace-nowrap">
                             <Button
                               variant="danger"
                               busy={busy === t.id}
@@ -432,23 +493,131 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
                             >
                               Revoke
                             </Button>
-                          )}
-                        </Td>
-                      </Row>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            </TableWrap>
-          )
-        }
+                          </Td>
+                        </Row>
+                      ))}
+                    </tbody>
+                  </Table>
+                </TableWrap>
+              )}
+
+              {dead === 0 ? null : (
+                <details className="border-t border-rule">
+                  {/* The count is on the label and not inside, so the reader
+                      knows what opening this costs before they open it, and so
+                      that a page with nothing but history on it still says how
+                      much there is. */}
+                  <summary className="cursor-pointer px-4 py-3 text-[13px] font-medium text-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ink">
+                    {dead === 1
+                      ? "1 credential has expired or been revoked"
+                      : `${dead.toLocaleString()} credentials have expired or been revoked`}
+                    {history.length === dead
+                      ? ""
+                      : `, in ${history.length.toLocaleString()} groups`}
+                  </summary>
+                  <p className="max-w-[74ch] px-4 pb-3 text-[12px] leading-5 text-dim">
+                    None of these can act as this organization.{" "}
+                    {/* Only where there is one to explain. An organization that
+                        has never run a GitHub Actions job has no workflow
+                        identities in here, and a paragraph about how they are
+                        grouped would be the page teaching somebody about a
+                        thing that is not on their screen. */}
+                    {shown.some((line) => line.kind === "oidc") ? (
+                      <>
+                        A workflow identity is minted for one GitHub Actions run
+                        and expires fifteen minutes later, so they are grouped by
+                        the run that minted them and counted rather than listed
+                        one by one. They are removed a day after they expire; a
+                        revoked credential is kept, because the revocation is the
+                        record of it.
+                      </>
+                    ) : (
+                      <>
+                        A revoked credential is kept, because the revocation is
+                        the record of it.
+                      </>
+                    )}
+                  </p>
+                  {/* Three columns, not the live table's five. There is no
+                      Revoke, because nothing here can act. And what would have
+                      been a Prefix column rides under the name instead: a line
+                      standing for a whole run has no single prefix to put in
+                      one, and the column heading that covered both readings,
+                      "Credentials", was longer than the label column this table
+                      stacks into at a phone width and ran into its own value. */}
+                  <TableWrap>
+                    <Table className="sm:min-w-[480px]">
+                      <thead>
+                        <tr>
+                          <Th>Name</Th>
+                          <Th>Last used</Th>
+                          <Th>State</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shown.map((line) => (
+                          <Row key={line.key}>
+                            <Td>
+                              <span className="block break-words text-ink">{line.name}</span>
+                              <span className="block text-[12px] text-dim">
+                                {kindLabel(line.kind)}
+                                {line.prefix ? (
+                                  <>
+                                    {" \u00b7 "}
+                                    <span className="font-mono">{line.prefix}</span>
+                                  </>
+                                ) : (
+                                  ` \u00b7 ${line.count} credentials`
+                                )}
+                              </span>
+                            </Td>
+                            <Td label="Last used">
+                              {line.lastUsed ? (
+                                <>
+                                  <When value={line.lastUsed} />
+                                  {line.count > 1 ? (
+                                    <span className="block text-[12px] text-dim">
+                                      {line.used} of {line.count} used
+                                    </span>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <span className="text-dim">never</span>
+                              )}
+                            </Td>
+                            <Td label="State">
+                              <StateBadge state={line.state} />
+                            </Td>
+                          </Row>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </TableWrap>
+                  {history.length > shown.length ? (
+                    <p className="max-w-[74ch] border-t border-rule px-4 py-3 text-[12px] leading-5 text-dim">
+                      The {shown.length.toLocaleString()} most recent are shown, out of{" "}
+                      {history.length.toLocaleString()}. Every credential this control plane has
+                      issued is in the audit log, whether or not its row is still here.
+                    </p>
+                  ) : null}
+                </details>
+              )}
+            </>
+          );
+        }}
       </Loaded>
-      <p className="max-w-[74ch] border-t border-rule px-4 py-3 text-[12px] leading-5 text-dim">
-        Revoking takes effect on the next request that machine makes, because
-        every route reads the row rather than trusting the token. It does not
-        reach the machine itself: whatever is stored there stays stored and
-        stops working.
-      </p>
+      {/* The rule is on the wrapper and the measure is on the paragraph. Both
+          were on the paragraph, so the line that separates this note from the
+          table above it stopped at 74 characters and read as a rule somebody
+          had drawn by hand and not finished. */}
+      <div className="border-t border-rule px-4 py-3">
+        <p className="max-w-[74ch] text-[12px] leading-5 text-dim">
+          Revoking takes effect on the next request that machine makes, because
+          every route reads the row rather than trusting the token. It does not
+          reach the machine itself: whatever is stored there stays stored and
+          stops working.
+        </p>
+      </div>
     </Card>
   );
 }
