@@ -14,6 +14,50 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.1
+
+v1.3.0 switched billing on in production and the first person to press
+Subscribe to team was refused. This release is that one fix, cut on its own
+because a plan nobody can buy is worth a tag by itself.
+
+**An operator who was also a customer could not run any customer mutation
+from the console.** One browser, two cookies: the operator session from the
+portal and the product session from the console. The console sends the
+product token with a product mutation, which is all it can know about. The
+operator transport check keyed on the operator cookie being PRESENT rather
+than on the request being an operator request, so it ran on every mutation
+that browser made and refused each one with 403 "needs the
+x-antifailure-admin-csrf header", naming a header the Plan page has never
+heard of. The product session had already been checked against the product
+token a few lines above. Everybody on the team carries both cookies, so
+nobody on the team could buy, invite or change anything from the console
+while signed in to the portal, and no test had ever presented both cookies at
+once.
+
+The operator cookie is the credential for exactly one namespace, `admin.*`,
+and the check now applies to a request that names a procedure in it and to
+nothing else. A batch with one operator procedure in it is an operator
+request as a whole. The suite that guards this gate gained the two orderings
+it was missing: both cookies on a customer mutation pass on the customer
+token alone, and both cookies on an operator mutation are still refused
+without the operator token. Each of three mutations of the fix, including the
+one that restores the old behaviour, turns that suite red.
+
+### What moves when this tag is pushed
+
+**No migrations.** v1.3.0 applied `0040` and `0041` and production has them.
+Nothing in this tag touches the schema, the Terraform or the Helm chart, so
+the deploy is the image and only the image.
+
+<!-- relnotes:omit -->
+
+### Fixed
+
+* An operator who was also a customer could not press Subscribe to team, or
+  run any other customer mutation from the console.
+
+<!-- relnotes:end -->
+
 ## v1.3.0
 
 v1.2.1 shipped a command line with eighty one commands and an MCP server that
