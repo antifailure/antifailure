@@ -114,7 +114,10 @@ func New(opts Options) (*Client, error) {
 		return nil, fmt.Errorf(
 			"controlplane: %s is not https, and a token must not be sent in the clear", raw)
 	}
-	if strings.TrimSpace(opts.Token) == "" {
+	// A client may start with no credential when it has a way to obtain one:
+	// the first request mints it, so a process that never sends never mints.
+	// With neither there is nothing to present and nothing to obtain.
+	if strings.TrimSpace(opts.Token) == "" && opts.Renew == nil {
 		return nil, ErrNotConfigured
 	}
 	if opts.Redactor == nil {
@@ -152,6 +155,57 @@ func (c *Client) bearer() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.token
+}
+
+// ensureCredential obtains the first credential on the first request rather
+// than when the client is built.
+//
+// Every af process on a CI runner builds this client on startup, and most of
+// them never send anything: eight engine tokens were minted per workflow run
+// and five of them never appeared in a request. Minting at construction is a
+// credential issued for a message that does not exist. Minting here means the
+// token directory shows what was used, and nothing else.
+//
+// A failed first attempt is bounded by RenewFloor like a renewal, so a batch
+// the sink retries within the minute does not present the identity again.
+func (c *Client) ensureCredential(ctx context.Context) error {
+	c.mu.Lock()
+	if c.token != "" {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.renew == nil {
+		c.mu.Unlock()
+		return ErrNotConfigured
+	}
+	now := c.clock.Now()
+	if !c.lastRenew.IsZero() && now.Sub(c.lastRenew) < RenewFloor {
+		c.mu.Unlock()
+		return errors.New("controlplane: no credential yet, and the last exchange for one was under a minute ago")
+	}
+	renew := c.renew
+	c.mu.Unlock()
+
+	// lastRenew is stamped only when the attempt fails. A first credential that
+	// arrives must not count as a renewal, or a refusal in the same minute,
+	// which is how an already expired binding announces itself, would be
+	// refused its one re-exchange by the floor meant for repeated failures.
+	fresh, err := renew(ctx)
+	if err != nil || strings.TrimSpace(fresh) == "" {
+		c.mu.Lock()
+		c.lastRenew = now
+		c.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		return errors.New("controlplane: the exchange returned no credential")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token == "" {
+		c.token = fresh
+	}
+	return nil
 }
 
 // renewCredential exchanges for a fresh credential, at most once a minute.
@@ -405,6 +459,9 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	if err := c.ensureCredential(ctx); err != nil {
+		return nil, err
+	}
 	target := *c.baseURL
 	if i := strings.IndexByte(path, '?'); i >= 0 {
 		target.Path = strings.TrimRight(target.Path, "/") + path[:i]
