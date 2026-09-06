@@ -377,6 +377,10 @@ describe(
       const queued = await generation(head)
       assert.equal(queued?.state, 'queued')
       assert.equal(checkFor(head)?.status, 'queued')
+      // The Details link has to open something the runs page can select on.
+      // It carried only the commit, which that page never reads, so every
+      // click from GitHub landed on the generic list.
+      assert.equal(checkFor(head)?.detailsUrl, `http://app.test/runs?pr=11&commit=${head}`)
       assert.ok(commentFor(11), 'a pull request with a queued check has no comment')
       assert.match(commentFor(11)!.body, new RegExp(`sha=${head}`))
 

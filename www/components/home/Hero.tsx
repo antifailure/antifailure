@@ -57,7 +57,7 @@ export function Hero() {
               left to text-balance, which put the first sentence's "The" alone
               at the end of a line. */}
           <br className="max-lg:hidden" />{" "}
-          The hosted control plane is invitation only while it is in development.
+          The hosted control plane is open: sign in with GitHub and connect a repository.
         </p>
         {/* mt-36 was 144 pixels of nothing between two short sentences and the
             five things this product is. The gap is the section rhythm now, and

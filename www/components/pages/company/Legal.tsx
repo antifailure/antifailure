@@ -1149,7 +1149,7 @@ export function ServiceLevelsPage() {
         path="/sla"
         eyebrow="Service levels"
         title="There is no service level agreement."
-        lead="A control plane is deployed and it is invitation only, so there is nothing generally available to make an agreement about. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
+        lead="A control plane is deployed and open to anyone who signs in, and no agreement is offered on it yet. Rather than leave a security review to discover that, this page says what is not committed, what holds anyway, and what would have to be true before a number here meant anything."
         actions={
           <>
             <Button href="/terms" theme="outlined">
@@ -1168,7 +1168,7 @@ export function ServiceLevelsPage() {
             "No uptime target, and no measured uptime to quote instead.",
             "No support response time, and no support tier to attach one to.",
             "No service credits, because there is nothing to credit against.",
-            "No status page.",
+            "A status page, at antifailure.github.io/antifailure, that probes production and says how old its last check is. No uptime target sits behind it.",
             "No on-call rotation. An outage today reaches a person when a person happens to look.",
           ]}
         />

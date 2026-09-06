@@ -369,6 +369,13 @@ function Runs() {
   const params = useSearchParams();
   const router = useRouter();
   const selected = params.get("run");
+  // The Details link on a GitHub check arrives as ?pr=<number>&commit=<sha>.
+  // Runs are keyed to environments and environments to pull requests, so the
+  // newest run for that pull request is the one the check is about. Before
+  // this the link carried only the commit, this page read only `run`, and
+  // every click from GitHub landed on the list below.
+  const prParam = params.get("pr");
+  const prNumber = prParam !== null && /^\d+$/.test(prParam) ? Number(prParam) : null;
   // `runs.recent` names its cursor `before` and returns `nextCursor`, which is
   // not the pair `environments.list` uses, so the adapter is here rather than
   // in the hook.
@@ -391,10 +398,27 @@ function Runs() {
     );
   }
 
+  const forPullRequest =
+    prNumber === null ? null : (state.data ?? []).find((run) => run.pull_request === prNumber) ?? null;
+  if (forPullRequest) {
+    return (
+      <Page
+        title="Run"
+        lede={`The newest run for pull request #${prNumber}, as the runner reported it.`}
+      >
+        <Detail runId={forPullRequest.id} onClose={() => router.push("/runs")} />
+      </Page>
+    );
+  }
+
   return (
     <Page
       title="Runs"
-      lede="Every run across every environment, newest first. A run with failing verdicts is one that found something."
+      lede={
+        prNumber !== null && state.status === "ready"
+          ? `No run has reported for pull request #${prNumber} yet. The check on GitHub updates when one does; every other run is below, newest first.`
+          : "Every run across every environment, newest first. A run with failing verdicts is one that found something."
+      }
     >
       {may(session.data?.role, "agents.run") ? (
         <div className="mb-6">

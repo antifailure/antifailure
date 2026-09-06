@@ -52,12 +52,11 @@ const PLANS: Plan[] = [
   },
   {
     name: "Team",
-    badge: "Illustrative",
-    price: "$500 to $2,000",
-    period: "per month · one application",
-    tagline: "Hosted control plane, included run credits, usage beyond the floor.",
+    price: "$500",
+    period: "per month · one organization",
+    tagline: "The hosted control plane, bought from the console with a card. Cancel from the same page.",
     featured: true,
-    cta: { href: "/contact#book", label: "Start a design partnership", theme: "green" },
+    cta: { href: "/signup", label: "Subscribe in the console", theme: "green" },
     includes: [
       "Flat platform fee per organization, not per person",
       `Up to ${members("team")} members, counting invitations not yet accepted`,

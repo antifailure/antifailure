@@ -1288,9 +1288,13 @@ async function publishCheck(
     headSha: state.generation.head_sha,
     status: shape.status,
     ...(shape.conclusion ? { conclusion: shape.conclusion } : {}),
+    // The pull request number rather than the commit alone. A run is keyed
+    // to its environment and the environment to the pull request; nothing on
+    // the runs page could resolve a bare commit, so every Details click landed
+    // on the generic list. The commit stays in the URL for a reader.
     ...(deps.consoleBase
       ? {
-          detailsUrl: `${deps.consoleBase.replace(/\/+$/, '')}/runs?commit=${encodeURIComponent(
+          detailsUrl: `${deps.consoleBase.replace(/\/+$/, '')}/runs?pr=${state.pullRequest.number}&commit=${encodeURIComponent(
             state.generation.head_sha,
           )}`,
         }
