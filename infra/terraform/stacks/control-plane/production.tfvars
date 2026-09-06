@@ -430,7 +430,18 @@ analytics_enabled = true
 # which is why checkout sends quantity exactly 1. There is deliberately no
 # enterprise price: that plan is arranged with a person, and checkout refuses
 # it by name rather than reaching Stripe with an empty identifier.
-stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
+#
+# OFF, ON 2026-09-06, BECAUSE THE TWO SECRETS ARE NOT IN THE VAULT. The line
+# above was switched on before the secrets existed, and nothing applied it: the
+# vault holds neither stripe-secret-key nor stripe-webhook-secret, so every
+# apply of this file since then would have built a revision that fails to
+# start, and the v1.3.0 apply that switches the PostHog proxy on is the first
+# one anybody needs to run. Billing is therefore what production has always
+# been so far, off, and the process says so at startup. Turning it on is this
+# one line again, AFTER both secrets are in afcpprod-kv-centralus:
+#
+#   stripe_price_team = "price_1UBSGCIfNGpUWtp7OVO2YbsY"
+stripe_price_team = ""
 
 # NOT SET, AND THAT IS THE DECISION RATHER THAN THE DEFAULT. hosted_required_plan
 # would gate the product behind a paid plan, and modules/control-plane/app.tf
