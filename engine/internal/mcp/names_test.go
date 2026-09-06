@@ -93,18 +93,25 @@ func localToolNames(t *testing.T) map[string]string {
 	t.Helper()
 
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
-	require.NoError(t, err, "parsing this package's own source")
-
-	pkg, ok := pkgs["mcp"]
-	require.True(t, ok, "package mcp was not found in its own directory")
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "listing this package's own directory")
+	var files []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, name, nil, 0)
+		require.NoErrorf(t, perr, "parsing %s", name)
+		require.Equalf(t, "mcp", f.Name.Name, "%s is not in package mcp", name)
+		files = append(files, f)
+	}
+	require.NotEmpty(t, files, "no non-test Go file was found in this directory")
 
 	// Every constructor in the package, by identifier, mapped to the Name in
 	// the Tool literal it returns.
 	nameByConstructor := map[string]string{}
-	for _, file := range pkg.Files {
+	for _, file := range files {
 		for _, decl := range file.Decls {
 			fn, isFunc := decl.(*ast.FuncDecl)
 			if !isFunc || fn.Recv != nil || fn.Body == nil {
@@ -120,7 +127,7 @@ func localToolNames(t *testing.T) map[string]string {
 			"have found a collision. The shape it reads is a function returning a "+
 			"&Tool{Name: \"...\"} literal.")
 
-	serve := findFunc(pkg, "Serve")
+	serve := findFunc(files, "Serve")
 	require.NotNil(t, serve, "Serve was not found, so the registrations could not be read")
 
 	registered := map[string]string{}
@@ -205,8 +212,8 @@ func toolNameIn(body *ast.BlockStmt) (string, bool) {
 	return name, found
 }
 
-func findFunc(pkg *ast.Package, name string) *ast.FuncDecl {
-	for _, file := range pkg.Files {
+func findFunc(files []*ast.File, name string) *ast.FuncDecl {
+	for _, file := range files {
 		for _, decl := range file.Decls {
 			fn, isFunc := decl.(*ast.FuncDecl)
 			if isFunc && fn.Recv == nil && fn.Name.Name == name && fn.Body != nil {

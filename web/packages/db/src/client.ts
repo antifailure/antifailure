@@ -216,32 +216,42 @@ export interface Pool {
    */
   withSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /**
-   * Runs fn as antifailure_sweeper, to delete expired sessions.
+   * Runs fn as antifailure_sweeper, to delete rows that are past their expiry.
+   *
+   * Called withSessionSweeper until engine_tokens needed the same treatment.
+   * The role was never a sessions role: it is the role that deletes expired
+   * rows on tables where no ordinary caller can reach them, and one table was
+   * simply the only one that had asked for it yet. A name that says the table
+   * makes the second caller look like a misuse of the first one's scope.
    *
    * Not withSweeper, which is a different mechanism for a different table.
    * That one declares a setting the policies on antifailure_app consult, and
-   * those policies are SELECT only. Deleting a session needs a policy that
-   * permits the delete, and on THIS table such a policy on antifailure_app
-   * widens every other one, which is the whole argument in 0024.
+   * those policies are SELECT only. Deleting a row needs a policy that permits
+   * the delete, and on THESE tables such a policy on antifailure_app widens
+   * every other one, which is the whole argument in 0024.
    *
-   * Deleting expired sessions belongs to no organization and no user, so no
-   * policy on that table matches it, and it deleted nothing for as long as it
-   * existed. The fix could not be a policy on antifailure_app: permissive
-   * policies are OR'd, so one naming no tenant widens every other policy on
-   * the table, and a session row names a user and an organization.
+   * Deleting an expired session belongs to no organization and no user, so no
+   * policy on that table matched it, and it deleted nothing for as long as it
+   * existed. Deleting an expired workflow identity is the same shape: the row
+   * belongs to a tenant, but a sweep is nobody's request, so it arrives with
+   * no tenant and every policy on engine_tokens denies. The fix could not be a
+   * policy on antifailure_app in either case: permissive policies are OR'd, so
+   * one naming no tenant widens every other policy on the table, and both a
+   * session row and a token row name an organization.
    *
    * So the sweep enters a role of its own for one transaction. Policies are
-   * attached to roles, so the one admitting it does not join the OR for
-   * ordinary requests. Inside here the role can reach expired sessions and can
-   * read two of their columns; it holds nothing else in the database. See
-   * 0024 for the whole argument, including why the row restriction is the
-   * database's clock rather than a value passed in from here.
+   * attached to roles, so the ones admitting it do not join the OR for
+   * ordinary requests. Inside here the role can reach expired rows on the two
+   * tables 0024 and 0041 name, and can read a handful of their columns; it
+   * holds nothing else in the database. See those two files for the whole
+   * argument, including why the row restriction is the database's clock rather
+   * than a value passed in from here.
    *
    * SET LOCAL, so the role is reverted when the transaction ends however it
    * ends. A pooled connection returned still acting as the sweeper is the same
    * class of bug as one returned with a tenant still set on it.
    */
-  withSessionSweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
+  withExpirySweeper<T>(fn: (db: Db) => Promise<T>): Promise<T>
   /**
    * Runs fn as an operator, for the administrative portal.
    *
@@ -714,7 +724,7 @@ export function createPool(options: PoolOptions): Pool {
         fn,
       )
     },
-    withSessionSweeper(fn) {
+    withExpirySweeper(fn) {
       return scoped(
         {
           'antifailure.org_id': '',
