@@ -19,11 +19,14 @@ import {
   Card,
   CardSkeleton,
   Field,
+  LinkButton,
   Loaded,
   Page,
   When,
   inputClass,
 } from "@/components/ui";
+import { useStartChoice } from "@/lib/start-choice";
+import { optionFor } from "@/lib/start";
 
 /* -------------------------------------------------------------------------
  * Shapes, matched to what the routes actually return.
@@ -151,6 +154,40 @@ function Organization({
         ) : (
           <Fact label="Name">{settings.name}</Fact>
         )}
+      </div>
+    </Card>
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * How you chose to start
+ *
+ * The one per person thing on a page of per organization things, and said to
+ * be: the answer lives in this browser, for this organization, and changing it
+ * is reopening the question. Without this card the question was asked once and
+ * could never be found again, which makes a remembered answer a trap.
+ * ---------------------------------------------------------------------- */
+
+function StartCard({ orgId }: { orgId: string }) {
+  const { choice, ready } = useStartChoice(orgId);
+  const current =
+    !ready || choice === null
+      ? "Not answered yet"
+      : choice === "skipped"
+        ? "Skipped for now"
+        : optionFor(choice).title;
+  return (
+    <Card
+      title="Getting started"
+      note="How you said you wanted to start, which decides the next step the console shows. Remembered in this browser, for you."
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
+        <dl>
+          <Fact label="Your answer">{current}</Fact>
+        </dl>
+        <LinkButton href="/start" variant="secondary">
+          {choice === null || choice === "skipped" ? "Answer it" : "Change"}
+        </LinkButton>
       </div>
     </Card>
   );
@@ -299,6 +336,7 @@ export default function SettingsPage() {
               mayEdit={mayEditSettings}
               onSaved={state.reload}
             />
+            {session.data?.orgId ? <StartCard orgId={session.data.orgId} /> : null}
             {mayBill ? <BillingContactCard csrf={csrf} /> : null}
             {maySessions ? <Sessions csrf={csrf} /> : null}
             {mayExport ? <ExportCard csrf={csrf} slug={settings.slug} /> : null}
