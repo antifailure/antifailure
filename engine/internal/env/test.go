@@ -155,9 +155,9 @@ type jobDocument struct {
 }
 
 type workflowDoc struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Persona     string   `json:"persona,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Persona     string `json:"persona,omitempty"`
 	// Personas is the ordered list a workflow about one browser holding
 	// several sessions signs in as. Empty for the ordinary single persona
 	// workflow, which keeps using Persona.
