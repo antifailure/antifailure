@@ -14,8 +14,9 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         <div className="px-6 py-16 text-center" role="alert">
           <p className="text-[14px] font-medium">The console stopped rendering</p>
           <p className="mx-auto mt-2 max-w-[52ch] text-[13px] leading-6 text-muted">
-            Something threw before the page could draw. Trying again reloads it; if it stops again,
-            the reference below is what to send us.
+            {error.digest
+              ? "Something threw before the page could draw. Trying again reloads it; if it stops again, the reference below is what to send us."
+              : "Something threw before the page could draw. Trying again reloads it."}
           </p>
           {error.digest ? <p className="mt-2 font-mono text-[12px] text-muted">Reference: {error.digest}</p> : null}
           <div className="mt-5 flex justify-center">
