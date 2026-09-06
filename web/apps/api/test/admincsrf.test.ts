@@ -51,7 +51,8 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { available, startApi, type ApiHarness } from './harness.ts'
+import { available, dropOrg, seedOrg, signInAs, startApi, type ApiHarness } from './harness.ts'
+import { namesOperatorProcedure } from '../src/admin/session.ts'
 
 const hasDatabase = await available()
 
@@ -174,6 +175,62 @@ function guardUnder(secureCookies: boolean) {
         assert.match(await allowed.text(), /no flag called nothing.here/)
       })
 
+      it('a CUSTOMER mutation by an operator who is also a customer is checked against the customer token only', async () => {
+        // The launch night failure. One browser, both cookies: the operator
+        // session from the portal and the product session from the console.
+        // The console sends the product token with a product mutation, which
+        // is all it can know about. This gate used to demand the operator
+        // token as well, on the strength of the operator cookie being present,
+        // and Subscribe to team answered 403 naming a header the Plan page has
+        // never heard of.
+        const org = await seedOrg(h.admin, 'csrf-both')
+        try {
+          const customer = await signInAs(h, org, 'owner', 'csrf-both')
+          const answered = await h.fetch('/trpc/subscriptions.checkout', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              cookie: `${customer.cookie}; ${cookie}`,
+              'x-antifailure-csrf': customer.csrfToken,
+            },
+            body: JSON.stringify({ plan: 'team' }),
+          })
+          const text = await answered.text()
+          assert.doesNotMatch(
+            text,
+            /x-antifailure-admin-csrf/,
+            'a customer mutation was refused for want of the OPERATOR token; the operator cookie being present is not what makes a request an operator request',
+          )
+          assert.notEqual(answered.status, 403, text)
+        } finally {
+          await dropOrg(h.admin, org.orgId)
+        }
+      })
+
+      it('an OPERATOR mutation made with both cookies still needs the operator token', async () => {
+        // The other half, so the case above cannot be satisfied by deleting the
+        // gate: the same two cookies, the product token only, an operator
+        // procedure. Refused, because the product token says nothing about the
+        // operator session, which is the sentence the gate is built on.
+        const org = await seedOrg(h.admin, 'csrf-both2')
+        try {
+          const customer = await signInAs(h, org, 'owner', 'csrf-both2')
+          const refused = await h.fetch('/trpc/admin.flags.kill', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              cookie: `${customer.cookie}; ${cookie}`,
+              'x-antifailure-csrf': customer.csrfToken,
+            },
+            body: JSON.stringify({ key: 'nothing.here', reason: 'a reason long enough' }),
+          })
+          assert.equal(refused.status, 403)
+          assert.match(await refused.text(), /x-antifailure-admin-csrf/)
+        } finally {
+          await dropOrg(h.admin, org.orgId)
+        }
+      })
+
       it('a QUERY needs no token, or the portal could not render before it had one', async () => {
         const read = await h.fetch('/trpc/admin.flags.list', { headers: { cookie } })
         assert.equal(read.status, 200)
@@ -201,3 +258,23 @@ function guardUnder(secureCookies: boolean) {
 // Both configurations, and the second one is the one that ships.
 guardUnder(false)
 guardUnder(true)
+
+describe('which requests the operator transport check applies to', () => {
+  it('a procedure under admin., alone or anywhere in a batch', () => {
+    assert.equal(namesOperatorProcedure('/trpc/admin.flags.kill'), true)
+    assert.equal(namesOperatorProcedure('/trpc/admin'), true)
+    assert.equal(namesOperatorProcedure('/trpc/subscriptions.current,admin.flags.list?batch=1'), true)
+    assert.equal(namesOperatorProcedure('/trpc/admin.flags.list,subscriptions.current'), true)
+  })
+
+  it('a customer procedure is not one, whatever cookies travel with it', () => {
+    assert.equal(namesOperatorProcedure('/trpc/subscriptions.checkout'), false)
+    assert.equal(namesOperatorProcedure('/trpc/subscriptions.checkout?batch=1'), false)
+    assert.equal(namesOperatorProcedure('/trpc/environments.list,runs.list'), false)
+  })
+
+  it('the dot is part of the rule, so a namespace that merely starts with the letters is not caught', () => {
+    assert.equal(namesOperatorProcedure('/trpc/administrator.anything'), false)
+    assert.equal(namesOperatorProcedure('/trpc/adminstuff'), false)
+  })
+})

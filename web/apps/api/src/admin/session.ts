@@ -140,6 +140,38 @@ export async function passwordMatches(
 /** The header a mutating operator request must present it in. */
 export const ADMIN_CSRF_HEADER = 'x-antifailure-admin-csrf'
 
+/**
+ * Whether a tRPC request path names an OPERATOR procedure, which is the only
+ * kind the operator cookie authenticates.
+ *
+ * THE FAILURE THIS DECIDES. The operator CSRF check in server.ts used to run
+ * whenever a request carried a live operator cookie, whatever procedure it
+ * named. An operator who is also a customer, which is everybody on the team,
+ * carries both cookies in one browser, so every customer mutation they made
+ * from the console was refused 403 "needs the x-antifailure-admin-csrf header"
+ * by a check that was never meant for it: the product session had already
+ * been checked against the product token a few lines above. The first thing
+ * it refused in production was Subscribe to team, on launch night.
+ *
+ * The operator cookie is the credential for exactly one namespace, `admin.*`
+ * (routers/index.ts mounts adminRouter there and nothing else reads
+ * ctx.admin), so the operator transport check applies to a request that names
+ * a procedure in it and to nothing else. A batch is several procedures in one
+ * path, comma separated; one operator procedure in the batch makes the whole
+ * request an operator request, because the check refuses the request as a
+ * unit.
+ *
+ * `admin.` with the dot, so `administrator.anything` is not caught by
+ * accident, and the bare `admin` for a router-level call.
+ */
+export function namesOperatorProcedure(path: string): boolean {
+  const procedures = path.replace(/^\/trpc\/?/, '').split('?')[0] ?? ''
+  return procedures
+    .split(',')
+    .map((procedure) => decodeURIComponent(procedure))
+    .some((procedure) => procedure === 'admin' || procedure.startsWith('admin.'))
+}
+
 export function adminCsrfTokenFor(sessionToken: string): string {
   return createHmac('sha256', sessionToken).update('admin-csrf').digest('base64url')
 }

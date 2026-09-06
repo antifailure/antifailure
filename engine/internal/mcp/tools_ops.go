@@ -290,7 +290,7 @@ func checkPrerequisites(
 		scope = "both"
 	}
 	out := prerequisitesResult{
-		Kind: "prerequisites", Engine: buildVersion, Project: p.ID, Verdict: verdictReady,
+		Kind: "prerequisites", Engine: engineVersion(), Project: p.ID, Verdict: verdictReady,
 	}
 
 	if scope == "machine" || scope == "both" {
