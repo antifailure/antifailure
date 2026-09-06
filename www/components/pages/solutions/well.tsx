@@ -199,7 +199,7 @@ function HeroCopy({
           Start the quickstart
         </Button>
         <Button href="/signup" theme="outlined">
-          Request hosted access
+          Create an account
         </Button>
       </div>
     </div>

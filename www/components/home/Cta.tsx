@@ -53,7 +53,7 @@ export function Cta() {
                 Start the quickstart
               </Button>
               <Button href="/signup" theme="outlined-inverse">
-                Request hosted access
+                Create an account
               </Button>
             </div>
             <CopyCodeButton variant="terminal" className="max-lg:w-full" />

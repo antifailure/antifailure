@@ -18,13 +18,18 @@ export function Hero() {
           <br className="max-xl:hidden" />{" "}
           on a disposable production twin.
         </h1>
-        {/* The free path first, because it is the only one a visitor can take
-            today without somebody else's permission. The primary button used
-            to be "Request access", which leads to an invitation wall, so the
-            page pitched a product and then pointed at a locked door. The
-            engine is MIT licensed and the quickstart needs no account, so that
-            is the action, and the install line under it is the first command
-            of it rather than a third call to action. */}
+        {/* The free path first, because it needs nothing from us at all. The
+            primary button used to be "Request access", which led to an
+            invitation wall, so the page pitched a product and then pointed at
+            a locked door. The engine is MIT licensed and the quickstart needs
+            no account, so that is the action, and the install line under it is
+            the first command of it rather than a third call to action.
+            The button beside it said "Request hosted access" for the same
+            reason, and outlived it: the hosted plane admitted an allowlist of
+            two when that was written and anybody can create an account now, so
+            asking for access described nothing while the link already went to
+            /signup. It says what the link does, the way the pricing page's
+            pair already did. */}
         {/* THREE CONTROLS ON ONE LINE. The install command sat on its own row
             below the two buttons, square where they are round, which read as a
             leftover rather than as the third thing you can do here. It is the
@@ -35,7 +40,7 @@ export function Hero() {
             Start the quickstart
           </Button>
           <Button href="/signup" theme="outlined">
-            Request hosted access
+            Create an account
           </Button>
           {/* No fill and no border of its own: the variant now carries Button's
               outlined theme, so this only has to stop being 34.2% of the row. */}
