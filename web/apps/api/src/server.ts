@@ -494,6 +494,70 @@ export async function refuseDuringMaintenance(pool: Pool): Promise<string | null
  */
 const CONTROL_PLANE_FAILURE = 'AF-CP-003'
 
+/** The code a cross-site refusal answers with. See refuseCrossSite. */
+const CROSS_SITE_REFUSED = 'AF-CP-004'
+
+/** Which of the three cross-site gates refused, in the words the log uses. */
+type CrossSiteGate = 'customer-csrf' | 'operator-origin' | 'operator-csrf'
+
+/**
+ * Refuses a request that failed a cross-site gate, and writes it down.
+ *
+ * There were six of these in this file, each a bare `return c.json({ error:
+ * <sentence> }, 403)` and nothing else, in a file where every other refusal
+ * logs. A CSRF refusal was therefore invisible on both sides: the browser got a
+ * sentence naming a header and no id, and the server wrote nothing at all, so
+ * the only trace was the platform's 4xx bucket, which cannot be filtered back
+ * down to one request. The two cross-site defects found on launch night were
+ * found by the founder pasting screenshots of that sentence, which is what an
+ * unlogged refusal looks like from outside.
+ *
+ * So this logs one structured line and answers the same fixed shape the other
+ * control plane refusals in this file answer: a code, the sentence, what to do,
+ * and the requestId that ties the two together. The line carries which gate
+ * and why, and NOT the cookie, the token or the presented header: the whole
+ * point of the log is to be readable by whoever runs the plane, and a token in
+ * a log is a token in a backup.
+ *
+ * The procedure is logged as a bounded, filtered string rather than the raw
+ * path. `/trpc/*` is one Hono route, so `routePath` alone says nothing, and
+ * the path is a caller's string: unbounded and unfiltered it is how a forged
+ * log line happens.
+ */
+function refuseCrossSite(
+  c: Context<ApiEnv>,
+  refusal: { gate: CrossSiteGate; why: 'header-missing' | 'header-mismatch' | 'cross-site-origin'; message: string },
+) {
+  const requestId = c.get('requestId') ?? 'unassigned'
+  console.warn('cross-site request refused', {
+    requestId,
+    method: c.req.method,
+    route: c.req.routePath,
+    procedure: c.req.path.replace(/[^A-Za-z0-9._,/-]/g, '').slice(0, 200),
+    gate: refusal.gate,
+    why: refusal.why,
+  })
+  return c.json(
+    {
+      error: {
+        code: CROSS_SITE_REFUSED,
+        message: refusal.message,
+        resolution:
+          'Reload the page so the console fetches a fresh session token, then try again. ' +
+          'If it happens again, quote the requestId below: it is the only thing that ties ' +
+          'this answer to a log line.',
+      },
+      requestId,
+    },
+    403,
+  )
+}
+
+/** Why a token check failed, without saying what was presented. */
+function tokenWhy(presented: string | undefined): 'header-missing' | 'header-mismatch' {
+  return presented === undefined ? 'header-missing' : 'header-mismatch'
+}
+
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
@@ -1597,7 +1661,11 @@ export function createServer(options: ServerOptions) {
       )
     }
     if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
-      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+      return refuseCrossSite(c, {
+        gate: 'customer-csrf',
+        why: tokenWhy(c.req.header(CSRF_HEADER)),
+        message: `This request needs the ${CSRF_HEADER} header from GET /auth/session.`,
+      })
     }
 
     let body: { user_code?: unknown } = {}
@@ -1624,7 +1692,11 @@ export function createServer(options: ServerOptions) {
     const session = await sessionFrom(c.req.header('cookie'))
     if (!session) return c.json({ error: 'Sign in first.' }, 401)
     if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
-      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+      return refuseCrossSite(c, {
+        gate: 'customer-csrf',
+        why: tokenWhy(c.req.header(CSRF_HEADER)),
+        message: `This request needs the ${CSRF_HEADER} header from GET /auth/session.`,
+      })
     }
     let body: { user_code?: unknown } = {}
     try {
@@ -1699,7 +1771,11 @@ export function createServer(options: ServerOptions) {
     const session = await sessionFrom(c.req.header('cookie'))
     if (!session) return c.json({ error: 'Sign in first.' }, 401)
     if (!csrfMatches(readCookie(c.req.header('cookie'), SESSION_COOKIE)!, c.req.header(CSRF_HEADER))) {
-      return c.json({ error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` }, 403)
+      return refuseCrossSite(c, {
+        gate: 'customer-csrf',
+        why: tokenWhy(c.req.header(CSRF_HEADER)),
+        message: `This request needs the ${CSRF_HEADER} header from GET /auth/session.`,
+      })
     }
     let body: { token?: unknown } = {}
     try {
@@ -3266,10 +3342,11 @@ export function createServer(options: ServerOptions) {
       if (token && namesCustomerProcedure(c.req.path)) {
         const session = await resolveSession(options.pool, clock, token)
         if (session && !csrfMatches(token, c.req.header(CSRF_HEADER))) {
-          return c.json(
-            { error: `This request needs the ${CSRF_HEADER} header from GET /auth/session.` },
-            403,
-          )
+          return refuseCrossSite(c, {
+            gate: 'customer-csrf',
+            why: tokenWhy(c.req.header(CSRF_HEADER)),
+            message: `This request needs the ${CSRF_HEADER} header from GET /auth/session.`,
+          })
         }
       }
 
@@ -3329,17 +3406,20 @@ export function createServer(options: ServerOptions) {
               options.appBaseUrl ?? '',
             )
           ) {
-            return c.json({ error: 'This operator request came from another site.' }, 403)
+            return refuseCrossSite(c, {
+              gate: 'operator-origin',
+              why: 'cross-site-origin',
+              message: 'This operator request came from another site.',
+            })
           }
           if (!adminCsrfMatches(adminToken, c.req.header(ADMIN_CSRF_HEADER))) {
-            return c.json(
-              {
-                error:
-                  `This operator request needs the ${ADMIN_CSRF_HEADER} header from the ` +
-                  'operator session endpoint.',
-              },
-              403,
-            )
+            return refuseCrossSite(c, {
+              gate: 'operator-csrf',
+              why: tokenWhy(c.req.header(ADMIN_CSRF_HEADER)),
+              message:
+                `This operator request needs the ${ADMIN_CSRF_HEADER} header from the ` +
+                'operator session endpoint.',
+            })
           }
         }
       }
@@ -3361,9 +3441,25 @@ export function createServer(options: ServerOptions) {
       // saying something went wrong and no way to find out what. This is where
       // it goes instead, so `af logs web` still has the diagnosis and the
       // browser does not.
-      onError({ error, path, type }) {
+      //
+      // The requestId is on the line, beside the code and the path, and it is
+      // the same id the formatter puts in the body and the middleware puts on
+      // x-request-id. Without it this line and the console's error card were
+      // two halves of one failure with nothing to join them on: the operator
+      // could find every tRPC failure of the day and not the one being asked
+      // about.
+      onError({ error, path, type, ctx }) {
         if (error.code !== 'INTERNAL_SERVER_ERROR') return
-        console.error(`trpc ${type} ${path ?? 'unknown'}:`, error.cause ?? error)
+        console.error(
+          'trpc procedure failed',
+          {
+            requestId: ctx?.requestId ?? 'unassigned',
+            code: error.code,
+            type,
+            path: path ?? 'unknown',
+          },
+          error.cause ?? error,
+        )
       },
       createContext: async (_opts, c) => {
         const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
@@ -3418,6 +3514,7 @@ export function createServer(options: ServerOptions) {
           operatorSetsPlan,
           actor,
           origin: 'web',
+          requestId: c.get('requestId') ?? null,
           ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops),
           userAgent: c.req.header('user-agent') ?? undefined,
         }

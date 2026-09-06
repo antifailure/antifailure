@@ -20,7 +20,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { IconSignOut, LogoMark } from "@/components/icons";
-import { Button, Field, Lede, Standalone, inputClass, NavLink as RailLink } from "@/components/ui";
+import { Button, Field, Lede, Reference, Standalone, inputClass, NavLink as RailLink } from "@/components/ui";
 import { ADMIN_NAV, ADMIN_OVERVIEW } from "@/lib/admin-nav";
 import type { AdminNavItem } from "@/lib/admin-nav";
 import { adminSignIn, adminSignOut, operatorMay, useAdminContext } from "@/lib/admin";
@@ -435,6 +435,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     return (
       <Standalone title="The control plane did not answer" width={440} alert>
         <Lede>{error.message}</Lede>
+        <Reference id={error.requestId} />
         <div className="mt-7">
           <Button variant="primary" onClick={reload}>
             Try again

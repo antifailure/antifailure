@@ -67,6 +67,9 @@ const (
 	AFCP002 Code = "AF-CP-002"
 	// The control plane could not complete this request.
 	AFCP003 Code = "AF-CP-003"
+	// The control plane refused this request as a possible cross-site
+	// request.
+	AFCP004 Code = "AF-CP-004"
 
 	// Control plane
 	// No control plane token is configured.
@@ -640,6 +643,15 @@ var catalog = map[Code]Entry{
 		Docs:      "self-hosting/control-plane",
 		Retryable: true,
 		ExitCode:  ExitProvider,
+	},
+	AFCP004: {
+		Code:      AFCP004,
+		Area:      "CP",
+		Message:   "The control plane refused this request as a possible cross-site request.",
+		NextStep:  "Reload the page so the console fetches a fresh session token, then try again. If it happens again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
 	},
 	AFCPL001: {
 		Code:      AFCPL001,

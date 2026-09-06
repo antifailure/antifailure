@@ -256,6 +256,17 @@
       "planned": false
     },
     {
+      "code": "AF-CP-004",
+      "area": "CP",
+      "areaName": "Control plane",
+      "message": "The control plane refused this request as a possible cross-site request.",
+      "resolution": "Reload the page so the console fetches a fresh session token, then try again. If it happens again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.",
+      "docs": "https://antifailure.dev/docs/self-hosting/control-plane",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
       "code": "AF-CPL-001",
       "area": "CPL",
       "areaName": "Control plane",

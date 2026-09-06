@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, trpcResponse } from "@/lib/wire";
+import { ApiError, requestIdIn, trpcResponse } from "@/lib/wire";
 import { isCurrentResponse } from "@/lib/session-freshness";
 
 export { ApiError } from "@/lib/wire";
@@ -53,6 +53,9 @@ export interface Session {
 async function readError(res: Response): Promise<ApiError> {
   let message = `The control plane answered ${res.status}.`;
   let code = "UNKNOWN";
+  // The header is set on every response by the same middleware that mints the
+  // id, so it is the fallback for a body that carries none or is not JSON.
+  let requestId = res.headers.get("x-request-id");
   try {
     const body = (await res.json()) as {
       error?: { message?: string; data?: { code?: string } } | string;
@@ -60,11 +63,12 @@ async function readError(res: Response): Promise<ApiError> {
     if (typeof body.error === "string") message = body.error;
     else if (body.error?.message) message = body.error.message;
     if (typeof body.error === "object" && body.error?.data?.code) code = body.error.data.code;
+    requestId = requestIdIn(body) ?? requestId;
   } catch {
     // A body that is not JSON tells us nothing the status has not already
     // said. Keep the status message rather than inventing a better one.
   }
-  return new ApiError(message, res.status, code);
+  return new ApiError(message, res.status, code, requestId);
 }
 
 /** A tRPC query. GET, so it is cacheable and cannot be a CSRF target. */

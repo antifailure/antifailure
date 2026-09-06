@@ -98,6 +98,19 @@ export interface Context {
   /** Null on self-hosted installations. Hosted Antifailure sets enterprise,
    *  leaving billing reachable while operational procedures are refused. */
   hostedRequiredPlan: HostedRequiredPlan | null
+  /**
+   * The identifier of the HTTP request this context was built for, the same
+   * one the server echoes on x-request-id and writes on its log lines.
+   *
+   * It is here so the error formatter can put it in the body. Before it was,
+   * the id existed on the header and on the log line and nowhere a browser
+   * reads: the console shows the body's message on its error card, and for an
+   * INTERNAL_SERVER_ERROR that message is a fixed sentence by design, so a
+   * person who hit one had nothing to quote and the operator reading the log
+   * had nothing to search for. Null when there is no HTTP request, which is a
+   * test calling a procedure directly.
+   */
+  requestId: string | null
   /** Whether whoever runs this installation also decides each organization's
    *  plan. False everywhere it is not said out loud, because the caller who
    *  reaches the route that writes the plan is an org owner rather than the
@@ -158,7 +171,7 @@ const BROKE_RATHER_THAN_REFUSED =
   'Something went wrong on the control plane. Nothing was changed, and the reason is in its logs.'
 
 const t = initTRPC.context<Context>().meta<Meta>().create({
-  errorFormatter({ shape, error }) {
+  errorFormatter({ shape, ctx }) {
     // Both halves of the same rule, and shipping one without the other is how
     // this got out. The stack was already withheld because it names internal
     // paths and table names to anyone who can provoke an error. The message
@@ -172,6 +185,14 @@ const t = initTRPC.context<Context>().meta<Meta>().create({
     // Only this code is replaced. Every other one carries a message written
     // for the reader, and blanking those would turn "your role cannot see
     // this" into a shrug.
+    //
+    // The request id is the one thing ADDED, on every code and not only the
+    // replaced one. The fixed sentence says the reason is in the logs, and the
+    // id is what finds it there; a sentence that points at a log with nothing
+    // to search the log by is a resolution step nobody can carry out. It is
+    // taken from the context rather than from a header, because a formatter
+    // sees no request. `ctx` is undefined when building the context itself
+    // threw, which is why the null is spelled out rather than assumed away.
     const broke = shape.data.code === 'INTERNAL_SERVER_ERROR'
     return {
       ...shape,
@@ -179,6 +200,7 @@ const t = initTRPC.context<Context>().meta<Meta>().create({
       data: {
         ...shape.data,
         stack: undefined,
+        requestId: ctx?.requestId ?? null,
       },
     }
   },

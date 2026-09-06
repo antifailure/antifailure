@@ -15,7 +15,8 @@ import {
 } from './auth/mcp.ts'
 import type { McpTool, McpOutcome, PostHogSink } from './analytics/posthog-sink.ts'
 
-type BaseContext = Omit<Context, 'actor'>
+/** Everything but what is per request: the actor, and the request's id. */
+type BaseContext = Omit<Context, 'actor' | 'requestId'>
 interface Options {
   base: BaseContext
   actorFrom: (cookie: string | undefined) => Promise<Actor | null>
@@ -204,7 +205,11 @@ export function mountHostedMcp(app: Hono<any>, options: Options): void {
       // throw into the tool call it is reporting on.
       options.postHog?.mcpToolCalled({ ...call, orgSurrogate })
     }
-    const server = toolServer({ ...base, actor: identity.actor }, identity.scopes, report)
+    const server = toolServer(
+      { ...base, actor: identity.actor, requestId: c.get('requestId') ?? null },
+      identity.scopes,
+      report,
+    )
     try {
       await server.connect(transport)
       return await transport.handleRequest(c.req.raw)

@@ -2,7 +2,7 @@
 
 import { type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
-import { Bar, Button, Card, CommandBlock, TableSkeleton } from "@/components/ui";
+import { Bar, Button, Card, CommandBlock, Reference, TableSkeleton } from "@/components/ui";
 
 /* -------------------------------------------------------------------------
  * Failure
@@ -68,6 +68,10 @@ export function LoadError({
     <div className="px-6 py-12 text-center" role="alert">
       <p className="text-[14px] font-medium text-ink">{title}</p>
       <p className="mx-auto mt-2 max-w-[54ch] text-[13px] leading-6 text-muted">{body}</p>
+      {/* Not for a disconnection: the request never reached the plane, so
+          there is no line to find and an id here would be a header from a
+          proxy at best. */}
+      {disconnected ? null : <Reference id={error.requestId} />}
       {/* One recovery action, and only the one that can work. */}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         {retry && !denied && !missing ? (

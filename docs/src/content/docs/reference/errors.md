@@ -312,6 +312,18 @@ The control plane could not complete this request.
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
+### AF-CP-004
+
+The control plane refused this request as a possible cross-site request.
+
+**What to do.** Reload the page so the console fetches a fresh session token, then try again. If it happens again, quote the requestId the response carries: it is the only thing that ties the answer to a log line.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
+
 ## Control plane
 
 ### AF-CPL-001

@@ -667,12 +667,35 @@ export function ErrorState({ error, retry }: { error: ApiError; retry?: () => vo
         {forbidden ? "Your role cannot see this" : "That did not load"}
       </p>
       <p className="mx-auto mt-2 max-w-[52ch] text-[13px] leading-6 text-muted">{error.message}</p>
+      <Reference id={error.requestId} />
       {retry && !forbidden ? (
         <div className="mt-5 flex justify-center">
           <Button onClick={retry}>Try again</Button>
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The control plane's id for the request that failed, for the person to quote.
+ *
+ * For an internal failure the message above it is a fixed sentence by design:
+ * whatever threw wrote the real one, and the real one has carried a whole SQL
+ * statement. That sentence says the reason is in the logs, and this is what
+ * finds it there. Before it was shown, a person who hit an error had a
+ * sentence to paste and nothing to search a log by.
+ *
+ * The same word and the same muted monospace line as the render boundary in
+ * app/error.tsx, so a failed request and a failed render read as one thing.
+ * Nothing else: no badge, no colour, no button. The line is selectable and
+ * that is the copy affordance; a second button beside Try again would make a
+ * quiet reference compete with the one thing to do.
+ */
+export function Reference({ id }: { id: string | null }) {
+  if (!id) return null;
+  return (
+    <p className="mt-2 select-all font-mono text-[12px] text-muted">Reference: {id}</p>
   );
 }
 

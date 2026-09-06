@@ -995,6 +995,13 @@ errors:
     docs: self-hosting/control-plane
     retryable: true
     exit_code: 5
+  - code: AF-CP-004
+    area: CP
+    message: "The control plane refused this request as a possible cross-site request."
+    next_step: "Reload the page so the console fetches a fresh session token, then try again. If it happens again, quote the requestId the response carries: it is the only thing that ties the answer to a log line."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
 
   # Infrastructure
   - code: AF-INF-001
