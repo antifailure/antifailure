@@ -662,3 +662,42 @@ func TestFileStore_ReportsAPathItCannotRead(t *testing.T) {
 	_, _, err = store.Lookup(t.Context(), "A")
 	require.Error(t, err)
 }
+
+func TestChain_PrependedSourcesAreAskedBeforeTheOriginalOnes(t *testing.T) {
+	t.Parallel()
+	// The engine's own values go in front of everything stored, because a
+	// signing secret that a keyring answered would verify nothing the
+	// environment signs with the one it derived.
+	stored := envSource("keyring", map[string]string{"STRIPE_WEBHOOK_SECRET": "stale"})
+	chain := secrets.NewChain(stored).Prepended(
+		secrets.NewProvidedSource("the environment's webhook signing secrets",
+			map[string]string{"STRIPE_WEBHOOK_SECRET": "derived"}))
+
+	v, res, found, err := chain.Lookup(t.Context(), "STRIPE_WEBHOOK_SECRET")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "derived", v.Reveal())
+	require.Equal(t, "the environment's webhook signing secrets", res.Source)
+
+	// A name the engine does not provide still reaches the stored sources.
+	stored2 := envSource("keyring", map[string]string{"OTHER": "kept"})
+	chain2 := secrets.NewChain(stored2).Prepended(
+		secrets.NewProvidedSource("provided", map[string]string{"STRIPE_WEBHOOK_SECRET": "derived"}))
+	v, _, found, err = chain2.Lookup(t.Context(), "OTHER")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "kept", v.Reveal())
+}
+
+func TestProvidedSource_WithNothingToProvideIsNotListed(t *testing.T) {
+	t.Parallel()
+	// A manifest with no webhook path has no signing secrets, and a "Looked
+	// in" list that named a source holding nothing would send somebody to
+	// look for a place that does not exist.
+	chain := secrets.NewChain(envSource("shell", map[string]string{})).
+		Prepended(secrets.NewProvidedSource("the environment's webhook signing secrets", nil))
+	require.Equal(t, []string{"shell"}, chain.Sources(t.Context()))
+	_, _, found, err := chain.Lookup(t.Context(), "STRIPE_WEBHOOK_SECRET")
+	require.NoError(t, err)
+	require.False(t, found)
+}

@@ -325,3 +325,26 @@ func sortedCopy(in []string) []string {
 	}
 	return out
 }
+
+func TestResolve_ARenameCanPointAtAValueTheEngineProvides(t *testing.T) {
+	t.Parallel()
+	// The webhook signing secret is derived at af up and delivered to every
+	// service as STRIPE_WEBHOOK_SECRET. An application that reads it under its
+	// own name says `from: STRIPE_WEBHOOK_SECRET`, and that lookup used to
+	// search the shell, the .env file and the keyring, none of which hold a
+	// value that does not exist until af up, so the variable was "not found"
+	// and billing in this repository's own twin stayed off.
+	chain := secrets.NewChain(envSource("shell", map[string]string{})).
+		Prepended(secrets.NewProvidedSource("the environment's webhook signing secrets",
+			map[string]string{"STRIPE_WEBHOOK_SECRET": "whsec_derived"}))
+	got, err := secrets.Resolve(t.Context(), chain, secrets.Request{
+		Declared: []schema.EnvVar{{Name: "AF_STRIPE_WEBHOOK_SECRET", From: "STRIPE_WEBHOOK_SECRET"}},
+		EnvID:    "af-1",
+	})
+	require.NoError(t, err)
+	require.Empty(t, missingNames(got.Missing))
+	require.Equal(t, "whsec_derived", got.Service["AF_STRIPE_WEBHOOK_SECRET"].Reveal())
+	require.Len(t, got.Resolutions, 1)
+	require.Equal(t, "the environment's webhook signing secrets", got.Resolutions[0].Source)
+	require.Contains(t, got.Resolutions[0].Name, "AF_STRIPE_WEBHOOK_SECRET (from STRIPE_WEBHOOK_SECRET)")
+}

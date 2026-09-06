@@ -81,6 +81,18 @@ func NewChain(sources ...Source) *Chain {
 	return &Chain{sources: sources}
 }
 
+// Prepended returns a chain that asks the given sources before this one's.
+//
+// For values the engine computes itself, which have to beat every stored
+// source: a webhook signing secret that came from a keyring rather than from
+// the environment's own derivation would verify nothing the environment sends.
+func (c *Chain) Prepended(sources ...Source) *Chain {
+	if len(sources) == 0 {
+		return c
+	}
+	return &Chain{sources: append(append([]Source{}, sources...), c.sources...)}
+}
+
 // Sources returns the names in the order they are asked, for the error message
 // that lists where a variable could have been.
 func (c *Chain) Sources(ctx context.Context) []string {
@@ -533,4 +545,44 @@ func (k *KeyringSource) Lookup(_ context.Context, name string) (Value, bool, err
 // SortResolutions orders by name, so an audit event is comparable between runs.
 func SortResolutions(rs []Resolution) {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].Name < rs[j].Name })
+}
+
+// ---------------------------------------------------------------------------
+// Values the engine itself supplies
+// ---------------------------------------------------------------------------
+
+// ProvidedSource holds values the engine computed for this environment, so
+// that a manifest can refer to them by name like anything else in the chain.
+//
+// It exists for the webhook signing secrets. The engine derives one per
+// provider and hands it to every service under the provider's conventional
+// name, STRIPE_WEBHOOK_SECRET for Stripe, and an application that reads the
+// same value under its own name, AF_STRIPE_WEBHOOK_SECRET say, had no way to
+// say so: `from: STRIPE_WEBHOOK_SECRET` looked the name up in the shell, the
+// .env file and the keyring, none of which hold a value that is derived at af
+// up, and the variable was reported missing. So the api in this repository's
+// own twin started with billing off while the sender signed events nothing
+// would ever verify.
+type ProvidedSource struct {
+	Label  string
+	Values map[string]string
+}
+
+// NewProvidedSource wraps values the engine already holds.
+func NewProvidedSource(label string, values map[string]string) *ProvidedSource {
+	return &ProvidedSource{Label: label, Values: values}
+}
+
+func (p *ProvidedSource) Name() string { return p.Label }
+
+// Available is false when there is nothing to provide, so a manifest with no
+// webhook paths never sees this source in a "Looked in" list.
+func (p *ProvidedSource) Available(context.Context) (bool, string) { return len(p.Values) > 0, "" }
+
+func (p *ProvidedSource) Lookup(_ context.Context, name string) (Value, bool, error) {
+	v, ok := p.Values[name]
+	if !ok {
+		return Value{}, false, nil
+	}
+	return NewFrom(v, p.Name()), true, nil
 }

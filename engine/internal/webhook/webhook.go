@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Provider is one third party's webhook shape and signing scheme.
@@ -59,9 +61,28 @@ var Providers = map[string]Provider{
 		Name:      "github",
 		SecretEnv: "GITHUB_WEBHOOK_SECRET",
 		Sign:      signGitHub,
+		// Each sample names the account it is about, because the application
+		// scopes every statement it makes to that account and a payload with
+		// no account is answered "the payload names no account" rather than
+		// handled. The first GitHub event a new customer's control plane ever
+		// receives is the installation itself, and it was missing here, so the
+		// path that creates their organization was the one event nobody could
+		// rehearse.
 		Events: map[string]string{
-			"push":         `{"ref":"refs/heads/main","commits":[]}`,
-			"pull_request": `{"action":"opened","number":1}`,
+			"push": `{"ref":"refs/heads/main","commits":[],` +
+				`"repository":{"id":1,"full_name":"afmock/app","owner":{"login":"afmock"}},` +
+				`"installation":{"id":1}}`,
+			"pull_request": `{"action":"opened","number":1,` +
+				`"pull_request":{"number":1,"title":"afmock","draft":false,"state":"open",` +
+				`"head":{"sha":"0000000000000000000000000000000000000001","ref":"afmock",` +
+				`"repo":{"full_name":"afmock/app"}},"base":{"ref":"main","repo":{"full_name":"afmock/app"}}},` +
+				`"repository":{"id":1,"full_name":"afmock/app","owner":{"login":"afmock"}},` +
+				`"installation":{"id":1},"sender":{"id":1,"login":"afmock"}}`,
+			"installation": `{"action":"created",` +
+				`"installation":{"id":1,"account":{"login":"afmock","type":"Organization"},` +
+				`"repository_selection":"selected"},` +
+				`"repositories":[{"id":1,"full_name":"afmock/app","private":true}],` +
+				`"sender":{"id":1,"login":"afmock"}}`,
 		},
 	},
 	"resend": {
@@ -102,6 +123,12 @@ func EventNames(provider string) []string {
 	return out
 }
 
+// EventIDOverride is the override key that pins the provider's event
+// identifier, the Stripe event id or the GitHub delivery id, instead of
+// setting a payload field. Sending one event twice with the same value is how
+// a retry is rehearsed.
+const EventIDOverride = "event_id"
+
 // Event is a webhook ready to deliver.
 type Event struct {
 	// Provider is who it appears to come from.
@@ -136,11 +163,23 @@ func Build(provider, eventType, secret string, overrides map[string]any, now tim
 	if err := json.Unmarshal([]byte(sample), &data); err != nil {
 		return Event{}, err
 	}
+	// The one override that is not a field of the payload. A provider retries
+	// the SAME event, with the same identifier, and an application that is
+	// right about that treats the second delivery as done. The identifier is
+	// otherwise derived from the second the event was built in, so two
+	// triggers of one event a second apart were two different events, and the
+	// retry, which is the ordering a billing handler most has to get right,
+	// could not be rehearsed on purpose.
+	var pinned string
 	for k, v := range overrides {
+		if k == EventIDOverride {
+			pinned, _ = v.(string)
+			continue
+		}
 		data[k] = v
 	}
 
-	body, err := envelope(p, eventType, data, now)
+	body, err := envelope(p, eventType, data, now, pinned)
 	if err != nil {
 		return Event{}, err
 	}
@@ -150,7 +189,38 @@ func Build(provider, eventType, secret string, overrides map[string]any, now tim
 			headers[k] = v
 		}
 	}
+	if p.Name == "github" {
+		// GitHub carries the event name in a header rather than in the body,
+		// and the sender did not set it. Every delivery arrived as "unknown",
+		// which the application acknowledged and acted on nowhere, so an
+		// installation created and a pull request opened were both delivered,
+		// both answered 200, and neither did a thing.
+		headers["X-GitHub-Event"] = eventType
+		// One identifier per delivery. It was a constant, so the second event
+		// of any kind was fenced as a replay of the first by an application
+		// that keys its ledger on it, which is exactly what a correct
+		// application does. Derived like the Stripe event id, so two runs of
+		// one workflow still agree.
+		headers["X-GitHub-Delivery"] = deliveryID(eventType, data, now)
+		if pinned != "" {
+			headers["X-GitHub-Delivery"] = pinned
+		}
+	}
 	return Event{Provider: provider, Type: eventType, Body: body, Headers: headers}, nil
+}
+
+// deliveryID is a UUID shaped identifier that is unique per delivery and the
+// same for two runs of one workflow, for the same reason eventID is.
+func deliveryID(eventType string, data map[string]any, now time.Time) string {
+	digest := sha256.New()
+	digest.Write([]byte(eventType))
+	digest.Write([]byte{0})
+	if payload, err := json.Marshal(data); err == nil {
+		digest.Write(payload)
+	}
+	digest.Write([]byte(strconv.FormatInt(now.Unix(), 10)))
+	h := hex.EncodeToString(digest.Sum(nil))
+	return h[0:8] + "-" + h[8:12] + "-4" + h[12:15] + "-8" + h[15:18] + "-" + h[18:30]
 }
 
 // envelope wraps the data in the shape the provider actually sends.
@@ -158,11 +228,15 @@ func Build(provider, eventType, secret string, overrides map[string]any, now tim
 // Providers do not agree on this, and an application parsing the wrong
 // envelope fails on a field that is not there, which looks like a bug in the
 // application rather than in the simulator.
-func envelope(p Provider, eventType string, data map[string]any, now time.Time) ([]byte, error) {
+func envelope(p Provider, eventType string, data map[string]any, now time.Time, pinned string) ([]byte, error) {
 	switch p.Name {
 	case "stripe":
+		id := eventID(eventType, data, now)
+		if pinned != "" {
+			id = pinned
+		}
 		return json.Marshal(map[string]any{
-			"id":               eventID(eventType, data, now),
+			"id":               id,
 			"object":           "event",
 			"api_version":      "2024-06-20",
 			"created":          now.Unix(),
@@ -236,7 +310,6 @@ func signGitHub(body []byte, secret string, _ time.Time) map[string]string {
 	mac.Write(body)
 	return map[string]string{
 		"X-Hub-Signature-256": "sha256=" + hex.EncodeToString(mac.Sum(nil)),
-		"X-GitHub-Delivery":   "afmock-00000000-0000-4000-8000-000000000000",
 	}
 }
 
@@ -296,6 +369,48 @@ func SecretFor(envID, provider string) string {
 	mac.Write([]byte(provider))
 	return "whsec_" + hex.EncodeToString(mac.Sum(nil))[:32]
 }
+
+// Secrets returns the signing secrets an environment uses, keyed by the
+// variable each provider's secret is delivered under.
+//
+// One rule with a webhook_path per provider is enough. A value already set in
+// the shell wins, because somebody who set one has a reason and is probably
+// matching a fixture recorded elsewhere; otherwise the secret is derived from
+// the environment identifier, so a preview environment needs no configuration
+// at all to have working signature verification.
+//
+// This is the one derivation, and af up, af webhook trigger, the MCP sender
+// and af explain all call it. Two copies of the rule that decides the secret
+// would be two copies that can disagree, and the symptom would be an
+// application refusing every event as unsigned.
+func Secrets(rules []schema.EgressRule, envID string, getenv func(string) string) map[string]string {
+	out := map[string]string{}
+	for _, r := range rules {
+		if r.WebhookPath == "" {
+			continue
+		}
+		provider := ForHost(r.Host)
+		if provider == "" {
+			continue
+		}
+		name := SecretEnvFor(provider)
+		if _, done := out[name]; done {
+			continue
+		}
+		if getenv != nil {
+			if value := getenv(name); value != "" {
+				out[name] = value
+				continue
+			}
+		}
+		out[name] = SecretFor(envID, provider)
+	}
+	return out
+}
+
+// SecretsSourceName is how the secrets chain refers to the values Secrets
+// returns, in af explain and in the "Looked in" list of AF-SEC-001.
+const SecretsSourceName = "the environment's webhook signing secrets"
 
 // SecretEnvFor returns the variable a provider's secret is read from.
 func SecretEnvFor(provider string) string {

@@ -29,6 +29,25 @@ secret, so your existing verification code runs and passes. A webhook handler
 that skips verification in previews is a handler nobody has tested, and the
 first time it matters is in production.
 
+The secret is derived per environment and handed to every service under the
+provider's conventional name: `STRIPE_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_SECRET`,
+`RESEND_WEBHOOK_SECRET`. `af webhook list` names the variable for each provider.
+An application that reads the same value under a name of its own says so with
+`from`, and receives what the environment will sign with:
+
+```yaml
+services:
+  - name: api
+    env:
+      - name: AF_STRIPE_WEBHOOK_SECRET
+        from: STRIPE_WEBHOOK_SECRET
+```
+
+`af explain` reports that variable as coming from the environment's webhook
+signing secrets. A value typed into the manifest instead would be the first
+thing to drift from the one the sender uses, and every event would then be
+refused as unsigned by the very verification this exists to exercise.
+
 ## Delivery failed
 
 ```
@@ -44,6 +63,20 @@ A 4xx or 5xx from your handler is not this error. That is delivered and
 recorded, and `af net log` shows the status, because a handler that returns 500
 is a bug in the handler and reporting it as a delivery failure would point at
 the wrong place.
+
+## Retries
+
+A provider retries the same event with the same identifier, and a handler that
+is right about that does nothing the second time. Two triggers a second apart
+are two different events, so to rehearse a retry pin the identifier:
+
+```sh
+af webhook trigger stripe invoice.paid --set event_id=evt_retry_1
+af webhook trigger stripe invoice.paid --set event_id=evt_retry_1
+```
+
+`event_id` is the one `--set` name that is not a payload field. The MCP tool
+`send_webhook_event` takes it the same way, in `fields`.
 
 ## Replaying
 

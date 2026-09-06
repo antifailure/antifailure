@@ -105,15 +105,15 @@ services:
       # be a real key are enough to turn the button on. None of these is a
       # Stripe credential.
       #
-      # api.stripe.com is deliberately NOT in the egress policy below, so the
-      # moment the button is pressed the checkout mutation reaches a host the
+      # api.stripe.com is BLOCKED in the egress policy below, so the moment
+      # the button is pressed the checkout mutation reaches a host the
       # sidecar refuses and fails inside the handler. That is the point of the
       # arrangement: the request gets PAST the /trpc transport gate and dies at
       # Stripe, which the control plane reports as an internal error. The 403
       # the transport gate returns when the operator cookie wrongly makes it
       # refuse a customer mutation is a different sentence, and the workflow's
       # expectation is the internal-error one, which the 403 path can never
-      # produce.
+      # produce. The rule exists for its webhook_path, not to open anything.
       # The operator portal's own database credential, so the portal WORKS in
       # a preview rather than answering "did not answer" after a sign-in.
       # Without it admin.* procedures refuse with PRECONDITION_FAILED, the
@@ -132,12 +132,55 @@ services:
       # sign anybody in:
       #   postgres://antifailure_admin:<any preview password>@db:5432/antifailure?sslmode=disable
       - name: AF_ADMIN_DATABASE_URL
+      # The three Stripe variables, and why one of them is not a literal.
+      #
+      # They were three typed placeholders, and the webhook secret among them
+      # could verify nothing: every event send_webhook_event delivers is
+      # signed with the secret the engine derives for this environment, and a
+      # placeholder typed here is by definition not that secret. So the api
+      # registered /webhooks/stripe and refused every simulated delivery as
+      # unsigned, and the billing orderings the product exists to rehearse, a
+      # checkout completed before the organization existed, the same event
+      # delivered twice, an updated subscription arriving after its deleted,
+      # were rehearsed nowhere. A double purchase on the checkout return page
+      # was found by reading code rather than by the product.
+      #
+      # The key is never presented to Stripe, because api.stripe.com is
+      # blocked, and its value is a label. It is deliberately NOT in the
+      # sk_test_ shape: a manifest is committed, and the validator refuses a
+      # literal that looks like a credential, which is the right reflex even
+      # when the value is made up.
       - name: AF_STRIPE_SECRET_KEY
         value: preview-billing-is-on-and-stripe-is-unreachable
+      # The one value that has to be right. Every event send_webhook_event
+      # delivers is signed with the secret the engine derives for this
+      # environment, and the engine hands that secret to every service as
+      # STRIPE_WEBHOOK_SECRET. The api reads it under its own name, so this is
+      # a rename of the engine's value and not a value of its own: the two
+      # sides agree by construction, and a secret typed here twice would be
+      # the first thing to drift.
       - name: AF_STRIPE_WEBHOOK_SECRET
-        value: preview-billing-is-on-and-stripe-is-unreachable
+        from: STRIPE_WEBHOOK_SECRET
+      # The price id the Team plan is sold under. Any string: the api
+      # compares a subscription's price against this to decide which plan it
+      # grants, so a simulated subscription event names it to be granted Team.
       - name: AF_STRIPE_PRICE_TEAM
         value: preview-team-price-with-no-stripe-behind-it
+
+      # The GitHub App is configured for the same reason, so /webhooks/github
+      # exists and an installation can be rehearsed. Nothing here can reach
+      # GitHub: api.github.com is blocked below, and the App id and key were
+      # never registered with GitHub. The key is a throwaway generated for
+      # this file with `openssl genpkey`, committed on purpose and useless
+      # anywhere else; it is base64 rather than PEM because the api accepts
+      # either and the validator refuses a literal beginning with BEGIN, again
+      # correctly. The webhook secret is a rename of the engine's, as above.
+      - name: AF_GITHUB_APP_ID
+        value: "1"
+      - name: AF_GITHUB_APP_PRIVATE_KEY
+        value: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2UUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktjd2dnU2pBZ0VBQW9JQkFRRFpWNE1yTEpBN2YvUU8KSENBWHREeUNCc01wMzdiWlkzM2dlSnYvZjZ1aitMQWx1cTBGN2MwTDA5bW1OMDhpNVpMK29XWklJbEFZSFg2TwpvSmE2dDFHUnpZZUZudVRIcURLamdHZjh6YmJsZDVhdUZ5cENwZ0NJUlFRODIxbXFKYTZtbVJNQW5oZS9JbDZ2CmZOak5ONTlXd1JiQVM1eWFLZkJMWW05SG9nZ01hRVg4dkhxSWNWZUVnZWNaWlZQY2hrRFdMQXlxWnNEaEl5L1YKeFJET1dJVy80TUs0NzlMZkNxSjgrZU9aNHMxY0R4RU43L0dsL0JaRGdzMElhL3E5ZEtyV3N4TzZCUUlaNU5JbQoweVp5M0c3czF3WThzNDlIcVhnbW5wczVJRHpQUnBteDh4cnl3Q0NFV0JiOXhSbWk1dldNV0xGakpwUHc3Vk9VCjhXS0FBbGVMQWdNQkFBRUNnZ0VBSUZjWkhGc0dDVHgvRWRIQWtCWmwxelB2WlhNMXI1VDgzWTBhS3E0U0x4VFUKWW9EV1pIdjFRZzNLSktWZjZxdytMNzBrelpZQmYxMGdLdjZkVkhlWkNuamY4aE9VZ2xzTHAwV2c4NVAwRGsxawpYVStkYzdaazBqZHhnU2E0bEdJRllpS0Q3OWhydXlsVTdUTHhjRjZXOWZTY1plSmxFVHd0Vm96MVRGNUJhVldkCkRYVVppNHFYMHJvaHhEMkpTQnlHOTh0V3ZqcnZsZmxLUmJJMndEdHp0Z1BKQTJXM2RBQzJ0dXdIbEtjOUZDdjMKVTZqMG4vekhUN1ZHWFo4MHFlMkRvVVFLRkw0ZGg4VjhqQnNSMkFYRmdTOW9idnM2NkgzTzJkWDZLM1pIT29yagp0K2JWNjRYUko2dXIyN014WGZPRURjbnFMMFJ6L3VaTGtIWVBaQk9LWVFLQmdRRDlSSVp5cXQzTHk5c0xiaGszCkZ3Z3c0T2hZN1FPUnhUMlNCdldsbWdnWjQ3M1ZxTkpDS3JTRUhRd05iMk5DM1ZYaTgrSWRCbG9lS2ZmNy9mNDQKSDhvaWcySmJqcGtPdll5aXJDZ2Zwc041dkFSVUtqWnpHWldNV2FvbThEZ09pWm8rMzhuRDd4TktOSjZqL3FTUApDN0NSdkxEcVE4MFJvN0d3WWRPbTMzeGFhd0tCZ1FEYnI4Um4wTG9jM2JUNUNPWFNyRHdhZWZtZzB1UTE0VDNFClRUYy94Yy9lamJBNVRqbU5vYkttUHBIMDA4bzZwaTJhL0RZNVhwV0Z3TW5DNDdnVmNjeTB2Nnd0MzdMU2k0TjQKWEE1SHcwcWR1TkVUK0tQTWhMbFFXNE4vbFZGTysxa05UMmtFZk9GM2VWTU4rSjZxTVpRZHc2Ukx1enROM0FkcQpYeUw0TjF0L1lRS0JnQ0JQb3J0MFV4R1I4Mk1VNjhDY2ZwNEZ3MzY4MWl5OXRpb3dHeHpDZHZBZW52Um9NbExnCnNlRDg5N0dyR1VYSmlSQ0lQcnVuT000S1dxbmFjSmxtYk5wVVdyTUZrVDlSTFdUL2c2cnVFcGd3UlhrYlhaRDMKbloyblBzN3k3S1BtS0RpSFFtMXR6Yzgwd1Z4NHV6UElzUUVXeXBkSWlSd0wvenBhY0s4a2FlLzdBb0dBV3BqaQo0M2xWdDEvTEtVUjlHdU9DcWR5UmtMeEg5dHhiejUrVVlFMWdpMFJkWDFTZU1ZVjBtbENGZXJUNDJqVDc2OFdGClN5Vnhma1ppTG1nZzIxOGg3NHg0SWpiMWxSU0o5RkhxWmJmcEJxQllRT2N5RGI3U2VZd3o3NktSZElQOVZwcmcKRVVTNjZyMXkvZmtBM2VreVR4QUdxbUNkZFY5L0EyUVdsTXluaENFQ2dZRUF6cktDdjVXRWp2bHRBQ0tDRXBoQQp2bWMwNFUxZWFKSUQwQlBYeStGNnRDSlhmbXVTNjZKTlQxTDRFRWtmZkpKRytxc3drbjRIRHpSRUlkWDFlME5rCkkzMHY2WEdhdURKL1ZNbE1uQ3lOR2xyT3B1Ti9qK1d1b2RpUnc5VmNqYVNncEJ2OU94a1hodUtWSzlvSm4wM3MKdGVMUk8yZnhXWW1Eajc4VGI5M3R6M1k9Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+      - name: AF_GITHUB_APP_WEBHOOK_SECRET
+        from: GITHUB_WEBHOOK_SECRET
 
 database:
   provider: docker
@@ -176,6 +219,24 @@ egress:
     - host: api.resend.com
       mode: capture
       note: "the sign-in link, recorded into the inbox instead of being sent to anybody"
+    # Blocked, as the default already says, and present for its webhook_path:
+    # the callbacks Stripe would send are delivered to the api's own handler,
+    # signed the way Stripe signs them. Without this line the sender refused
+    # every event with AF-NET-012 before the api saw it. The checkout workflow
+    # below depends on Stripe staying unreachable, so this is not mock, which
+    # the engine's own Stripe pack would allow; that is a separate decision.
+    - host: api.stripe.com
+      mode: block
+      webhook_path: /webhooks/stripe
+      note: "Stripe stays unreachable; the callbacks it would send go to the api"
+    # Still blocked, which is the point of this environment. The rule exists
+    # for its webhook_path: an installation or a pull request can be delivered
+    # to the api and handled, while anything the api then tries to ask GitHub
+    # is refused with a readable decision rather than reaching it.
+    - host: api.github.com
+      mode: block
+      webhook_path: /webhooks/github
+      note: "the GitHub App's callbacks go to the api; GitHub itself stays unreachable"
 
 personas:
   - name: owner

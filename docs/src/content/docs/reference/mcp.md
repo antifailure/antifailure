@@ -662,7 +662,14 @@ event and does whatever it does, which for a payment or subscription event means
 creating, changing or cancelling records. The signing secret is resolved by the
 server from the same variable the application reads, and there is no argument
 that carries one. `list_webhook_events` has the exact event names, so a name
-that merely looks right is refused before anything is sent.
+that merely looks right is refused before anything is sent. `fields` sets
+values on the payload, as name and value pairs; a value that parses as JSON is
+sent as JSON. The one name that is not a payload field is `event_id`, which
+pins the provider's event identifier, so sending the same event twice with the
+same `event_id` rehearses a retry. The application's answer is returned on every
+delivery, bounded and labelled as its own words, because a handler that is right
+about ordering answers 200 to a first delivery and to a repeat and says which
+only in the body.
 
 ### `describe_model_key`, `verify_model_key` and `describe_control_plane_account`
 

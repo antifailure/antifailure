@@ -600,8 +600,13 @@ func TestSendWebhookEvent_IsNotReadOnly(t *testing.T) {
 	require.False(t, tool.ReadOnly)
 }
 
-func TestSendWebhookEvent_AcceptedDeliveryDoesNotEchoTheApplicationsBody(t *testing.T) {
+func TestSendWebhookEvent_AnAcceptedDeliverysBodyIsLabelledAsTheApplicationsOwnWords(t *testing.T) {
 	t.Parallel()
+	// This used to assert the body was dropped on a 200, on the grounds that
+	// a successful response says nothing a caller can act on. A webhook
+	// handler that is right about ordering says the one thing that matters
+	// in exactly that body, so it is kept; what survives from the old rule is
+	// that it is the application's words, bounded and labelled as data.
 	tool := newSendWebhookEventTool(testProject(t),
 		func(context.Context, string, string, map[string]any) (local.Delivery, bool, error) {
 			return local.Delivery{
@@ -615,8 +620,9 @@ func TestSendWebhookEvent_AcceptedDeliveryDoesNotEchoTheApplicationsBody(t *test
 	).(webhookDeliveryResult)
 
 	require.True(t, out.Accepted)
-	require.Empty(t, out.Response,
-		"a successful response says nothing a caller can act on and is not worth repeating")
+	require.NotEmpty(t, out.UntrustedNote,
+		"the application's own words are data and have to be labelled as such")
+	require.LessOrEqual(t, len(out.Response), 400)
 }
 
 // ---------------------------------------------------------------------------
@@ -757,4 +763,49 @@ func TestRemoveExpiredEnvironments_ASweepThatReportedNothingAtAllIsRefused(t *te
 
 	require.NotNil(t, fault)
 	require.Equal(t, FaultSafetyUnavailable, fault.Code)
+}
+
+func TestSendWebhookEvent_FieldsThatParseAsJSONArriveAsJSON(t *testing.T) {
+	t.Parallel()
+	// The rule the CLI's --set applies, and the one this tool's own comment
+	// claimed and did not apply: "4900" is a number, an object is an object,
+	// and text that is not JSON stays text. A subscription's items are an
+	// object, and with every value kept as a string they could not be
+	// expressed at all.
+	var got map[string]any
+	tool := newSendWebhookEventTool(testProject(t),
+		func(_ context.Context, _, _ string, fields map[string]any) (local.Delivery, bool, error) {
+			got = fields
+			return local.Delivery{Status: 200}, true, nil
+		})
+
+	mustInvoke(t, tool, `{"project_id":"test-project","provider":"stripe","event":"invoice.paid",`+
+		`"fields":[{"name":"amount_paid","value":"4900"},`+
+		`{"name":"items","value":"{\"data\":[{\"id\":\"si_1\"}]}"},`+
+		`{"name":"customer","value":"cus_plain"}]}`)
+
+	require.Equal(t, float64(4900), got["amount_paid"])
+	require.Equal(t, map[string]any{"data": []any{map[string]any{"id": "si_1"}}}, got["items"])
+	require.Equal(t, "cus_plain", got["customer"])
+}
+
+func TestSendWebhookEvent_KeepsTheApplicationsAnswerOnADeliveryItAccepted(t *testing.T) {
+	t.Parallel()
+	// A handler that is right about ordering answers 200 to a first delivery
+	// and to a repeat of it, and the body is the only thing that says which.
+	tool := newSendWebhookEventTool(testProject(t),
+		func(context.Context, string, string, map[string]any) (local.Delivery, bool, error) {
+			return local.Delivery{
+				Service: "api", URL: "http://localhost:3000/webhooks/stripe", Status: 200,
+				Body: `{"handled":true,"detail":"already handled; a repeat delivery of one event changes nothing"}`,
+			}, true, nil
+		})
+
+	out := mustInvoke(t, tool,
+		`{"project_id":"test-project","provider":"stripe","event":"invoice.paid"}`,
+	).(webhookDeliveryResult)
+
+	require.True(t, out.Accepted)
+	require.Contains(t, out.Response, "already handled")
+	require.NotEmpty(t, out.UntrustedNote)
 }

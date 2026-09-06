@@ -466,7 +466,7 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 // store is last because it is the long-lived default.
 func (o *Orchestrator) secretChain() *secrets.Chain {
 	if o.opts.Secrets != nil {
-		return o.opts.Secrets
+		return o.withWebhookSecrets(o.opts.Secrets)
 	}
 	getenv := o.opts.Getenv
 	if getenv == nil {
@@ -480,7 +480,26 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	// One constructor, shared with af explain and with model key resolution, so
 	// that a command whose job is to say where a value will come from cannot
 	// describe a different chain than the one that resolves it.
-	return secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring())
+	return o.withWebhookSecrets(
+		secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring()))
+}
+
+// withWebhookSecrets puts the signing secrets this environment derives in
+// front of a chain, under the names the sender uses.
+//
+// So that a service can declare `from: STRIPE_WEBHOOK_SECRET` on whatever
+// variable its application actually reads and receive the value the engine
+// will sign with. Before this the derived secret reached the services only
+// under STRIPE_WEBHOOK_SECRET itself, an alias looked the name up in sources
+// that could not hold a value computed at af up, and the api in this
+// repository's own twin, which reads AF_STRIPE_WEBHOOK_SECRET, started with
+// billing off while every simulated event was refused before it was sent.
+func (o *Orchestrator) withWebhookSecrets(chain *secrets.Chain) *secrets.Chain {
+	provided := o.WebhookSecrets()
+	if len(provided) == 0 {
+		return chain
+	}
+	return chain.Prepended(secrets.NewProvidedSource(webhook.SecretsSourceName, provided))
 }
 
 // resolveSecrets looks up everything the manifest declares.
@@ -581,27 +600,7 @@ func (o *Orchestrator) WebhookSecrets() map[string]string {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-
-	out := map[string]string{}
-	for _, r := range o.opts.Manifest.Egress.Rules {
-		if r.WebhookPath == "" {
-			continue
-		}
-		provider := webhook.ForHost(r.Host)
-		if provider == "" {
-			continue
-		}
-		name := webhook.SecretEnvFor(provider)
-		if _, done := out[name]; done {
-			continue
-		}
-		if value := getenv(name); value != "" {
-			out[name] = value
-			continue
-		}
-		out[name] = webhook.SecretFor(o.envID, provider)
-	}
-	return out
+	return webhook.Secrets(o.opts.Manifest.Egress.Rules, o.envID, getenv)
 }
 
 // WebhookSecretFor returns the secret used for one provider.
