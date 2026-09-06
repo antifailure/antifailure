@@ -1,9 +1,18 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Badge, Button, Card, LinkButton, Loaded, Page, TableSkeleton, When } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  LinkButton,
+  Loaded,
+  NavLink,
+  Page,
+  TableSkeleton,
+  When,
+} from "@/components/ui";
 import { AdminPage, DataTable, EmptyList, FilterBar, StatusChip } from "@/components/admin/primitives";
 import { More } from "@/components/pagination";
 import { useTwins, type Twin, type TwinScope } from "@/lib/admin-product";
@@ -195,12 +204,12 @@ const COLUMNS = [
       // A link out of the row rather than plain text: the next question after
       // "whose twin is this" is always about the account, and copying a slug
       // into a search box is the step this removes.
-      <Link
+      <NavLink
         href={`/admin/customers/users/organization?org=${encodeURIComponent(t.orgSlug)}`}
         className="inline-flex min-h-11 items-center underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
       >
         <span className="truncate font-mono text-[12px]">{t.orgSlug}</span>
-      </Link>
+      </NavLink>
     ),
   },
   {

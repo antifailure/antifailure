@@ -24,12 +24,12 @@
  */
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import Link from "next/link";
 import {
   Badge,
   Button,
   Card,
   Empty,
+  NavLink,
   Page,
   Table,
   TableWrap,
@@ -608,7 +608,7 @@ export function DataTable<T>({
                         // portal. min-h-11 keeps the 44px target under a thumb
                         // and is dropped above the phone breakpoint, where the
                         // row is already dense on purpose.
-                        <Link
+                        <NavLink
                           href={href(row)}
                           // flex-col, not the row `items-center` this had.
                           //
@@ -625,7 +625,7 @@ export function DataTable<T>({
                           className="-mx-1 -my-2 inline-flex min-h-11 min-w-0 flex-col items-start justify-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
                         >
                           {c.cell(row)}
-                        </Link>
+                        </NavLink>
                       ) : (
                         c.cell(row)
                       )}

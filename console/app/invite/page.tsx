@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ApiError, rest, useSession } from "@/lib/api";
 import { LogoMark } from "@/components/icons";
-import { Badge, Button, Lede, LinkButton, Standalone } from "@/components/ui";
+import { Badge, Button, Lede, LinkButton, Standalone, When } from "@/components/ui";
 
 interface Invitation {
   organization: string;
@@ -155,7 +155,7 @@ function Accept() {
             Link expires
           </dt>
           <dd className="mt-1 text-[13px] text-ink">
-            {new Date(invitation.expiresAt).toLocaleDateString()}
+            <When value={invitation.expiresAt} />
           </dd>
         </div>
       </dl>

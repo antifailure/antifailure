@@ -275,13 +275,17 @@ export function Row({ children, onClick }: { children: ReactNode; onClick?: () =
  * stays as the mouse convenience it always was.
  */
 export function CellLink({ href, children }: { href: string; children: ReactNode }) {
+  // NavLink, not Link. This is rendered once per row, so a page of fifty rows
+  // was fifty segment prefetches the moment the table appeared, the exact
+  // storm NavLink's comment describes for the rail, and the fix had been
+  // applied to the rail and not here.
   return (
-    <Link
+    <NavLink
       href={href}
       className="-mx-1 -my-2 inline-flex min-h-11 items-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
     >
       {children}
-    </Link>
+    </NavLink>
   );
 }
 

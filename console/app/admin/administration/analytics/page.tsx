@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import {
   Badge,
   Card,
   Empty,
   Field,
   Loaded,
+  NavLink,
   Table,
   TableSkeleton,
   TableWrap,
@@ -115,7 +115,7 @@ function UsageTable({ usage }: { usage: AdminUsage }) {
             {usage.rows.map((r) => (
               <tr key={r.id}>
                 <Td>
-                  <Link
+                  <NavLink
                     href={`/admin/customers/users/organization?org=${encodeURIComponent(r.slug)}`}
                     className="-mx-1 -my-2 inline-flex min-h-11 items-center px-1 py-2 underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
                   >
@@ -123,7 +123,7 @@ function UsageTable({ usage }: { usage: AdminUsage }) {
                       <span className="block truncate font-medium text-ink">{r.name}</span>
                       <span className="block truncate text-[12px] text-muted">{r.slug}</span>
                     </span>
-                  </Link>
+                  </NavLink>
                   {r.suspended ? (
                     <span className="mt-1 block">
                       <Badge tone="fail">suspended</Badge>

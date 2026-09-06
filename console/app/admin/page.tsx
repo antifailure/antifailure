@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import {
   Badge,
   Bar,
   Card,
   Empty,
   Loaded,
+  NavLink,
   Table,
   TableSkeleton,
   TableWrap,
@@ -169,12 +169,12 @@ export default function AdminOverviewPage() {
           title="Recent operator actions"
           note="Writes only. Reads are counted and left out."
           actions={
-            <Link
+            <NavLink
               href="/admin/security/audit"
               className="inline-flex min-h-11 items-center text-[13px] text-muted underline decoration-transparent underline-offset-4 hover:text-ink hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
             >
               Full chain
-            </Link>
+            </NavLink>
           }
         >
           <Loaded state={activity} skeleton={<TableSkeleton rows={4} cols={4} />}>
@@ -502,12 +502,12 @@ function Attention({
                 {item.detail}
               </span>
             </span>
-            <Link
+            <NavLink
               href={item.href}
               className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap text-[13px] text-ink underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink sm:min-h-0"
             >
               {item.action}
-            </Link>
+            </NavLink>
           </div>
         </li>
       ))}
@@ -665,7 +665,7 @@ function SectionLink({ item }: { item: AdminNavItem }) {
   const { Icon } = item;
   return (
     <li className="border-b border-rule last:border-b-0">
-      <Link
+      <NavLink
         href={item.href}
         className="flex min-h-11 items-start gap-3 px-4 py-3 transition-colors hover:bg-[rgba(16,16,16,0.035)] lg:h-full lg:items-center"
       >
@@ -674,7 +674,7 @@ function SectionLink({ item }: { item: AdminNavItem }) {
           <span className="block text-[13.5px] font-medium leading-5 text-ink">{item.label}</span>
           <span className="mt-0.5 block text-[12.5px] leading-5 text-muted">{item.summary}</span>
         </span>
-      </Link>
+      </NavLink>
     </li>
   );
 }

@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Badge, Button, Card, Loaded, TableSkeleton, When } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Loaded,
+  NavLink,
+  TableSkeleton,
+  When,
+} from "@/components/ui";
 import {
   AdminPage,
   DataTable,
@@ -155,12 +162,12 @@ const MASKING_COLUMNS: Column<MaskingRule>[] = [
     key: "org",
     header: "Organization",
     cell: (r) => (
-      <Link
+      <NavLink
         href={`/admin/customers/users/organization?org=${encodeURIComponent(r.orgSlug)}`}
         className="inline-flex min-h-11 items-center truncate font-mono text-[12px] underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
       >
         {r.orgSlug}
-      </Link>
+      </NavLink>
     ),
   },
   {
@@ -310,12 +317,12 @@ const GOLDEN_COLUMNS: Column<GoldenVersion>[] = [
     key: "org",
     header: "Organization",
     cell: (g) => (
-      <Link
+      <NavLink
         href={`/admin/customers/users/organization?org=${encodeURIComponent(g.orgSlug)}`}
         className="inline-flex min-h-11 items-center truncate font-mono text-[12px] underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
       >
         {g.orgSlug}
-      </Link>
+      </NavLink>
     ),
   },
   {

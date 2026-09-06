@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { mutate, query, useApi } from "@/lib/api";
+import { when } from "@/lib/format";
 import { useSessionContext } from "@/components/session";
 import {
   Badge,
   Button,
   Card,
+  Confirm,
   Empty,
   Loaded,
   Page,
@@ -153,6 +155,7 @@ function Billing() {
   const csrf = session.data?.csrfToken ?? "";
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   // THE RETURN FROM CHECKOUT.
   //
@@ -258,11 +261,15 @@ function Billing() {
     });
   }
 
-  function cancel() {
-    if (!window.confirm("Cancel this subscription at the end of its paid period?")) return;
-    return act("cancel", async () => {
+  // The app's own dialog, not window.confirm. The native popup was the one
+  // unstyled surface in the console, it cannot ask for the plan's name, and a
+  // driver steering this page from outside a browser never sees it, so the
+  // click either hung or went through unasked depending on the driver.
+  async function cancel() {
+    await act("cancel", async () => {
       await mutate("subscriptions.cancel", { reason: "cancelled in the console" }, csrf);
     });
+    setCancelling(false);
   }
 
   return (
@@ -377,7 +384,11 @@ function Billing() {
                       {busy === "portal" ? "Opening" : "Manage in Stripe"}
                     </Button>
                     {!data.billing.subscription.cancelAtPeriodEnd ? (
-                      <Button variant="danger" busy={busy === "cancel"} onClick={cancel}>
+                      <Button
+                        variant="danger"
+                        busy={busy === "cancel"}
+                        onClick={() => setCancelling(true)}
+                      >
                         {busy === "cancel" ? "Cancelling" : "Cancel at period end"}
                       </Button>
                     ) : null}
@@ -539,6 +550,29 @@ function Billing() {
               )}
             </Card>
           ) : null}
+          <Confirm
+            open={cancelling}
+            title="Cancel this subscription?"
+            phrase={data.billing.subscription?.plan ?? "cancel"}
+            confirmLabel="Cancel at period end"
+            busy={busy === "cancel"}
+            onCancel={() => setCancelling(false)}
+            onConfirm={() => void cancel()}
+          >
+            <p>
+              The <span className="font-medium text-ink">{data.billing.subscription?.plan}</span>{" "}
+              plan keeps running until{" "}
+              <span className="font-medium text-ink">
+                {when(data.billing.subscription?.currentPeriodEnd)}
+              </span>
+              , and is not renewed after that. Nothing is refunded and nothing is removed today.
+            </p>
+            <p>
+              When it ends, this organization drops to the free plan&rsquo;s limits. Anything already
+              over those limits stays where it is, and the next environment is refused until there
+              is room.
+            </p>
+          </Confirm>
         </div>
       )}
     </Loaded>

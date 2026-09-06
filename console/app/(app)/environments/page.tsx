@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   CellLink,
+  Confirm,
   Empty,
   Field,
   LinkButton,
@@ -70,8 +71,23 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
   const state = useApi<Environment>(() => query("environments.get", { envId }), [envId]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const csrf = session.data?.csrfToken ?? "";
+
+  async function teardown() {
+    setBusy(true);
+    setError(null);
+    try {
+      await mutate("environments.teardown", { envId }, csrf);
+      setConfirming(false);
+      state.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "That did not work.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Card
@@ -127,33 +143,41 @@ function Detail({ envId, onClose }: { envId: string; onClose: () => void }) {
                   containers reads that and does the removing, so this asks
                   rather than reaches.
                 </p>
-                {error ? (
+                {error && !confirming ? (
                   <p role="alert" className="mt-2 text-[12.5px] text-fail">
                     {error}
                   </p>
                 ) : null}
                 <div className="mt-3">
-                  <Button
-                    variant="danger"
-                    busy={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      setError(null);
-                      try {
-                        await mutate("environments.teardown", { envId }, csrf);
-                        state.reload();
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : "That did not work.");
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
+                  <Button variant="danger" busy={busy} onClick={() => setConfirming(true)}>
                     {busy ? "Requesting" : "Request teardown"}
                   </Button>
                 </div>
               </div>
             ) : null}
+            <Confirm
+              open={confirming}
+              title="Tear down this environment?"
+              confirmLabel="Tear it down"
+              busy={busy}
+              error={error}
+              onCancel={() => {
+                if (busy) return;
+                setConfirming(false);
+                setError(null);
+              }}
+              onConfirm={() => void teardown()}
+            >
+              <p>
+                <span className="font-mono text-ink">{envId}</span> is marked for removal. The
+                engine that built it removes the containers and the copied data the next time it
+                reads that mark, and any workflow still running against it stops.
+              </p>
+              <p>
+                A new environment for <span className="font-medium text-ink">{env.branch}</span>{" "}
+                can be created afterwards. This one does not come back.
+              </p>
+            </Confirm>
           </>
         )}
       </Loaded>
@@ -408,6 +432,7 @@ function Runtimes() {
   const [provider, setProvider] = useState("local");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Runtime | null>(null);
 
   async function act(key: string, run: () => Promise<unknown>) {
     setBusy(key);
@@ -520,11 +545,7 @@ function Runtimes() {
                             <Button
                               variant="danger"
                               busy={busy === r.name}
-                              onClick={() =>
-                                void act(r.name, () =>
-                                  mutate("runtimes.remove", { name: r.name }, csrf),
-                                )
-                              }
+                              onClick={() => setRemoving(r)}
                             >
                               Remove
                             </Button>
@@ -554,6 +575,26 @@ function Runtimes() {
           )
         }
       </Loaded>
+      <Confirm
+        open={removing !== null}
+        title={`Remove ${removing?.name ?? "this runtime"}?`}
+        confirmLabel="Remove it"
+        busy={busy !== null}
+        onCancel={() => setRemoving(null)}
+        onConfirm={async () => {
+          const r = removing;
+          if (!r) return;
+          await act(r.name, () => mutate("runtimes.remove", { name: r.name }, csrf));
+          setRemoving(null);
+        }}
+      >
+        <p>
+          The registration for <span className="font-mono text-ink">{removing?.name}</span> is
+          withdrawn. Nothing running is stopped: environments already on it keep going, and the
+          name stays in this list as long as one of them reports from there.
+        </p>
+        <p>It can be registered again under the same name.</p>
+      </Confirm>
     </Card>
   );
 }

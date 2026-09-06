@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Badge, Button, Card, Loaded, TableSkeleton, When } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Loaded,
+  NavLink,
+  TableSkeleton,
+  When,
+} from "@/components/ui";
 import {
   AdminPage,
   DataTable,
@@ -152,12 +159,12 @@ const COLUMNS: Column<BranchRow>[] = [
     key: "org",
     header: "Organization",
     cell: (b) => (
-      <Link
+      <NavLink
         href={`/admin/customers/users/organization?org=${encodeURIComponent(b.orgSlug)}`}
         className="inline-flex min-h-11 items-center truncate font-mono text-[12px] underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
       >
         {b.orgSlug}
-      </Link>
+      </NavLink>
     ),
   },
   {
@@ -219,7 +226,7 @@ const COLUMNS: Column<BranchRow>[] = [
     numeric: true,
     cell: (b) => (
       <span className="block">
-        <Link
+        <NavLink
           // The organization travels with the branch name. Two tenants can
           // both have a branch called main, and a link carrying only the name
           // showed somebody else's environments beside the ones clicked on.
@@ -232,7 +239,7 @@ const COLUMNS: Column<BranchRow>[] = [
           <span className="whitespace-nowrap">
             {b.live.toLocaleString()} live of {b.twins.toLocaleString()}
           </span>
-        </Link>
+        </NavLink>
         <span className="block whitespace-nowrap text-[12px] font-normal text-muted">
           newest is {b.latestState.replace(/_/g, " ")}
         </span>

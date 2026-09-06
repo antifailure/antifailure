@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ApiError, rest } from "@/lib/api";
 import { LogoMark } from "@/components/icons";
-import { Lede, Standalone } from "@/components/ui";
+import { Lede, Standalone, When } from "@/components/ui";
 
 interface Held {
   organization: string;
@@ -131,7 +131,7 @@ function Download() {
         <div className="min-w-0">
           <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">Taken</dt>
           <dd className="mt-1 text-[13px] text-ink">
-            {held.generatedAt ? new Date(held.generatedAt).toLocaleDateString() : "--"}
+            <When value={held.generatedAt} />
           </dd>
         </div>
         <div className="min-w-0">
@@ -139,7 +139,7 @@ function Download() {
             Link works until
           </dt>
           <dd className="mt-1 text-[13px] text-ink">
-            {new Date(held.expiresAt).toLocaleDateString()}
+            <When value={held.expiresAt} />
           </dd>
         </div>
       </dl>

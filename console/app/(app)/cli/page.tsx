@@ -17,6 +17,7 @@ import {
   Button,
   Card,
   CommandBlock,
+  Confirm,
   Empty,
   LinkButton,
   Loaded,
@@ -384,6 +385,7 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
   const state = useApi<TokenRow[]>(() => query<TokenRow[]>("tokens.list"), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<TokenRow | null>(null);
 
   if (!mayManage) {
     return (
@@ -478,22 +480,7 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
                             <Button
                               variant="danger"
                               busy={busy === t.id}
-                              onClick={async () => {
-                                setBusy(t.id);
-                                setError(null);
-                                try {
-                                  await mutate("tokens.revoke", { id: t.id }, csrf);
-                                  state.reload();
-                                } catch (e) {
-                                  setError(
-                                    e instanceof Error
-                                      ? e.message
-                                      : "The control plane refused it.",
-                                  );
-                                } finally {
-                                  setBusy(null);
-                                }
-                              }}
+                              onClick={() => setRevoking(t)}
                             >
                               Revoke
                             </Button>
@@ -622,6 +609,38 @@ function Tokens({ mayManage, csrf }: { mayManage: boolean; csrf: string }) {
           stops working.
         </p>
       </div>
+      <Confirm
+        open={revoking !== null}
+        title={`Revoke ${revoking?.name ?? "this credential"}?`}
+        confirmLabel="Revoke it"
+        busy={busy !== null}
+        onCancel={() => setRevoking(null)}
+        onConfirm={async () => {
+          const t = revoking;
+          if (!t) return;
+          setBusy(t.id);
+          setError(null);
+          try {
+            await mutate("tokens.revoke", { id: t.id }, csrf);
+            state.reload();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "The control plane refused it.");
+          } finally {
+            setBusy(null);
+            setRevoking(null);
+          }
+        }}
+      >
+        <p>
+          The {revoking ? kindLabel(revoking.kind) : "credential"} whose token starts{" "}
+          <span className="font-mono text-ink">{revoking?.prefix}</span> stops working on its next
+          request. Whatever is stored on that machine stays stored and stops being accepted.
+        </p>
+        <p>
+          Nothing signs it back in. Run the sign-in command above on that machine again to give it
+          a new one.
+        </p>
+      </Confirm>
     </Card>
   );
 }

@@ -1,9 +1,18 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Badge, Button, Card, LinkButton, Loaded, Page, TableSkeleton, When } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  LinkButton,
+  Loaded,
+  NavLink,
+  Page,
+  TableSkeleton,
+  When,
+} from "@/components/ui";
 import {
   AdminPage,
   DataTable,
@@ -236,12 +245,12 @@ function RunsEmpty({
 
 function Org({ slug }: { slug: string }) {
   return (
-    <Link
+    <NavLink
       href={`/admin/customers/users/organization?org=${encodeURIComponent(slug)}`}
       className="inline-flex min-h-11 items-center truncate font-mono text-[12px] underline decoration-transparent underline-offset-4 hover:decoration-[rgba(16,16,16,0.35)] sm:min-h-0"
     >
       {slug}
-    </Link>
+    </NavLink>
   );
 }
 

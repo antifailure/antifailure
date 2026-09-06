@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   CardSkeleton,
+  Confirm,
   Field,
   Loaded,
   Page,
@@ -88,6 +89,7 @@ function ProviderCard({
   const [cap, setCap] = useState(budget ? String(budget.capUsd) : "");
   const [busy, setBusy] = useState<"key" | "cap" | "revoke" | null>(null);
   const [capError, setCapError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   async function run(what: "key" | "cap" | "revoke", fn: () => Promise<Notice>) {
     setBusy(what);
@@ -207,25 +209,7 @@ function ProviderCard({
                   {stored ? "Rotate" : "Store"}
                 </Button>
                 {stored ? (
-                <Button
-                  variant="danger"
-                  busy={busy === "revoke"}
-                  onClick={() =>
-                    run("revoke", async () => {
-                      const out = await rest<{ revoked: boolean }>(
-                        `/console/api/providers/${provider}`,
-                        { method: "DELETE", csrf },
-                      );
-                      return {
-                        tone: out.revoked ? "ok" : "warn",
-                        title: out.revoked ? `The ${label} key is removed` : "There was nothing to remove",
-                        body: out.revoked
-                          ? "It cannot be used from here again. Revoke it at the provider too, because this does not reach them."
-                          : `No ${label} key was stored.`,
-                      };
-                    })
-                  }
-                >
+                <Button variant="danger" busy={busy === "revoke"} onClick={() => setRemoving(true)}>
                   Remove
                 </Button>
                 ) : null}
@@ -319,6 +303,44 @@ function ProviderCard({
           </TableWrap>
         ) : null}
       </div>
+      {/* Outside both forms. A dialog's own form is a form, and a form
+          inside a form is the one nesting HTML does not allow: the submit
+          reached the outer key form instead, which ignored an empty key, and
+          the confirm button removed nothing. */}
+      <Confirm
+        open={removing}
+        title={`Remove the ${label} key?`}
+        confirmLabel="Remove it"
+        busy={busy === "revoke"}
+        onCancel={() => setRemoving(false)}
+        onConfirm={async () => {
+          await run("revoke", async () => {
+            const out = await rest<{ revoked: boolean }>(
+              `/console/api/providers/${provider}`,
+              { method: "DELETE", csrf },
+            );
+            return {
+              tone: out.revoked ? "ok" : "warn",
+              title: out.revoked ? `The ${label} key is removed` : "There was nothing to remove",
+              body: out.revoked
+                ? "It cannot be used from here again. Revoke it at the provider too, because this does not reach them."
+                : `No ${label} key was stored.`,
+            };
+          });
+          setRemoving(false);
+        }}
+      >
+        <p>
+          The key ending{" "}
+          <span className="font-mono text-ink">{stored?.last4}</span> is deleted from this
+          control plane and every run on {label} refuses to spend until another one is
+          stored. Runs already in flight finish with the key they were given.
+        </p>
+        <p>
+          The key itself keeps working at {label}. Revoke it there too if it is meant to be
+          dead everywhere, because this does not reach them.
+        </p>
+      </Confirm>
     </Card>
   );
 }
