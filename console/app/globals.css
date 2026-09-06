@@ -63,6 +63,13 @@ html,
 body {
   background: var(--color-paper);
   color: var(--color-ink);
+  /* `only light` is the keyword that holds. The bare `light` describes the
+     page and still lets Chrome's automatic dark theme repaint it, and that
+     repaint inverts type and flat fills while leaving gradients and images
+     alone, which is how the marketing site ended up with white headings over
+     a pale hero. This console declared nothing at all, so it took the same
+     treatment on every screen. See www/app/globals.css for the whole of it. */
+  color-scheme: only light;
 }
 
 body {

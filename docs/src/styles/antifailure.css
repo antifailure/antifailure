@@ -92,6 +92,16 @@
 :root,
 :root[data-theme="light"],
 :root[data-theme="dark"] {
+  /* Starlight still writes `data-theme="dark"` on the root for a reader whose
+     system is dark, and carries `color-scheme: dark` with it. Every token
+     below is defined identically for both themes, so the page paints light
+     either way, and the declaration it came with was the half that showed:
+     dark scrollbars and dark form controls around a light page, and a browser
+     told this page supports dark when it does not. `only light` also keeps
+     Chrome's automatic dark theme off the documentation, the same way
+     www/app/globals.css keeps it off the site. */
+  color-scheme: only light;
+
   --sl-font: "Inter", ui-sans-serif, system-ui, sans-serif;
   --sl-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 

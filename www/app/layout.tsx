@@ -77,7 +77,12 @@ export const viewport: Viewport = {
   initialScale: 1,
   // The site is authored light. Saying so stops a browser in dark mode from
   // painting its own dark ground behind a light page for the first frame.
-  colorScheme: "light",
+  //
+  // `only light` rather than `light`, because the bare keyword does not stop
+  // Chrome's automatic dark theme, which then inverted the hero's type and
+  // left the film behind it pale. app/globals.css carries the reasoning and
+  // the same value in the cascade.
+  colorScheme: "only light",
   themeColor: "#101014",
 };
 

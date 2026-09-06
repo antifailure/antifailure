@@ -49,6 +49,22 @@ html,
 body {
   background: #f7f7f5;
   color: #000;
+  /* `only light`, not `light`. A browser painting the page itself treats the
+     two the same, and they part company in the one place that broke the home
+     page: Chrome's automatic dark theme, which an Android reader switches on
+     with "Darken websites" and a desktop reader switches on with a flag,
+     darkens any page that merely declares `light` and leaves a page alone at
+     `only light`. Its algorithm inverts text and flat backgrounds and does
+     not touch gradients, images or video, and the hero is all four at once,
+     so the h1 and the label above it turned white while the film behind them
+     and the fade over it stayed pale. White type on a near white ground, on
+     the first screen of the site, for every reader whose browser offered to
+     darken it.
+
+     `app/layout.tsx` carries the same value as a meta tag, for the frame
+     before this stylesheet arrives. Both are wanted: the tag decides the
+     first paint, this decides the cascade. */
+  color-scheme: only light;
 }
 
 html {
