@@ -127,6 +127,13 @@ variable "max_replicas" {
   default = 3
 }
 
+# Requests per replica before the platform adds one. See the module variable;
+# each tfvars file states its own number beside max_replicas and pool_max.
+variable "concurrent_requests" {
+  type    = number
+  default = 10
+}
+
 # Connections PER REPLICA, and the stack has to set it because the number that
 # matters is this one multiplied by the replicas and compared against what the
 # database SKU allows. The module defaulted it to 10 and the stack never passed

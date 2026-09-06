@@ -131,15 +131,24 @@ backup_retention_days = 35
 # on a single replica app that alert and the availability probe are the same
 # event.
 min_replicas = 2
-max_replicas = 6
+max_replicas = 12
+
+# Forty requests in flight per replica before the platform adds one. Azure
+# applies ten when nothing is declared, and the first release ran on that: six
+# replicas times ten was sixty concurrent requests for the whole product, and a
+# launch day reader with a slow connection holds one of those for as long as
+# the response streams. A Node process answering JSON over a pool of ten
+# connections is nowhere near saturated at ten; forty leaves it CPU bound
+# before it is queue bound, which is what the CPU on the revision is for.
+concurrent_requests = 40
 
 # Ten, stated rather than inherited, because the number only means anything
 # next to the server it runs against.
 #
 #   D2ds_v4 answers max_connections = 859, less 5 reserved and 10 superuser
 #   reserved, so an ordinary role gets 844.
-#   (max_replicas 6 + one rollback revision at min_replicas 2) x 10 = 80,
-#   plus 4 for the jobs and break-glass = 84 against 844.
+#   (max_replicas 12 + one rollback revision at min_replicas 2) x 10 = 140,
+#   plus 4 for the jobs and break-glass = 144 against 844.
 #
 # Staging runs 5 against the same pipeline because its B1ms hands out 35. The
 # defect that took staging down is present here too and has simply not been

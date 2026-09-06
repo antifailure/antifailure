@@ -178,6 +178,20 @@ variable "max_replicas" {
   type    = number
   default = 3
 }
+# Requests one replica handles at once before the platform adds another. Azure
+# applies 10 when no rule is declared, and that default was never written down
+# here, so production's ceiling was max_replicas x 10 in-flight requests and
+# nobody had chosen either number. A Node process serving JSON over a pool of
+# ten connections is not saturated at ten concurrent requests; the stack sets
+# this next to max_replicas and pool_max, where the three can be read together.
+variable "concurrent_requests" {
+  type    = number
+  default = 10
+  validation {
+    condition     = var.concurrent_requests >= 1 && var.concurrent_requests <= 1000
+    error_message = "concurrent_requests is the per replica HTTP concurrency the scaler acts on, between 1 and 1000."
+  }
+}
 variable "pool_max" {
   type    = number
   default = 10

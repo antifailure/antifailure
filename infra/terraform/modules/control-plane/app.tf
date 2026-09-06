@@ -327,6 +327,14 @@ resource "azurerm_container_app" "this" {
     min_replicas = var.min_replicas
     max_replicas = var.max_replicas
 
+    # Stated rather than inherited. Without a rule the platform scales on ten
+    # concurrent requests per replica, which is the number production ran on
+    # for its first release without anybody having chosen it.
+    http_scale_rule {
+      name                = "http-concurrency"
+      concurrent_requests = tostring(var.concurrent_requests)
+    }
+
     container {
       name   = "control-plane"
       image  = local.image

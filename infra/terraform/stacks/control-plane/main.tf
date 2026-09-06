@@ -106,10 +106,11 @@ module "control_plane" {
   geo_redundant_backup  = var.geo_redundant_backup
   high_availability     = var.high_availability
 
-  min_replicas = var.min_replicas
-  max_replicas = var.max_replicas
-  pool_max     = var.pool_max
-  app_base_url = var.app_base_url
+  min_replicas        = var.min_replicas
+  max_replicas        = var.max_replicas
+  concurrent_requests = var.concurrent_requests
+  pool_max            = var.pool_max
+  app_base_url        = var.app_base_url
 
   event_retention_months = var.event_retention_months
 
