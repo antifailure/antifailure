@@ -14,7 +14,7 @@ import (
 // A real engine token has no such prefix, which is why the adapter that holds
 // one registers it exactly; scrubberFor is what that path relies on and it is
 // proved separately below.
-const theToken = "sk-ant-api03-a-real-looking-credential-value"
+const theToken = "sk-ant-a-real-looking-credential-value"
 
 // theShapelessSecret has no prefix any pattern rule names, so nothing but
 // exact registration can find it.
