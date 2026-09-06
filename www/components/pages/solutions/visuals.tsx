@@ -55,7 +55,7 @@ export function DirectoryList({
         <li key={item.href}>
           <Link prefetch={false} href={item.href} className="group block py-8 max-md:py-6">
             {item.metric ? (
-              <span className="font-mono text-[11px] tracking-extra-tight text-black/40">{item.metric}</span>
+              <span className="font-mono text-[11px] tracking-extra-tight text-gray-new-50">{item.metric}</span>
             ) : null}
             <span
               className={cn(
@@ -68,7 +68,7 @@ export function DirectoryList({
             <p className="mt-2 max-w-[560px] text-[15px] leading-6 tracking-extra-tight text-gray-new-40">
               {item.body}
             </p>
-            <span className="mt-4 inline-block text-[13px] tracking-extra-tight text-black/50 transition-colors group-hover:text-black">
+            <span className="mt-4 inline-block text-[13px] tracking-extra-tight text-gray-new-50 transition-colors group-hover:text-black">
               Open
             </span>
           </Link>

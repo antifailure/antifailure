@@ -171,7 +171,7 @@ export function NestedPane({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-black/[0.08] bg-[#FAFAF8]">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.08] bg-white px-3 py-2">
         <span className="min-w-0 truncate text-[12px] tracking-extra-tight text-[#1A1A1A]">{title}</span>
-        {meta ? <span className="shrink-0 text-[11px] tracking-extra-tight text-[#9B9EA5]">{meta}</span> : null}
+        {meta ? <span className="shrink-0 text-[11px] tracking-extra-tight text-gray-new-50">{meta}</span> : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </div>
@@ -195,7 +195,7 @@ export function FindingHead({
         {title}
       </h3>
       <div className="mt-2 flex h-5 flex-wrap items-center gap-1.5 overflow-hidden">{meta}</div>
-      <div className="mt-3 h-4 text-[11px] tabular-nums tracking-extra-tight text-[#9B9EA5]">{step}</div>
+      <div className="mt-3 h-4 text-[11px] tabular-nums tracking-extra-tight text-gray-new-50">{step}</div>
       <p className="mt-2 h-[3.9em] max-w-[34ch] overflow-hidden text-[13px] leading-snug tracking-extra-tight text-[#6B6F76]">
         {body}
       </p>

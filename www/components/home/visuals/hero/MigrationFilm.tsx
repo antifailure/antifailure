@@ -61,7 +61,7 @@ export function MigrationFilm({ active }: FilmProps) {
               return (
                 <span
                   key={step}
-                  className={`text-[9px] tracking-extra-tight ${hot ? "text-[#C43D3D]" : "text-[#9B9EA5]"}`}
+                  className={`text-[9px] tracking-extra-tight ${hot ? "text-[#C43D3D]" : "text-gray-new-50"}`}
                   style={moveStyle({ opacity: 0.25 + show * 0.75, y: (1 - show) * 4 })}
                 >
                   {step}

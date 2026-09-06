@@ -83,7 +83,7 @@ export function MonoLabel({
         "font-mono text-[10px] tracking-extra-tight",
         tone === "reader" && "text-black/60",
         tone === "ok" && "text-[#285D49]",
-        tone === "art" && "text-black/45",
+        tone === "art" && "text-gray-new-50",
         className,
       )}
     >
@@ -123,7 +123,7 @@ export function StatusPill({
       className={cn(
         "inline-flex items-center px-1.5 py-0.5 font-mono text-[10px] tracking-extra-tight uppercase ring-1",
         tone === "PASS" && "text-[#285D49] ring-[#33bf00]/50",
-        tone === "UNVERIFIED" && "text-black/50 ring-black/20",
+        tone === "UNVERIFIED" && "text-gray-new-50 ring-black/20",
         tone === "FAIL" && "text-red-700 ring-red-600/50",
         className,
       )}
@@ -166,7 +166,7 @@ export function Node({
     <span
       className={cn(
         "inline-flex items-center gap-1.5 font-mono text-[10px] tracking-extra-tight",
-        lit ? "text-black" : "text-black/40",
+        lit ? "text-black" : "text-gray-new-50",
         className,
       )}
     >

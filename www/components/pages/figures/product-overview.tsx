@@ -40,7 +40,7 @@ function FigureShell({
             <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-[#285D49] sm:text-[10px]">
               {rail}
             </span>
-            <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-black/35 sm:inline">
+            <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
               FIG. {id}
             </span>
           </div>
@@ -57,14 +57,14 @@ function FigureShell({
 
 // The green is a prop rather than something a caller adds through className.
 // `cn` is a plain join, so text-[#285D49] passed in landed beside the eyebrow's
-// own text-black/50 and lost the cascade: three eyebrows meant to carry the
+// own text-gray-new-50 and lost the cascade: three eyebrows meant to carry the
 // sage signal rendered in the same grey as the ones that carry none.
 function Eyebrow({ children, className, tone = "muted" }: { children: ReactNode; className?: string; tone?: "muted" | "sage" }) {
   return (
     <span
       className={cn(
         "font-mono text-[8px] font-medium uppercase tracking-[0.12em] sm:text-[9px]",
-        tone === "sage" ? "text-[#285D49]" : "text-black/50",
+        tone === "sage" ? "text-[#285D49]" : "text-gray-new-50",
         className,
       )}
     >
@@ -159,7 +159,7 @@ function TopologyNode({
         <StateDot tone={tone === "danger" ? "danger" : tone === "mint" ? "active" : "muted"} />
         <span className="min-w-0 break-words text-[10px] font-medium leading-4 text-black sm:text-[11px]">{label}</span>
       </div>
-      <p className="mt-1 font-mono text-[8px] leading-3.5 text-black/48 sm:text-[9px]">{detail}</p>
+      <p className="mt-1 font-mono text-[8px] leading-3.5 text-gray-new-50 sm:text-[9px]">{detail}</p>
     </div>
   );
 }
@@ -192,7 +192,7 @@ export function POV01() {
         <section className="relative min-w-0 border-x border-[#285D49]/16 px-3" aria-label="Isolated twin boundary">
           <div className="flex items-center justify-between gap-2">
             <Eyebrow tone="sage">Isolated run boundary</Eyebrow>
-            <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#285D49]/70">temporary</span>
+            <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#285D49]">temporary</span>
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-1.5">
@@ -204,14 +204,14 @@ export function POV01() {
 
           <div className="mt-2.5 flex items-center gap-2 border-t border-[#285D49]/14 pt-2.5">
             <span className="flex size-5 shrink-0 items-center justify-center text-[#285D49]" aria-hidden="true">
-              <svg viewBox="0 0 16 16" className="size-3" fill="none">
+              <svg viewBox="0 0 16 16" className="size-3" fill="none" aria-hidden>
                 <path d="M8 1.5 13 3.6v3.6c0 3.2-2 5.7-5 7.3-3-1.6-5-4.1-5-7.3V3.6L8 1.5Z" stroke={GREEN_DARK} strokeWidth="1.2" />
                 <path d="m5.7 8 1.4 1.4 3.2-3.2" stroke={GREEN_DARK} strokeWidth="1.2" />
               </svg>
             </span>
             <div className="min-w-0">
               <div className="text-[10px] font-medium text-black sm:text-[11px]">Side-effect firewall</div>
-              <div className="font-mono text-[8px] text-black/50 sm:text-[9px]">all egress has an explicit mode</div>
+              <div className="font-mono text-[8px] text-gray-new-50 sm:text-[9px]">all egress has an explicit mode</div>
             </div>
           </div>
         </section>
@@ -228,13 +228,13 @@ export function POV01() {
       <div className="mt-3 grid items-center gap-2 border-t border-black/[0.07] pt-3 sm:grid-cols-[auto_1fr_auto]">
         <div className="flex items-center gap-2">
           <span className="flex size-5 items-center justify-center text-black/55" aria-hidden="true">
-            <svg viewBox="0 0 16 16" className="size-3.5" fill="none">
+            <svg viewBox="0 0 16 16" className="size-3.5" fill="none" aria-hidden>
               <path d="M3 4h10M5 4V2.5h6V4m1 0-.6 9H4.6L4 4m2.2 2.2v4.5m3.6-4.5v4.5" stroke="currentColor" strokeWidth="1.1" />
             </svg>
           </span>
           <div>
             <div className="text-[10px] font-medium text-black sm:text-[11px]">Resource journal</div>
-            <div className="font-mono text-[8px] text-black/45 sm:text-[9px]">every temporary resource recorded</div>
+            <div className="font-mono text-[8px] text-gray-new-50 sm:text-[9px]">every temporary resource recorded</div>
           </div>
         </div>
         <div className="hidden items-center text-black/25 sm:flex" aria-hidden="true">
@@ -265,12 +265,12 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
         <Eyebrow>Dimension</Eyebrow>
         <div>
           <div className="text-[11px] font-medium text-black sm:text-[12px]">Shared staging</div>
-          <p className="mt-0.5 font-mono text-[8px] text-black/45 sm:text-[9px]">fragmented signals</p>
+          <p className="mt-0.5 font-mono text-[8px] text-gray-new-50 sm:text-[9px]">fragmented signals</p>
         </div>
         <span className="hidden sm:block" aria-hidden="true" />
         <div>
           <div className="text-[11px] font-medium text-[#285D49] sm:text-[12px]">Disposable twin</div>
-          <p className="mt-0.5 font-mono text-[8px] text-[#285D49]/70 sm:text-[9px]">one decision path</p>
+          <p className="mt-0.5 font-mono text-[8px] text-[#285D49] sm:text-[9px]">one decision path</p>
         </div>
       </div>
 
@@ -280,7 +280,7 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
             key={row.miss}
             className="grid grid-cols-[minmax(76px,0.72fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-2 py-2.5 sm:grid-cols-[minmax(104px,0.72fr)_minmax(0,1fr)_24px_minmax(0,1fr)]"
           >
-            <span className="pr-1 font-mono text-[8px] uppercase leading-3 tracking-[0.08em] text-black/50 sm:text-[9px]">
+            <span className="pr-1 font-mono text-[8px] uppercase leading-3 tracking-[0.08em] text-gray-new-50 sm:text-[9px]">
               {COVERAGE_DIMENSIONS[index] ?? `Dimension ${index + 1}`}
             </span>
             <div className="flex min-w-0 items-start gap-1.5">
@@ -353,7 +353,7 @@ export function POV03() {
       </div>
 
       <section className="mt-3.5" aria-label="Lock hold timeline">
-        <div className="ml-[86px] grid grid-cols-5 text-center font-mono text-[8px] tabular-nums text-black/40 sm:ml-[114px] sm:text-[9px]" aria-hidden="true">
+        <div className="ml-[86px] grid grid-cols-5 text-center font-mono text-[8px] tabular-nums text-gray-new-50 sm:ml-[114px] sm:text-[9px]" aria-hidden="true">
           <span className="text-left">0s</span>
           <span>8s</span>
           <span>16s</span>
@@ -396,7 +396,7 @@ export function POV03() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-[10px] font-medium text-black sm:text-[11px]">Observation receipt</div>
-            <p className="mt-0.5 font-mono text-[8px] text-black/45 sm:text-[9px]">110 samples · one every 250 milliseconds</p>
+            <p className="mt-0.5 font-mono text-[8px] text-gray-new-50 sm:text-[9px]">110 samples · one every 250 milliseconds</p>
           </div>
           <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#285D49]">release seen</span>
         </div>
@@ -420,7 +420,7 @@ export function POV03() {
           ["plan changed", "yes"],
         ].map(([term, value]) => (
           <div key={term} className="min-w-0 px-2 py-2.5 text-center sm:px-3">
-            <dt className="font-mono text-[7px] uppercase leading-3 tracking-[0.08em] text-black/45 sm:text-[8px]">{term}</dt>
+            <dt className="font-mono text-[7px] uppercase leading-3 tracking-[0.08em] text-gray-new-50 sm:text-[8px]">{term}</dt>
             <dd className="mt-1 text-[10px] font-medium text-[#B93838] sm:text-[11px]">{value}</dd>
           </div>
         ))}
@@ -451,7 +451,7 @@ function PlanNode({
         <StateDot tone={baseline ? "active" : "danger"} />
         <span className="text-[10px] font-medium text-black sm:text-[11px]">{label}</span>
       </div>
-      <div className="mt-1 pl-3 font-mono text-[8px] text-black/50 sm:text-[9px]">relation: {relation}</div>
+      <div className="mt-1 pl-3 font-mono text-[8px] text-gray-new-50 sm:text-[9px]">relation: {relation}</div>
     </div>
   );
 }
@@ -477,7 +477,7 @@ export function POV04() {
           <div className="mt-1 text-[14px] font-medium text-black">Migration safety report</div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-black/45">merge gate</span>
+          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-gray-new-50">merge gate</span>
           <StatusPill tone="FAIL">FAIL</StatusPill>
         </div>
       </header>
@@ -496,14 +496,14 @@ export function POV04() {
               index < 2 ? "bg-[#FFF3F3]" : "bg-[#F8FAF8]",
             )}
           >
-            <dt className="font-mono text-[8px] uppercase tracking-[0.1em] text-black/45">{term}</dt>
+            <dt className="font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">{term}</dt>
             <dd className={cn("mt-1 text-[11px] font-medium sm:text-[12px]", index < 2 ? "text-[#B93838]" : "text-black")}>{value}</dd>
           </div>
         ))}
       </dl>
 
       <section className="mt-3 overflow-hidden border border-black/[0.07]" aria-label="Recorded findings">
-        <div className="grid grid-cols-[0.8fr_1.5fr_auto] gap-2 bg-[#F8FAF8] px-2.5 py-1.5 font-mono text-[8px] uppercase tracking-[0.1em] text-black/45 sm:px-3">
+        <div className="grid grid-cols-[0.8fr_1.5fr_auto] gap-2 bg-[#F8FAF8] px-2.5 py-1.5 font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50 sm:px-3">
           <span>check</span>
           <span>evidence</span>
           <span>state</span>
@@ -516,7 +516,7 @@ export function POV04() {
               index % 2 === 0 ? "bg-white" : "bg-[#FCFDFB]",
             )}
           >
-            <span className="min-w-0 font-mono text-[8px] uppercase leading-3 tracking-[0.06em] text-black/50 sm:text-[9px]">{finding.label}</span>
+            <span className="min-w-0 font-mono text-[8px] uppercase leading-3 tracking-[0.06em] text-gray-new-50 sm:text-[9px]">{finding.label}</span>
             <span className="min-w-0 [overflow-wrap:anywhere] text-[9px] leading-3.5 text-black/75 sm:text-[10px] sm:leading-4">{finding.value}</span>
             <span className={cn("size-2 rounded-full", finding.severe ? "bg-[#B93838]" : "bg-black/25")}>
               <span className="sr-only">{finding.severe ? "blocking evidence" : "supporting evidence"}</span>
@@ -555,7 +555,7 @@ export function POV04() {
         </div>
       </aside>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-black/[0.07] pt-2.5 font-mono text-[8px] uppercase tracking-[0.08em] text-black/45" aria-label="Evidence chain">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-black/[0.07] pt-2.5 font-mono text-[8px] uppercase tracking-[0.08em] text-gray-new-50" aria-label="Evidence chain">
         <span>rehearsal</span><span aria-hidden="true">→</span><span>lock samples</span><span aria-hidden="true">→</span><span>report</span><span aria-hidden="true">→</span><span className="text-[#B93838]">pull request blocked</span>
       </div>
     </FigureShell>

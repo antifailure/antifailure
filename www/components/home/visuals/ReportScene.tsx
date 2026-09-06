@@ -166,7 +166,7 @@ function InvariantRows() {
   return (
     <table className="w-full text-left font-mono text-[9px] tabular-nums tracking-extra-tight">
       <thead>
-        <tr className="text-black/35">
+        <tr className="text-gray-new-50">
           <th className="pb-0.5 pr-4 font-normal">account_id</th>
           <th className="pb-0.5 pr-4 font-normal">active</th>
           <th className="pb-0.5 font-normal">latest</th>
@@ -253,7 +253,7 @@ function ChecksColumn({ t, blocked, running }: { t: number; blocked: boolean; ru
       <Hairline />
       <ul className="flex flex-col">
         {GREY_CHECKS.map((name) => (
-          <li key={name} className="flex items-center gap-2 px-3 py-1.5 font-mono text-[11px] tracking-extra-tight text-black/35">
+          <li key={name} className="flex items-center gap-2 px-3 py-1.5 font-mono text-[11px] tracking-extra-tight text-gray-new-50">
             <GreyDot />
             {name}
           </li>
@@ -312,7 +312,7 @@ function ChecksColumn({ t, blocked, running }: { t: number; blocked: boolean; ru
         ) : null}
 
         {t >= 3 && t < 5.5 ? (
-          <p className="mt-2 font-mono text-[10px] leading-4 tracking-extra-tight text-black/50">{LOG_LINE}</p>
+          <p className="mt-2 font-mono text-[10px] leading-4 tracking-extra-tight text-gray-new-50">{LOG_LINE}</p>
         ) : null}
       </div>
 
@@ -321,12 +321,12 @@ function ChecksColumn({ t, blocked, running }: { t: number; blocked: boolean; ru
           type="button"
           disabled
           tabIndex={-1}
-          className="flex w-full cursor-not-allowed items-center justify-between bg-black/[0.04] px-2.5 py-1.5 font-mono text-[11px] tracking-extra-tight text-black/35 ring-1 ring-black/10"
+          className="flex w-full cursor-not-allowed items-center justify-between bg-black/[0.04] px-2.5 py-1.5 font-mono text-[11px] tracking-extra-tight text-gray-new-50 ring-1 ring-black/10"
         >
           <span>Merge pull request</span>
           <span className="text-black/25">▾</span>
         </button>
-        <p className="mt-1.5 font-mono text-[9px] tracking-extra-tight text-black/30">
+        <p className="mt-1.5 font-mono text-[9px] tracking-extra-tight text-gray-new-50">
           {blocked ? "inert · required check failed" : "inert · waiting on deployment safety"}
         </p>
       </div>
@@ -447,7 +447,7 @@ function EvidenceColumn({ t }: { t: number }) {
                     <span
                       className={cn(
                         "tabular-nums uppercase",
-                        row.tag === "fail" ? "text-red-700" : "text-black/35",
+                        row.tag === "fail" ? "text-red-700" : "text-gray-new-50",
                       )}
                     >
                       {row.tag}
@@ -455,7 +455,7 @@ function EvidenceColumn({ t }: { t: number }) {
                   </li>
                 ))}
               </ul>
-              <p className="mt-1.5 pl-2 font-mono text-[9px] leading-3 tracking-extra-tight text-black/35">
+              <p className="mt-1.5 pl-2 font-mono text-[9px] leading-3 tracking-extra-tight text-gray-new-50">
                 The verdict comes from the workflows and the invariants. The other two are reported.
               </p>
             </div>

@@ -1099,7 +1099,7 @@ export function FirewallScene() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   <MonoLabel>critical</MonoLabel>
-                  <Ticker className={cn("text-[12px]", crit > 0 ? "text-red-700" : "text-black/50")} value={crit} />
+                  <Ticker className={cn("text-[12px]", crit > 0 ? "text-red-700" : "text-gray-new-50")} value={crit} />
                 </span>
               </div>
               <Hairline />
@@ -1132,7 +1132,7 @@ export function FirewallScene() {
                           <span
                             className={cn(
                               "shrink-0 tabular-nums",
-                              row.tone === "block" ? "text-red-700" : "text-black/45",
+                              row.tone === "block" ? "text-red-700" : "text-gray-new-50",
                             )}
                           >
                             {row.receipt}
@@ -1141,7 +1141,7 @@ export function FirewallScene() {
                       </CheckRow>
                       {isExpand ? (
                         <pre
-                          className="pl-4 font-mono text-[9px] leading-3 tracking-extra-tight text-black/45"
+                          className="pl-4 font-mono text-[9px] leading-3 tracking-extra-tight text-gray-new-50"
                           style={{ opacity: expand }}
                         >
                           {`{ "amount": "***", "customer": "***", "source": "***" }`}
@@ -1181,7 +1181,7 @@ export function FirewallScene() {
               }}
             >
               <Receipt className="relative bg-[#fbfaf6]">
-                <div className="text-black/40">MIME · captured copy</div>
+                <div className="text-gray-new-50">MIME · captured copy</div>
                 <div>Subject: Order #4182</div>
                 <div>From: alex@***</div>
                 <div>Your card was charged $49.00.</div>
@@ -1218,7 +1218,7 @@ export function FirewallScene() {
                 <div className="font-mono text-[12px] tracking-extra-tight text-red-700">
                   unknown destination · denied inside the twin.
                 </div>
-                <div className="mt-1 font-mono text-[10px] tracking-extra-tight text-black/40">
+                <div className="mt-1 font-mono text-[10px] tracking-extra-tight text-gray-new-50">
                   telemetry.unknown.example · unresolved
                 </div>
               </div>
@@ -1243,7 +1243,7 @@ export function FirewallScene() {
               <span
                 className={cn(
                   "shrink-0 font-mono text-[11px] tabular-nums tracking-extra-tight",
-                  row.tone === "block" ? "text-red-700" : "text-black/40",
+                  row.tone === "block" ? "text-red-700" : "text-gray-new-50",
                 )}
               >
                 {row.receipt}

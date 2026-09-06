@@ -44,7 +44,7 @@ function FigureFrame({
             <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-black">
               {rail}
             </span>
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-black/35 sm:inline">
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
               FIG. {id}
             </span>
           </div>
@@ -61,7 +61,7 @@ function Eyebrow({ children, tone = "muted" }: { children: ReactNode; tone?: "mu
     <span
       className={cn(
         "font-mono text-[10px] font-medium uppercase tracking-[0.12em]",
-        tone === "muted" && "text-black/42",
+        tone === "muted" && "text-gray-new-50",
         tone === "green" && "text-[#285D49]",
         tone === "red" && "text-[#B44848]",
       )}
@@ -235,7 +235,7 @@ export function PTW01() {
           ["04", "Destroy"],
         ].map(([number, label], index) => (
           <li key={label} className={cn("min-w-0 px-2 py-2", index === 3 ? "bg-[#e4f1eb]" : "bg-white")}>
-            <span className="font-mono text-[10px] text-black/35">{number}</span>
+            <span className="font-mono text-[10px] text-gray-new-50">{number}</span>
             <span className="ml-1.5 text-[12px] font-medium text-black">{label}</span>
           </li>
         ))}
@@ -262,12 +262,12 @@ function StateCard({ state, index }: { state: LifecycleState; index: number }) {
   return (
     <div className={cn("min-w-0 border p-3", state.tone === "pass" ? "border-[#285D49]/20 bg-[#e4f1eb]" : "border-black/[0.08] bg-white")}>
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] text-black/35">0{index + 1}</span>
+        <span className="font-mono text-[10px] text-gray-new-50">0{index + 1}</span>
         <span className={cn("size-1.5 rounded-full", state.tone === "pass" ? "bg-[#33bf00]" : "bg-black/24")} aria-hidden="true" />
       </div>
       <div className="mt-1.5 font-mono text-[11px] leading-4 text-black [overflow-wrap:anywhere]">{state.event}</div>
       <div className="mt-1 text-[13px] font-semibold leading-5 text-black">{state.title}</div>
-      <p className="mt-1 text-[12px] leading-5 text-black/54">{state.detail}</p>
+      <p className="mt-1 text-[12px] leading-5 text-gray-new-50">{state.detail}</p>
     </div>
   );
 }
@@ -384,18 +384,18 @@ export function PTW03({ items }: { items: readonly IsolationItem[] }) {
         <section aria-label="Isolation controls" className="min-w-0 overflow-hidden border border-black/[0.08] bg-white">
           <div className="flex items-center justify-between gap-2 bg-[#f5f6f2] px-2.5 py-2">
             <Eyebrow>control register</Eyebrow>
-            <span className="font-mono text-[10px] text-black/35">{items.length} enforced</span>
+            <span className="font-mono text-[10px] text-gray-new-50">{items.length} enforced</span>
           </div>
           <ol>
             {items.map((item, index) => (
               <li key={item.kicker} className="grid grid-cols-[24px_1fr] gap-2 border-t border-black/[0.07] px-3 py-2.5 first:border-t-0">
-                <span className="pt-px font-mono text-[10px] text-black/32">{String(index + 1).padStart(2, "0")}</span>
+                <span className="pt-px font-mono text-[10px] text-gray-new-50">{String(index + 1).padStart(2, "0")}</span>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                     <span className="text-[12px] font-semibold leading-5 text-black">{item.kicker}</span>
                     {item.node ? <span className="max-w-full font-mono text-[10px] leading-4 text-[#285D49] [overflow-wrap:anywhere]">{item.node}</span> : null}
                   </div>
-                  <p className="mt-0.5 text-[11px] leading-4 text-black/54">{item.title}</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-gray-new-50">{item.title}</p>
                 </div>
               </li>
             ))}
@@ -426,7 +426,7 @@ function CommandStep({
           <code className="font-mono text-[12px] font-medium text-black">{command}</code>
           <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#285D49]">{title}</span>
         </div>
-        <p className="mt-1 text-[12px] leading-5 text-black/54">{detail}</p>
+        <p className="mt-1 text-[12px] leading-5 text-gray-new-50">{detail}</p>
       </div>
     </li>
   );
@@ -457,7 +457,7 @@ export function PTW04() {
           <div className="border-b border-black/[0.07] bg-[#f5f6f2] px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
               <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-black/25" />
-              <span className="min-w-0 truncate font-mono text-[11px] text-black/50">127.0.0.1 · loopback-only preview</span>
+              <span className="min-w-0 truncate font-mono text-[11px] text-gray-new-50">127.0.0.1 · loopback-only preview</span>
               <span className="ml-auto shrink-0 font-mono text-[10px] text-[#B44848]">TEMPORARY</span>
             </div>
           </div>
@@ -515,9 +515,9 @@ function JournalList({ reverse = false }: { reverse?: boolean }) {
     <ol className="mt-2 overflow-hidden border border-black/[0.07] bg-white">
       {rows.map(([number, kind, label], index) => (
         <li key={`${reverse ? "delete" : "create"}-${number}`} className={cn("grid grid-cols-[28px_1fr_auto] items-center gap-2 px-3 py-2.5", index > 0 && "border-t border-black/[0.07]", reverse && "bg-[#f3f8f5]")}>
-          <span className="font-mono text-[10px] text-black/35">{number}</span>
+          <span className="font-mono text-[10px] text-gray-new-50">{number}</span>
           <span className="min-w-0 text-[12px] leading-5 text-black/68">{label}</span>
-          <span className={cn("font-mono text-[10px] uppercase tracking-[0.08em]", reverse ? "text-[#285D49]" : "text-black/40")}>
+          <span className={cn("font-mono text-[10px] uppercase tracking-[0.08em]", reverse ? "text-[#285D49]" : "text-gray-new-50")}>
             {reverse ? "delete" : kind}
           </span>
         </li>
@@ -538,7 +538,7 @@ export function PTW05() {
         <section aria-label="Journal creation order" className="border border-black/[0.08] bg-[#f6f6f3] p-3">
           <div className="flex items-center justify-between gap-2">
             <Eyebrow>append immediately</Eyebrow>
-            <span className="font-mono text-[10px] text-black/40">create ↓</span>
+            <span className="font-mono text-[10px] text-gray-new-50">create ↓</span>
           </div>
           <JournalList />
         </section>
@@ -573,7 +573,7 @@ export function PTW05() {
 
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border border-dashed border-black/15 bg-white px-3 py-2.5">
         <code className="font-mono text-[11px] text-black">af env prune --before &lt;cutoff&gt;</code>
-        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-black/40">manual sweep · no automatic TTL</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-gray-new-50">manual sweep · no automatic TTL</span>
       </div>
     </FigureFrame>
   );

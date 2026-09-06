@@ -4,7 +4,7 @@ import { u } from "../SafetyCards";
 
 const INK = "#000000";
 const BODY = "#61646b";
-const FAINT = "#797d86";
+const FAINT = "var(--color-gray-new-50)";
 const BRAND = "#33bf00";
 
 const MESSAGES = [
@@ -14,7 +14,6 @@ const MESSAGES = [
     tint: "#6b8cae",
     time: "8:55 PM",
     body: "env-4c1 reached for an unlisted host",
-    opacity: 0.28,
   },
   {
     name: "firewall",
@@ -22,7 +21,6 @@ const MESSAGES = [
     tint: "#5a8f6e",
     time: "8:56 PM",
     body: "No rule for it. Denied, and written to the log.",
-    opacity: 0.62,
   },
 ] as const;
 
@@ -207,7 +205,7 @@ export function FailClosedCard() {
           <div
             className="absolute flex"
             key={msg.name}
-            style={{ left: u(10.5), top: u(i === 0 ? 5.5 : 45.5), width: u(213), opacity: msg.opacity }}
+            style={{ left: u(10.5), top: u(i === 0 ? 5.5 : 45.5), width: u(213) }}
           >
             <span
               className="flex shrink-0 items-center justify-center font-sans font-medium text-white"
@@ -265,7 +263,7 @@ export function FailClosedCard() {
         >
           <div className="flex items-center" style={{ gap: u(4), lineHeight: u(10.5) }}>
             <span
-              className="font-sans font-medium tracking-extra-tight bg-[rgba(51,191,0,0.15)] text-[#33bf00]"
+              className="font-sans font-medium tracking-extra-tight bg-[rgba(51,191,0,0.15)] text-[#285D49]"
               style={{
                 fontSize: u(8),
                 lineHeight: u(10.5),

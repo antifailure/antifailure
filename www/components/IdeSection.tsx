@@ -46,8 +46,8 @@ const KW = "text-[#0550ae]";
 const FN = "text-[#6f42c1]";
 const VAR = "text-[#0550ae]";
 const STR = "text-[#a31515]";
-const CM = "text-[#22863a]";
-const DIM = "text-black/50";
+const CM = "text-[#1E7A3A]";
+const DIM = "text-gray-new-50";
 const TEAL = "text-[#116329]";
 
 /**
@@ -291,13 +291,21 @@ function TokenView({
           <div key={i}>{i + 1}</div>
         ))}
       </div>
-      <pre className="min-w-0 flex-1 overflow-auto py-3.5 pr-4 outline-none max-sm:overflow-visible max-sm:px-3.5 max-sm:whitespace-pre-wrap max-sm:break-words">
+      {/* Scrollable, so it has to be reachable from the keyboard: a region
+          with a tab stop, or the overflow is mouse only. The outline is
+          suppressed on the element and drawn by the editor frame instead. */}
+      <pre
+        tabIndex={0}
+        role="region"
+        aria-label="Editor"
+        className="min-w-0 flex-1 overflow-auto py-3.5 pr-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-black/60 max-sm:overflow-visible max-sm:px-3.5 max-sm:whitespace-pre-wrap max-sm:break-words"
+      >
         {tokens.map((tok, i) => (
           <span key={i} className={tok.cls || VAR}>
             {tok.t}
           </span>
         ))}
-        {echo ? <span className="text-black/45">{echo}</span> : null}
+        {echo ? <span className="text-gray-new-50">{echo}</span> : null}
         {caret ? <Caret /> : null}
       </pre>
     </div>
@@ -556,7 +564,7 @@ export function IdePlay() {
           {"  ACCESS EXCLUSIVE on subscriptions 27.4s"}
         </div>
       ) : (
-        <div className="text-black/45">No problems have been detected.</div>
+        <div className="text-gray-new-50">No problems have been detected.</div>
       );
   } else if (bottomTab === "output") {
     bottomBody =
@@ -573,14 +581,14 @@ export function IdePlay() {
   } else if (bottomTab === "debug") {
     bottomBody = (
       <div>
-        <span className="text-black/40">{"> "}</span>
+        <span className="text-gray-new-50">{"> "}</span>
         <Caret />
       </div>
     );
   } else if (bottomTab === "ports") {
     bottomBody = (
       <div>
-        <div className="text-black/45">Local</div>
+        <div className="text-gray-new-50">Local</div>
         <div>http://127.0.0.1:46000</div>
       </div>
     );
@@ -591,7 +599,7 @@ export function IdePlay() {
           <div key={i} className={l.cls}>
             {i === 0 ? (
               <>
-                <span className="text-black/40">$ </span>
+                <span className="text-gray-new-50">$ </span>
                 {l.text}
                 {term < 1 && cmdChars < CMD.length && inView ? <Caret /> : null}
               </>
@@ -606,7 +614,7 @@ export function IdePlay() {
           </div>
         ))}
         {spin ? (
-          <span className="mt-1 inline-flex items-center gap-1.5 text-black/40">
+          <span className="mt-1 inline-flex items-center gap-1.5 text-gray-new-50">
             {/* A square, not a spinner. The word "running" carries the state
                 already; the ring beside it added a permanent rotation to a
                 page nobody is interacting with. */}
@@ -623,7 +631,7 @@ export function IdePlay() {
       ref={ref}
       className="relative min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white shadow-[0_40px_90px_rgba(0,0,0,0.12)]"
     >
-      <div className="flex h-[42px] items-center border-b border-black/[0.07] px-3.5 text-[12px] text-black/40">
+      <div className="flex h-[42px] items-center border-b border-black/[0.07] px-3.5 text-[12px] text-gray-new-50">
         <div className="flex gap-[6px]">
           <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
           <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
@@ -656,7 +664,7 @@ export function IdePlay() {
                 }}
               >
                 {f.folder ? (
-                  <span className="w-2.5 text-[9px] text-black/35">{open ? "▾" : "▸"}</span>
+                  <span className="w-2.5 text-[9px] text-gray-new-50">{open ? "▾" : "▸"}</span>
                 ) : (
                   <span className="w-2.5" />
                 )}
@@ -685,7 +693,7 @@ export function IdePlay() {
                 >
                   <button
                     type="button"
-                    className={`flex items-center gap-1.5 px-2 py-2 ${on ? "text-black" : "text-black/40 hover:text-black/70"}`}
+                    className={`flex items-center gap-1.5 px-2 py-2 ${on ? "text-black" : "text-gray-new-50 hover:text-black/70"}`}
                     onClick={() => openFile(id)}
                   >
                     <FileGlyph name={id} />
@@ -733,7 +741,7 @@ export function IdePlay() {
                 style={{ animation: "wt-sheen 0.9s cubic-bezier(0.16,1,0.3,1) 1" }}
               />
             ) : null}
-            <div className="fade-scroll-x no-scrollbars flex gap-5 overflow-x-auto px-3 text-[11.5px] text-black/35 max-sm:gap-4">
+            <div className="fade-scroll-x no-scrollbars flex gap-5 overflow-x-auto px-3 text-[11.5px] text-gray-new-50 max-sm:gap-4">
               {BOTTOM_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -749,14 +757,21 @@ export function IdePlay() {
                 </button>
               ))}
             </div>
-            <pre className="min-h-[128px] overflow-x-auto px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72 max-sm:min-h-[96px] max-sm:px-3.5 max-sm:text-[11px] max-sm:leading-[18px]">{bottomBody}</pre>
+            <pre
+              tabIndex={0}
+              role="region"
+              aria-label="Panel output"
+              className="min-h-[128px] overflow-x-auto px-4 pb-4 font-mono text-[12px] leading-[20px] text-black/72 outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-black/60 max-sm:min-h-[96px] max-sm:px-3.5 max-sm:text-[11px] max-sm:leading-[18px]"
+            >
+              {bottomBody}
+            </pre>
           </div>
         </div>
         <div className="hidden min-w-0 bg-[#f4f4f2] p-2 xl:block">
           <div className="flex h-full flex-col rounded-[12px] border border-black/[0.08] bg-white shadow-[0_16px_48px_rgba(0,0,0,0.08)]">
             <div className="flex min-w-0 items-center justify-between gap-2 px-3.5 pt-3.5 text-[13px] font-medium text-black">
               <span className="min-w-0 leading-snug">Getting started with Antifailure</span>
-              <span className="shrink-0 text-[15px] tracking-[0.2em] text-black/35">···</span>
+              <span className="shrink-0 text-[15px] tracking-[0.2em] text-gray-new-50">···</span>
             </div>
             <p className="mt-3 px-3.5 text-[12px] leading-[18px] text-black/55">
               Three commands. af init reads the repository and writes the manifest, af up builds the
@@ -764,7 +779,7 @@ export function IdePlay() {
               with evidence. With a production database, af golden refresh once before af up.
             </p>
             <pre className="mx-3.5 mt-3 overflow-hidden rounded-lg bg-[#f4f4f2] p-2.5 font-mono text-[10.5px] leading-[17px]">
-              <span className="mb-1 block text-[10px] text-black/35">terminal</span>
+              <span className="mb-1 block text-[10px] text-gray-new-50">terminal</span>
               <span className={DIM}>{"$ "}</span>
               <span className={VAR}>{"af init\n"}</span>
               <span className={DIM}>{"$ "}</span>
@@ -803,7 +818,7 @@ export function IdePlay() {
                 className="flex w-full flex-col rounded-[12px] border border-black/10 bg-[#f4f4f2] px-3 py-2.5 text-left hover:border-black/18"
                 onClick={replayRun}
               >
-                <span className="block min-w-0 text-[12.5px] text-black/40">Plan, search, build anything...</span>
+                <span className="block min-w-0 text-[12.5px] text-gray-new-50">Plan, search, build anything...</span>
                 <span className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white px-2 py-[3px] text-[11px] text-black/80">
                     <Sparkle className="h-2.5 w-2.5 text-black/70" />

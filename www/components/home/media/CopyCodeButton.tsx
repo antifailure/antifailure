@@ -73,10 +73,10 @@ export function CopyCodeButton({
         <span
           className={
             variant === "white"
-              ? "text-black/40"
+              ? "text-gray-new-50"
               : variant === "terminal"
                 ? "text-white/40"
-                : "text-black/50"
+                : "text-gray-new-50"
           }
         >
           ${" "}

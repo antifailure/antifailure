@@ -24,12 +24,12 @@ export function Breadcrumbs({ path }: { path: string }) {
   return (
     <nav aria-label="Breadcrumb" className="mb-6 max-md:mb-4">
       {/* gray-new-40 rather than 50, and it is a contrast fix rather than a
-          preference. 50 is #797d86, which at 13px measures 3.85:1 on the paper
-          ground, 4.13:1 on white and 3.55:1 on the sage bands, so the crumb
-          trail failed 4.5:1 on every page of the site that renders it. 40 is
-          the next token up and clears it on all three: 5.53, 5.93 and 5.10.
-          Nothing outside the scale was invented; the scale already had a
-          passing grey one step away. */}
+          preference. 50 was #797d86, which at 13px measured 3.85:1 on the
+          paper ground, 4.13:1 on white and 3.55:1 on the sage bands, so the
+          crumb trail failed 4.5:1 on every page of the site that renders it.
+          40 is the next token up and clears it on all three: 5.53, 5.93 and
+          5.10. The 50 token has since been retuned to pass as well, and this
+          stays on 40 because the trail is navigation, not a caption. */}
       <ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tracking-extra-tight text-gray-new-40">
         {trail.map((route, i) => {
           const last = i === trail.length - 1;

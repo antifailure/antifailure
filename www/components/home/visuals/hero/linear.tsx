@@ -161,7 +161,7 @@ export function Meta({
     <span
       className={cn(
         "text-[10px] tracking-extra-tight",
-        strong ? "text-[#1A1A1A]" : "text-[#9B9EA5]",
+        strong ? "text-[#1A1A1A]" : "text-gray-new-50",
         className,
       )}
     >

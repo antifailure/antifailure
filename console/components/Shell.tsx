@@ -130,7 +130,7 @@ const LAPSED_PATHS = LAPSED_NAV.map((n) => n.href);
  * different answers would turn this field into a way to ask whether somebody
  * works here.
  */
-function EmailSignIn() {
+function EmailSignIn({ signupsOpen }: { signupsOpen: boolean }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -179,7 +179,17 @@ function EmailSignIn() {
         <Field
           label="Email address"
           error={error}
-          hint="We send a link that signs you in. No password."
+          // The link only reaches an address that was invited into an
+          // organization. A brand new address gets the same "check your mail"
+          // sentence as an invited one, deliberately, so this field cannot be
+          // used to ask whether somebody works here, which also means it
+          // cannot tell a newcomer that no mail is coming. The hint says it
+          // up front instead, before they wait on a link that was never sent.
+          hint={
+            signupsOpen
+              ? "We send a link that signs you in. No password. New accounts start with GitHub, and the link is for addresses that were already invited into an organization."
+              : "We send a link that signs you in. No password. The link is for addresses that were already invited into an organization."
+          }
         >
           <input
             className={inputClass}
@@ -225,7 +235,7 @@ function SignIn({ session }: { session: Session }) {
           Continue with GitHub
         </LinkButton>
       </div>
-      {methods.includes("email") ? <EmailSignIn /> : null}
+      {methods.includes("email") ? <EmailSignIn signupsOpen={session.signupsOpen === true} /> : null}
       <p className="mt-6 text-[12.5px] leading-6 text-muted">
           The engine itself needs none of this. It is open source, it runs on
           your own machine, and the{" "}

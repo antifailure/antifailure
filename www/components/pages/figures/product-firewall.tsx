@@ -27,7 +27,7 @@ function FigureChrome({ id, tab, rail }: { id: string; tab: string; rail: string
         <span className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-black sm:text-[10px]">
           {rail}
         </span>
-        <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-black/35 sm:inline">
+        <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
           FIG. {id}
         </span>
       </div>
@@ -79,7 +79,7 @@ function MicroLabel({ children, tone = "muted" }: { children: ReactNode; tone?: 
     <span
       className={cn(
         "font-mono text-[9px] font-medium uppercase tracking-[0.12em]",
-        tone === "muted" && "text-black/45",
+        tone === "muted" && "text-gray-new-50",
         tone === "sage" && "text-[#285D49]",
         tone === "danger" && "text-[#A73737]",
       )}
@@ -179,7 +179,7 @@ function SummaryMetric({ label, value, tone = "plain" }: { label: string; value:
   return (
     <div className={cn("min-w-0 rounded-[10px] border px-3 py-2.5 text-center", toneClasses[tone])}>
       <div className="font-mono text-[18px] leading-none text-black">{value}</div>
-      <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-black/45">{label}</div>
+      <div className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-gray-new-50">{label}</div>
     </div>
   );
 }
@@ -201,7 +201,7 @@ export function PFW01() {
           </span>
           <div className="min-w-0">
             <div className="truncate text-[14px] font-medium tracking-tight text-black">Fail-closed egress boundary</div>
-            <div className="font-mono text-[10px] text-black/45">network namespace sealed; run 08f2</div>
+            <div className="font-mono text-[10px] text-gray-new-50">network namespace sealed; run 08f2</div>
           </div>
         </div>
         <StateChip tone="success">0 escaped</StateChip>
@@ -290,7 +290,7 @@ export function PFW02() {
         </span>
         <div className="min-w-0">
           <div className="truncate text-[12px] font-medium text-black">Clone-local state transition persisted</div>
-          <div className="truncate font-mono text-[10px] text-black/45">cus_sim_11; charge.created; api.stripe.com never resolved</div>
+          <div className="truncate font-mono text-[10px] text-gray-new-50">cus_sim_11; charge.created; api.stripe.com never resolved</div>
         </div>
       </div>
     </FirewallFigure>
@@ -322,18 +322,18 @@ export function PFW03() {
             </span>
             <div className="min-w-0">
               <div className="truncate text-[12px] font-medium text-black">Order #4182</div>
-              <div className="truncate font-mono text-[10px] text-black/45">msg_sim_2a91; multipart/alternative</div>
+              <div className="truncate font-mono text-[10px] text-gray-new-50">msg_sim_2a91; multipart/alternative</div>
             </div>
           </div>
           <StateChip tone="danger">not sent</StateChip>
         </header>
 
         <dl className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-b border-black/[0.06] px-3 py-2.5 font-mono text-[10px] leading-4">
-          <dt className="text-black/35">from</dt>
+          <dt className="text-gray-new-50">from</dt>
           <dd className="min-w-0 truncate text-black/70">checkout@twin.local</dd>
-          <dt className="text-black/35">to</dt>
+          <dt className="text-gray-new-50">to</dt>
           <dd className="min-w-0 truncate text-black/70">customer@example.test</dd>
-          <dt className="text-black/35">subject</dt>
+          <dt className="text-gray-new-50">subject</dt>
           <dd className="min-w-0 truncate text-black/70">Your order #4182</dd>
         </dl>
 
@@ -344,7 +344,7 @@ export function PFW03() {
             <div className="mt-2 h-2 w-[56%] rounded-full bg-black/[0.07]" />
           </div>
           <div className="grid content-start gap-1" aria-label="Captured MIME parts">
-            <span className="rounded-[6px] bg-[#f7f7f5] px-2 py-1 font-mono text-[9px] text-black/45">plain</span>
+            <span className="rounded-[6px] bg-[#f7f7f5] px-2 py-1 font-mono text-[9px] text-gray-new-50">plain</span>
             <span className="rounded-[6px] bg-[#E4F1EB] px-2 py-1 font-mono text-[9px] text-[#285D49]">html</span>
           </div>
         </div>
@@ -390,7 +390,7 @@ export function PFW04() {
             <span
               className={cn(
                 "grid size-6 place-items-center rounded-full font-mono text-[9px]",
-                check.tone === "danger" ? "bg-[#f4d9d9] text-[#A73737]" : check.tone === "sage" ? "bg-[#CAE6D9] text-[#285D49]" : "bg-[#f0f0ee] text-black/45",
+                check.tone === "danger" ? "bg-[#f4d9d9] text-[#A73737]" : check.tone === "sage" ? "bg-[#CAE6D9] text-[#285D49]" : "bg-[#f0f0ee] text-gray-new-50",
               )}
             >
               {String(index + 1).padStart(2, "0")}
@@ -399,7 +399,7 @@ export function PFW04() {
             <span
               className={cn(
                 "shrink-0 font-mono text-[10px] font-medium",
-                check.tone === "danger" ? "text-[#A73737]" : check.tone === "sage" ? "text-[#285D49]" : "text-black/45",
+                check.tone === "danger" ? "text-[#A73737]" : check.tone === "sage" ? "text-[#285D49]" : "text-gray-new-50",
               )}
             >
               {check.value}
@@ -460,11 +460,11 @@ export function PFW05() {
             >
               <span className="flex min-w-0 items-center gap-2 text-black/75" title={row.target}>
                 <OutcomeDot blocked={blocked} />
-                <span className="shrink-0 text-black/40">{row.method}</span>
+                <span className="shrink-0 text-gray-new-50">{row.method}</span>
                 <span className="min-w-0 truncate">{row.target}</span>
               </span>
               <span className={blocked ? "text-[#A73737]" : "text-[#285D49]"}>{row.mode}</span>
-              <span className="text-black/45">{row.receipt}</span>
+              <span className="text-gray-new-50">{row.receipt}</span>
             </div>
           );
         })}
@@ -493,7 +493,7 @@ function RouteNode({
       <span className="grid size-7 place-items-center rounded-full border border-current/15 bg-white font-mono text-[9px]">{number}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12px] font-medium text-black">{title}</span>
-        <span className="block truncate font-mono text-[10px] text-black/45">{detail}</span>
+        <span className="block truncate font-mono text-[10px] text-gray-new-50">{detail}</span>
       </span>
     </div>
   );
@@ -521,7 +521,7 @@ export function PFW06() {
             <RouteNode number="03" title="Mandatory gateway" detail="MOCK; decision logged" tone="success" />
           </div>
           <div className="mt-3 flex items-center justify-between gap-2 rounded-[9px] bg-white px-3 py-2.5 font-mono text-[10px]">
-            <span className="text-black/45">network result</span>
+            <span className="text-gray-new-50">network result</span>
             <span className="text-[#285D49]">contained response</span>
           </div>
         </section>

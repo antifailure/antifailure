@@ -313,7 +313,7 @@ function EntryRow({ entry }: { entry: Entry }) {
             <span className="mt-1.5 block">
               {entry.categories.map((category, index) => (
                 <span key={category}>
-                  {index === 0 ? null : <span className="text-gray-new-60"> · </span>}
+                  {index === 0 ? null : <span className="text-gray-new-50"> · </span>}
                   <span
                     className={
                       category === "security" ? "font-medium text-[#C43D3D]" : "text-gray-new-20"

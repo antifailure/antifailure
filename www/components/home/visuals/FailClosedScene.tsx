@@ -68,19 +68,19 @@ const COLUMNS = [
       {
         id: "DNS-018",
         title: "api.prod.internal",
-        tags: [{ label: "Production", color: "#2F8A5F" }],
+        tags: [{ label: "Production", color: "#285D49" }],
         who: { initial: "A", bg: "#E4E5E7" },
       },
       {
         id: "TCP-443",
         title: "18.4.2.9 · ip-bypass",
-        tags: [{ label: "Unknown", color: "#2F8A5F" }],
+        tags: [{ label: "Unknown", color: "#285D49" }],
         who: { initial: "L", bg: "#E4E5E7" },
       },
       {
         id: "WH-441",
         title: "hooks.prod.internal",
-        tags: [{ label: "Webhook", color: "#2F8A5F" }],
+        tags: [{ label: "Webhook", color: "#285D49" }],
         who: { initial: "D", bg: "#E4E5E7" },
       },
     ],
@@ -200,10 +200,10 @@ function EgressLedger() {
   return (
     <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
       <div className="flex items-center justify-between border-b border-black/[0.06] px-3.5 py-2.5">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#8A8F98]">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-gray-new-50">
           Egress ledger
         </span>
-        <span className="text-[12px] tabular-nums tracking-tight text-[#8A8F98]">
+        <span className="text-[12px] tabular-nums tracking-tight text-gray-new-50">
           {COLUMNS.reduce((n, col) => n + col.cards.length, 0)} attempts
         </span>
       </div>
@@ -212,7 +212,7 @@ function EgressLedger() {
           <span key={col.title} className="flex items-center gap-1.5 text-[12px] tracking-tight text-[#6B6F76]">
             <ColIcon kind={col.icon} />
             {col.title}
-            <span className="tabular-nums text-[#9B9EA5]">{col.cards.length}</span>
+            <span className="tabular-nums text-gray-new-50">{col.cards.length}</span>
           </span>
         ))}
       </div>
@@ -225,14 +225,14 @@ function EgressLedger() {
             <span className="min-w-0">
               <span className="block text-[13px] leading-snug tracking-tight text-[#1A1A1A]">{row.title}</span>
               <span className="mt-1 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] tabular-nums tracking-tight text-[#9B9EA5]">{row.id}</span>
+                <span className="font-mono text-[10px] tabular-nums tracking-tight text-gray-new-50">{row.id}</span>
                 <Tag color={row.tag.color} label={row.tag.label} />
               </span>
             </span>
             <span
               className={cn(
                 "mt-0.5 shrink-0 font-mono text-[10px] uppercase tracking-[0.1em]",
-                row.disposition === "blocked" ? "text-[#2F8A5F]" : "text-[#9B9EA5]",
+                row.disposition === "blocked" ? "text-[#285D49]" : "text-gray-new-50",
               )}
             >
               {row.disposition}
@@ -266,7 +266,7 @@ export function FailClosedScene() {
                 <div className="mb-2.5 flex h-7 items-center gap-1.5 px-0.5">
                   <ColIcon kind={col.icon} />
                   <span className="text-[13px] font-medium tracking-tight text-[#24262B]">{col.title}</span>
-                  <span className="text-[13px] tabular-nums text-[#9B9EA5]">{col.cards.length}</span>
+                  <span className="text-[13px] tabular-nums text-gray-new-50">{col.cards.length}</span>
                 </div>
                 <div className="flex flex-col gap-2">
                   {col.cards.map((card) => (
@@ -275,7 +275,7 @@ export function FailClosedScene() {
                       className="rounded-[10px] border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.03)]"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] tabular-nums tracking-tight text-[#8A8F98]">{card.id}</span>
+                        <span className="text-[12px] tabular-nums tracking-tight text-gray-new-50">{card.id}</span>
                         <span
                           className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-full text-[8px] font-medium text-[#6B6F76]"
                           style={{ background: card.who.bg }}
@@ -341,7 +341,7 @@ function SlackThread({ mobile }: { mobile?: boolean }) {
             <div className="flex items-center gap-2">
               <ChannelHash />
               <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">Checkout</span>
-              <span className="text-[13px] tracking-tight text-[#8A8F98]">#egress</span>
+              <span className="text-[13px] tracking-tight text-gray-new-50">#egress</span>
             </div>
           </div>
 
@@ -358,7 +358,7 @@ function SlackThread({ mobile }: { mobile?: boolean }) {
                   <div className="min-w-0">
                     <div className="flex items-baseline gap-2">
                       <span className="text-[13px] font-semibold tracking-tight text-[#1A1A1A]">{msg.name}</span>
-                      <span className="text-[12px] text-[#9B9EA5]">{msg.time}</span>
+                      <span className="text-[12px] text-gray-new-50">{msg.time}</span>
                     </div>
                     <p className="mt-0.5 text-[13px] leading-[1.45] tracking-tight text-[#3C3F44]">{msg.body}</p>
                   </div>
@@ -371,7 +371,7 @@ function SlackThread({ mobile }: { mobile?: boolean }) {
           <div className="px-3 pb-3">
             <div className="rounded-[10px] border border-black/[0.08] bg-[#FAFAFB] px-3 pt-3.5 pb-2">
               <div className="flex flex-wrap items-center gap-1.5 text-[13px] leading-5 text-[#3C3F44]">
-                <span className="rounded-[5px] bg-[#33bf00]/[0.14] px-1.5 py-px font-medium text-[#2F8A5F]">@firewall</span>
+                <span className="rounded-[5px] bg-[#33bf00]/[0.14] px-1.5 py-px font-medium text-[#285D49]">@firewall</span>
                 <span>deny unknown destinations</span>
               </div>
               {/* NO COMPOSER TOOLBAR. It carried a plus, a type control,

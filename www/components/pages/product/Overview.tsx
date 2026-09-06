@@ -210,7 +210,12 @@ export function OverviewPage() {
 
       <PageSection tone="ruled">
         <PageHeading title="<strong>The output is a decision.</strong> Not a dataset. Not a preview URL alone." />
-        <ul className="relative mt-16 grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
+        {/* The two column rules are siblings of the list, not children of it.
+            They were spans inside the ul, and a ul may only directly contain
+            li, so axe's list rule reported the element and a screen reader
+            counted five items where there are three. */}
+        <div className="relative mt-16">
+        <ul className="grid grid-cols-3 gap-x-16 max-xl:grid-cols-1 max-xl:gap-y-10">
           {VERDICTS.map((item) => (
             <li key={item.tone} className="min-w-0">
               <StatusPill tone={item.tone}>{item.tone}</StatusPill>
@@ -222,9 +227,10 @@ export function OverviewPage() {
               </p>
             </li>
           ))}
+        </ul>
           <span className="pointer-events-none absolute inset-y-0 left-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
           <span className="pointer-events-none absolute inset-y-0 right-[calc(33.333%-32px)] w-px bg-black/12 max-xl:hidden" />
-        </ul>
+        </div>
         <div className="mt-16 max-w-[640px] border-t border-black/10 pt-8">
           <MonoLabel tone="reader">What we will not claim</MonoLabel>
           <p className="mt-3 text-[15px] leading-6 tracking-extra-tight text-gray-new-40">

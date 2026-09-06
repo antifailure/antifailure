@@ -13,7 +13,17 @@
   --color-gray-new-10: #18191b;
   --color-gray-new-20: #303236;
   --color-gray-new-40: #61646b;
-  --color-gray-new-50: #797d86;
+  /* gray-new-50 is the site's tertiary text: captions, timestamps, the dim
+     labels inside every product illustration. It was #797d86, which is
+     3.85:1 on the page ground and 4.13:1 on white, under the 4.5:1 that
+     body-sized text needs, and axe counted it 263 times across six pages.
+     This value is 5.05:1 on #f7f7f5, 5.42:1 on white and 4.67:1 on the
+     mint (#e4f1eb), so it clears the bar on every ground the site paints.
+     It sits close to gray-new-40 on purpose: the step between them was the
+     failing part. The black/NN opacity utilities below 55% composited to
+     the same failing greys, so tertiary text uses this token rather than
+     an alpha. */
+  --color-gray-new-50: #666a73;
   --color-gray-new-60: #94979e;
   --color-gray-new-80: #c9cbcf;
   --color-gray-new-90: #e4e5e7;

@@ -75,7 +75,7 @@ function FigureShell({
             <span className="border-b-2 border-neon pb-0.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black sm:text-[10px]">
               {rail}
             </span>
-            <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-black/35 sm:inline">
+            <span className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50 sm:inline">
               FIG. {id}
             </span>
           </div>
@@ -91,7 +91,7 @@ function FigureShell({
 
 function SectionKicker({ children }: { children: ReactNode }) {
   return (
-    <div className="font-mono text-[9px] font-medium uppercase tracking-[0.13em] text-black/40 sm:text-[10px]">
+    <div className="font-mono text-[9px] font-medium uppercase tracking-[0.13em] text-gray-new-50 sm:text-[10px]">
       {children}
     </div>
   );
@@ -107,7 +107,7 @@ function EvidenceLine({ label, value, tone = "neutral" }: { label: string; value
       }`}
     >
       <span className="min-w-0 text-[11px] font-medium tracking-extra-tight text-black/75 sm:text-[12px]">{label}</span>
-      <span className={`shrink-0 font-mono text-[10px] ${tone === "delete" ? "text-[#A63333]" : tone === "pass" ? "text-[#285D49]" : "text-black/45"}`}>
+      <span className={`shrink-0 font-mono text-[10px] ${tone === "delete" ? "text-[#A63333]" : tone === "pass" ? "text-[#285D49]" : "text-gray-new-50"}`}>
         {value}
       </span>
     </div>
@@ -145,7 +145,7 @@ export function PSS01() {
           <div className="mt-3 text-[19px] font-medium leading-6 tracking-extra-tight text-black sm:text-[22px]">
             Production shape, unsafe values.
           </div>
-          <div className="mt-3 grid gap-1.5 font-mono text-[10px] text-black/45">
+          <div className="mt-3 grid gap-1.5 font-mono text-[10px] text-gray-new-50">
             <span>emails and names present</span>
             <span>secrets still live</span>
             <span>comments may contain PII</span>
@@ -180,7 +180,7 @@ export function PSS01() {
           ["audit", "attested"],
         ].map(([label, value], index) => (
           <div key={label} className={`min-w-0 px-2 py-2.5 sm:px-3 ${index ? "border-l border-black/[0.07]" : ""}`}>
-            <div className="font-mono text-[8px] uppercase tracking-[0.1em] text-black/35 sm:text-[9px]">{label}</div>
+            <div className="font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50 sm:text-[9px]">{label}</div>
             <div className="mt-1 truncate text-[10px] font-medium tracking-extra-tight text-black sm:text-[11px]">{value}</div>
           </div>
         ))}
@@ -204,7 +204,7 @@ function RelationColumn({ title, rows }: { title: string; rows: RelationRow[] })
           <div
             key={row.id}
             className={`flex min-w-0 items-center justify-between gap-2 rounded-[8px] px-2.5 py-2 ${
-              row.state === "KEEP" ? "bg-[#F1F8F4] text-[#285D49]" : "bg-[#F0F0ED] text-black/38"
+              row.state === "KEEP" ? "bg-[#F1F8F4] text-[#285D49]" : "bg-[#F0F0ED] text-gray-new-50"
             }`}
           >
             <div className="min-w-0">
@@ -233,7 +233,7 @@ export function PSS02() {
             <SectionKicker>Seed budget</SectionKicker>
             <div className="mt-1 text-[21px] font-medium leading-6 tracking-extra-tight text-black">12% seed grows only where relationships require it.</div>
           </div>
-          <div className="font-mono text-[10px] leading-5 text-black/48 sm:text-right">
+          <div className="font-mono text-[10px] leading-5 text-gray-new-50 sm:text-right">
             foreign-key closure keeps parents and children consistent; rare billing states stay represented.
           </div>
         </div>
@@ -241,7 +241,7 @@ export function PSS02() {
           <span className="h-full w-[12%] min-w-3 rounded-full bg-[#285D49]" />
           <span className="ml-1 h-full w-5 rounded-full bg-[#9FCAB6]" title="Rows added by referential closure" />
         </div>
-        <div className="mt-2 flex items-center gap-4 font-mono text-[8px] uppercase tracking-[0.1em] text-black/35">
+        <div className="mt-2 flex items-center gap-4 font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">
           <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#285D49]" /> seed</span>
           <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-[#9FCAB6]" /> closure</span>
         </div>
@@ -256,7 +256,7 @@ export function PSS02() {
           ]}
         />
         <div className="flex flex-col items-center justify-center text-[#285D49]">
-          <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-black/35">user_id</span>
+          <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">user_id</span>
           <span className="sm:hidden"><Arrow direction="down" /></span>
           <span className="hidden sm:inline"><Arrow /></span>
           <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#285D49]">closure</span>
@@ -274,14 +274,14 @@ export function PSS02() {
         <div className="flex min-w-0 items-center justify-between gap-3 rounded-[10px] bg-[#F1F8F4] px-3 py-2.5">
           <div className="min-w-0">
             <div className="truncate font-mono text-[10px] text-black/75">billing_state · lapsed</div>
-            <div className="mt-0.5 text-[9px] text-black/45">rare-state preservation</div>
+            <div className="mt-0.5 text-[9px] text-gray-new-50">rare-state preservation</div>
           </div>
           <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#285D49]">keep</span>
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3 rounded-[10px] bg-[#FAEEEE] px-3 py-2.5">
           <div className="min-w-0">
             <div className="truncate font-mono text-[10px] text-black/75">session · live</div>
-            <div className="mt-0.5 text-[9px] text-black/45">credential policy</div>
+            <div className="mt-0.5 text-[9px] text-gray-new-50">credential policy</div>
           </div>
           <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#A63333]">delete</span>
         </div>
@@ -326,7 +326,7 @@ export function PSS03() {
             className={`relative min-w-0 rounded-[10px] px-3 py-3 sm:rounded-none sm:px-2.5 sm:first:rounded-l-[10px] sm:last:rounded-r-[10px] ${index === 2 ? "bg-[#F1F8F4] text-[#285D49]" : "bg-white text-black"}`}
           >
             <div className="flex items-center justify-between gap-2 sm:block">
-              <span className="font-mono text-[9px] text-black/35">{stage.index}</span>
+              <span className="font-mono text-[9px] text-gray-new-50">{stage.index}</span>
               {index < postgresStages.length - 1 ? (
                 <svg viewBox="0 0 12 12" className="size-3 text-black/25 sm:absolute sm:-right-1.5 sm:top-4 sm:z-10" fill="none" aria-hidden="true">
                   <circle cx="6" cy="6" r="5.5" fill="white" stroke="currentColor" />
@@ -335,7 +335,7 @@ export function PSS03() {
               ) : null}
             </div>
             <div className="mt-1 text-[11px] font-medium leading-4 tracking-extra-tight text-black">{stage.name}</div>
-            <div className="mt-1 text-[9px] leading-3.5 tracking-extra-tight text-black/45">{stage.detail}</div>
+            <div className="mt-1 text-[9px] leading-3.5 tracking-extra-tight text-gray-new-50">{stage.detail}</div>
           </li>
         ))}
       </ol>
@@ -345,7 +345,7 @@ export function PSS03() {
           <div className="rounded-[9px] bg-white p-3">
             <SectionKicker>Built in</SectionKicker>
             <div className="mt-1 text-[11px] font-medium tracking-extra-tight text-black">Common Postgres paths</div>
-            <div className="mt-2 font-mono text-[10px] leading-5 text-black/45">logical restore<br />provider-native branch</div>
+            <div className="mt-2 font-mono text-[10px] leading-5 text-gray-new-50">logical restore<br />provider-native branch</div>
           </div>
           <div className="flex items-center justify-center gap-1 text-[#285D49] sm:flex-col">
             <span className="font-mono text-[8px] uppercase tracking-[0.1em]">same contract</span>
@@ -356,7 +356,7 @@ export function PSS03() {
           <div className="rounded-[9px] border border-dashed border-black/20 bg-white p-3">
             <SectionKicker>Pluggable</SectionKicker>
             <div className="mt-1 text-[11px] font-medium tracking-extra-tight text-black">External data provider</div>
-            <div className="mt-2 font-mono text-[10px] leading-5 text-black/45">same evidence contract<br />provider-owned depth</div>
+            <div className="mt-2 font-mono text-[10px] leading-5 text-gray-new-50">same evidence contract<br />provider-owned depth</div>
           </div>
         </div>
         <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-[8px] bg-[#E4F1EB] px-3 py-2">
@@ -404,7 +404,7 @@ export function PSS04() {
                 </div>
                 <div className={`min-w-0 pb-3 ${rowIndex === 2 ? "pb-0" : ""}`}>
                   <div className="text-[11px] font-medium tracking-extra-tight text-black">{title}</div>
-                  <div className="mt-0.5 font-mono text-[9px] text-black/45">{detail}</div>
+                  <div className="mt-0.5 font-mono text-[9px] text-gray-new-50">{detail}</div>
                 </div>
               </div>
             ))}
@@ -414,10 +414,10 @@ export function PSS04() {
         <section className="min-w-0 border-t border-dashed border-black/20 bg-[#F7F7F5] p-3 sm:border-t-0 sm:border-l" aria-label="Hosted control plane">
           <div className="flex items-center justify-between gap-2">
             <SectionKicker>Hosted</SectionKicker>
-            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-black/45">control plane</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-gray-new-50">control plane</span>
           </div>
           <div className="mt-3 rounded-[9px] bg-white p-3">
-            <div className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-black/45">Receives attestation</div>
+            <div className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-gray-new-50">Receives attestation</div>
             <dl className="mt-2">
               {[
                 ["ruleset", "hash"],
@@ -425,7 +425,7 @@ export function PSS04() {
                 ["status", "verified"],
               ].map(([term, value]) => (
                 <div key={term} className="flex items-center justify-between gap-2 border-t border-black/[0.06] py-2 first:border-0">
-                  <dt className="font-mono text-[10px] text-black/40">{term}</dt>
+                  <dt className="font-mono text-[10px] text-gray-new-50">{term}</dt>
                   <dd className="text-[11px] font-medium text-black/70">{value}</dd>
                 </div>
               ))}

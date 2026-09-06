@@ -131,6 +131,7 @@ export function VerdictCard() {
         viewBox="0 0 18 18"
         fill="none"
         className="absolute"
+        aria-hidden
         style={{
           left: u(MARK_X - MARK_SIZE / 2),
           top: u(MARK_Y - MARK_SIZE / 2),

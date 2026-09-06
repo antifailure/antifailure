@@ -80,9 +80,9 @@ function LoadFigure({
 function RunMetric({ term, value, detail }: { term: string; value: string; detail: string }) {
   return (
     <div className="min-w-0 rounded-[9px] border border-black/[0.06] bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
-      <dt className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/42">{term}</dt>
+      <dt className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">{term}</dt>
       <dd className="mt-1 text-[16px] font-medium tracking-extra-tight text-black">{value}</dd>
-      <dd className="mt-0.5 font-mono text-[9px] leading-3.5 text-black/40">{detail}</dd>
+      <dd className="mt-0.5 font-mono text-[9px] leading-3.5 text-gray-new-50">{detail}</dd>
     </div>
   );
 }
@@ -91,7 +91,7 @@ function ShareMeter({ share }: { share: number }) {
   return (
     <div aria-label={`${share}% of observed requests`}>
       <div className="flex items-center justify-between gap-2 font-mono text-[10px] tabular-nums">
-        <span className="text-black/42">share</span>
+        <span className="text-gray-new-50">share</span>
         <span className="text-black">{share}%</span>
       </div>
       <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-black/[0.06]">
@@ -125,10 +125,10 @@ function LatencyComparison({
       }
     >
       <div className="flex items-baseline justify-between gap-2 font-mono text-[10px] tabular-nums">
-        <span className="text-black/42">p95</span>
+        <span className="text-gray-new-50">p95</span>
         <span className={breach ? "text-[#A93434]" : "text-black"}>
           {candidate}ms
-          <span className="ml-1.5 text-black/35">/ {baseline === null ? "no base" : `${baseline}ms`}</span>
+          <span className="ml-1.5 text-gray-new-50">/ {baseline === null ? "no base" : `${baseline}ms`}</span>
         </span>
       </div>
       <div className="relative mt-1.5 h-2.5 rounded-full bg-black/[0.055]">
@@ -158,14 +158,14 @@ function Verdict({ delta }: { delta: number | null }) {
       <span
         className={cn(
           "inline-flex rounded-[6px] border px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.08em]",
-          delta === null && "border-black/10 bg-black/[0.025] text-black/42",
+          delta === null && "border-black/10 bg-black/[0.025] text-gray-new-50",
           breach && "border-[#C95B5B]/30 bg-[#F8E4E4] text-[#A93434]",
           delta !== null && !breach && "border-[#66A58C]/30 bg-[#E4F1EB] text-[#285D49]",
         )}
       >
         {text}
       </span>
-      <div className="font-mono text-[10px] tabular-nums text-black/45 sm:mt-1">{deltaText}</div>
+      <div className="font-mono text-[10px] tabular-nums text-gray-new-50 sm:mt-1">{deltaText}</div>
     </div>
   );
 }
@@ -197,7 +197,7 @@ function RouteRow({ datum, index }: { datum: RouteDatum; index: number }) {
             />
             <div className="truncate font-mono text-[11px] font-medium tracking-extra-tight text-black">{datum.route}</div>
           </div>
-          <p className="mt-1 pl-4 font-mono text-[9px] text-black/35">
+          <p className="mt-1 pl-4 font-mono text-[9px] text-gray-new-50">
             {index === 0 ? "largest p95 increase" : datum.baseline === null ? "allowed route without baseline" : "production baseline compared"}
           </p>
         </div>
@@ -228,7 +228,7 @@ function RouteMixBand() {
       </div>
       <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-2">
         {ROUTES.map((route) => (
-          <div key={route.route} className="flex min-w-0 items-center gap-2 font-mono text-[9px] text-black/45">
+          <div key={route.route} className="flex min-w-0 items-center gap-2 font-mono text-[9px] text-gray-new-50">
             <span
               className={cn("size-1.5 shrink-0 rounded-full", route.delta !== null && route.delta > P95_THRESHOLD ? "bg-[#C95B5B]" : "bg-[#66A58C]")}
               aria-hidden
@@ -256,7 +256,7 @@ export function PLD01() {
           <FigCmd>$ af load</FigCmd>
           <h3 className="mt-1 text-[14px] font-medium tracking-tight text-black">Production-shaped route comparison</h3>
         </div>
-        <div className="flex items-center gap-2 font-mono text-[10px] text-black/42">
+        <div className="flex items-center gap-2 font-mono text-[10px] text-gray-new-50">
           <span className="size-1.5 rounded-full bg-[#33bf00]" aria-hidden />
           run complete
         </div>
@@ -275,9 +275,9 @@ export function PLD01() {
             <h4 id="route-results-heading" className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-black/62">
               Route mix + p95 comparison
             </h4>
-            <p className="mt-0.5 font-mono text-[9px] text-black/35">weighted arrivals · baseline marker in black · 0 to 450ms scale</p>
+            <p className="mt-0.5 font-mono text-[9px] text-gray-new-50">weighted arrivals · baseline marker in black · 0 to 450ms scale</p>
           </div>
-          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-black/35">candidate vs production</span>
+          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-gray-new-50">candidate vs production</span>
         </div>
         <div className="mt-3">
           <RouteMixBand />
@@ -318,7 +318,7 @@ function YamlLine({ line, number }: { line: string; number: number }) {
           <>
             {match[1]}
             <span className="font-medium text-[#285D49]">{match[2]}</span>
-            <span className="text-black/35">{match[3]}</span>
+            <span className="text-gray-new-50">{match[3]}</span>
             <span className="text-black/62">{match[4]}</span>
           </>
         ) : (
@@ -371,7 +371,7 @@ function CapabilityCard({ capability }: { capability: (typeof CAPABILITIES)[numb
           <CapabilityMark value={capability.access} />
         </div>
       </div>
-      <p className="mt-2 font-mono text-[9px] leading-4 text-black/42">{capability.detail}</p>
+      <p className="mt-2 font-mono text-[9px] leading-4 text-gray-new-50">{capability.detail}</p>
     </li>
   );
 }
@@ -403,7 +403,7 @@ export function PLD02({ source }: { source: string }) {
             <h4 id="manifest-source-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
               workload manifest
             </h4>
-            <span className="font-mono text-[9px] text-black/32">repository</span>
+            <span className="font-mono text-[9px] text-gray-new-50">repository</span>
           </div>
           <div className="py-2">
             {lines.map((line, index) => (
@@ -417,7 +417,7 @@ export function PLD02({ source }: { source: string }) {
             <h4 id="source-capabilities-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
               source capabilities
             </h4>
-            <div className="flex gap-1.5 font-mono text-[8px] uppercase tracking-[0.1em] text-black/35">
+            <div className="flex gap-1.5 font-mono text-[8px] uppercase tracking-[0.1em] text-gray-new-50">
               <span>otel</span>
               <span>access</span>
             </div>
@@ -443,7 +443,7 @@ export function PLD02({ source }: { source: string }) {
           <h4 id="compile-path-heading" className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/58">
             compile path
           </h4>
-          <span className="font-mono text-[9px] text-black/32">no outbound lookup</span>
+          <span className="font-mono text-[9px] text-gray-new-50">no outbound lookup</span>
         </div>
         <ol className="mt-3 grid gap-2 sm:grid-cols-4">
           {PIPELINE.map((item, index) => (
@@ -460,7 +460,7 @@ export function PLD02({ source }: { source: string }) {
                 ) : null}
                 <span className="font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-black/65">{item.label}</span>
               </div>
-              <p className="mt-1.5 pl-7 font-mono text-[9px] leading-4 text-black/38">{item.detail}</p>
+              <p className="mt-1.5 pl-7 font-mono text-[9px] leading-4 text-gray-new-50">{item.detail}</p>
             </li>
           ))}
         </ol>

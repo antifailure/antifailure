@@ -180,7 +180,7 @@ function SqlDiff({
         +
       </span>
       <span className={tone === "block" ? "text-[#C43D3D]" : "text-[#1A1A1A]"}>
-        {shown || <span className="text-[#9B9EA5]">waiting to apply…</span>}
+        {shown || <span className="text-gray-new-50">waiting to apply…</span>}
       </span>
       {started && !done ? <Caret className="bg-[#1A1A1A]" /> : null}
     </div>
@@ -212,7 +212,7 @@ function TablePane({
         ) : shortLock ? (
           <Pill>ShareUpdate 0.4s</Pill>
         ) : (
-          <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">ShareUpdate</span>
+          <span className="text-[11px] tracking-extra-tight text-gray-new-50">ShareUpdate</span>
         )}
       </div>
       <div className="relative">
@@ -227,7 +227,7 @@ function TablePane({
         />
         <table className="relative w-full border-collapse text-left">
           <thead>
-            <tr className="text-[11px] tracking-extra-tight text-[#9B9EA5]">
+            <tr className="text-[11px] tracking-extra-tight text-gray-new-50">
               <th className="px-3 py-1.5 font-medium">id</th>
               <th className="px-3 py-1.5 font-medium">customer</th>
               <th className="px-3 py-1.5 font-medium">status</th>
@@ -417,7 +417,7 @@ function Film({
               meta={
                 <>
                   <PrivatePill />
-                  <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">production not in path</span>
+                  <span className="text-[11px] tracking-extra-tight text-gray-new-50">production not in path</span>
                 </>
               }
               step={padStep(idx, ops.length)}

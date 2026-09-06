@@ -416,7 +416,7 @@ export function RelatedGrid({
               <span className="mt-2 block text-[14px] leading-6 tracking-extra-tight text-gray-new-40">
                 {item.description}
               </span>
-              <span className="mt-4 inline-block text-[13px] tracking-extra-tight text-black/50 transition-colors group-hover:text-black">
+              <span className="mt-4 inline-block text-[13px] tracking-extra-tight text-gray-new-50 transition-colors group-hover:text-black">
                 Read
               </span>
             </Link>

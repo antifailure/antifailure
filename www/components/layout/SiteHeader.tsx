@@ -9,7 +9,7 @@ import { Logo } from "./Logo";
 import { cn } from "@/lib/cn";
 import { FOOTER_MENUS, GITHUB_URL, HEADER_MENUS } from "@/lib/nav";
 import { HeaderMini, MenuCardArt, ProductMiniStyles } from "@/components/home/visuals/headerMinis";
-import { BookIcon, Chevron, GitHubIcon } from "../icons";
+import { Chevron, GitHubIcon } from "../icons";
 
 function HeaderLink({
   href,
@@ -219,20 +219,14 @@ export function SiteHeader({ overlay = true }: { overlay?: boolean }) {
               {/* There is no Discord. The link that used to sit here was
                   labelled Discord and went to the sign-up form, which is a
                   broken promise in the header of every page. */}
-              {/* HeaderLink rather than next/link. The documentation is built
-                  by Astro and merged into the published site afterwards, so
-                  the app router does not own /docs: it prefetched an RSC
-                  payload that does not exist and answered the click with a
-                  client side navigation to nothing. The helper above this file
-                  makes exactly that distinction and this one link, in the
-                  header of every page, was not using it. */}
-              <HeaderLink
-                href="/docs"
-                className="flex items-center gap-1.5 text-black transition-colors hover:text-gray-new-40"
-              >
-                <BookIcon className="h-[18px] w-[18px] text-gray-new-20" />
-                <span className="text-sm leading-none tracking-extra-tight">Docs</span>
-              </HeaderLink>
+              {/* And there is no second Docs link. One sat here with a book
+                  icon, next to GitHub, while HEADER_MENUS already put "Docs"
+                  in the nav list between Solutions and Writing, so from 1280px
+                  up the header said Docs twice and pointed both at the same
+                  page. The nav item renders through HeaderLink, which is a
+                  plain anchor for /docs because Astro builds that tree and the
+                  app router cannot navigate into it, so the one link that
+                  remains is already the safe one. */}
             </div>
             {/* The filled action was "Request access" once, which is an
                 invitation wall, and then "Install the engine", which was the

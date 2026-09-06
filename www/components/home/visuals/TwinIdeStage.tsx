@@ -125,13 +125,13 @@ function TwinIsolationMap() {
             <h3 className="text-[13px] tracking-tight text-black/55">Production</h3>
             <span className="text-[11px] tracking-tight text-[#C43D3D]">Not in path</span>
           </div>
-          <ul className="mt-4 opacity-60">
+          <ul className="mt-4">
             {PROD.map((row) => (
               <li
                 key={row.id}
                 className="flex items-center justify-between border-b border-black/[0.06] py-2.5 last:border-0"
               >
-                <span className={cn("text-[13px] tracking-tight", "cut" in row && row.cut ? "text-[#C43D3D]" : "text-black/50")}>
+                <span className={cn("text-[13px] tracking-tight", "cut" in row && row.cut ? "text-[#C43D3D]" : "text-gray-new-50")}>
                   {row.label}
                 </span>
                 {"cut" in row && row.cut ? (
@@ -149,7 +149,7 @@ function TwinIsolationMap() {
 
         <article className="relative overflow-hidden rounded-[12px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
           <h3 className="text-[13px] tracking-tight text-black">Containment</h3>
-          <p className="mt-1 text-[12px] leading-snug tracking-tight text-black/45">
+          <p className="mt-1 text-[12px] leading-snug tracking-tight text-gray-new-50">
             The twin cannot reach live keys or the public internet.
           </p>
           <ul className="mt-4">
@@ -167,7 +167,7 @@ function TwinIsolationMap() {
                       )}
                     />
                   </div>
-                  <p className="mt-0.5 text-[12px] tracking-tight text-black/45">{seal.detail}</p>
+                  <p className="mt-0.5 text-[12px] tracking-tight text-gray-new-50">{seal.detail}</p>
                 </li>
               );
             })}
@@ -177,7 +177,7 @@ function TwinIsolationMap() {
         <article className="rounded-[12px] border border-black/10 bg-white p-4 shadow-[0_18px_40px_rgba(0,0,0,0.06)]">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-[13px] tracking-tight text-black">Disposable twin</h3>
-            <span className="text-[11px] tracking-tight text-black/40">{gone ? "empty" : "live"}</span>
+            <span className="text-[11px] tracking-tight text-gray-new-50">{gone ? "empty" : "live"}</span>
           </div>
           <ul className="mt-4">
             {SLOTS.map((slot, i) => {
@@ -186,7 +186,7 @@ function TwinIsolationMap() {
                 <li key={slot.id} className="border-b border-black/[0.06] py-2.5 last:border-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] tracking-tight text-black">{slot.label}</span>
-                    <span className="text-[12px] tabular-nums tracking-tight text-black/40">
+                    <span className="text-[12px] tabular-nums tracking-tight text-gray-new-50">
                       {fill < 0.08 ? (gone ? "gone" : "waiting") : `${Math.round(fill * 100)}%`}
                     </span>
                   </div>
@@ -208,7 +208,7 @@ function TwinIsolationMap() {
 
       <div className="mt-6">
         <div className="text-[13px] tracking-tight text-black">Cleanup proof</div>
-        <p className="mt-0.5 text-[12px] tracking-tight text-black/45">
+        <p className="mt-0.5 text-[12px] tracking-tight text-gray-new-50">
           {gone
             ? "Every resource journaled, destroyed, and counted."
             : "Resources are journaled as they come up. Nothing outlives the run."}

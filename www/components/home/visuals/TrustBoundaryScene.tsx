@@ -761,7 +761,7 @@ export function TrustBoundaryScene() {
       </div>
       <div className="hidden overflow-hidden rounded-[12px] border border-black/[0.08] bg-white max-xl:block">
         <div className="p-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/45">Hosted control plane</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">Hosted control plane</div>
           <ul className="mt-3 flex flex-wrap gap-1.5">
             {CONTROL_NODES.map((label) => (
               <li
@@ -777,7 +777,7 @@ export function TrustBoundaryScene() {
           {BARRIER_COPY}
         </div>
         <div className="bg-[#eaf3ee] p-4">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/45">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
             Customer-hosted data plane
           </div>
           <ul className="mt-3 flex flex-wrap gap-1.5">
@@ -790,7 +790,7 @@ export function TrustBoundaryScene() {
               </li>
             ))}
           </ul>
-          <p className="mt-3 font-mono text-[11px] tabular-nums tracking-extra-tight text-black/50">{DESTROY_COPY}</p>
+          <p className="mt-3 font-mono text-[11px] tabular-nums tracking-extra-tight text-gray-new-50">{DESTROY_COPY}</p>
         </div>
       </div>
     </div>

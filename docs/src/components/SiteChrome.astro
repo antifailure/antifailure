@@ -157,12 +157,12 @@ const nav = [
         <a
           href="/signin"
           class="inline-flex h-9 cursor-pointer items-center justify-center rounded-full border border-black/40 bg-black/[0.02] px-[18px] text-sm font-medium tracking-extra-tight text-black transition-colors duration-200 hover:border-black"
-          >Log in</a
+          >Sign in</a
         >
         <a
           href="/signup"
           class="inline-flex h-9 cursor-pointer items-center justify-center rounded-full bg-black px-[18px] text-sm font-medium tracking-extra-tight text-white transition-colors duration-200 hover:bg-[#292929]"
-          >Sign up</a
+          >Start free</a
         >
       </div>
     </div>
@@ -175,14 +175,14 @@ const nav = [
    * Tailwind v4 added `outline-color` to what `transition-colors` animates, and
    * every link in this bar carries `transition-colors duration-200`. So the
    * ring interpolates from the element's own colour to the brand green over
-   * 200ms. Measured on Sign up, holding focus and sampling:
+   * 200ms. Measured on Start free, holding focus and sampling:
    *
    *     t~0ms    rgb(255,255,255)   invisible, white on the white header
    *     t~50ms   rgb(185,233,167)
    *     t~150ms  rgb(52,191,1)
    *     t~300ms  rgb(51,191,0)      settled
    *
-   * Log in starts at black on white so it looks instant and hid the defect for
+   * Sign in starts at black on white so it looks instant and hid the defect for
    * both of them. Tabbing quickly along the bar never shows a finished ring on
    * either. Only the colour is excluded here: hover still animates, because
    * that transition is the reason the class is on these links at all.

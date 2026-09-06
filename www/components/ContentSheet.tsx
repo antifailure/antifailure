@@ -122,7 +122,7 @@ export function ContentSheet({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-[15px] font-medium">{sheet.title}</div>
-        <p className="mt-1 text-[13px] leading-5 text-black/50">{sheet.lead}</p>
+        <p className="mt-1 text-[13px] leading-5 text-gray-new-50">{sheet.lead}</p>
         <ul className="mt-5 space-y-2.5 text-[13px] leading-5 text-black/75">
           {sheet.points.map((p) => (
             <li key={p} className="border-l border-black/15 pl-3">

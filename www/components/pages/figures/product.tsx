@@ -28,7 +28,7 @@ export function POV01() {
           ]}
         />
       </div>
-      <p className="mt-2 font-mono text-[11px] tracking-extra-tight text-black/45">One run, then gone.</p>
+      <p className="mt-2 font-mono text-[11px] tracking-extra-tight text-gray-new-50">One run, then gone.</p>
     </WellFigure>
   );
 }
@@ -40,18 +40,18 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
     <WellFigure id="P-OV-02" tab="staging vs twin" rail="COMPARE">
       <div className="grid grid-cols-2 items-start gap-3 max-sm:grid-cols-1">
         <div className="rounded-[10px] border border-black/[0.06] bg-[#f7f7f5] p-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">Fragments</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">Fragments</div>
           <ul className="mt-3 space-y-2">
             {fragments.map((name) => (
               <li key={name} className="flex items-center gap-2">
                 <span className="size-1.5 rounded-full bg-black/15" aria-hidden />
-                <span className="font-mono text-[12px] text-black/40 line-through">{name}</span>
+                <span className="font-mono text-[12px] text-gray-new-50 line-through">{name}</span>
               </li>
             ))}
           </ul>
         </div>
         <div className="rounded-[10px] border border-black/[0.06] bg-white p-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">Twin</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">Twin</div>
           <ul className="mt-3 space-y-2">
             {twin.map((name, i) => (
               <li key={name} className="flex items-center gap-2">
@@ -70,7 +70,7 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
         </div>
       </div>
       <div className="mt-3 overflow-x-auto rounded-[10px] border border-black/[0.06]">
-        <div className="grid grid-cols-2 gap-x-4 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-black/40">
+        <div className="grid grid-cols-2 gap-x-4 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50">
           <span>Staging misses</span>
           <span>Twin has</span>
         </div>
@@ -79,7 +79,7 @@ export function POV02({ rows }: { rows: { miss: string; have: string }[] }) {
             key={row.miss}
             className="grid grid-cols-2 gap-x-4 border-t border-black/[0.06] px-3 py-2 font-mono text-[11px]"
           >
-            <span className="text-black/40">{row.miss}</span>
+            <span className="text-gray-new-50">{row.miss}</span>
             <span className="text-black/80">{row.have}</span>
           </div>
         ))}
@@ -110,7 +110,7 @@ function FigChrome({
               onClick={item.onSelect}
               className={cn(
                 "rounded-t-[8px] px-2.5 py-1.5 text-[11px] font-medium sm:px-3 sm:py-2 sm:text-[12px]",
-                item.active ? "bg-[#CAE6D9] text-[#285D49]" : "text-black/35",
+                item.active ? "bg-[#CAE6D9] text-[#285D49]" : "text-gray-new-50",
               )}
             >
               {item.label}
@@ -129,7 +129,7 @@ function FigChrome({
         <div className="border-b-2 border-[#33bf00] pb-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-black">
           {rail}
         </div>
-        <span className="hidden font-mono text-[9px] uppercase tracking-[0.14em] text-black/30 sm:inline">
+        <span className="hidden font-mono text-[9px] uppercase tracking-[0.14em] text-gray-new-50 sm:inline">
           FIG. {id}
         </span>
       </div>
@@ -249,13 +249,13 @@ function LockHoldViz({
           32s
         </text>
       </svg>
-      <div className="mt-1 flex justify-between font-mono text-[9px] text-black/35">
+      <div className="mt-1 flex justify-between font-mono text-[9px] text-gray-new-50">
         <span>acquire</span>
         <span>{fail ? "110 samples" : "2 samples"}</span>
         <span>release</span>
       </div>
       <div className="mt-4 overflow-x-auto rounded-[10px] border border-black/[0.06]">
-        <div className="grid grid-cols-[1fr_1.2fr_auto] gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40">
+        <div className="grid grid-cols-[1fr_1.2fr_auto] gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">
           <span>Session</span>
           <span>Mode</span>
           <span>Hold</span>
@@ -308,7 +308,7 @@ export function POV04() {
           ["Rewrite", "yes"],
         ].map(([k, v]) => (
           <div key={k} className="rounded-[8px] border border-black/[0.06] bg-[#f7f7f5] px-3 py-2">
-            <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-black/40">{k}</div>
+            <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50">{k}</div>
             <div className="mt-0.5 text-[14px] font-medium tabular-nums text-black">{v}</div>
           </div>
         ))}
@@ -326,7 +326,7 @@ export function POV04() {
               i % 2 === 0 ? "bg-[#f7f7f5]" : "bg-white",
             )}
           >
-            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
               {row.k}
             </span>
             <span
@@ -344,12 +344,12 @@ export function POV04() {
         <div className="rounded-[8px] border border-[#285D49]/25 bg-[#E4F1EB] px-3 py-2.5">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#285D49]">baseline</div>
           <div className="mt-1 text-[13px] text-black">Index Scan</div>
-          <div className="mt-0.5 font-mono text-[10px] text-black/40">events</div>
+          <div className="mt-0.5 font-mono text-[10px] text-gray-new-50">events</div>
         </div>
         <div className="rounded-[8px] border border-[#C43D3D]/30 bg-[#f8e4e4] px-3 py-2.5">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#C43D3D]">candidate</div>
           <div className="mt-1 text-[13px] text-black">Seq Scan</div>
-          <div className="mt-0.5 font-mono text-[10px] text-black/40">events</div>
+          <div className="mt-0.5 font-mono text-[10px] text-gray-new-50">events</div>
         </div>
       </div>
       <p className="mt-3 rounded-[8px] bg-[#E4F1EB] px-3 py-2.5 font-mono text-[11px] leading-5 text-[#285D49]">
@@ -367,7 +367,7 @@ export function PTW01() {
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="rounded-[8px] bg-[#f7f7f5] px-3 py-2">
-          <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-black/40">Production</div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-gray-new-50">Production</div>
           <div className="mt-0.5 text-[13px] text-black">untouched</div>
         </div>
         <div className="rounded-[8px] bg-[#E4F1EB] px-3 py-2">
@@ -435,10 +435,10 @@ export function PTW03({
               i === items.length - 1 && "max-md:col-span-1 col-span-2",
             )}
           >
-            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-black/40">{item.kicker}</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-gray-new-50">{item.kicker}</div>
             <div className="mt-1 text-[13px] tracking-extra-tight text-black">{item.title}</div>
             {item.body ? (
-              <p className="mt-1 text-[12px] leading-4 tracking-extra-tight text-black/45">{item.body}</p>
+              <p className="mt-1 text-[12px] leading-4 tracking-extra-tight text-gray-new-50">{item.body}</p>
             ) : null}
           </li>
         ))}
@@ -468,7 +468,7 @@ export function PTW04() {
                 i === cmds.length - 1 && "bg-[#E4F1EB]",
               )}
             >
-              <span className="w-5 shrink-0 font-mono text-[9px] text-black/30">
+              <span className="w-5 shrink-0 font-mono text-[9px] text-gray-new-50">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <FigCmd>$ {cmd}</FigCmd>
@@ -493,7 +493,7 @@ export function PTW05() {
   return (
     <WellFigure id="P-TW-05" tab="journal replay" rail="CLEANUP">
       <div className="overflow-x-auto rounded-[10px] border border-black/[0.06]">
-        <div className="grid grid-cols-[1fr_auto] gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40">
+        <div className="grid grid-cols-[1fr_auto] gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">
           <span>Destroyed</span>
           <span>t+</span>
         </div>
@@ -506,7 +506,7 @@ export function PTW05() {
             )}
           >
             <span className="text-black/70">{id}</span>
-            <span className="tabular-nums text-black/40">{at}</span>
+            <span className="tabular-nums text-gray-new-50">{at}</span>
           </div>
         ))}
       </div>
@@ -529,7 +529,7 @@ export function PSS01() {
     <WellFigure id="P-SS-01" tab="public.users" rail="SANITIZE">
       <div className="-m-3.5 overflow-hidden sm:-m-4">
         <div className="flex items-center justify-between gap-3 bg-[#E4F1EB] px-3 py-1">
-          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40">
+          <span className="font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">
             Column
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#285D49]">unique</span>
@@ -540,7 +540,7 @@ export function PSS01() {
             className="flex items-baseline justify-between gap-3 border-t border-black/[0.06] px-3 py-1.5"
           >
             <div className="min-w-0">
-              <span className="font-mono text-[10px] text-black/40">{k}</span>
+              <span className="font-mono text-[10px] text-gray-new-50">{k}</span>
               <span className="ml-2 truncate font-mono text-[12px] tracking-extra-tight text-black">{v}</span>
             </div>
             <span
@@ -569,7 +569,7 @@ export function PSS02() {
           <span className="text-[#285D49]">u_8f2a parent kept</span>
           <span className="text-[#285D49]">o_441 follows</span>
         </div>
-        <div className="flex items-center justify-between border-t border-black/[0.06] px-3 py-1 font-mono text-[11px] text-black/40">
+        <div className="flex items-center justify-between border-t border-black/[0.06] px-3 py-1 font-mono text-[11px] text-gray-new-50">
           <span>u_bb12 sampled out</span>
           <span>o_902 dropped</span>
         </div>
@@ -596,7 +596,7 @@ export function PSS03() {
             ]}
           />
         </div>
-        <div className="border-t border-black/[0.06] bg-[#f7f7f5] px-3 py-1.5 font-mono text-[11px] tracking-extra-tight text-black/45">
+        <div className="border-t border-black/[0.06] bg-[#f7f7f5] px-3 py-1.5 font-mono text-[11px] tracking-extra-tight text-gray-new-50">
           Postgres adapter · logical restore
         </div>
       </div>
@@ -611,7 +611,7 @@ export function PSS04() {
         <div className="-my-10 max-sm:-my-7 [&>div]:!py-0">
           <IsoTwoPlanes top="CONTROL PLANE" bottom="DATA PLANE" callout="ATTESTATION ONLY" />
         </div>
-        <div className="grid grid-cols-2 gap-2 border-t border-black/[0.06] bg-[#f7f7f5] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">
+        <div className="grid grid-cols-2 gap-2 border-t border-black/[0.06] bg-[#f7f7f5] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
           <span>evidence · hashes</span>
           <span className="text-right">snapshots · secrets</span>
         </div>
@@ -665,7 +665,7 @@ function ProviderBoard({
         <span className="min-w-0 truncate font-mono text-[11px] tracking-extra-tight text-black">{op}</span>
         <StatusPill tone={tone}>{tone}</StatusPill>
       </div>
-      <p className="mt-1 px-3 text-[12px] leading-4 tracking-extra-tight text-black/50">{body}</p>
+      <p className="mt-1 px-3 text-[12px] leading-4 tracking-extra-tight text-gray-new-50">{body}</p>
       <div className="mt-2 border-t border-black/[0.06]">
         {lines.map((line, i) => (
           <div
@@ -761,7 +761,7 @@ export function PFW05() {
         <div className="min-w-[520px]">
           <div
             className={cn(
-              "grid gap-x-2 bg-[#E4F1EB] px-2.5 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40",
+              "grid gap-x-2 bg-[#E4F1EB] px-2.5 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50",
               cols,
             )}
           >
@@ -783,7 +783,7 @@ export function PFW05() {
                     : "bg-[#f7f7f5]",
               )}
             >
-              <span className="whitespace-nowrap text-black/35">{method}</span>
+              <span className="whitespace-nowrap text-gray-new-50">{method}</span>
               <span className="min-w-0 truncate text-black/80">{dest}</span>
               <span
                 className={cn(
@@ -793,7 +793,7 @@ export function PFW05() {
               >
                 {action}
               </span>
-              <span className="whitespace-nowrap text-black/35">{receipt}</span>
+              <span className="whitespace-nowrap text-gray-new-50">{receipt}</span>
             </div>
           ))}
           <div className="border-t border-black/[0.06] bg-[#E4F1EB] px-2.5 py-1 font-mono text-[10px] text-[#285D49]">
@@ -847,12 +847,12 @@ export function PLD01() {
     <WellFigure id="P-LD-01" tab="af load" rail="SHAPE">
       <div className="flex items-center justify-between gap-3">
         <div className="text-[13px] font-medium tracking-tight text-black">shaped routes</div>
-        <span className="font-mono text-[11px] text-black/40">source otel · 17.8/s</span>
+        <span className="font-mono text-[11px] text-gray-new-50">source otel · 17.8/s</span>
       </div>
       <div className="mt-4 flex min-h-[220px] min-w-0 flex-col overflow-x-auto rounded-[10px] border border-black/[0.06]">
         <div
           className={cn(
-            "hidden bg-[#f7f7f5] px-3 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40 sm:grid sm:gap-x-3",
+            "hidden bg-[#f7f7f5] px-3 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:grid sm:gap-x-3",
             PLD_COLS,
           )}
         >
@@ -862,7 +862,7 @@ export function PLD01() {
           <span className="text-right">Base</span>
           <span className="text-right">Δ</span>
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 bg-[#f7f7f5] px-3 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40 sm:hidden">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 bg-[#f7f7f5] px-3 py-2 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50 sm:hidden">
           <span>Route</span>
           <span className="text-right">Δ</span>
         </div>
@@ -885,9 +885,9 @@ export function PLD01() {
                   )}
                 >
                   <span className="min-w-0 truncate">{route}</span>
-                  <span className="text-right text-black/40">{share}</span>
+                  <span className="text-right text-gray-new-50">{share}</span>
                   <span className="text-right">{p95}</span>
-                  <span className="text-right text-black/40">{base ?? "no base"}</span>
+                  <span className="text-right text-gray-new-50">{base ?? "no base"}</span>
                   <span className={cn("text-right tabular-nums", deltaCls)}>{deltaText}</span>
                 </div>
                 <div className="px-3 py-3 sm:hidden">
@@ -897,7 +897,7 @@ export function PLD01() {
                       {deltaText}
                     </span>
                   </div>
-                  <div className="mt-1 font-mono text-[10px] text-black/40">
+                  <div className="mt-1 font-mono text-[10px] text-gray-new-50">
                     {share}
                     <span className="mx-1.5 text-black/20">·</span>
                     {p95}
@@ -908,7 +908,7 @@ export function PLD01() {
           })}
         </div>
       </div>
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-black/35">
+      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
         refused · POST /billing/upgrade · POST /api/payments/intent
       </p>
     </WellFigure>
@@ -921,12 +921,12 @@ export function PLD02({ source }: { source: string }) {
     <WellFigure id="P-LD-02" tab="load.yml" rail="MANIFEST" compact>
       <div className="flex items-center justify-between gap-3">
         <FigCmd>$ af load</FigCmd>
-        <span className="font-mono text-[11px] text-black/40">otel</span>
+        <span className="font-mono text-[11px] text-gray-new-50">otel</span>
       </div>
       <div className="mt-3 min-w-0 overflow-x-auto rounded-[10px] border border-black/[0.06] bg-[#f7f7f5]">
         <div className="flex min-w-max">
           <div
-            className="select-none border-r border-black/[0.06] px-2 py-3 text-right font-mono text-[11px] leading-5 text-black/25"
+            className="select-none border-r border-black/[0.06] px-2 py-3 text-right font-mono text-[11px] leading-5 text-gray-new-50"
             aria-hidden
           >
             {lines.map((_, i) => (
@@ -974,7 +974,7 @@ export function PMG02() {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium tracking-tight text-black">subscriptions</div>
-          <p className="mt-0.5 font-mono text-[10px] text-black/40">
+          <p className="mt-0.5 font-mono text-[10px] text-gray-new-50">
             second session · pg_locks every 250ms
           </p>
         </div>
@@ -995,7 +995,7 @@ export function PMG03({ source }: { source: string }) {
         <StatusPill tone="FAIL">FAIL</StatusPill>
       </div>
       <div className="mt-3 min-w-0 overflow-hidden rounded-[10px] border border-black/[0.06] bg-[#f7f7f5]">
-        <div className="border-b border-black/[0.06] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">
+        <div className="border-b border-black/[0.06] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
           internal/insights
         </div>
         <pre className="min-w-0 whitespace-pre-wrap break-words px-3 py-3 font-mono text-[12px] leading-5 tracking-extra-tight text-black/70">
@@ -1012,7 +1012,7 @@ export function PMG04() {
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-medium tracking-tight text-black">after expand-and-contract</div>
-          <p className="mt-0.5 font-mono text-[10px] text-black/40">same table · nothing waiting</p>
+          <p className="mt-0.5 font-mono text-[10px] text-gray-new-50">same table · nothing waiting</p>
         </div>
         <StatusPill tone="PASS">PASS</StatusPill>
       </div>
@@ -1039,17 +1039,17 @@ export function PRP01({
   return (
     <WellFigure id="P-RP-01" tab={pr} rail="CHECK">
       <div className="flex items-center justify-between gap-3">
-        <span className="font-mono text-[11px] text-black/45">{pr}</span>
+        <span className="font-mono text-[11px] text-gray-new-50">{pr}</span>
         <StatusPill tone={tone} />
       </div>
       <div className="mt-4 text-[13px] font-medium tracking-tight text-black">{title}</div>
-      <p className="mt-2 font-mono text-[11px] leading-4 text-black/45">{evidence}</p>
+      <p className="mt-2 font-mono text-[11px] leading-4 text-gray-new-50">{evidence}</p>
       <p
         className={cn(
           "mt-4 rounded-[8px] px-3 py-2.5 font-mono text-[10px] tracking-extra-tight",
           tone === "PASS" && "bg-[#E4F1EB] text-[#285D49]",
           tone === "FAIL" && "bg-[#f8e4e4] text-[#C43D3D]",
-          tone === "UNVERIFIED" && "bg-[#f7f7f5] text-black/45",
+          tone === "UNVERIFIED" && "bg-[#f7f7f5] text-gray-new-50",
         )}
       >
         {merge}
@@ -1066,11 +1066,11 @@ export function PRP02() {
         <StatusPill tone="FAIL">required · FAIL</StatusPill>
       </div>
       <p className="mt-4 text-[13px] text-black">1 workflow failed, and 1 invariant did not hold.</p>
-      <p className="mt-1 font-mono text-[11px] text-black/45">
+      <p className="mt-1 font-mono text-[11px] text-gray-new-50">
         Invariant `one_active_subscription` does not hold.
       </p>
       <div className="mt-4 overflow-hidden rounded-[10px] border border-black/[0.06]">
-        <div className="grid grid-cols-3 gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-black/40">
+        <div className="grid grid-cols-3 gap-2 bg-[#f7f7f5] px-3 py-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.12em] text-gray-new-50">
           <span>account_id</span>
           <span>active</span>
           <span>latest</span>
@@ -1094,8 +1094,8 @@ export function PRP02() {
         ))}
       </div>
       <div className="mt-4 flex items-center justify-between rounded-[8px] bg-[#f7f7f5] px-3 py-2.5">
-        <span className="font-mono text-[11px] text-black/35">Merge pull request · inert</span>
-        <span className="rounded-[6px] border border-black/15 px-2 py-0.5 font-mono text-[10px] text-black/35">
+        <span className="font-mono text-[11px] text-gray-new-50">Merge pull request · inert</span>
+        <span className="rounded-[6px] border border-black/15 px-2 py-0.5 font-mono text-[10px] text-gray-new-50">
           Merge
         </span>
       </div>
@@ -1114,7 +1114,7 @@ export function PAR01() {
           { label: "CLEANUP" },
         ]}
       />
-      <p className="mt-2 font-mono text-[11px] text-black/45">outbound-only · bearer token over TLS</p>
+      <p className="mt-2 font-mono text-[11px] text-gray-new-50">outbound-only · bearer token over TLS</p>
     </WellFigure>
   );
 }
@@ -1123,7 +1123,7 @@ export function PAR02() {
   return (
     <WellFigure id="P-AR-02" tab="evidence vs records" rail="BOUNDARY">
       <IsoTwoPlanes top="EVIDENCE" bottom="RECORDS" callout="does not enter" />
-      <div className="mt-2 flex justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">
+      <div className="mt-2 flex justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">
         <span>reports · sha256</span>
         <span>snapshots · secrets</span>
       </div>
@@ -1153,10 +1153,10 @@ export function PAR03({
           </ul>
         </div>
         <div className="rounded-[10px] border border-black/[0.06] bg-[#f7f7f5] p-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-black/40">designed, not built</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-gray-new-50">designed, not built</div>
           <ul className="mt-3 space-y-2">
             {planned.map((item) => (
-              <li key={item} className="font-mono text-[12px] leading-5 tracking-extra-tight text-black/45">
+              <li key={item} className="font-mono text-[12px] leading-5 tracking-extra-tight text-gray-new-50">
                 {item}
               </li>
             ))}

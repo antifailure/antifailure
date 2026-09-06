@@ -153,7 +153,7 @@ export function TwinLifecycleScene() {
       <div className="hidden max-xl:block">
         <div className="overflow-hidden rounded-[12px] border border-black/[0.08] bg-white">
           <div className="flex items-center justify-between gap-3 border-b border-black/[0.08] px-4 py-2.5">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-black/45">twin lifecycle</span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-gray-new-50">twin lifecycle</span>
             <span className="font-mono text-[12px] tracking-extra-tight text-[#C43D3D]">BLOCK</span>
           </div>
           <ol>
@@ -185,7 +185,7 @@ export function TwinLifecycleScene() {
               <span className="text-[#6B6F76]">Twin</span>
               <span className="text-[#C0C3C8]">/</span>
               <span className="truncate">
-                {hostShown || <span className="text-[#9B9EA5]">preview hostname</span>}
+                {hostShown || <span className="text-gray-new-50">preview hostname</span>}
                 {t >= 0.28 && t < 9.35 && !hostDone ? <Caret className="bg-[#1A1A1A]" /> : null}
               </span>
             </span>
@@ -210,7 +210,7 @@ export function TwinLifecycleScene() {
                 meta={
                   <>
                     {built ? <PrivatePill /> : <Pill>tearing down</Pill>}
-                    <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">
+                    <span className="text-[11px] tracking-extra-tight text-gray-new-50">
                       production not in path
                     </span>
                   </>
@@ -266,10 +266,10 @@ export function TwinLifecycleScene() {
               <div className="grid min-h-0 flex-1 grid-cols-2 max-xl:grid-cols-1">
                 <div className="border-black/[0.08] p-3 max-xl:border-b xl:border-r">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">Production</span>
+                    <span className="text-[11px] tracking-extra-tight text-gray-new-50">Production</span>
                     <span className="text-[11px] tracking-extra-tight text-[#C0C3C8]">Not in path</span>
                   </div>
-                  <ul className="flex flex-col gap-1.5 opacity-55">
+                  <ul className="flex flex-col gap-1.5">
                     {PROD.map((row) => (
                       <li
                         key={row.id}
@@ -278,7 +278,7 @@ export function TwinLifecycleScene() {
                         <span
                           className={cn(
                             "text-[12px] tracking-extra-tight",
-                            "cut" in row && row.cut ? "text-[#C43D3D]" : "text-[#9B9EA5]",
+                            "cut" in row && row.cut ? "text-[#C43D3D]" : "text-gray-new-50",
                           )}
                         >
                           {row.label}
@@ -298,7 +298,7 @@ export function TwinLifecycleScene() {
                 <div className="p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-[11px] tracking-extra-tight text-[#1A1A1A]">Isolated twin</span>
-                    <span className="text-[11px] tracking-extra-tight text-[#9B9EA5]">
+                    <span className="text-[11px] tracking-extra-tight text-gray-new-50">
                       {destroyedHold ? "empty" : "live"}
                     </span>
                   </div>

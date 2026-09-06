@@ -58,7 +58,7 @@ type State =
   | { kind: "sent"; reference: string };
 
 const FIELD =
-  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-black/40 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
+  "mt-1.5 h-11 w-full rounded-[8px] border border-black/15 bg-white px-3 text-[15px] text-black outline-none placeholder:text-gray-new-50 focus-visible:border-black/45 focus-visible:ring-2 focus-visible:ring-black/10 disabled:opacity-60";
 const LABEL = "block text-[13px] tracking-extra-tight text-gray-new-40";
 
 export function ApplicationForm() {

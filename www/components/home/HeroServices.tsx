@@ -69,7 +69,11 @@ export function HeroServices() {
     // `grid-rows-subgrid` on each card is what keeps the artwork tops aligned
     // across a row when the paragraphs above them wrap to different heights,
     // so the wrapped rows need the row pair, not a plain two-row card.
-    <ul className="grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:grid-cols-3 max-xl:gap-x-10 max-xl:gap-y-12 max-md:grid-cols-2 max-md:gap-x-8 max-md:gap-y-10 max-sm:-mx-5 max-sm:flex max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-5 max-sm:gap-x-6 max-sm:gap-y-0 max-sm:overflow-x-auto max-sm:px-5 max-sm:no-scrollbars">
+    // Below `sm` this is a horizontal scroller, and a scroller needs a tab
+    // stop or a keyboard cannot reach the cards past the fold. The tab stop
+    // is unconditional because tabindex cannot follow a media query; above
+    // `sm` nothing overflows and the focus ring is the only trace of it.
+    <ul tabIndex={0} aria-label="What a run does" className="rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black/60 grid grid-cols-5 grid-rows-[auto_auto] gap-x-16 gap-y-8 max-xl:grid-cols-3 max-xl:gap-x-10 max-xl:gap-y-12 max-md:grid-cols-2 max-md:gap-x-8 max-md:gap-y-10 max-sm:-mx-5 max-sm:flex max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-5 max-sm:gap-x-6 max-sm:gap-y-0 max-sm:overflow-x-auto max-sm:px-5 max-sm:no-scrollbars">
       {items.map((item, index) => {
         const started = index <= startedThrough;
         return (

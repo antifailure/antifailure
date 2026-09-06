@@ -13,12 +13,12 @@ const PAGE = "#FFFFFF";
 const SIDE = "#FAFAFA";
 const CARD = "#FFFFFF";
 const INK = "#161616";
-const MUTED = "#8A8A83";
-const DIM = "#A3A39C";
+const MUTED = "var(--color-gray-new-50)";
+const DIM = "var(--color-gray-new-50)";
 const RULE = "rgba(16,16,16,0.10)";
 const GOLD = "#D4A017";
 const MENTION = "#5B5FEF";
-const DEL = "#D94841";
+const DEL = "#C43D3D";
 // Dark enough on white to clear 4.5:1, which the brand green at #33bf00 does
 // not: this is text, not a logo.
 const OK = "#1E7A3A";
