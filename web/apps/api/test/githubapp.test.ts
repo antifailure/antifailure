@@ -312,7 +312,8 @@ describe('what a delivery writes', {
   })
   after(async () => {
     const rows = await api.admin<{ id: string }[]>`
-      SELECT id FROM organizations WHERE github_login IN ('delivery-test-org', 'other-org')`
+      SELECT id FROM organizations
+      WHERE github_login IN ('delivery-test-org', 'other-org', 'stranger-org')`
     for (const row of rows) await dropOrg(api.admin, row.id)
     await api.close()
   })
@@ -513,6 +514,228 @@ describe('what a delivery writes', {
       SELECT archived_at FROM repositories WHERE full_name = 'delivery-test-org/second'`
     assert.ok(row, 'the row was deleted rather than archived')
     assert.notEqual(row!.archived_at, null)
+  })
+
+  // -------------------------------------------------------------------------
+  // Renames and transfers. Every table of consequence points at
+  // repositories.id, so the row IS the history, and both of these used to fork
+  // it: the upsert keyed on (org_id, full_name) inserted a second row under the
+  // new name and left the first one live under a name GitHub no longer served.
+  // -------------------------------------------------------------------------
+
+  test('a rename keeps the row and changes the name on it', async () => {
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'created',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 88,
+        full_name: 'delivery-test-org/original',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    const [before] = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'delivery-test-org/original'`
+    assert.ok(before, 'the created event wrote nothing')
+
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'renamed',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      changes: { repository: { name: { from: 'original' } } },
+      repository: {
+        id: 88,
+        full_name: 'delivery-test-org/renamed-again',
+        private: false,
+        default_branch: 'trunk',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    assert.equal(out.handled, true, out.detail)
+    assert.match(out.detail, /renamed to delivery-test-org\/renamed-again/)
+
+    const [after] = await api.admin<{ id: string; github_id: string }[]>`
+      SELECT id, github_id::text AS github_id FROM repositories
+      WHERE full_name = 'delivery-test-org/renamed-again'`
+    assert.ok(after, 'no row carries the new name')
+    assert.equal(after!.id, before!.id, 'the rename created a second row instead of renaming the first')
+    const stale = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'delivery-test-org/original'`
+    assert.equal(stale.length, 0, 'the old name is still a row')
+  })
+
+  test('the next delivery after a rename finds the renamed row', async () => {
+    // The whole point of keeping the id: the next event about this repository
+    // arrives under the new name and has to land on the row with the history.
+    const [before] = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'delivery-test-org/renamed-again'`
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'archived',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 88,
+        full_name: 'delivery-test-org/renamed-again',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    const [row] = await api.admin<{ id: string; archived_at: Date | null }[]>`
+      SELECT id, archived_at FROM repositories WHERE full_name = 'delivery-test-org/renamed-again'`
+    assert.equal(row!.id, before!.id)
+    assert.notEqual(row!.archived_at, null, 'the archive after the rename missed the row')
+  })
+
+  test('a rename finds a row that predates github_id by its old name', async () => {
+    // Rows written before the id was recorded have github_id NULL. The old
+    // name is what GitHub sends for exactly this purpose, and the rename
+    // records the id on the way through so the next one need not.
+    const [org] = await api.admin<{ id: string }[]>`
+      SELECT id FROM organizations WHERE github_login = 'delivery-test-org'`
+    const [legacy] = await api.admin<{ id: string }[]>`
+      INSERT INTO repositories (org_id, full_name) VALUES (${org!.id}, 'delivery-test-org/legacy')
+      RETURNING id`
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'renamed',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      changes: { repository: { name: { from: 'legacy' } } },
+      repository: {
+        id: 5555,
+        full_name: 'delivery-test-org/modern',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    assert.equal(out.handled, true, out.detail)
+    const [row] = await api.admin<{ id: string; github_id: string | null }[]>`
+      SELECT id, github_id::text AS github_id FROM repositories
+      WHERE full_name = 'delivery-test-org/modern'`
+    assert.equal(row?.id, legacy!.id, 'the rename by old name did not find the row')
+    assert.equal(row?.github_id, '5555', 'the rename did not record the id it was given')
+  })
+
+  test('a rename onto a name a stale row still holds falls back and says so', async () => {
+    // GitHub allows the rename because nobody on GitHub holds the name. This
+    // table can: a repository deleted years ago is archived here, not removed.
+    // Renaming onto it would violate the unique constraint and answer 500,
+    // which GitHub retries forever. So the delivery is answered, the old row
+    // is archived, and the outcome says the record starts over.
+    const [org] = await api.admin<{ id: string }[]>`
+      SELECT id FROM organizations WHERE github_login = 'delivery-test-org'`
+    await api.admin`
+      INSERT INTO repositories (org_id, full_name, github_id, archived_at)
+      VALUES (${org!.id}, 'delivery-test-org/taken', 1, now())`
+    const [live] = await api.admin<{ id: string }[]>`
+      INSERT INTO repositories (org_id, full_name, github_id)
+      VALUES (${org!.id}, 'delivery-test-org/moving-onto-taken', 6666) RETURNING id`
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'renamed',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      changes: { repository: { name: { from: 'moving-onto-taken' } } },
+      repository: {
+        id: 6666,
+        full_name: 'delivery-test-org/taken',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    assert.equal(out.handled, true, out.detail)
+    assert.match(out.detail, /already held that name/)
+    const [old] = await api.admin<{ archived_at: Date | null }[]>`
+      SELECT archived_at FROM repositories WHERE id = ${live!.id}`
+    assert.notEqual(old!.archived_at, null, 'the row that lost its name is still live')
+    const [taken] = await api.admin<{ archived_at: Date | null; github_id: string }[]>`
+      SELECT archived_at, github_id::text AS github_id FROM repositories
+      WHERE full_name = 'delivery-test-org/taken'`
+    assert.equal(taken!.archived_at, null, 'the name that is live on GitHub reads as archived here')
+    assert.equal(taken!.github_id, '6666')
+  })
+
+  test('a transfer to an owner with no installation archives, and mints no tenant', async () => {
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'created',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 90,
+        full_name: 'delivery-test-org/moving',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    const [before] = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'delivery-test-org/moving'`
+
+    // The defensive case. The delivery names the OLD owner's installation and
+    // a new owner this control plane has never seen. Before this, the handler
+    // created an organization for stranger-org and pointed installation
+    // 900123 at it, taking it away from delivery-test-org.
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'transferred',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'stranger-org' },
+      changes: { owner: { from: { organization: { login: 'delivery-test-org' } } } },
+      repository: {
+        id: 90,
+        full_name: 'stranger-org/moving',
+        owner: { login: 'stranger-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    assert.equal(out.handled, true, out.detail)
+    assert.match(out.detail, /archived under delivery-test-org/)
+    assert.match(out.detail, /no installation here/)
+
+    const [old] = await api.admin<{ id: string; archived_at: Date | null; org_id: string }[]>`
+      SELECT id, archived_at, org_id FROM repositories WHERE id = ${before!.id}`
+    assert.notEqual(old!.archived_at, null, 'the old owner still reads the repository as live')
+    const strangers = await api.admin<{ id: string }[]>`
+      SELECT id FROM organizations WHERE github_login = 'stranger-org'`
+    assert.equal(strangers.length, 0, 'a tenant was minted for an owner that never installed the App')
+    const [installation] = await api.admin<{ account_login: string }[]>`
+      SELECT account_login FROM github_installations WHERE installation_id = 900123`
+    assert.equal(installation!.account_login, 'delivery-test-org', 'the installation changed hands')
+    const orphans = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'stranger-org/moving'`
+    assert.equal(orphans.length, 0, 'a row was written for an owner with no tenant')
+  })
+
+  test('a transfer to an owner with an installation archives here and records there', async () => {
+    // other-org holds installation 900999 from the cross-tenant test above.
+    await handleDelivery(api.pool, clock, 'repository', {
+      action: 'created',
+      installation: { id: 900123, node_id: 'x' },
+      organization: { login: 'delivery-test-org' },
+      repository: {
+        id: 91,
+        full_name: 'delivery-test-org/moving-known',
+        owner: { login: 'delivery-test-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    const [before] = await api.admin<{ id: string }[]>`
+      SELECT id FROM repositories WHERE full_name = 'delivery-test-org/moving-known'`
+
+    const out = await handleDelivery(api.pool, clock, 'repository', {
+      action: 'transferred',
+      installation: { id: 900999, node_id: 'x' },
+      organization: { login: 'other-org' },
+      changes: { owner: { from: { organization: { login: 'delivery-test-org' } } } },
+      repository: {
+        id: 91,
+        full_name: 'other-org/moving-known',
+        owner: { login: 'other-org', type: 'Organization' },
+      },
+    }, { github: api.github, analytics: api.analytics })
+    assert.equal(out.handled, true, out.detail)
+    assert.match(out.detail, /recorded under other-org/)
+
+    const [old] = await api.admin<{ archived_at: Date | null }[]>`
+      SELECT archived_at FROM repositories WHERE id = ${before!.id}`
+    assert.notEqual(old!.archived_at, null, 'the old owner still reads the repository as live')
+    const [fresh] = await api.admin<{ id: string; slug: string; archived_at: Date | null }[]>`
+      SELECT r.id, o.slug, r.archived_at FROM repositories r JOIN organizations o ON o.id = r.org_id
+      WHERE r.full_name = 'other-org/moving-known'`
+    assert.ok(fresh, 'nothing was recorded for the new owner')
+    assert.equal(fresh!.slug, 'other-org')
+    assert.equal(fresh!.archived_at, null)
+    assert.notEqual(fresh!.id, before!.id, 'the row crossed tenants')
   })
 
   test('an event this control plane does not act on is answered, not failed', async () => {

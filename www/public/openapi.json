@@ -4407,6 +4407,35 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "name": "input",
+            "in": "query",
+            "required": false,
+            "description": "JSON-encoded tRPC input. Every field has a default, so it may be omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": {
+                    "limit": 200
+                  },
+                  "type": "object",
+                  "properties": {
+                    "limit": {
+                      "default": 200,
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 200
+                    },
+                    "cursor": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "The tRPC result envelope.",

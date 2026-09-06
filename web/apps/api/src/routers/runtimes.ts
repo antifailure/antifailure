@@ -76,7 +76,15 @@ export const runtimesRouter = router({
               WHERE r.name = e.runtime AND r.removed_at IS NULL)
           GROUP BY e.runtime
 
-          ORDER BY registered DESC, removed_at NULLS FIRST, name`),
+          ORDER BY registered DESC, removed_at NULLS FIRST, name
+          -- Capped for the reason every list here is capped: no caller may ask
+          -- for an unbounded answer. Two hundred is the same number
+          -- invitations.list and sessions.list use, and it is far above any
+          -- registry a person maintains by hand. A name is one hundred
+          -- characters at most and unique while live, so the cap is not a
+          -- cursor's job here: it bounds a hostile registration loop rather
+          -- than a real list.
+          LIMIT 200`),
       )
     }),
 

@@ -508,6 +508,26 @@ export function postHogLimits(): Record<string, PostHogLimit> {
   return out
 }
 
+/**
+ * The body limit for every POST this mounts, keyed the same way as the rate
+ * limits so the one catalog in limits.ts can carry both.
+ *
+ * Generated from the allowlist for the same reason postHogLimits is: the
+ * number lived beside the route for a year and the middleware that applied it
+ * was registered per route in server.ts. When the server grew one body
+ * middleware for every endpoint, an allowlist entry that was not also in that
+ * catalog would have been clamped to the default, and session recording at two
+ * megabytes is the entry that would have broken first.
+ */
+export function postHogBodyLimits(): Record<string, { maxBytes: number; reason: string }> {
+  const out: Record<string, { maxBytes: number; reason: string }> = {}
+  for (const entry of POSTHOG_PROXIED) {
+    if (entry.method !== 'POST') continue
+    out[key('POST', entry)] = { maxBytes: entry.maxBodyBytes, reason: entry.why }
+  }
+  return out
+}
+
 export interface PostHogBoundary {
   audience: 'excluded'
   grounds: 'foreign-shape'

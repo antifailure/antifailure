@@ -172,7 +172,7 @@ import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
 import { mountApplicationRoutes } from './recruitment/routes.ts'
 import {
-  limitFor, bucketFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
+  limitFor, bucketFor, bodyLimitFor, servedRoute, ENDPOINT_LIMITS, type EndpointLimit,
 } from './limits.ts'
 import { createMetrics, routeLabel, statusClass, type ControlPlaneMetrics } from './metrics.ts'
 import { apiNotFound } from './notfound.ts'
@@ -778,6 +778,39 @@ export function createServer(options: ServerOptions) {
       )
     }
     return next()
+  })
+
+  // -------------------------------------------------------------------------
+  // How much body a request may carry, before anything reads it.
+  //
+  // After the rate limiter, so a caller over their rate is answered 429 without
+  // a byte of their body being read, and before every route, so no handler can
+  // buffer a body nobody has bounded. The number comes from BODY_LIMITS in
+  // limits.ts, one default and a list of exceptions with their reasons, for the
+  // same reason the rate limits do: a limit applied where somebody remembered
+  // is a limit missing from the endpoint added last.
+  //
+  // What this closes. Both webhook handlers below read the whole body with
+  // c.req.text() and verify the signature over those exact bytes afterwards,
+  // which is the right order for the signature and the wrong order for memory:
+  // a stranger with no secret could post a body of any size and the refusal
+  // came after every byte of it had been buffered. Now a body over the limit
+  // is refused here, from the content-length when the client declares one and
+  // from the count of bytes read when it does not, and the handler never runs.
+  // For a body under the limit the middleware hands the handler the same bytes
+  // it received, so the signature still verifies over the raw body; the webhook
+  // tests that sign a body whose re-serialisation differs are what prove that.
+  //
+  // The MCP mount bounds its own body and is skipped here; see bodyLimitFor.
+  // -------------------------------------------------------------------------
+  app.use('*', async (c, next) => {
+    const max = bodyLimitFor(c.req.method, new URL(c.req.url).pathname)
+    if (max === null) return next()
+    return bodyLimit({
+      maxSize: max,
+      onError: (refused) =>
+        refused.json({ error: `This request is larger than ${max} bytes.` }, 413),
+    })(c, next)
   })
 
   // -------------------------------------------------------------------------
@@ -3142,16 +3175,12 @@ export function createServer(options: ServerOptions) {
           }
           return forward(c)
         }
+        // The body limit for a POST here is entry.maxBodyBytes, and it is
+        // applied by the one body middleware above through postHogBodyLimits
+        // rather than registered per route. It was per route once, and that
+        // was the only body limit this server had outside the MCP mount.
         if (method === 'POST') {
-          app.post(
-            path,
-            bodyLimit({
-              maxSize: entry.maxBodyBytes,
-              onError: (c) =>
-                c.json({ error: `This request is larger than ${entry.maxBodyBytes} bytes.` }, 413),
-            }),
-            guarded,
-          )
+          app.post(path, guarded)
         } else {
           app.get(path, guarded)
         }

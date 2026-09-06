@@ -15,7 +15,7 @@
 import { TrieRouter } from 'hono/router/trie-router'
 
 import { extensionRoutes } from './extensions.ts'
-import { POSTHOG_MOUNT, postHogLimits } from './analytics/posthog.ts'
+import { POSTHOG_MOUNT, postHogBodyLimits, postHogLimits } from './analytics/posthog.ts'
 
 export type LimitKey = 'ip' | 'token' | 'org'
 
@@ -464,6 +464,122 @@ export function bucketFor(limit: EndpointLimit, subject: LimitSubject): string {
     case 'ip':
       return `ip:${subject.ip}`
   }
+}
+
+// ---------------------------------------------------------------------------
+// How much body a request may carry
+// ---------------------------------------------------------------------------
+
+export interface BodyLimit {
+  /** Bytes, counted on the wire before anything reads the body. */
+  maxBytes: number
+  /** Why this number rather than the default. Read by whoever raises it. */
+  reason: string
+}
+
+/**
+ * The body limit every endpoint gets unless it is named below.
+ *
+ * One megabyte, because the largest thing any unnamed endpoint legitimately
+ * receives is a tRPC mutation whose biggest field is a manifest block capped at
+ * twenty thousand characters, or an events batch of five hundred events whose
+ * every string field is bounded in ingest.ts, or a pull request report whose
+ * markdown is cut at sixty thousand characters on the way in. All of those sit
+ * well under a tenth of this.
+ *
+ * WHY THERE IS A DEFAULT AT ALL. The node server this process runs on sets no
+ * limit of its own, and until this existed the only bounded bodies were the
+ * PostHog proxy's and the MCP endpoint's, because those were the two places
+ * somebody remembered. Both webhook handlers read the whole body into memory
+ * with c.req.text() BEFORE checking the signature, so a stranger could hand
+ * the process a multi gigabyte body with no valid signature at all and the
+ * refusal came only after every byte of it had been buffered. A limit that is
+ * applied where somebody remembered to apply it is a limit that is missing
+ * from the endpoint added last, which is the same argument the rate catalog
+ * above makes and the reason this is one default plus a list of exceptions
+ * rather than a call site per route.
+ */
+export const DEFAULT_BODY_BYTES = 1024 * 1024
+
+/**
+ * The endpoints whose legitimate bodies are not the default's shape.
+ *
+ * Keyed exactly like ENDPOINT_LIMITS, and resolved the same way, so a route
+ * named here gets its number and every other route gets the default. Every
+ * entry carries the reason for its number, because a body limit that is wrong
+ * in the small direction is an outage that looks like a client bug: the
+ * caller sees 413 and nothing on this side logs it as a mistake.
+ */
+export const BODY_LIMITS: Record<string, BodyLimit> = {
+  // The PostHog proxy, from the same allowlist as its rate limits, so the
+  // number beside the route in analytics/posthog.ts is the number applied.
+  ...postHogBodyLimits(),
+
+  'POST /webhooks/github': {
+    maxBytes: 5 * 1024 * 1024,
+    reason:
+      'GitHub caps a delivery at 25 MB and drops anything larger, so that is the ceiling and not the size. ' +
+      'This App subscribes to installation, installation_repositories, repository, pull_request, workflow_run, ' +
+      'check_run and check_suite. The two installation events list every repository the installation can ' +
+      'reach, at about a hundred and twenty bytes each, so an organization with forty thousand repositories ' +
+      'choosing "all repositories" sends a little under five megabytes and is the largest honest delivery ' +
+      'this control plane can receive. A pull_request delivery carries the body twice at up to sixty-five ' +
+      'thousand characters and two repository objects, which is under half a megabyte; workflow_run, check_run ' +
+      'and check_suite are smaller. Five megabytes admits every one of those and refuses the other twenty.',
+  },
+  'POST /webhooks/stripe': {
+    maxBytes: 512 * 1024,
+    reason:
+      'A Stripe event is one object plus its previous attributes. The largest this control plane handles is ' +
+      'invoice.paid, and an invoice carries its first ten line items inline, each a few hundred bytes, plus ' +
+      'the customer, subscription and payment identifiers: a few tens of kilobytes at most, and the recorded ' +
+      'pack every billing test here runs against holds all of its events in under nine. Half a megabyte is an ' +
+      'order of magnitude above the largest, and a body larger than it is not an event Stripe sent.',
+  },
+  // The bring-your-own-key proxy forwards a model request verbatim, and the
+  // request IS the body: a long context prompt is the point of the product,
+  // so the number here is the provider's own ceiling rather than a guess.
+  'POST /byok/anthropic/v1/messages': {
+    maxBytes: 32 * 1024 * 1024,
+    reason:
+      'Anthropic refuses a request larger than 32 MB, so a body this proxy accepts and the provider would ' +
+      'not is a body it need not read. A two hundred thousand token prompt is under a megabyte of text; ' +
+      'the rest of the allowance is images and documents, which the provider accepts inline.',
+  },
+  'POST /byok/openai/v1/chat/completions': {
+    maxBytes: 32 * 1024 * 1024,
+    reason:
+      'The same number as the Anthropic route beside it, for the same reason: the provider bounds the ' +
+      'request, and this proxy has no grounds to be tighter than what it forwards to.',
+  },
+}
+
+/**
+ * The byte limit for a concrete request, or null for a path that bounds its
+ * own body.
+ *
+ * Matched by the same rules as limitFor, minus the extension routes and the
+ * console class: an extension route and a console page both get the default,
+ * because neither has said otherwise, and the default is the point.
+ *
+ * The one null is the hosted MCP mount. mountHostedMcp registers a 32 KiB
+ * limit of its own on /mcp and /auth/mcp/*, sized to a JSON-RPC message, and
+ * it is registered there rather than here because it exists only when an App
+ * base URL is configured. Bounding it here as well would buffer the same body
+ * twice, once to a megabyte and once to thirty-two kilobytes, and the tighter
+ * of the two is the one that decides.
+ */
+export function bodyLimitFor(method: string, path: string): number | null {
+  if (path === '/mcp' || path.startsWith('/auth/mcp/')) return null
+  const exact = BODY_LIMITS[`${method} ${path}`]
+  if (exact) return exact.maxBytes
+  const segments = path.split('/')
+  for (const [endpoint, limit] of Object.entries(BODY_LIMITS)) {
+    const space = endpoint.indexOf(' ')
+    if (endpoint.slice(0, space) !== method) continue
+    if (matches(endpoint.slice(space + 1), segments)) return limit.maxBytes
+  }
+  return DEFAULT_BODY_BYTES
 }
 
 /**

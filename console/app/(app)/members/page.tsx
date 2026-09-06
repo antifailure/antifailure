@@ -487,9 +487,33 @@ function describe(r: SyncReport): string {
   return parts.length === 0 ? "Already matched GitHub." : `${parts.join(", ")}.`;
 }
 
+/**
+ * Every page of members.list, in order.
+ *
+ * The procedure answers two hundred at a time with a cursor for the rest, so
+ * that no single request can ask for an organization's whole membership at
+ * once. This page renders the whole membership, because a Members page that
+ * stopped at two hundred with no sign of it would read as two hundred people,
+ * so it follows the cursor until there is none. The bound the procedure
+ * enforces is per request; the table stays complete.
+ */
+async function allMembers(): Promise<Member[]> {
+  const members: Member[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: { members: Member[]; nextCursor: string | null } = await query(
+      "members.list",
+      cursor ? { limit: 200, cursor } : { limit: 200 },
+    );
+    members.push(...page.members);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return members;
+}
+
 function Members() {
   const session = useSessionContext();
-  const state = useApi<Member[]>(() => query("members.list"), []);
+  const state = useApi<Member[]>(() => allMembers(), []);
   const csrf = session.data?.csrfToken ?? "";
   const mayManage = may(session.data?.role, "members.manage");
   const reloadMembership = useCallback(() => {

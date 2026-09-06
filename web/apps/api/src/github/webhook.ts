@@ -82,6 +82,14 @@ interface Repo {
   default_branch?: string
 }
 
+/** The `changes` object on a repository event. GitHub sends the old name on
+ *  `renamed` and the old owner on `transferred`, and nothing else here reads
+ *  it. */
+interface RepositoryChanges {
+  repository?: { name?: { from?: string } }
+  owner?: { from?: { organization?: { login?: string }; user?: { login?: string } } }
+}
+
 /**
  * Handles one verified delivery.
  *
@@ -235,10 +243,35 @@ export async function handleDelivery(
         return { event, action, handled: false, detail: 'no repository in the payload' }
       }
       const account: Account = { login, type: repo.owner?.type ?? 'Organization' }
+      const changes = payload.changes as RepositoryChanges | undefined
+
+      // A transfer BEFORE rememberInstallation, because that call creates an
+      // organization for whatever login the payload names, and on a transfer
+      // the payload names the new owner. See transferRepository for why the
+      // new owner is not taken on trust.
+      if (action === 'transferred') {
+        const detail = await transferRepository(pool, clock, {
+          repo,
+          installationId: id,
+          newOwner: account,
+          oldOwner: changes?.owner?.from?.organization?.login ?? changes?.owner?.from?.user?.login ?? null,
+        })
+        return { event, action, handled: true, detail }
+      }
+
       const orgId = await rememberInstallation(pool, clock, account, id, deps.analytics)
       if (action === 'deleted' || action === 'archived') {
         await archiveRepositories(pool, clock, account.login, orgId, [repo])
         return { event, action, handled: true, detail: `${repo.full_name} archived` }
+      }
+      if (action === 'renamed') {
+        const from = changes?.repository?.name?.from
+        const detail = await renameRepository(pool, clock, account.login, orgId, repo, {
+          previousFullName: typeof from === 'string' && from ? `${login}/${from}` : null,
+        })
+        if (detail) return { event, action, handled: true, detail }
+        // Nothing here knew the old name or the id, so there is nothing to
+        // rename: it is recorded under the name it has now, below.
       }
       await rememberRepositories(pool, clock, account.login, orgId, [repo])
       return { event, action, handled: true, detail: `${repo.full_name} recorded` }
@@ -389,6 +422,182 @@ async function rememberRepositories(
           updated_at = ${clock.now().toISOString()}`)
     }
   })
+}
+
+/**
+ * A rename keeps the row and changes the name on it.
+ *
+ * THE ROW IS THE HISTORY. environments, runs, pull_requests, repository_setups,
+ * the cost ledger and the load definitions all point at repositories.id, and
+ * before this a rename went through rememberRepositories, whose upsert keys on
+ * (org_id, full_name): the new name matched nothing, so it inserted a second
+ * row, and the old row kept every environment and every verdict under a name
+ * GitHub no longer serves. Nothing archived it and nothing pointed at it. The
+ * next pull request on the renamed repository looked up the new name, found
+ * the empty row, and started the product's record of that repository from
+ * zero.
+ *
+ * The row is found by github_id first, which GitHub keeps stable across every
+ * rename and transfer, and by the old full name when the row predates the id
+ * being recorded. The lookup is inside the delivery's own account scope, so a
+ * rename can only ever move a name within the organization the delivery is
+ * about.
+ *
+ * Returns the outcome for the delivery log, or null when no row was found,
+ * which the caller answers by recording the repository under its new name.
+ *
+ * ONE NAME PER ORGANIZATION IS A CONSTRAINT, and the rename has to respect it.
+ * GitHub only allows a rename to a name nobody holds, but this table can still
+ * hold the new name from a repository that was deleted or moved away under it
+ * years ago, archived and never removed. Renaming onto it would violate the
+ * unique constraint and the delivery would answer 500, which GitHub retries
+ * into the same 500 forever. So when another row holds the new name, the
+ * rename falls back to what it did before, one row per name with the old one
+ * archived, and says so in the outcome. That loses the id continuity for that
+ * one repository and keeps the delivery answerable, which is the right trade
+ * for a case that needs a deleted repository's ghost to line up with a live
+ * one's new name.
+ */
+async function renameRepository(
+  pool: Pool,
+  clock: Clock,
+  login: string,
+  orgId: string,
+  repo: Repo,
+  options: { previousFullName: string | null },
+): Promise<string | null> {
+  return pool.withGitHubAccount(login, async (db) => {
+    const found = await db.execute<{ id: string; full_name: string }>(sql`
+      SELECT id, full_name FROM repositories
+      WHERE org_id = ${orgId}::uuid
+        AND (github_id = ${repo.id ?? null}
+             OR (${options.previousFullName}::text IS NOT NULL
+                 AND full_name = ${options.previousFullName}))
+      ORDER BY (github_id = ${repo.id ?? null}) DESC NULLS LAST, archived_at NULLS FIRST
+      LIMIT 1`)
+    const row = found[0]
+    if (!row) return null
+    if (row.full_name === repo.full_name) {
+      return `${repo.full_name} already carries that name`
+    }
+
+    const holder = await db.execute<{ id: string }>(sql`
+      SELECT id FROM repositories
+      WHERE org_id = ${orgId}::uuid AND full_name = ${repo.full_name} AND id <> ${row.id}::uuid`)
+    if (holder.length > 0) {
+      await db.execute(sql`
+        INSERT INTO repositories (org_id, full_name, github_id, private, default_branch, archived_at, updated_at)
+        VALUES (${orgId}::uuid, ${repo.full_name}, ${repo.id ?? null},
+                ${repo.private ?? true}, ${repo.default_branch ?? 'main'}, NULL,
+                ${clock.now().toISOString()})
+        ON CONFLICT (org_id, full_name) DO UPDATE SET
+          github_id = coalesce(EXCLUDED.github_id, repositories.github_id),
+          private = EXCLUDED.private,
+          default_branch = EXCLUDED.default_branch,
+          archived_at = NULL,
+          updated_at = ${clock.now().toISOString()}`)
+      await db.execute(sql`
+        UPDATE repositories
+        SET archived_at = coalesce(archived_at, ${clock.now().toISOString()}),
+            updated_at = ${clock.now().toISOString()}
+        WHERE id = ${row.id}::uuid`)
+      return (
+        `${row.full_name} renamed to ${repo.full_name}, but a row already held that name, ` +
+        `so the old row is archived and the new name starts a new record`
+      )
+    }
+
+    await db.execute(sql`
+      UPDATE repositories
+      SET full_name = ${repo.full_name},
+          github_id = coalesce(${repo.id ?? null}, github_id),
+          private = ${repo.private ?? true},
+          default_branch = ${repo.default_branch ?? 'main'},
+          updated_at = ${clock.now().toISOString()}
+      WHERE id = ${row.id}::uuid`)
+    return `${row.full_name} renamed to ${repo.full_name}`
+  })
+}
+
+/**
+ * A transfer moves a repository between two GitHub owners, and here an owner
+ * is a tenant.
+ *
+ * The row does NOT move with it, and that is a decision rather than a gap.
+ * Every table that points at the repository carries its own org_id and its own
+ * row-level policy, so moving repositories.org_id alone would leave the old
+ * tenant's environments and verdicts joined to a repository they can no longer
+ * see, and moving all of it would hand one customer another customer's run
+ * history, cost ledger and captured messages because somebody on GitHub
+ * pressed Transfer. The policies in 0013 refuse the cross-tenant write
+ * outright: a delivery is scoped to one account and can write only that
+ * account's rows. So the old owner keeps its history, archived, exactly as an
+ * installation_repositories removal would leave it, and the new owner starts a
+ * fresh record under its own tenant, exactly as a new repository would.
+ *
+ * WHAT MADE THIS A BUG rather than a design note. Before this, the transferred
+ * action fell through to rememberRepositories under the NEW owner, after
+ * rememberInstallation had created an organization and an installation row
+ * for that owner from the delivery's installation id. GitHub sends this event
+ * to the new owner's installation, so usually that owner does have the App,
+ * but the handler never checked, and a delivery about an owner this control
+ * plane had never seen would have minted a tenant for them and pointed the
+ * delivery's installation id at it. The old row, meanwhile, was left live
+ * under the old tenant, still named for a repository that had left.
+ *
+ * So the new owner is believed only when the installation the delivery names
+ * is already recorded for that owner, which is exactly what the row-level
+ * policy on github_installations lets the new owner's scope see. An owner
+ * with no installation here gets nothing written for them; the delivery is
+ * still handled, because the half that matters, archiving the old row, does
+ * not depend on the new owner at all.
+ */
+async function transferRepository(
+  pool: Pool,
+  clock: Clock,
+  input: { repo: Repo; installationId: number; newOwner: Account; oldOwner: string | null },
+): Promise<string> {
+  const { repo, newOwner, oldOwner } = input
+  const parts: string[] = []
+  const name = repo.full_name.slice(repo.full_name.indexOf('/') + 1)
+
+  if (oldOwner) {
+    // The old owner's scope, which can see the old owner's rows and nothing
+    // else. The old name is reconstructed from the old owner and the
+    // repository's name, because GitHub sends only the owner that changed.
+    const archived = await pool.withGitHubAccount(oldOwner, async (db) => {
+      const rows = await db.execute<{ id: string; full_name: string }>(sql`
+        UPDATE repositories
+        SET archived_at = coalesce(archived_at, ${clock.now().toISOString()}),
+            updated_at = ${clock.now().toISOString()}
+        WHERE github_id = ${repo.id ?? null} OR full_name = ${`${oldOwner}/${name}`}
+        RETURNING id, full_name`)
+      return rows.map((r) => r.full_name)
+    })
+    parts.push(
+      archived.length > 0
+        ? `${archived.join(', ')} archived under ${oldOwner}`
+        : `${oldOwner} had no record of it`,
+    )
+  } else {
+    parts.push('the delivery names no previous owner')
+  }
+
+  const known = await pool.withGitHubAccount(newOwner.login, async (db) => {
+    const rows = await db.execute<{ org_id: string }>(sql`
+      SELECT org_id FROM github_installations
+      WHERE installation_id = ${input.installationId}
+        AND lower(account_login) = ${newOwner.login.toLowerCase()}
+        AND suspended_at IS NULL`)
+    return rows[0]?.org_id ?? null
+  })
+  if (known) {
+    await rememberRepositories(pool, clock, newOwner.login, known, [repo])
+    parts.push(`${repo.full_name} recorded under ${newOwner.login}`)
+  } else {
+    parts.push(`${newOwner.login} has no installation here, so nothing was recorded for it`)
+  }
+  return parts.join('; ')
 }
 
 /**

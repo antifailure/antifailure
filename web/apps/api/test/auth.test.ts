@@ -1201,9 +1201,9 @@ describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgr
     assert.ok(report.added.includes(arrives.login), JSON.stringify(report))
 
     const listed = await callProcedure(h, admin, 'members.list', 'query', {})
-    const logins = ((listed.body as { result: { data: { github_login: string }[] } }).result.data).map(
-      (m) => m.github_login,
-    )
+    const logins = (
+      listed.body as { result: { data: { members: { github_login: string }[] } } }
+    ).result.data.members.map((m) => m.github_login)
     assert.ok(logins.includes(stays.login), 'members.list does not show the synced member')
 
     // And the removal, which is the half sign-in can never do: somebody taken
@@ -1212,9 +1212,9 @@ describe('members.sync over the route', { skip: hasDatabase ? false : 'no Postgr
     const second = await callProcedure(h, admin, 'members.sync', 'mutation', {})
     assert.equal(second.status, 200, JSON.stringify(second.body).slice(0, 300))
     const after2 = await callProcedure(h, admin, 'members.list', 'query', {})
-    const logins2 = ((after2.body as { result: { data: { github_login: string }[] } }).result.data).map(
-      (m) => m.github_login,
-    )
+    const logins2 = (
+      after2.body as { result: { data: { members: { github_login: string }[] } } }
+    ).result.data.members.map((m) => m.github_login)
     assert.ok(!logins2.includes(arrives.login), 'a member GitHub no longer reports is still listed')
   })
 

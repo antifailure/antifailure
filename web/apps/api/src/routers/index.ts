@@ -954,15 +954,52 @@ const auditRouter = router({
 // ---------------------------------------------------------------------------
 
 const membersRouter = router({
-  list: orgProcedure('environments.view').query(async ({ ctx }) => {
-    const c = ctx as OrgContext
-    return c.pool.withTenant(c.tenant, async (db) =>
-      db.execute(sql`
-        SELECT u.github_login, u.name, u.avatar_url, m.role, m.source, m.created_at
-        FROM members m JOIN users u ON u.id = m.user_id
-        ORDER BY m.created_at ASC`),
+  list: orgProcedure('environments.view')
+    .input(
+      z
+        .object({
+          // Paginated like every other list here, and for the same reason
+          // environments.list gives: an organization that synced ten thousand
+          // members from GitHub must not be able to ask for all of them in one
+          // answer and take the replica down for everyone else on it. This one
+          // had no limit at all, and neither did runtimes.list; they were the
+          // only two lists the console renders that did not.
+          limit: z.number().int().min(1).max(200).default(200),
+          cursor: z.string().optional(),
+        })
+        .default({ limit: 200 }),
     )
-  }),
+    .query(async ({ ctx, input }) => {
+      const c = ctx as OrgContext
+      // The cursor names both halves of the order. A sync writes every member
+      // it adds inside one transaction, and now() is fixed for a transaction,
+      // so the whole batch shares one created_at to the microsecond; a cursor
+      // on the timestamp alone would either skip the rest of that batch or
+      // return it forever. The timestamp is carried as Postgres wrote it
+      // rather than as a JavaScript Date, which keeps only milliseconds and
+      // would compare unequal to the row it came from.
+      const after = memberCursor(input.cursor)
+      return c.pool.withTenant(c.tenant, async (db) => {
+        const rows = await db.execute<MemberRow>(sql`
+          SELECT u.github_login, u.name, u.avatar_url, m.role, m.source, m.created_at,
+                 m.created_at::text AS created_text, m.user_id
+          FROM members m JOIN users u ON u.id = m.user_id
+          WHERE (${after?.createdAt ?? null}::text IS NULL
+                 OR (m.created_at, m.user_id) > (${after?.createdAt ?? null}::timestamptz,
+                                                 ${after?.userId ?? null}::uuid))
+          ORDER BY m.created_at ASC, m.user_id ASC
+          LIMIT ${input.limit + 1}`)
+        const page = rows.slice(0, input.limit)
+        const last = page[page.length - 1]
+        return {
+          members: page.map(({ created_text: _text, user_id: _id, ...member }) => member),
+          nextCursor:
+            rows.length > input.limit && last
+              ? `${last.created_text}|${last.user_id}`
+              : null,
+        }
+      })
+    }),
 
   /**
    * Reconciles this organization's members against GitHub's.
@@ -1414,4 +1451,43 @@ function asNumber(value: string | number | null | undefined): number | string | 
 
 function asIso(v: Date | string): string {
   return (v instanceof Date ? v : new Date(v)).toISOString()
+}
+
+type MemberRow = {
+  github_login: string
+  name: string | null
+  avatar_url: string | null
+  role: string
+  source: string
+  created_at: Date | string
+  /** created_at as Postgres spells it, microseconds included. */
+  created_text: string
+  user_id: string
+}
+
+/**
+ * Reads a members.list cursor back into its two halves, or null for none.
+ *
+ * A cursor a caller made up rather than received is refused as BAD_REQUEST
+ * rather than passed to Postgres: the halves are cast to timestamptz and uuid
+ * inside the query, so a malformed one would surface as a database error and
+ * a database error is answered with the fixed control plane failure sentence,
+ * which tells the caller nothing about what they sent.
+ */
+/** A timestamptz as Postgres prints it: `2026-09-06 06:22:16.029690+00`,
+ *  with the fraction and the offset both optional. */
+const TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:?\d{2})?|Z)?$/
+
+function memberCursor(cursor: string | undefined): { createdAt: string; userId: string } | null {
+  if (cursor === undefined) return null
+  const bar = cursor.lastIndexOf('|')
+  const createdAt = bar > 0 ? cursor.slice(0, bar) : ''
+  const userId = bar > 0 ? cursor.slice(bar + 1) : ''
+  if (!TIMESTAMP_TEXT.test(createdAt) || !uuid.safeParse(userId).success) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'That cursor is not one members.list returned. Start again without one.',
+    })
+  }
+  return { createdAt, userId }
 }
