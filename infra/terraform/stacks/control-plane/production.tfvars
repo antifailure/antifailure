@@ -363,6 +363,13 @@ operator_portal_enabled = true
 # disagree.
 site_origin = "https://antifailure.dev,https://www.antifailure.dev"
 
+# The PostHog proxy the marketing site sends its product analytics through, and
+# the key this process reports hosted MCP and model usage under. The key is the
+# same public project key built into the site's JavaScript; the region was read
+# off the cloud the way docs/reference/control-plane.md says to.
+posthog_region      = "us"
+posthog_project_key = "phc_BXsb8vQVdiajf7uG9soRdsEwLtcE7tJWgdAfc4Vvoqau"
+
 # ---------------------------------------------------------------------------
 # The acquisition dashboard, and who it belongs to.
 # ---------------------------------------------------------------------------

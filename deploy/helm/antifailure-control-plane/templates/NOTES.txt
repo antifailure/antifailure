@@ -53,6 +53,7 @@ Four things worth knowing:
 {{- if not (or .Values.providerKeys.secret .Values.providerKeys.existingSecret) }}{{ $off = append $off "storing customers' provider keys (providerKeys.secret)" }}{{ end }}
 {{- if not (or .Values.analytics.surrogateSecret .Values.analytics.existingSecret) }}{{ $off = append $off "analytics (analytics.surrogateSecret)" }}{{ end }}
 {{- if not .Values.config.siteOrigin }}{{ $off = append $off "cross-origin posts from a marketing site, so its enterprise contact form cannot submit (config.siteOrigin)" }}{{ end }}
+{{- if not .Values.config.posthogRegion }}{{ $off = append $off "the PostHog proxy at /ph, so a marketing site cannot send product analytics through this process (config.posthogRegion)" }}{{ end }}
 {{- if eq (len $off) 0 }}
   Nothing. Every optional feature this chart configures has a value set.
 {{- else }}

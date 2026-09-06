@@ -140,6 +140,8 @@ module "control_plane" {
   analytics_operator_org   = var.analytics_operator_org
   analytics_retention_days = var.analytics_retention_days
   site_origin              = var.site_origin
+  posthog_region           = var.posthog_region
+  posthog_project_key      = var.posthog_project_key
 
   github_app_install_url = var.github_app_install_url
   github_api_base        = var.github_api_base

@@ -143,3 +143,8 @@ admin_pool_max          = 2
 # hostnames, for the same reason: a list of one here would mean the two origin
 # path is first exercised on the plane a visitor is standing on.
 site_origin = "https://antifailure.dev,https://www.antifailure.dev"
+
+# The PostHog proxy, so the /ph route exists on staging before it is relied on
+# in production. No project key here: staging's own hosted usage would land in
+# the same PostHog project as production's and read as customers.
+posthog_region = "us"

@@ -539,6 +539,28 @@ resource "azurerm_container_app" "this" {
         }
       }
 
+      # The PostHog proxy, and the process's own reporting to PostHog. Both were
+      # documented and read by the application before any apply of this module
+      # could set them; tools/wirecheck found the gap. Absent is the safe end
+      # for both: no region mounts no proxy, so a site configured to send
+      # analytics here is answered 404 rather than reaching a vendor this
+      # installation did not choose, and no key reports nothing.
+      dynamic "env" {
+        for_each = var.posthog_region == "" ? [] : [var.posthog_region]
+        content {
+          name  = "AF_POSTHOG_REGION"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.posthog_project_key == "" ? [] : [var.posthog_project_key]
+        content {
+          name  = "AF_POSTHOG_PROJECT_KEY"
+          value = env.value
+        }
+      }
+
       # -------------------------------------------------------------------
       # The GitHub App's public install address, which is a different variable
       # from the App itself and is why it was missed.

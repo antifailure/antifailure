@@ -437,6 +437,7 @@ admin_pool_max          = 4
 analytics_enabled      = true               # generates the surrogate secret
 analytics_operator_org = "your-org-slug"    # who may read the dashboard
 site_origin            = "https://example.com,https://www.example.com"
+posthog_region         = "us"                # mounts the PostHog proxy at /ph
 
 mail_from         = "no-reply@example.com"   # only once the DNS below is right
 public_url        = "https://cp.example.com"

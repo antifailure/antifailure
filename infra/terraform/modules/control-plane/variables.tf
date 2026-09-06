@@ -516,6 +516,44 @@ variable "site_origin" {
   }
 }
 
+# The PostHog proxy and the process's own PostHog reporting.
+#
+# DOCUMENTED BEFORE IT COULD BE SET. docs/reference/control-plane.md listed
+# AF_POSTHOG_REGION and AF_POSTHOG_PROJECT_KEY, the application read both, the
+# marketing site was built to send its analytics to /ph on this container, and
+# no apply of this module could put either variable on it. tools/wirecheck is
+# the gate that saw it, and this is the wiring it asked for.
+#
+# The region is one of two fixed values because the application maps it onto a
+# pair of fixed upstream hosts. Refusing anything else at plan time means the
+# mistake is found before the revision fails its startup check.
+variable "posthog_region" {
+  type        = string
+  default     = ""
+  description = "us or eu. Mounts the PostHog proxy at /ph and forwards to that cloud. Empty mounts nothing and a site pointed here is answered 404."
+
+  validation {
+    condition     = contains(["", "us", "eu"], var.posthog_region)
+    error_message = "posthog_region is us, eu, or empty. There is no other PostHog cloud and no setting that forwards anywhere else."
+  }
+}
+
+# Public by design, like every PostHog project key: it writes events into one
+# project and reads nothing back, and the same value ships inside the marketing
+# site's JavaScript. That is why it is a plain variable and not a Key Vault
+# reference. Needs posthog_region as well, since a key with no region has
+# nowhere to go.
+variable "posthog_project_key" {
+  type        = string
+  default     = ""
+  description = "The PostHog project API key this process reports its own hosted MCP and model usage under. Empty reports nothing. Needs posthog_region."
+
+  validation {
+    condition     = var.posthog_project_key == "" || var.posthog_region != ""
+    error_message = "posthog_project_key without posthog_region has nowhere to send anything. Set the region too."
+  }
+}
+
 # Where a person with no organization installs the GitHub App.
 #
 # The variable whose absence hid both buttons on the "No organization yet"
