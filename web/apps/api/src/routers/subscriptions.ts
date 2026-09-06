@@ -32,8 +32,8 @@ import { sql } from 'drizzle-orm'
 import { router, orgProcedure, audit, type OrgContext } from '../trpc.ts'
 import { killSwitch, killedMessage } from '../flags.ts'
 import { attachCustomer, readBillingState, reconcile } from '../billing/store.ts'
-import { LIVE_STATUSES, PAID_PLANS, type PaidPlan } from '../billing/plans.ts'
-import { StripeError } from '../billing/stripe.ts'
+import { ENTITLING_STATUSES, LIVE_STATUSES, PAID_PLANS, type PaidPlan } from '../billing/plans.ts'
+import { StripeError, type StripeSubscription } from '../billing/stripe.ts'
 
 /** The billing context, or a refusal that names the variables an operator has
  *  to set. A self-hosted installation takes no money and has to be able to run
@@ -70,6 +70,115 @@ function refused(err: unknown, what: string): TRPCError {
   return err instanceof TRPCError
     ? err
     : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Could not ${what}.`, cause: err })
+}
+
+/**
+ * How long a checkout that Stripe still calls `incomplete` is treated as a
+ * purchase in flight rather than as one that was abandoned.
+ *
+ * Stripe leaves a subscription `incomplete` for 23 hours before it expires it,
+ * and for the whole of that window it can still be paid. Refusing a new
+ * checkout for the whole window would lock out an organization whose buyer
+ * closed the tab on the card form and came back the next morning. An hour is
+ * long enough to cover the thing this guards against, which is the buyer who
+ * has just paid, and short enough that a walked-away attempt does not block
+ * the next one for a day.
+ */
+const CHECKOUT_IN_FLIGHT_MS = 60 * 60 * 1000
+
+/**
+ * The width of the window inside which two checkout requests from the same
+ * organization for the same plan are the same request.
+ *
+ * Stripe returns the first session for a repeated idempotency key, so a double
+ * click, a retried request or two owners pressing Subscribe in the same moment
+ * open one hosted page rather than two. The bucket is short on purpose: a
+ * session is reusable for the whole of it, and an organization that cancelled
+ * on the card form and came back an hour later gets a fresh session rather
+ * than the one it walked away from.
+ */
+const CHECKOUT_KEY_BUCKET_MS = 30 * 1000
+
+/** The idempotency key for one organization's checkout of one plan inside one
+ *  bucket. Exported for the test that asserts it is what reaches Stripe. */
+export function checkoutIdempotencyKey(orgId: string, plan: string, at: Date): string {
+  const bucket = Math.floor(at.getTime() / CHECKOUT_KEY_BUCKET_MS)
+  return `af-checkout-${orgId}-${plan}-${bucket}`
+}
+
+/**
+ * What Stripe itself says about this customer, read as a refusal or nothing.
+ *
+ * THE SECOND GUARD, and the one that closes the gap the local read cannot see.
+ * The subscriptions table is written by the webhook, which is a second HTTP
+ * delivery from Stripe that arrives some seconds after the buyer's browser
+ * does. A buyer who came back from checkout inside that gap saw the same
+ * Subscribe button they had pressed before they paid, pressed it again, and
+ * the local read found nothing to refuse on. The customer id was already
+ * attached from the first purchase, so the second session was opened against
+ * it, and a completed second checkout was a second live subscription and a
+ * second charge for the same organization.
+ *
+ * So before a session is opened for a customer that already exists, Stripe is
+ * asked for that customer's subscriptions, in every status. Anything live is
+ * refused with the state named, because the person reading it has just paid
+ * and is about to be told the page was wrong, not them. An `incomplete`
+ * subscription younger than an hour is a checkout still being confirmed and
+ * is refused too. Anything ended, or an `incomplete` older than that, lets
+ * the purchase through: a cancelled organization that comes back must be able
+ * to buy again.
+ *
+ * Returns the refusal rather than throwing it, so the caller can repair the
+ * local row before it answers.
+ */
+export function refusalFromStripe(
+  subscriptions: readonly StripeSubscription[],
+  now: Date,
+): { error: TRPCError; live: boolean } | null {
+  for (const s of subscriptions) {
+    if (ENTITLING_STATUSES.includes(s.status)) {
+      return {
+        live: true,
+        error: new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            s.status === 'past_due'
+              ? 'This organization already has a subscription, and its last payment did not go ' +
+                'through. Update the card in the billing portal rather than buying a second plan. ' +
+                'Nothing was charged.'
+              : 'Your plan is already active. Stripe confirmed the payment and this page is ' +
+                'catching up with it; nothing was charged again. Refresh from Stripe to see it here, ' +
+                'or change it in the billing portal.',
+        }),
+      }
+    }
+    if (s.status === 'unpaid') {
+      return {
+        live: true,
+        error: new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'This organization already has a subscription that Stripe has stopped collecting on. ' +
+            'Settle it in the billing portal rather than buying a second plan. Nothing was charged.',
+        }),
+      }
+    }
+    if (s.status === 'incomplete') {
+      const created = s.createdAt?.getTime() ?? null
+      if (created !== null && now.getTime() - created < CHECKOUT_IN_FLIGHT_MS) {
+        return {
+          live: false,
+          error: new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message:
+              'A payment for this organization is still being confirmed. Give it a minute, then ' +
+              'refresh from Stripe. Nothing was charged again.',
+          }),
+        }
+      }
+    }
+  }
+  return null
 }
 
 /**
@@ -229,10 +338,12 @@ export const subscriptionsRouter = router({
       const state = await c.pool.withTenant(c.tenant, async (db) =>
         readBillingState(db, c.actor.orgId),
       )
-      // The only place a double subscription can actually be prevented. No
-      // constraint in the database can, because the charge happens at Stripe
-      // and a refused write there would lose the delivery rather than the
-      // charge; see migrations/0020_billing.sql.
+      // The first of two guards against a double subscription. No constraint
+      // in the database can be one, because the charge happens at Stripe and a
+      // refused write there would lose the delivery rather than the charge;
+      // see migrations/0020_billing.sql. This read answers from what the
+      // webhook has already written; refusalFromStripe below answers for the
+      // seconds before it has.
       if (state.subscription && LIVE_STATUSES.includes(state.subscription.status)) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
@@ -243,7 +354,35 @@ export const subscriptionsRouter = router({
       }
 
       let customerId = state.customer?.stripeCustomerId ?? null
-      if (!customerId) {
+      if (customerId) {
+        // The customer exists, so Stripe may already hold a subscription this
+        // database has not been told about yet. Ask it. See refusalFromStripe
+        // for why the local read above is not enough on its own.
+        //
+        // A Stripe that will not answer is a refusal, not a pass. The session
+        // this would go on to open is a request to the same Stripe, and a guard
+        // that waves a purchase through because it could not check is the guard
+        // that is absent exactly when the double charge happens.
+        const held = await billing.client
+          .listSubscriptions(customerId, 100)
+          .catch((err: unknown) => {
+            throw refused(err, 'confirm whether this organization already has a subscription')
+          })
+        const refusal = refusalFromStripe(held, c.clock.now())
+        if (refusal) {
+          if (refusal.live) {
+            // The local row is behind Stripe, which is the only way this branch
+            // is reached, so write down what Stripe just said before answering.
+            // The page the buyer is looking at then shows the subscription on
+            // its next read instead of a Subscribe button under a refusal.
+            // Best effort: the refusal stands whether or not the repair lands.
+            await reconcile(
+              c.pool, c.clock, billing.config, billing.client, c.actor.orgId, c.analytics,
+            ).catch(() => undefined)
+          }
+          throw refusal.error
+        }
+      } else {
         const customer = await billing.client
           .createCustomer({
             email: state.customer?.email ?? null,
@@ -269,6 +408,7 @@ export const subscriptionsRouter = router({
           orgId: c.actor.orgId,
           successUrl: input.successUrl,
           cancelUrl: input.cancelUrl,
+          idempotencyKey: checkoutIdempotencyKey(c.actor.orgId, input.plan, c.clock.now()),
         })
         .catch((err: unknown) => {
           throw refused(err, 'open a checkout page')

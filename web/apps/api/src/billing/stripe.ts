@@ -202,6 +202,13 @@ export interface StripeClient {
     orgId: string
     successUrl: string
     cancelUrl: string
+    /**
+     * Required, like every other write that can end in a charge. Stripe
+     * returns the first session for a repeated key, so two requests inside
+     * the caller's window open one hosted page rather than two. The caller
+     * decides the window; see checkoutIdempotencyKey in routers/subscriptions.
+     */
+    idempotencyKey: string
   }): Promise<StripeCheckoutSession>
 
   /** The hosted page somebody changes a plan, a card, or a cancellation on. */
@@ -353,9 +360,11 @@ export class RealStripeClient implements StripeClient {
     // two customers that both look real in the dashboard. Stripe returns the
     // first customer for a repeated key, so the retry converges instead.
     //
-    // Not used on the checkout session: Stripe returns the SAME session for a
-    // repeated key, so an organization that cancelled and came back would be
-    // sent to a stale expired page forever.
+    // The checkout session's key is different in kind: it carries a time
+    // bucket, because Stripe returns the SAME session for a repeated key and an
+    // organization that cancelled and came back a week later must not be sent
+    // to the page it walked away from. The customer's key carries none,
+    // because there is exactly one customer per organization forever.
     return customerOf(await this.post('/v1/customers', body, `af-customer-${input.orgId}`))
   }
 
@@ -365,6 +374,7 @@ export class RealStripeClient implements StripeClient {
     orgId: string
     successUrl: string
     cancelUrl: string
+    idempotencyKey: string
   }): Promise<StripeCheckoutSession> {
     const body = new URLSearchParams({
       mode: 'subscription',
@@ -384,7 +394,7 @@ export class RealStripeClient implements StripeClient {
       'metadata[org_id]': input.orgId,
       'subscription_data[metadata][org_id]': input.orgId,
     })
-    return checkoutOf(await this.post('/v1/checkout/sessions', body))
+    return checkoutOf(await this.post('/v1/checkout/sessions', body, input.idempotencyKey))
   }
 
   async createPortalSession(input: {

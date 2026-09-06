@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { mutate, query, useApi } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import {
@@ -116,6 +116,19 @@ interface PageState {
   invoices: Invoice[];
 }
 
+/** The subscription statuses that entitle a plan, as billing/plans.ts has
+ *  them. Named here because the confirmation below waits for one of these,
+ *  not for a row: the webhook can write `incomplete` seconds before it writes
+ *  `active`, and a buyer told "active" on the first of those would be told
+ *  wrong. */
+const ENTITLING = ["active", "trialing", "past_due"];
+
+/** How long the page keeps asking before it says the activation is slow.
+ *  Stripe's webhook is usually seconds behind the browser; ninety is long past
+ *  anything ordinary and short of anybody giving up on the page. */
+const CONFIRM_FOR_MS = 90_000;
+const CONFIRM_EVERY_MS = 2_000;
+
 function money(amount: string | number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -140,6 +153,59 @@ function Billing() {
   const csrf = session.data?.csrfToken ?? "";
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // THE RETURN FROM CHECKOUT.
+  //
+  // Stripe sends the browser back to /plan?checkout=success the moment the
+  // card is accepted, and sends the webhook that writes the subscription some
+  // seconds later. Nothing read the parameter, this page fetched once, and so
+  // a buyer who came back inside that gap saw the same Subscribe button they
+  // had pressed before they paid. A reasonable person presses it again. The
+  // control plane now refuses that second checkout by asking Stripe, but the
+  // page must never put them in front of it: while the parameter is present
+  // and the entitlement has not arrived, the page says the payment was
+  // received, keeps the Subscribe controls off, and asks again every two
+  // seconds until the plan reads as entitled.
+  //
+  // Read from window in an effect rather than through useSearchParams, so the
+  // page prerenders without a Suspense boundary and the server and the first
+  // client render agree.
+  const [returned, setReturned] = useState<"success" | null>(null);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("checkout") === "success") {
+      setReturned("success");
+    }
+  }, []);
+  const subscription = state.data?.billing.subscription ?? null;
+  const activated = subscription !== null && ENTITLING.includes(subscription.status);
+  const confirming = returned === "success" && state.status === "ready" && !activated && !slow;
+  const { reload } = state;
+  useEffect(() => {
+    if (!confirming) return;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - started >= CONFIRM_FOR_MS) {
+        setSlow(true);
+        return;
+      }
+      reload();
+    }, CONFIRM_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [confirming, reload]);
+  // Once the plan is entitled the parameter has done its job. Stripping it
+  // means a reload, a bookmark or a shared link shows the plan and not a
+  // confirmation of a payment that happened some other day.
+  useEffect(() => {
+    if (returned !== "success" || !activated) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("checkout");
+    window.history.replaceState(null, "", url);
+  }, [returned, activated]);
+  // The Subscribe controls stay off from the moment the page knows a payment
+  // was made until the entitlement arrives, including after the ninety
+  // seconds: a slow webhook is not a reason to let a second purchase through.
+  const holdPurchases = returned === "success" && !activated;
 
   async function act(name: string, action: () => Promise<void>) {
     setBusy(name);
@@ -268,6 +334,13 @@ function Billing() {
                 </Button>
               }
             >
+              {returned === "success" ? (
+                <CheckoutReturn
+                  activated={activated}
+                  slow={slow}
+                  plan={data.billing.subscription?.plan ?? data.billing.plan}
+                />
+              ) : null}
               {data.billing.subscription ? (
                 <div className="grid gap-5 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
@@ -323,8 +396,9 @@ function Billing() {
                       control plane per organization at a flat fee, so there is
                       no quantity to choose. */}
                   <p className="text-[12px] leading-5 text-dim">
-                    A plan is priced per organization, not per person. The limits
-                    above are what it allows, including how many members it holds.
+                    {holdPurchases
+                      ? "These stay off until the plan you paid for is confirmed, so a second press cannot start a second purchase."
+                      : "A plan is priced per organization, not per person. The limits above are what it allows, including how many members it holds."}
                   </p>
                   <div className="mt-5 flex flex-wrap gap-2">
                     {data.billing.plans.map((plan, index) => (
@@ -332,6 +406,7 @@ function Billing() {
                         key={plan}
                         variant={index === 0 ? "primary" : "secondary"}
                         busy={busy === `checkout-${plan}`}
+                        disabled={holdPurchases}
                         onClick={() => checkout(plan)}
                       >
                         {busy === `checkout-${plan}` ? "Opening checkout" : `Subscribe to ${plan}`}
@@ -478,6 +553,68 @@ export default function PlanPage() {
     >
       <Billing />
     </Page>
+  );
+}
+
+/**
+ * The first thing a buyer reads after Stripe sends them back.
+ *
+ * Three states, one surface, inside the Subscription card rather than floating
+ * above it, because it is a statement about the subscription. The colour is
+ * never the only signal: the badge names the state in words and the sentence
+ * says what happens next. Nothing here moves. A payment confirmation that
+ * throbs or spins reads as a page that is unsure, and this page is sure: the
+ * money went through, and the only open question is a delivery that is
+ * seconds away.
+ *
+ * `role="status"` rather than `role="alert"`, on all three. The reader has
+ * lost nothing and is not being interrupted; they are being told that what
+ * they did worked.
+ */
+function CheckoutReturn({
+  activated,
+  slow,
+  plan,
+}: {
+  activated: boolean;
+  slow: boolean;
+  plan: string;
+}) {
+  // The pass and warn tints are Badge's, by value, rather than a third and
+  // fourth colour.
+  const tint = activated || !slow ? "bg-[rgba(30,122,58,0.07)]" : "bg-[rgba(138,90,0,0.12)]";
+  return (
+    <div
+      role="status"
+      className={`flex flex-wrap items-start gap-x-3 gap-y-1.5 border-b border-rule px-4 py-3 ${tint}`}
+    >
+      <Badge tone={activated || !slow ? "pass" : "warn"}>
+        {activated ? "Payment received" : slow ? "Still activating" : "Payment received"}
+      </Badge>
+      <p className="min-w-0 max-w-[62ch] text-[12.5px] leading-5 text-ink">
+        {activated ? (
+          <>Your {plan} plan is active. Nothing more to do here.</>
+        ) : slow ? (
+          <>
+            Stripe confirmed the payment, and the plan will activate shortly. This is
+            taking longer than usual. Refresh from Stripe asks it directly, and if the
+            plan has not appeared within a few minutes,{" "}
+            <a
+              href="https://antifailure.dev/contact"
+              className="underline decoration-[rgba(16,16,16,0.25)] underline-offset-4 hover:decoration-ink"
+            >
+              contact support
+            </a>
+            . You will not be charged again.
+          </>
+        ) : (
+          <>
+            Stripe confirmed the payment. Activating your plan, which usually takes a
+            few seconds; this page updates on its own.
+          </>
+        )}
+      </p>
+    </div>
   );
 }
 

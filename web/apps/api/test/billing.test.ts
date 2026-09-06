@@ -45,6 +45,7 @@ import {
 } from '../src/billing/webhook.ts'
 import { PLANS, planForPrice, planForStatus, stripeConfigFrom } from '../src/billing/plans.ts'
 import { RealStripeClient, invoiceOf, subscriptionOf } from '../src/billing/stripe.ts'
+import { checkoutIdempotencyKey } from '../src/routers/subscriptions.ts'
 import {
   available, startApi, seedOrg, signInAs, callProcedure, errorCode, dropOrg,
   stripeAgainstMockPack, type ApiHarness, type Org, type SignedIn,
@@ -100,11 +101,15 @@ function subscriptionObject(over: {
   quantity?: number
   cancelAtPeriodEnd?: boolean
   canceledAt?: number | null
+  /** Stripe's own creation second. Left out, the decoder reads null, which is
+   *  what every test before the in-flight checkout guard needed. */
+  created?: number
 }): Record<string, unknown> {
   return {
     id: over.id,
     object: 'subscription',
     customer: over.customer,
+    ...(over.created !== undefined ? { created: over.created } : {}),
     status: over.status ?? 'active',
     current_period_start: 1767225600,
     current_period_end: 1769904000,
@@ -858,6 +863,7 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const created = await billing.client.createCheckoutSession({
       customerId, priceId: 'price_team_afmock', orgId: o.orgId,
       successUrl: 'https://app.test/ok', cancelUrl: 'https://app.test/no',
+      idempotencyKey: `af-test-${o.orgId}`,
     })
     assert.ok(created.url.endsWith(created.id), 'the checkout url does not name its own session')
 
@@ -1147,12 +1153,16 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     assert.ok(customerCall, 'no customer was created')
     assert.equal(customerCall.key, `af-customer-${spyOrg.orgId}`)
 
-    // And deliberately not on the checkout session: Stripe returns the same
-    // session for a repeated key, so an organization that cancelled and came
-    // back would be sent to a stale expired page forever.
+    // And on the checkout session, keyed on the organization, the plan and a
+    // thirty second bucket. This asserted the key was ABSENT, on the reasoning
+    // that Stripe returns the same session for a repeated key and a cancelled
+    // organization coming back would be sent to a stale page forever. The
+    // bucket is what makes both true: two requests inside the same half
+    // minute, which is a double click or two owners on one call, open one
+    // hosted page, and a return an hour later gets a fresh one.
     const sessionCall = seen.find((c) => c.path === '/v1/checkout/sessions')
     assert.ok(sessionCall, 'no checkout session was opened')
-    assert.equal(sessionCall.key, null)
+    assert.equal(sessionCall.key, checkoutIdempotencyKey(spyOrg.orgId, 'team', spy.clock.now()))
 
     await dropOrg(spy.admin, spyOrg.orgId)
     await spy.close()
@@ -1726,5 +1736,241 @@ describe('billing', { skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABA
     const res = await plain.fetch('/webhooks/stripe', { method: 'POST', body: '{}' })
     assert.equal(res.status, 503)
     await plain.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The checkout guard that asks Stripe.
+//
+// THE DEFECT. After Stripe Checkout the buyer's browser comes back to /plan
+// before the customer.subscription.created webhook does, sometimes by several
+// seconds. The page showed the same Subscribe button it had shown before they
+// paid, and the checkout route's only guard was a read of the subscriptions
+// table, which the webhook had not written yet. The customer id was already
+// attached from the first purchase, so a second press opened a second session
+// against it, and a second completed checkout was a second live subscription
+// and a double charge for one organization.
+//
+// Stripe is the system that knows, so the route asks it. These cells are the
+// statuses Stripe can answer with, each driven through the route with the
+// local table EMPTY, which is the exact state of the gap. The list is served
+// by a fetch wrapper keyed on the customer id in the query string, so each
+// organization here sees only what its own test scripted and the pack still
+// answers everything else.
+// ---------------------------------------------------------------------------
+
+describe('checkout asks Stripe before it opens a session', {
+  skip: hasDatabase ? false : 'no Postgres at AF_TEST_DATABASE_URL',
+}, () => {
+  let h: ApiHarness
+  /** What Stripe holds for a customer, by customer id. A Response function
+   *  instead of a list scripts a failure. */
+  const holds = new Map<string, Record<string, unknown>[] | (() => Response)>()
+  const posted: { path: string; key: string | null; body: string }[] = []
+  const orgs: string[] = []
+
+  before(async () => {
+    const stripe = await stripeAgainstMockPack()
+    const underneath = stripe.config.fetch!
+    h = await startApi({
+      stripe: {
+        config: stripe.config,
+        client: new RealStripeClient({
+          ...stripe.config,
+          fetch: async (input, init) => {
+            const url = new URL(input instanceof Request ? input.url : String(input))
+            const method = init?.method ?? 'GET'
+            if (method === 'POST') {
+              posted.push({
+                path: url.pathname,
+                key: new Headers(init?.headers).get('idempotency-key'),
+                body: typeof init?.body === 'string' ? init.body : '',
+              })
+            }
+            if (method === 'GET' && url.pathname === '/v1/subscriptions') {
+              const scripted = holds.get(url.searchParams.get('customer') ?? '')
+              if (typeof scripted === 'function') return scripted()
+              if (scripted) {
+                return new Response(
+                  JSON.stringify({ object: 'list', has_more: false, data: scripted }),
+                  { status: 200, headers: { 'content-type': 'application/json' } },
+                )
+              }
+            }
+            return underneath(input, init)
+          },
+        }),
+      },
+    })
+  })
+
+  after(async () => {
+    for (const orgId of orgs) await dropOrg(h.admin, orgId)
+    await h.close()
+  })
+
+  /** An organization whose customer already exists at Stripe and locally, and
+   *  whose subscriptions table is empty: the buyer between two checkouts. */
+  async function returningBuyer(
+    label: string,
+    held: (customerId: string) => Record<string, unknown>[] | (() => Response),
+  ) {
+    const org = await seedOrg(h.admin, label)
+    orgs.push(org.orgId)
+    const customerId = `cus_${label}_${randomUUID().slice(0, 8)}`
+    await h.admin`
+      INSERT INTO billing_customers (org_id, stripe_customer_id, email)
+      VALUES (${org.orgId}, ${customerId}, 'buyer@example.test')`
+    holds.set(customerId, held(customerId))
+    const owner = await signInAs(h, org, 'owner')
+    return { org, customerId, owner }
+  }
+
+  const buy = { plan: 'team', successUrl: 'https://app.test/plan?checkout=success', cancelUrl: 'https://app.test/plan' }
+
+  function sessionsOpenedSince(mark: number): number {
+    return posted.slice(mark).filter((p) => p.path === '/v1/checkout/sessions').length
+  }
+
+  function messageOf(body: unknown): string {
+    return (body as { error?: { message?: string } }).error?.message ?? ''
+  }
+
+  it('an active subscription Stripe holds and this database does not: refused, named, and written down', async () => {
+    const { org, customerId, owner } = await returningBuyer('guard-active', (customerId) => [
+      subscriptionObject({ id: 'sub_guard_active', customer: customerId, status: 'active' }),
+    ])
+    const mark = posted.length
+
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 412, `a second checkout was allowed: ${JSON.stringify(body)}`)
+    assert.equal(errorCode(body), 'PRECONDITION_FAILED')
+    assert.match(messageOf(body), /already active/, 'the refusal does not name the state')
+    assert.equal(sessionsOpenedSince(mark), 0, 'a checkout session was opened under the refusal')
+
+    // The repair. The refusal is reached only when the local row is behind
+    // Stripe, and the page the buyer is looking at reads the local row, so the
+    // route writes what Stripe said before it answers. Without this the buyer
+    // is refused under a Subscribe button that still looks pressable.
+    const [row] = await h.admin<{ status: string; plan: string }[]>`
+      SELECT status, plan FROM subscriptions WHERE org_id = ${org.orgId}`
+    assert.ok(row, 'the subscription Stripe holds was not written locally on refusal')
+    assert.equal(row.status, 'active')
+    const [o] = await h.admin<{ plan: string }[]>`SELECT plan FROM organizations WHERE id = ${org.orgId}`
+    assert.equal(o!.plan, 'team', 'the entitlement did not follow the repaired row')
+  })
+
+  it('a trialing subscription refuses too', async () => {
+    const { customerId, owner } = await returningBuyer('guard-trial', (customerId) => [
+      subscriptionObject({ id: 'sub_guard_trial', customer: customerId, status: 'trialing' }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 412, JSON.stringify(body))
+    assert.match(messageOf(body), /already active/)
+    assert.equal(sessionsOpenedSince(mark), 0)
+  })
+
+  it('a past_due subscription refuses and sends the buyer to the card, not to a second plan', async () => {
+    const { customerId, owner } = await returningBuyer('guard-pastdue', (customerId) => [
+      subscriptionObject({ id: 'sub_guard_pastdue', customer: customerId, status: 'past_due' }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 412, JSON.stringify(body))
+    assert.match(messageOf(body), /payment did not go through/)
+    assert.equal(sessionsOpenedSince(mark), 0)
+  })
+
+  it('an unpaid subscription refuses', async () => {
+    const { customerId, owner } = await returningBuyer('guard-unpaid', (customerId) => [
+      subscriptionObject({ id: 'sub_guard_unpaid', customer: customerId, status: 'unpaid' }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 412, JSON.stringify(body))
+    assert.match(messageOf(body), /stopped collecting/)
+    assert.equal(sessionsOpenedSince(mark), 0)
+  })
+
+  it('an incomplete subscription from ten minutes ago is a checkout still being confirmed', async () => {
+    const tenMinutesAgo = Math.floor((h.clock.now().getTime() - 10 * 60 * 1000) / 1000)
+    const { customerId, owner } = await returningBuyer('guard-inflight', (customerId) => [
+      subscriptionObject({
+        id: 'sub_guard_inflight', customer: customerId, status: 'incomplete', created: tenMinutesAgo,
+      }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 412, JSON.stringify(body))
+    assert.match(messageOf(body), /still being confirmed/, 'the refusal does not say a payment is in flight')
+    assert.equal(sessionsOpenedSince(mark), 0)
+  })
+
+  it('an incomplete subscription from two hours ago was abandoned, and the buyer may try again', async () => {
+    const twoHoursAgo = Math.floor((h.clock.now().getTime() - 2 * 60 * 60 * 1000) / 1000)
+    const { customerId, owner } = await returningBuyer('guard-stale', (customerId) => [
+      subscriptionObject({
+        id: 'sub_guard_stale', customer: customerId, status: 'incomplete', created: twoHoursAgo,
+      }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 200, `an abandoned checkout blocked the next one: ${JSON.stringify(body)}`)
+    assert.equal(sessionsOpenedSince(mark), 1)
+  })
+
+  it('a canceled subscription lets the organization buy again', async () => {
+    const { customerId, owner } = await returningBuyer('guard-canceled', (customerId) => [
+      subscriptionObject({
+        id: 'sub_guard_canceled', customer: customerId, status: 'canceled', canceledAt: 1767225600,
+      }),
+    ])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 200, `a cancelled organization could not come back: ${JSON.stringify(body)}`)
+    assert.equal(sessionsOpenedSince(mark), 1)
+  })
+
+  it('no subscription at Stripe: the ordinary first purchase proceeds', async () => {
+    const { owner } = await returningBuyer('guard-none', (customerId) => [])
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 200, JSON.stringify(body))
+    assert.equal(sessionsOpenedSince(mark), 1)
+  })
+
+  it('a Stripe that will not answer the question is a refusal, not a pass', async () => {
+    const { owner } = await returningBuyer('guard-down', () => () =>
+      new Response(JSON.stringify({ error: { type: 'api_error', message: 'nope' } }), {
+        status: 500, headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const mark = posted.length
+    const { status, body } = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(status, 502, `a purchase went through unchecked: ${JSON.stringify(body)}`)
+    assert.match(messageOf(body), /Nothing was charged/)
+    assert.equal(sessionsOpenedSince(mark), 0, 'a session was opened while Stripe could not be asked')
+  })
+
+  it('two checkouts inside one half minute carry the same idempotency key, and the next half minute a new one', async () => {
+    const { org, owner } = await returningBuyer('guard-key', (customerId) => [])
+    const mark = posted.length
+    const first = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    const second = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(first.status, 200)
+    assert.equal(second.status, 200)
+    const keys = posted.slice(mark).filter((p) => p.path === '/v1/checkout/sessions').map((p) => p.key)
+    assert.equal(keys.length, 2)
+    assert.equal(keys[0], checkoutIdempotencyKey(org.orgId, 'team', h.clock.now()))
+    assert.equal(keys[0], keys[1], 'a double click inside the bucket reached Stripe as two different requests')
+    assert.ok(keys[0]!.startsWith(`af-checkout-${org.orgId}-team-`), `the key is not scoped to the organization: ${keys[0]}`)
+
+    h.clock.advance(30 * 1000)
+    const later = await callProcedure(h, owner, 'subscriptions.checkout', 'mutation', buy)
+    assert.equal(later.status, 200)
+    const next = posted.at(-1)!
+    assert.equal(next.path, '/v1/checkout/sessions')
+    assert.notEqual(next.key, keys[0], 'a return in the next bucket was pinned to the old session')
   })
 })
