@@ -1061,8 +1061,8 @@ func readCapturedMessages(
 	}
 	out.Shown = len(out.Messages)
 
-	switch {
-	case out.Total == 0:
+	switch out.Total {
+	case 0:
 		out.Summary = "Nothing has been sent that matches. Messages appear here as the " +
 			"environment's captured providers are asked to send them, so drive the flow " +
 			"that sends one, or pass wait_seconds to wait for it."

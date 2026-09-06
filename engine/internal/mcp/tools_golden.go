@@ -341,8 +341,8 @@ func goldensSummary(out goldensResult, total int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d %s here, %d made for this project and %d of those verified. ",
 		total, plural(total, "golden version is", "golden versions are"), mine, verified)
-	switch {
-	case out.Branchable == "":
+	switch out.Branchable {
+	case "":
 		b.WriteString("NONE of them can be branched by this project, so nothing can be " +
 			"brought up: a version another project made, or one that failed verification, " +
 			"is refused by the engine rather than used. Make one with prepare_golden. ")

@@ -294,8 +294,7 @@ func checkPrerequisites(
 	}
 
 	if scope == "machine" || scope == "both" {
-		switch {
-		case diagnose == nil:
+		if diagnose == nil {
 			// Stated rather than silently omitted. A section that vanishes
 			// reads as a section that passed, and this build genuinely did
 			// not look.
@@ -304,15 +303,12 @@ func checkPrerequisites(
 					"so nothing here says whether a container daemon, disk or a route out is "+
 					"available. Run af doctor at a terminal.")
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
-		default:
-			d, err := diagnose(ctx)
-			if err != nil {
-				out.NotChecked = append(out.NotChecked,
-					"the machine: the checks could not be run, so nothing here says whether "+
-						"this machine can run anything. The server log says why.")
-				out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
-				break
-			}
+		} else if d, err := diagnose(ctx); err != nil {
+			out.NotChecked = append(out.NotChecked,
+				"the machine: the checks could not be run, so nothing here says whether "+
+					"this machine can run anything. The server log says why.")
+			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
+		} else {
 			out.Platform = safeText(d.Platform, 120)
 			section := describeDiagnosticChecks(d.Checks)
 			section.Verdict = machineVerdict(d)
@@ -322,22 +318,18 @@ func checkPrerequisites(
 	}
 
 	if scope == "browser_agents" || scope == "both" {
-		switch {
-		case runner == nil:
+		if runner == nil {
 			out.NotChecked = append(out.NotChecked,
 				"the browser agents: this build did not wire the runner check into this "+
 					"server, so nothing here says whether a browser can be driven. Run "+
 					"af runner check at a terminal.")
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
-		default:
-			r, err := runner(ctx)
-			if err != nil {
-				out.NotChecked = append(out.NotChecked,
-					"the browser agents: the runner could not be inspected, so nothing here "+
-						"says whether a browser can be driven. The server log says why.")
-				out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
-				break
-			}
+		} else if r, err := runner(ctx); err != nil {
+			out.NotChecked = append(out.NotChecked,
+				"the browser agents: the runner could not be inspected, so nothing here "+
+					"says whether a browser can be driven. The server log says why.")
+			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
+		} else {
 			section := runnerSectionDoc{sectionDoc: describeDiagnosticChecks(r.Checks)}
 			section.Verdict = normaliseVerdict(r.Verdict)
 			section.Path = safeText(r.Path, 300)
