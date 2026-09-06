@@ -754,6 +754,16 @@ var exemptFromGate = map[string]string{
 		"than passed, and a positive control asserts a good region IS allowed " +
 		"so that a guard which refuses everything cannot pass the suite. " +
 		"It runs in infra.yml's plan job, which has a credential.",
+	"npm run seed in ?": "" +
+		"The same seed, run from the pull request's BASE commit rather than the " +
+		"head. dogfood.yml checks the base out into a worktree under the " +
+		"runner's temp directory and runs its seeder there, so that the head's " +
+		"migrations meet a copy that predates them, which is the ordering a " +
+		"customer's golden always produces and the one this job had never " +
+		"rehearsed: migration 0037 broke every real twin for two days while " +
+		"this job stayed green. The directory is named at run time by the " +
+		"checkout step, which is why this check reads it as `?`. Not a gate " +
+		"for the reason the entry below gives.",
 	"npm run seed in web": "" +
 		"It is not a gate. `npm run seed --workspace @antifailure/db` writes the " +
 		"fixture rows a dogfood run then drives the product against, so it is " +

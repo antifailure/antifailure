@@ -191,6 +191,7 @@ terraform:modules/control-plane	variable	app_cpu	number	optional
 terraform:modules/control-plane	variable	app_memory	string	optional
 terraform:modules/control-plane	variable	assign_deployer_secret_officer	bool	optional
 terraform:modules/control-plane	variable	backup_retention_days	number	optional
+terraform:modules/control-plane	variable	concurrent_requests	number	optional
 terraform:modules/control-plane	variable	custom_domain	string	optional
 terraform:modules/control-plane	variable	database_admin_user	string	optional
 terraform:modules/control-plane	variable	database_app_user	string	optional
@@ -290,6 +291,7 @@ terraform:stacks/control-plane	variable	backup_retention_days	number	optional
 terraform:stacks/control-plane	variable	budget_contact_emails	list(string)	optional
 terraform:stacks/control-plane	variable	cd_principal_id	string	optional
 terraform:stacks/control-plane	variable	ci_principal_id	string	optional
+terraform:stacks/control-plane	variable	concurrent_requests	number	optional
 terraform:stacks/control-plane	variable	custom_domain	string	optional
 terraform:stacks/control-plane	variable	database_extensions	list(string)	optional
 terraform:stacks/control-plane	variable	database_sku	string	optional
