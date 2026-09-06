@@ -13,11 +13,18 @@ import {
   describeMcpAuthorization, approveMcpAuthorization, redeemMcpAuthorization,
   identifyMcpToken,
 } from './auth/mcp.ts'
+import type { McpTool, McpOutcome, PostHogSink } from './analytics/posthog-sink.ts'
 
 type BaseContext = Omit<Context, 'actor'>
 interface Options {
   base: BaseContext
   actorFrom: (cookie: string | undefined) => Promise<Actor | null>
+  /** Where a tool call is reported. Absent sends nothing, which is the default
+   *  for a self-hosted deployment: this is OUR hosted service's own usage, and
+   *  somebody running this for their own team has no reason to tell us about
+   *  theirs. See analytics/posthog-sink.ts, in particular the paragraph about
+   *  why nothing of this shape may ever go in engine/. */
+  postHog?: PostHogSink | null
 }
 
 function uniqueParameters(parameters: URLSearchParams): Record<string, string> {
@@ -30,17 +37,32 @@ function uniqueParameters(parameters: URLSearchParams): Record<string, string> {
 }
 
 /** The hosted surface calls the same authorized procedures as the console. */
-function toolServer(context: Context, scopes: string[]) {
+/** How one tool call ended, reported to whoever is counting. The tool NAME and
+ *  nothing else about the request: see analytics/posthog-sink.ts for why an
+ *  argument may never travel this way. */
+type ReportCall = (call: { tool: McpTool; outcome: McpOutcome; durationMs: number }) => void
+
+function toolServer(context: Context, scopes: string[], report: ReportCall) {
   const server = new McpServer({ name: 'Antifailure', version: '1.0.0' })
   const caller = appRouter.createCaller(context)
-  async function call(write: boolean, action: () => Promise<unknown>) {
+  async function call(tool: McpTool, write: boolean, action: () => Promise<unknown>) {
+    // Measured around the whole call including the scope check, because a
+    // refusal that takes a second is as interesting as a success that does.
+    const started = Date.now()
+    const done = (outcome: McpOutcome) => report({ tool, outcome, durationMs: Date.now() - started })
     if (!scopes.includes(write ? 'mcp:write' : 'mcp:read')) {
+      done('refused')
       return { isError: true, content: [{ type: 'text' as const, text: 'Reconnect and approve the scope this tool needs.' }] }
     }
     try {
       const result = await action()
+      done('ok')
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] }
     } catch (error) {
+      // The outcome, never the message. A tRPC error can quote a repository
+      // name or an environment identifier, which is the customer's and not
+      // ours to send anywhere.
+      done('error')
       const safe = error instanceof TRPCError && error.code !== 'INTERNAL_SERVER_ERROR'
         ? error.message : 'The control plane could not complete this request. Try again.'
       return { isError: true, content: [{ type: 'text' as const, text: safe }] }
@@ -49,42 +71,42 @@ function toolServer(context: Context, scopes: string[]) {
   const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   server.registerTool('list_projects', {
     description: 'List the repositories connected to your organization.', inputSchema: z.object({}).strict(), annotations: read,
-  }, async () => call(false, () => caller.repositories.list({ includeArchived: false })))
+  }, async () => call('list_projects', false, () => caller.repositories.list({ includeArchived: false })))
   server.registerTool('list_environments', {
     description: 'List recorded environments. A ready port does not prove that application workflows passed.',
     inputSchema: z.object({ repository: z.string().max(300).optional(), cursor: z.string().max(300).optional(),
       limit: z.number().int().min(1).max(100).default(25) }).strict(), annotations: read,
-  }, async (input) => call(false, () => caller.environments.list(input)))
+  }, async (input) => call('list_environments', false, () => caller.environments.list(input)))
   server.registerTool('list_runs', {
     description: 'Read reported runs. Missing or unfinished results are not passes.',
     inputSchema: z.object({ envId: z.string().max(200).optional(), before: z.string().max(200).optional(),
       limit: z.number().int().min(1).max(100).default(25) }).strict(), annotations: read,
-  }, async (input) => call(false, () => caller.runs.recent(input)))
+  }, async (input) => call('list_runs', false, () => caller.runs.recent(input)))
   server.registerTool('get_run', {
     description: 'Read one recorded run by its UUID. This does not invent a verdict for unfinished work.',
     inputSchema: z.object({ runId: z.string().uuid() }).strict(), annotations: read,
-  }, async (input) => call(false, () => caller.runs.get(input)))
+  }, async (input) => call('get_run', false, () => caller.runs.get(input)))
   server.registerTool('inspect_recorded_egress', {
     description: 'Read reported outbound host and mode counts. No recorded event is not proof of containment.',
     inputSchema: z.object({ envId: z.string().max(200).optional(),
       limit: z.number().int().min(1).max(100).default(25) }).strict(), annotations: read,
-  }, async (input) => call(false, () => caller.network.decisions(input)))
+  }, async (input) => call('inspect_recorded_egress', false, () => caller.network.decisions(input)))
   const workflow = z.string().max(100).regex(/^[A-Za-z0-9._-]+\.ya?ml$/).default('antifailure.yml')
   server.registerTool('start_environment', {
     description: 'Request an environment through the connected repository workflow. Returns a dispatch, not a ready environment. Existing permissions, plan limits and safety switches apply.',
     inputSchema: z.object({ repository: z.string().min(1).max(300), branch: z.string().min(1).max(255).optional(), workflow }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async (input) => call(true, () => caller.environments.create(input)))
+  }, async (input) => call('start_environment', true, () => caller.environments.create(input)))
   server.registerTool('run_workflows', {
     description: 'Dispatch every manifest workflow against a recorded environment through the customer repository. Results appear when the engine reports them.',
     inputSchema: z.object({ envId: z.string().min(1).max(200), workflow }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async (input) => call(true, () => caller.agents.run(input)))
+  }, async (input) => call('run_workflows', true, () => caller.agents.run(input)))
   server.registerTool('stop_environment', {
     description: 'Request teardown. The environment is not gone until the runtime acknowledges cleanup.',
     inputSchema: z.object({ envId: z.string().min(1).max(200), reason: z.string().max(500).optional(), workflow }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  }, async (input) => call(true, () => caller.environments.teardown(input)))
+  }, async (input) => call('stop_environment', true, () => caller.environments.teardown(input)))
   return server
 }
 
@@ -171,7 +193,18 @@ export function mountHostedMcp(app: Hono<any>, options: Options): void {
       return c.json({ error: 'invalid_token' }, 401)
     }
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    const server = toolServer({ ...base, actor: identity.actor }, identity.scopes)
+    // The pseudonym, taken from the analytics recorder rather than computed
+    // here, so PostHog holds the identifier our own store already holds and
+    // there is only ever one pseudonym per organization. Null when analytics is
+    // off, and the sink then sends nothing rather than sending anonymous.
+    const orgSurrogate = base.analytics.surrogate(identity.actor.orgId)
+    const report: ReportCall = (call) => {
+      // Never awaited. A vendor being slow is not a reason for a customer's
+      // agent to wait, and the sink swallows its own failures so this cannot
+      // throw into the tool call it is reporting on.
+      options.postHog?.mcpToolCalled({ ...call, orgSurrogate })
+    }
+    const server = toolServer({ ...base, actor: identity.actor }, identity.scopes, report)
     try {
       await server.connect(transport)
       return await transport.handleRequest(c.req.raw)

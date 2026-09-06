@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import type { Context } from 'hono'
 import type { ApiEnv } from './env.ts'
 import {
@@ -156,6 +157,15 @@ import {
 import { openApiDocument } from './openapi.ts'
 import { createAnalytics, type Analytics } from './analytics/record.ts'
 import { beaconCors, siteBeacon } from './analytics/beacon.ts'
+import {
+  POSTHOG_MOUNT,
+  POSTHOG_PROXIED,
+  PostHogProxyRefused,
+  forwardToPostHog,
+  postHogMethodsFor,
+  type PostHogUpstreams,
+} from './analytics/posthog.ts'
+import type { PostHogSink } from './analytics/posthog-sink.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
 import { mountApplicationRoutes } from './recruitment/routes.ts'
@@ -194,6 +204,27 @@ export interface ServerOptions {
    *  an error, so an installation that has not configured mail does not expose
    *  a sign-in path that cannot work. */
   emailSignIn?: EmailSignInConfig
+
+  /**
+   * Where the marketing site's PostHog traffic is forwarded, or absent.
+   *
+   * Absent mounts NOTHING, the same choice emailSignIn makes above. A
+   * deployment that has not configured a region should not be serving a path
+   * that forwards a browser's requests to an analytics vendor it does not use,
+   * and a mounted route answering an error would be exactly that path with a
+   * worse answer.
+   */
+  postHog?: { bases: PostHogUpstreams; fetchImpl?: typeof fetch } | null
+
+  /**
+   * Where this process reports its OWN hosted usage to PostHog, or absent.
+   *
+   * A DIFFERENT THING FROM `postHog` ABOVE, which forwards a browser's
+   * requests. This one sends events from here: which hosted MCP tool was
+   * called and how a brokered model call went. Absent sends nothing, which is
+   * the right default for somebody self-hosting this: their usage is theirs.
+   */
+  postHogSink?: PostHogSink | null
 
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
@@ -407,6 +438,23 @@ export const maintenanceExemptions = [
   // `/auth/` this list already carried, which is the second time a prefix that
   // LOOKS like it covers a path did not.
   '/v1/auth/',
+  // The PostHog proxy, and the reason is not the same as the others.
+  //
+  // The rest of this list is about not locking somebody out. This one is about
+  // the switch not applying in the first place. Maintenance stops writes to OUR
+  // data, and this route has none: it reads no table, writes no row, and every
+  // path under it forwards a browser's own request to a vendor and hands back
+  // what came out. Refusing it does not pause anything, it loses the record of
+  // what people did during the window, which is the same argument /v1/events is
+  // exempt on one line above.
+  //
+  // It also takes a database round trip OFF a hot path. The gate calls
+  // refuseDuringMaintenance, which is a query, and it would have run once per
+  // captured event and once per recording flush on a route that otherwise
+  // touches Postgres never. As it stands the marketing site's analytics keeps
+  // working through a database outage, which for a static site being read by
+  // strangers is the correct behaviour rather than a nicety.
+  `${POSTHOG_MOUNT}/`,
   // The surface that owns the switch. admin-portal has committed to this
   // prefix as a hard interface for exactly this reason.
   '/trpc/admin.',
@@ -851,6 +899,7 @@ export function createServer(options: ServerOptions) {
   }
 
   mountHostedMcp(app, {
+    postHog: options.postHogSink ?? null,
     base: {
       pool: options.pool, clock, github: options.github, stripe: options.stripe ?? null,
       appBaseUrl: options.appBaseUrl ?? '', mailer: options.emailSignIn?.mailer ?? null,
@@ -2303,6 +2352,10 @@ export function createServer(options: ServerOptions) {
           sealingKey: options.sealingKey!,
           prices: options.modelPrices ?? {},
           ...(options.providerBases ? { bases: options.providerBases } : {}),
+          ...(options.postHogSink ? { postHog: options.postHogSink } : {}),
+          // The pseudonym rather than the organization, and taken from the
+          // recorder so there is one per organization rather than two.
+          orgSurrogate: analytics.surrogate(caller),
         },
         provider as Provider,
         caller,
@@ -2908,6 +2961,113 @@ export function createServer(options: ServerOptions) {
     const result = await siteBeacon(body, { pool: options.pool, analytics, clock })
     return c.json(result.body, result.status as 202)
   })
+
+  // -------------------------------------------------------------------------
+  // The PostHog proxy
+  //
+  // The marketing site's product analytics, forwarded from here so a reader's
+  // browser opens no connection to posthog.com. See analytics/posthog.ts for
+  // why it is on this process rather than on the site, for why "same site" is
+  // the accurate description and "same origin" is not, and for the allowlist.
+  //
+  // MOUNTED ONLY WHEN CONFIGURED. Absent means these routes do not exist, so an
+  // unconfigured deployment answers 404 rather than serving a forwarder nobody
+  // asked for.
+  // -------------------------------------------------------------------------
+
+  if (options.postHog) {
+    const postHog = options.postHog
+
+    // The CORS answer, and it is the beacon's rule rather than a second copy of
+    // it. The site is served on the apex and on www, this control plane answers
+    // on a third hostname, and every one of those is a different origin, so the
+    // request's Origin is matched against the configured list and the ONE entry
+    // that matched is echoed. Never `*`: this endpoint forwards a body to a
+    // vendor, and a wildcard would let any page on the internet do it from a
+    // reader's browser.
+    //
+    // No credentials, ever. The forward strips the browser's headers anyway, so
+    // saying so here is what stops a future change from quietly adding one.
+    const postHogCors = (c: Context): boolean => {
+      const matched = matchSiteOrigin(c.req.header('origin'), siteOrigins)
+      if (!matched) return false
+      c.header('access-control-allow-origin', matched)
+      c.header('access-control-allow-methods', 'GET, POST, OPTIONS')
+      c.header('access-control-allow-headers', 'content-type')
+      c.header('access-control-max-age', '86400')
+      // Vary, or a shared cache serves one origin's allow header to another.
+      c.header('vary', 'origin')
+      return true
+    }
+
+    const forward = async (c: Context): Promise<Response> => {
+      // The path as it ARRIVED, still percent encoded, taken from the URL
+      // rather than from a decoded route parameter. A decoded parameter is a
+      // string somebody chose; this is the thing the router already matched.
+      const url = new URL(c.req.url)
+      const subPath = url.pathname.slice(POSTHOG_MOUNT.length)
+      try {
+        const result = await forwardToPostHog(
+          { bases: postHog.bases, ...(postHog.fetchImpl ? { fetchImpl: postHog.fetchImpl } : {}) },
+          {
+            method: c.req.method,
+            subPath,
+            search: url.search,
+            contentType: c.req.header('content-type'),
+            ...(c.req.method === 'POST' ? { body: await c.req.arrayBuffer() } : {}),
+          },
+        )
+        for (const [name, value] of Object.entries(result.headers)) c.header(name, value)
+        return c.body(result.body, result.status as 200)
+      } catch (error) {
+        if (error instanceof PostHogProxyRefused) {
+          return c.json({ error: error.message }, error.status as 404)
+        }
+        // A network failure reaching PostHog. Answered as a gateway failure
+        // rather than as a control plane failure, because nothing on this side
+        // is broken and a reader losing a page view is not an incident here.
+        // Never carries the upstream's message: it is another vendor's text and
+        // this is a public endpoint.
+        return c.json({ error: 'The analytics upstream could not be reached.' }, 502)
+      }
+    }
+
+    for (const entry of POSTHOG_PROXIED) {
+      const path = POSTHOG_MOUNT + entry.route
+      for (const method of postHogMethodsFor(entry)) {
+        if (method === 'OPTIONS') {
+          app.options(path, (c) => {
+            if (!postHogCors(c)) return c.body(null, 403)
+            return c.body(null, 204)
+          })
+          continue
+        }
+        // The origin check comes FIRST and refuses rather than answering
+        // without the header. A browser would refuse the response anyway; a
+        // non-browser caller would not, and this is the line that bounds this
+        // to the site.
+        const guarded = async (c: Context): Promise<Response> => {
+          if (!postHogCors(c)) {
+            return c.json({ error: 'This endpoint serves the marketing site only.' }, 403)
+          }
+          return forward(c)
+        }
+        if (method === 'POST') {
+          app.post(
+            path,
+            bodyLimit({
+              maxSize: entry.maxBodyBytes,
+              onError: (c) =>
+                c.json({ error: `This request is larger than ${entry.maxBodyBytes} bytes.` }, 413),
+            }),
+            guarded,
+          )
+        } else {
+          app.get(path, guarded)
+        }
+      }
+    }
+  }
 
   // Studio, for an engine
   //

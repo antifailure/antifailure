@@ -17,6 +17,7 @@ import type { StripeConfig } from '../src/billing/plans.ts'
 import type { Billing } from '../src/billing/index.ts'
 import type { HostedRequiredPlan } from '../src/hosted.ts'
 import type { LeadNotifier } from '../src/enterprise/leads.ts'
+import type { PostHogSink } from '../src/analytics/posthog-sink.ts'
 import type { RepositoryApi } from '../src/github/api.ts'
 import { ActionsKeys } from '../src/github/oidc.ts'
 import { MockPack, loadPack } from './mockpack.ts'
@@ -121,6 +122,9 @@ export interface StartApiOptions {
   /** The GitHub App's webhook secret. Undefined means no App, and the webhook
    *  endpoint refuses every delivery rather than accepting unsigned ones. */
   githubWebhookSecret?: string | null
+  /** Where hosted MCP tool calls and brokered model calls are reported.
+   *  Undefined means nowhere, which is every deployment but ours. */
+  postHogSink?: PostHogSink | null
   /** What each model costs, for the budgeted model proxy. */
   modelPrices?: Record<string, { inputPerMillion: number; outputPerMillion: number }>
   /** Where the providers live, so no test reaches a real one. */
@@ -271,6 +275,7 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     selfServeSignup: options.selfServeSignup ?? false,
     leadNotifier: options.leadNotifier ?? null,
     sealingKey: options.sealingKey ?? null,
+    postHogSink: options.postHogSink ?? null,
     githubWebhookSecret: options.githubWebhookSecret ?? null,
     ...(options.modelPrices ? { modelPrices: options.modelPrices } : {}),
     ...(options.providerBases ? { providerBases: options.providerBases } : {}),

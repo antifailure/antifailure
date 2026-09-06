@@ -15,6 +15,7 @@
 import { TrieRouter } from 'hono/router/trie-router'
 
 import { extensionRoutes } from './extensions.ts'
+import { POSTHOG_MOUNT, postHogLimits } from './analytics/posthog.ts'
 
 export type LimitKey = 'ip' | 'token' | 'org'
 
@@ -37,6 +38,12 @@ export interface EndpointLimit {
  * ends up behind a limit sized for a cheap one.
  */
 export const ENDPOINT_LIMITS: Record<string, EndpointLimit> = {
+  // The PostHog proxy, generated from the one allowlist in analytics/posthog.ts
+  // so that the paths, their limits and their published API classification
+  // cannot drift apart. Every one is keyed on the address: a reader of the
+  // marketing site has no token and no organization.
+  ...postHogLimits(),
+
   'GET /.well-known/oauth-protected-resource': { rate: 10, burst: 30, key: 'ip', reason: 'Small public discovery document for MCP clients.' },
   'GET /.well-known/oauth-authorization-server': { rate: 10, burst: 30, key: 'ip', reason: 'Small public authorization discovery document.' },
   'POST /auth/mcp/register': { rate: 0.1, burst: 5, key: 'ip', reason: 'Client registration writes a persistent row and is needed only when connecting.' },
@@ -544,7 +551,16 @@ export function limitFor(requestMethod: string, path: string): EndpointLimit | u
  * What is left is the space a browser asks for pages in, and a page there is a
  * stat and a read.
  */
-const API_PREFIXES = ['/v1/', '/auth/', '/trpc/', '/webhooks/', '/byok/', '/console/api/']
+// `/ph/` is here for a reason that is not obvious and cost nothing to get
+// wrong. consoleClass is the LAST resort in limitFor, and it answers every
+// unmatched GET with the console's own limit, which means the console's static
+// export is what gets served. So without this line a GET to a PostHog path this
+// deliberately does not forward, say /ph/api/surveys/, would not be refused: it
+// would be answered with the console application's HTML, 200, from a path
+// somebody is using to talk to an analytics vendor. It has to be recognised as
+// an API prefix so that an unlisted path under the mount reaches the 404 it
+// deserves.
+const API_PREFIXES = ['/v1/', '/auth/', '/trpc/', '/webhooks/', '/byok/', '/console/api/', `${POSTHOG_MOUNT}/`]
 
 export function consoleClass(method: string, path: string): string | null {
   if (method !== 'GET' && method !== 'HEAD') return null

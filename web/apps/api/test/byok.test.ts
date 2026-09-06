@@ -27,6 +27,11 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import { available, startApi, seedOrg, dropOrg, type ApiHarness, type Org, testAnalytics } from './harness.ts'
 import { saveKey, setBudget, listBudgets, borrowKey, recordSpend } from '../src/providers/store.ts'
 import { costOf, pricesFrom, PricingError, usageFrom, DEFAULT_PRICES } from '../src/providers/pricing.ts'
+import { createPostHogSink } from '../src/analytics/posthog-sink.ts'
+
+interface Generation { event: string; distinctId: string; properties: Record<string, unknown> }
+/** Everything the control plane reported about a brokered model call. */
+const generations: Generation[] = []
 
 const ANTHROPIC = ['sk', 'ant', 'api03'].join('-')
 const KEY = `${ANTHROPIC}-dddddddddddddddddddddddddddd8888`
@@ -144,6 +149,18 @@ describe('spending a key against a budget', {
       sealingKey,
       modelPrices: PRICES,
       providerBases: { anthropic: stubUrl, openai: stubUrl },
+      // The REAL sink with a fake transport, so what is asserted below is the
+      // payload this process would actually send rather than a double's
+      // reconstruction of it. A hand written double passed while the real sink
+      // leaked, on this exact shape, in the MCP suite.
+      postHogSink: createPostHogSink({
+        projectKey: 'phc_public',
+        region: 'us',
+        client: {
+          capture(payload: unknown) { generations.push(payload as Generation) },
+          async shutdown() {},
+        } as never,
+      }),
     })
     org = await seedOrg(api.admin, 'byok-spend')
   })
@@ -155,6 +172,7 @@ describe('spending a key against a budget', {
 
   beforeEach(async () => {
     seen = []
+    generations.length = 0
     reply = {
       status: 200,
       body: { usage: { input_tokens: 1_000_000, output_tokens: 0 }, content: [{ text: 'hi' }] },
@@ -404,4 +422,92 @@ describe('spending a key against a budget', {
       /no budget row/i,
     )
   })
+
+  // -------------------------------------------------------------------------
+  // What the control plane tells PostHog about a call it brokered
+  // -------------------------------------------------------------------------
+
+  test('a brokered call is reported, with the provider\'s own token counts', async () => {
+    // DEFINED, WIRED, EFFECTIVE, and this is the third one. posthog-sink.test.ts
+    // proves the payload is right if something calls the sink. This proves
+    // something calls it, through the real route, with a real key, a real
+    // budget and a real charge, which is the only version of the question that
+    // matters.
+    await ready(100)
+    const token = await engineToken()
+    const startedAt = Date.now()
+    const res = await call(token, { model: 'test-model', max_tokens: 10 })
+    const elapsedMs = Date.now() - startedAt
+    assert.equal(res.status, 200)
+
+    assert.equal(generations.length, 1, 'the brokered call reported nothing, so the sink has no live caller')
+    const [generation] = generations
+    assert.equal(generation!.event, '$ai_generation')
+    assert.equal(generation!.properties.$ai_model, 'test-model')
+    assert.equal(generation!.properties.$ai_provider, 'anthropic')
+    // The counts the PROVIDER reported, not a local estimate. A local estimate
+    // is a number that disagrees with the invoice, which is the reasoning
+    // providers/proxy.ts already applies to the spend it records.
+    assert.equal(generation!.properties.$ai_input_tokens, 1_000_000)
+    assert.equal(generation!.properties.$ai_output_tokens, 0)
+    // SECONDS, AND MEASURED AGAINST THE WALL CLOCK RATHER THAN AGAINST A
+    // PLAUSIBLE LOOKING BOUND. PostHog's $ai_latency is documented in seconds
+    // and everything in this process measures in milliseconds, so getting it
+    // wrong is a silent thousand fold error on a dashboard nobody would
+    // question. The first version of this asserted the value was under sixty,
+    // which a local stub answering in three milliseconds satisfies in EITHER
+    // unit: mutation proved it, the check passed with the division removed.
+    //
+    // So it is held against how long the request actually took. Reported in
+    // seconds the number is a thousandth of the elapsed milliseconds; reported
+    // in milliseconds it is roughly equal to them, which this cannot miss.
+    const latency = generation!.properties.$ai_latency
+    assert.equal(typeof latency, 'number')
+    assert.ok((latency as number) >= 0)
+    assert.ok(
+      (latency as number) * 1000 <= elapsedMs + 50,
+      `$ai_latency is ${latency} for a request that took ${elapsedMs}ms, which is milliseconds ` +
+        'in a field PostHog reads as seconds',
+    )
+  })
+
+  test('neither the prompt nor the completion leaves this process', async () => {
+    // THE WORST THING THAT COULD END UP IN A VENDOR'S EVENT STORE. The request
+    // below carries a recognisable sentence and the stubbed provider answers
+    // with another, and neither may appear in anything reported.
+    await ready(100)
+    reply = {
+      status: 200,
+      body: {
+        usage: { input_tokens: 10, output_tokens: 10 },
+        content: [{ text: 'THE-MODELS-ANSWER-ABOUT-A-CUSTOMERS-PAGE' }],
+      },
+    }
+    const token = await engineToken()
+    await call(token, {
+      model: 'test-model',
+      max_tokens: 10,
+      messages: [{ role: 'user', content: 'THE-CUSTOMERS-OWN-PROMPT-TEXT' }],
+    })
+
+    assert.equal(generations.length, 1)
+    const payload = JSON.stringify(generations[0])
+    assert.ok(!payload.includes('THE-CUSTOMERS-OWN-PROMPT-TEXT'), `the prompt was reported: ${payload}`)
+    assert.ok(!payload.includes('THE-MODELS-ANSWER-ABOUT-A-CUSTOMERS-PAGE'), 'the completion was reported')
+    assert.ok(!payload.includes(org.orgId), 'the organization id was reported rather than its pseudonym')
+    assert.equal(generations[0]!.distinctId, api.analytics.surrogate(org.orgId))
+  })
+
+  test('a call the provider reported no usage for is charged nothing and reported not at all', async () => {
+    // The spend and the report move together. A response with no usage is a
+    // charge of nothing, and reporting a generation with zero tokens would put
+    // a row on a dashboard for a call nobody can price.
+    await ready(100)
+    reply = { status: 200, body: { content: [{ text: 'hi' }] } }
+    const token = await engineToken()
+    const res = await call(token, { model: 'test-model', max_tokens: 10 })
+    assert.equal(res.status, 200)
+    assert.deepEqual(generations, [])
+  })
+
 })

@@ -31,7 +31,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -61,6 +61,56 @@ const read = (p: string) => readFile(path.join(repoRoot, p), 'utf8')
 /** An http or https address that is not the loopback a local control plane
  *  serves on. Named once so the gate and its negative control cannot drift. */
 const NAMES_A_HOST = /https?:\/\/(?!127\.0\.0\.1)/
+
+/**
+ * A PostHog host written as a DESTINATION rather than named in a sentence.
+ *
+ * Anchored on a scheme for the same reason NAMES_A_HOST is: the published copy
+ * has to be able to say "your browser does not talk to a posthog.com host",
+ * which is prose and not a network destination. Named here once so the two
+ * gates below and the negative control at the end cannot drift apart.
+ */
+const POSTHOG_URL = /https?:\/\/[a-z0-9.-]*posthog\.com[^"'`\s)]*/g
+
+/**
+ * The hosts a browser must never be pointed at.
+ *
+ * `i.posthog.com` is the suffix of us.i, eu.i, us-assets.i and eu-assets.i, so
+ * naming it once covers every ingestion and asset host in both regions, and
+ * app.posthog.com is the legacy spelling posthog-js still rewrites internally.
+ * The assets half matters as much as the ingestion half: the recorder bundle is
+ * the largest and most blockable request the library makes.
+ */
+const INGESTION_HOST = /\b(?:[a-z0-9-]+\.)*i\.posthog\.com|\bapp\.posthog\.com/
+
+/**
+ * A PRESENT TENSE denial that this site engages PostHog.
+ *
+ * The published sentence was "There is no Sentry, no Datadog, no PostHog, no
+ * Google Analytics", so the shape is an "is no" enumeration reaching PostHog
+ * before the sentence ends. Past tense is deliberately not matched: the page
+ * keeps a change log which has to be able to say what it used to claim.
+ */
+/**
+ * The page promising a reader can turn the counting off.
+ *
+ * A LIST OF PHRASINGS RATHER THAN ONE STRING, and this is not defensive
+ * generality, it is a defect that was live. The gate below fired on the literal
+ * "switch measurement off" and returned early otherwise. The copy was rewritten
+ * to say "the switch on the privacy page", the phrase disappeared, and the whole
+ * gate silently asserted NOTHING while continuing to report a pass. Everything
+ * it checks, that the beacon exports a setter, that a control calls it, that a
+ * page renders it, and that PostHog consults the same flag, went unchecked at
+ * exactly the moment a second analytics vendor was added.
+ *
+ * A skip reads as a pass. That is the sentence this file opens with, and this is
+ * the file's own gate doing it. The companion test below fails if this stops
+ * matching, so a future rewording turns the suite red rather than quiet.
+ */
+const PROMISES_A_SWITCH =
+  /switch measurement off|switch the measurement off|turn measurement off|the switch on the privacy page|measurement can be switched off/i
+
+const DENIES_POSTHOG = /\b(?:is|are)\s+no\b[^.]{0,200}?\bno PostHog\b|\bthere is no PostHog\b/i
 
 /**
  * The same source with its comments taken out.
@@ -105,6 +155,57 @@ function withoutComments(source: string): string {
       return line
     })
     .join('\n')
+}
+
+/**
+ * Every source file of the marketing site that the browser actually runs.
+ *
+ * Used by the PostHog rules below, which are about where a reader's browser is
+ * POINTED. That is a property of code, so this reads code.
+ *
+ * TWO FILES ARE EXCLUDED BY NAME AND THE EXCLUSION IS THE INTERESTING PART.
+ * www/lib/subprocessors.ts and www/lib/legal-facts.ts are prose stored as string
+ * literals: they are the published legal copy, and that copy has to be able to
+ * NAME the vendor and its hosts in a sentence. `withoutComments` cannot help,
+ * because a sentence in a string literal is code as far as any parser here is
+ * concerned. This is the same problem the comment stripping already solved one
+ * level down, and it has the same answer: a gate people cannot explain
+ * themselves next to is a gate they route around by deleting the explanation.
+ *
+ * Nothing is lost by the exclusion. Those two files are the SUBJECT of the
+ * disclosure pair above rather than a place the SDK could be configured, and a
+ * site that tried to configure posthog-js from inside its own subprocessor list
+ * has a problem this gate is not the right instrument for.
+ */
+async function siteSources(): Promise<{ file: string; text: string }[]> {
+  const EXCLUDED = new Set(['www/lib/subprocessors.ts', 'www/lib/legal-facts.ts'])
+  // Nothing under www/test reaches a browser, which is the reason
+  // tools/routecheck skips it too. It also has to be skipped rather than
+  // merely being harmless: the site's own test asserts that the vendor's
+  // ingestion hosts are ABSENT from what is handed to the library, and an
+  // assertion that a string is absent has to be able to name the string. A
+  // gate that failed on it would be refusing the test written to enforce the
+  // same rule.
+  const out: { file: string; text: string }[] = []
+  const walk = async (dir: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(path.join(repoRoot, dir), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const rel = `${dir}/${e.name}`
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === 'out' || e.name === '.next') continue
+        await walk(rel)
+      } else if (/\.tsx?$/.test(e.name) && !EXCLUDED.has(rel) && !rel.startsWith('www/test/')) {
+        out.push({ file: rel, text: await read(rel) })
+      }
+    }
+  }
+  await walk('www')
+  return out
 }
 
 const facts = await read('www/lib/legal-facts.ts')
@@ -153,6 +254,25 @@ function conditionalProcessors(): { vendor: string; module: string; variables: s
     })
   }
   return out
+}
+
+/**
+ * One subprocessor row out of the published list, by the vendor's name.
+ *
+ * Read as a slice between one `name:` and the next rather than with a pattern
+ * spanning the whole entry, which is the lesson conditionalProcessors above
+ * already paid for: a pattern requiring the fields adjacent silently matched
+ * one processor instead of two the moment an entry gained a comment.
+ */
+function rowFor(page: string, vendor: RegExp): string | null {
+  const starts = [...page.matchAll(/name:\s*"([^"]+)"/g)]
+  for (let i = 0; i < starts.length; i += 1) {
+    if (!vendor.test(starts[i]![1]!)) continue
+    const from = starts[i]!.index!
+    const to = i + 1 < starts.length ? starts[i + 1]!.index! : page.length
+    return page.slice(from, to)
+  }
+  return null
 }
 
 /** A Terraform assignment, from the file that actually sets it. */
@@ -473,6 +593,17 @@ describe('the subprocessor page describes the code that exists', () => {
     // adds the beacon also rewrites this claim, and landing the rewrite without
     // the beacon would have published a site that counts page views when it
     // does not.
+    //
+    // WHAT CHANGED WHEN POSTHOG ARRIVED, and why this was rewritten rather than
+    // deleted. Until tonight the claim this held was "this site loads no
+    // analytics and no third-party script", and both halves of the pair were
+    // about the first party beacon. That claim stops being true, so a gate that
+    // only knew how to assert it would have had to be deleted, and a deleted
+    // gate is how the next false sentence gets published. So the SUBJECT moves
+    // and the SHAPE does not: it still keys on whether the code is in the tree,
+    // it still asserts both states rather than skipping one, and the claim it
+    // holds is now the true one. Analytics goes to PostHog, through an endpoint
+    // on our own infrastructure, and PostHog is disclosed by name.
     const page = await read('www/lib/subprocessors.ts')
     // EVERY file the beacon is made of, not just the one it started in. The
     // queue, the session rules and the endpoint moved out of analytics.ts into
@@ -499,14 +630,348 @@ describe('the subprocessor page describes the code that exists', () => {
       return
     }
 
-    assert.match(
+    // A NEGATIVE, NOT A PHRASE MATCH, and the difference cost a run against the
+    // real copy. This asserted that one of two replacement sentences was
+    // PRESENT, which holds the copy to a form of words rather than to a fact,
+    // and the sentence that actually landed says the same thing in neither of
+    // them. The fact is that the denial has to be gone; what replaces it is the
+    // writer's to choose. So the exact string the other branch REQUIRES is the
+    // string this branch REFUSES, which also makes the pair symmetrical instead
+    // of two unrelated rules facing opposite directions.
+    assert.doesNotMatch(
       page,
-      /no script from another origin/,
+      /This site loads no analytics and no third-party script/,
       'a beacon exists and the subprocessor page still claims the site loads no analytics',
     )
     assert.ok(
-      !NAMES_A_HOST.test(withoutComments(beacon).replace(/CONTROL_PLANE_URL/g, '')),
+      !NAMES_A_HOST.test(
+        withoutComments(beacon).replace(/CONTROL_PLANE_URL/g, '').replace(/POSTHOG_PATH/g, ''),
+      ),
       'the site beacon now names an external address, so the no-third-party claim needs revisiting',
+    )
+  })
+
+  it('discloses PostHog exactly when the site actually loads it, in both directions', async () => {
+    // THE PAIR THIS WAS BUILT FOR, and the reason it is a pair rather than an
+    // assertion. The published sentence is currently "There is no Sentry, no
+    // Datadog, no PostHog, no Google Analytics", and the moment posthog-js is
+    // added to the site that sentence is a false statement in a legal page.
+    // Asserting only the new state would let the dependency land while the page
+    // still denies it, which is the failure; asserting only the old state would
+    // block the change. So the code decides which sentence has to be there.
+    //
+    // KEYED ON THE DEPENDENCY, NOT ON A STRING IN THE PAGE. A gate that read
+    // the page to decide what the page must say is a gate that agrees with
+    // itself. www/package.json is the one place that cannot lie about whether
+    // the browser bundle contains posthog-js.
+    const page = await read('www/lib/subprocessors.ts')
+    const manifest = JSON.parse(await read('www/package.json')) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const loadsPostHog = Boolean(
+      manifest.dependencies?.['posthog-js'] ?? manifest.devDependencies?.['posthog-js'],
+    )
+
+    if (!loadsPostHog) {
+      assert.match(
+        page,
+        DENIES_POSTHOG,
+        'posthog-js is not a dependency of the site, so the subprocessor page must still deny ' +
+          'PostHog by name. It no longer does, which means the disclosure was written for an ' +
+          'analytics vendor that is not in this tree.',
+      )
+      assert.ok(
+        !rowFor(page, /PostHog/i),
+        'posthog-js is not a dependency and SUBPROCESSORS carries a PostHog row anyway, which ' +
+          'publishes a vendor this site does not load. Copy without code is the same defect as ' +
+          'code without copy, arriving from the other side.',
+      )
+      return
+    }
+
+    // PRESENT TENSE, WHICH IS THE WHOLE OF THE RULE. The page carries a change
+    // log of its own, and that log has to be able to QUOTE the denial it
+    // removed: the real entry reads "the entry below the list said in as many
+    // words that there WAS no PostHog". A gate matching a bare "no PostHog"
+    // refuses the honest record of the correction, which is the same class of
+    // mistake as a gate that cannot be explained next to, and people route
+    // around that one by deleting the explanation.
+    assert.doesNotMatch(
+      page,
+      DENIES_POSTHOG,
+      'posthog-js is a dependency of the site and the subprocessor page still says there is no ' +
+        'PostHog. That is a false statement in a published legal page, and it is false from the ' +
+        'moment the dependency lands rather than from the moment somebody notices.',
+    )
+    // Disclosed as a PROCESSOR, structurally, not merely mentioned in a
+    // sentence somewhere on the page. A vendor that receives data belongs in
+    // the list a security review reads, and the list is what this reads.
+    const entries = [...page.matchAll(/name:\s*"([^"]+)"/g)].map((m) => m[1]!)
+    assert.ok(
+      entries.some((n) => /PostHog/i.test(n)),
+      'the site loads posthog-js and SUBPROCESSORS carries no row naming PostHog, so a vendor ' +
+        `that receives visitor data is absent from the published list. The list holds: ${entries.join(', ')}`,
+    )
+
+    // THE ROW HAS TO SAY THE TRUE THING, NOT MERELY EXIST. This is the half
+    // that a proxy makes easy to get wrong, and the reason it is checked here
+    // rather than left to prose review.
+    //
+    // A proxy changes the destination the browser connects to. It does not
+    // change who receives the data. PostHog, Inc. receives every event, every
+    // autocaptured interaction and every session recording whether the request
+    // went direct or through us. A row that named the vendor while implying the
+    // proxy kept anything inside our own boundary would be worse than the
+    // denial it replaced, because a reader could open a network tab, see no
+    // vendor host, and take that as verification of a claim that is false.
+    const row = rowFor(page, /PostHog/i)
+    assert.ok(row, 'the PostHog row could not be read out of the list, so nothing below checked it')
+    assert.match(
+      row,
+      /PostHog(?:, Inc\.)? receives\b/,
+      'the PostHog row never says that PostHog receives the data. The proxy is transport and not ' +
+        'a boundary, so a row that does not say who receives it describes an arrangement the ' +
+        'reader would have to infer, and the obvious inference from a first party endpoint is ' +
+        'the wrong one.',
+    )
+    assert.match(
+      row,
+      /PostHog Cloud (?:US|EU)|United States|European Union/,
+      'the PostHog row does not name the cloud region the data is processed in, which is the ' +
+        'first thing a security review asks of a subprocessor and the one fact a reader cannot ' +
+        'work out from the endpoint they can see.',
+    )
+
+    // AND NO PAGE MAY STILL CLAIM NOBODY RECEIVES IT. A closed list of the
+    // specific containment sentences this site has actually published or nearly
+    // published, rather than a clever pattern: a broad one would refuse the
+    // honest sentences beside them, and "no cookie is set" or "PostHog never
+    // receives your IP address" are both true and both have to survive.
+    for (const claim of [
+      /No third party sees anything/,
+      /this site loads no analytics/i,
+      /no third party (?:receives|sees|gets) (?:any|your) data/i,
+      /(?:stays|stay|remains|never leaves) (?:inside |within )?(?:our|your) (?:boundary|infrastructure|servers)/i,
+    ]) {
+      assert.doesNotMatch(
+        page,
+        claim,
+        `the site loads posthog-js and the subprocessor page still publishes ${claim}. The proxy ` +
+          'is transport: it changes which host the browser connects to and not who receives the ' +
+          'data, so that sentence is false and it is false in the direction a reader cannot check.',
+      )
+    }
+  })
+
+  it('sends analytics to an endpoint we run, and never to a posthog.com ingestion host', async () => {
+    // WHAT THIS DOES AND DOES NOT ASSERT, because getting that wrong here would
+    // be the same mistake in a gate that the copy was rewritten to stop making.
+    //
+    // A proxy changes the DESTINATION THE BROWSER CONNECTS TO. It does not
+    // change WHO RECEIVES THE DATA: PostHog, Inc. receives every event, every
+    // autocaptured interaction and every session recording either way. So this
+    // asserts a transport property and nothing more. It is worth asserting,
+    // because a direct vendor host is the proxy being bypassed rather than
+    // used, and because the recorder bundle is the largest and most blockable
+    // request posthog-js makes, so a blocked one kills replay while ingest goes
+    // on looking healthy. It is NOT evidence that the data stayed anywhere, and
+    // nothing in this test's messages may suggest that it is. The gate that
+    // holds the receiving claim is the disclosure pair above.
+    //
+    // IT WOULD BE ONE CHARACTER TO BREAK. posthog-js takes api_host, and the
+    // value in the vendor's own quickstart is https://us.i.posthog.com.
+    // Pasting it does not break a build, fail a type check, or change a
+    // rendered pixel.
+    //
+    // ANCHORED ON A SCHEME, WHICH IS THE FIX FOR THE FIRST VERSION OF THIS.
+    // That version forbade a bare `posthog.com` anywhere but a ui_host line,
+    // and it would have refused the sentence that makes the disclosure honest:
+    // the privacy page says "Your browser does not talk to a posthog.com host".
+    // That is prose, not a destination. A destination has a scheme, which is
+    // the same distinction NAMES_A_HOST above already draws, so it is drawn the
+    // same way here rather than by keeping a list of pages to skip.
+    const sources = await siteSources()
+    assert.ok(sources.length > 0, 'no site source was read, so this gate checked nothing')
+
+    for (const { file, text } of sources) {
+      const code = withoutComments(text)
+      for (const [url] of code.matchAll(POSTHOG_URL)) {
+        assert.doesNotMatch(
+          url,
+          INGESTION_HOST,
+          `${file} points the browser at ${url}, which is a PostHog ingestion or asset host. ` +
+            'The browser is supposed to reach PostHog only through the proxy on our own control ' +
+            'plane, so this is the proxy being bypassed rather than used, and a content blocker ' +
+            'that matches that host silently removes part of the measurement.',
+        )
+        // A non-ingestion posthog.com URL is permitted only as ui_host, which
+        // posthog-js uses to build links a person clicks and never fetches.
+        // Matched case insensitively because the value is held in a constant
+        // read from NEXT_PUBLIC_POSTHOG_UI_HOST, so the identifier on the line
+        // is spelled in capitals.
+        const line = code.split('\n').find((l) => l.includes(url)) ?? ''
+        assert.match(
+          line,
+          /ui_host/i,
+          `${file} names ${url} on a line that has nothing to do with ui_host: ${line.trim()}. ` +
+            'ui_host builds links a reader clicks through to and is never fetched by the browser, ' +
+            'which is the only reason a posthog.com host is allowed in this tree at all.',
+        )
+      }
+    }
+  })
+
+  it('points posthog-js at the mount the control plane actually serves', async () => {
+    // THE OTHER HALF, and without it the rule above is satisfied by a site with
+    // no api_host at all, which then falls back to the vendor's own default.
+    // Refusing the wrong host is not the same as requiring the right one: the
+    // first is satisfied by silence and the second is not.
+    //
+    // READS A URL RATHER THAN AN `api_host:` LINE, which is the second fix the
+    // site's real code forced. The configured value is a constant,
+    // `api_host: apiHost`, so a gate looking for a literal beside that key
+    // would have read the identifier and concluded the site was pointed at a
+    // host called "apiHost". So this looks for the URL wherever it is written,
+    // and holds its path against the mount taken from the proxy's own source
+    // rather than from a second copy of the string.
+    const proxy = await read('web/apps/api/src/analytics/posthog.ts')
+    const mount = proxy.match(/export const POSTHOG_MOUNT = '([^']+)'/)
+    assert.ok(mount, 'the proxy no longer declares POSTHOG_MOUNT, so this gate cannot know the path')
+
+    const sources = (await siteSources()).filter((f) => /posthog/i.test(f.file))
+    if (sources.length === 0) return
+
+    const urls = sources.flatMap(({ text }) =>
+      [...withoutComments(text).matchAll(/https?:\/\/[^"'`\s)]+/g)].map((m) => m[0]),
+    )
+    assert.ok(
+      urls.some((u) => {
+        try {
+          return new URL(u).pathname.replace(/\/$/, '') === mount[1]
+        } catch {
+          return false
+        }
+      }),
+      `nothing in the site's PostHog configuration names ${mount[1]}, which is the path the ` +
+        `control plane actually forwards. The URLs it does name are: ${urls.join(', ') || 'none'}. ` +
+        'Either every event is being sent somewhere this repository does not forward, or the ' +
+        'site has no api_host and posthog-js has fallen back to the vendor default.',
+    )
+  })
+
+  it('is still reading a page that promises the switch, so the gate above cannot skip quietly', async () => {
+    // THE COMPANION TO A CONDITIONAL GATE, and the reason it exists is that the
+    // gate above had already skipped. Its trigger was one literal phrase, the
+    // copy was rewritten, and it went from checking four things to checking
+    // none without changing its result. Nothing in the suite could tell.
+    //
+    // So the trigger itself is now asserted. This site does promise a reader
+    // can turn the counting off, on a page it publishes, and if that stops
+    // being true the honest outcome is a red test asking whether the promise
+    // was withdrawn on purpose, not a green one that quietly stopped looking.
+    const page = await read('www/lib/subprocessors.ts')
+    assert.match(
+      page,
+      PROMISES_A_SWITCH,
+      'the subprocessor page no longer promises the reader a way to switch measurement off in ' +
+        'any wording this knows. If the promise was withdrawn, delete this test and the gate ' +
+        'above with it. If it was reworded, add the wording, because until you do that gate is ' +
+        'passing without checking anything.',
+    )
+  })
+
+  it('would still see an address in code, and a PostHog host, which is what makes the cases above worth anything', () => {
+    // THE NEGATIVE CONTROL on the comment stripping immediately above. Taking
+    // comments out of the subject of a gate is exactly the kind of loosening
+    // that quietly turns a check into a check of nothing, and the failure would
+    // be invisible: the suite stays green either way. So the same predicate is
+    // driven against source that does name a host, in the three places a host
+    // could actually be named.
+    const inCode = [
+      `const ENDPOINT = "https://plausible.io/api/event"`,
+      `fetch('https://cdn.example.com/a.js')`,
+      'const hosts = [`https://analytics.example.com`]',
+    ]
+    for (const line of inCode) {
+      assert.ok(
+        NAMES_A_HOST.test(withoutComments(line)),
+        `stripping comments hid a real address: ${line}`,
+      )
+    }
+    // And a comment quoting one is not a destination, which is the case that
+    // sent this gate red on a branch that had added no address at all.
+    assert.ok(
+      !NAMES_A_HOST.test(withoutComments('// yandex announces "+http://yandex.com/bots"')),
+      'a comment quoting a crawler address still reads as a network destination',
+    )
+
+    // THE SAME CONTROL ON THE POSTHOG RULE, and it is the one that matters
+    // most, because that rule is a regular expression over host names and a
+    // regular expression that matches nothing passes every file in the tree.
+    // So it is driven against each spelling it has to catch, one at a time.
+    for (const host of [
+      'https://us.i.posthog.com',
+      'https://eu.i.posthog.com',
+      'https://i.posthog.com',
+      'https://us-assets.i.posthog.com',
+      'https://eu-assets.i.posthog.com',
+      'https://app.posthog.com',
+    ]) {
+      assert.ok(
+        INGESTION_HOST.test(withoutComments(`const api_host = "${host}"`)),
+        `the ingestion host rule does not catch ${host}, so it would pass a site pointed there`,
+      )
+    }
+    // And the one spelling that is allowed, which must NOT be caught by the
+    // ingestion rule, or the exception below it could never be reached.
+    assert.ok(
+      !INGESTION_HOST.test(withoutComments('ui_host: "https://us.posthog.com"')),
+      'the ingestion rule catches ui_host, so the permitted case is unreachable and the gate ' +
+        'refuses a correct configuration',
+    )
+
+    // THE SCHEME ANCHOR, driven from both sides. A destination has a scheme; a
+    // sentence naming the vendor does not, and the published privacy page has
+    // to be able to say one.
+    assert.equal(
+      [...'Your browser does not talk to a posthog.com host'.matchAll(POSTHOG_URL)].length,
+      0,
+      'the destination rule reads a host named in prose as a destination, so it refuses the ' +
+        'sentence that makes the disclosure honest',
+    )
+    assert.equal(
+      [...'const h = "https://us.i.posthog.com"'.matchAll(POSTHOG_URL)].length,
+      1,
+      'the destination rule does not see a real URL, so it would pass a site pointed at one',
+    )
+
+    // THE DENIAL PREDICATE, and this is the one most able to be quietly wrong,
+    // because a regular expression written to spare a change log is one edit
+    // away from sparing everything. Both sides are driven: the sentence that
+    // was actually false has to be caught, and the change log's past tense
+    // record of removing it must not be.
+    assert.ok(
+      DENIES_POSTHOG.test(
+        'There is no Sentry, no Datadog, no PostHog, no Google Analytics, and this site loads no script from another origin.',
+      ),
+      'the denial rule does not catch the exact sentence that was published and false, so it ' +
+        'would have passed the day posthog-js landed',
+    )
+    assert.ok(
+      DENIES_POSTHOG.test('There is no PostHog on this site.'),
+      'the denial rule only catches one phrasing of the claim',
+    )
+    assert.ok(
+      !DENIES_POSTHOG.test(
+        'the entry below the list said in as many words that there was no PostHog, and a correction that hid what it corrected would be worse',
+      ),
+      'the denial rule refuses the page\'s own record of removing the denial, so the honest ' +
+        'change log is what fails the gate',
+    )
+    assert.ok(
+      !DENIES_POSTHOG.test('PostHog IS engaged now, and it has its own row on the list above.'),
+      'the denial rule fires on the disclosure that replaced the denial',
     )
   })
 
@@ -523,7 +988,7 @@ describe('the subprocessor page describes the code that exists', () => {
     // to set it, a component calls that, and a page renders the component. Any
     // one of the three going missing leaves a promise on a published page.
     const page = await read('www/lib/subprocessors.ts')
-    if (!/switch measurement off/.test(page)) return
+    if (!PROMISES_A_SWITCH.test(page)) return
 
     const beacon = await read('www/lib/beacon.ts')
     assert.match(
@@ -549,33 +1014,79 @@ describe('the subprocessor page describes the code that exists', () => {
       /<MeasurementSwitch \/>/,
       'the control exists and no page renders it, so no reader can reach it',
     )
-  })
 
-  it('would still see an address in code, which is what makes the case above worth anything', () => {
-    // THE NEGATIVE CONTROL on the comment stripping immediately above. Taking
-    // comments out of the subject of a gate is exactly the kind of loosening
-    // that quietly turns a check into a check of nothing, and the failure would
-    // be invisible: the suite stays green either way. So the same predicate is
-    // driven against source that does name a host, in the three places a host
-    // could actually be named.
-    const inCode = [
-      `const ENDPOINT = "https://plausible.io/api/event"`,
-      `fetch('https://cdn.example.com/a.js')`,
-      'const hosts = [`https://analytics.example.com`]',
-    ]
-    for (const line of inCode) {
-      assert.ok(
-        NAMES_A_HOST.test(withoutComments(line)),
-        `stripping comments hid a real address: ${line}`,
+    // THE HALF THAT ARRIVED WITH POSTHOG, and it is the same defect one level
+    // out. Everything above proves a reader can PRESS the switch. None of it
+    // proves that pressing it stops the counting, and until tonight that did
+    // not matter because there was one counter and the switch was wired to it.
+    //
+    // With a second analytics vendor in the browser, a switch that silences the
+    // first party beacon and leaves PostHog capturing is a published promise
+    // that is false for the reader who believed it. That is worse than the
+    // original defect, not a smaller version of it: the page no longer merely
+    // describes something unreachable, it describes something the reader
+    // reaches and is then wrong about.
+    //
+    // Held structurally, on whichever file configures the SDK, because the
+    // wiring is ph-web's to write and the property is not: the code that starts
+    // PostHog has to consult the same measurement flag the switch sets.
+    const manifest = JSON.parse(await read('www/package.json')) as {
+      dependencies?: Record<string, string>
+    }
+    if (!manifest.dependencies?.['posthog-js']) return
+
+    const starts = (await siteSources()).filter((f) =>
+      /posthog\.init\(|from ['"]posthog-js['"]/.test(withoutComments(f.text)),
+    )
+    assert.ok(
+      starts.length > 0,
+      'posthog-js is a dependency and nothing in the site imports it, so either the dependency ' +
+        'is dead or this gate is reading the wrong tree',
+    )
+    for (const { file, text } of starts) {
+      const code = withoutComments(text)
+      assert.match(
+        code,
+        /measurementStatus|setMeasurement|measurementOn/,
+        `${file} starts PostHog without consulting the measurement flag the switch sets. The ` +
+          'published page promises a reader can switch measurement off; they can press the ' +
+          'control, the beacon stops, and PostHog keeps capturing.',
+      )
+
+      // THE PART THAT LOOKS DONE AND IS NOT, and this is measured rather than
+      // reasoned: ph-web pressed the switch and watched the network.
+      //
+      // `opt_out_capturing()` alone reads exactly as though it worked. It
+      // writes the flag, renders correctly, and produces no request. The next
+      // navigation then sent a 47KB $snapshot of the page the reader had just
+      // objected to, plus the $autocapture for the click on the switch itself,
+      // flushed by posthog-js's own unload handler out of buffers that opt out
+      // does not empty. The line in posthog-js that discards the recorder
+      // buffer sits inside a branch that only runs under a project setting this
+      // site does not have.
+      //
+      // So the opt out has to do two more things, and their absence is
+      // invisible in review and in every screenshot: discard the recording
+      // explicitly, and turn request batching off, because the unload handler
+      // flushes the request and retry queues only while batching is on. Held
+      // structurally on the names, because this gate cannot drive a browser and
+      // the alternative to naming them is checking nothing.
+      assert.match(
+        code,
+        /stopSessionRecording/,
+        `${file} opts out without discarding the session recording, so the buffered snapshot of ` +
+          'the page the reader just objected to is flushed on the next navigation. Measured: ' +
+          'seven proxy requests before the press and nine after.',
+      )
+      assert.match(
+        code,
+        /request_batching/,
+        `${file} opts out without turning request batching off, so posthog-js's unload handler ` +
+          'still has a request queue to flush and sends what was already buffered.',
       )
     }
-    // And a comment quoting one is not a destination, which is the case that
-    // sent this gate red on a branch that had added no address at all.
-    assert.ok(
-      !NAMES_A_HOST.test(withoutComments('// yandex announces "+http://yandex.com/bots"')),
-      'a comment quoting a crawler address still reads as a network destination',
-    )
   })
+
 })
 
 describe('the site does not publish a mailbox that cannot receive mail', () => {

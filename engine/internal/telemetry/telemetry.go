@@ -35,6 +35,31 @@
 // make up one environment are three processes. What is genuinely lost is
 // counted and reported, because a gap nobody can account for is worse than one
 // that is explained.
+//
+// A FOURTH RULE, WHICH IS ABOUT A SINK THAT DOES NOT EXIST AND MUST NOT.
+//
+// NO SINK HERE MAY SEND ANYTHING TO A VENDOR OF OURS. Not PostHog, not Sentry,
+// not an analytics service of any kind. Every sink this package builds writes
+// to somewhere the person running the engine chose: their terminal, their log
+// directory, their collector, THEIR control plane. That is not an accident of
+// how it grew, it is the product's central promise, and this package is where
+// somebody would break it without noticing.
+//
+// The temptation is real and it will arrive looking reasonable. `af mcp` runs a
+// Model Context Protocol server, somebody will want to know which tools get
+// used, and there is a working PostHog client in this repository already. But
+// the engine runs on A CUSTOMER'S OWN MACHINE, inside their network, on their
+// hardware. An event leaving here for our analytics vendor would be a new
+// outbound flow nobody agreed to, out of a product sold on the promise that
+// production data stays in the customer's boundary, and it would be
+// indefensible on the day somebody reads their own network log.
+//
+// So: engine side numbers travel the route that already exists, to the
+// CUSTOMER'S control plane, redacted at the writer like everything else. Only a
+// HOSTED control plane forwards anything onward about its OWN service, and it
+// does that in web/apps/api/src/analytics/posthog-sink.ts, where the callers
+// are our endpoints and the users are ours. If you came here to add a sink for
+// that, you are in the wrong repository half.
 package telemetry
 
 import (

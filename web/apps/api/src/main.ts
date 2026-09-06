@@ -39,6 +39,8 @@ import {
   hostedRequiredPlanFrom,
   operatorSetsPlanFrom,
 } from './hosted.ts'
+import { POSTHOG_REGIONS, postHogRegionFrom, postHogSummary } from './analytics/posthog.ts'
+import { createPostHogSink, postHogSinkSummary } from './analytics/posthog-sink.ts'
 
 function required(name: string, ...fallbacks: string[]): string {
   for (const n of [name, ...fallbacks]) {
@@ -196,6 +198,23 @@ const siteOrigins = siteOriginsFrom(process.env.AF_SITE_ORIGIN)
 console.log(siteOriginsSummary(siteOrigins))
 const leads = leadNotifierFrom(process.env, emailSignIn?.mailer)
 console.log(leads.summary)
+
+// The marketing site's analytics, forwarded from this process so that a
+// reader's browser never opens a connection to posthog.com. Read at start-up so
+// an unknown region stops the process here rather than on the first page view,
+// and said out loud either way: a proxy that is not mounted looks exactly like
+// one that is, right up until every event 404s.
+const postHogRegion = postHogRegionFrom(process.env.AF_POSTHOG_REGION)
+console.log(postHogSummary(postHogRegion))
+
+// What this process reports about ITSELF, which is a different thing from the
+// proxy above and is off by default. Somebody self-hosting this measures their
+// own usage or nobody does; only the hosted deployment tells us about ours.
+const postHogSink = createPostHogSink({
+  projectKey: process.env.AF_POSTHOG_PROJECT_KEY ?? null,
+  region: postHogRegion,
+})
+console.log(postHogSinkSummary(postHogSink))
 
 // Said out loud at startup, every time. Whether an instance is open to the
 // world is not something anybody should have to infer from a deployment
@@ -399,6 +418,8 @@ const { app, ingestLimiter, authLimiter } = createServer({
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   selfServeSignup,
+  postHog: postHogRegion ? { bases: POSTHOG_REGIONS[postHogRegion] } : null,
+  postHogSink,
   leadNotifier: leads.notifier,
   sealingKey,
   githubWebhookSecret: appConfig?.webhookSecret ?? null,
@@ -560,7 +581,15 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     console.log(`${signal}: draining`)
     server.close(() => {
-      void pool.close().then(() => process.exit(0))
+      // The sink is flushed BEFORE the pool closes and the process exits, or
+      // whatever it batched in the last ten seconds is lost on every deploy.
+      // It swallows its own failures, so a vendor being unreachable delays this
+      // by its own timeout and never turns a clean shutdown into a bad exit
+      // status.
+      void postHogSink
+        .shutdown()
+        .then(() => pool.close())
+        .then(() => process.exit(0))
     })
   })
 }
