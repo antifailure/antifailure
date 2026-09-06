@@ -26,18 +26,21 @@ that works.
 | `command` | `ci` | What to run. `ci` on a pull request. The hosted control plane sends `up`, `down`, `agents`, `load`, `scenario` or `explore` through `dispatch` instead, and that wins when both are set. |
 | `dispatch` | `{}` | The caller's `workflow_dispatch` inputs as JSON, which is what `toJSON(inputs)` produces. Empty or `{}` means this is a pull request and the command is `ci`. |
 | `control-plane` | empty | Address of a hosted control plane. Empty skips both calls to it, and the job comments for itself. |
-| `secrets` | empty | The caller's secrets as JSON, `toJSON(secrets)`, from a reusable workflow. Only the variables the manifest names are exported, by name, after `af change` reports which those are. Leave it empty and pass secrets through `env:` on the step instead. |
 | `report` | `report.md` | Where to write the report that becomes the comment. |
 | `runner` | `auto` | Whether to install the agent runner, which drives a real browser and needs node. `auto` installs it for `ci`, `agents` and `explore`. `always` and `never` do what they say. |
 
 Every input reaches a script through `env:` rather than through an expression
 inside a `run:` block, so an input carrying a quote cannot become a command.
 
-The `secrets` input is how the production database reaches the check without
-its name appearing in any workflow file. `af change` writes the variables the
-manifest reads, `database.source_url_env` among them, to its step outputs, and
-the action exports exactly those out of the JSON. A variable the caller already
-set through `env:` is left alone. The JSON is dropped before the engine starts.
+Secrets reach the action through `env:`. A job that uses the action directly
+names each one there. The reusable workflow instead passes pairs,
+`AF_SECRET_<n>_NAME` and `AF_SECRET_<n>` for `n` from 1 to 12, one per variable
+the manifest reads, and the action exports each pair under its name. That is
+how the production database reaches the check without its name appearing in
+any workflow file: `af change` writes the variables the manifest reads,
+`database.source_url_env` among them, to its `secrets` step output, and the
+workflow looks each one up by that name. A variable the caller already set
+through `env:` is left alone.
 One mapping is fixed: a `STRIPE_TEST_SECRET_KEY` in the environment is exported
 as `STRIPE_SECRET_KEY` when the latter is unset, because a sandbox rule reads
 the second name and the first is the one people create.
@@ -54,8 +57,8 @@ the second name and the first is the one people create.
 ## Inputs of the reusable workflow
 
 The customer's file calls `.github/workflows/check.yml` and passes these. The
-workflow forwards each to the action of the same name, and adds the caller's
-secrets as `toJSON(secrets)`.
+workflow forwards each to the action of the same name, and adds the secrets
+the manifest names, selected by name out of the caller's.
 
 | Input | Default | What it does |
 | --- | --- | --- |
@@ -126,8 +129,8 @@ jobs:
 
 Three things are on you in this shape that the reusable workflow otherwise
 carries. The checkout must be `fetch-depth: 0`, or `af change` has no merge
-base. The `secrets` input is empty, so each secret is named under `env:` and
-only those are visible. And the fork label gate in the reusable workflow's
+base. Each secret is named under `env:`, and only those are visible; the
+`secrets` output of `af change` lists the names the manifest expects. And the fork label gate in the reusable workflow's
 `if:` is absent, though the engine's own gate still refuses an unapproved fork
 before it names an environment, which [Forks](/docs/guides/github#forks)
 describes.

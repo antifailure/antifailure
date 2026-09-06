@@ -44,14 +44,6 @@ inputs:
       job comments for itself, which is the self-hosted and no-account path.
     required: false
     default: ''
-  secrets:
-    description: >-
-      The caller's secrets as JSON, `toJSON(secrets)`, from a reusable
-      workflow. Only the variables the manifest names are exported, by
-      name, after `af change` reports which those are. Leave it empty and
-      pass secrets through `env:` on the step instead.
-    required: false
-    default: ''
   report:
     description: Where to write the report that becomes the comment.
     required: false
@@ -183,7 +175,11 @@ runs:
     #
     # With no manifest in the repository `af change` drafts one from the
     # repository and says so in the report, so a repository that has only
-    # this workflow still gets a check.
+    # this workflow still gets a check. The `secrets` output it writes is
+    # the list of variable names the manifest reads; check.yml runs the
+    # same command before this action to select those out of the caller's
+    # secrets, and a job that uses the action directly reads it to know
+    # what to pass under env:.
     - id: change
       name: Work out what this change touches
       shell: bash
@@ -203,8 +199,6 @@ runs:
         AF_CONCURRENCY: ${{ steps.plan.outputs.concurrency }}
         AF_RUN_ID: ${{ steps.plan.outputs.run_id }}
         AF_REPORT: ${{ inputs.report }}
-        AF_SECRETS_JSON: ${{ inputs.secrets }}
-        AF_SECRET_NAMES: ${{ steps.change.outputs.secrets }}
         # Where the engine reports its own event stream. Unset, it attaches
         # no control plane sink and the run is unaffected. No token: the
         # engine trades this job's identity for a short lived credential the
@@ -212,20 +206,22 @@ runs:
         AF_CONTROL_PLANE_URL: ${{ inputs.control-plane }}
       run: |
         set -euo pipefail
-        # Export exactly the variables the manifest names, out of the JSON a
-        # reusable workflow passed. Anything the caller set through env: is
-        # already here and is left alone. The JSON is dropped before the
-        # engine starts, so it never reaches a build or a container.
-        if [ -n "$AF_SECRETS_JSON" ] && [ -n "$AF_SECRET_NAMES" ]; then
-          IFS=',' read -ra names <<< "$AF_SECRET_NAMES" || true
-          for name in "${names[@]:-}"; do
-            [ -n "$name" ] || continue
-            if [ -n "${!name:-}" ]; then continue; fi
-            value=$(printf '%s' "$AF_SECRETS_JSON" | jq -r --arg k "$name" '.[$k] // empty')
-            if [ -n "$value" ]; then export "$name=$value"; fi
-          done
-        fi
-        unset AF_SECRETS_JSON
+        # Secrets a reusable workflow selected by name arrive as pairs,
+        # AF_SECRET_<n>_NAME and AF_SECRET_<n>, because a composite action
+        # cannot read the caller's secrets and a workflow can look one up by
+        # name in an expression but cannot name the variable it lands in.
+        # Each pair whose name and value are both set is exported under the
+        # name. Anything the caller set through env: directly is left alone.
+        for i in $(seq 1 12); do
+          name_var="AF_SECRET_${i}_NAME"
+          value_var="AF_SECRET_${i}"
+          name="${!name_var:-}"
+          value="${!value_var:-}"
+          unset "$name_var" "$value_var"
+          [ -n "$name" ] && [ -n "$value" ] || continue
+          if [ -n "${!name:-}" ]; then continue; fi
+          export "$name=$value"
+        done
         # The four the workflow has always mapped, under the names the
         # engine reads, when the caller's secrets carry them.
         if [ -z "${STRIPE_SECRET_KEY:-}" ] && [ -n "${STRIPE_TEST_SECRET_KEY:-}" ]; then

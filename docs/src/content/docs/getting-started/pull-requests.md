@@ -95,11 +95,10 @@ touches, runs the check, and leaves the comment. Its inputs and outputs are on
 `secrets: inherit` is the line that makes the file short. A composite action
 cannot read a caller's secrets, so without it every secret would have to be
 named in your file, including the production database secret whose name only
-your manifest knows. With it the reusable workflow sees your secrets, passes
-them to the action as one JSON value, and the action exports only the ones the
-manifest names. `af change` reports which those are before the check starts,
-and the JSON is dropped before the engine runs, so it never reaches a build or a
-container.
+your manifest knows. With it the reusable workflow can see your secrets, and
+it reads only the ones the manifest names. `af change` reports which those are
+before the check starts, and each is looked up by that name and passed to the
+action under it. A secret the manifest never mentions is never read.
 
 The `workflow_dispatch` block is for the hosted control plane, whose buttons
 run this workflow on the branch an environment is on. Delete it if you do not

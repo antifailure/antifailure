@@ -20,10 +20,10 @@ long is a file every copy diverges in, so a fix to the template reached
 nobody who had already copied it.
 
 The action installs the runner when the command needs a browser. The reusable
-workflow sees the caller's secrets through `secrets: inherit`, hands them to
-the action as one JSON value, and the action exports only the variables `af
-change` says the manifest reads, by name, then drops the JSON before the
-engine starts. So the production secret reaches the check under whatever name
+workflow sees the caller's secrets through `secrets: inherit`, runs `af change`
+to learn which variables the manifest reads, and passes exactly those to the
+action by name, so a secret the manifest never mentions is never read. So the
+production secret reaches the check under whatever name
 the manifest chose, with no line in the customer's file naming it, and the
 report says at the top when it ran on an empty database instead.
 

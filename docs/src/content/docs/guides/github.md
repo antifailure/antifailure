@@ -83,8 +83,9 @@ jobs:
 caller's event with the caller's `github` context, so the fork label gate and
 the concurrency group read the caller's pull request, which is where they
 belong. It checks out with `fetch-depth: 0`, because `af change` diffs against
-the merge base, and then calls the action with the caller's secrets as one JSON
-value. It exists as a workflow rather than only as an action because of that
+the merge base, runs `af change` once to learn which variables the manifest
+reads, and then calls the action with exactly those secrets, each looked up by
+name. It exists as a workflow rather than only as an action because of that
 last part: a composite action cannot read a caller's secrets, and
 `secrets: inherit` is only available to a reusable workflow.
 
@@ -95,15 +96,16 @@ there is one, and leaves the comment otherwise. Every input reaches a script
 through `env:` rather than through an expression inside a `run:` block, so an
 input carrying a quote cannot become a command.
 
-The `secrets` input is the part worth understanding. The reusable workflow
-passes `toJSON(secrets)`, which is every secret the caller has. The action does
-not export them all. `af change` reports the variables the manifest names,
-`database.source_url_env` among them, and the action exports exactly those,
-by name, out of the JSON. Anything the caller already set through `env:` is
-left alone. The JSON is dropped before the engine starts, so it reaches no
-build and no container, and GitHub masks the values in the log either way. A
-repository whose manifest names `PRODUCTION_DATABASE_URL` therefore needs a
-secret of that name and nothing in its workflow file mentions it.
+The secret selection is the part worth understanding. `af change` writes the
+variables the manifest names, `database.source_url_env` among them, to its step
+outputs as `secrets`. The reusable workflow looks each one up in the caller's
+secrets by that name, twelve slots at most, and hands the action name and value
+pairs under `env:`. The action exports each pair under its name. Nothing else
+in the caller's secret store is read, which is what code scanning requires and
+what a first version of the workflow got wrong by passing `toJSON(secrets)`.
+Anything the caller already set through `env:` is left alone. A repository
+whose manifest names `PRODUCTION_DATABASE_URL` therefore needs a secret of that
+name and nothing in its workflow file mentions it.
 
 **`v1`** is a moving tag. The release workflow moves it to every final release
 `v1.x.y` after the release is published, and never to a prerelease, so a
