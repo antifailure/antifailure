@@ -572,7 +572,7 @@ export function PTW05() {
       </div>
 
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border border-dashed border-black/15 bg-white px-3 py-2.5">
-        <code className="font-mono text-[11px] text-black">af env prune --before &lt;cutoff&gt;</code>
+        <code className="font-mono text-[11px] text-black">af env prune --older-than &lt;cutoff&gt;</code>
         <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-gray-new-50">manual sweep · no automatic TTL</span>
       </div>
     </FigureFrame>

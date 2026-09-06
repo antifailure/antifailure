@@ -389,7 +389,7 @@ export function PLD02({ source }: { source: string }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <FigCmd>$ af load --manifest load.yml</FigCmd>
+          <FigCmd>$ af load</FigCmd>
           <h3 className="mt-1 text-[14px] font-medium tracking-tight text-black">Manifest compilation</h3>
         </div>
         <span className="rounded-[6px] border border-[#66A58C]/30 bg-[#E4F1EB] px-2 py-1 font-mono text-[9px] font-medium uppercase tracking-[0.1em] text-[#285D49]">
