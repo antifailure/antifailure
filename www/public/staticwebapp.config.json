@@ -58,6 +58,11 @@
       "statusCode": 301
     },
     {
+      "route": "/status",
+      "redirect": "https://antifailure.github.io/antifailure/",
+      "statusCode": 301
+    },
+    {
       "route": "/_next/static/*",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"

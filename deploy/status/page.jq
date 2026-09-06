@@ -98,10 +98,20 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
 # scheduled runs under load and delivers far fewer, and a page that printed
 # the schedule it asked for rather than the cadence it got would be stating a
 # freshness it does not have.
+#
+# Measured PER COMPONENT, not across the pooled timestamps. One probe run
+# checks every component within a few seconds of the others, so the pooled
+# gaps are dominated by the two second spacing inside a run and the median
+# came out as "checks have been arriving about every 2 seconds", on a page
+# whose runs were two hours apart. The threshold below is three times that
+# figure, so the same defect pinned it to its floor and no component could
+# ever read as stale at render time. Consecutive readings of ONE component are
+# one run apart, which is the interval this paragraph is trying to state.
 | ($rows | map(.checked_at | iso) | map(select(. != null)) | unique) as $stamps
-| (if ($stamps | length) < 2 then null
-   else ([range(1; $stamps | length) | $stamps[.] - $stamps[. - 1]] | sort) as $gaps
-     | $gaps[(($gaps | length) / 2 | floor)]
+| ([ $byId[] | map(.checked_at | iso) | map(select(. != null)) | unique
+     | . as $s | range(1; $s | length) | $s[.] - $s[. - 1] ] | sort) as $gaps
+| (if ($gaps | length) == 0 then null
+   else $gaps[(($gaps | length) / 2 | floor)]
    end) as $interval
 | (if $interval == null then null else ([1800, $interval * 3] | max) end) as $staleAfter
 | ($stamps | if length == 0 then null else .[0] end) as $firstSeen
@@ -414,9 +424,15 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
     # it if the age is in front of them rather than in a paragraph at the
     # bottom of the page. GitHub delivers this five minute cron every three to
     # six hours in practice, so this is the normal case and not an edge one.
-    + "<span class=\"comp-t\">"
-    + (if $c.latestAt == null then "never checked"
-       else "checked \(($nowS - $c.latestAt) | humanSecs) ago" end)
+    #
+    # The age is written against the moment the page was GENERATED, and the
+    # page is then served unchanged until the next probe lands, hours later
+    # on a throttled schedule. "checked 3 seconds ago" was still on the live
+    # page an hour after it was written. `data-at` carries the epoch so the
+    # script at the foot of the page can restate the age against the reader's
+    # clock, and keep restating it while the tab stays open.
+    + (if $c.latestAt == null then "<span class=\"comp-t\">never checked"
+       else "<span class=\"comp-t\">checked <span data-at=\"\($c.latestAt)\">\(($nowS - $c.latestAt) | humanSecs) ago</span>" end)
     + "</span></span></div>"
     + "<div class=\"strip\" role=\"img\" aria-label=\"\($stripDays) days to \($lastDay | dayStampKey): \(($known | length)) with readings, \(($known | map(select(.ok < .checks)) | length)) with a failed check, \(($stripDays - ($known | length))) with no readings.\">"
     + ($c.cells | map(bar(.)) | join("")) + "</div>"
@@ -449,10 +465,13 @@ def readingOk: if has("ok") and ((.ok | type) == "boolean") then .ok
  * document, because a person arriving here is trying to find one fact quickly
  * while something else is going wrong.
  *
- * Self contained on purpose too. No font file, no stylesheet, no script, no
- * image and no request of any kind leaves this document, because the one
- * moment it has to render correctly is the moment something else is broken. A
- * web font from a CDN is a second origin that can be down.
+ * Self contained on purpose too. No font file, no stylesheet, no external
+ * script, no image and no request of any kind leaves this document, because
+ * the one moment it has to render correctly is the moment something else is
+ * broken. A web font from a CDN is a second origin that can be down. The one
+ * script is inline at the foot of the page, fetches nothing, and does one
+ * thing: it restates every age against the reader's clock rather than the
+ * generator's. Without it the page reads exactly as generated.
  *
  * That rules out the site's Inter and Geist, so the type is the reader's own
  * system stack with the site's tracking over it. Every colour is Antifailure's,
@@ -542,6 +561,18 @@ a { color: inherit; }
   white-space: nowrap;
 }
 .sub:hover { border-color: var(--ink); }
+
+/* ---------------------------------------------------------- an aged page */
+
+.aged {
+  margin: 0 0 18px;
+  padding: 12px 18px;
+  border: 1px solid var(--rule-2);
+  background: var(--card);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.aged b { font-weight: 600; }
 
 /* ------------------------------------------------------- active incidents */
 
@@ -777,6 +808,13 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
   <a class=\"sub\" href=\"feed.xml\">Subscribe to updates</a>
 </div>
 "
+# Empty and hidden when written. The script below shows it, filled in, once
+# the reader's clock says the page itself is older than the interval the
+# component states are allowed to be. Every "ago" on this page is otherwise a
+# number frozen at generation time, and a frozen "3 seconds ago" beside
+# Operational is the one lie a status page must not tell.
++ "<p class=\"aged\" hidden data-generated=\"\($nowS)\" data-stale-after=\"\($staleAfter // 1800)\"></p>
+"
 
 + (($openIncidents + $openMaint) | map("<section class=\"active\">" + banner(.) + "</section>") | join(""))
 
@@ -844,7 +882,7 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
     <p>The control plane checks answer <code>/readyz</code>, which runs a real database query. <code>/health</code> is a static literal that answers even when the database is unreachable, so a page built on it would report an outage as healthy. The static surfaces are checked for a marker in the body as well as a 200, because this site has twice been published broken behind a 200.</p>
     <p>The percentages are <b>the share of checks that passed</b>, not measured uptime. Between two checks this page knows nothing, and an outage shorter than the gap can pass unrecorded. A day with no readings is drawn in the neutral and is never counted as a day that was up.</p>"
 + (if $lastSeen != null
-   then "<p>The last check landed <b>\($lastSeen | stamp | esc)</b>, \(($nowS - $lastSeen) | humanSecs) ago"
+   then "<p>The last check landed <b>\($lastSeen | stamp | esc)</b>, <span data-at=\"\($lastSeen)\">\(($nowS - $lastSeen) | humanSecs) ago</span>"
      + (if $interval == null then "." else ", and checks have been arriving about every \($interval | humanSecs)." end)
      + " That interval is measured from the readings rather than taken from the schedule that asks for them.</p>"
    else "<p>No check has been recorded yet.</p>" end)
@@ -854,6 +892,44 @@ footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule);
 + (if $dropped > 0 then "\(plural($dropped; "reading was"; "readings were")) unreadable and skipped. " else "" end)
 + "Every reading behind this page is in the <a href=\"https://github.com/antifailure/antifailure/tree/status-data\">status-data</a> branch, and the probe that wrote them is <a href=\"https://github.com/antifailure/antifailure/blob/main/deploy/status/probe.sh\">deploy/status/probe.sh</a>. <a href=\"feed.xml\">Atom feed</a>.</footer>
 </main>
+<script>
+(function () {
+  // Ages, from the reader's clock. The text is rendered once when the probe
+  // lands and served unchanged until the next probe, which a throttled
+  // schedule can put hours away, so \"checked 3 seconds ago\" is true for
+  // three seconds and on screen for three hours. Same rounding as humanSecs.
+  function human(s) {
+    var n, u;
+    if (s < 90) { n = Math.round(s); u = \"second\"; }
+    else if (s < 5400) { n = Math.round(s / 60); u = \"minute\"; }
+    else if (s < 172800) { n = Math.round(s / 3600); u = \"hour\"; }
+    else { n = Math.round(s / 86400); u = \"day\"; }
+    return n + \" \" + u + (n === 1 ? \"\" : \"s\");
+  }
+  var aged = document.querySelector(\".aged\");
+  var generated = aged ? Number(aged.getAttribute(\"data-generated\")) : NaN;
+  var staleAfter = aged ? Number(aged.getAttribute(\"data-stale-after\")) : NaN;
+  function tick() {
+    var now = Date.now() / 1000;
+    var spans = document.querySelectorAll(\"[data-at]\");
+    for (var i = 0; i < spans.length; i++) {
+      var at = Number(spans[i].getAttribute(\"data-at\"));
+      if (at > 0 && now >= at) spans[i].textContent = human(now - at) + \" ago\";
+    }
+    if (aged && generated > 0 && staleAfter > 0) {
+      var age = now - generated;
+      if (age > staleAfter) {
+        aged.innerHTML = \"<b>This page is \" + human(age) + \" old.</b> No probe has run since it was generated, so every state below is at least that old and says nothing about right now.\";
+        aged.hidden = false;
+      } else {
+        aged.hidden = true;
+      }
+    }
+  }
+  tick();
+  setInterval(tick, 30000);
+})();
+</script>
 </body>
 </html>
 "

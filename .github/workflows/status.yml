@@ -31,12 +31,31 @@ on:
     # Nothing downstream believes it. `page.jq` measures the interval from the
     # readings themselves and prints that, saying in the rendered page that the
     # figure comes from the data rather than from this line, and the staleness
-    # threshold is three times the OBSERVED interval. So a throttled schedule
-    # makes the page coarser and never makes it wrong. If this page ever needs a
+    # threshold is three times the OBSERVED interval. The page also carries the
+    # epoch of every check and of its own generation, and an inline script
+    # restates each age against the reader's clock, so a page served unchanged
+    # for three hours says three hours and not the three seconds it said when
+    # it was written. So a throttled schedule makes the page coarser and never
+    # makes it wrong. If this page ever needs a
     # real five minute cadence, it needs a runner that is not GitHub's free
     # scheduler, and that is a hosting decision rather than a cron edit.
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
+  # A second source of probes, on top of the schedule and independent of its
+  # throttling: the moment a deploy finishes. Measured over 2026-09-03 to
+  # 2026-09-06, the schedule above delivered 25 runs where it asked for 864,
+  # the shortest gap 1h24m and the longest 4h38m, and GitHub's documentation
+  # says why: the schedule event is delayed under load and "some queued jobs
+  # may be dropped". A completed cd run is the one moment the answer is most
+  # worth having, since it is when a revision just changed under the surfaces
+  # this page reports on, and a workflow_run event is queued the way a push is
+  # rather than the way a schedule is. The concurrency group below keeps the
+  # two sources from writing status-data at the same time. This does not make
+  # the cadence five minutes and nothing in this file can; it makes sure a
+  # fresh deploy is never followed by hours of a page that predates it.
+  workflow_run:
+    workflows: [cd]
+    types: [completed]
   # The probe never runs on a push. These two triggers exist only for the
   # `validate` job below, which reads the incident files a person just edited
   # and says so before they reach main rather than after. A paths filter is
@@ -93,7 +112,7 @@ jobs:
   probe:
     name: probe and publish
     runs-on: ubuntu-latest
-    if: github.repository == 'antifailure/antifailure' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: github.repository == 'antifailure/antifailure' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run')
     timeout-minutes: 5
     permissions:
       # Only to push status-data, and nothing else this token could touch: no

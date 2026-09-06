@@ -402,6 +402,46 @@ kept="$(jq -r '[.days[] | select(.day == "2026-01-05")] | .[0].checks // 0' "$d/
 expect_exit "the stored rollup survives a run that has no raw readings for that day" 288 "$kept"
 
 # ---------------------------------------------------------------------------
+case_start "the interval is the gap between runs, not the gap between components inside one run"
+# What the live page actually held on 2026-09-06: every component probed
+# within seconds of the others, runs two hours apart, and a paragraph saying
+# checks arrive "about every 2 seconds". Three runs of every target, each
+# target two seconds after the last, the runs 7200 seconds apart.
+d="$WORK/runs"; mkdir -p "$d"; s="$(scripts runs)"
+{ for run in 14400 7200 0; do
+    i=0
+    for id in $(jq -r '.[].id' "$s/targets.json"); do
+      reading "$id" "$(( run + 60 + i * 2 ))" true
+      i=$((i + 1))
+    done
+  done; } > "$d/readings.jsonl"
+run "$d" "$d/readings.jsonl" "$s"
+expect_exit "renders" 0 "$?"
+expect "states the interval between runs" "$d/index.html" "checks have been arriving about every 2 hours."
+refute "and not the spacing of the components inside one run" "$d/index.html" "about every 2 seconds"
+expect "the stale threshold is three times the observed interval" "$d/index.html" 'data-stale-after="21600"'
+
+# ---------------------------------------------------------------------------
+case_start "every age on the page is anchored to an epoch the reader's clock can be measured against"
+# The rendered text says "checked 2 minutes ago" at the moment of generation
+# and is then served as is until the next probe. The page carries the epochs
+# so the inline script can restate the ages against the clock in the browser,
+# and the notice it fills in when the page itself has aged past the threshold.
+d="$WORK/anchored"; mkdir -p "$d"; s="$(scripts anchored)"
+{ reading control-plane-api 3660 true; reading control-plane-api 120 true; } > "$d/readings.jsonl"
+run "$d" "$d/readings.jsonl" "$s"
+expect_exit "renders" 0 "$?"
+expect "the rendered age is still there for a reader with no script" "$d/index.html" "checked <span data-at="
+# Two needles that cannot answer for each other: the row's span follows the
+# word "checked" and the paragraph's follows the bold stamp. A needle of the
+# bare span matched either one, so a break in one was covered by the other.
+expect "and the component row carries the epoch of that check" "$d/index.html" "class=\"comp-t\">checked <span data-at=\"$(( NOW - 120 ))\">2 minutes ago</span>"
+expect "the last check paragraph carries the same epoch" "$d/index.html" "</b>, <span data-at=\"$(( NOW - 120 ))\">2 minutes ago</span>"
+expect "the notice knows when the page was generated" "$d/index.html" "data-generated=\"$NOW\""
+expect "the notice is hidden until the reader's clock says otherwise" "$d/index.html" "class=\"aged\" hidden"
+expect "the script restates ages rather than trusting the generator's" "$d/index.html" "human(now - at)"
+
+# ---------------------------------------------------------------------------
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

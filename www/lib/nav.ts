@@ -121,6 +121,17 @@ export const HEADER_MENUS: HeaderMenu[] = [
 export const GITHUB_URL = "https://github.com/antifailure/antifailure";
 
 /**
+ * The status page. Served by GitHub Pages from the status-data branch, and
+ * deliberately not from antifailure.dev: the whole point of the page is to be
+ * readable while this site's own host is the thing that is down, so the link
+ * goes straight to the address that does not share a region with it. The
+ * github.io address rather than a subdomain for the same reason, since the
+ * zone for antifailure.dev is Azure DNS. antifailure.dev/status is a 301 to
+ * this, for anybody who types it.
+ */
+export const STATUS_URL = "https://antifailure.github.io/antifailure/";
+
+/**
  * The legal row along the bottom of the footer.
  *
  * Separate from FOOTER_MENUS because these are not a category of the product,
@@ -188,6 +199,7 @@ export const FOOTER_MENUS = [
     heading: "Connect",
     items: [
       { text: "GitHub", href: GITHUB_URL },
+      { text: "Status", href: STATUS_URL },
       { text: "Sign in", href: "/signin" },
       { text: "Request access", href: "/signup" },
     ],

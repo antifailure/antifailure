@@ -297,6 +297,11 @@ What the subdomain must not be is a route on `antifailure.dev` itself. That
 hostname is the Static Web App, so serving this page from it would put the
 page and the site it reports on in the same Azure region, and one event would
 take both down together. That is the exact failure this whole design avoids.
+What the site does carry is a way to find the page: the footer of every
+`antifailure.dev` page links it under Connect, and `antifailure.dev/status`
+is a 301 to the `github.io` address rather than a page of its own. Both went
+in after the page had been live for days with nothing anywhere linking to it,
+which is a status page only its author could find.
 
 ## What this is not
 
