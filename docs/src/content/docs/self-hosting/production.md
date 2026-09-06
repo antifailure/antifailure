@@ -424,6 +424,20 @@ deployment owns the traffic, so an apply that adds an environment variable
 creates a **new revision at zero percent** and reports success while production
 keeps serving the old one without the change.
 
+**A change to the app's configuration alone no longer needs this section.**
+Since 2026-09-06 the production job in `cd.yml` runs
+`deploy/cd/apply-config.sh production` after the approval and before
+`deploy.sh`. It plans `production.tfvars` targeted at the container app,
+applies it only when the plan is an environment or secret reference change
+and nothing else, and leaves the revision at zero percent for `deploy.sh` to
+supersede a minute later with the one that takes traffic. So a variable
+merged into `production.tfvars` reaches production on the next tag, through
+the migration and both health gates, with nobody at a terminal. The job log
+says what changed by name, or why it refused. Staging gets the same on every
+merge to main. Everything else in this file, a SKU, a grant, the alerting
+module, a Key Vault change, is outside that target and still needs the hand
+apply above; the guard refuses a plan that carries one.
+
 ```sh
 az containerapp ingress traffic show -n afcpprod-app -g af-cp-prod-centralus -o table
 az containerapp revision list -n afcpprod-app -g af-cp-prod-centralus \

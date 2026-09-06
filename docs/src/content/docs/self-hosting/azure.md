@@ -761,7 +761,7 @@ repository secrets, plus `AZURE_TFSTATE_RG` and `AZURE_TFSTATE_ACCOUNT` if you
 want it to read real state. None of those five is a credential; they are
 identifiers, and the whole design is that the credential does not exist.
 
-**The identity's entire authority**, which is short on purpose:
+**What the plan job needs**, which is short on purpose:
 
 | Scope | Role |
 | --- | --- |
@@ -777,17 +777,40 @@ Data Reader cannot perform `Microsoft.Storage/storageAccounts/read`, which the
 The error names a read action while the identity is called a Reader, so it takes
 a moment to see. Both roles are read-only.
 
-Nothing at subscription scope. Two grants are deliberately absent, and each is
-half of a pair with a flag in the workflow:
+Nothing at subscription scope. The plan job also passes two flags, and each
+one is there so the job does not need a write:
 
-- No **Storage Blob Data Contributor**, so the plan runs `-lock=false`. The
-  backend locks with a blob lease and a lease is a write. Granting it would let
-  any pull request corrupt the record of everything the project owns, and a pull
-  request can edit the workflow that uses the credential in the same commit that
-  runs it.
-- No **Key Vault Secrets User**, so the plan runs `-refresh=false`. Refreshing
-  an `azurerm_key_vault_secret` reads the secret's *value*, which would put the
-  live database URLs into a pull request job.
+- `-lock=false`. The backend locks with a blob lease and a lease is a write,
+  and a pull request can edit the workflow that uses the credential in the
+  same commit that runs it.
+- `-refresh=false`. Refreshing an `azurerm_key_vault_secret` reads the
+  secret's *value*, which would put the live database URLs into a pull
+  request job.
+
+**What the deploy job needs on top of that**, and this is the same principal
+on the hosted control plane, which is the uncomfortable part
+`stacks/control-plane/ci.tf` spells out. `cd.yml` deploys with it and, since
+2026-09-06, applies each environment's container app configuration from its
+tfvars before deploying, through `deploy/cd/apply-config.sh`:
+
+| Scope | Role | For |
+| --- | --- | --- |
+| each control plane resource group | Contributor | `az containerapp update`, the bootstrap job, the traffic shift |
+| the state storage account | Storage Blob Data Contributor | the apply writes the state and takes the lock lease |
+| each control plane Key Vault | Key Vault Secrets User | the targeted plan refreshes the app's secret references, and a refresh reads the value |
+
+The refresh is not optional for the apply the way it is for the plan: the
+app's image is in `ignore_changes`, so the apply writes back the image the
+prior state holds, and only a refreshed state holds the digest `deploy.sh` last
+shipped. `ci.tf` and `stacks/tfstate/main.tf` declare these grants; both note
+which of them were made by hand before they were declared and how to import
+those rather than duplicate them.
+
+This page said for nine days that the identity held none of the three. It held
+two of them, made by hand on 2026-08-28, and the state Contributor is why the
+plan's `-lock=false` is now a flag rather than a consequence. What still holds:
+the plan job writes nothing, the deploy job's steps are the only ones that
+apply, and both federated credentials name this repository.
 
 ### The job has three modes and always says which one it ran
 

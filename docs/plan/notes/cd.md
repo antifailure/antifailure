@@ -173,11 +173,22 @@ here rather than implied to be covered.
 
 ## What is not automated, and why
 
-**Terraform is not applied by CD.** `infra.yml` plans on every pull request that
-touches `infra/` and posts the destroy count; applying is still a person. That is
-deliberate after the incident below, and it is the one place where a human gate
-buys more than it costs: an infrastructure plan is the only thing here that can
-destroy something.
+**Terraform is applied by CD for exactly one resource.** `infra.yml` plans on
+every pull request that touches `infra/` and posts the destroy count; applying
+the stack is still a person. That is deliberate after the incident below, and
+it is the one place where a human gate buys more than it costs: an
+infrastructure plan is the only thing here that can destroy something.
+
+The exception, since 2026-09-06, is the container app's own configuration.
+`cd.yml` runs `deploy/cd/apply-config.sh` before `deploy.sh` in both the
+staging and the production job: a plan targeted at the container app alone,
+refused by `tools/configguard` unless it is an env or secret reference change
+and nothing else, then applied. It cannot destroy anything because it refuses
+a plan that contains a destroy, a create, a replace, or a change to any second
+resource. It exists because on 2026-09-05 three configuration changes merged
+into `production.tfvars` were inert until a person ran the targeted apply and
+the traffic shift by hand, and the marketing site pointed at a proxy the
+missing variable had not turned on for an hour.
 
 **Production refuses.** The approval gate on the `production` environment is
 real, the federated credential is real, and the job promotes the same digest

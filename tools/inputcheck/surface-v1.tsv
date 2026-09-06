@@ -338,6 +338,7 @@ terraform:stacks/control-plane	variable	stripe_secret_key_secret_name	string	opt
 terraform:stacks/control-plane	variable	stripe_webhook_secret_secret_name	string	optional
 terraform:stacks/control-plane	variable	subscription_id	string	required
 terraform:stacks/tfstate	output	backend_hcl	-	-
+terraform:stacks/tfstate	variable	cd_principal_id	string	optional
 terraform:stacks/tfstate	variable	ci_principal_id	string	optional
 terraform:stacks/tfstate	variable	exemption_expires_on	string	optional
 terraform:stacks/tfstate	variable	location	string	optional

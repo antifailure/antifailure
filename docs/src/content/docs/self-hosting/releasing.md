@@ -24,7 +24,7 @@ cutting one.
 | Workflow | Triggered by | What it does |
 | --- | --- | --- |
 | `.github/workflows/release.yml` | `push` of a tag matching `v*` | Waits for CI, builds four platforms, packages, signs, and creates the GitHub release |
-| `.github/workflows/cd.yml` | `push` to `main` **and** `push` of a tag matching `v*` | Waits for CI, builds the control plane image, deploys staging, then waits for a human to approve production |
+| `.github/workflows/cd.yml` | `push` to `main` **and** `push` of a tag matching `v*` | Waits for CI, builds the control plane image, applies staging's configuration from its tfvars and deploys staging, then waits for a human to approve production and does the same there |
 
 Two things follow from that table and both have bitten somebody somewhere.
 
@@ -323,11 +323,23 @@ in the workflow, so it cannot be edited in the same pull request that deploys.
    refuses by asking rather than by asserting. It stops being a refusal the
    moment the apply has happened, with no workflow edit.
 2. Runs `tools/azguard` against the resource group, offline, failing closed.
-3. Runs `deploy/cd/deploy.sh`, which reads what is serving now, **applies
+3. Runs `deploy/cd/apply-config.sh production`, which plans
+   `production.tfvars` targeted at the container app against the production
+   state, with the alert receivers read back out of that state so the action
+   group is a no-op, and applies it **only if the plan is an environment or
+   secret reference change and nothing else**. `tools/configguard` is the
+   part that says no: an image change, a traffic weight change, a create, a
+   replace, a second resource, or any other attribute moving is refused with
+   the reason and the plan summary, and the job stops there with production
+   untouched. On most tags this step reports no change. When it applies, the
+   new revision sits at zero traffic; it never shifts traffic itself.
+4. Runs `deploy/cd/deploy.sh`, which reads what is serving now, **applies
    migrations first in the `afcpprod-bootstrap` job**, creates the new revision
-   at zero traffic, health checks it on its own address, shifts traffic, health
-   checks the public origin, and rolls traffic back if that last check fails.
-4. After both health checks pass, points `afcpprod-maintenance` at the exact
+   at zero traffic from the template the configuration apply just wrote, health checks it on
+   its own address, shifts traffic, health checks the public origin, and rolls
+   traffic back if that last check fails. That revision is how the
+   configuration takes effect, behind the same gates as the code.
+5. After both health checks pass, points `afcpprod-maintenance` at the exact
    image digest staging tested and reads the job back. A failed candidate cannot
    change the scheduled process that runs DDL later.
 

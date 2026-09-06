@@ -242,7 +242,7 @@ variable "ci_principal_id" {
 variable "cd_principal_id" {
   type        = string
   default     = ""
-  description = "Object id of the identity cd.yml deploys with. Gets Contributor on this resource group and nothing else, which is what updating the container app and shifting traffic needs. Empty disables the grant, and with it continuous deployment into this environment."
+  description = "Object id of the identity cd.yml deploys with. Gets Contributor on this resource group, which is what updating the container app and shifting traffic needs, and Key Vault Secrets User on this stack's vault, which is what planning the container app's configuration from the tfvars before each deploy needs. Empty disables both grants, and with them continuous deployment into this environment."
 }
 
 variable "geo_redundant_backup" {

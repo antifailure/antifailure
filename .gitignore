@@ -132,6 +132,7 @@ runner/artifacts/
 /claimcheck
 /actioncheck
 /classcheck
+/configguard
 /conflictcheck
 /constcheck
 /contactcheck

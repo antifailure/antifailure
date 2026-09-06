@@ -66,3 +66,53 @@ resource "azurerm_role_assignment" "cd_deploys_the_group" {
   role_definition_name = "Contributor"
   principal_id         = var.cd_principal_id
 }
+
+# What the deploy job needs in order to PLAN the app before it deploys it.
+#
+# KEY VAULT SECRETS USER, on this stack's vault and nowhere else. cd.yml runs
+# deploy/cd/apply-config.sh before deploy.sh, which plans the container app
+# from the tfvars with a refresh. A refresh of the app refreshes its
+# dependencies, and those include every azurerm_key_vault_secret the app
+# references, and refreshing one of those reads the secret's VALUE. Without
+# this grant the plan fails on the first vault read with a 403 and no
+# configuration reaches production without a person, which is the exact state
+# this branch exists to end.
+#
+# WHY THE REFRESH IS NOT SIMPLY TURNED OFF, since infra.yml's plan job avoids
+# this grant by planning with -refresh=false. The app's image is in
+# ignore_changes, so the value an apply writes back for it is the value in the
+# prior state. With a refresh, that is the digest deploy.sh last shipped. With
+# -refresh=false it is whatever the state recorded at the last apply, which
+# after any number of deploys is an older build, and the apply would create a
+# revision on it. Every hand apply on 2026-09-05 refreshed, which is why the
+# revisions it made carried the serving image.
+#
+# THE SAME TRADE AS THE CONTRIBUTOR ABOVE, and the same paragraph applies: the
+# plan job's identity is this identity, so a pull request that edits infra.yml
+# in the same commit could read the vault. Staging has been in that position
+# since 2026-08-28, when the identity was handed Key Vault Secrets Officer on
+# afcp-kv-centralus by hand, and every plan since has read that vault; the
+# infra.yml comment on the staging plan says so. This declares the narrower
+# read role, for production, where the grant did not exist at all on
+# 2026-09-06 (`az role assignment list` on afcpprod-kv-centralus for
+# af-infra-ci returned nothing).
+#
+# THIS RESOURCE IS NOT INSIDE THE TARGETED APPLY that cd.yml runs. The app does
+# not depend on it, so the configuration apply never creates it, and the first
+# production run of apply-config.sh fails on the vault read until somebody
+# applies this once by hand:
+#
+#   terraform apply -var-file=production.tfvars \
+#     -target='azurerm_role_assignment.cd_refreshes_secrets[0]'
+#
+# Staging's hand-made Officer grant already covers staging. Setting
+# cd_principal_id in staging.tfvars would also declare a second Contributor
+# over the hand-made one, which Azure refuses as RoleAssignmentExists, so
+# staging stays as ci.tf's Contributor paragraph describes it: granted by hand,
+# recorded nowhere, and working.
+resource "azurerm_role_assignment" "cd_refreshes_secrets" {
+  count                = var.cd_principal_id == "" ? 0 : 1
+  scope                = module.control_plane.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = var.cd_principal_id
+}

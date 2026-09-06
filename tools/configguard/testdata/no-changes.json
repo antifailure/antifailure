@@ -1,0 +1,832 @@
+{
+  "format_version": "1.2",
+  "errored": false,
+  "prior_state": {
+    "values": {
+      "root_module": {
+        "resources": [
+          {
+            "mode": "managed"
+          }
+        ]
+      }
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "module.control_plane.azurerm_container_app.this",
+      "type": "azurerm_container_app",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {
+          "container_app_environment_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/managedEnvironments/afcp-env",
+          "custom_domain_verification_id": "REDACTED",
+          "dapr": [],
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/containerApps/afcp-app",
+          "identity": [
+            {
+              "identity_ids": [
+                "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id"
+              ],
+              "principal_id": "",
+              "tenant_id": "",
+              "type": "UserAssigned"
+            }
+          ],
+          "ingress": [
+            {
+              "allow_insecure_connections": false,
+              "client_certificate_mode": "",
+              "cors": [],
+              "custom_domain": [
+                {
+                  "certificate_binding_type": "SniEnabled",
+                  "certificate_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/managedEnvironments/afcp-env/managedCertificates/mc-afcp-env-app-dev-antifail-3347",
+                  "name": "app.dev.antifailure.dev"
+                }
+              ],
+              "exposed_port": 0,
+              "external_enabled": true,
+              "fqdn": "afcp-app.wonderfulisland-ab101bee.centralus.azurecontainerapps.io",
+              "ip_security_restriction": [],
+              "target_port": 8080,
+              "traffic_weight": [
+                {
+                  "label": "",
+                  "latest_revision": false,
+                  "percentage": 100,
+                  "revision_suffix": "c02e13af8-031402"
+                }
+              ],
+              "transport": "auto"
+            }
+          ],
+          "latest_revision_fqdn": "afcp-app--c02e13af8-031402.wonderfulisland-ab101bee.centralus.azurecontainerapps.io",
+          "latest_revision_name": "afcp-app--c02e13af8-031402",
+          "location": "centralus",
+          "max_inactive_revisions": 0,
+          "name": "afcp-app",
+          "outbound_ip_addresses": [
+            "203.0.113.2",
+            "203.0.113.1"
+          ],
+          "registry": [],
+          "resource_group_name": "af-cp-centralus",
+          "revision_mode": "Multiple",
+          "secret": [
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/admin-database-url",
+              "name": "admin-database-url",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/database-url",
+              "name": "database-url",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-app-private-key",
+              "name": "github-app-private-key",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-app-webhook-secret",
+              "name": "github-app-webhook-secret",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-client-id",
+              "name": "github-client-id",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-client-secret",
+              "name": "github-client-secret",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-redirect-uri",
+              "name": "github-redirect-uri",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/provider-key-secret",
+              "name": "provider-key-secret",
+              "value": ""
+            }
+          ],
+          "tags": {
+            "environment": "cp",
+            "managed_by": "terraform",
+            "project": "antifailure"
+          },
+          "template": [
+            {
+              "azure_queue_scale_rule": [],
+              "container": [
+                {
+                  "args": [],
+                  "command": [],
+                  "cpu": 0.5,
+                  "env": [
+                    {
+                      "name": "AF_DATABASE_URL",
+                      "secret_name": "database-url",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_CLIENT_ID",
+                      "secret_name": "github-client-id",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_CLIENT_SECRET",
+                      "secret_name": "github-client-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_REDIRECT_URI",
+                      "secret_name": "github-redirect-uri",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_PORT",
+                      "secret_name": "",
+                      "value": "8080"
+                    },
+                    {
+                      "name": "AF_POOL_MAX",
+                      "secret_name": "",
+                      "value": "5"
+                    },
+                    {
+                      "name": "AF_APP_BASE_URL",
+                      "secret_name": "",
+                      "value": "https://app.dev.antifailure.dev"
+                    },
+                    {
+                      "name": "AF_SIGNIN_ALLOWLIST",
+                      "secret_name": "",
+                      "value": "virsanghavi,maksymrajszewski"
+                    },
+                    {
+                      "name": "AF_SIGNUP_URL",
+                      "secret_name": "",
+                      "value": "https://antifailure.dev/contact"
+                    },
+                    {
+                      "name": "AF_SELF_SERVE_SIGNUP",
+                      "secret_name": "",
+                      "value": "1"
+                    },
+                    {
+                      "name": "AF_PROVIDER_KEY_SECRET",
+                      "secret_name": "provider-key-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_ID",
+                      "secret_name": "",
+                      "value": "4756201"
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_PRIVATE_KEY",
+                      "secret_name": "github-app-private-key",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_WEBHOOK_SECRET",
+                      "secret_name": "github-app-webhook-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_ADMIN_DATABASE_URL",
+                      "secret_name": "admin-database-url",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_ADMIN_POOL_MAX",
+                      "secret_name": "",
+                      "value": "2"
+                    },
+                    {
+                      "name": "AF_SITE_ORIGIN",
+                      "secret_name": "",
+                      "value": "https://antifailure.dev,https://www.antifailure.dev"
+                    },
+                    {
+                      "name": "AF_POSTHOG_REGION",
+                      "secret_name": "",
+                      "value": "us"
+                    }
+                  ],
+                  "ephemeral_storage": "2Gi",
+                  "image": "ghcr.io/antifailure/control-plane@sha256:10efa69b9b8af4f58bab9cab6b329407b24f7db124b5af3f49d376ec95eddb0b",
+                  "liveness_probe": [
+                    {
+                      "failure_count_threshold": 3,
+                      "header": [],
+                      "host": "",
+                      "initial_delay": 10,
+                      "interval_seconds": 30,
+                      "path": "/health",
+                      "port": 8080,
+                      "termination_grace_period_seconds": 0,
+                      "timeout": 1,
+                      "transport": "HTTP"
+                    }
+                  ],
+                  "memory": "1Gi",
+                  "name": "control-plane",
+                  "readiness_probe": [
+                    {
+                      "failure_count_threshold": 3,
+                      "header": [],
+                      "host": "",
+                      "initial_delay": 0,
+                      "interval_seconds": 10,
+                      "path": "",
+                      "port": 8080,
+                      "success_count_threshold": 3,
+                      "timeout": 1,
+                      "transport": "TCP"
+                    }
+                  ],
+                  "startup_probe": [],
+                  "volume_mounts": []
+                }
+              ],
+              "cooldown_period_in_seconds": 300,
+              "custom_scale_rule": [],
+              "http_scale_rule": [],
+              "init_container": [],
+              "max_replicas": 3,
+              "min_replicas": 1,
+              "polling_interval_in_seconds": 30,
+              "revision_suffix": "c02e13af8-031402",
+              "tcp_scale_rule": [],
+              "termination_grace_period_seconds": 0,
+              "volume": []
+            }
+          ],
+          "timeouts": null,
+          "workload_profile_name": "Consumption"
+        },
+        "after": {
+          "container_app_environment_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/managedEnvironments/afcp-env",
+          "custom_domain_verification_id": "REDACTED",
+          "dapr": [],
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/containerApps/afcp-app",
+          "identity": [
+            {
+              "identity_ids": [
+                "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id"
+              ],
+              "principal_id": "",
+              "tenant_id": "",
+              "type": "UserAssigned"
+            }
+          ],
+          "ingress": [
+            {
+              "allow_insecure_connections": false,
+              "client_certificate_mode": "",
+              "cors": [],
+              "custom_domain": [
+                {
+                  "certificate_binding_type": "SniEnabled",
+                  "certificate_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.App/managedEnvironments/afcp-env/managedCertificates/mc-afcp-env-app-dev-antifail-3347",
+                  "name": "app.dev.antifailure.dev"
+                }
+              ],
+              "exposed_port": 0,
+              "external_enabled": true,
+              "fqdn": "afcp-app.wonderfulisland-ab101bee.centralus.azurecontainerapps.io",
+              "ip_security_restriction": [],
+              "target_port": 8080,
+              "traffic_weight": [
+                {
+                  "label": "",
+                  "latest_revision": false,
+                  "percentage": 100,
+                  "revision_suffix": "c02e13af8-031402"
+                }
+              ],
+              "transport": "auto"
+            }
+          ],
+          "latest_revision_fqdn": "afcp-app--c02e13af8-031402.wonderfulisland-ab101bee.centralus.azurecontainerapps.io",
+          "latest_revision_name": "afcp-app--c02e13af8-031402",
+          "location": "centralus",
+          "max_inactive_revisions": 0,
+          "name": "afcp-app",
+          "outbound_ip_addresses": [
+            "203.0.113.2",
+            "203.0.113.1"
+          ],
+          "registry": [],
+          "resource_group_name": "af-cp-centralus",
+          "revision_mode": "Multiple",
+          "secret": [
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/admin-database-url",
+              "name": "admin-database-url",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/database-url",
+              "name": "database-url",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-app-private-key",
+              "name": "github-app-private-key",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-app-webhook-secret",
+              "name": "github-app-webhook-secret",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-client-id",
+              "name": "github-client-id",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-client-secret",
+              "name": "github-client-secret",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/github-redirect-uri",
+              "name": "github-redirect-uri",
+              "value": ""
+            },
+            {
+              "identity": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/af-cp-centralus/providers/Microsoft.ManagedIdentity/userAssignedIdentities/afcp-id",
+              "key_vault_secret_id": "https://afcp-kv-centralus.vault.azure.net/secrets/provider-key-secret",
+              "name": "provider-key-secret",
+              "value": ""
+            }
+          ],
+          "tags": {
+            "environment": "cp",
+            "managed_by": "terraform",
+            "project": "antifailure"
+          },
+          "template": [
+            {
+              "azure_queue_scale_rule": [],
+              "container": [
+                {
+                  "args": [],
+                  "command": [],
+                  "cpu": 0.5,
+                  "env": [
+                    {
+                      "name": "AF_DATABASE_URL",
+                      "secret_name": "database-url",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_CLIENT_ID",
+                      "secret_name": "github-client-id",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_CLIENT_SECRET",
+                      "secret_name": "github-client-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_REDIRECT_URI",
+                      "secret_name": "github-redirect-uri",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_PORT",
+                      "secret_name": "",
+                      "value": "8080"
+                    },
+                    {
+                      "name": "AF_POOL_MAX",
+                      "secret_name": "",
+                      "value": "5"
+                    },
+                    {
+                      "name": "AF_APP_BASE_URL",
+                      "secret_name": "",
+                      "value": "https://app.dev.antifailure.dev"
+                    },
+                    {
+                      "name": "AF_SIGNIN_ALLOWLIST",
+                      "secret_name": "",
+                      "value": "virsanghavi,maksymrajszewski"
+                    },
+                    {
+                      "name": "AF_SIGNUP_URL",
+                      "secret_name": "",
+                      "value": "https://antifailure.dev/contact"
+                    },
+                    {
+                      "name": "AF_SELF_SERVE_SIGNUP",
+                      "secret_name": "",
+                      "value": "1"
+                    },
+                    {
+                      "name": "AF_PROVIDER_KEY_SECRET",
+                      "secret_name": "provider-key-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_ID",
+                      "secret_name": "",
+                      "value": "4756201"
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_PRIVATE_KEY",
+                      "secret_name": "github-app-private-key",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_GITHUB_APP_WEBHOOK_SECRET",
+                      "secret_name": "github-app-webhook-secret",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_ADMIN_DATABASE_URL",
+                      "secret_name": "admin-database-url",
+                      "value": ""
+                    },
+                    {
+                      "name": "AF_ADMIN_POOL_MAX",
+                      "secret_name": "",
+                      "value": "2"
+                    },
+                    {
+                      "name": "AF_SITE_ORIGIN",
+                      "secret_name": "",
+                      "value": "https://antifailure.dev,https://www.antifailure.dev"
+                    },
+                    {
+                      "name": "AF_POSTHOG_REGION",
+                      "secret_name": "",
+                      "value": "us"
+                    }
+                  ],
+                  "ephemeral_storage": "2Gi",
+                  "image": "ghcr.io/antifailure/control-plane@sha256:10efa69b9b8af4f58bab9cab6b329407b24f7db124b5af3f49d376ec95eddb0b",
+                  "liveness_probe": [
+                    {
+                      "failure_count_threshold": 3,
+                      "header": [],
+                      "host": "",
+                      "initial_delay": 10,
+                      "interval_seconds": 30,
+                      "path": "/health",
+                      "port": 8080,
+                      "termination_grace_period_seconds": 0,
+                      "timeout": 1,
+                      "transport": "HTTP"
+                    }
+                  ],
+                  "memory": "1Gi",
+                  "name": "control-plane",
+                  "readiness_probe": [
+                    {
+                      "failure_count_threshold": 3,
+                      "header": [],
+                      "host": "",
+                      "initial_delay": 0,
+                      "interval_seconds": 10,
+                      "path": "",
+                      "port": 8080,
+                      "success_count_threshold": 3,
+                      "timeout": 1,
+                      "transport": "TCP"
+                    }
+                  ],
+                  "startup_probe": [],
+                  "volume_mounts": []
+                }
+              ],
+              "cooldown_period_in_seconds": 300,
+              "custom_scale_rule": [],
+              "http_scale_rule": [],
+              "init_container": [],
+              "max_replicas": 3,
+              "min_replicas": 1,
+              "polling_interval_in_seconds": 30,
+              "revision_suffix": "c02e13af8-031402",
+              "tcp_scale_rule": [],
+              "termination_grace_period_seconds": 0,
+              "volume": []
+            }
+          ],
+          "timeouts": null,
+          "workload_profile_name": "Consumption"
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_container_app_environment.this",
+      "type": "azurerm_container_app_environment",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_container_app_job.bootstrap",
+      "type": "azurerm_container_app_job",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault.this",
+      "type": "azurerm_key_vault",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.owned[\"admin-database-url\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.owned[\"database-url\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.owned[\"migration-database-url\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.owned[\"provider-key-secret\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.seeded[\"github-client-id\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.seeded[\"github-client-secret\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_key_vault_secret.seeded[\"github-redirect-uri\"]",
+      "type": "azurerm_key_vault_secret",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_postgresql_flexible_server.this",
+      "type": "azurerm_postgresql_flexible_server",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_postgresql_flexible_server_configuration.extensions",
+      "type": "azurerm_postgresql_flexible_server_configuration",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_postgresql_flexible_server_database.this",
+      "type": "azurerm_postgresql_flexible_server_database",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_private_dns_zone.postgres",
+      "type": "azurerm_private_dns_zone",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_private_dns_zone_virtual_network_link.postgres",
+      "type": "azurerm_private_dns_zone_virtual_network_link",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_role_assignment.app_reads_secrets",
+      "type": "azurerm_role_assignment",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_role_assignment.deployer_writes_secrets[0]",
+      "type": "azurerm_role_assignment",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_subnet.apps",
+      "type": "azurerm_subnet",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_subnet.database",
+      "type": "azurerm_subnet",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_user_assigned_identity.app",
+      "type": "azurerm_user_assigned_identity",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.azurerm_virtual_network.this",
+      "type": "azurerm_virtual_network",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.random_bytes.provider_key_secret[0]",
+      "type": "random_bytes",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.random_password.admin",
+      "type": "random_password",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.random_password.app",
+      "type": "random_password",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.control_plane.random_password.operator[0]",
+      "type": "random_password",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.foundation.azurerm_log_analytics_workspace.this[0]",
+      "type": "azurerm_log_analytics_workspace",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.foundation.azurerm_resource_group.this",
+      "type": "azurerm_resource_group",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    },
+    {
+      "address": "module.foundation.terraform_data.name_guard",
+      "type": "terraform_data",
+      "mode": "managed",
+      "change": {
+        "actions": [
+          "no-op"
+        ]
+      }
+    }
+  ]
+}

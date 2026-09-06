@@ -106,6 +106,7 @@ gate: _reports
     run "gate matches CI"                just gatecheck
     run "every script can be executed"   just execcheck
     run "deploy keeps jobs on one image" just deploycheck
+    run "configuration applies itself safely" just applycheck
     run "no yaml key is shadowed"        just keycheck
     run "vet"                            just vet
     run "typecheck"                      just typecheck
@@ -1148,6 +1149,13 @@ execcheck:
 # including every failure ordering that must leave maintenance unchanged.
 deploycheck:
     ./deploy/cd/deploy_test.sh
+
+# The configuration apply that runs before every deploy does what its header
+# says: init, a targeted plan, the guard, then an apply only when the guard
+# said yes, and never a traffic shift. The test runs the real script against
+# a fake terraform with the real guard and the real plan fixtures.
+applycheck:
+    ./deploy/cd/apply-config_test.sh
 
 # No YAML key is defined twice in one mapping.
 #

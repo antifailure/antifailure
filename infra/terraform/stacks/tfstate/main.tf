@@ -218,6 +218,40 @@ resource "azurerm_role_assignment" "ci_reads_state" {
 # Reader here is the CONTROL plane only: it can see that the account exists and
 # what its settings are, and it can read nothing inside it. The pair is what
 # makes the plan job work, and both halves are read-only.
+# What the DEPLOY job holds on the state, which is a write.
+#
+# STORAGE BLOB DATA CONTRIBUTOR, on this account. cd.yml applies the control
+# plane's configuration from its tfvars before every deploy, through
+# deploy/cd/apply-config.sh, and an apply writes the state blob and takes the
+# blob lease that locks it. The Reader above cannot do either.
+#
+# THIS GRANT ALREADY EXISTS AND WAS NOT MADE HERE. `az role assignment list`
+# on the account for af-infra-ci shows Storage Blob Data Contributor created
+# 2026-08-28T03:20:32Z, by hand, in the same minute as the hand-made Key Vault
+# Secrets Officer grant on staging's vault, and self-hosting/azure.md went on
+# describing the identity as read-only on the state for a further nine days.
+# This resource declares what is live so the next reader of this stack learns
+# it from the code. It will not apply cleanly over the hand-made one; Azure
+# refuses a duplicate as RoleAssignmentExists. Import it instead, once, with
+# the id the listing prints:
+#
+#   terraform import 'azurerm_role_assignment.cd_writes_state[0]' \
+#     "$(az role assignment list --assignee <cd_principal_id> \
+#          --scope <state account id> \
+#          --query "[?roleDefinitionName=='Storage Blob Data Contributor'].id | [0]" -o tsv)"
+#
+# WHAT IT COSTS, said here because azure.md used to say the opposite. The plan
+# job's identity is this identity, and the plan job runs on pull requests. The
+# plan still passes -lock=false and writes nothing, and that is a flag in a
+# workflow a pull request can edit. The state's blob versioning and thirty day
+# retention in the account above are what make a wrong write recoverable.
+resource "azurerm_role_assignment" "cd_writes_state" {
+  count                = var.cd_principal_id == "" ? 0 : 1
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = var.cd_principal_id
+}
+
 resource "azurerm_role_assignment" "ci_sees_the_account" {
   count                = var.ci_principal_id == "" ? 0 : 1
   scope                = azurerm_storage_account.state.id

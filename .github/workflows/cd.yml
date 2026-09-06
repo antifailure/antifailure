@@ -5,6 +5,18 @@
 #   merge to main  ->  gate  ->  build  ->  staging          (automatic)
 #   push a v* tag  ->  gate  ->  build  ->  staging  ->  [approval]  ->  production
 #
+# Each deploy is two steps in a fixed order: the CONFIGURATION, then the IMAGE.
+# deploy/cd/apply-config.sh plans the environment's tfvars targeted at the
+# container app alone, refuses anything that is not an env or secret reference
+# change, and applies. deploy/cd/deploy.sh then creates the revision that takes
+# traffic from that template. The order is the whole point: before it, a
+# variable merged into production.tfvars was inert until a person ran a
+# targeted apply and a traffic shift by hand, and on 2026-09-05 three of them
+# were, while the marketing site pointed at a proxy the missing variable had
+# not yet turned on. Anything in the tfvars that is not the app's configuration
+# still needs a person: the runbook's hand apply is how the rest of the stack
+# moves.
+#
 # Staging is not gated by a human because a gate a person clicks through fifty
 # times a day is a gate nobody reads. Production is, and the approval lives in
 # the `production` GitHub environment where the reviewer list is auditable
@@ -78,6 +90,11 @@ env:
   PRODUCTION_BOOTSTRAP_JOB: afcpprod-bootstrap
   PRODUCTION_MAINTENANCE_JOB: afcpprod-maintenance
   PRODUCTION_URL: https://app.antifailure.dev
+  # The same pin as infra.yml, and it has to stay the same: a plan job and an
+  # apply job on two versions would write the state back and forth between
+  # them. If you bump one, bump both in the same commit.
+  TERRAFORM_VERSION: 1.13.4
+  TERRAFORM_SHA256: 98aa516201e948306698efd9954ab4cc0d1227c2578ba56245898b5f679e590b
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -272,6 +289,36 @@ jobs:
       - name: The target group is ours
         run: GOTOOLCHAIN=local go run ./tools/azguard check --tags "${RESOURCE_GROUP}"
 
+      # THE CONFIGURATION, BEFORE THE IMAGE. See the header. This plans
+      # staging.tfvars targeted at the container app, applies it only if the
+      # plan is an env or secret reference change and nothing else, and leaves
+      # the new revision at zero traffic for deploy.sh to supersede. The
+      # credential is the same OIDC login as the deploy; the state account's
+      # names arrive from the two repository secrets infra.yml's plan job
+      # already reads, and ci_principal_id is pinned for the reason infra.yml
+      # gives: a plan run with different inputs is a plan about a different
+      # desired state.
+      - name: Install Terraform
+        run: |
+          set -euo pipefail
+          url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL -o /tmp/tf.zip "$url"
+          echo "${TERRAFORM_SHA256}  /tmp/tf.zip" | sha256sum -c -
+          sudo unzip -o -q /tmp/tf.zip -d /usr/local/bin
+
+      - name: Apply configuration
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          AF_TFSTATE_RG: ${{ secrets.AZURE_TFSTATE_RG }}
+          AF_TFSTATE_ACCOUNT: ${{ secrets.AZURE_TFSTATE_ACCOUNT }}
+        run: deploy/cd/apply-config.sh staging
+
       # The digest goes through the environment rather than being interpolated
       # into the script text. It comes from `docker inspect` and is therefore
       # trustworthy today, but a template expansion inside `run:` is a shell
@@ -387,6 +434,40 @@ jobs:
 
       - name: The target group is ours
         run: GOTOOLCHAIN=local go run ./tools/azguard check --tags "${PRODUCTION_RESOURCE_GROUP}"
+
+      # THE CONFIGURATION, AFTER THE APPROVAL AND BEFORE THE IMAGE. This is the
+      # step that was a person at a terminal on 2026-09-05, three times. It
+      # plans production.tfvars targeted at the container app, against the
+      # production state blob, with the alert receivers read back out of that
+      # state so the action group is a no-op, and applies only an env or secret
+      # reference change. The revision it makes sits at zero traffic until
+      # deploy.sh, two steps down, creates the one that takes traffic from the
+      # same template. It never shifts traffic and it never touches the image.
+      #
+      # The identity refreshes the app's dependencies to plan, and those
+      # include the vault secrets the app references, so it holds Key Vault
+      # Secrets User on afcpprod-kv-centralus; ci.tf declares that grant beside
+      # the Contributor one.
+      - name: Install Terraform
+        run: |
+          set -euo pipefail
+          url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSL -o /tmp/tf.zip "$url"
+          echo "${TERRAFORM_SHA256}  /tmp/tf.zip" | sha256sum -c -
+          sudo unzip -o -q /tmp/tf.zip -d /usr/local/bin
+
+      - name: Apply configuration
+        env:
+          ARM_USE_OIDC: "true"
+          ARM_USE_AZUREAD: "true"
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_ci_principal_id: ${{ vars.AZURE_CI_PRINCIPAL_ID }}
+          AF_TFSTATE_RG: ${{ secrets.AZURE_TFSTATE_RG }}
+          AF_TFSTATE_ACCOUNT: ${{ secrets.AZURE_TFSTATE_ACCOUNT }}
+        run: deploy/cd/apply-config.sh production
 
       # The same digest staging tested, which is the entire reason build outputs
       # one. A tag can be moved between the two deploys and a digest cannot.

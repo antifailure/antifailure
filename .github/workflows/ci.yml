@@ -219,6 +219,15 @@ jobs:
         # script against fake Azure and health endpoints and proves all three.
         run: ./deploy/cd/deploy_test.sh
 
+      - name: The configuration apply applies configuration and nothing else
+        # Before every deploy, cd.yml applies the container app's env and
+        # secret references from the environment's tfvars. This runs that
+        # script against a fake terraform with the real guard and the real
+        # plan fixtures: an apply only after the guard said yes, never a
+        # traffic shift, a refusal that names its reason, and a stop before
+        # any terraform call when an input is missing.
+        run: ./deploy/cd/apply-config_test.sh
+
       - name: No YAML key is defined twice in one mapping
         # examples/github-workflow.yml declared `seed` and `concurrency` twice
         # each in its workflow_dispatch inputs. YAML keeps the last definition,

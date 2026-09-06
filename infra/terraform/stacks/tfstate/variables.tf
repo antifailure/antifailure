@@ -55,3 +55,16 @@ variable "ci_principal_id" {
     stack came to be silently skipped.
   EOT
 }
+
+variable "cd_principal_id" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    Object id of the identity cd.yml deploys with, which gets WRITE access to
+    the state because it applies the control plane's configuration before each
+    deploy. Usually the same principal as ci_principal_id; the two variables
+    are separate so a stack that federates a second identity for deploys can
+    grant the write to that one alone. Empty disables the grant. See
+    cd_writes_state in main.tf for why the live grant has to be imported.
+  EOT
+}
