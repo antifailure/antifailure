@@ -6,6 +6,7 @@ antifailure
 autocapture
 autocaptured
 autovacuum
+blockable
 branchable
 bubbletea
 buildpack
@@ -21,6 +22,7 @@ depguard
 DMARC
 eastus
 Fulcio
+geolocates
 gitleaks
 golangci
 goldens
@@ -41,6 +43,7 @@ pgvector
 PKCE
 pooler
 postgres
+posthog
 Procfile
 reprovision
 SCIM
