@@ -148,6 +148,12 @@ variable "pool_max" {
   description = "Postgres connections each replica may hold. (max_replicas + min_replicas) times this, plus four for the jobs and break-glass, has to fit in what the database SKU hands a role without pg_use_reserved_connections."
 }
 
+variable "trusted_proxy_hops" {
+  type        = number
+  default     = 1
+  description = "Proxies every request passes through before the container. One is the Container Apps ingress alone, which is what this stack builds; two if a Front Door or WAF is put in front of it. Sets AF_TRUSTED_PROXY_HOPS."
+}
+
 variable "app_base_url" {
   type    = string
   default = ""

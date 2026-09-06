@@ -140,19 +140,26 @@ describe('the OAuth exchange', { skip: hasDatabase ? false : 'no Postgres' }, ()
   })
 
   it('signs in behind a chain of proxies, where the forwarded header is a list', async () => {
-    // The header a request arrives with in production is not one address. Two
-    // proxies in front of this make it "client, proxy", and the sessions table
-    // records the address in an `inet` column, which refuses a list outright.
-    // The failure was total: the INSERT threw, the callback answered 500, and
-    // nobody could sign in at all through that path. Nothing behind a single
-    // proxy or a direct request reproduces it, which is why it is written down
-    // here rather than left to be found by whoever deploys behind a second one.
+    // The header a request arrives with in production is not one address. A
+    // caller who sends the header themselves, or a second proxy in front of
+    // the ingress, makes it a list, and the sessions table records the address
+    // in an `inet` column, which refuses a list outright. The failure was
+    // total: the INSERT threw, the callback answered 500, and nobody could sign
+    // in at all through that path. Nothing behind a single proxy or a direct
+    // request reproduces it, which is why it is written down here rather than
+    // left to be found by whoever deploys behind a second one.
+    //
+    // The entry recorded is the LAST one, because that is the one the trusted
+    // proxy appended; the first is whatever the caller sent. The original
+    // version of this case expected the first, and that expectation was the
+    // audit trail recording an attacker's chosen address. clientaddress.test.ts
+    // has the rest of the argument.
     //
     // A direct request with no header at all is the same bug from the other
     // side: the bucket key for a request with no address is the literal string
     // "unknown", and that is a fine bucket key and not an address.
     const cases: Record<string, string | null> = {
-      '203.0.113.7, 198.51.100.4': '203.0.113.7',
+      '203.0.113.7, 198.51.100.4': '198.51.100.4',
       '203.0.113.9:44321': '203.0.113.9',
       '[2001:db8::1]:443': '2001:db8::1',
       'unknown': null,

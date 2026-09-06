@@ -10,6 +10,7 @@ import { serve } from '@hono/node-server'
 import { createPool, createAdminPool, migrate } from '@antifailure/db'
 import postgres from 'postgres'
 import { createServer } from './server.ts'
+import { describeTrustedProxyHops, trustedProxyHopsFrom } from './clientaddress.ts'
 import { RealGitHubClient } from './auth/github.ts'
 import { systemClock } from './clock.ts'
 import { sweepSessions } from './auth/session.ts'
@@ -233,6 +234,12 @@ console.log(describeAllowlist(signInAllowlist))
 const selfServeSignup = selfServeSignupFrom(process.env.AF_SELF_SERVE_SIGNUP)
 console.log(describeSelfServeSignup(selfServeSignup))
 
+// Read at start-up so a hop count that is not a number stops the process here,
+// rather than putting every caller in one shared bucket and answering 429 to
+// the whole product. The default is one proxy, which is the ingress alone.
+const trustedProxyHops = trustedProxyHopsFrom(process.env.AF_TRUSTED_PROXY_HOPS)
+console.log(describeTrustedProxyHops(trustedProxyHops))
+
 // Read at start-up rather than on first use, so a secret of the wrong length
 // stops the process here instead of on the one request the feature exists for.
 const sealingKey = sealingKeyFrom(process.env.AF_PROVIDER_KEY_SECRET)
@@ -416,6 +423,7 @@ const { app, ingestLimiter, authLimiter } = createServer({
   github,
   clock: systemClock,
   secureCookies: process.env.AF_INSECURE_COOKIES !== '1',
+  trustedProxyHops,
   appBaseUrl: process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL,
   signInAllowlist,
   selfServeSignup,

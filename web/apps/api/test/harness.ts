@@ -106,6 +106,11 @@ export interface StartApiOptions {
    * hand are unaffected by Secure, since they are their own cookie jar.
    */
   secureCookies?: boolean
+  /** How many X-Forwarded-For entries a trusted proxy wrote, from the end. */
+  trustedProxyHops?: number
+  /** The auth limiter's rate and burst, when a test needs it to trip before the
+   *  per-endpoint limit that sits in front of it on the same key. */
+  authLimit?: { rate: number; burst: number }
   /** Who may sign in. Undefined leaves the server open, which is its default. */
   signInAllowlist?: ReadonlySet<string> | null
   /** Whether a sign-in with no organization creates one. Undefined is off,
@@ -270,6 +275,8 @@ export async function startApi(options: StartApiOptions = {}): Promise<ApiHarnes
     // The test client speaks plain HTTP, and a Secure cookie would not come
     // back. Production defaults the other way and there is a test for that.
     secureCookies: options.secureCookies ?? false,
+    ...(options.trustedProxyHops ? { trustedProxyHops: options.trustedProxyHops } : {}),
+    ...(options.authLimit ? { authLimit: options.authLimit } : {}),
     appBaseUrl: options.appBaseUrl ?? 'http://app.test/',
     signInAllowlist: options.signInAllowlist ?? null,
     selfServeSignup: options.selfServeSignup ?? false,

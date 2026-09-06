@@ -47,7 +47,7 @@ import { actorOf } from './admin/trpc.ts'
 // Lifted out of this file when a second one needed it. `x-forwarded-for` is a
 // LIST with optional ports, and Postgres refuses every one of those shapes on
 // an inet column. See clientaddress.ts.
-import { clientAddress, clientIP } from './clientaddress.ts'
+import { DEFAULT_TRUSTED_PROXY_HOPS, clientAddress, clientIP } from './clientaddress.ts'
 import { matchSiteOrigin } from './siteorigin.ts'
 import { endImpersonation, registerImpersonationRoutes } from './admin/customers.ts'
 import { appRouter } from './routers/index.ts'
@@ -199,6 +199,11 @@ export interface ServerOptions {
   clock?: Clock
   /** Set false only for local HTTP development. The cookie is Secure otherwise. */
   secureCookies?: boolean
+  /** How many proxies every request passes through before it reaches this
+   *  process, and so how many X-Forwarded-For entries were written by something
+   *  trusted, counted from the end. One is the ingress alone. See
+   *  clientaddress.ts for why the count is from the right. */
+  trustedProxyHops?: number
   /** Where the browser lands after signing in. */
   appBaseUrl?: string
   /** Signing in with a link, for the deployments GitHub cannot reach. Absent
@@ -492,6 +497,7 @@ const CONTROL_PLANE_FAILURE = 'AF-CP-003'
 export function createServer(options: ServerOptions) {
   const clock = options.clock ?? systemClock
   const secure = options.secureCookies ?? true
+  const trustedProxyHops = options.trustedProxyHops ?? DEFAULT_TRUSTED_PROXY_HOPS
   const metrics = options.metrics ?? createMetrics(options.version ?? 'dev')
   const hostedRequiredPlan = options.hostedRequiredPlan ?? null
   const operatorSetsPlan = options.operatorSetsPlan ?? false
@@ -691,7 +697,7 @@ export function createServer(options: ServerOptions) {
     const auth = c.req.header('authorization') ?? ''
     const verdict = limiterFor(limit).take(
       bucketFor(limit, {
-        ip: clientIP(c.req.header('x-forwarded-for')),
+        ip: clientIP(c.req.header('x-forwarded-for'), trustedProxyHops),
         token: auth.startsWith('Bearer ') ? auth.slice(7, 39) : null,
         // The organization is not known before the session resolves, so the
         // org-keyed limits fall back to the address for an unauthenticated
@@ -1028,7 +1034,7 @@ export function createServer(options: ServerOptions) {
   }
 
   app.get('/auth/github', async (c) => {
-    const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')))
+    const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops))
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
     // Refused here, before the redirect, when the answer cannot depend on who
@@ -1075,7 +1081,7 @@ export function createServer(options: ServerOptions) {
   })
 
   app.get('/auth/github/callback', async (c) => {
-    const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')))
+    const limited = authLimiter.take(clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops))
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
     const code = c.req.query('code')
@@ -1112,7 +1118,7 @@ export function createServer(options: ServerOptions) {
       const issued = await issueSession(options.pool, clock, {
         userId: result.userId,
         orgId: decision.orgId,
-        ip: clientAddress(c.req.header('x-forwarded-for')),
+        ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops),
         userAgent: c.req.header('user-agent') ?? undefined,
         replacing: existing ?? undefined,
       })
@@ -1181,7 +1187,7 @@ export function createServer(options: ServerOptions) {
 
   app.post('/v1/admin/signin', async (c) => {
     const limited = authLimiter.take(
-      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
     )
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
@@ -1192,7 +1198,12 @@ export function createServer(options: ServerOptions) {
     try {
       const result = await adminSignIn(
         options.pool,
-        { email, password, ip: c.req.header('x-forwarded-for'), userAgent: c.req.header('user-agent') },
+        {
+          email,
+          password,
+          ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops) ?? null,
+          userAgent: c.req.header('user-agent'),
+        },
         clock.now(),
       )
       c.header('set-cookie', adminSessionCookie(result.token, result.expiresAt, secure))
@@ -1256,7 +1267,7 @@ export function createServer(options: ServerOptions) {
       const operator = await resolveAdminSession(options.pool, token, clock.now())
       if (operator && options.adminPool) {
         await endImpersonation(options.adminPool, operator, clock.now(), {
-          ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+          ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops) ?? null,
           how: 'signed out',
         })
       }
@@ -1291,6 +1302,7 @@ export function createServer(options: ServerOptions) {
     clock,
     secure,
     appBaseUrl: options.appBaseUrl ?? '',
+    trustedProxyHops,
   })
 
   app.post('/auth/signout', async (c) => {
@@ -1385,7 +1397,7 @@ export function createServer(options: ServerOptions) {
 
     app.post('/auth/email', async (c) => {
       const limited = authLimiter.take(
-        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
       )
       if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
@@ -1401,7 +1413,7 @@ export function createServer(options: ServerOptions) {
         ;({ send } = await beginEmailSignIn(options.pool, clock, emailSignIn, {
           email: body.email,
           redirectTo: body.redirectTo,
-          ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+          ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops) ?? null,
           userAgent: c.req.header('user-agent') ?? null,
         }))
       } catch (err) {
@@ -1426,7 +1438,7 @@ export function createServer(options: ServerOptions) {
 
     app.get('/auth/email/callback', async (c) => {
       const limited = authLimiter.take(
-        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+        clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
       )
       if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
@@ -1441,7 +1453,7 @@ export function createServer(options: ServerOptions) {
         const issued = await issueSession(options.pool, clock, {
           userId: result.userId,
           orgId: result.orgId,
-          ip: clientAddress(c.req.header('x-forwarded-for')),
+          ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops),
           userAgent: c.req.header('user-agent') ?? undefined,
           replacing: existing ?? undefined,
         })
@@ -1667,7 +1679,7 @@ export function createServer(options: ServerOptions) {
   /** What the link says, before anybody signs in. */
   app.get('/auth/invitation', async (c) => {
     const limited = authLimiter.take(
-      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
     )
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
@@ -1774,7 +1786,7 @@ export function createServer(options: ServerOptions) {
     // The same bucket as the sign-in routes, because this has the same shape:
     // an unauthenticated caller with no credential to key on, and a write.
     const limited = authLimiter.take(
-      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
     )
     // The CORS header goes on the refusal too. Without it the browser reports a
     // CORS failure instead of the 429, and the page shows "could not reach the
@@ -1796,7 +1808,7 @@ export function createServer(options: ServerOptions) {
       seats: body.seats === undefined || body.seats === null ? null : Number(body.seats),
       message: String(body.message ?? ''),
       source: String(body.source ?? 'contact'),
-      ip: clientAddress(c.req.header('x-forwarded-for')),
+      ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops),
       userAgent: c.req.header('user-agent') ?? null,
     })
     if ('error' in checked) return c.json({ error: checked.error }, 400)
@@ -1839,7 +1851,7 @@ export function createServer(options: ServerOptions) {
    */
   app.get('/exports/deletion', async (c) => {
     const limited = authLimiter.take(
-      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent')),
+      clientKey(c.req.header('x-forwarded-for'), c.req.header('user-agent'), trustedProxyHops),
     )
     if (!limited.allowed) return tooMany(c, limited.retryAfterSeconds)
 
@@ -3406,7 +3418,7 @@ export function createServer(options: ServerOptions) {
           operatorSetsPlan,
           actor,
           origin: 'web',
-          ip: c.req.header('x-forwarded-for') ?? undefined,
+          ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops),
           userAgent: c.req.header('user-agent') ?? undefined,
         }
         // tRPC's fetch adapter types the context as a plain record, and the
@@ -3489,33 +3501,17 @@ async function readEmailForm(
   }
 }
 
-function clientKey(forwardedFor: string | undefined, userAgent: string | undefined): string {
-  return `${clientIP(forwardedFor)}|${(userAgent ?? '').slice(0, 64)}`
+/** The auth limiter's bucket: the address the trusted proxy saw, and the
+ *  user agent. Which entry of the forwarded header is the trusted one, and
+ *  why an unparseable one shares a bucket rather than escaping, is in
+ *  clientaddress.ts. */
+function clientKey(
+  forwardedFor: string | undefined,
+  userAgent: string | undefined,
+  trustedHops: number,
+): string {
+  return `${clientIP(forwardedFor, trustedHops)}|${(userAgent ?? '').slice(0, 64)}`
 }
-
-// The first entry in X-Forwarded-For is the client as the closest trusted proxy
-// saw it. Later entries were supplied by the caller and must never be used: a
-// limiter keyed on an attacker-chosen value is a limiter with unlimited
-// buckets.
-
-/**
- * The caller's address, in a form the database will accept, or null.
- *
- * Not the same function as clientIP, and the difference is the whole point.
- * clientIP produces a rate-limit bucket key, where "unknown" is a perfectly
- * good key and every request without a header sharing one bucket is the
- * intended behaviour. This produces a value for an `inet` column, where
- * "unknown" is a type error that fails the whole statement.
- *
- * Two ways that bites, both found by putting a real Postgres behind this:
- * a direct request has no `x-forwarded-for` at all, and a request through two
- * proxies has "1.2.3.4, 5.6.7.8", which is a list rather than an address. The
- * first entry is the client; the rest are the proxies that forwarded it. A
- * value that is neither is recorded as nothing, because a sign-in that fails
- * because the audit field would not parse is the wrong trade in every
- * direction.
- */
-
 
 /**
  * Turns one ingested batch into the numbers the objectives are measured on.

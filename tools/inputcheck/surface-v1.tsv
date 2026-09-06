@@ -52,6 +52,7 @@ helm	value	config.selfServeSignup	bool	optional
 helm	value	config.signinAllowlist	null	optional
 helm	value	config.signupUrl	string	optional
 helm	value	config.siteOrigin	string	optional
+helm	value	config.trustedProxyHops	number	optional
 helm	value	database.adminUrl	string	optional
 helm	value	database.existingSecret	string	optional
 helm	value	database.migrationUrl	string	optional
@@ -251,6 +252,7 @@ terraform:modules/control-plane	variable	stripe_price_team	string	optional
 terraform:modules/control-plane	variable	stripe_secret_key_secret_name	string	optional
 terraform:modules/control-plane	variable	stripe_webhook_secret_secret_name	string	optional
 terraform:modules/control-plane	variable	tags	map(string)	optional
+terraform:modules/control-plane	variable	trusted_proxy_hops	number	optional
 terraform:modules/control-plane	variable	vnet_cidr	string	optional
 terraform:modules/foundation	output	location	-	-
 terraform:modules/foundation	output	log_analytics_id	-	-
@@ -341,6 +343,7 @@ terraform:stacks/control-plane	variable	stripe_price_team	string	optional
 terraform:stacks/control-plane	variable	stripe_secret_key_secret_name	string	optional
 terraform:stacks/control-plane	variable	stripe_webhook_secret_secret_name	string	optional
 terraform:stacks/control-plane	variable	subscription_id	string	required
+terraform:stacks/control-plane	variable	trusted_proxy_hops	number	optional
 terraform:stacks/tfstate	output	backend_hcl	-	-
 terraform:stacks/tfstate	variable	cd_principal_id	string	optional
 terraform:stacks/tfstate	variable	ci_principal_id	string	optional

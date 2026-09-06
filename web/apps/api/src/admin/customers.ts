@@ -388,6 +388,9 @@ export interface ImpersonationRouteOptions {
    *  sign-in routes take and must be the same value. */
   secure: boolean
   appBaseUrl: string
+  /** The same count the sign-in routes use: which X-Forwarded-For entry a
+   *  trusted proxy wrote, from the end. See clientaddress.ts. */
+  trustedProxyHops: number
 }
 
 /**
@@ -402,7 +405,7 @@ export function registerImpersonationRoutes(
   app: Hono<ApiEnv>,
   options: ImpersonationRouteOptions,
 ): void {
-  const { pool, clock } = options
+  const { pool, clock, trustedProxyHops } = options
 
   /**
    * The two checks the /trpc/* middleware makes, made again here.
@@ -522,7 +525,7 @@ export function registerImpersonationRoutes(
     // important action in the portal into a 500 whose message says nothing
     // about a header. Undefined becomes null, because a column that takes an
     // address should hold one or nothing.
-    const ip = clientAddress(c.req.header('x-forwarded-for')) ?? null
+    const ip = clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops) ?? null
 
     try {
       const result = await adminPool.withOperator(
@@ -698,7 +701,7 @@ export function registerImpersonationRoutes(
     }
 
     const revoked = await endImpersonation(adminPool, operator, clock.now(), {
-      ip: clientAddress(c.req.header('x-forwarded-for')) ?? null,
+      ip: clientAddress(c.req.header('x-forwarded-for'), trustedProxyHops) ?? null,
       how: 'ended',
     })
 

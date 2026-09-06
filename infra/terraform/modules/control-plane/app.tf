@@ -365,6 +365,13 @@ resource "azurerm_container_app" "this" {
         name  = "AF_POOL_MAX"
         value = tostring(var.pool_max)
       }
+      # Which X-Forwarded-For entry is the client. The ingress appends the peer
+      # it saw as the LAST entry and leaves whatever the caller sent in front,
+      # so the count is from the right. See web/apps/api/src/clientaddress.ts.
+      env {
+        name  = "AF_TRUSTED_PROXY_HOPS"
+        value = tostring(var.trusted_proxy_hops)
+      }
       dynamic "env" {
         for_each = var.app_base_url == "" ? [] : [var.app_base_url]
         content {

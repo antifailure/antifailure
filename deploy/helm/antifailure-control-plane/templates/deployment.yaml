@@ -64,6 +64,8 @@ spec:
               value: {{ .Values.config.port | quote }}
             - name: AF_POOL_MAX
               value: {{ .Values.config.poolMax | quote }}
+            - name: AF_TRUSTED_PROXY_HOPS
+              value: {{ .Values.config.trustedProxyHops | quote }}
             {{- if .Values.config.appBaseUrl }}
             - name: AF_APP_BASE_URL
               value: {{ .Values.config.appBaseUrl | quote }}

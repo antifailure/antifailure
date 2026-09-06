@@ -196,6 +196,21 @@ variable "pool_max" {
   type    = number
   default = 10
 }
+
+# How many proxies every request passes through before it reaches the
+# container, which is how many X-Forwarded-For entries were written by
+# something trusted, counted from the end. One is the Container Apps ingress
+# alone, which is what this module builds. An installation that puts a Front
+# Door or a WAF in front of the ingress has two, and says so here.
+variable "trusted_proxy_hops" {
+  type        = number
+  default     = 1
+  description = "Proxies every request passes through before the container. One is the Container Apps ingress alone; two if a Front Door or WAF sits in front of it."
+  validation {
+    condition     = var.trusted_proxy_hops >= 1 && var.trusted_proxy_hops <= 16 && floor(var.trusted_proxy_hops) == var.trusted_proxy_hops
+    error_message = "trusted_proxy_hops must be a whole number from 1 to 16."
+  }
+}
 variable "app_base_url" {
   type    = string
   default = ""

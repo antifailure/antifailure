@@ -110,6 +110,7 @@ module "control_plane" {
   max_replicas        = var.max_replicas
   concurrent_requests = var.concurrent_requests
   pool_max            = var.pool_max
+  trusted_proxy_hops  = var.trusted_proxy_hops
   app_base_url        = var.app_base_url
 
   event_retention_months = var.event_retention_months

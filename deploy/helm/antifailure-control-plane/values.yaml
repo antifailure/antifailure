@@ -100,6 +100,14 @@ config:
   appBaseUrl: ""
   port: 8080
   poolMax: 10
+  # How many proxies every request passes through before it reaches the pod,
+  # which is how many X-Forwarded-For entries were written by something
+  # trusted, counted from the end. One is the ingress controller alone. A
+  # load balancer or WAF that also appends to the header in front of it makes
+  # two. A proxy that some requests can skip does not count, because a caller
+  # who reaches the inner one directly gets to write the entry this count
+  # attributes to the outer one.
+  trustedProxyHops: 1
   # Drop event partitions older than this many whole months. Empty keeps
   # everything, which is the default because retention is an operator's
   # decision and not a chart's.
