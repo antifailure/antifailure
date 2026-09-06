@@ -289,9 +289,9 @@ export function PricingPage() {
           command, and the quickstart runs on your own compute without an account. The hosted
           control plane is open: signing up is a GitHub exchange with no card and no invitation,
           and it lands you in your own organization on the free plan, whose limits are the ones
-          below and are enforced from the first environment. Team and Enterprise are open for
-          design partners, and those two buttons book a call or reach a person rather than take
-          an address.
+          below and are enforced from the first environment. Team is bought from the console
+          with a card at the price on its card, and cancelled from the same page. Enterprise is
+          arranged with a person, so its band is illustrative and its button books a call.
         </p>
         <ul className="grid grid-cols-3 items-stretch gap-x-12 max-xl:grid-cols-1 max-xl:gap-y-12">
           {PLANS.map((plan) => (
