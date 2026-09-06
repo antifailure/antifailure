@@ -68,6 +68,9 @@ export function isTier(value: unknown): value is TierName {
 export interface Tier {
   name: TierName;
   label: string;
+  /** Two or three words of metadata beside the name: how the plan is come by.
+   *  Quiet on purpose, and never a price, for the reason above. */
+  tag: string;
   detail: string;
   limits: {
     environments: number;
@@ -83,18 +86,21 @@ export const TIERS: readonly Tier[] = [
   {
     name: "free",
     label: "Free",
+    tag: "No card",
     detail: "What every organization starts on. No card, and the limits are enforced from the first environment.",
     limits: { environments: 3, goldens: 2, artifactGigabytes: 1, seats: 5, retentionDays: 30, perRunHours: 24 },
   },
   {
     name: "team",
     label: "Team",
+    tag: "Bought after setup",
     detail: "A flat fee per organization, not per person. Bought here through Stripe, after setup.",
     limits: { environments: 25, goldens: 10, artifactGigabytes: 50, seats: 50, retentionDays: 90, perRunHours: 168 },
   },
   {
     name: "enterprise",
     label: "Enterprise",
+    tag: "Arranged with a person",
     detail: "Agreed with a person, because the scope, the term and the price are set for each organization.",
     limits: {
       environments: 500,
@@ -301,6 +307,12 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** "1 of 3 done", the line over the setup cards. A count rather than a
+ *  percentage, because three cards is a number a person can hold. */
+export function doneLine(done: number, total: number): string {
+  return `${done} of ${total} done`;
+}
+
 /* -------------------------------------------------------------------------
  * Step four: what the control plane gives you
  * ---------------------------------------------------------------------- */
@@ -355,6 +367,49 @@ export const STEP_TITLES: Record<Step, string> = {
   tier: "Start on",
   setup: "Setting up Antifailure for you",
   benefits: "What the control plane gives you",
+};
+
+/** One word per step, under the progress bars, so the four bars say where
+ *  they lead rather than only how many are left. */
+export const STEP_LABELS: Record<Step, string> = {
+  uses: "Where",
+  tier: "Plan",
+  setup: "Setup",
+  benefits: "What you get",
+};
+
+/**
+ * What the cover pane says at each step.
+ *
+ * The cover was the same on all four steps: the sign-in screen's sentence,
+ * byte for byte, which is right on arrival and wallpaper by the third step.
+ * It carries the step now. The first headline is still the sign-in
+ * sentence, because a person has just come from the pane that says it, and
+ * each one after is a claim about that step that the step then has to keep.
+ * Nothing here is a number and nothing is a promise about the future.
+ */
+export interface CoverCopy {
+  headline: string;
+  line: string;
+}
+
+export const COVER: Record<Step, CoverCopy> = {
+  uses: {
+    headline: "Know what happens before you deploy.",
+    line: "Start with where the checks will run. Everything after this is shaped by that answer.",
+  },
+  tier: {
+    headline: "Read the limits before you meet them.",
+    line: "Every number on this step is the one the control plane enforces. Free is already yours.",
+  },
+  setup: {
+    headline: "Connected in the time it takes to read this.",
+    line: "One card for each place you named, with the exact command and what it may do.",
+  },
+  benefits: {
+    headline: "The engine runs without it. This is what changes when it reports here.",
+    line: "Environments that outlive the job, a history, and an audit log nobody can edit.",
+  },
 };
 
 /** Step one needs at least one use. Nothing else blocks. */

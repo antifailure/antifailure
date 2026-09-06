@@ -4,15 +4,18 @@ import assert from "node:assert/strict";
 import {
   BENEFITS,
   CONTACT,
+  COVER,
   EMPTY_SETUP,
   LIMIT_LABELS,
   STEPS,
+  STEP_LABELS,
   STEP_TITLES,
   TIERS,
   TIER_NAMES,
   canContinue,
   choiceFor,
   connectionSummary,
+  doneLine,
   effectiveTier,
   formatLimit,
   isPaidPlan,
@@ -146,6 +149,20 @@ test("a limit is written with its unit, and a bare count without one", () => {
   // illustrative and Stripe holds the real one.
   assert.equal(LIMIT_LABELS.length, 6);
   assert.ok(!TIERS.some((tier) => /\$/.test(tier.detail)));
+});
+
+test("each tier carries a short tag saying how it is come by, and the tag is never a price", () => {
+  // www/components/pages/company/Pricing.tsx marks its bands illustrative
+  // and subscriptions.current exposes no amount, so the metadata beside the
+  // name says how the plan arrives and never what it costs.
+  assert.deepEqual(
+    TIERS.map((tier) => tier.tag),
+    ["No card", "Bought after setup", "Arranged with a person"],
+  );
+  for (const tier of TIERS) {
+    assert.ok(tier.tag.length > 0 && tier.tag.length <= 24, `${tier.name} tag is short`);
+    assert.ok(!/\$|\d/.test(tier.tag), `${tier.name} tag has no price`);
+  }
 });
 
 test("free and team are the plans the control plane sells for money, and free never has a price", () => {
@@ -292,6 +309,13 @@ test("marking done adds in PATHS order and marking again undoes", () => {
   assert.deepEqual(toggleDone(["ci", "hosted"], "ci"), ["hosted"]);
 });
 
+test("the line over the setup cards counts cards, with the total, and updates with each mark", () => {
+  assert.equal(doneLine(0, 3), "0 of 3 done");
+  assert.equal(doneLine(1, 3), "1 of 3 done");
+  assert.equal(doneLine(1, 1), "1 of 1 done");
+  assert.equal(doneLine(3, 3), "3 of 3 done");
+});
+
 /* ------------------------------------------------------------------------
  * Step four
  * --------------------------------------------------------------------- */
@@ -335,6 +359,11 @@ test("no benefit carries a number or a buzzword", () => {
 test("four steps, in order, each with a title, and Continue and Back walk them", () => {
   assert.deepEqual([...STEPS], ["uses", "tier", "setup", "benefits"]);
   for (const step of STEPS) assert.ok(STEP_TITLES[step].length > 0);
+  // The word under each bar is one short word or two, and no two are the
+  // same, so the four bars read as four places rather than as a count.
+  const labels = STEPS.map((step) => STEP_LABELS[step]);
+  assert.equal(new Set(labels).size, 4);
+  for (const label of labels) assert.ok(label.length > 0 && label.length <= 12, `${label} fits under a bar`);
   assert.equal(nextStep("uses"), "tier");
   assert.equal(nextStep("setup"), "benefits");
   assert.equal(nextStep("benefits"), null);
@@ -372,6 +401,27 @@ test("writing keeps only ticked uses in the done list, so the two cannot disagre
   assert.deepEqual(selectedUses({ uses: ["hosted", "ci"], tier: "free", done: [] }), ["ci", "hosted"]);
 });
 
+test("the cover carries the step: a headline and a line for each, the first being the sign-in screen's sentence", () => {
+  // www/components/.../SignIn: the cover pane behind the sign-in screen says
+  // "Know what happens before you deploy." A person arrives from that pane
+  // and the first thing they see here is the sentence they just read.
+  assert.equal(COVER.uses.headline, "Know what happens before you deploy.");
+  const seen = new Set<string>();
+  for (const step of STEPS) {
+    const { headline, line } = COVER[step];
+    assert.ok(headline.length > 0 && headline.length <= 80, `${step} headline is short`);
+    assert.ok(line.length > 0 && line.length <= 110, `${step} line is one line`);
+    assert.ok(!seen.has(headline), `${step} headline is its own`);
+    seen.add(headline);
+    for (const text of [headline, line]) {
+      assert.ok(!/\d/.test(text), `${step} cover has no number`);
+      assert.ok(!text.includes("!"), `${step} cover has no exclamation`);
+      assert.ok(!text.includes(String.fromCharCode(8212)) && !text.includes("--"), `${step} cover has no em dash`);
+      assert.ok(!/seamless|empower|unlock|effortless|supercharge|elevate/i.test(text), `${step} cover has no buzzword`);
+    }
+  }
+});
+
 test("the shell gives /start the whole window, the way the sign-in screen has it", () => {
   // The browser check proves the layout. This keeps the bare branch in Shell
   // when it is edited later, so the rail cannot quietly come back around the
@@ -380,5 +430,5 @@ test("the shell gives /start the whole window, the way the sign-in screen has it
   assert.ok(shell.includes('pathname === "/start"'));
   const page = repo("console/app/(app)/start/page.tsx");
   assert.ok(page.includes("auth-honeycomb"), "the page renders the cover pane");
-  assert.ok(page.includes("Know what happens before you deploy."), "with the sign-in screen's sentence");
+  assert.ok(page.includes("COVER[step]"), "and the cover reads its words from COVER, per step");
 });

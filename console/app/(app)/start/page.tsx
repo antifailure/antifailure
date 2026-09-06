@@ -12,13 +12,16 @@ import { describeSetup, type RepositorySetup } from "@/lib/setup";
 import {
   BENEFITS,
   CONTACT,
+  COVER,
   LIMIT_LABELS,
   STEPS,
+  STEP_LABELS,
   STEP_TITLES,
   TIERS,
   canContinue,
   choiceFor,
   connectionSummary,
+  doneLine,
   effectiveTier,
   formatLimit,
   nextStep,
@@ -34,7 +37,7 @@ import {
   type Step,
   type TierName,
 } from "@/lib/onboarding";
-import { Bar, Button, Card, CommandBlock, LinkButton } from "@/components/ui";
+import { Bar, Button, CommandBlock, LinkButton } from "@/components/ui";
 import {
   GitHubMark,
   IconAudit,
@@ -60,12 +63,20 @@ import {
  * land on the environments list and are not asked again, because a question
  * that cannot be declined is a wall.
  *
- * Native inputs, on purpose. The step one cards are real checkboxes and the
+ * Native inputs, on purpose. The step one tiles are real checkboxes and the
  * tier cards are real radios, so a screen reader hears "checkbox, checked"
- * rather than a button with a state bolted on, arrow keys move between the
- * radios the way they do in every form, and the console's one focus ring lands
- * on the input without any of it being written here. The card around each is
- * a label, so the whole card is the target.
+ * rather than a button with a state bolted on, and arrow keys move between the
+ * radios the way they do in every form. The input itself is visually hidden
+ * and the tile draws its state, so the console's one focus ring is written on
+ * the tile through :has(:focus-visible) rather than landing on a box nobody
+ * can see. The tile around each input is a label, so the whole tile is the
+ * target.
+ *
+ * ONE MOTION, and it is finite. The right column fades in and rises eight
+ * pixels over 160ms when the step changes, which is the whole of what moves
+ * on this page: no bar animates, no card scales on hover, the cover swaps its
+ * words in place. It respects prefers-reduced-motion, and motioncheck reads
+ * the built export to confirm nothing on it loops.
  */
 
 /** The origin this console is served from, once there is a window to ask.
@@ -96,13 +107,17 @@ const BENEFIT_ICONS: Record<Benefit["key"], (props: { className?: string }) => R
  * ---------------------------------------------------------------------- */
 
 /**
- * The cover, byte for byte the one behind the sign-in and sign-up screens on
- * the marketing site: the same two radial washes, the same honeycomb and the
- * same sentence. A person arrives here from that screen and the pane they
- * just looked at is the pane they should see. Sticky at the desktop width, so
- * a long third step scrolls past a cover that stays put.
+ * The cover, the one behind the sign-in and sign-up screens on the marketing
+ * site: the same two radial washes and the same honeycomb. A person arrives
+ * here from that screen and the pane they just looked at is the pane they
+ * should see, so the first headline is that screen's sentence. From there the
+ * pane carries the step: each one gets its own headline and one line under
+ * it, set in the console's display size, so the left half of the window is
+ * not wallpaper by step three. Sticky at the desktop width, so a long third
+ * step scrolls past a cover that stays put.
  */
-function Cover() {
+function Cover({ step }: { step: Step }) {
+  const copy = COVER[step];
   return (
     <div className="relative hidden overflow-hidden bg-paper lg:sticky lg:top-0 lg:block lg:h-dvh">
       <div
@@ -113,36 +128,44 @@ function Cover() {
         }}
       />
       <div className="auth-honeycomb absolute inset-0 opacity-80" />
-      <div className="relative z-10 flex h-full flex-col items-center justify-center px-16 text-center">
+      <div className="relative z-10 flex h-full flex-col items-center justify-center px-12 text-center xl:px-16">
         <LogoMark className="h-14 w-14" />
-        <p className="mt-8 max-w-[320px] text-[32px] font-normal leading-dense tracking-tighter text-ink">
-          Know what happens before you deploy.
+        <p className="mt-8 max-w-[400px] text-balance text-[32px] font-normal leading-dense tracking-tighter text-ink">
+          {copy.headline}
         </p>
+        <p className="mt-4 max-w-[38ch] text-balance text-[15px] leading-6 text-muted">{copy.line}</p>
       </div>
     </div>
   );
 }
 
-/** Four bars and the words. Static: the bars that are filled are the steps
- *  behind and under the reader, and nothing on this page moves on its own. */
+/** Four bars, a word under each from the sm width, and the count. Static: the
+ *  bars that are filled are the steps behind and under the reader, and
+ *  nothing on this page moves on its own. */
 function Progress({ step }: { step: Step }) {
   const index = STEPS.indexOf(step);
   return (
     <div>
-      <ol aria-label="Steps" className="flex items-center gap-1.5">
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
+        Step {index + 1} of {STEPS.length}
+      </p>
+      <ol aria-label="Steps" className="mt-2.5 grid grid-cols-4 gap-1.5">
         {STEPS.map((s, i) => (
-          <li
-            key={s}
-            aria-current={s === step ? "step" : undefined}
-            className={`h-1 flex-1 rounded-sm ${i <= index ? "bg-ink" : "bg-[rgba(16,16,16,0.1)]"}`}
-          >
-            <span className="sr-only">{STEP_TITLES[s]}</span>
+          <li key={s} aria-current={s === step ? "step" : undefined} className="min-w-0">
+            <span
+              aria-hidden
+              className={`block h-1 rounded-sm ${i <= index ? "bg-ink" : "bg-[rgba(16,16,16,0.1)]"}`}
+            />
+            <span
+              className={`mt-2 block truncate text-[13px] tracking-snug max-sm:sr-only ${
+                s === step ? "font-medium text-ink" : i < index ? "text-muted" : "text-dim"
+              }`}
+            >
+              {STEP_LABELS[s]}
+            </span>
           </li>
         ))}
       </ol>
-      <p className="mt-2.5 text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-        Step {index + 1} of {STEPS.length}
-      </p>
     </div>
   );
 }
@@ -162,44 +185,94 @@ function Permissions({ children }: { children: ReactNode }) {
   return (
     <dl className="rounded-md border border-rule bg-[rgba(16,16,16,0.02)] px-3.5 py-3">
       <dt className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">Permissions</dt>
-      <dd className="mt-1 max-w-[74ch] text-[12.5px] leading-5 text-ink">{children}</dd>
+      <dd className="mt-1 max-w-[74ch] text-[13px] leading-5 text-ink">{children}</dd>
     </dl>
   );
 }
 
-const cardClass = (on: boolean, enabled = true) =>
-  `flex items-start gap-3.5 rounded-lg border bg-card px-4 py-4 transition-colors ${
+/**
+ * The surface a hidden native input sits in. The ink border plus a one pixel
+ * inset ring is the chosen state, which is the same two lines the console's
+ * pressed buttons use; the focus ring is drawn on the tile when the input
+ * inside it has keyboard focus, because the input is off screen.
+ */
+const tileClass = (on: boolean, enabled = true) =>
+  `relative rounded-lg border bg-card transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ink ${
     on ? "border-ink shadow-[inset_0_0_0_1px_#101010]" : "border-rule"
   } ${enabled ? "cursor-pointer hover:border-rule-strong" : "cursor-not-allowed"}`;
+
+/** The drawn half of a checkbox: an empty ring at rest, a filled disc with the
+ *  check when on. aria-hidden, because the input beside it is the truth. */
+function CheckMark({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors ${
+        on ? "border-ink bg-ink text-white" : "border-rule-strong bg-card"
+      }`}
+    >
+      {on ? <IconCheck className="h-3 w-3" /> : null}
+    </span>
+  );
+}
+
+/** The drawn half of a radio: a ring, and a dot inside it when chosen. */
+function RadioMark({ on, enabled }: { on: boolean; enabled: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-0.5 grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border ${
+        on ? "border-ink" : enabled ? "border-rule-strong" : "border-rule"
+      }`}
+    >
+      {on ? <span className="h-2 w-2 rounded-full bg-ink" /> : null}
+    </span>
+  );
+}
 
 /* -------------------------------------------------------------------------
  * Step one: where
  * ---------------------------------------------------------------------- */
 
+/**
+ * Three tiles. Three across wherever the column is wide enough for three
+ * titles to sit on one line each, which is from sm to lg, where the cover is
+ * not yet beside the column, and again from xl, where it is and the column
+ * still has 640 pixels; one under another on a phone and at the lg width
+ * between. The tile's own layout follows: the icon sits above the words when
+ * three are across and beside them when they stack, so a stacked tile is a
+ * row and not a tall box with a small icon at the top.
+ */
 function UsesStep({ setup, onToggle }: { setup: Setup; onToggle: (path: Path) => void }) {
   return (
     <fieldset>
       <legend className="sr-only">Where you will use Antifailure. Tick every one that applies.</legend>
-      <div className="grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
         {OPTIONS.map((option) => {
           const on = setup.uses.includes(option.path);
           const Icon = USE_ICONS[option.path];
           return (
-            <label key={option.path} className={cardClass(on)}>
+            <label
+              key={option.path}
+              className={`${tileClass(on)} flex flex-row items-start gap-4 p-4 sm:flex-col sm:gap-0 sm:p-5 lg:flex-row lg:gap-4 lg:p-4 xl:flex-col xl:gap-0 xl:p-5`}
+            >
               <input
                 type="checkbox"
                 name="uses"
                 value={option.path}
                 checked={on}
                 onChange={() => onToggle(option.path)}
-                className="mt-[3px] h-4 w-4 shrink-0 accent-ink"
+                className="sr-only"
               />
-              <Icon className="mt-px h-[18px] w-[18px] shrink-0 text-ink" />
-              <span className="min-w-0">
-                <span className="block text-[14px] font-medium leading-5 tracking-extra-tight text-ink">
+              <Icon className="h-7 w-7 shrink-0 text-ink" />
+              <span className="min-w-0 flex-1 pr-7 sm:mt-5 sm:pr-0 lg:mt-0 lg:pr-7 xl:mt-5 xl:pr-0">
+                <span className="block text-[15px] font-medium leading-5 tracking-extra-tight text-ink">
                   {option.title}
                 </span>
-                <span className="mt-1 block text-[12.5px] leading-5 text-muted">{option.detail}</span>
+                <span className="mt-1.5 block text-[13px] leading-5 text-muted">{option.detail}</span>
+              </span>
+              <span className="absolute right-4 top-4">
+                <CheckMark on={on} />
               </span>
             </label>
           );
@@ -239,7 +312,7 @@ function TierStep({
             const current = context.currentPlan === tier.name;
             const waiting = tier.name !== "free" && context.mayBill && context.billing.status === "loading";
             return (
-              <label key={tier.name} className={cardClass(on, availability.selectable)}>
+              <label key={tier.name} className={`${tileClass(on, availability.selectable)} block p-5`}>
                 <input
                   type="radio"
                   name="tier"
@@ -248,41 +321,54 @@ function TierStep({
                   disabled={!availability.selectable}
                   onChange={() => onPick(tier.name)}
                   aria-describedby={`${id}-${tier.name}`}
-                  className="mt-[3px] h-4 w-4 shrink-0 accent-ink"
+                  className="sr-only"
                 />
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                    <span
-                      className={`text-[14px] font-medium leading-5 tracking-extra-tight ${
-                        availability.selectable ? "text-ink" : "text-muted"
-                      }`}
-                    >
-                      {tier.label}
-                    </span>
-                    {current ? (
-                      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
-                        Current plan
+                <span className="flex items-start gap-3.5">
+                  <RadioMark on={on} enabled={availability.selectable} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <span
+                        className={`text-[22px] font-semibold leading-none tracking-tighter ${
+                          availability.selectable ? "text-ink" : "text-muted"
+                        }`}
+                      >
+                        {tier.label}
                       </span>
-                    ) : null}
-                  </span>
-                  <span className="mt-1 block text-[12.5px] leading-5 text-muted">{tier.detail}</span>
-                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
-                    {LIMIT_LABELS.map((limit) => (
-                      <div key={limit.key} className="min-w-0">
-                        <dt className="text-[11px] uppercase tracking-[0.08em] text-dim">{limit.label}</dt>
-                        <dd className="tnum mt-0.5 text-[13px] text-ink">{formatLimit(tier, limit.key)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <span id={`${id}-${tier.name}`} className="mt-3 block text-[12px] leading-5 text-dim">
-                    {waiting ? (
-                      <>
-                        <Bar className="h-3 w-[34ch] max-w-full" />
-                        <span className="sr-only">{availability.note}</span>
-                      </>
-                    ) : (
-                      availability.note
-                    )}
+                      <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-dim">
+                        {current ? "Current plan" : tier.tag}
+                      </span>
+                    </span>
+                    <span className="mt-2.5 block max-w-[62ch] text-[13px] leading-5 text-muted">
+                      {tier.detail}
+                    </span>
+                    {/* The six limits as a figure grid: the number first and
+                        large, the label under it, tabular so the columns
+                        line up across the three cards. Two rows of three
+                        from sm, three rows of two on a phone. */}
+                    <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3.5 border-t border-rule pt-4 sm:grid-cols-3">
+                      {LIMIT_LABELS.map((limit) => (
+                        <div key={limit.key} className="flex min-w-0 flex-col-reverse">
+                          <dt className="mt-1 text-[11px] uppercase tracking-[0.08em] text-dim">{limit.label}</dt>
+                          <dd
+                            className={`tnum text-[17px] font-medium leading-none tracking-extra-tight ${
+                              availability.selectable ? "text-ink" : "text-muted"
+                            }`}
+                          >
+                            {formatLimit(tier, limit.key)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <span id={`${id}-${tier.name}`} className="mt-4 block text-[13px] leading-5 text-dim">
+                      {waiting ? (
+                        <>
+                          <Bar className="h-3 w-[34ch] max-w-full" />
+                          <span className="sr-only">{availability.note}</span>
+                        </>
+                      ) : (
+                        availability.note
+                      )}
+                    </span>
                   </span>
                 </span>
               </label>
@@ -295,7 +381,7 @@ function TierStep({
           role="alert"
           className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-rule bg-[rgba(138,90,0,0.12)] px-4 py-3"
         >
-          <p className="min-w-0 flex-1 text-[12.5px] leading-5 text-ink">
+          <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink">
             Could not read whether this control plane takes payment. {billingError.message}
           </p>
           <Button onClick={retryBilling}>Try again</Button>
@@ -328,7 +414,7 @@ function ConnectionLine() {
 
   if (state.status === "loading") {
     return (
-      <p role="status" className="text-[12.5px] leading-5 text-muted">
+      <p role="status" className="text-[13px] leading-5 text-muted">
         <Bar className="h-3 w-[38ch] max-w-full" />
         <span className="sr-only">Checking which repositories are connected</span>
       </p>
@@ -337,7 +423,7 @@ function ConnectionLine() {
   if (state.status === "error") {
     return (
       <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <p className="min-w-0 flex-1 text-[12.5px] leading-5 text-muted">
+        <p className="min-w-0 flex-1 text-[13px] leading-5 text-muted">
           Could not check which repositories are connected. {state.error.message}
         </p>
         <Button onClick={state.reload}>Try again</Button>
@@ -348,7 +434,7 @@ function ConnectionLine() {
   const pending = state.data.rows.filter((row) => row.state !== "present");
   return (
     <div className="space-y-2">
-      <p role="status" className="text-[12.5px] leading-5 text-ink">
+      <p role="status" className="text-[13px] leading-5 text-ink">
         {summary ?? "No repository connected yet. Installing the App on one lists it here."}
       </p>
       {pending.length > 0 ? (
@@ -356,8 +442,8 @@ function ConnectionLine() {
           {pending.map((row) => {
             const line = describeSetup(row);
             return (
-              <li key={row.id} className="flex flex-wrap items-baseline gap-x-2 text-[12px] leading-5">
-                <span className="font-mono text-ink">{row.repository}</span>
+              <li key={row.id} className="flex flex-wrap items-baseline gap-x-2 text-[13px] leading-5">
+                <span className="font-mono text-[12.5px] text-ink">{row.repository}</span>
                 {line.href ? (
                   <a
                     href={line.href}
@@ -378,42 +464,93 @@ function ConnectionLine() {
   );
 }
 
+/** The card's number on the rail beside it, or the check once it is done. */
+function StepNumber({ n, done }: { n: number; done: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`tnum grid h-7 w-7 shrink-0 place-items-center rounded-full text-[13px] font-medium transition-colors ${
+        done ? "bg-ink text-white" : "border border-rule-strong bg-card text-ink"
+      }`}
+    >
+      {done ? <IconCheck className="h-3.5 w-3.5" /> : n}
+    </span>
+  );
+}
+
+/**
+ * Done as a check control rather than a button that changes its label: the
+ * box ticks, the card behind it goes to the paper tone and its prose to the
+ * dim grey, and the number on the rail becomes the same check. Still a real
+ * button with aria-pressed, so a screen reader hears a toggle and its state.
+ * The dim grey is the console's own dim token, which is 4.6:1 on paper, so
+ * a done card is quieter and still readable rather than faded past reading.
+ */
+function DoneToggle({ done, onToggle }: { done: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={done}
+      onClick={onToggle}
+      className={`inline-flex h-11 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md border bg-card px-3 text-[13px] font-medium text-ink transition-colors sm:h-9 ${
+        done ? "border-ink" : "border-rule hover:border-rule-strong"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`grid h-[18px] w-[18px] place-items-center rounded-sm border transition-colors ${
+          done ? "border-ink bg-ink text-white" : "border-rule-strong bg-card"
+        }`}
+      >
+        {done ? <IconCheck className="h-3 w-3" /> : null}
+      </span>
+      {done ? "Done" : "Mark done"}
+    </button>
+  );
+}
+
 function SetupCard({
+  n,
   path,
   guide,
   origin,
   done,
   onToggleDone,
 }: {
+  n: number;
   path: Path;
   guide: Guide;
   origin: string | null;
   done: boolean;
   onToggleDone: () => void;
 }) {
+  const id = useId();
   const option = OPTIONS.find((o) => o.path === path)!;
   const Icon = USE_ICONS[path];
+  const prose = done ? "text-dim" : "text-muted";
   return (
-    <Card
-      title={option.title}
-      note={guide.heading}
-      actions={
-        <Button variant={done ? "primary" : "secondary"} pressed={done} onClick={onToggleDone}>
-          {done ? (
-            <>
-              <IconCheck className="h-4 w-4" />
-              Done
-            </>
-          ) : (
-            "Mark done"
-          )}
-        </Button>
-      }
+    <section
+      aria-labelledby={id}
+      className={`overflow-hidden rounded-lg border border-rule transition-colors ${done ? "bg-paper" : "bg-card"}`}
     >
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-rule px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="sm:hidden">
+            <StepNumber n={n} done={done} />
+          </span>
+          <div className="min-w-0">
+            <h2 id={id} className="text-[14px] font-semibold tracking-extra-tight text-ink">
+              {option.title}
+            </h2>
+            <p className="mt-0.5 text-[13px] leading-5 text-dim">{guide.heading}</p>
+          </div>
+        </div>
+        <DoneToggle done={done} onToggle={onToggleDone} />
+      </header>
       <div className="space-y-5 px-4 py-4">
         <div className="flex items-start gap-3">
           <Icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-ink" />
-          <p className="max-w-[70ch] text-[13px] leading-6 text-muted">{guide.ack}</p>
+          <p className={`max-w-[70ch] text-[13px] leading-6 ${prose}`}>{guide.ack}</p>
         </div>
         {guide.step ? (
           <div className="space-y-3">
@@ -424,7 +561,7 @@ function SetupCard({
               </LinkButton>
             </div>
             {guide.step.note ? (
-              <p className="max-w-[74ch] text-[13px] leading-6 text-muted">{guide.step.note}</p>
+              <p className={`max-w-[74ch] text-[13px] leading-6 ${prose}`}>{guide.step.note}</p>
             ) : null}
           </div>
         ) : null}
@@ -435,16 +572,22 @@ function SetupCard({
             ) : (
               <CommandBlock command={item.value} label={item.label} said={item.said} />
             )}
-            {item.note ? <p className="max-w-[74ch] text-[13px] leading-6 text-muted">{item.note}</p> : null}
+            {item.note ? <p className={`max-w-[74ch] text-[13px] leading-6 ${prose}`}>{item.note}</p> : null}
           </div>
         ))}
         {path === "ci" ? <ConnectionLine /> : null}
         <Permissions>{guide.permissions}</Permissions>
       </div>
-    </Card>
+    </section>
   );
 }
 
+/**
+ * The cards in a numbered rail: 1, 2, 3 down the left from the sm width, a
+ * hairline between the numbers, and each number becoming a check as its card
+ * is marked done. On a phone the rail's 40 pixels are better spent on the
+ * command block, so the number moves into the card's own header.
+ */
 function SetupStep({
   setup,
   origin,
@@ -458,22 +601,46 @@ function SetupStep({
 }) {
   const uses = selectedUses(setup);
   return (
-    <div className="space-y-5">
-      <p className="text-[12.5px] leading-5 text-dim" role="status">
-        {setup.done.length} of {uses.length} marked done
-      </p>
-      <div className="space-y-5">
-        {uses.map((path) => (
-          <SetupCard
-            key={path}
-            path={path}
-            guide={guideFor(path, origin ?? "", installUrl)}
-            origin={origin}
-            done={setup.done.includes(path)}
-            onToggleDone={() => onToggleDone(path)}
-          />
-        ))}
+    <div>
+      <div className="flex items-center gap-3">
+        <span aria-hidden className="flex gap-1">
+          {uses.map((path) => (
+            <span
+              key={path}
+              className={`block h-1 w-6 rounded-sm transition-colors ${
+                setup.done.includes(path) ? "bg-ink" : "bg-[rgba(16,16,16,0.1)]"
+              }`}
+            />
+          ))}
+        </span>
+        <p className="tnum text-[13px] text-dim" role="status">
+          {doneLine(setup.done.length, uses.length)}
+        </p>
       </div>
+      <ol className="mt-5 space-y-5 sm:space-y-0">
+        {uses.map((path, i) => {
+          const done = setup.done.includes(path);
+          const last = i === uses.length - 1;
+          return (
+            <li key={path} className="sm:grid sm:grid-cols-[28px_minmax(0,1fr)] sm:gap-x-4">
+              <div className="hidden sm:flex sm:flex-col sm:items-center">
+                <StepNumber n={i + 1} done={done} />
+                {last ? null : <span aria-hidden className="mt-2 w-px flex-1 bg-rule" />}
+              </div>
+              <div className={last ? "" : "sm:pb-5"}>
+                <SetupCard
+                  n={i + 1}
+                  path={path}
+                  guide={guideFor(path, origin ?? "", installUrl)}
+                  origin={origin}
+                  done={done}
+                  onToggleDone={() => onToggleDone(path)}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -484,15 +651,15 @@ function SetupStep({
 
 function BenefitsStep() {
   return (
-    <ul className="divide-y divide-rule rounded-lg border border-rule bg-card">
+    <ul className="divide-y divide-rule border-y border-rule">
       {BENEFITS.map((benefit) => {
         const Icon = BENEFIT_ICONS[benefit.key];
         return (
-          <li key={benefit.key} className="flex items-start gap-4 px-4 py-4">
-            <Icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-ink" />
+          <li key={benefit.key} className="grid grid-cols-[28px_minmax(0,1fr)] gap-x-4 py-5">
+            <Icon className="mt-px h-6 w-6 text-ink" />
             <div className="min-w-0">
-              <p className="text-[14px] font-medium leading-5 tracking-extra-tight text-ink">{benefit.title}</p>
-              <p className="mt-1 max-w-[62ch] text-[12.5px] leading-5 text-muted">{benefit.detail}</p>
+              <p className="text-[15px] font-medium leading-6 tracking-extra-tight text-ink">{benefit.title}</p>
+              <p className="mt-1 max-w-[62ch] text-[13px] leading-6 text-muted">{benefit.detail}</p>
             </div>
           </li>
         );
@@ -681,12 +848,12 @@ export default function StartPage() {
     // page scrolled sideways under it. The command scrolls inside its own
     // box; the column must not grow to fit it.
     <div className="grid min-h-dvh w-full grid-cols-[minmax(0,1fr)] bg-paper lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <Cover />
+      <Cover step={step} />
       <div className="relative flex min-w-0 flex-col px-5 py-6 sm:px-8 lg:px-16 lg:py-8 max-sm:pb-[max(2rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <LogoMark className="h-6 w-6 shrink-0 lg:hidden" />
-            <span className="min-w-0 truncate text-[12.5px] text-muted">Signed in as {me?.label}</span>
+            <span className="min-w-0 truncate text-[13px] text-muted">Signed in as {me?.label}</span>
           </div>
           <button
             type="button"
@@ -701,47 +868,53 @@ export default function StartPage() {
         </div>
 
         <div className="flex flex-1 items-start justify-center py-8 lg:items-center lg:py-10">
-          <div className="w-full max-w-[560px]">
+          <div className="w-full max-w-[640px]">
             <Progress step={step} />
-            <h1
-              ref={headingRef}
-              tabIndex={-1}
-              className="mt-5 text-[28px] font-semibold leading-dense tracking-tighter text-ink outline-none max-sm:text-[26px]"
-            >
-              {STEP_TITLES[step]}
-            </h1>
-            <p className="mt-3 max-w-[58ch] text-[13.5px] leading-6 text-muted">{LEDES[step]}</p>
+            {/* Keyed by the step, so a change remounts this block and the one
+                entrance animation in globals.css plays once: 160ms, eight
+                pixels, and off under prefers-reduced-motion. The progress
+                above and the cover beside it swap in place. */}
+            <div key={step} className="step-enter">
+              <h1
+                ref={headingRef}
+                tabIndex={-1}
+                className="mt-6 text-[28px] font-semibold leading-dense tracking-tighter text-ink outline-none max-sm:text-[26px]"
+              >
+                {STEP_TITLES[step]}
+              </h1>
+              <p className="mt-3 max-w-[60ch] text-[13.5px] leading-6 text-muted">{LEDES[step]}</p>
 
-            <div className="mt-7">{body}</div>
+              <div className="mt-7">{body}</div>
 
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              {last ? (
-                ending === "checkout" ? (
-                  <Button variant="primary" busy={checkoutBusy} onClick={checkout}>
-                    {checkoutBusy ? "Opening checkout" : "Continue to checkout"}
-                  </Button>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                {last ? (
+                  ending === "checkout" ? (
+                    <Button variant="primary" busy={checkoutBusy} onClick={checkout}>
+                      {checkoutBusy ? "Opening checkout" : "Continue to checkout"}
+                    </Button>
+                  ) : (
+                    <LinkButton href="/environments">Open environments</LinkButton>
+                  )
                 ) : (
-                  <LinkButton href="/environments">Open environments</LinkButton>
-                )
-              ) : (
-                <Button variant="primary" disabled={!canContinue(step, setup.uses)} onClick={forward}>
-                  Continue
-                </Button>
-              )}
-              {last && ending === "contact" ? (
-                <LinkButton href={CONTACT} variant="secondary">
-                  Talk to us about Enterprise
-                </LinkButton>
+                  <Button variant="primary" disabled={!canContinue(step, setup.uses)} onClick={forward}>
+                    Continue
+                  </Button>
+                )}
+                {last && ending === "contact" ? (
+                  <LinkButton href={CONTACT} variant="secondary">
+                    Talk to us about Enterprise
+                  </LinkButton>
+                ) : null}
+                {step !== "uses" ? <Button onClick={back}>Back</Button> : null}
+              </div>
+              {checkoutError ? (
+                <p role="alert" className="mt-3 max-w-[60ch] text-[13px] leading-5 text-fail">
+                  {checkoutError}
+                </p>
+              ) : noteUnderActions ? (
+                <p className="mt-3 max-w-[60ch] text-[13px] leading-5 text-muted">{noteUnderActions}</p>
               ) : null}
-              {step !== "uses" ? <Button onClick={back}>Back</Button> : null}
             </div>
-            {checkoutError ? (
-              <p role="alert" className="mt-3 max-w-[60ch] text-[12.5px] leading-5 text-fail">
-                {checkoutError}
-              </p>
-            ) : noteUnderActions ? (
-              <p className="mt-3 max-w-[60ch] text-[12.5px] leading-5 text-muted">{noteUnderActions}</p>
-            ) : null}
           </div>
         </div>
       </div>

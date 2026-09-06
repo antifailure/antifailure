@@ -115,6 +115,36 @@ body {
   background-size: 16px 16px, 34px 60px;
 }
 
+/*
+ * The one entrance on the first sign-in walk. The step's column fades in and
+ * rises eight pixels when the step changes, once, in 160ms, and that is the
+ * whole of what moves on that page. It is a keyframe rather than a transition
+ * because the block is remounted per step, so there is no earlier state to
+ * transition from; `1` and `both` make it finite and leave it where it lands.
+ * Under prefers-reduced-motion it does not run at all, over and above the
+ * global shortening at the end of this file, so the rule is readable here.
+ */
+@keyframes af-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.step-enter {
+  animation: af-step-in 160ms ease-out 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-enter {
+    animation: none;
+  }
+}
+
 /* Numbers in a table have to line up, and proportional digits do not. */
 .tnum {
   font-variant-numeric: tabular-nums;

@@ -309,29 +309,98 @@ function NoOrganization({ session }: { session: Session }) {
   );
 }
 
-function SignOutButton() {
+function useSignOut() {
   const [busy, setBusy] = useState(false);
+  const signOut = async () => {
+    setBusy(true);
+    try {
+      await rest("/auth/signout", { method: "POST" });
+    } finally {
+      window.location.href = "/";
+    }
+  };
+  return { busy, signOut };
+}
+
+/** Sign out on a light surface: the no-organization screen. */
+function SignOutButton() {
+  const { busy, signOut } = useSignOut();
   return (
-    <Button
-      busy={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await rest("/auth/signout", { method: "POST" });
-        } finally {
-          window.location.href = "/";
-        }
-      }}
-    >
+    <Button busy={busy} onClick={signOut}>
       <IconSignOut className="h-4 w-4" />
       Sign out
     </Button>
   );
 }
 
+/**
+ * Sign out on the black chrome: the same row the operator portal's rail ends
+ * in, at the rail's own text tone, rather than a white bordered button that
+ * would be the brightest thing on the rail. `full` for the rail, where it
+ * spans the column; without it for the lapsed header, where it sits beside
+ * the wordmark.
+ */
+function RailSignOut({ full = false }: { full?: boolean }) {
+  const { busy, signOut } = useSignOut();
+  return (
+    <button
+      type="button"
+      onClick={signOut}
+      disabled={busy}
+      aria-busy={busy || undefined}
+      className={`flex min-h-11 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] leading-5 text-[rgba(255,255,255,0.72)] transition-colors hover:bg-[rgba(255,255,255,0.07)] hover:text-white disabled:cursor-not-allowed disabled:opacity-55 lg:min-h-9 ${
+        full ? "w-full" : ""
+      }`}
+    >
+      <IconSignOut className="h-4 w-4 shrink-0" />
+      Sign out
+    </button>
+  );
+}
+
 /* -------------------------------------------------------------------------
  * Signed in
  * ---------------------------------------------------------------------- */
+
+/**
+ * The rail is black, and it is the operator portal's black.
+ *
+ * The two consoles are one product served from one origin, and until now
+ * they had two rails: the portal's near-black one with white text, written
+ * so an operator could tell the two windows apart across a desk, and this
+ * one, off-white with grey text, written first and never brought back into
+ * line. Side by side the customer console read as the older of the two.
+ * These are the portal's tokens, by value: the same bg-ink, the same 0.72
+ * white at rest and white on the current entry, the same 0.12 white pill
+ * behind it and 0.07 on hover, and the same inverted focus ring, which
+ * globals.css draws in white on any surface marked data-surface="inverted".
+ * What is kept from this side is the row height: 36 pixels in the desktop
+ * rail, which is the console's density decision, and 44 in the drawer,
+ * where a thumb is the pointer.
+ *
+ * Measured on #101010: white is 18.4:1, the 0.72 white is 10.0:1, the 0.6
+ * white under the name is 7.2:1, and white on the 0.12 pill is 14.1:1.
+ */
+function railLinkClass(active: boolean): string {
+  return `flex min-h-11 items-center gap-2.5 rounded-md px-2.5 text-[13.5px] leading-5 tracking-snug transition-colors lg:min-h-9 ${
+    active
+      ? "bg-[rgba(255,255,255,0.12)] font-medium text-white"
+      : "text-[rgba(255,255,255,0.72)] hover:bg-[rgba(255,255,255,0.07)] hover:text-white"
+  }`;
+}
+
+/** The wordmark on the black chrome. The mark keeps its green; the name is
+ *  white, the same weight and tracking as the portal's OPERATOR. */
+function Wordmark({ href, className = "" }: { href: string; className?: string }) {
+  return (
+    <Link href={href} className={`flex items-center gap-2 rounded-md px-2.5 ${className}`}>
+      <LogoMark className="h-[18px] w-[18px]" />
+      <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white">
+        Antifailure
+      </span>
+    </Link>
+  );
+}
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -349,13 +418,9 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
               href={href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
-              className={`flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] tracking-snug transition-colors ${
-                active
-                  ? "bg-[rgba(16,16,16,0.06)] font-medium text-ink"
-                  : "text-muted hover:bg-[rgba(16,16,16,0.035)] hover:text-ink"
-              }`}
+              className={railLinkClass(active)}
             >
-              <Icon className={`h-4 w-4 shrink-0 ${active ? "text-ink" : "text-dim"}`} />
+              <Icon className="h-4 w-4 shrink-0" />
               {label}
             </NavLink>
           </li>
@@ -367,13 +432,15 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 
 function Who({ session }: { session: Session }) {
   return (
-    <div className="border-t border-rule px-2.5 pt-3">
-      <p className="truncate text-[12.5px] font-medium text-ink">{session.label}</p>
-      <p className="mt-0.5 text-[11.5px] uppercase tracking-[0.08em] text-dim">
+    <div className="mt-4 border-t border-[rgba(255,255,255,0.14)] pt-3">
+      <p className="truncate px-2.5 text-[12.5px] font-medium text-white" title={session.label}>
+        {session.label}
+      </p>
+      <p className="mt-0.5 truncate px-2.5 text-[11.5px] uppercase tracking-[0.1em] text-[rgba(255,255,255,0.6)]">
         {session.role ?? "no role"}
       </p>
-      <div className="mt-3">
-        <SignOutButton />
+      <div className="mt-2">
+        <RailSignOut full />
       </div>
     </div>
   );
@@ -524,15 +591,10 @@ export function Shell({ children }: { children: ReactNode }) {
   if (needsPlan) {
     return (
       <div className="min-h-dvh">
-        <header className="border-b border-rule bg-paper">
+        <header data-surface="inverted" className="border-b border-rule bg-ink">
           <div className="mx-auto flex min-h-14 w-full max-w-[1120px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-10">
-            <Link href={mayBill ? "/plan" : "/exits"} className="flex min-h-11 items-center gap-2">
-              <LogoMark className="h-[18px] w-[18px]" />
-              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
-                Antifailure
-              </span>
-            </Link>
-            <SignOutButton />
+            <Wordmark href={mayBill ? "/plan" : "/exits"} className="-ml-2.5 min-h-11" />
+            <RailSignOut />
           </div>
           {/* The second row carries the label and the two links.
 
@@ -557,11 +619,7 @@ export function Shell({ children }: { children: ReactNode }) {
                         <NavLink
                           href={item.href}
                           aria-current={active ? "page" : undefined}
-                          className={`flex h-9 items-center rounded-md px-2.5 text-[13px] tracking-snug transition-colors ${
-                            active
-                              ? "bg-[rgba(16,16,16,0.06)] font-medium text-ink"
-                              : "text-muted hover:bg-[rgba(16,16,16,0.035)] hover:text-ink"
-                          }`}
+                          className={railLinkClass(active)}
                         >
                           {item.label}
                         </NavLink>
@@ -573,7 +631,7 @@ export function Shell({ children }: { children: ReactNode }) {
             ) : (
               <span />
             )}
-            <span className="min-w-0 truncate py-1 text-[12.5px] text-muted">
+            <span className="min-w-0 truncate py-1 text-[12.5px] text-[rgba(255,255,255,0.72)]">
               Signed in as {me.label}
             </span>
           </div>
@@ -587,15 +645,14 @@ export function Shell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">
-      {/* Desktop rail */}
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-rule bg-[#fbfbfa] px-3 py-4 lg:flex">
-        <Link href="/environments" className="flex items-center gap-2 px-2.5">
-          <LogoMark className="h-[18px] w-[18px]" />
-          <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
-            Antifailure
-          </span>
-        </Link>
+    <div className="min-h-dvh lg:grid lg:grid-cols-[236px_1fr]">
+      {/* Desktop rail. It scrolls on its own rather than with the page, so a
+          short viewport reaches Sign out without taking the content with it. */}
+      <aside
+        data-surface="inverted"
+        className="sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-rule bg-ink px-3 py-4 lg:flex"
+      >
+        <Wordmark href="/environments" />
         <nav aria-label="Console" className="mt-6 flex-1">
           <NavList />
         </nav>
@@ -603,20 +660,18 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile bar */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-paper px-4 lg:hidden">
-        <Link href="/environments" className="-ml-2 flex min-h-11 items-center gap-2 rounded-md px-2">
-          <LogoMark className="h-[18px] w-[18px]" />
-          <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
-            Antifailure
-          </span>
-        </Link>
+      <header
+        data-surface="inverted"
+        className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-ink px-4 lg:hidden"
+      >
+        <Wordmark href="/environments" className="-ml-2.5 min-h-11" />
         <button
           ref={opener}
           type="button"
           onClick={() => setMenu(true)}
           aria-expanded={menu}
           aria-label="Open the menu"
-          className="grid h-11 w-11 place-items-center rounded-md text-ink hover:bg-[rgba(16,16,16,0.05)]"
+          className="-mr-1 grid h-11 w-11 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
         >
           <svg viewBox="0 0 20 20" className="h-5 w-5" fill="none" aria-hidden>
             <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -630,11 +685,14 @@ export function Shell({ children }: { children: ReactNode }) {
             type="button"
             aria-label="Close the menu"
             onClick={() => setMenu(false)}
-            className="absolute inset-0 bg-[rgba(16,16,16,0.35)]"
+            className="absolute inset-0 bg-[rgba(16,16,16,0.55)]"
           />
-          <div className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-paper px-3 py-4">
+          <div
+            data-surface="inverted"
+            className="absolute inset-y-0 right-0 flex w-[min(300px,86vw)] flex-col overflow-y-auto border-l border-rule bg-ink px-3 py-4"
+          >
             <div className="flex items-center justify-between px-2.5">
-              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-ink">
+              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-white">
                 Menu
               </span>
               <button
@@ -642,7 +700,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setMenu(false)}
                 aria-label="Close the menu"
-                className="grid h-11 w-11 place-items-center rounded-md text-ink hover:bg-[rgba(16,16,16,0.05)]"
+                className="-mr-1 grid h-11 w-11 place-items-center rounded-md text-white hover:bg-[rgba(255,255,255,0.1)]"
               >
                 <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" aria-hidden>
                   <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
