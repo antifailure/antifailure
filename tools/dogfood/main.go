@@ -148,7 +148,7 @@ var budgets = []budget{
 			"attempt. A cold layer cache is the normal case on a hosted runner, " +
 			"not the exception, which is what the earlier number assumed."},
 	{"test", 12 * time.Minute,
-		"Seven workflows, two attempts each, driven by an agent. In recorded mode " +
+		"Eight workflows, two attempts each, driven by an agent. In recorded mode " +
 			"the model is a cassette lookup, so this measures the browser and the " +
 			"application rather than a provider's queue."},
 	{"load", 4 * time.Minute,

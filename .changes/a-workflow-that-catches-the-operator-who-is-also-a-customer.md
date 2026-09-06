@@ -32,3 +32,15 @@ last is the identity it acts as. A persona may name a `sign_in_path`, so the
 runner finds the operator portal's form at `/admin` rather than typing an
 operator's address into the console's own sign-in screen at the workflow's
 start path.
+
+The mirror image is rehearsed too. The customer transport check had the same
+defect in the other direction: an operator whose browser also held the console
+cookie pressed Mark reviewed in the portal and was refused 403 for want of the
+product token, by a check for a session the request was not using. The check
+now applies only to a request that names a customer procedure, and a second
+workflow acts as the operator with both cookies live, marks an application the
+persona seeder left waiting as reviewed, and expects the queue's own empty
+state. The preview now carries the operator portal's database credential, so
+the portal works inside a twin, and the planner without a model presses a
+control whose whole label the description names, which is how it finds a
+review queue's buttons on a page with no shared shape.

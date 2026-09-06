@@ -114,6 +114,24 @@ services:
       # refuse a customer mutation is a different sentence, and the workflow's
       # expectation is the internal-error one, which the 403 path can never
       # produce.
+      # The operator portal's own database credential, so the portal WORKS in
+      # a preview rather than answering "did not answer" after a sign-in.
+      # Without it admin.* procedures refuse with PRECONDITION_FAILED, the
+      # shell shows an error screen, and the runner never sees "Sign out"
+      # after the operator signs in. bootstrap.mjs gives antifailure_admin the
+      # password the URL carries at migrate time; the migrations created the
+      # role with BYPASSRLS and its grants.
+      #
+      # No value here, on purpose, and not only because the validator refuses
+      # a committed URL with a password in it. The value knows how the
+      # database provider names things (the branch answers as `db`, the
+      # database is `antifailure`), which is the run's business rather than the
+      # manifest's, so the secrets subsystem supplies it: dogfood.yml sets it
+      # for CI and a laptop exports it or puts it in .env. A run without it
+      # fails at start rather than quietly bringing up a portal that cannot
+      # sign anybody in:
+      #   postgres://antifailure_admin:<any preview password>@db:5432/antifailure?sslmode=disable
+      - name: AF_ADMIN_DATABASE_URL
       - name: AF_STRIPE_SECRET_KEY
         value: preview-billing-is-on-and-stripe-is-unreachable
       - name: AF_STRIPE_WEBHOOK_SECRET
@@ -394,6 +412,39 @@ workflows:
       # unverified result that would exit zero.
       - '"Something went wrong on the control plane. Nothing was changed, and the reason is in its logs."'
     tags: [billing, rbac, csrf]
+
+  # The same failure in the other direction, which the founder hit next. An
+  # operator whose browser also held the console cookie pressed Mark reviewed
+  # in the portal and the CUSTOMER gate refused it, 403 "needs the
+  # x-antifailure-csrf header from GET /auth/session", for a session the
+  # request was not using. Same two cookies, same browser, the mutation now an
+  # operator one, so the workflow acts as the operator (named last).
+  #
+  # personas.mjs seeds one application, "Preview Applicant", waiting to be
+  # reviewed, and resets it to waiting on every provisioning run so this
+  # presses the mutation rather than finding the work done. The description
+  # names the two controls by their visible labels, which is how the planner
+  # without a model knows what to press on a page whose shape it does not
+  # share with every application.
+  - name: an-operator-who-is-also-a-customer-can-mark-an-application-reviewed
+    description: >-
+      Sign in to the console as the owner, then sign in to the operator portal
+      in the same browser, open the applications queue, open the application
+      from Preview Applicant, press Mark reviewed, and confirm the waiting queue
+      says nothing is left in it rather than refusing the review for want of a
+      header the portal has no reason to send.
+    personas: [owner, operator-owner]
+    start_path: /admin/administration/applications
+    expect:
+      # The waiting queue's own empty state, which the page shows only once the
+      # one seeded application has left it, which only a review that reached
+      # the handler does. Under the bug the drawer stays open showing the 403
+      # sentence and the row stays in the queue, so this is absent and the
+      # quoted form makes that a failure. A seed that wrote no row cannot pass
+      # this vacuously: personas.mjs exits non zero when the application is not
+      # waiting, and provisioning failing stops the run before any workflow.
+      - '"Nothing has come in through the careers page since the last one was reviewed or removed."'
+    tags: [rbac, csrf, operator]
 
 explore:
   enabled: true

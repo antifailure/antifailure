@@ -112,6 +112,27 @@ never produce. A persona whose sign-in form is not where the workflow starts
 says so with [`sign_in_path`](/docs/guides/personas), which the runner tries
 before the usual paths.
 
+## Naming a button
+
+Without a model key the runner presses the controls every application shares:
+sign up, continue, subscribe, the button that sends a form it has just filled.
+A page with no shared shape, an operator's review queue say, gets nothing
+pressed and a run that says so. Name the control in the description by the
+label a person reads:
+
+```yaml
+    description: >
+      Open the application from Preview Applicant, press Mark reviewed, and
+      confirm the waiting queue is empty afterwards.
+```
+
+A control whose whole visible label appears in the description is pressed once
+the shared words have nothing left to offer, in the order the description
+mentions them. This is a label, not a selector, and it still says nothing about
+when: a control is pressed when it is on the page and not before. The sign-in
+vocabulary is never pressed this way, because every description says "sign in"
+somewhere and the runner already did.
+
 ## Ordering
 
 Workflows share an environment and run in order, because a subscription usually

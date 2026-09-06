@@ -46,7 +46,7 @@ func TestBudgets_EveryOneCarriesItsReason(t *testing.T) {
 
 // A phase is bounded by the last closing event, not the first.
 //
-// Two services build inside one up, and seven workflows run inside one test. The
+// Two services build inside one up, and eight workflows run inside one test. The
 // interval somebody waits for ends when the last of them finishes, and timing
 // to the first would report a five minute step as forty seconds.
 func TestSpan_EndsAtTheLastClosingEvent(t *testing.T) {

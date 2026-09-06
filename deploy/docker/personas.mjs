@@ -163,6 +163,30 @@ try {
       RETURNING id`
     id = row.id
     console.log(`${persona.email} is an operator with the ${persona.role} role`)
+
+    // Something for the operator to act on. The portal's cheapest real
+    // mutation is marking a recruitment application reviewed, and a branch
+    // has none: the careers form writes them and no preview has a careers
+    // form. One row, with a fixed id so a second run finds it, and reset to
+    // the waiting queue every run so that the workflow that reviews it
+    // exercises the mutation rather than finding the work already done. The
+    // name is what the workflow's description presses.
+    const applicationId = '00000000-0000-4000-8000-00000000af01'
+    await sql`
+      INSERT INTO recruitment_applications
+        (id, name, email, role, project_url, why, compensation_acknowledged, created_at,
+         reviewed_at, reviewed_by)
+      VALUES (${applicationId}, 'Preview Applicant', 'applicant@antifailure.test',
+              'founding_engineer', '', 'A seeded application for the operator persona to review.',
+              true, now(), NULL, NULL)
+      ON CONFLICT (id) DO UPDATE SET reviewed_at = NULL, reviewed_by = NULL, name = EXCLUDED.name`
+    const [seeded] = await sql`
+      SELECT 1 FROM recruitment_applications WHERE id = ${applicationId} AND reviewed_at IS NULL`
+    if (!seeded) {
+      console.error('The seeded application is not in the waiting queue; refusing to report success.')
+      process.exit(1)
+    }
+    console.log('Preview Applicant is waiting to be reviewed')
   } else {
     // A customer of the oldest organization, which is the one the rest of the
     // fixture data hangs off. Named by age rather than by slug because the

@@ -14,6 +14,7 @@
 // covers sign up, sign in, and checkout in most applications, and it runs with
 // no key, no network, and no cost.
 
+import { CONTROL } from './login.ts';
 import type { Page } from './login.ts';
 
 /** What a workflow asks for. */
@@ -336,16 +337,28 @@ export class DeterministicPlanner implements Planner {
     // a submit control at all, a wizard with a "Continue" link, still falls
     // through to the word list.
     const answeredSomething = history.some((a) => a.kind === 'fill' || a.kind === 'check');
+    // Then a control the DESCRIPTION names, by its visible label. Below the
+    // shared words and above giving up, and only by the whole label: a page
+    // this planner has no shape for, an operator's review queue say, still has
+    // a description written for a person, and that description says which
+    // button the person presses. Refusing information the workflow handed
+    // over, and reporting that nothing moved it forward while "Mark reviewed"
+    // sat on the page, is the failure this closes. It is not a script: no
+    // order is given, only the presence of the control decides when, and a
+    // model reading the page decides for itself.
+    const named = namedControls(workflow, snapshot).find((c) => pressedBefore(c) < 2);
     const control = answeredSomething
-      ? (submit ?? (snapshot.submits.length > 0 ? undefined : known))
-      : (known ?? submit);
+      ? (submit ?? (snapshot.submits.length > 0 ? undefined : (known ?? named)))
+      : (known ?? named ?? submit);
     if (control) {
       return {
         kind: 'click',
         control: anchored(control),
         why: control === submit && answeredSomething
           ? `${control} sends the form this workflow has just filled in.`
-          : `${control} is the control that moves this workflow forward.`,
+          : control === named && control !== known
+            ? `${control} is named by this workflow's description.`
+            : `${control} is the control that moves this workflow forward.`,
       };
     }
 
@@ -364,6 +377,31 @@ export class DeterministicPlanner implements Planner {
         `not counted against it.`,
     };
   }
+}
+
+/** namedControls returns the page's controls whose whole visible label appears
+ *  in the workflow's description, in the order the description mentions them.
+ *
+ * Whole label, case insensitively, bounded by non-word characters, so
+ * "reviewed" in prose does not press "Mark reviewed" and "out" does not press
+ * "Sign out". The sign-in vocabulary is excluded outright: nearly every
+ * description says "sign in" somewhere, and a header's "Sign in" link would
+ * otherwise be pressed on every page that has one. Labels under four
+ * characters are excluded for the same reason, "OK" and "Go" being words.
+ */
+export function namedControls(
+  workflow: Pick<Workflow, 'description'>, snapshot: Pick<Snapshot, 'controls'>,
+): string[] {
+  const text = workflow.description.toLowerCase();
+  const found: { readonly control: string; readonly at: number }[] = [];
+  for (const control of snapshot.controls) {
+    const label = control.trim();
+    if (label.length < 4 || CONTROL.signIn.test(label) || CONTROL.sendLink.test(label)) continue;
+    const escaped = label.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const at = text.search(new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`));
+    if (at >= 0) found.push({ control, at });
+  }
+  return found.sort((a, b) => a.at - b.at).map((f) => f.control);
 }
 
 /** answerFor returns what this workflow said to type into a field, if it said.

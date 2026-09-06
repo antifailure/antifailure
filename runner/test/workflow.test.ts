@@ -308,3 +308,54 @@ test('a subscribe or upgrade button that names the plan moves the workflow forwa
   const action = await next(apply, page({ controls: ['Subscribe to our newsletter'] }));
   assert.equal(action.kind, 'stuck');
 });
+
+// A control the description names, by its visible label.
+//
+// The operator portal's review queue has no shape this planner knows: an
+// applicant's name opens a drawer and "Mark reviewed" is the button in it.
+// Neither is a shared word, so the planner stood on the page and reported
+// that nothing moved the workflow forward while the description said, in as
+// many words, which button to press.
+const review: Workflow = {
+  name: 'review-an-application',
+  description:
+    'Sign in to the portal, open the application from Preview Applicant, press Mark reviewed, ' +
+    'and confirm the waiting queue is empty afterwards.',
+  expect: ['"Nothing has come in"'],
+};
+
+test('a control the description names by its whole label is pressed when no shared word matches', async () => {
+  const action = await next(review, page({
+    controls: ['Refresh', 'Preview Applicant', 'Sign out'],
+  }));
+  assert.equal(action.kind, 'click');
+  assert.match('Preview Applicant', (action as { control: RegExp }).control);
+});
+
+test('named controls are pressed in the order the description mentions them', async () => {
+  const action = await next(review, page({
+    controls: ['Mark reviewed', 'Preview Applicant'],
+  }));
+  assert.match('Preview Applicant', (action as { control: RegExp }).control);
+});
+
+test('a label the description only contains as part of a longer word is not pressed', async () => {
+  // "Appl" is inside "Applicant" in the prose; a control called "Appl" is not
+  // what the description asked for. Whole labels only.
+  const action = await next(review, page({ controls: ['Appl'] }));
+  assert.equal(action.kind, 'stuck');
+});
+
+test('the sign-in vocabulary is never pressed on the strength of the description', async () => {
+  // A description that mentions sending a sign-in link must not press the
+  // button that does it: the runner already signed this persona in, and a
+  // second link is a second session.
+  const asks: Workflow = { ...review, description: review.description + ' Never send a sign-in link again.' };
+  const action = await next(asks, page({ controls: ['Send a sign-in link'] }));
+  assert.equal(action.kind, 'stuck');
+});
+
+test('a shared word still outranks a named control', async () => {
+  const action = await next(review, page({ controls: ['Preview Applicant', 'Continue'] }));
+  assert.match('Continue', (action as { control: RegExp }).control);
+});

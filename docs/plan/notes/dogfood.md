@@ -44,7 +44,7 @@ Four files carry it, and all four are the ones a customer writes:
 
 | File | What it says |
 | --- | --- |
-| `antifailure.yaml` | two services, the database, the egress policy, three personas, seven workflows, four invariants |
+| `antifailure.yaml` | two services, the database, the egress policy, three personas, eight workflows, four invariants |
 | `masking.yaml` | the columns that need a particular transform, and the columns that must survive |
 | `deploy/docker/app.Dockerfile` | the web application, as a standalone server |
 | `deploy/docker/control-plane.Dockerfile` | the API, with the framework deliberately excluded |
@@ -113,8 +113,11 @@ console, because the portal is the only password form on this origin.
 the same scrypt parameters the API verifies against, so the password the runner
 types and the hash in the row agree.
 
-The workflow that needs it, `an-operator-who-is-also-a-customer-can-start-checkout`,
-is the first here that holds two sessions in one browser. It signs in to the
+Two workflows need it, and they are the first here that hold two sessions in
+one browser. `an-operator-who-is-also-a-customer-can-mark-an-application-reviewed`
+is the mirror image: the same browser, acting as the operator, marks a seeded
+application reviewed, which the CUSTOMER gate used to refuse for want of the
+product token. `an-operator-who-is-also-a-customer-can-start-checkout` It signs in to the
 portal, then to the console, and then presses Subscribe to team, which is what
 the founder pressed on launch night when both cookies were live and the
 console answered 403 for want of a header the Plan page had never heard of. The
@@ -140,7 +143,7 @@ it would stay invisible. Every event carries a timestamp from the injected
 clock, so a phase is the interval between the event that opens it and the last
 event that closes it: `env.creating` to `env.ready`, `agent.started` to
 `agent.finished`, `env.destroying` to `env.destroyed`. Last rather than first,
-because two services build inside one `up` and seven workflows run inside one
+because two services build inside one `up` and eight workflows run inside one
 `test`, and what somebody waits for ends when the last of them finishes.
 
 Every budget is a measurement doubled, and carries the reason for its number

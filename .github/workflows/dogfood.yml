@@ -112,6 +112,11 @@ jobs:
       # thing this repository could do, and the shape is what the rules are
       # about, not the rows.
       AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
+      # The operator portal's credential inside the preview, which the manifest
+      # names and does not value: the branch answers as `db` in the docker
+      # provider's environment, and this is a preview password inside a network
+      # with no route out. bootstrap.mjs sets it on antifailure_admin.
+      AF_ADMIN_DATABASE_URL: postgres://antifailure_admin:preview-operator-portal@db:5432/antifailure?sslmode=disable
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -620,6 +625,11 @@ jobs:
 
     env:
       AF_STAGING_DATABASE_URL: postgres://postgres:staging@127.0.0.1:5433/antifailure
+      # The operator portal's credential inside the preview, which the manifest
+      # names and does not value: the branch answers as `db` in the docker
+      # provider's environment, and this is a preview password inside a network
+      # with no route out. bootstrap.mjs sets it on antifailure_admin.
+      AF_ADMIN_DATABASE_URL: postgres://antifailure_admin:preview-operator-portal@db:5432/antifailure?sslmode=disable
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

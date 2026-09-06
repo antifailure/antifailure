@@ -194,6 +194,27 @@ export function namesOperatorProcedure(path: string): boolean {
     .some((procedure) => procedure === 'admin' || procedure.startsWith('admin.'))
 }
 
+/**
+ * The mirror of namesOperatorProcedure: whether a tRPC request path names a
+ * CUSTOMER procedure, which is the only kind the product cookie authenticates.
+ *
+ * The customer transport check had the same defect the operator one had, in
+ * the other direction. It ran whenever the product cookie was PRESENT, so an
+ * operator whose browser also held a console session had every portal
+ * mutation refused 403 "needs the x-antifailure-csrf header" by a check for a
+ * session that request was not using. Mark reviewed on the applications queue
+ * was the first one it refused. A request is a customer request when it names
+ * a procedure outside `admin.`; a batch mixing both kinds is both, and each
+ * check looks at its own cookie.
+ */
+export function namesCustomerProcedure(path: string): boolean {
+  const procedures = path.replace(/^\/trpc\/?/, '').split('?')[0] ?? ''
+  return procedures
+    .split(',')
+    .map((procedure) => decodeURIComponent(procedure))
+    .some((procedure) => procedure !== '' && procedure !== 'admin' && !procedure.startsWith('admin.'))
+}
+
 export function adminCsrfTokenFor(sessionToken: string): string {
   return createHmac('sha256', sessionToken).update('admin-csrf').digest('base64url')
 }
