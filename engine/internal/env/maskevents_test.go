@@ -289,3 +289,19 @@ func toInt64Field(t *testing.T, v any) int64 {
 	t.Fatalf("%v is not a number", v)
 	return 0
 }
+
+// The guard in rules, named directly, because the test above reaches it by a
+// long path and a reader repairing a panic stack should find the smallest
+// statement of what is supposed to happen.
+//
+// An orchestrator with no manifest is the shape verification runs in when it
+// reads a database somebody else masked. It used to be a nil dereference the
+// moment unruledColumns asked for the rules.
+func TestRules_WithNoManifestAnswersWithTheBuiltInSet(t *testing.T) {
+	o := &Orchestrator{opts: Options{Root: t.TempDir(), Clock: clock.New(), Redactor: redact.New()}}
+	rules, hash, err := o.rules()
+	require.NoError(t, err, "a project with no manifest is not a reason to refuse the built in rules")
+	require.NotNil(t, rules)
+	require.Equal(t, rulesHash(nil), hash,
+		"nothing was declared, so the hash has to be the one an empty declaration produces")
+}

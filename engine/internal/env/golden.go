@@ -90,9 +90,21 @@ func (o *Orchestrator) MaskingKey(ctx context.Context, s *session) (*masking.Key
 }
 
 // rules returns the compiled masking rules for this project.
+//
+// The manifest is read defensively here and nowhere else in this file, because
+// this is the one place reached without one. Every other caller of a manifest
+// field in this file runs inside a command that loaded a project, so a nil
+// there would be a bug worth crashing on. rules is now also called from
+// verifyDatabase, by way of unruledColumns, and verification is the step that
+// runs against a database somebody else masked: a branch, a published golden,
+// a pull. A missing manifest means the same thing a missing rules file already
+// meant, which is the built in rule set, so it is answered rather than
+// refused. Before this guard existed, verifyDatabase on an orchestrator with
+// no manifest was a nil dereference.
 func (o *Orchestrator) rules() (*masking.RuleSet, string, error) {
 	var declared []masking.Rule
-	if o.opts.Manifest.Database != nil && o.opts.Manifest.Database.MaskingRules != "" {
+	if o.opts.Manifest != nil && o.opts.Manifest.Database != nil &&
+		o.opts.Manifest.Database.MaskingRules != "" {
 		path := filepath.Join(o.opts.Root,
 			filepath.FromSlash(strings.TrimPrefix(o.opts.Manifest.Database.MaskingRules, "./")))
 		body, err := os.ReadFile(path)
