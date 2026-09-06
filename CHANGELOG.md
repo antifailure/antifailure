@@ -150,8 +150,11 @@ pages, months after the invitation wall came down; the render boundary added
 in v1.3.3 promised a reference it showed only when the error carried one; the
 version bump rewrote a dependency that happened to share our version
 number, which no runner would have noticed and every laptop would; two figures
-on the site printed a flag that has never existed; and the variable the App
-writes into a customer's workflow was documented on no page.
+on the site printed a flag that has never existed; the pricing page told a
+reader that Team books a call in the paragraph above the card that sells it for
+five hundred dollars; the terms described a verification scan that read six
+column types, which is no longer what it reads; and the variable the App writes
+into a customer's workflow was documented on no page.
 <!-- relnotes:end -->
 
 ## v1.3.3
