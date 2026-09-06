@@ -399,7 +399,20 @@ func TestTheGoldenRungNeverClaimsAnotherProjectsOrAnUnverifiedGolden(t *testing.
 // golden that is there and skips the scheduled refresh while the source holds
 // nothing. So the golden rung is done and names the golden, the source rung is
 // a warning about the next refresh rather than a blocker, and Next is af up.
+// installedRunnerAt gives a test the runner rung as a machine that ran
+// `af runner install` has it: a home of its own with a complete runner under
+// .antifailure, and no browsers of the developer's leaking in. Without it the
+// rung reads whatever the machine running the tests holds, which on a laptop
+// was an installed runner and on the CI runner was nothing, so the tests that
+// assert the next step passed on one and failed on the other.
+func installedRunnerAt(t *testing.T) {
+	t.Helper()
+	f := newRunnerFixture(t)
+	f.homeRunner(t)
+}
+
 func TestAVerifiedGoldenForThisProjectMakesAnUnsetSourceAWarningAndNextIsAfUp(t *testing.T) {
+	installedRunnerAt(t)
 	dir := t.TempDir()
 	writeManifest(t, dir, startManifest+dockerWithSource+`  golden:
     schedule: "0 3 * * *"
@@ -487,6 +500,7 @@ func TestASetSourceIsDoneAndNeverPrinted(t *testing.T) {
 // No source named and no golden: af up makes the first golden itself, so the
 // rung must not send the reader to a refresh the run would do for them.
 func TestNoSourceAndNoGoldenPointsAtAfUp(t *testing.T) {
+	installedRunnerAt(t)
 	dir := t.TempDir()
 	writeManifest(t, dir, startManifest+`
 database:
@@ -912,6 +926,7 @@ database:
 // it whatever masking.yaml says, so an absent file is a warning about the next
 // refresh and never the next command.
 func TestAnAbsentMaskingFileBesideAUsableGoldenIsAWarningNotTheNextStep(t *testing.T) {
+	installedRunnerAt(t)
 	dir := t.TempDir()
 	writeManifest(t, dir, startManifest+dockerWithSource)
 	mine := identityOf(t, dir)
