@@ -180,7 +180,7 @@ export const FOOTER_MENUS = [
       { text: "About", href: "/about" },
       { text: "Careers", href: "/careers" },
       { text: "Contact", href: "/contact" },
-      { text: "Request access", href: "/signup" },
+      { text: "Start free", href: "/signup" },
     ],
   },
   {
@@ -201,7 +201,7 @@ export const FOOTER_MENUS = [
       { text: "GitHub", href: GITHUB_URL },
       { text: "Status", href: STATUS_URL },
       { text: "Sign in", href: "/signin" },
-      { text: "Request access", href: "/signup" },
+      { text: "Start free", href: "/signup" },
     ],
   },
 ];
