@@ -14,6 +14,174 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.0
+
+v1.2.1 shipped a command line with eighty one commands and an MCP server that
+answered four of them. Every coding agent pointed at `af mcp` could rehearse a
+migration and read the egress log, and could not bring an environment up, drive
+it, load it, look at it, or find out whether the machine could run one at all.
+This release is that server, made whole, and the two things a person met before
+they ever reached it: a first sign-in that landed on three empty cards, and a
+GitHub integration that stopped one step short of a check.
+
+**`af mcp` now serves thirty two tools rather than four.** They are named for
+the question rather than for the command, so a model picks one without reading
+a manual. `check_prerequisites` is the one to call first: it reports ready,
+blocked or undetermined, and undetermined is never a pass. Seven cover the
+environment's whole working life, from `start_environment` through
+`describe_environment`, `read_service_logs`, `run_load_test`,
+`run_browser_workflows` and `explore_for_friction` to `teardown_environment`.
+Eight answer what the engine already knew and a person had to type flags to
+ask: whether the environment is close enough to production to trust, what a
+failure code means, what the project is actually configured to do, which checks
+a diff needs, whether the data still holds, whether this change behaves like the
+release it replaces, and what masking does. Thirteen more read state and
+prerequisites, extend a lifetime, verify a model key, send a captured webhook,
+prepare a golden, and remove what has expired.
+
+The division of authority is a property of the schemas rather than a
+convention. No tool takes a branch, a base URL, a database, a golden, a safe
+route, a threshold or a runner executable; the environment comes from the
+checkout, the limits from the manifest, and unknown fields are refused. The
+three that destroy something say so on the wire in `destructiveHint`, plan by
+default, and carry out a plan only when the caller names every item the plan
+listed. Nothing reads, returns, stores or removes a credential: there is no tool
+for `af secret`, `af token`, `af login`, `af provider set` or `af model set`,
+and free text on its way into a result passes the engine's redactor, so a
+provider quoting back the key it just rejected does not put that key into a
+model's context. Rows behind a violated invariant are counted and never quoted,
+a masking preview reports that a column changed and never what from, and every
+verdict comes from the evaluator `af ci` uses, so a tool call and a pull request
+check cannot disagree.
+
+**The first screen after sign-in asks how you want to start.** Checks on pull
+requests, from a terminal, or hosted access for an agent: one question, and the
+answer's own next step with its command, address or install link and the
+permissions it needs in one line. The answer is remembered in the browser for
+the organization, the other two paths stay a click away, Not now is honoured,
+and Settings shows the answer with a way to change it.
+
+**Installing the GitHub App now opens the pull request that makes it work.**
+The App commits the same thirty line workflow `af init` writes, on a branch of
+its own, titled "Check every pull request with Antifailure", and never touches
+the default branch. `af init` writes that file itself when the checkout has a
+GitHub remote, `af github init` writes it into a project that already has a
+manifest, and a repository with only the workflow file and no manifest is
+checked anyway: `af ci` drafts one in memory, says so in the first line of the
+report, and names `af init` as what makes it yours. The file calls a reusable
+workflow, which calls the action at `antifailure/antifailure@v1`, and a moving
+`v1` tag follows every final release from this one on, so that line never needs
+editing. `af mask init` writes `masking.yaml` from the schema, and `af init`
+runs it when the manifest names a production database the shell holds.
+
+**The marketing site measures itself, and says so.** PostHog Cloud US runs on
+antifailure.dev beside the first party beacon, with every input value masked in
+the browser before anything is sent, no cookie, and Global Privacy Control, Do
+Not Track, the switch on the privacy page and an automated browser each stopping
+it before the library is fetched. Requests go to `/ph` on the control plane
+rather than to a posthog.com host. That is transport and not a boundary, and
+the privacy page, the data boundary page and the subprocessor list now all name
+PostHog, Inc. rather than saying there was no vendor. The hosted control plane
+also reports its own MCP tool calls and the model calls it brokers, by name,
+outcome and duration, and never a tool's arguments, a prompt, a completion or
+an organization identifier.
+
+**Two things a `/cli` page and a CI runner were doing wrong are fixed.** Every
+`af` process on a runner minted an engine token at startup whether or not it
+sent anything, eight per workflow run with five never used, and the page that
+teaches the command line ended in seven hundred dead credentials. The token is
+now minted on the first request, expired workflow identities are swept a day
+after they die by a role whose policy can reach nothing else, and the page
+leads with everything that can still act and folds the rest behind a count.
+A manifest with no `database.source_url_env` used to get an environment that
+looked exactly like one on a masked copy of production; `af up` and `af ci` now
+say in one bold sentence that the database was empty.
+
+### What moves when this tag is pushed
+
+**Two migrations.** `0040` creates `repository_setups`, the queue behind the
+App's setup pull request, with row level security enabled and forced. `0041`
+creates the `antifailure_sweeper` role, sets `antifailure_app` to `NOINHERIT`,
+adds one policy on `engine_tokens` that admits expired workflow identities and
+nothing else, and one partial index. Neither drops, renames, or adds a `NOT
+NULL` to anything that exists, so the revision being replaced keeps running
+against the new schema and `deploy.sh` can put traffic back on it. Read both
+before approving production; they are short.
+
+**The tag alone does not switch the PostHog proxy on, and this note says so
+rather than letting somebody find out from a 404.** `/ph` mounts only when
+`AF_POSTHOG_REGION` is set, and an environment variable on a Container App moves
+when Terraform applies, not when an image deploys. `production.tfvars` names the
+region; the order is this tag, then the apply, then a traffic shift, and between
+the first two the site's analytics are answered 404 by a process that has the
+code and not the variable. Until the apply, the same is true of the hosted
+usage reporting behind `AF_POSTHOG_PROJECT_KEY`.
+
+**The GitHub App's Contents permission is Read and write from here on.** An App
+that already exists keeps Read until somebody accepts the new permission, and
+until then the setup pull request is recorded as needing it, with the remedy,
+rather than retried against a refusal that would answer the same way forever.
+`self-hosting/production` says what to do.
+
+### Behaviour you may depend on that changed
+
+* `af init --non-interactive` no longer refuses a Dockerfile with no `EXPOSE`
+  with AF-DET-004; every question carries a default and the report lists what
+  was assumed. A run with no terminal takes the defaults and says so, and
+  AF-MAN-004 is gone.
+* `af change` writes two more keys to `GITHUB_OUTPUT`: `source_url_env` and
+  `secrets`, names only.
+* `destructiveHint` on `af mcp` tools is now declared per tool rather than false
+  everywhere. A client that surfaces it will start asking before
+  `teardown_environment`, `apply_data_masking`, `remove_expired_environments`
+  and `remove_old_goldens`.
+* The engine's own telemetry credential is obtained on the first request rather
+  than at startup. A process that sends nothing mints nothing, so the `/cli`
+  token list stops growing by eight per workflow run.
+
+<!-- relnotes:omit -->
+
+### Added
+
+* Twenty eight more `af mcp` tools, in three groups: the environment's working
+  life, the questions the engine already answered, and prerequisites and
+  housekeeping. Every one named for the question, none reaching a credential.
+* The console asks, once, how you want to start, and shows that path's real
+  next step.
+* Installing the GitHub App opens a pull request that adds the workflow file.
+* `af init` writes `.github/workflows/antifailure.yml`; `af github init` writes
+  it into an existing project; the file calls a reusable workflow and a moving
+  `v1` tag.
+* `af ci` and `af change` draft a manifest in memory when there is none.
+* `af mask init` writes `masking.yaml` from the schema.
+* PostHog on the marketing site, behind the privacy gate, through a proxy at
+  `/ph` on the control plane, and three published documents that now name it.
+* The hosted control plane reports its own MCP tool calls and brokered model
+  calls to PostHog, with nothing of a customer's in them.
+* The launch film on the home page, and a `motioncheck` that can see a video
+  looping.
+* `AF_POSTHOG_REGION` and `AF_POSTHOG_PROJECT_KEY` can be set from the Terraform
+  module and stack and from the Helm chart.
+
+### Fixed
+
+* Every `af` process on a CI runner minted an engine token it never used.
+* The `/cli` page ended in seven hundred expired workflow credentials, and
+  nothing had ever removed one.
+* An environment on an empty golden looked exactly like one on a masked copy of
+  production.
+* The runbook for a stale vulnerability scan knew one of two causes.
+* The www lockfile was regenerated on a Mac and the deploy runs `npm ci` on
+  Linux.
+* The spelling gate did not know the vendor the reference now names.
+
+### Changed
+
+* `af init` writes the workflow file and refuses less: defaults for every
+  question, and no refusal on a missing terminal.
+
+<!-- relnotes:end -->
+
 ## v1.2.1
 
 v1.2.0 was cut for a careers form that told people the server could not be
