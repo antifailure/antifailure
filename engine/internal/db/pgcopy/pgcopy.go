@@ -323,17 +323,30 @@ func CopyWith(ctx context.Context, source, target secrets.Value, opts CopyOption
 	//
 	// It sits here rather than in either path because both restore, and a
 	// requirement that holds for one holds for the other.
-	if err := ensureRoles(ctx, source, target, opts.ExcludeSchemas); err != nil {
+	names, err := ensureRoles(ctx, source, target, opts.ExcludeSchemas)
+	if err != nil {
 		return err
 	}
 
-	var err error
 	if len(opts.ExcludeArchiveKinds) > 0 {
 		err = copyThroughArchive(ctx, source, target, opts)
 	} else {
 		err = copyThroughPipe(ctx, source, target, opts)
 	}
 	if err != nil {
+		return err
+	}
+
+	// The roles are in the target and so are the objects. What is not is any
+	// privilege the one held on the other: the dump was taken with
+	// --no-privileges, so every table, sequence, function, type and schema
+	// arrived owned by whoever ran the restore and with an empty ACL. A role
+	// the source granted DELETE on sessions to exists in the copy and cannot
+	// delete from sessions, and a role the source granted nothing to is
+	// entered from a superuser connection that owns everything. The copy ran
+	// the application with a different privilege shape than production in
+	// both directions. See ensureGrants for what travels and what does not.
+	if err := ensureGrants(ctx, source, target, names, opts.ExcludeSchemas); err != nil {
 		return err
 	}
 
@@ -761,16 +774,23 @@ func Analyze(ctx context.Context, conn secrets.Value) error {
 // platform's roles with it. Policies are read from every schema, as they always
 // were: an unneeded shell role costs nothing, and a missing one stops the
 // restore.
-func ensureRoles(ctx context.Context, source, target secrets.Value, excludeSchemas []string) error {
+//
+// It returns the names it made sure of, because the same list decides whose
+// grants ensureGrants carries after the restore: the two are one decision
+// about which roles are part of the schema, read once.
+func ensureRoles(ctx context.Context, source, target secrets.Value, excludeSchemas []string) ([]string, error) {
 	names, err := requiredRoles(ctx, source, excludeSchemas)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	members, err := requiredMemberships(ctx, source, names)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return createRoleShells(ctx, target, names, members)
+	if err := createRoleShells(ctx, target, names, members); err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // membership is one row of pg_auth_members between two roles the copy

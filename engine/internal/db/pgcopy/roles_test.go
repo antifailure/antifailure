@@ -38,6 +38,9 @@ type rolesTestFixture struct {
 	bypasser   string // named by a GRANT, and BYPASSRLS in the source
 	owner      string // owns everything, has byGrant as a member, is named by nothing else
 	excluded   string // named only in a schema the copy leaves out
+	deleter    string // DELETE on the table byGrant may only read, USAGE WITH GRANT OPTION on a sequence
+	app        string // the application's role: a NOINHERIT member of sweeper, named by one schema grant
+	sweeper    string // SELECT on one column of sessions, DELETE on sessions, and a policy admitting it
 	sourceDB   string
 }
 
@@ -54,6 +57,9 @@ func newRolesTestFixture(t *testing.T, ctx context.Context, admin string) rolesT
 		bypasser:   fmt.Sprintf("af_roles_bypass_%d", stamp),
 		owner:      fmt.Sprintf("af_roles_owner_%d", stamp),
 		excluded:   fmt.Sprintf("af_roles_excluded_%d", stamp),
+		deleter:    fmt.Sprintf("af_roles_deleter_%d", stamp),
+		app:        fmt.Sprintf("af_roles_app_%d", stamp),
+		sweeper:    fmt.Sprintf("af_roles_sweeper_%d", stamp),
 		sourceDB:   fmt.Sprintf("af_roles_src_%d", stamp),
 	}
 
@@ -66,11 +72,15 @@ func newRolesTestFixture(t *testing.T, ctx context.Context, admin string) rolesT
 		CREATE ROLE %[6]s NOLOGIN BYPASSRLS;
 		CREATE ROLE %[7]s NOLOGIN;
 		CREATE ROLE %[8]s NOLOGIN;
+		CREATE ROLE %[9]s NOLOGIN;
+		CREATE ROLE %[10]s NOLOGIN NOINHERIT;
+		CREATE ROLE %[11]s NOLOGIN NOBYPASSRLS;
 		GRANT %[7]s TO CURRENT_USER;
 		GRANT %[1]s TO %[5]s WITH INHERIT FALSE, SET TRUE;
-		GRANT %[7]s TO %[1]s;`,
+		GRANT %[7]s TO %[1]s;
+		GRANT %[11]s TO %[10]s;`,
 		f.byGrant, f.byDefault, f.byFunction, f.bySchema, f.byPolicy,
-		f.bypasser, f.owner, f.excluded)))
+		f.bypasser, f.owner, f.excluded, f.deleter, f.app, f.sweeper)))
 	// On its own: a script runs in one transaction and CREATE DATABASE refuses
 	// to be in one.
 	require.NoError(t, Exec(ctx, secrets.New(admin), fmt.Sprintf(
@@ -99,6 +109,10 @@ func newRolesTestFixture(t *testing.T, ctx context.Context, admin string) rolesT
 		CREATE FUNCTION public.answer() RETURNS int LANGUAGE sql AS 'SELECT 42';
 		REVOKE ALL ON FUNCTION public.answer() FROM PUBLIC;
 		GRANT EXECUTE ON FUNCTION public.answer() TO %[3]s;
+		CREATE FUNCTION public.greet(who text) RETURNS text LANGUAGE sql AS 'SELECT who';
+		REVOKE ALL ON FUNCTION public.greet(text) FROM PUBLIC;
+		GRANT EXECUTE ON FUNCTION public.greet(text) TO %[3]s;
+		ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 		CREATE SCHEMA reporting;
 		GRANT USAGE ON SCHEMA reporting TO %[4]s;
 		CREATE TABLE public.guarded (id int PRIMARY KEY, who text);
@@ -107,14 +121,28 @@ func newRolesTestFixture(t *testing.T, ctx context.Context, admin string) rolesT
 		CREATE SCHEMA platform;
 		CREATE TABLE platform.internal (id int PRIMARY KEY);
 		GRANT SELECT ON platform.internal TO %[8]s;
+		GRANT DELETE ON public.usage TO %[9]s;
+		CREATE SEQUENCE public.usage_seq;
+		GRANT USAGE ON SEQUENCE public.usage_seq TO %[9]s WITH GRANT OPTION;
+		CREATE DOMAIN public.email AS text;
+		REVOKE ALL ON DOMAIN public.email FROM PUBLIC;
+		GRANT USAGE ON DOMAIN public.email TO %[3]s;
+		CREATE TABLE public.notice (id int PRIMARY KEY, body text);
+		GRANT SELECT ON public.notice TO PUBLIC;
+		CREATE TABLE public.sessions (id int PRIMARY KEY, token_hash text, expires_at timestamptz);
+		ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+		GRANT USAGE ON SCHEMA public TO %[10]s;
+		GRANT SELECT (expires_at), DELETE ON public.sessions TO %[11]s;
+		CREATE POLICY sweep_expired ON public.sessions FOR ALL TO %[11]s USING (expires_at <= now());
 		ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO %[2]s;`,
 		f.byGrant, f.byDefault, f.byFunction, f.bySchema, f.byPolicy,
-		f.bypasser, f.owner, f.excluded)))
+		f.bypasser, f.owner, f.excluded, f.deleter, f.app, f.sweeper)))
 	return f
 }
 
 func (f rolesTestFixture) roles() []string {
-	return []string{f.byGrant, f.byDefault, f.byFunction, f.bySchema, f.byPolicy, f.bypasser, f.owner, f.excluded}
+	return []string{f.byGrant, f.byDefault, f.byFunction, f.bySchema, f.byPolicy, f.bypasser, f.owner, f.excluded,
+		f.deleter, f.app, f.sweeper}
 }
 
 func (f rolesTestFixture) source(admin string) secrets.Value {
@@ -339,12 +367,29 @@ func TestACopyCarriesARoleNamedOnlyByAGrant(t *testing.T) {
 		require.NoError(t, err, "%s should have arrived", r)
 	}
 
-	// But its grants did not. The copy drops privileges, and a shell role
-	// holding production's grants would be more of production than the copy
-	// needs.
+	// And so did its grants. This assertion used to say the opposite, that a
+	// shell role holding production's grants would be more of production than
+	// the copy needs, and the twin answered with 42501 on its first sweep:
+	// the dump drops privileges, so the role arrived and could do nothing,
+	// which is not production's shape either. The ACL now names the role, and
+	// the owner is the target's connecting user rather than the source's.
 	acl, err := queryOneForTest(ctx, target, "SELECT coalesce(relacl::text, '') FROM pg_class WHERE oid = 'public.usage'::regclass")
 	require.NoError(t, err)
-	require.NotContains(t, acl, f.byGrant, "the grant itself must not travel, only the name it needs")
+	require.Contains(t, acl, f.byGrant+"=r/", "the SELECT the source granted has to travel with the role")
+	require.NotContains(t, acl, f.owner, "ownership stays with the connecting user, and the owner's own entry with it")
+
+	// The sweeper, verbatim: the application's role enters the sweeper's and
+	// deletes expired sessions, which needs the DELETE and the column SELECT
+	// that migration 0024 granted and that the twin did not have.
+	require.NoError(t, Exec(ctx, target, fmt.Sprintf(`
+		SET ROLE %s;
+		SET ROLE %s;
+		DELETE FROM public.sessions WHERE false;
+		DELETE FROM public.sessions WHERE expires_at <= now();`, f.app, f.sweeper)),
+		"the sweep has to succeed in the copy as it does in production")
+	requireDeniedForTest(t, Exec(ctx, target, fmt.Sprintf(
+		"SET ROLE %s; SELECT token_hash FROM public.sessions", f.sweeper)),
+		"and the column it was never granted stays out of reach")
 
 	// The owner and the excluded schema's role stayed behind.
 	for _, r := range []string{f.owner, f.excluded} {
