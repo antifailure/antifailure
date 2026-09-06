@@ -362,6 +362,42 @@ This machine is not signed in to {origin}.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
 
+### AF-CPL-005
+
+The sign in to {origin} on this machine expired.
+
+**What to do.** Run '{command}' to sign in again. The expired credential stays stored until a new sign in replaces it, so every command that needs one says this until you do.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
+
+### AF-CPL-006
+
+{origin} no longer accepts the sign in stored on this machine.
+
+**What to do.** Run '{command}' to sign in again. The token was revoked, or you were removed from the organization it belonged to; the control plane does not say which.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
+
+### AF-CPL-007
+
+The sign in to {origin} does not carry the scope this command needs: {detail}
+
+**What to do.** Run '{command}' and approve the scope in the browser. A sign in without it succeeds and then fails here again, which reads as the fix not working.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [self-hosting/control-plane](/docs/self-hosting/control-plane) |
+
 ## Database
 
 ### AF-DB-002
@@ -959,6 +995,18 @@ The manifest at {path} declares schema version {found}, which this build does no
 The manifest at {path} is larger than the {limit} limit.
 
 **What to do.** Split the configuration or remove generated content; a manifest describes services, it does not contain them.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
+### AF-MAN-007
+
+A manifest already exists at {path}, and af init does not merge into one.
+
+**What to do.** Edit the file to change it, or run 'af init --force' to replace it with a fresh detection. --force discards every edit in the file, so read it first.
 
 | | |
 | --- | --- |

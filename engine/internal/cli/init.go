@@ -75,7 +75,7 @@ worked rather than dropped in silence.`),
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false,
 		"Do not ask questions; accept every default and report what was assumed")
 	cmd.Flags().BoolVar(&force, "force", false,
-		"Overwrite an existing manifest instead of merging into it")
+		"Replace an existing antifailure.yaml with a fresh detection; nothing is merged and its edits are lost")
 	cmd.Flags().StringArrayVar(&answers, "answer", nil,
 		"Answer a question, or override a detected value, as id=value. Repeatable.")
 	return cmd
@@ -127,10 +127,15 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 
 	// An existing manifest is never silently replaced. A user's edits are the
 	// most valuable thing in the file, and detection cannot reproduce them.
+	//
+	// Its own code rather than AF-MAN-002, whose next step is "fix the
+	// reported line, then run af doctor". There is no reported line, the file
+	// is usually valid, and af doctor cannot change the one fact that stops
+	// this command, which is that the file exists. The remedy is a flag on
+	// this command, and the error is the one place a reader who did not open
+	// the help will learn its name.
 	if _, err := os.Stat(manifestPath); err == nil && !opts.force {
-		return aferrors.Coded(aferrors.AFMAN002,
-			"path", manifestPath,
-			"detail", "a manifest already exists, and af init would overwrite the edits in it")
+		return aferrors.Coded(aferrors.AFMAN007, "path", manifestPath)
 	}
 
 	env.Out.Printf("Reading %s\n", env.WorkDir)

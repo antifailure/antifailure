@@ -456,9 +456,12 @@ and reporting it would tell somebody they have access they do not have.
 			if err != nil {
 				return err
 			}
-			if cred.Expired(time.Now()) {
-				return fmt.Errorf("the credential for %s expired on %s. Run: af login",
-					origin, cred.ExpiresAt.Format(time.RFC3339))
+			// The engine's clock rather than the wall clock, so that a test
+			// can hold an expired credential still, and coded, so that the
+			// exit code is the 4 the table promises for every unusable sign
+			// in rather than the 1 a bare string earns.
+			if cred.Expired(e.Clock.Now()) {
+				return aferrors.Coded(aferrors.AFCPL005, "origin", origin, "command", "af login")
 			}
 
 			out := WhoamiJSON{
@@ -478,9 +481,7 @@ and reporting it would tell somebody they have access they do not have.
 			} else {
 				id, err := auth.NewClient(origin).Whoami(ctx, cred.Token)
 				if errors.Is(err, auth.ErrNotSignedIn) {
-					return fmt.Errorf(
-						"%s no longer accepts this token. It may have been revoked, or you may have "+
-							"been removed from %s. Run: af login", origin, cred.Organization)
+					return aferrors.Wrap(err, aferrors.AFCPL006, "origin", origin, "command", "af login")
 				}
 				if err != nil {
 					return err

@@ -804,7 +804,7 @@ af init --non-interactive --answer database.present=yes
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--answer` | - | Answer a question, or override a detected value, as id=value. Repeatable. |
-| `--force` | `false` | Overwrite an existing manifest instead of merging into it. |
+| `--force` | `false` | Replace an existing antifailure.yaml with a fresh detection; nothing is merged and its edits are lost. |
 | `--non-interactive` | `false` | Do not ask questions; accept every default and report what was assumed. |
 
 ### `af insights`

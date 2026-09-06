@@ -80,6 +80,13 @@ const (
 	AFCPL003 Code = "AF-CPL-003"
 	// This machine is not signed in to {origin}.
 	AFCPL004 Code = "AF-CPL-004"
+	// The sign in to {origin} on this machine expired.
+	AFCPL005 Code = "AF-CPL-005"
+	// {origin} no longer accepts the sign in stored on this machine.
+	AFCPL006 Code = "AF-CPL-006"
+	// The sign in to {origin} does not carry the scope this command needs:
+	// {detail}
+	AFCPL007 Code = "AF-CPL-007"
 
 	// Database
 	// The database provider {provider} is not registered in this build.
@@ -243,6 +250,9 @@ const (
 	AFMAN005 Code = "AF-MAN-005"
 	// The path {path} in the manifest resolves outside the repository.
 	AFMAN006 Code = "AF-MAN-006"
+	// A manifest already exists at {path}, and af init does not merge into
+	// one.
+	AFMAN007 Code = "AF-MAN-007"
 
 	// Masking and verification
 	// The golden {version} has no valid verification attestation and
@@ -685,6 +695,33 @@ var catalog = map[Code]Entry{
 		Area:      "CPL",
 		Message:   "This machine is not signed in to {origin}.",
 		NextStep:  "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFCPL005: {
+		Code:      AFCPL005,
+		Area:      "CPL",
+		Message:   "The sign in to {origin} on this machine expired.",
+		NextStep:  "Run '{command}' to sign in again. The expired credential stays stored until a new sign in replaces it, so every command that needs one says this until you do.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFCPL006: {
+		Code:      AFCPL006,
+		Area:      "CPL",
+		Message:   "{origin} no longer accepts the sign in stored on this machine.",
+		NextStep:  "Run '{command}' to sign in again. The token was revoked, or you were removed from the organization it belonged to; the control plane does not say which.",
+		Docs:      "self-hosting/control-plane",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
+	AFCPL007: {
+		Code:      AFCPL007,
+		Area:      "CPL",
+		Message:   "The sign in to {origin} does not carry the scope this command needs: {detail}",
+		NextStep:  "Run '{command}' and approve the scope in the browser. A sign in without it succeeds and then fails here again, which reads as the fix not working.",
 		Docs:      "self-hosting/control-plane",
 		Retryable: false,
 		ExitCode:  ExitAuth,
@@ -1234,6 +1271,15 @@ var catalog = map[Code]Entry{
 		Area:      "MAN",
 		Message:   "The path {path} in the manifest resolves outside the repository.",
 		NextStep:  "Use a path relative to the repository root, with no leading slash and no parent directory segments.",
+		Docs:      "reference/manifest",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFMAN007: {
+		Code:      AFMAN007,
+		Area:      "MAN",
+		Message:   "A manifest already exists at {path}, and af init does not merge into one.",
+		NextStep:  "Edit the file to change it, or run 'af init --force' to replace it with a fresh detection. --force discards every edit in the file, so read it first.",
 		Docs:      "reference/manifest",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,

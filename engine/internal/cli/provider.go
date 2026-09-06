@@ -131,23 +131,45 @@ func providerSessionFor(e *Env, flag string) (providerSession, error) {
 	// Checked here rather than left to a 401, so that an expired credential
 	// says what to do instead of looking like a permissions problem.
 	if cred.Expired(e.Clock.Now()) {
-		return providerSession{}, fmt.Errorf(
-			"the credential for %s expired. Run: af login --scope providers.write", origin)
+		return providerSession{}, aferrors.Coded(aferrors.AFCPL005,
+			"origin", origin,
+			"command", "af login --control-plane "+origin+" --scope providers.write")
 	}
 	return providerSession{client: auth.NewClient(origin), cred: cred, origin: origin}, nil
 }
 
-// explainScope turns the server's refusal into the command that fixes it.
+// explain turns the server's refusal into the command that fixes it.
 //
 // The server already names the scope; this keeps the control plane in the
 // message, because somebody with two of them signed in needs to know which one
 // refused.
 func (s providerSession) explain(err error) error {
+	return explainCredential(s.origin, "providers.write", err)
+}
+
+// explainCredential is the one place a control plane's refusal of a stored
+// sign in becomes an error, for every command that carries one.
+//
+// Coded, and coded under the same exit code as "not signed in", because a
+// script branching on exit 4 to decide whether to run af login (which the
+// exit code table invites it to do) has to see 4 for every reason a sign in
+// is unusable: absent, expired, revoked, or short a scope. Before this, the
+// absent case was AF-CPL-004 and exit 4 in provider and whoami, a bare string
+// and exit 1 in token, and the other three reasons were bare strings and exit
+// 1 everywhere, so the same script misclassified most of them as a generic
+// failure and the reader never saw a Next line or a docs link.
+//
+// The scope's detail is the server's own sentence rather than the wrapped
+// error, because the wrapper's prefix restates what the code already says.
+func explainCredential(origin, scope string, err error) error {
+	login := "af login --control-plane " + origin + " --scope " + scope
 	if errors.Is(err, auth.ErrScopeMissing) {
-		return fmt.Errorf("%w\n\nRun: af login --control-plane %s --scope providers.write", err, s.origin)
+		detail := strings.TrimPrefix(err.Error(), auth.ErrScopeMissing.Error()+": ")
+		return aferrors.Wrap(err, aferrors.AFCPL007,
+			"origin", origin, "detail", detail, "command", login)
 	}
 	if errors.Is(err, auth.ErrNotSignedIn) {
-		return fmt.Errorf("the credential for %s is not valid any more. Run: af login", s.origin)
+		return aferrors.Wrap(err, aferrors.AFCPL006, "origin", origin, "command", login)
 	}
 	return err
 }

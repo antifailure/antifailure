@@ -24,10 +24,17 @@ import (
 // or it does not, and a list that disagrees with reality is worse than no list.
 
 // EnvJSON is one environment.
+//
+// Services was called "name", which is what the text table's column header
+// never was: the key held the comma joined service list and the
+// environment's identifier was already in env_id. The field was never in the
+// documented output, so the stability page's promise did not cover it, and
+// nothing in this repository read it; it is renamed rather than aliased so the
+// document does not carry a key that contradicts its content for a release.
 type EnvJSON struct {
 	EnvID     string  `json:"env_id"`
 	Kind      string  `json:"kind"`
-	Name      string  `json:"name"`
+	Services  string  `json:"services"`
 	Service   string  `json:"service,omitempty"`
 	State     string  `json:"state,omitempty"`
 	CreatedAt string  `json:"created_at"`
@@ -241,7 +248,7 @@ func newEnvListCommand(e *Env) *cobra.Command {
 				for _, env := range envs {
 					docs = append(docs, EnvJSON{
 						EnvID: env.ID, Kind: "environment",
-						Name:      strings.Join(env.Services, ", "),
+						Services:  strings.Join(env.Services, ", "),
 						State:     fmt.Sprintf("%d of %d running", env.Running, env.Resources),
 						CreatedAt: env.Oldest.UTC().Format(time.RFC3339),
 						AgeHours:  e.Clock.Since(env.Oldest).Hours(),

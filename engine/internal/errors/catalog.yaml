@@ -61,6 +61,13 @@ errors:
     docs: reference/manifest
     retryable: false
     exit_code: 3
+  - code: AF-MAN-007
+    area: MAN
+    message: "A manifest already exists at {path}, and af init does not merge into one."
+    next_step: "Edit the file to change it, or run 'af init --force' to replace it with a fresh detection. --force discards every edit in the file, so read it first."
+    docs: reference/manifest
+    retryable: false
+    exit_code: 3
 
   # Detection
   - code: AF-DET-001
@@ -1120,6 +1127,27 @@ errors:
     area: CPL
     message: "This machine is not signed in to {origin}."
     next_step: "Run '{command}' to sign in from this terminal. Nothing else in the engine needs a sign in; only the commands that read or write your own account do."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
+  - code: AF-CPL-005
+    area: CPL
+    message: "The sign in to {origin} on this machine expired."
+    next_step: "Run '{command}' to sign in again. The expired credential stays stored until a new sign in replaces it, so every command that needs one says this until you do."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
+  - code: AF-CPL-006
+    area: CPL
+    message: "{origin} no longer accepts the sign in stored on this machine."
+    next_step: "Run '{command}' to sign in again. The token was revoked, or you were removed from the organization it belonged to; the control plane does not say which."
+    docs: self-hosting/control-plane
+    retryable: false
+    exit_code: 4
+  - code: AF-CPL-007
+    area: CPL
+    message: "The sign in to {origin} does not carry the scope this command needs: {detail}"
+    next_step: "Run '{command}' and approve the scope in the browser. A sign in without it succeeds and then fails here again, which reads as the fix not working."
     docs: self-hosting/control-plane
     retryable: false
     exit_code: 4

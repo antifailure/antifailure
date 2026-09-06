@@ -300,6 +300,39 @@
       "planned": false
     },
     {
+      "code": "AF-CPL-005",
+      "area": "CPL",
+      "areaName": "Control plane",
+      "message": "The sign in to {origin} on this machine expired.",
+      "resolution": "Run '{command}' to sign in again. The expired credential stays stored until a new sign in replaces it, so every command that needs one says this until you do.",
+      "docs": "https://antifailure.dev/docs/self-hosting/control-plane",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-CPL-006",
+      "area": "CPL",
+      "areaName": "Control plane",
+      "message": "{origin} no longer accepts the sign in stored on this machine.",
+      "resolution": "Run '{command}' to sign in again. The token was revoked, or you were removed from the organization it belonged to; the control plane does not say which.",
+      "docs": "https://antifailure.dev/docs/self-hosting/control-plane",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-CPL-007",
+      "area": "CPL",
+      "areaName": "Control plane",
+      "message": "The sign in to {origin} does not carry the scope this command needs: {detail}",
+      "resolution": "Run '{command}' and approve the scope in the browser. A sign in without it succeeds and then fails here again, which reads as the fix not working.",
+      "docs": "https://antifailure.dev/docs/self-hosting/control-plane",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
       "code": "AF-DB-002",
       "area": "DB",
       "areaName": "Database",
@@ -833,6 +866,17 @@
       "areaName": "Manifest",
       "message": "The manifest at {path} is larger than the {limit} limit.",
       "resolution": "Split the configuration or remove generated content; a manifest describes services, it does not contain them.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-MAN-007",
+      "area": "MAN",
+      "areaName": "Manifest",
+      "message": "A manifest already exists at {path}, and af init does not merge into one.",
+      "resolution": "Edit the file to change it, or run 'af init --force' to replace it with a fresh detection. --force discards every edit in the file, so read it first.",
       "docs": "https://antifailure.dev/docs/reference/manifest",
       "retryable": false,
       "exitCode": 3,

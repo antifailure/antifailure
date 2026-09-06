@@ -21,13 +21,13 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 func newTokenCommand(e *Env) *cobra.Command {
@@ -62,30 +62,28 @@ that can make more credentials is a credential worth stealing twice.`),
 func tokenSessionFor(e *Env, flag string) (providerSession, error) {
 	origin := auth.Normalise(controlPlaneFor(e, flag))
 	cred, err := e.CredentialStore().Load(origin)
+	// The same codes as providerSessionFor, because the exit code table
+	// promises 4 for an authentication failure and a script reading it
+	// cannot know which subcommand it is talking to. These three used to be
+	// bare strings and exit 1, so a script that branched on 4 to run af
+	// login treated every token subcommand as a generic failure.
+	login := "af login --control-plane " + origin + " --scope tokens.manage"
 	if errors.Is(err, auth.ErrNotSignedIn) {
-		return providerSession{}, fmt.Errorf(
-			"not signed in to %s. Run: af login --control-plane %s --scope tokens.manage",
-			origin, origin)
+		return providerSession{}, aferrors.Coded(aferrors.AFCPL004,
+			"origin", origin, "command", login)
 	}
 	if err != nil {
 		return providerSession{}, err
 	}
 	if cred.Expired(e.Clock.Now()) {
-		return providerSession{}, fmt.Errorf(
-			"the credential for %s expired. Run: af login --scope tokens.manage", origin)
+		return providerSession{}, aferrors.Coded(aferrors.AFCPL005,
+			"origin", origin, "command", login)
 	}
 	return providerSession{client: auth.NewClient(origin), cred: cred, origin: origin}, nil
 }
 
 func explainToken(s providerSession, err error) error {
-	if errors.Is(err, auth.ErrScopeMissing) {
-		return fmt.Errorf("%w\n\nRun: af login --control-plane %s --scope tokens.manage",
-			err, s.origin)
-	}
-	if errors.Is(err, auth.ErrNotSignedIn) {
-		return fmt.Errorf("the credential for %s is not valid any more. Run: af login", s.origin)
-	}
-	return err
+	return explainCredential(s.origin, "tokens.manage", err)
 }
 
 // ---------------------------------------------------------------------------
