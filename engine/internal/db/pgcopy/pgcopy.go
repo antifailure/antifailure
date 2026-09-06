@@ -298,8 +298,10 @@ func tooOld(name string, have, want int) error {
 // with PGCONNECT_TIMEOUT set so that an unreachable source fails rather than
 // hangs.
 func CopyWith(ctx context.Context, source, target secrets.Value, opts CopyOptions) error {
-	// The roles the source's policies name have to exist in the target before
-	// the restore runs, or every CREATE POLICY in the dump fails.
+	// The roles the source's policies and grants name have to exist in the
+	// target before the restore runs, or every CREATE POLICY in the dump fails,
+	// and before the first migration runs against a branch, or the first GRANT
+	// in it fails.
 	//
 	// This is the other half of keeping row level security. The dump preserves
 	// policies on purpose, because a schema that depends on them restores into
@@ -311,9 +313,17 @@ func CopyWith(ctx context.Context, source, target secrets.Value, opts CopyOption
 	// with `role "antifailure_app" does not exist`, and a database using the
 	// pattern this product recommends could not be copied at all.
 	//
+	// Grants are the same failure one step later. The dump drops them, so the
+	// restore never mentions a role that is only granted to, and the copy
+	// succeeds. The migration ledger travelled with it, so the migration that
+	// created the role is recorded as applied, and a later migration that
+	// grants to the role fails in every branch with the same "does not exist".
+	// That is how this repository's own twin stopped coming up: a role that no
+	// policy names on purpose, because it exists to bypass them.
+	//
 	// It sits here rather than in either path because both restore, and a
 	// requirement that holds for one holds for the other.
-	if err := ensureRoles(ctx, source, target); err != nil {
+	if err := ensureRoles(ctx, source, target, opts.ExcludeSchemas); err != nil {
 		return err
 	}
 
@@ -724,22 +734,81 @@ func Analyze(ctx context.Context, conn secrets.Value) error {
 	return nil
 }
 
-// ensureRoles creates, in the target, every role the source's policies name.
+// ensureRoles creates, in the target, every role the source names in a policy
+// or in a grant on an object the copy carries.
 //
 // Deliberately the narrowest thing that works. Each role is created NOLOGIN and
-// with no attributes and no memberships, because the only job it has here is to
-// be a name that `CREATE POLICY ... TO it` can resolve. Copying a role's
-// password, its attributes, or what it is a member of would put a credential
-// from production into a golden, which is the one thing a golden must never
-// hold, and it would do so for a role nothing in the copy connects as.
+// with no attributes, because the only job it has here is to be a name a later
+// statement can resolve: `CREATE POLICY ... TO it` during the restore, or
+// `GRANT ... TO it` in a migration that runs after the restore. Copying a
+// role's password or its attributes would put a credential from production
+// into a golden, which is the one thing a golden must never hold, and it would
+// do so for a role nothing in the copy connects as. A source role with
+// BYPASSRLS arrives without it for the same reason: the attribute is a standing
+// exemption from every policy in the database, and the copy is not the place to
+// hand it out. Memberships are carried only between the roles created here,
+// never in a role the target already had, for the reason on createRoleShells.
 //
 // PUBLIC is skipped: it is not a role, it is the absence of one, and it appears
-// in pg_policy as the zero OID rather than as a row.
-func ensureRoles(ctx context.Context, source, target secrets.Value) error {
-	names, err := policyRoles(ctx, source)
+// in pg_policy and in an ACL as the zero OID rather than as a row. The role the
+// copy connects to the source as is skipped too, because it is whoever runs the
+// refresh rather than part of the schema, and the target already has whoever
+// runs the restore. A role that exists in the target already is left exactly as
+// it is.
+//
+// Only roles named by grants on objects in the schemas being copied are
+// created, so a platform schema left out of the dump does not bring its
+// platform's roles with it. Policies are read from every schema, as they always
+// were: an unneeded shell role costs nothing, and a missing one stops the
+// restore.
+func ensureRoles(ctx context.Context, source, target secrets.Value, excludeSchemas []string) error {
+	names, err := requiredRoles(ctx, source, excludeSchemas)
 	if err != nil {
 		return err
 	}
+	members, err := requiredMemberships(ctx, source, names)
+	if err != nil {
+		return err
+	}
+	return createRoleShells(ctx, target, names, members)
+}
+
+// membership is one row of pg_auth_members between two roles the copy
+// carries: member may SET ROLE to role, and inherits its privileges or does
+// not.
+type membership struct {
+	role, member string
+	// inherit is whether the member holds the role's privileges without SET
+	// ROLE. On a server before 16 it is the member's own INHERIT attribute,
+	// because a membership had no setting of its own.
+	inherit bool
+	// set is whether the member may SET ROLE to it, always true before 16.
+	set   bool
+	admin bool
+}
+
+// createRoleShells makes each name a NOLOGIN role in the target, skipping the
+// ones that already exist, and then grants each membership between two of
+// those names that the target does not already have. Split from ensureRoles so
+// a test on one cluster, where every source role already exists in the target,
+// can still show what a role made by this code looks like.
+//
+// The memberships are the one thing about a role that is carried, and only
+// between roles in this list. A membership between two NOLOGIN shells is not a
+// credential: neither can be connected as, and neither holds a privilege until
+// a migration grants one. What it is, is the shape a migration checks. 0041 in
+// this repository asserts that the application's role may SET ROLE to the
+// sweeper's and does not inherit from it, an arrangement 0024 made and the
+// golden's ledger says is done. With the two roles present and the membership
+// absent, every branch failed 0041 with "cannot SET ROLE antifailure_sweeper",
+// one migration after the grant failure this file fixed.
+//
+// The INHERIT, SET and ADMIN options travel with each grant, because the
+// inherit flag is precisely what the migration checks: a member that inherits
+// the sweeper's privileges would put the sweep's cross tenant read on every
+// ordinary request. A target older than 16 has no per grant options and gets
+// the plain GRANT, with ADMIN OPTION when the source had it.
+func createRoleShells(ctx context.Context, target secrets.Value, names []string, members []membership) error {
 	if len(names) == 0 {
 		return nil
 	}
@@ -758,22 +827,53 @@ func ensureRoles(ctx context.Context, source, target secrets.Value) error {
 				"  END IF;\n",
 			quoteLiteral(name), quoteLiteral(name))
 	}
+	for _, m := range members {
+		fmt.Fprintf(&b,
+			"  IF NOT EXISTS (SELECT 1 FROM pg_auth_members am"+
+				" JOIN pg_roles g ON g.oid = am.roleid JOIN pg_roles u ON u.oid = am.member"+
+				" WHERE g.rolname = %[1]s AND u.rolname = %[2]s) THEN\n"+
+				"    IF current_setting('server_version_num')::int >= 160000 THEN\n"+
+				"      EXECUTE format('GRANT %%I TO %%I WITH INHERIT %[3]s, SET %[4]s, ADMIN %[5]s', %[1]s, %[2]s);\n"+
+				"    ELSE\n"+
+				"      EXECUTE format('GRANT %%I TO %%I%[6]s', %[1]s, %[2]s);\n"+
+				"    END IF;\n"+
+				"  END IF;\n",
+			quoteLiteral(m.role), quoteLiteral(m.member),
+			sqlBool(m.inherit), sqlBool(m.set), sqlBool(m.admin),
+			map[bool]string{true: " WITH ADMIN OPTION", false: ""}[m.admin])
+	}
 	b.WriteString("END\n$af$;")
 
 	if err := Exec(ctx, target, b.String()); err != nil {
 		return fmt.Errorf(
-			"pgcopy: create the roles the source's policies name (%s): %w",
+			"pgcopy: create the roles the source's policies and grants name (%s): %w",
 			strings.Join(names, ", "), err)
 	}
 	return nil
 }
 
-// policyRoles reads the roles named by row level security policies.
+func sqlBool(b bool) string {
+	if b {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+
+// requiredMemberships reads the memberships between the named roles.
 //
-// Only policies. Ownership and grants are dropped by the flags on the dump, so
-// the roles they mention are not needed and creating them would be creating
-// more of production in the copy than the copy needs.
-func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
+// Both ends have to be in the list. A membership in a role the copy does not
+// carry, the source's superuser say, is left where it is: the target's own
+// administrator is not the source's, and a shell that could SET ROLE to it
+// would be the copy handing out more than the schema needs.
+//
+// The per grant options arrived in Postgres 16. They are read through the row
+// as JSON so that one query serves every version this package copies from: on
+// an older server the keys are absent, the member's INHERIT attribute stands in
+// for the inherit option, and SET is always allowed.
+func requiredMemberships(ctx context.Context, conn secrets.Value, names []string) ([]membership, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
 	db, err := sql.Open("pgx", conn.Reveal())
 	if err != nil {
 		return nil, connectError(err, "the address in database.source_url_env")
@@ -782,11 +882,124 @@ func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 	db.SetMaxOpenConns(1)
 
 	rows, err := db.QueryContext(ctx, `
+		SELECT g.rolname, u.rolname,
+		       COALESCE((to_jsonb(am) ->> 'inherit_option')::bool, u.rolinherit),
+		       COALESCE((to_jsonb(am) ->> 'set_option')::bool, true),
+		       am.admin_option
+		FROM pg_auth_members am
+		JOIN pg_roles g ON g.oid = am.roleid
+		JOIN pg_roles u ON u.oid = am.member
+		WHERE g.rolname = ANY ($1::text[]) AND u.rolname = ANY ($1::text[])
+		ORDER BY 1, 2`, names)
+	if err != nil {
+		return nil, fmt.Errorf("pgcopy: read the memberships between the roles the source names: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []membership
+	for rows.Next() {
+		var m membership
+		if err := rows.Scan(&m.role, &m.member, &m.inherit, &m.set, &m.admin); err != nil {
+			return nil, fmt.Errorf("pgcopy: read a membership: %w", err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pgcopy: read the memberships between the roles the source names: %w", err)
+	}
+	return out, nil
+}
+
+// requiredRoles reads the roles the source names in row level security
+// policies and in grants on the objects the copy carries.
+//
+// It used to read only policies, on the reasoning that ownership and grants
+// are dropped by the flags on the dump, so the roles they mention are not
+// needed. That is true of the restore and false of what runs after it. A
+// migration ledger travels with the copy, so a role created by an earlier
+// migration is recorded as already made, and the first later migration to say
+// `GRANT ... TO that_role` fails with "role does not exist" in every
+// environment branched from the golden. The role that broke this repository's
+// own twin was one that no policy names on purpose, because it exists to
+// bypass them; it existed in the source only through grants.
+//
+// Owners are still left out. Ownership is dropped by the same flags and
+// nothing that runs later can need an owner's name in the way it needs a
+// grantee's: a migration that alters a table alters it as whoever runs the
+// migration, which is a role the target has. An ACL always carries the owner
+// as a grantee of its own object, so that one entry is removed per object
+// rather than the owner's name being removed everywhere, because a role that
+// owns one table and is granted on another is needed for the second.
+//
+// The grants read are the ones pg_dump would have carried had it been asked:
+// relations of every kind (tables, sequences, views, materialized views,
+// foreign tables), functions and procedures, types and domains, the schemas
+// themselves, and default privileges, which name a role before any object
+// exists for it to be granted on.
+func requiredRoles(ctx context.Context, conn secrets.Value, excludeSchemas []string) ([]string, error) {
+	db, err := sql.Open("pgx", conn.Reveal())
+	if err != nil {
+		return nil, connectError(err, "the address in database.source_url_env")
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+
+	// Never nil. The driver sends a nil slice as NULL, `= ANY (NULL)` is NULL
+	// for every row, and NOT NULL is NULL too, so a copy with nothing excluded
+	// would read no schemas at all and create no roles.
+	excluded := make([]string, 0, len(excludeSchemas))
+	excluded = append(excluded, excludeSchemas...)
+
+	rows, err := db.QueryContext(ctx, `
+		WITH copied AS (
+			SELECT oid, nspname
+			FROM pg_namespace
+			WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+			  AND nspname NOT LIKE 'pg\_toast%'
+			  AND nspname NOT LIKE 'pg\_temp\_%'
+			  AND NOT (nspname = ANY ($1::text[]))
+		),
+		granted AS (
+			SELECT a.grantee
+			FROM pg_class c
+			JOIN copied s ON s.oid = c.relnamespace
+			CROSS JOIN LATERAL aclexplode(c.relacl) a
+			WHERE a.grantee <> c.relowner
+			UNION
+			SELECT a.grantee
+			FROM pg_proc p
+			JOIN copied s ON s.oid = p.pronamespace
+			CROSS JOIN LATERAL aclexplode(p.proacl) a
+			WHERE a.grantee <> p.proowner
+			UNION
+			SELECT a.grantee
+			FROM pg_type t
+			JOIN copied s ON s.oid = t.typnamespace
+			CROSS JOIN LATERAL aclexplode(t.typacl) a
+			WHERE a.grantee <> t.typowner
+			UNION
+			SELECT a.grantee
+			FROM pg_namespace n
+			JOIN copied s ON s.oid = n.oid
+			CROSS JOIN LATERAL aclexplode(n.nspacl) a
+			WHERE a.grantee <> n.nspowner
+			UNION
+			SELECT a.grantee
+			FROM pg_default_acl d
+			CROSS JOIN LATERAL aclexplode(d.defaclacl) a
+			WHERE a.grantee <> d.defaclrole
+			  AND (d.defaclnamespace = 0 OR d.defaclnamespace IN (SELECT oid FROM copied))
+		),
+		named AS (
+			SELECT grantee AS oid FROM granted
+			UNION
+			SELECT unnest(p.polroles) FROM pg_policy p
+		)
 		SELECT DISTINCT r.rolname
-		FROM pg_policy p
-		JOIN pg_roles r ON r.oid = ANY (p.polroles)
-		WHERE r.rolname <> 'PUBLIC'
-		ORDER BY 1`)
+		FROM named x
+		JOIN pg_roles r ON r.oid = x.oid
+		WHERE r.rolname <> current_user
+		ORDER BY 1`, excluded)
 	if err != nil {
 		// A source that cannot be asked is not a source that has no policies.
 		// Saying which is which matters: the first is a connection problem and
@@ -810,7 +1023,7 @@ func policyRoles(ctx context.Context, conn secrets.Value) ([]string, error) {
 		names = append(names, name)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("pgcopy: read the roles the source's policies name: %w", err)
+		return nil, fmt.Errorf("pgcopy: read the roles the source's policies and grants name: %w", err)
 	}
 	return names, nil
 }
