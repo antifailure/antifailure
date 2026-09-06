@@ -44,6 +44,15 @@ export interface Persona {
   readonly password?: string;
   readonly role?: string;
   readonly login: LoginStrategy;
+  /** Where this persona's sign-in form lives, when it is not where the
+   *  workflow starts. The search for a form begins at the workflow's start
+   *  path, which is right for the persona the workflow acts as and wrong for
+   *  one whose form is on another path of the same origin: an operator portal
+   *  at /admin beside a console whose every route shows the console's own
+   *  sign-in screen. Without this the operator persona found the console's
+   *  email field at the start path, typed into it, and then timed out looking
+   *  for a password field the console does not have. */
+  readonly signInPath?: string;
   /** The base32 TOTP secret the engine enrolled for this persona, present
    *  when the persona has a second factor. The runner holds it so that it can
    *  complete a challenge, which is what the manifest schema's `mfa` field
@@ -243,7 +252,11 @@ export async function signIn(
   // An sms code is asked for by number and everything else by address, so the
   // field that says "this is the sign-in form" differs by strategy.
   const wanted = persona.login === 'sms_code' ? FIELD.phone : FIELD.email;
-  const found = await openSignIn(page, options.baseURL, options.signInPath, wanted);
+  // The persona's own path outranks the workflow's, because the persona knows
+  // where its form is and the workflow only knows where it is going.
+  const found = await openSignIn(
+    page, options.baseURL, persona.signInPath ?? options.signInPath, wanted,
+  );
   if (found.path === null) {
     // The environment's problem rather than the change's, and named by path
     // rather than by regex. A run that says which addresses were tried is one

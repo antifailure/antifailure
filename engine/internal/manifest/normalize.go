@@ -263,7 +263,18 @@ func normalizeWorkflows(m *schema.Manifest) {
 	}
 	for i := range m.Workflows {
 		w := &m.Workflows[i]
-		if w.Persona == "" {
+		if len(w.Personas) > 0 {
+			// The last one named is the identity the workflow acts as, and
+			// that is what Persona means everywhere else: the report's "as"
+			// column, the default the runner falls back to, and the goal an
+			// exploration is compiled from. Filling it in here rather than
+			// teaching every reader about the list keeps the list a detail
+			// of signing in. A manifest that sets both to different names is
+			// refused by the validator, so this only ever fills an absence.
+			if w.Persona == "" {
+				w.Persona = w.Personas[len(w.Personas)-1]
+			}
+		} else if w.Persona == "" {
 			w.Persona = firstPersona
 		}
 		if w.StartPath == "" {

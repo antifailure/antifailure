@@ -257,3 +257,29 @@ test('a code the previous attempt already used is not entered again', async () =
   assert.equal(result.ok, true);
   assert.equal(page.filled[FIELD.code.source], '222222');
 });
+
+// A persona that signs in somewhere other than where the workflow starts.
+//
+// The control plane answers every console route with the console's sign-in
+// screen, which has an email field, so the search that begins at the
+// workflow's start path found a form there and the operator persona typed its
+// address into it and then waited ten seconds for a password field the console
+// does not have. The operator's form is at /admin, and only the persona knows
+// that.
+test('a persona with its own sign-in path is signed in there, ahead of the start path', async () => {
+  const page = new FakePage(/sign out/i);
+  const operator: Persona = { ...owner, name: 'operator', signInPath: '/admin' };
+  const result = await signIn(page, operator, {
+    baseURL: 'https://app.test', signInPath: '/plan',
+  });
+  assert.equal(result.ok, true, result.detail);
+  assert.equal(page.visited[0], 'https://app.test/admin');
+  assert.equal(page.filled[FIELD.password.source], 'correct horse');
+});
+
+test('a persona with no sign-in path of its own still starts at the workflow start path', async () => {
+  const page = new FakePage(/sign out/i);
+  const result = await signIn(page, owner, { baseURL: 'https://app.test', signInPath: '/plan' });
+  assert.equal(result.ok, true, result.detail);
+  assert.equal(page.visited[0], 'https://app.test/plan');
+});

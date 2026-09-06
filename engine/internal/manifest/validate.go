@@ -639,6 +639,36 @@ func (v *validator) workflows(m *schema.Manifest) {
 				fmt.Sprintf("Workflow %q runs as %q, which is not a declared persona.", w.Name, w.Persona),
 				"Check the spelling against the persona names.")
 		}
+		// The several-sessions form. Every name has to be a persona for the
+		// same reason the single one does, and the same name twice is a
+		// second sign-in that either fails or, worse, replaces the first
+		// session with an identical one and proves nothing about holding two.
+		if n := len(w.Personas); n > 0 && w.Persona != w.Personas[n-1] {
+			// Normalisation fills an empty persona in from the list, so the
+			// two disagreeing here means the author wrote both. The list is
+			// the order of signing in and its last entry is who the workflow
+			// acts as; a separate persona naming somebody else is a workflow
+			// with two different answers to "as whom".
+			v.add(base+".persona",
+				fmt.Sprintf("Workflow %q sets persona to %q and personas ending in %q.",
+					w.Name, w.Persona, w.Personas[n-1]),
+				"Name the sessions in personas only. The last one is the persona the workflow acts as.")
+		}
+		seen := map[string]bool{}
+		for j, name := range w.Personas {
+			field := fmt.Sprintf("%s.personas[%d]", base, j)
+			if !personas[name] {
+				v.add(field,
+					fmt.Sprintf("Workflow %q signs in as %q, which is not a declared persona.", w.Name, name),
+					"Check the spelling against the persona names.")
+			}
+			if seen[name] {
+				v.add(field,
+					fmt.Sprintf("Workflow %q signs in as %q twice.", w.Name, name),
+					"Name each persona once; the sessions accumulate in one browser.")
+			}
+			seen[name] = true
+		}
 		if w.Budget != nil {
 			if _, err := ParseDuration(w.Budget.Duration); err != nil {
 				v.add(base+".budget.duration",

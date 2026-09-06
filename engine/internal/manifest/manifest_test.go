@@ -1014,3 +1014,98 @@ func TestParse_LeavesTheHostedFieldsEmptyForDocker(t *testing.T) {
 	require.Empty(t, m.Database.APIKeyEnv)
 	require.Zero(t, m.Database.MaxBranches)
 }
+
+// One browser, several sessions.
+//
+// The case that earned `personas` as a list is this repository's own: an
+// operator who is also a customer holds the portal cookie and the console
+// cookie in one browser, and a check keyed on the first refused every mutation
+// made with the second. A workflow that signs in as one persona can never hold
+// both, so the failure could not be rehearsed however the workflow was
+// written. These pin down what the list means: every name is a persona, the
+// last one is who the workflow acts as, and a single `persona` that disagrees
+// with it is refused rather than silently outranked.
+const twoSessions = minimal + `
+personas:
+  - name: operator
+    email: operator@example.test
+    login: password
+    sign_in_path: /admin
+  - name: owner
+    email: owner@example.test
+    login: magic_link
+`
+
+func TestParse_AWorkflowMaySignInAsSeveralPersonas(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, twoSessions+`
+workflows:
+  - name: both-at-once
+    description: Sign in to the portal, then to the console, and open the plan page.
+    personas: [operator, owner]
+    start_path: /plan
+`)
+	w := m.Workflows[0]
+	require.Equal(t, []string{"operator", "owner"}, w.Personas)
+	// The last session is the identity the workflow acts as, so every reader
+	// of Persona, the report's "as" column included, sees the console user.
+	require.Equal(t, "owner", w.Persona)
+	require.Equal(t, "/admin", m.Personas[0].SignInPath)
+	require.Equal(t, "", m.Personas[1].SignInPath)
+	// And the explanation names every session, because "as owner" would hide
+	// the operator one that is the point of the workflow.
+	out := strings.Join(strings.Fields(manifest.Explain(m, 0)), " ")
+	require.Contains(t, out, "both-at-once as operator+owner")
+}
+
+func TestParse_RejectsAWorkflowSigningInAsAnUndeclaredPersonaInTheList(t *testing.T) {
+	t.Parallel()
+	msg := messages(problems(t, mustFail(t, twoSessions+`
+workflows:
+  - name: both-at-once
+    description: Sign in to the portal, then to the console, and open the plan page.
+    personas: [operator, onwer]
+`)))
+	require.Contains(t, msg, `signs in as "onwer", which is not a declared persona`)
+}
+
+func TestParse_RejectsAWorkflowSigningInAsThePersonaTwice(t *testing.T) {
+	t.Parallel()
+	msg := messages(problems(t, mustFail(t, twoSessions+`
+workflows:
+  - name: both-at-once
+    description: Sign in to the portal, then to the console, and open the plan page.
+    personas: [operator, operator]
+`)))
+	require.Contains(t, msg, `signs in as "operator" twice`)
+}
+
+func TestParse_RejectsAPersonaThatDisagreesWithTheListItSignsInAs(t *testing.T) {
+	t.Parallel()
+	msg := messages(problems(t, mustFail(t, twoSessions+`
+workflows:
+  - name: both-at-once
+    description: Sign in to the portal, then to the console, and open the plan page.
+    persona: operator
+    personas: [operator, owner]
+`)))
+	require.Contains(t, msg, `sets persona to "operator" and personas ending in "owner"`)
+	// Agreeing is allowed: the author has said the same thing twice.
+	mustParse(t, twoSessions+`
+workflows:
+  - name: both-at-once
+    description: Sign in to the portal, then to the console, and open the plan page.
+    persona: owner
+    personas: [operator, owner]
+`)
+}
+
+func TestParse_SuggestsSignInPathForATypo(t *testing.T) {
+	t.Parallel()
+	msg := messages(problems(t, mustFail(t, minimal+`
+personas:
+  - name: operator
+    signin_path: /admin
+`)))
+	require.Contains(t, msg, "sign_in_path")
+}

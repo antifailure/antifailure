@@ -158,8 +158,12 @@ type workflowDoc struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Persona     string   `json:"persona,omitempty"`
-	Expect      []string `json:"expect"`
-	StartPath   string   `json:"startPath,omitempty"`
+	// Personas is the ordered list a workflow about one browser holding
+	// several sessions signs in as. Empty for the ordinary single persona
+	// workflow, which keeps using Persona.
+	Personas  []string `json:"personas,omitempty"`
+	Expect    []string `json:"expect"`
+	StartPath string   `json:"startPath,omitempty"`
 }
 
 type personaDoc struct {
@@ -169,6 +173,9 @@ type personaDoc struct {
 	Password string `json:"password,omitempty"`
 	Role     string `json:"role,omitempty"`
 	Login    string `json:"login"`
+	// SignInPath is where this persona's form lives when it is not where the
+	// workflow starts, carried so the runner looks there first.
+	SignInPath string `json:"signInPath,omitempty"`
 	// TOTPSecret is the base32 secret the adapter enrolled, present when the
 	// persona has a second factor. The runner holds it so that it can
 	// complete a challenge, which is what the manifest's `mfa` field promises.
@@ -579,7 +586,7 @@ func (o *Orchestrator) workflowDocs(only []string) []workflowDoc {
 		}
 		out = append(out, workflowDoc{
 			Name: w.Name, Description: w.Description, Persona: w.Persona,
-			Expect: w.Expect, StartPath: w.StartPath,
+			Personas: w.Personas, Expect: w.Expect, StartPath: w.StartPath,
 		})
 	}
 	return out
@@ -592,7 +599,10 @@ func (o *Orchestrator) personaDocs(provisioned *personas.Result) []personaDoc {
 		if login == "" {
 			login = string(schema.LoginPassword)
 		}
-		doc := personaDoc{Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role, Login: login}
+		doc := personaDoc{
+			Name: p.Name, Email: p.Email, Phone: p.Phone, Role: p.Role, Login: login,
+			SignInPath: p.SignInPath,
+		}
 
 		// Taken from what provisioning actually created, rather than derived
 		// again here. Two derivations that agree today are two derivations

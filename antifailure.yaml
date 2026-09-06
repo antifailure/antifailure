@@ -37,11 +37,16 @@ services:
     # Migrations run against the branch rather than the golden, so a pull
     # request that adds a column gets it and nobody else's environment does.
     #
-    # Then the two identities a preview can be signed into as. Masking replaces
-    # every address with a synthetic one at example.test, which is correct and
-    # leaves nobody to sign in as, so a known pair is added here.
-    # `personas.mjs` refuses to run outside an environment the engine created.
-    migrate: node bootstrap.mjs && node personas.mjs
+    # The personas that used to be created here have moved to `auth.adapter:
+    # seed` below. Masking replaces every address with a synthetic one at
+    # example.test, which is correct and leaves nobody to sign in as, so known
+    # identities are added afterwards. The seed adapter is the right place for
+    # that rather than this step, because it is the only place the password
+    # the engine derived for a persona reaches the process that writes the
+    # hash: the runner types that password, and the two agree only when one
+    # process hands both out. This step went back to migrating and nothing
+    # else once the operator persona needed a password.
+    migrate: node bootstrap.mjs
     build:
       strategy: dockerfile
       dockerfile: deploy/docker/control-plane.Dockerfile
@@ -89,6 +94,32 @@ services:
         value: preview-has-no-github
       - name: AF_GITHUB_REDIRECT_URI
         value: http://localhost:3100/auth/github/callback
+      # Billing is ON here, with three values that are plainly not credentials.
+      #
+      # This is what lets the launch-night workflow below press the button the
+      # founder pressed. "Subscribe to team" renders only when billing is
+      # configured: subscriptions.current returns configured=true from a
+      # non-null Stripe config, and the Plan page shows the checkout button
+      # only in that branch. stripeConfigFrom needs exactly these three set and
+      # non-empty, and it never checks their shape, so strings that could not
+      # be a real key are enough to turn the button on. None of these is a
+      # Stripe credential.
+      #
+      # api.stripe.com is deliberately NOT in the egress policy below, so the
+      # moment the button is pressed the checkout mutation reaches a host the
+      # sidecar refuses and fails inside the handler. That is the point of the
+      # arrangement: the request gets PAST the /trpc transport gate and dies at
+      # Stripe, which the control plane reports as an internal error. The 403
+      # the transport gate returns when the operator cookie wrongly makes it
+      # refuse a customer mutation is a different sentence, and the workflow's
+      # expectation is the internal-error one, which the 403 path can never
+      # produce.
+      - name: AF_STRIPE_SECRET_KEY
+        value: preview-billing-is-on-and-stripe-is-unreachable
+      - name: AF_STRIPE_WEBHOOK_SECRET
+        value: preview-billing-is-on-and-stripe-is-unreachable
+      - name: AF_STRIPE_PRICE_TEAM
+        value: preview-team-price-with-no-stripe-behind-it
 
 database:
   provider: docker
@@ -129,6 +160,33 @@ personas:
     email: viewer@antifailure.test
     role: viewer
     login: magic_link
+
+  # The operator who is also a customer, which is everybody on this team and
+  # was the person who hit the launch-night bug. It is a SEPARATE account in a
+  # separate table from `owner` above: the console's sessions live in `users`
+  # and the operator portal's in `admin_users`, two id spaces on purpose, so
+  # the one human holds two logins. This one is the operator half, with the
+  # `owner` role the portal itself uses, signed in with a password because the
+  # portal is the only password form on this origin.
+  #
+  # sign_in_path is /admin because that is where the portal's form is, and the
+  # console answers every other route with the console's own sign-in screen.
+  # Without it the runner would find the console's email field at the workflow
+  # start path and type an operator address into the wrong form.
+  - name: operator-owner
+    email: operator@antifailure.test
+    role: owner
+    login: password
+    sign_in_path: /admin
+
+# The command that creates the personas above, run once per persona against the
+# branch with the persona in its environment. It writes a magic_link persona
+# into `users` with a membership, and a password persona into `admin_users`
+# with the hash the operator portal verifies against. See deploy/docker/
+# personas.mjs for why the operator's password can only be written here.
+auth:
+  adapter: seed
+  seed: node deploy/docker/personas.mjs
 
 workflows:
   # The expectations below name words that actually appear on the page.
@@ -280,6 +338,62 @@ workflows:
       # The viewer sees the same table without its Approve column.
       - "Scope"
     tags: [policy, rbac]
+
+  # The launch-night failure, rehearsed. THE FIRST WORKFLOW HERE THAT HOLDS TWO
+  # SESSIONS AT ONCE, because the bug it exists to catch could only appear when
+  # a browser did.
+  #
+  # An operator who is also a customer, which is everybody on this team, is
+  # signed into the operator portal (a __Host- cookie in admin_users) AND into
+  # the console (the product cookie in users) in one browser. The /trpc
+  # transport check for the operator cookie used to run whenever that cookie
+  # was PRESENT, whatever the request named, so it refused every customer
+  # mutation the browser made with its customer session. The first one it
+  # refused in production was Subscribe to team, with a 403 naming a header the
+  # Plan page has no reason to know about. Every persona this manifest had
+  # signed in as one identity, so no workflow could hold both cookies and the
+  # rehearsal could not have found it however the expectations were written.
+  #
+  # personas: the two sessions, in the order they are established, in one
+  # browser. The operator signs in first at /admin with a password; the owner
+  # signs in second in the console by magic link. The workflow acts as the last
+  # one named, the owner, whose product session sends the mutation while the
+  # operator cookie sits beside it in the same request.
+  - name: an-operator-who-is-also-a-customer-can-start-checkout
+    description: >-
+      Sign in to the operator portal with a password, then sign in to the
+      console as the owner in the same browser, open the plan page, and press
+      Subscribe to team. Confirm the checkout reaches the control plane rather
+      than being refused by the operator transport check, which has no business
+      running on a customer request the console authenticated with its own
+      session.
+    personas: [operator-owner, owner]
+    start_path: /plan
+    expect:
+      # The sentence the Plan page shows when Subscribe to team was pressed and
+      # the checkout mutation REACHED THE HANDLER. Billing is configured in
+      # this environment, so the mutation gets past the precondition, tries to
+      # create a Stripe customer, and fails at api.stripe.com, which the egress
+      # policy does not allow. The control plane turns that into an internal
+      # error, and this is the fixed sentence its tRPC layer shows for one. It
+      # can only appear once the request is past the transport gate.
+      #
+      # THE 403 PATH CANNOT PRODUCE IT. When the operator CSRF check wrongly
+      # runs on this customer mutation, the gate refuses the request before the
+      # handler with 403 "This operator request needs the
+      # x-antifailure-admin-csrf header from the operator session endpoint",
+      # and that is what the page shows instead. So this expectation passes on
+      # the fixed tree and fails on the reverted one, which is the proof the
+      # workflow exists to give. That negative half, that the header is NOT
+      # named, cannot be written as an expectation because the checker asserts
+      # presence and not absence, so it is carried entirely by this positive
+      # sentence, which the 403 path can never show.
+      #
+      # Quoted, so it is required character for character rather than by its
+      # scattered words, and so its absence is a FAILURE rather than an
+      # unverified result that would exit zero.
+      - '"Something went wrong on the control plane. Nothing was changed, and the reason is in its logs."'
+    tags: [billing, rbac, csrf]
 
 explore:
   enabled: true

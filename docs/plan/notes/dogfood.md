@@ -44,7 +44,7 @@ Four files carry it, and all four are the ones a customer writes:
 
 | File | What it says |
 | --- | --- |
-| `antifailure.yaml` | two services, the database, the egress policy, two personas, six workflows, four invariants |
+| `antifailure.yaml` | two services, the database, the egress policy, three personas, seven workflows, four invariants |
 | `masking.yaml` | the columns that need a particular transform, and the columns that must survive |
 | `deploy/docker/app.Dockerfile` | the web application, as a standalone server |
 | `deploy/docker/control-plane.Dockerfile` | the API, with the framework deliberately excluded |
@@ -101,6 +101,31 @@ still running. No gate was removed, no threshold lowered, no permission
 widened: the workflow's default is `contents: read` and the one job that needs
 more declares it for itself.
 
+### The operator who is also a customer
+
+The three personas are the two customers, `owner` and `viewer`, and one more:
+`operator-owner`, an operator of the platform who is also the owner of an
+organization on it, which is what everybody on this team is. It is a separate
+account in a separate table, `admin_users` rather than `users`, and it signs in
+with a password at the operator portal rather than by a magic link at the
+console, because the portal is the only password form on this origin.
+`deploy/docker/personas.mjs`, run as the seed adapter's command, writes it with
+the same scrypt parameters the API verifies against, so the password the runner
+types and the hash in the row agree.
+
+The workflow that needs it, `an-operator-who-is-also-a-customer-can-start-checkout`,
+is the first here that holds two sessions in one browser. It signs in to the
+portal, then to the console, and then presses Subscribe to team, which is what
+the founder pressed on launch night when both cookies were live and the
+console answered 403 for want of a header the Plan page had never heard of. The
+transport check for the operator cookie ran on the customer mutation because
+the cookie was present, not because the request was an operator one. The
+workflow expects the sentence the Plan page shows once the mutation is past
+that gate, which the 403 can never produce, so it passes on the fixed control
+plane and fails on the broken one. A workflow that signed in as a single
+persona could never have carried both cookies, which is why the bug reached
+production through a rehearsal that ran clean.
+
 ### The harness, and what it deliberately does not do
 
 `tools/dogfood` runs `af ci` and almost nothing else. That is the point: `af ci`
@@ -115,7 +140,7 @@ it would stay invisible. Every event carries a timestamp from the injected
 clock, so a phase is the interval between the event that opens it and the last
 event that closes it: `env.creating` to `env.ready`, `agent.started` to
 `agent.finished`, `env.destroying` to `env.destroyed`. Last rather than first,
-because two services build inside one `up` and six workflows run inside one
+because two services build inside one `up` and seven workflows run inside one
 `test`, and what somebody waits for ends when the last of them finishes.
 
 Every budget is a measurement doubled, and carries the reason for its number

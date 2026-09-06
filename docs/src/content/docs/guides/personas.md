@@ -198,6 +198,26 @@ It can print the account's identifier on its last line, and that is recorded.
 Anything else it prints is ignored unless it fails, in which case its output is
 what explains why.
 
+## `sign_in_path`
+
+Where this persona's sign-in form is, when it is not where the workflow starts.
+
+```yaml
+personas:
+  - name: operator
+    role: owner
+    login: password
+    sign_in_path: /admin
+```
+
+The runner looks for a sign-in form at the workflow's start path first, then at
+the usual paths. That is right for the persona the workflow acts as, and wrong
+for one whose form is somewhere else on the same origin: an operator portal at
+`/admin` beside a console that answers every other route with the console's own
+sign-in screen. Without this the runner finds the console's email field at the
+start path and types an operator's address into the wrong form. A persona's own
+path is tried ahead of the workflow's.
+
 ## `attributes`
 
 Anything your application reads to decide what a user sees: plan, feature

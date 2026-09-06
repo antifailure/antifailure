@@ -139,21 +139,26 @@ async function attemptOnce(
   const taken: string[] = [];
   const page = session.page();
 
-  const persona = job.personas.find((p) => p.name === workflow.persona) ?? job.personas[0];
-  if (workflow.persona && !persona) {
+  const chosen = sessionsFor(workflow, job.personas);
+  if (chosen.missing) {
     return {
       cause: 'environment-incomplete',
-      detail: `This workflow runs as ${workflow.persona}, and no persona by that name is declared.`,
+      detail: `This workflow runs as ${chosen.missing}, and no persona by that name is declared.`,
       taken,
     };
   }
-  if (persona) {
+  // Every session, in the order named, into ONE browser. A second sign-in
+  // does not replace the first: each strategy sets its own cookie and the
+  // browser keeps both, which is exactly the state a person in two roles is
+  // in and the state a single sign-in could never reproduce.
+  for (const persona of chosen.personas) {
     const login = await signIn(page, persona, {
       baseURL: job.baseURL,
       // Where this workflow was going anyway is the first place to look for
       // the form. An application that answers every protected route with its
       // sign-in screen, which is what this repository's own control plane
       // does, is signed into without guessing at a path it does not have.
+      // A persona with a sign-in path of its own outranks this inside signIn.
       ...(workflow.startPath ? { signInPath: workflow.startPath } : {}),
       ...(job.inbox ? { inbox: job.inbox } : {}),
     });
@@ -221,6 +226,35 @@ async function attemptOnce(
     `The workflow took ${limit} steps without reaching what it was asked to reach.`,
     taken,
   );
+}
+
+/** sessionsFor resolves which personas a workflow signs in as, in order.
+ *
+ * The list form wins when it is present, because a workflow that names
+ * several sessions is about holding all of them. The single form keeps its
+ * old fallback to the first declared persona, which a manifest with one
+ * persona and no `persona:` lines relies on. A name that matches nothing is
+ * returned rather than skipped: silently signing in as fewer personas than the
+ * workflow named would run the workflow in a state it was not written for and
+ * report against the application whatever that state produced.
+ */
+export function sessionsFor(
+  workflow: Pick<Workflow, 'persona' | 'personas'>,
+  declared: readonly Persona[],
+): { readonly personas: readonly Persona[]; readonly missing?: string } {
+  const names = workflow.personas?.length ? workflow.personas : null;
+  if (names) {
+    const personas: Persona[] = [];
+    for (const name of names) {
+      const persona = declared.find((p) => p.name === name);
+      if (!persona) return { personas: [], missing: name };
+      personas.push(persona);
+    }
+    return { personas };
+  }
+  const persona = declared.find((p) => p.name === workflow.persona) ?? declared[0];
+  if (workflow.persona && !persona) return { personas: [], missing: workflow.persona };
+  return { personas: persona ? [persona] : [] };
 }
 
 /** finalJudgement decides what a run that did not obviously finish means.

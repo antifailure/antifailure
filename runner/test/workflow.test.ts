@@ -287,3 +287,24 @@ test('an ordinary page carries no failure signal', () => {
   assert.equal(judge('The application is recorded', 'It is written down. Keep this reference.'),
     'unclear');
 });
+
+// A checkout button that names the plan.
+//
+// This repository's own Plan page says "Subscribe to team", and the bare
+// `^subscribe$` matched nothing on it, so the planner declared itself stuck in
+// front of the one control the workflow existed to press. The name of the
+// plan after the verb is the ordinary way a page with more than one plan
+// labels the button, and "Upgrade to Pro" is the same shape.
+test('a subscribe or upgrade button that names the plan moves the workflow forward', async () => {
+  for (const label of ['Subscribe to team', 'Upgrade to Pro', 'Subscribe']) {
+    const action = await next(apply, page({
+      controls: ['Refresh from Stripe', label, 'Sign out'],
+    }));
+    assert.equal(action.kind, 'click', label);
+    assert.match(label, (action as { control: RegExp }).control);
+  }
+  // Not a button that merely starts with the word. "Subscribe to our
+  // newsletter" is the control this rule must never press.
+  const action = await next(apply, page({ controls: ['Subscribe to our newsletter'] }));
+  assert.equal(action.kind, 'stuck');
+});

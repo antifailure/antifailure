@@ -194,8 +194,16 @@ func Explain(m *schema.Manifest, width int) string {
 			if w.Independent {
 				mode = "parallel"
 			}
+			as := w.Persona
+			if len(w.Personas) > 1 {
+				// Every session the browser holds, not just the one it acts
+				// as. A reader of this output is deciding whether the
+				// workflow proves what its name says, and "as owner" hides
+				// the operator session that is the whole point of it.
+				as = strings.Join(w.Personas, "+")
+			}
 			fmt.Fprintf(&b, "  %-24s as %-14s %s, up to %d steps and %s\n",
-				w.Name, w.Persona, mode, w.Budget.Steps, formatUSD(w.Budget.USD))
+				w.Name, as, mode, w.Budget.Steps, formatUSD(w.Budget.USD))
 		}
 		b.WriteString("\n")
 	}

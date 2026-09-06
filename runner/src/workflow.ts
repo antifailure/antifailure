@@ -21,6 +21,11 @@ export interface Workflow {
   readonly name: string;
   readonly description: string;
   readonly persona?: string;
+  /** personas are the sessions this workflow signs in as, in order, in one
+   *  browser, for a person who holds more than one at once. Each is signed in
+   *  through its own strategy and the cookies accumulate; the last one is who
+   *  the workflow acts as. Empty or absent means the single `persona`. */
+  readonly personas?: readonly string[];
   /** expect are the sentences that have to be true at the end. */
   readonly expect: readonly string[];
   /** startPath is where to begin. Empty starts at the root. */
@@ -176,7 +181,12 @@ const CHOSEN_TYPES = new Set(['checkbox', 'radio']);
 /** Controls a deterministic planner will press, most likely first. */
 const PROGRESS_CONTROLS: readonly RegExp[] = [
   /^(sign up|create account|get started|register)$/i,
-  /^(subscribe|upgrade|choose plan|select plan)$/i,
+  // With or without the plan's name after it. "Subscribe to team" and
+  // "Upgrade to Pro" are how a page with more than one plan labels the
+  // button, and the bare verb matched neither, so the planner stood in front
+  // of this repository's own Plan page with a checkout button on it and
+  // reported that nothing moved the workflow forward.
+  /^(subscribe|upgrade|choose plan|select plan)( to \S+)?$/i,
   /^(pay|pay now|complete|place order|confirm|checkout)$/i,
   /^(continue|next|submit|save)$/i,
   /^(sign in|log in|login)$/i,

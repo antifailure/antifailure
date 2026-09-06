@@ -84,6 +84,34 @@ A string is on the page or it is not, and there is no third answer to hedge
 towards. That is the difference that matters: an unclear result is `unverified`,
 and `unverified` exits zero.
 
+## Signing in as more than one person
+
+Most workflows sign in as one persona. A workflow about somebody who holds more
+than one session at once names them as a list instead, and the runner signs in
+as each in turn, in the same browser, so the cookies accumulate:
+
+```yaml
+workflows:
+  - name: an-operator-who-is-also-a-customer-can-start-checkout
+    personas: [operator-owner, owner]
+    start_path: /plan
+    description: >
+      Sign in to the operator portal, then to the console as the owner, open the
+      plan page, and start checkout. Confirm the request reaches the control
+      plane rather than being refused by a check meant for operator requests.
+    expect:
+      - '"Checkout is not available on this control plane."'
+```
+
+The last persona named is the one the workflow acts as; the ones before it are
+signed in first and kept. `personas` and `persona` are mutually exclusive. This
+is for a real product state that a single login cannot reach: an operator who is
+also a customer holds a session in each of two independent tables at once, and a
+request that carries both is a case a workflow signed in as one identity can
+never produce. A persona whose sign-in form is not where the workflow starts
+says so with [`sign_in_path`](/docs/guides/personas), which the runner tries
+before the usual paths.
+
 ## Ordering
 
 Workflows share an environment and run in order, because a subscription usually

@@ -319,6 +319,7 @@ One account an agent logs in as. Personas are created or reconciled in the golde
 | `name` | string | **yes** | Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `phone` | string | no | Number an SMS code is sent to. Defaults to a number in the +1 555 0100 block, which is reserved for fictional use and can never reach a real handset. Only sms_code uses it. Max length 32. |
 | `role` | string | no | Application role to provision, for example admin or member. Interpreted by the authentication adapter. Max length 64. |
+| `sign_in_path` | string | no | Where this persona's sign-in form lives, when it is not where the workflow starts. The runner looks for a form at the workflow's start path first and then at the usual paths, which finds the wrong form for a persona whose sign-in surface is elsewhere on the same origin, such as an operator portal beside a customer console. Max length 512. |
 
 ## Policy
 
@@ -428,6 +429,7 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 | `independent` | boolean | no | Whether this workflow can run at the same time as others. Workflows that share an environment run one at a time unless this says otherwise, because two agents mutating the same data produce failures nobody can reproduce. Defaults to `false`. |
 | `name` | string | **yes** | Max length 64, matches `^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`. |
 | `persona` | string | no | Which persona runs it. Defaults to the first persona. Max length 40. |
+| `personas` | list of string | no | The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona. Min items 1, max items 5. |
 | `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
 | `tags` | list of string | no | Max items 20. |
 

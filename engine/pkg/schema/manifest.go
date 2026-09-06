@@ -247,6 +247,13 @@ type Persona struct {
 	Phone      string            `json:"phone,omitempty" yaml:"phone,omitempty"`
 	MFA        bool              `json:"mfa,omitempty" yaml:"mfa,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+	// SignInPath is where this persona's sign-in form lives, when it is not
+	// where the workflow starts. An application with two sign-in surfaces on
+	// one origin, a customer console and an operator portal say, has personas
+	// whose forms are on different paths, and the runner's search for a form
+	// begins at the workflow's start path, which is the wrong one for the
+	// persona that signs in somewhere else.
+	SignInPath string `json:"sign_in_path,omitempty" yaml:"sign_in_path,omitempty"`
 }
 
 // AuthAdapter names how personas are created.
@@ -338,6 +345,12 @@ type Workflow struct {
 	Name        string   `json:"name" yaml:"name"`
 	Description string   `json:"description" yaml:"description"`
 	Persona     string   `json:"persona,omitempty" yaml:"persona,omitempty"`
+	// Personas is the list of personas this workflow signs in as, in order,
+	// in ONE browser, for a workflow about a person who holds more than one
+	// session at once. The last one named is the identity the workflow acts
+	// as; the ones before it are signed in first and their sessions kept.
+	// Mutually exclusive with Persona.
+	Personas    []string `json:"personas,omitempty" yaml:"personas,omitempty"`
 	StartPath   string   `json:"start_path,omitempty" yaml:"start_path,omitempty"`
 	Independent bool     `json:"independent,omitempty" yaml:"independent,omitempty"`
 	Budget      *Budget  `json:"budget,omitempty" yaml:"budget,omitempty"`
