@@ -98,13 +98,12 @@ jobs:
       # The hosted control plane this repository is connected to, and the one
       # whose App posts the `Antifailure` check on every pull request here.
       #
-      # A literal rather than `vars.AF_CONTROL_PLANE`, which is what
-      # examples/github-workflow.yml tells a customer to set. A customer's
-      # address is their own and belongs in a variable; this repository's is
-      # this repository's own product at its published address, and a variable
-      # that has to be set by hand before the check can work is a variable
-      # somebody will not set. It was not set here, which is the second of the
-      # two reasons nothing was ever reported.
+      # A literal rather than `vars.AF_CONTROL_PLANE`. A variable that has to
+      # be set by hand before the check can work is a variable somebody will
+      # not set: it was not set here, which is the second of the two reasons
+      # nothing was ever reported, and it was not set on any customer's first
+      # pull request either, which is why examples/github-workflow.yml now
+      # carries this same address as the variable's default.
       AF_CONTROL_PLANE: https://app.antifailure.dev
       # The source the masking rules are written against. Synthesised rather
       # than restored from production: a control plane that copies a real

@@ -76,10 +76,18 @@ jobs:
     secrets: inherit
     with:
       dispatch: ${{ toJSON(inputs) }}
-      control-plane: ${{ vars.AF_CONTROL_PLANE }}
+      # Where the run reports: the control plane whose GitHub App posts the
+      # check on this pull request, so the check is answered by this run rather
+      # than by a timeout. Set the variable to point the run somewhere else.
+      control-plane: ${{ vars.AF_CONTROL_PLANE || 'https://app.antifailure.dev' }}
 ```
 
 It is short because the work is somewhere else, and where it is matters.
+
+The App writes its own address on that last line. The file above carries the
+hosted control plane's, and a self hosted control plane that knows its public
+address writes that instead, so the pull request it opens and the file it adds
+name the same place.
 
 The job calls a **reusable workflow** in the Antifailure repository. That
 workflow checks out your branch with full history, because `af change` diffs
@@ -148,10 +156,14 @@ the engine reads. It has to be a test key. A live one is refused before
 anything starts.
 
 `AF_CONTROL_PLANE` is a repository **variable**, not a secret, because it is an
-address. Set it to a hosted control plane's address and the run reports there,
-the control plane publishes a check run and maintains the comment. Leave it
-unset and the job comments for itself. [The control plane](/docs/getting-started/hosted)
-is what that adds.
+address. The file already carries one as the variable's default: the control
+plane whose App opened the pull request, or the hosted one when you copied the
+file by hand. The run reports there, the control plane concludes the check it
+posted and maintains the comment, and there is nothing to set. Set the variable
+only to point the run at a self hosted control plane. A repository the control
+plane does not know refuses the run a credential, the job comments for itself,
+and nothing is red for it. [The control plane](/docs/getting-started/hosted)
+is what reporting adds.
 
 ## No manifest yet
 

@@ -21,6 +21,10 @@
 //   duplicate delivery          see githubapp.test.ts, which owns the fence
 //   timeout                     nothing reported before the deadline
 //   missing callback            the run finished and said nothing
+//   unclaimed workflow          the customer's own Antifailure workflow
+//                               finished and no run ever claimed the commit
+//   unclaimed then callback     a job claims after that check concluded
+//   claim then workflow         the ordinary one, said the other way round
 //   fork approval then a new sha the approval is void
 //   concurrent deliveries       see githubapp.test.ts
 //
@@ -47,8 +51,10 @@ import {
   TEARDOWN_ATTEMPTS,
   TEARDOWN_LEASE_MS,
   TIMED_OUT_DETAIL,
+  unclaimedDetail,
   WORKFLOW_ENGINE_TTL_MS,
 } from '../src/github/lifecycle.ts'
+import { CONTROL_PLANE_VARIABLE, SETUP_DOCS_URL, WORKFLOW_PATH } from '../src/github/setup.ts'
 import { CHECK_NAME, COMMENT_MARKER } from '../src/github/render.ts'
 import { checkShapeFor, GENERATION_STATES } from '../src/github/states.ts'
 import {
@@ -254,6 +260,10 @@ describe(
       headSha: string,
       runId: number,
       conclusion: string | null = null,
+      /** Which workflow, the way GitHub says it. Absent means a run this
+       *  suite has no opinion about, which is what every test before the
+       *  unclaimed ones sends. */
+      workflow: { name?: string; path?: string; event?: string } = {},
     ): Record<string, unknown> {
       return {
         action,
@@ -262,6 +272,7 @@ describe(
           head_sha: headSha,
           status: action === 'completed' ? 'completed' : 'in_progress',
           conclusion,
+          ...workflow,
         },
         repository: { full_name: repository, owner: { login: org.slug } },
         organization: { login: org.slug },
@@ -981,6 +992,153 @@ describe(
       assert.equal((await report(token, head, ['pass'])).status, 200)
       assert.equal((await generation(head))?.state, 'passed')
       assert.equal(checkFor(head)?.conclusion, 'success')
+    })
+
+    // -----------------------------------------------------------------------
+    // ordering: unclaimed workflow
+    // -----------------------------------------------------------------------
+
+    /** The customer's own Antifailure workflow, answering a pull request. */
+    const antifailure = { name: 'Antifailure', path: WORKFLOW_PATH, event: 'pull_request' }
+
+    it('ordering: unclaimed workflow, the customer\u2019s own run finished and nobody claimed the commit', async () => {
+      // THE FIRST PULL REQUEST AFTER INSTALLING THE APP. The App posted this
+      // check the moment the pull request opened, the workflow it committed
+      // ran green, and with nothing pointing the run at this control plane the
+      // check read "Waiting for a runner" for forty five minutes and then
+      // "Nothing was verified: the run never reported back", beside a green
+      // job of the same name. The stranger guard above is right to ignore a
+      // run that never introduced itself; this run is the one file the App
+      // commits, on the event the check is about, and its finishing without
+      // a word is the finding, said now and said with the variable's name.
+      const head = sha('unclaimed-workflow')
+      await deliver('pull_request', pullRequestPayload('opened', 62, head))
+      await deliver('workflow_run', workflowRunPayload('in_progress', head, 7101, null, antifailure))
+      assert.equal((await generation(head))?.state, 'queued', 'an unclaimed start moved the check')
+
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7101, 'success', antifailure))
+      const done = await generation(head)
+      assert.equal(done?.state, 'unverified')
+      assert.equal(done?.workflow_run_id, null, 'concluding is not binding')
+      // The sentence, and what it has to carry: the variable, this control
+      // plane's address, and the page with the file. Each is a separate
+      // assertion because each is a separate thing a reader has to be told.
+      assert.equal(done?.detail, unclaimedDetail('http://app.test'))
+      assert.ok(done!.detail!.includes(`\`${CONTROL_PLANE_VARIABLE}\``), 'the variable is not named')
+      assert.ok(done!.detail!.includes('`http://app.test`'), 'this control plane is not named')
+      assert.ok(done!.detail!.includes(SETUP_DOCS_URL), 'the page is not named')
+      assert.notEqual(done?.detail, TIMED_OUT_DETAIL)
+      // action_required, not timed_out: something came back, and it was the
+      // wrong shape, which is a thing a person has to fix rather than wait on.
+      assert.equal(checkFor(head)?.status, 'completed')
+      assert.equal(checkFor(head)?.conclusion, 'action_required')
+      assert.match(commentFor(62)!.body, new RegExp(CONTROL_PLANE_VARIABLE))
+
+      // And the sweeper, forty five minutes later, has nothing to add: the
+      // check concluded once, with the better sentence.
+      h.clock.advance(DEFAULT_DEADLINE_MS + 60_000)
+      await sweepGenerations(lifecycle())
+      assert.equal((await generation(head))?.detail, unclaimedDetail('http://app.test'))
+    })
+
+    it('ordering: unclaimed then callback, a late claim cannot reopen the verdict', async () => {
+      // A job that introduces itself after the workflow that ran it has
+      // finished is not a job on this commit's check: the Re-run button is
+      // the route to another attempt, and it bumps the attempt so that the
+      // record says so.
+      const head = sha('unclaimed-then-callback')
+      await deliver('pull_request', pullRequestPayload('opened', 63, head))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7102, 'success', antifailure))
+      assert.equal((await generation(head))?.state, 'unverified')
+
+      assert.equal(await callbackFor(head, 7103), null, 'a concluded check issued a credential')
+      assert.equal((await generation(head))?.state, 'unverified')
+      assert.equal((await generation(head))?.workflow_run_id, null)
+    })
+
+    it('ordering: claim then workflow, the claimed run\u2019s silence is the older sentence', async () => {
+      // The other ordering of the same two events. A run that claimed the
+      // commit and then said nothing is a job that ran and did not post its
+      // report, and that sentence names `af ci`, not a variable: the variable
+      // was plainly set, or the claim could not have happened.
+      const head = sha('claim-then-workflow')
+      await deliver('pull_request', pullRequestPayload('opened', 64, head))
+      assert.ok(await callbackFor(head, 7104))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7104, 'success', antifailure))
+      const done = await generation(head)
+      assert.equal(done?.state, 'unverified')
+      assert.match(done!.detail!, /af ci/)
+      assert.ok(!done!.detail!.includes(CONTROL_PLANE_VARIABLE), 'a claimed run was told to set the variable')
+    })
+
+    it('ordering: claim then a second run of the workflow finishes, and the claimed one still owns the verdict', async () => {
+      // Two runs of the same file on one commit: a `labeled` delivery beside
+      // the `opened` one, or a Re-run somebody pressed in the Actions tab.
+      // The run that claimed the commit is the check. The other finishing,
+      // whatever it concludes, is a stranger with a familiar name.
+      const head = sha('claimed-then-another')
+      await deliver('pull_request', pullRequestPayload('opened', 69, head))
+      assert.ok(await callbackFor(head, 7110))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7111, 'success', antifailure))
+      const still = await generation(head)
+      assert.equal(still?.state, 'running', 'an unclaimed twin ended a claimed check')
+      assert.equal(still?.workflow_run_id, '7110')
+      assert.notEqual(checkFor(head)?.status, 'completed')
+    })
+
+    it('the customer\u2019s own workflow failing before it claimed is blocked, not the variable sentence', async () => {
+      const head = sha('unclaimed-failed')
+      await deliver('pull_request', pullRequestPayload('opened', 65, head))
+      await deliver('workflow_run', workflowRunPayload('completed', head, 7105, 'failure', antifailure))
+      const done = await generation(head)
+      assert.equal(done?.state, 'blocked')
+      assert.match(done!.detail!, /Read the job log/)
+      assert.equal(checkFor(head)?.conclusion, 'action_required')
+    })
+
+    for (const conclusion of ['skipped', 'cancelled']) {
+      it(`a ${conclusion} run of the customer\u2019s own workflow concludes nothing`, async () => {
+        // A `labeled` event that is not the approval label skips the job by
+        // design, and a push cancels the run it supersedes. Neither says
+        // whether the workflow can report, and the real run may be claiming
+        // the commit this second: an `opened` and a `labeled` delivered
+        // together start two runs, of which one is skipped in seconds.
+        const head = sha(`unclaimed-${conclusion}`)
+        await deliver('pull_request', pullRequestPayload('opened', 66, head))
+        await deliver('workflow_run', workflowRunPayload('completed', head, 7106, conclusion, antifailure))
+        assert.equal((await generation(head))?.state, 'queued')
+        assert.notEqual(checkFor(head)?.status, 'completed')
+      })
+    }
+
+    it('a dispatched run of the customer\u2019s own workflow is never the check', async () => {
+      // The same file runs on workflow_dispatch when the console asks for an
+      // environment, on the branch a pull request is on, so its head is a
+      // pull request's head. Only a pull_request run answers the check.
+      const head = sha('unclaimed-dispatch')
+      await deliver('pull_request', pullRequestPayload('opened', 67, head))
+      await deliver(
+        'workflow_run',
+        workflowRunPayload('completed', head, 7107, 'success', { ...antifailure, event: 'workflow_dispatch' }),
+      )
+      assert.equal((await generation(head))?.state, 'queued')
+    })
+
+    it('a stranger that names itself is still a stranger', async () => {
+      // The seventeen workflow repository, with the fields a real delivery
+      // carries: a security scan, green, on the pull request event.
+      const head = sha('named-stranger')
+      await deliver('pull_request', pullRequestPayload('opened', 68, head))
+      await deliver(
+        'workflow_run',
+        workflowRunPayload('completed', head, 7108, 'success', {
+          name: 'Security',
+          path: '.github/workflows/security.yml',
+          event: 'pull_request',
+        }),
+      )
+      assert.equal((await generation(head))?.state, 'queued')
+      assert.notEqual(checkFor(head)?.status, 'completed')
     })
 
     it('a stranger\u2019s run that fails cannot block a check either', async () => {

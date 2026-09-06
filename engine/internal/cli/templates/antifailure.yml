@@ -33,4 +33,7 @@ jobs:
     secrets: inherit
     with:
       dispatch: ${{ toJSON(inputs) }}
-      control-plane: ${{ vars.AF_CONTROL_PLANE }}
+      # Where the run reports: the control plane whose GitHub App posts the
+      # check on this pull request, so the check is answered by this run rather
+      # than by a timeout. Set the variable to point the run somewhere else.
+      control-plane: ${{ vars.AF_CONTROL_PLANE || 'https://app.antifailure.dev' }}

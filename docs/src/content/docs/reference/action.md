@@ -63,7 +63,7 @@ the manifest names, selected by name out of the caller's.
 | Input | Default | What it does |
 | --- | --- | --- |
 | `dispatch` | `{}` | The caller's `workflow_dispatch` inputs as JSON, `toJSON(inputs)`. Empty or `{}` on a pull request, and then the command is `ci`. |
-| `control-plane` | empty | Address of a hosted control plane, usually `vars.AF_CONTROL_PLANE`. Empty skips the two calls to it and the job comments for itself. |
+| `control-plane` | empty | Address of the control plane the run reports to. The example passes `vars.AF_CONTROL_PLANE` with the hosted address as its default. Empty skips the two calls to it and the job comments for itself. |
 | `version` | empty | The Antifailure release to install, such as `v1.2.1`. Empty installs the latest release. |
 
 The workflow has no `secrets` input of its own. `secrets: inherit` in the

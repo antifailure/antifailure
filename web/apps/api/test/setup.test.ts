@@ -11,7 +11,11 @@
 //     puts it back;
 //   - a branch a dead sweeper left behind is reused rather than refused;
 //   - a failure is retried five times and then said so;
-//   - the file the App writes is the file the documentation shows.
+//   - the file the App writes is the file the documentation shows, with this
+//     control plane's own address where the file reports, so the check the
+//     App posts is answered by the run rather than by a forty five minute
+//     timeout;
+//   - the body says the address is in the file and there is nothing to set.
 
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -22,10 +26,13 @@ import { handleDelivery } from '../src/github/webhook.ts'
 import { FakeRepositoryApi } from '../src/github/fakeapi.ts'
 import {
   CONTROL_PLANE_VARIABLE,
+  HOSTED_CONTROL_PLANE,
+  renderWorkflow,
   SETUP_ATTEMPTS,
   SETUP_BRANCH,
   SETUP_DOCS_URL,
   SETUP_TITLE,
+  WORKFLOW_NAME,
   WORKFLOW_PATH,
   WORKFLOW_TEMPLATE,
   setupPullRequestBody,
@@ -67,7 +74,49 @@ describe('the workflow file the App writes', () => {
 
   it('is not empty and is the workflow it claims to be', () => {
     assert.match(WORKFLOW_TEMPLATE, /^name: Antifailure$/m)
+    assert.equal(WORKFLOW_NAME, 'Antifailure')
     assert.match(WORKFLOW_TEMPLATE, /uses: antifailure\/antifailure\/\.github\/workflows\/check\.yml@/)
+  })
+
+  it('reports to the hosted control plane unless the repository variable says otherwise', () => {
+    // THE FIRST PULL REQUEST AFTER INSTALLING THE APP. The App posts a check
+    // named Antifailure the moment the pull request opens, and the check
+    // concludes when this file reports back. The first version of the file
+    // reported only when AF_CONTROL_PLANE was set, and nothing on the way set
+    // it, so a new customer's first pull request showed a green job beside a
+    // check that waited forty five minutes and then said nothing was verified.
+    assert.equal(HOSTED_CONTROL_PLANE, 'https://app.antifailure.dev')
+    assert.ok(
+      WORKFLOW_TEMPLATE.includes(`\${{ vars.${CONTROL_PLANE_VARIABLE} || '${HOSTED_CONTROL_PLANE}' }}`),
+      'the template passes the variable with no default address',
+    )
+  })
+})
+
+describe('the file the App commits', () => {
+  it('is the template unchanged for the hosted control plane', () => {
+    assert.equal(renderWorkflow('https://app.antifailure.dev/'), WORKFLOW_TEMPLATE)
+  })
+
+  it('carries a self hosted control plane\u2019s own address as the default', () => {
+    const rendered = renderWorkflow('https://plane.test/')
+    assert.ok(
+      rendered.includes(`control-plane: \${{ vars.${CONTROL_PLANE_VARIABLE} || 'https://plane.test' }}`),
+      rendered,
+    )
+    assert.ok(!rendered.includes(HOSTED_CONTROL_PLANE), 'the hosted address survived the render')
+    // One line differs and nothing else: a render that touched a comment or a
+    // trigger would be a file the documentation no longer shows.
+    const changed = rendered.split('\n').filter((line, i) => line !== WORKFLOW_TEMPLATE.split('\n')[i])
+    assert.equal(changed.length, 1, `lines changed: ${JSON.stringify(changed)}`)
+  })
+
+  it('reads the variable and nothing else when the control plane has no address', () => {
+    // A default pointing at some other control plane is a check that never
+    // concludes, which is the defect the default exists to remove.
+    const rendered = renderWorkflow(null)
+    assert.ok(rendered.includes(`control-plane: \${{ vars.${CONTROL_PLANE_VARIABLE} }}`), rendered)
+    assert.ok(!rendered.includes('||'), 'a default survived for a control plane with no address')
   })
 })
 
@@ -78,9 +127,13 @@ describe('the pull request body', () => {
     controlPlane: 'https://app.antifailure.dev',
   })
 
-  it('names the one variable the hosted control plane needs, with its address', () => {
+  it('says the address is in the file and there is nothing to set', () => {
     assert.ok(body.includes(`\`${CONTROL_PLANE_VARIABLE}\``), 'the variable name is missing')
     assert.ok(body.includes('`https://app.antifailure.dev`'), 'the address is missing')
+    assert.match(body, /so there is nothing to set/)
+    assert.match(body, /answered by this workflow/)
+    // The sentence that buried the address under a condition nobody met.
+    assert.ok(!body.includes('If you use a control plane'), 'the variable is still called optional')
   })
 
   it('links to the documentation', () => {
@@ -113,6 +166,10 @@ describe('the pull request body', () => {
     const without = setupPullRequestBody({ repository: 'acme/app', defaultBranch: 'main', controlPlane: null })
     assert.ok(!without.includes('null'))
     assert.ok(without.includes(`\`${CONTROL_PLANE_VARIABLE}\``))
+    // With no address to write into the file the variable is the only route,
+    // and the body has to say so before the merge rather than after.
+    assert.match(without, /set it to this control plane's address before merging/)
+    assert.ok(!without.includes('nothing to set'))
   })
 })
 
@@ -414,9 +471,12 @@ describe(
       assert.ok(!opened!.body.includes('—'), 'the body contains an em dash')
 
       // The branch was made from the default branch's head and the file on it
-      // is the template, byte for byte.
+      // is the template with THIS control plane's address written in where the
+      // run reports, so the pull request body and the file name the same place.
       assert.equal(api.branchSha(full, SETUP_BRANCH), HEAD)
-      assert.equal(api.fileOn(full, SETUP_BRANCH, WORKFLOW_PATH)?.content, WORKFLOW_TEMPLATE)
+      const committed = api.fileOn(full, SETUP_BRANCH, WORKFLOW_PATH)?.content
+      assert.equal(committed, renderWorkflow('https://plane.test'))
+      assert.ok(committed!.includes(`|| 'https://plane.test' }}`), 'the committed file does not report here')
       assert.equal(api.fileOn(full, 'develop', WORKFLOW_PATH), undefined, 'the default branch was written to')
 
       const row = await setupOf(full)

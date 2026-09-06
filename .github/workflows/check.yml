@@ -37,7 +37,8 @@ on:
         default: '{}'
       control-plane:
         description: >-
-          Address of a hosted control plane, usually `vars.AF_CONTROL_PLANE`.
+          Address of the control plane the run reports to. The example passes
+          `vars.AF_CONTROL_PLANE` with the hosted address as its default.
           Empty skips the two calls to it and the job comments for itself.
         type: string
         required: false
@@ -52,7 +53,14 @@ on:
 
 jobs:
   antifailure:
-    name: Antifailure
+    # NOT "Antifailure". That is the name of the check the GitHub App posts on
+    # the same pull request, the one a branch protection rule requires, and it
+    # is the verdict: it concludes when this run reports. This job is the
+    # runner, and it is green when the job exited zero, which `af ci` does on
+    # a run that verified nothing. Two checks with one name and opposite
+    # answers sat side by side on every first pull request, and a rule
+    # requiring "Antifailure" could not tell them apart.
+    name: Antifailure rehearsal
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # A `labeled` or `unlabeled` event that is not the approval label skips

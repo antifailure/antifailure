@@ -17,10 +17,22 @@
 // WHAT IT WRITES, AND WHERE. One file, `.github/workflows/antifailure.yml`, on
 // a branch of its own, `antifailure/setup`, never on the default branch. The
 // file is the same one `af init` writes and the same one the documentation
-// shows, and setup.test.ts holds it byte for byte equal to
+// shows, and setup.test.ts holds the template byte for byte equal to
 // examples/github-workflow.yml so the three cannot drift. Nothing runs in the
 // customer's repository until a person merges the pull request, and the body
 // says so.
+//
+// WHERE THE FILE REPORTS, AND WHY THE ADDRESS IS IN IT. The App posts a check
+// named Antifailure on every pull request of a connected repository the moment
+// the pull request opens, and that check concludes when the workflow reports
+// back through this control plane. The first version of the file reported
+// only when the repository variable AF_CONTROL_PLANE was set, the pull request
+// body called the variable optional, and nothing on the way set it. So a new
+// customer's first pull request showed a green job beside a check that waited
+// forty five minutes and then said nothing was verified. The file now carries
+// the address as the variable's default, and renderWorkflow writes THIS
+// control plane's address there, because the App knows where it lives and the
+// person merging the file should not have to.
 //
 // THE PERMISSION THIS DID NOT HAVE. Writing a file needs `contents: write`,
 // and the App was created with Contents read. Widening it raises a request
@@ -91,6 +103,64 @@ export const CONTROL_PLANE_VARIABLE = ((): string => {
   }
   return found[1]!
 })()
+
+/** `${{ vars.NAME || 'address' }}`, the one expression the template passes
+ *  for the control plane and the only shape renderWorkflow rewrites. */
+const HOSTED_DEFAULT = new RegExp(
+  String.raw`\$\{\{\s*vars\.` + CONTROL_PLANE_VARIABLE + String.raw`\s*\|\|\s*'([^']+)'\s*\}\}`,
+)
+
+/**
+ * The address the template reports to when the variable is unset, read out
+ * of the template for the same reason the variable's name is: the body and
+ * the file this process writes must name the same address, and the example
+ * file is where that address is decided.
+ *
+ * The expression is `vars.NAME || 'address'`, which is the only shape
+ * renderWorkflow knows how to rewrite, so a template that stopped carrying a
+ * default fails here at import rather than shipping a file that says one
+ * thing next to a body that says another.
+ */
+export const HOSTED_CONTROL_PLANE = ((): string => {
+  const found = HOSTED_DEFAULT.exec(WORKFLOW_TEMPLATE)
+  if (!found) {
+    throw new Error(
+      `setup/antifailure.yml passes vars.${CONTROL_PLANE_VARIABLE} with no default address, ` +
+        'so the check the App posts would wait on a variable nobody sets',
+    )
+  }
+  return found[1]!
+})()
+
+/** The workflow's own `name:`, which is what a `workflow_run` delivery for it
+ *  carries. lifecycle.ts uses it to tell the customer's Antifailure workflow
+ *  from every other workflow in the repository. */
+export const WORKFLOW_NAME = ((): string => {
+  const found = /^name:[ \t]*(.+?)[ \t]*$/m.exec(WORKFLOW_TEMPLATE)
+  if (!found) throw new Error('setup/antifailure.yml has no name')
+  return found[1]!
+})()
+
+/**
+ * The file this control plane commits, with its own address as the default.
+ *
+ * The hosted control plane and the example agree already, so for it this is
+ * the template unchanged. A self hosted control plane that knows its address
+ * writes that address instead, and one that does not is given a file that
+ * reads the variable and nothing else, because a default that points at a
+ * control plane other than the one posting the check is a check that never
+ * concludes, which is the defect the default exists to remove.
+ */
+export function renderWorkflow(controlPlane: string | null): string {
+  const base = controlPlane ? controlPlane.replace(/\/+$/, '') : null
+  const expression =
+    base === null
+      ? `\${{ vars.${CONTROL_PLANE_VARIABLE} }}`
+      : `\${{ vars.${CONTROL_PLANE_VARIABLE} || '${base}' }}`
+  // A function rather than a replacement string, so a `$` in the address
+  // could never be read as a capture reference.
+  return WORKFLOW_TEMPLATE.replace(HOSTED_DEFAULT, () => expression)
+}
 
 /** The secrets the workflow can use and does not need, by name, with what
  *  each one unlocks. Customer-side names, kept as data for the reason above. */
@@ -191,9 +261,6 @@ export function setupPullRequestBody(input: {
   defaultBranch: string
   controlPlane: string | null
 }): string {
-  const plane = input.controlPlane
-    ? `\`${input.controlPlane}\``
-    : 'the public address of the control plane that opened this pull request'
   return [
     `This pull request adds \`${WORKFLOW_PATH}\`, the workflow that runs Antifailure on ` +
       `every pull request in ${input.repository}. It was opened by the Antifailure GitHub ` +
@@ -230,14 +297,30 @@ export function setupPullRequestBody(input: {
     'Secrets are read by name from the repository settings. The workflow passes them to ' +
       'Antifailure and to nothing else, and the job prints none of them.',
     '',
-    '## The hosted control plane',
+    '## Where the check reports',
     '',
-    `If you use a control plane, set one repository variable, \`${CONTROL_PLANE_VARIABLE}\`, ` +
-      `to its public address, which for this one is ${plane}. It is a variable rather than a ` +
-      `secret because it is an address, not a credential. With it set, the control plane ` +
-      `keeps one check and one comment per pull request and can ask this workflow to build an ` +
-      `environment from the console. Without it the workflow comments for itself and needs ` +
-      `nothing from anybody.`,
+    ...(input.controlPlane
+      ? [
+          `The check named Antifailure that this App posts on every pull request is answered ` +
+            `by this workflow, which reports through the control plane at ` +
+            `\`${input.controlPlane}\`. That address is written into the file as the default ` +
+            `for the repository variable \`${CONTROL_PLANE_VARIABLE}\`, so there is nothing to ` +
+            `set. Set the variable only to point the workflow at a self hosted control plane. ` +
+            `It is a variable rather than a secret because it is an address, not a credential; ` +
+            `the job proves who it is with the workflow identity GitHub signs for it.`,
+        ]
+      : [
+          `The check named Antifailure that this App posts on every pull request concludes ` +
+            `when this workflow reports back, and this control plane has no public address ` +
+            `configured to write into the file. So the file reads the repository variable ` +
+            `\`${CONTROL_PLANE_VARIABLE}\` and nothing else: set it to this control plane's ` +
+            `address before merging, or the check will hear nothing from the run. It is a ` +
+            `variable rather than a secret because it is an address, not a credential.`,
+        ]),
+    '',
+    `With the report the control plane keeps one check and one comment per pull request and ` +
+      `can ask this workflow to build an environment from the console. A run that reports ` +
+      `nowhere still comments for itself, and the check says the run never reported.`,
     '',
     `The rest is at ${SETUP_DOCS_URL}.`,
   ].join('\n')
@@ -427,6 +510,7 @@ async function attemptSetup(deps: SetupDeps, setup: ClaimedSetup): Promise<Setup
   const { api } = deps
   const installationId = setup.installationId
   const repository = setup.repository
+  const controlPlane = deps.consoleBase ? deps.consoleBase.replace(/\/+$/, '') : null
   try {
     if (await api.fileExists(installationId, repository, WORKFLOW_PATH, setup.defaultBranch)) {
       return { state: 'present', error: null, ...none }
@@ -437,7 +521,7 @@ async function attemptSetup(deps: SetupDeps, setup: ClaimedSetup): Promise<Setup
       path: WORKFLOW_PATH,
       branch: SETUP_BRANCH,
       message: 'Add the Antifailure workflow',
-      content: WORKFLOW_TEMPLATE,
+      content: renderWorkflow(controlPlane),
     })
     const opened = await api.createPullRequest(installationId, repository, {
       title: SETUP_TITLE,
@@ -446,7 +530,7 @@ async function attemptSetup(deps: SetupDeps, setup: ClaimedSetup): Promise<Setup
       body: setupPullRequestBody({
         repository,
         defaultBranch: setup.defaultBranch,
-        controlPlane: deps.consoleBase ? deps.consoleBase.replace(/\/+$/, '') : null,
+        controlPlane,
       }),
     })
     return { state: 'opened', error: null, pullRequest: opened }

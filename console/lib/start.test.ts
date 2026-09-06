@@ -86,6 +86,22 @@ test("the CI path is the App install when the plane has one", () => {
   // web/apps/api/src/github/setup.ts: SETUP_TITLE and WORKFLOW_PATH.
   assert.ok(guide.step?.note?.includes("Check every pull request with Antifailure"));
   assert.ok(guide.step?.note?.includes(".github/workflows/antifailure.yml"));
+  // The file the App commits carries the control plane's own address, so the
+  // one thing the old copy left a reader to discover, a repository variable
+  // nothing on this path ever named, is now said not to exist.
+  assert.ok(guide.step?.note?.includes("address written in as where the run reports"));
+  assert.ok(guide.step?.note?.includes("no variable to set"));
+});
+
+test("the af init fallback names the variable only when this is not the hosted control plane", () => {
+  // af init writes examples/github-workflow.yml, whose default address is the
+  // hosted control plane. A self hosted one that cannot open the pull request
+  // itself has to say so, and the hosted one must not tell people to set a
+  // variable to the address the file already carries.
+  const hosted = guideFor("ci", HOSTED, undefined).copy[0]?.note ?? "";
+  assert.ok(!hosted.includes("AF_CONTROL_PLANE"));
+  const own = guideFor("ci", "https://plane.example.com", undefined).copy[0]?.note ?? "";
+  assert.ok(own.includes("AF_CONTROL_PLANE to https://plane.example.com"));
 });
 
 test("the CI path falls back to af init when the plane has no install address", () => {

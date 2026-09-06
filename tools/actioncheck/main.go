@@ -41,6 +41,15 @@ const (
 	actionFile   = "action.yml"
 	reusableFile = ".github/workflows/check.yml"
 	exampleFile  = "examples/github-workflow.yml"
+
+	// checkName is the name of the check run the GitHub App posts on every
+	// pull request, CHECK_NAME in web/apps/api/src/github/render.ts. The
+	// reusable workflow's job appears on the same pull request, and when it
+	// carried this name a first pull request showed a green "Antifailure"
+	// beside an amber "Antifailure": the job is the runner and the check is
+	// the verdict, and a branch protection rule requiring the name could not
+	// tell them apart.
+	checkName = "Antifailure"
 )
 
 // copies are the embedded copies of the example, each of which must equal it
@@ -106,6 +115,7 @@ type workflow struct {
 }
 
 type job struct {
+	Name    string            `yaml:"name"`
 	Uses    string            `yaml:"uses"`
 	With    map[string]string `yaml:"with"`
 	Secrets any               `yaml:"secrets"`
@@ -170,7 +180,10 @@ func check(root string) ([]string, error) {
 	}
 	var actionRef string
 	var actionStep *step
-	for _, j := range reusable.Jobs {
+	for id, j := range reusable.Jobs {
+		if strings.TrimSpace(j.Name) == checkName || (j.Name == "" && id == checkName) {
+			say("%s: job %q is named %q, which is the name of the check the GitHub App posts on the same pull request; the runner and the verdict must not share a name", reusableFile, id, checkName)
+		}
 		for i := range j.Steps {
 			s := j.Steps[i]
 			m := usesRef.FindStringSubmatch(s.Uses)

@@ -116,8 +116,14 @@ func TestAStepOutputWithNoSuchStepIsRefused(t *testing.T) {
 
 func TestTheExampleMustPassOnlyDeclaredInputs(t *testing.T) {
 	root := tree(t)
-	edit(t, root, exampleFile, "control-plane: ${{ vars.AF_CONTROL_PLANE }}", "control_plane: ${{ vars.AF_CONTROL_PLANE }}")
+	edit(t, root, exampleFile, "control-plane: ${{ vars.AF_CONTROL_PLANE", "control_plane: ${{ vars.AF_CONTROL_PLANE")
 	expect(t, root, "passes with.control_plane, which .github/workflows/check.yml does not declare")
+}
+
+func TestTheReusableJobMustNotBeNamedLikeTheAppsCheck(t *testing.T) {
+	root := tree(t)
+	edit(t, root, reusableFile, "name: Antifailure rehearsal", "name: Antifailure")
+	expect(t, root, `is named "Antifailure", which is the name of the check the GitHub App posts`)
 }
 
 func TestTheExampleMustInheritSecrets(t *testing.T) {

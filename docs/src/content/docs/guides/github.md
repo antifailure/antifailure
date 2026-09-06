@@ -33,9 +33,14 @@ repository can require, maintains the comment itself, and owns the parts a
 workflow cannot do: stopping a run when the pull request closes, noticing a run
 that never reported, and keeping the history.
 
-Which one you get is decided by one repository variable, `AF_CONTROL_PLANE`.
-Set it to the control plane's address and the two extra steps in the example
-workflow run; leave it unset and they are skipped and the workflow comments for
+Which one you get is decided by the `control-plane` address the workflow
+passes, and the example passes the repository variable `AF_CONTROL_PLANE` with
+the control plane's own address as its default: the hosted one in the file you
+copy, and the address of whichever control plane's App opened the pull request
+that added the file. So a repository connected to a control plane reports to it
+with nothing set, and the check the App posts is answered by the run. Set the
+variable to point the run at a self hosted control plane. A repository no
+control plane knows is refused a credential and the workflow comments for
 itself. There is no mode to configure and nothing to keep in step.
 
 It is a **variable** on your repository rather than a secret, because it is an
@@ -76,7 +81,7 @@ jobs:
     secrets: inherit
     with:
       dispatch: ${{ toJSON(inputs) }}
-      control-plane: ${{ vars.AF_CONTROL_PLANE }}
+      control-plane: ${{ vars.AF_CONTROL_PLANE || 'https://app.antifailure.dev' }}
 ```
 
 **`.github/workflows/check.yml`** is the reusable workflow. It runs on the
@@ -120,6 +125,13 @@ the action directly are on [the action reference](/docs/reference/action).
 One check run per commit, named **Antifailure**, so a branch protection rule can
 require it. The name is stable on purpose: changing it would silently
 un-require the check on every repository that named it.
+
+It is not the workflow's job. That one appears on the same pull request as
+**check / Antifailure rehearsal**, and it is green when the job exited zero,
+which `af ci` does on a run that verified nothing. The check named Antifailure
+is the verdict, and it concludes when the run reports. Require the verdict.
+The two carried the same name once, and a first pull request showed a green
+Antifailure beside an amber Antifailure with nothing to say which to believe.
 
 | The check says | GitHub's conclusion | Merges behind a required check? |
 | --- | --- | --- |
@@ -176,9 +188,16 @@ the end:
   is its only route into the runtime holding your environment;
 - a run that dies is reported in seconds rather than at the deadline.
 
-A commit where no run ever introduces itself is not passed and not failed. It
-sits until the deadline and then reads "Nothing was verified: the run never
-reported back", which is `timed_out` and true: nothing came back at all.
+A commit where no run ever introduces itself is not passed and not failed.
+When the repository's own Antifailure workflow finishes on the pull request
+without having claimed the commit, the check concludes then: "Nothing was
+verified", with a sentence naming `AF_CONTROL_PLANE`, this control plane's
+address and this page, because the run reported somewhere else or nowhere.
+When no such run finishes either, the check sits until the deadline and then
+reads "Nothing was verified: the run never reported back", which is
+`timed_out` and true: nothing came back at all. A skipped or cancelled run of
+the workflow concludes nothing, because a label that is not the approval label
+skips the job by design and a push cancels the run it supersedes.
 
 ## One comment, about one commit
 

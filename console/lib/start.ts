@@ -185,7 +185,7 @@ export function guideFor(path: Path, origin: string, installUrl: string | null |
               href: installUrl,
               label: "Install the GitHub App",
               note:
-                'Installing it on a repository opens a pull request titled "Check every pull request with Antifailure". It adds one file, .github/workflows/antifailure.yml, on a branch of its own. Merge it and the next pull request gets a check.',
+                'Installing it on a repository opens a pull request titled "Check every pull request with Antifailure". It adds one file, .github/workflows/antifailure.yml, on a branch of its own, with this control plane\'s address written in as where the run reports. Merge it and the next pull request gets a check; there is no variable to set.',
             }
           : null,
         copy: installUrl
@@ -195,7 +195,10 @@ export function guideFor(path: Path, origin: string, installUrl: string | null |
                 value: "af init",
                 said: "af init copied to the clipboard",
                 note:
-                  "This control plane has not been told where its GitHub App installs, so the workflow comes from your checkout instead. Run this where the repository has a github.com remote and it writes .github/workflows/antifailure.yml beside the manifest. Commit both and the next pull request gets a check.",
+                  "This control plane has not been told where its GitHub App installs, so the workflow comes from your checkout instead. Run this where the repository has a github.com remote and it writes .github/workflows/antifailure.yml beside the manifest. Commit both and the next pull request gets a check." +
+                  (origin === HOSTED
+                    ? ""
+                    : ` The file reports to the hosted control plane unless told otherwise, so set the repository variable AF_CONTROL_PLANE to ${origin} before that pull request opens.`),
               },
             ],
         permissions:

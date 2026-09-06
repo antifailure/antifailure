@@ -335,9 +335,11 @@ func runGitHubInit(_ context.Context, env *Env, force bool) error {
 	}
 	block.Flush()
 
-	env.Out.Section("Repository variable, only with a hosted control plane")
+	env.Out.Section("Repository variable, only for a self hosted control plane")
 	block = env.Out.Block()
-	block.Add("AF_CONTROL_PLANE", "the address of the control plane that keeps the check and the comment")
+	block.Add("AF_CONTROL_PLANE", "where the run reports. The file carries the hosted control "+
+		"plane's address as the default, so leave it unset unless the run should report to a "+
+		"control plane of your own, which then keeps the check and the comment")
 	block.Flush()
 	env.Out.Println("")
 	env.Out.Hint("Commit the file, open a pull request, and read the comment. Then", "af start")

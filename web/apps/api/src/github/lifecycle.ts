@@ -35,6 +35,7 @@ import type { Clock } from '../clock.ts'
 import { suspensionReason } from '../ingest.ts'
 import { GitHubApiError, GitHubPermissionError, type RepositoryApi } from './api.ts'
 import { countPolicyAndLoad } from './findings.ts'
+import { CONTROL_PLANE_VARIABLE, SETUP_DOCS_URL, WORKFLOW_NAME, WORKFLOW_PATH } from './setup.ts'
 import {
   CHECK_NAME,
   COMMENT_MARKER,
@@ -653,8 +654,31 @@ interface WorkflowRunPayload {
     head_sha?: string
     status?: string
     conclusion?: string | null
+    /** The workflow's `name:`. */
+    name?: string
+    /** The workflow file, such as `.github/workflows/antifailure.yml`. */
+    path?: string
+    /** What started the run: `pull_request`, `workflow_dispatch`, `push`. */
+    event?: string
   }
   repository?: { full_name?: string }
+}
+
+/**
+ * Whether a run is the customer's own Antifailure workflow answering a pull
+ * request, as opposed to any of the other workflows a repository has.
+ *
+ * By the file the App commits or by the name the file declares, and only on a
+ * `pull_request` event: the same file runs on `workflow_dispatch` when the
+ * console asks for an environment, and that run is never the check.
+ */
+export function isTheAntifailureWorkflow(run: {
+  name?: string
+  path?: string
+  event?: string
+}): boolean {
+  if (run.event !== 'pull_request') return false
+  return run.path === WORKFLOW_PATH || run.name === WORKFLOW_NAME
 }
 
 async function handleWorkflowRun(
@@ -734,8 +758,28 @@ async function handleWorkflowRun(
   // it ever introduces itself is left to the deadline sweeper, which writes
   // `timed_out` and "Nothing reported before the deadline", and that sentence
   // is true. The sentence this replaces was not.
+  //
+  // ONE EXCEPTION, AND IT IS NARROWER THAN THE GUESS IT REPLACES. When the
+  // run that finished is the customer's own Antifailure workflow, on this
+  // pull request, and nothing has claimed the commit, the check is told now
+  // rather than forty five minutes from now. That run is not a stranger: it
+  // is the one file this App commits, running on the event this check is
+  // about, and its finishing without a word is the finding. On a new
+  // customer's first pull request this was a green job named Antifailure
+  // beside a check named Antifailure that read "Waiting for a runner" for
+  // the whole deadline and then "Nothing was verified", and nothing on the
+  // way said the workflow had never been told where to report.
   const bound = found.generation.workflow_run_id
   if (bound !== String(run.id)) {
+    if (
+      bound === null &&
+      payload.action === 'completed' &&
+      isTheAntifailureWorkflow(run) &&
+      run.conclusion !== 'skipped' &&
+      run.conclusion !== 'cancelled'
+    ) {
+      return concludeUnclaimed(deps, login, found.orgId, generationId, headSha, run)
+    }
     return {
       handled: true,
       detail: bound
@@ -793,6 +837,78 @@ async function handleWorkflowRun(
   await requestTeardownFor(deps, login, generationId, 'the workflow run finished')
   await publish(deps, login, generationId)
   return { handled: true, detail: outcome, orgId: found.orgId }
+}
+
+/**
+ * The customer's own Antifailure workflow finished on this pull request and
+ * never introduced itself, so it reported to some other address or to none.
+ *
+ * `skipped` and `cancelled` never reach here. A `labeled` event that is not
+ * the approval label skips the job by design, and a push cancels the run it
+ * supersedes; neither says anything about whether the workflow can report.
+ * Everything else does: a run that exited zero without a word is `unverified`
+ * with the sentence that names the variable and the page, and a run that
+ * failed first is `blocked`, because a job that died is not a finding about
+ * the change.
+ */
+async function concludeUnclaimed(
+  deps: LifecycleDeps,
+  login: string,
+  orgId: string,
+  generationId: string,
+  headSha: string,
+  run: { id?: number; conclusion?: string | null },
+): Promise<DeliveryResult> {
+  const conclusion = run.conclusion ?? 'unknown'
+  const outcome = await deps.pool.withGitHubAccount(login, async (db) => {
+    const rows = await db.execute<{ id: string; state: GenerationState }>(sql`
+      SELECT id, state::text AS state FROM pr_generations WHERE id = ${generationId}::uuid`)
+    const current = rows[0]
+    if (!current) return 'the generation vanished'
+    if (current.state !== 'queued' && current.state !== 'running') return `already ${current.state}`
+
+    const { state, detail } =
+      conclusion === 'success'
+        ? { state: 'unverified' as const, detail: unclaimedDetail(deps.consoleBase) }
+        : {
+            state: 'blocked' as const,
+            detail:
+              `The workflow run ended ${conclusion} before it introduced itself to this control ` +
+              'plane, so the code was never checked. Read the job log: this is a failure of the ' +
+              'run rather than a finding about the change.',
+          }
+    await db.execute(sql`
+      UPDATE pr_generations
+      SET state = ${state}::pr_generation_state, detail = ${detail},
+          finished_at = ${deps.clock.now().toISOString()},
+          updated_at = ${deps.clock.now().toISOString()},
+          callback_hash = NULL, callback_expires_at = NULL
+      WHERE id = ${generationId}::uuid AND state IN ('queued', 'running')`)
+    return `the Antifailure workflow run ${run.id} ended ${conclusion} without claiming ${shortSha(headSha)}: ${state}`
+  })
+  await requestTeardownFor(deps, login, generationId, 'the workflow run finished')
+  await publish(deps, login, generationId)
+  return { handled: true, detail: outcome, orgId }
+}
+
+/**
+ * The sentence for a workflow that ran and reported nowhere this control
+ * plane could hear. It names the variable, the address, and the page, because
+ * the reader is somebody whose file predates the default or whose variable
+ * points elsewhere, and "nothing was verified" alone sends them to the wrong
+ * log.
+ */
+export function unclaimedDetail(consoleBase: string | null): string {
+  const here = consoleBase
+    ? `\`${consoleBase.replace(/\/+$/, '')}\``
+    : "this control plane's address"
+  return (
+    'The Antifailure workflow finished and never reported to this control plane, so nothing ' +
+    `was verified. The run reports wherever the workflow's \`control-plane\` input points, ` +
+    `which is the repository variable \`${CONTROL_PLANE_VARIABLE}\` or its default in the file: ` +
+    `set the variable to ${here}, or leave it unset with a file that carries that address as ` +
+    `the default. ${SETUP_DOCS_URL} has the file.`
+  )
 }
 
 /** What a finished run that never reported means. Never `passed`. */

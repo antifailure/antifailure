@@ -223,8 +223,9 @@ leave, and it carries no identity: it can send events and read an environment
 back, and it cannot reach a key, a member, or another token.
 
 **A job in GitHub Actions needs none of this.** Give the workflow
-`permissions: id-token: write` and set the `AF_CONTROL_PLANE` variable, and the
-engine trades the identity GitHub signs for that job for a short-lived
+`permissions: id-token: write` and point it at this control plane, which the
+pull request the App opens does for you and the `AF_CONTROL_PLANE` repository
+variable does for a file copied by hand, and the engine trades the identity GitHub signs for that job for a short-lived
 credential of its own, at `POST /v1/engine/token`. Nothing is stored in the
 repository and nothing has to be rotated. The rest of this section is for an
 engine running somewhere GitHub will not vouch for it: a developer's machine, a
