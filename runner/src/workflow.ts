@@ -97,6 +97,19 @@ export interface Snapshot {
   readonly unnamed: number;
   /** text is the visible text, which the expectations are checked against. */
   readonly text: string;
+  /** status is the HTTP status of the document itself, from the last
+   *  navigation. Undefined when nothing has navigated yet, which a Playwright
+   *  response can genuinely fail to produce.
+   *
+   *  This exists because a health check answering SELECT 1 and the page it
+   *  fronts answering with a stack trace used to be indistinguishable to
+   *  everything downstream of the browser: judgement ran on `text` alone, and
+   *  a page that never rendered because the server threw read exactly like a
+   *  page that rendered something the checker's words did not happen to
+   *  match. Both came back UNVERIFIED, with a note about the expectation's
+   *  wording, on an application that was never given a chance to show
+   *  anything at all. */
+  readonly status?: number | undefined;
 }
 
 /** Decides what to do next. */

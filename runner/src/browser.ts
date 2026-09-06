@@ -164,6 +164,10 @@ export class Session {
   readonly #failed: string[] = [];
   /** How many requests this page has in the air right now. See quiet. */
   #inFlight = 0;
+  /** lastStatus is the HTTP status of the last document navigated to,
+   *  undefined until the first goto. See snapshot's own field for why this
+   *  exists at all. */
+  #lastStatus: number | undefined;
   readonly #artifacts: string;
 
   private constructor(browser: Browser, context: BrowserContext, page: PWPage, artifacts: string) {
@@ -220,9 +224,20 @@ export class Session {
     // be the count AT THE MOMENT IT IS ASKED, not the count when the press
     // started, which is always zero.
     const inFlight = () => this.#inFlight;
+    // A private field is reachable from any function defined textually
+    // inside the class, but only through a reference to the instance, and
+    // the object literal below is not one. `self` is that reference.
+    const self = this;
     return {
       async goto(url: string) {
-        await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        const response = await pw.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        // The status of the document itself, not of every request the page
+        // goes on to make. This is what tells a health check answering
+        // SELECT 1 apart from the page it fronts answering with a stack
+        // trace: the response is discarded here on purpose in every version
+        // of this file before this one, so nothing downstream could ever
+        // tell a crashed page from an unreadable one.
+        self.#lastStatus = response ? response.status() : undefined;
         await settled(pw);
       },
       async fill(field: RegExp, value: string) {
@@ -415,6 +430,7 @@ export class Session {
       submits: interactive.submits,
       unnamed: interactive.unnamed,
       text: await pw.locator('body').innerText().catch(() => ''),
+      status: this.#lastStatus,
     };
   }
 

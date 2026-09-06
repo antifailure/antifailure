@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionsFor } from '../src/execute.ts';
+import { finalJudgement, sessionsFor } from '../src/execute.ts';
 import type { Persona } from '../src/login.ts';
+import type { Snapshot, Workflow } from '../src/workflow.ts';
 
 // Which sessions a workflow holds, and in what order.
 //
@@ -50,4 +51,55 @@ test('the single form keeps its fallback to the first declared persona', () => {
 
 test('an empty list means the single form, not no sign in at all', () => {
   assert.deepEqual(sessionsFor({ persona: 'operator', personas: [] }, declared).personas.map((p) => p.name), ['operator']);
+});
+
+// The failure a stranger following the docs actually hit: af init wrote a
+// manifest missing its migrate key, the health check ran SELECT 1 and passed,
+// and the page itself answered every request with a 500 and the words "relation
+// customers does not exist". Three rewrites of the workflow's expectation all
+// came back UNVERIFIED, with a note blaming the wording, because judgement ran
+// on the page's text and never looked at the status the runner already had.
+
+const emptySnapshot: Snapshot = {
+  url: 'http://127.0.0.1:9/', title: '', fields: [], controls: [], submits: [],
+  unnamed: 0, text: 'Internal Server Error',
+};
+
+const readOrders: Workflow = {
+  name: 'read-the-spend-by-customer',
+  description: 'Open the orders page and check a customer is on it.',
+  expect: ['Katherine Johnson', 'Customer Email Orders Spent'],
+};
+
+test('a page answering with a server error is a failure naming the status and the page, not an unread expectation', () => {
+  const result = finalJudgement(
+    readOrders, { ...emptySnapshot, status: 500 }, 'Nothing moved the workflow forward.', []);
+  assert.equal(result.cause, 'application-error');
+  assert.match(result.detail, /500/, 'the status has to be in the sentence');
+  assert.match(result.detail, new RegExp(emptySnapshot.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    'the page has to be in the sentence');
+});
+
+test('a page answering with a client error is also a failure, not an unread expectation', () => {
+  const result = finalJudgement(
+    readOrders, { ...emptySnapshot, status: 404 }, 'Nothing moved the workflow forward.', []);
+  assert.equal(result.cause, 'application-error');
+  assert.match(result.detail, /404/);
+});
+
+test('a page that answered 200 and matches nothing is still unverified, not a failure', () => {
+  // The status check must not swallow the real UNVERIFIED case: a page that
+  // rendered fine and simply does not carry the expectation's words is
+  // page-unreadable, exactly as it always was.
+  const result = finalJudgement(
+    readOrders, { ...emptySnapshot, status: 200, text: 'No customers yet.' },
+    'Nothing moved the workflow forward.', []);
+  assert.equal(result.cause, 'page-unreadable');
+});
+
+test('a page with no status yet (nothing has navigated) falls through to the text judgement', () => {
+  const result = finalJudgement(
+    readOrders, { ...emptySnapshot, status: undefined, text: 'No customers yet.' },
+    'Nothing moved the workflow forward.', []);
+  assert.equal(result.cause, 'page-unreadable');
 });

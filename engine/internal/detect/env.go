@@ -360,13 +360,23 @@ func (a *MigrationAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, erro
 	}
 
 	// A plain SQL migration directory, which many projects have with no tool
-	// at all. Reporting it at low confidence surfaces the question rather than
-	// silently skipping rehearsal.
-	sqlDirs := map[string]int{}
+	// at all. This used to become a KindNote and nothing else: it had no
+	// Subject any candidate loop reads, so a directory of numbered SQL files
+	// was reported to nobody and af init wrote a manifest with no migrate key
+	// at all, silently, on the project's own showcase example. A directory
+	// whose files are numbered (0001_init.sql, 0002_add_orders.sql, and so on)
+	// has a real, unambiguous replay order, so this now guesses the plain
+	// psql invocation those files imply and reports it as a migration finding
+	// like any recognised tool's command, at Low confidence so an ambiguous
+	// owner still becomes a question rather than a silent choice. A directory
+	// whose files are NOT numbered has no ordering evidence at all, and
+	// guessing one would be worse than the gap it replaces, so that case still
+	// becomes the note it always was: a question rather than a silent guess.
+	sqlDirs := map[string][]string{}
 	for _, p := range r.WithExtension(".sql") {
 		d := path.Dir(p)
 		if strings.Contains(d, "migration") || strings.Contains(d, "migrate") {
-			sqlDirs[d]++
+			sqlDirs[d] = append(sqlDirs[d], path.Base(p))
 		}
 	}
 	dirs := make([]string, 0, len(sqlDirs))
@@ -374,13 +384,52 @@ func (a *MigrationAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, erro
 		dirs = append(dirs, d)
 	}
 	sort.Strings(dirs)
+	numberedFile := regexp.MustCompile(`^[0-9]`)
 	for _, d := range dirs {
+		files := append([]string(nil), sqlDirs[d]...)
+		sort.Strings(files)
+		numbered := len(files) > 0
+		for _, f := range files {
+			if !numberedFile.MatchString(f) {
+				numbered = false
+				break
+			}
+		}
+		if !numbered {
+			out = append(out, Finding{
+				Kind: KindNote, Subject: "migrations.sql", Value: d,
+				Confidence: Low, Evidence: d,
+				Detail: fmt.Sprintf(
+					"%s holds %d SQL files and looks like a migration directory, but no migration tool was recognised.",
+					d, len(files)),
+			})
+			continue
+		}
+		// The owner is the directory a migrate command runs from: the
+		// migrations directory's parent, normalized the same way merge.go
+		// normalizes every other candidate's directory, so a service whose
+		// Dockerfile builds from that same directory is found as the unique
+		// local owner instead of asking who can run it.
+		owner := normalizeDir(path.Dir(d))
+		relDir := d
+		if owner != "" {
+			relDir = strings.TrimPrefix(d, owner+"/")
+		}
+		flags := make([]string, 0, len(files))
+		for _, f := range files {
+			flags = append(flags, "-f "+relDir+"/"+f)
+		}
+		cmd := "psql $DATABASE_URL -v ON_ERROR_STOP=1 " + strings.Join(flags, " ")
 		out = append(out, Finding{
-			Kind: KindNote, Subject: "migrations.sql", Value: d,
-			Confidence: Low, Evidence: d,
+			Kind: KindMigration, Subject: sanitizeServiceName(baseNameFor(owner, r)),
+			Value: cmd, Confidence: Low, Evidence: d,
 			Detail: fmt.Sprintf(
-				"%s holds %d SQL files and looks like a migration directory, but no migration tool was recognised.",
-				d, sqlDirs[d]),
+				"%s holds %d numbered SQL files and no migration tool was recognised, so this guesses "+
+					"the plain psql invocation the file order implies. Check it: a runner that applies "+
+					"these files differently, or reads them from a table this did not find, needs its own "+
+					"migrate command written in by hand.",
+				d, len(files)),
+			Extra: map[string]string{"tool": "sql", "dir": owner},
 		})
 	}
 

@@ -938,6 +938,80 @@ func TestRun_NeverReadsAValueFromAnExampleFile(t *testing.T) {
 	}
 }
 
+// The showcase example, and the shape a stranger's own readiness review found
+// broken: a Next.js Dockerfile app with numbered SQL migrations and no ORM,
+// which is examples/next-app with its own antifailure.yaml deleted. Before
+// this fixture existed, af init wrote a manifest with no migrate key at all
+// for exactly this repository, af up reported the service healthy on a
+// SELECT 1 health check, and the page answered "relation customers does not
+// exist" to every visitor. The migrate command has to come from the numbered
+// files themselves, since nothing here names a tool.
+func TestRun_NumberedSQLMigrationsProduceAPsqlCommand(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json": `{"name":"next-orders","dependencies":{"next":"15.0.0"},"scripts":{"start":"next start"}}`,
+		"Dockerfile": `FROM node:22-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm ci
+COPY migrations ./migrations
+EXPOSE 3000
+CMD ["node", "server.js"]
+`,
+		"migrations/0001_init.sql": "CREATE TABLE customers (id serial primary key);\n",
+	}
+	res := run(t, "next-orders", files)
+	web := serviceNamed(t, res.Draft, "next-orders")
+	require.Equal(t, "psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql", web.Migrate,
+		"a single numbered SQL file has an unambiguous replay order and a real migrate command must "+
+			"come from it, not be left blank")
+	requireDraftValidates(t, res.Draft, files)
+}
+
+// Two files prove the order is read from the names and not just copied
+// through: 0002 has to come after 0001 in the command even though this test
+// writes the fixture map in the other order, because a map has no order at
+// all and the command's own correctness cannot depend on Go's iteration.
+func TestRun_SeveralNumberedSQLMigrationsAreOrderedByName(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"package.json":               `{"name":"app","dependencies":{"next":"15.0.0"},"scripts":{"start":"next start"}}`,
+		"Dockerfile":                 "FROM node:22-alpine\nWORKDIR /app\nCOPY package.json ./\nRUN npm ci\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]\n",
+		"migrations/0002_orders.sql": "CREATE TABLE orders (id serial primary key);\n",
+		"migrations/0001_init.sql":   "CREATE TABLE customers (id serial primary key);\n",
+	}
+	res := run(t, "app", files)
+	web := serviceNamed(t, res.Draft, "app")
+	require.Equal(t,
+		"psql $DATABASE_URL -v ON_ERROR_STOP=1 -f migrations/0001_init.sql -f migrations/0002_orders.sql",
+		web.Migrate)
+}
+
+// A directory of SQL files with no numbering has no ordering evidence at
+// all, and guessing a replay order would be a worse failure than the gap it
+// replaces: a wrong order applied against a real database can corrupt it in a
+// way an empty migrate key never could. This stays a question, not a guess.
+func TestRun_UnnumberedSQLMigrationsAreNotGuessedAtAll(t *testing.T) {
+	t.Parallel()
+	res := run(t, "app", map[string]string{
+		"package.json":              `{"name":"app","dependencies":{"next":"15.0.0"},"scripts":{"start":"next start"}}`,
+		"Dockerfile":                "FROM node:22-alpine\nWORKDIR /app\nCOPY package.json ./\nRUN npm ci\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]\n",
+		"migrations/init.sql":       "CREATE TABLE customers (id serial primary key);\n",
+		"migrations/add_orders.sql": "CREATE TABLE orders (id serial primary key);\n",
+	})
+	web := serviceNamed(t, res.Draft, "app")
+	require.Empty(t, web.Migrate,
+		"no migration tool was recognised and the files carry no order, so nothing should be guessed")
+	var found bool
+	for _, f := range detect.OfKind(res.Findings, detect.KindNote) {
+		if f.Subject == "migrations.sql" {
+			found = true
+			require.Contains(t, f.Detail, "no migration tool was recognised")
+		}
+	}
+	require.True(t, found, "the directory must still be reported, as a question rather than a silent gap")
+}
+
 type analyzerFunc struct {
 	name string
 	fn   func() ([]detect.Finding, error)

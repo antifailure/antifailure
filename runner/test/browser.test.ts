@@ -17,12 +17,22 @@ import type { Persona } from '../src/login.ts';
  * is that it drives a page the way a person does, and a fake page proves
  * nothing about whether it can.
  */
-function application(options: { readonly breakIt?: boolean } = {}): {
+function application(
+  options: { readonly breakIt?: boolean; readonly serverError?: boolean } = {},
+): {
   server: Server; url: Promise<string>;
 } {
   const accounts = new Set<string>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    // The root page itself never renders, the way examples/next-app answered
+    // every request once af init left its migrate key blank: the database
+    // has no tables, and the page throws before it writes a single tag.
+    if (options.serverError) {
+      res.writeHead(500, { 'content-type': 'text/html' });
+      res.end('<html><body>relation "customers" does not exist</body></html>');
+      return;
+    }
     if (req.method === 'POST' && url.pathname === '/signup') {
       let body = '';
       req.on('data', (c) => { body += c; });
@@ -106,6 +116,30 @@ test('an application error is a failure, with steps to reproduce it', { timeout:
     assert.equal(result!.outcome.verdict, 'fail', JSON.stringify(result!.outcome, null, 2));
     assert.ok(result!.outcome.reproduction.length > 0, 'a failure comes with steps to follow');
     assert.match(result!.outcome.reproduction.join('\n'), /Expected:/);
+  } finally {
+    server.close();
+  }
+});
+
+// The control plane's own showcase example, reproduced: a page that answers
+// every request with a 500 because af init never wrote the migrate key that
+// would have created its tables. Three rewrites of the workflow's expectation
+// all came back UNVERIFIED against this, quoting the wording as the problem,
+// because nothing ever looked at the response the real browser had already
+// received. A real navigation through a real Session is what proves the fix
+// reaches the actual code path and not just the unit around it.
+test('a page that answers every request with a server error FAILS naming the status, not unverified', { timeout: 120_000 }, async () => {
+  const { server, url } = application({ serverError: true });
+  const baseURL = await url;
+  const artifacts = mkdtempSync(join(tmpdir(), 'af-runner-'));
+  try {
+    const results = await run({
+      baseURL, artifacts, workflows: [signUp], personas: nobody, attempts: 1,
+    });
+    const [result] = results;
+    assert.equal(result!.outcome.verdict, 'fail', JSON.stringify(result!.outcome, null, 2));
+    assert.equal(result!.outcome.cause, 'application-error');
+    assert.match(result!.outcome.detail, /500/, 'the status has to be in the report, not just af logs');
   } finally {
     server.close();
   }

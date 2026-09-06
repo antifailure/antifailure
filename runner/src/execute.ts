@@ -264,9 +264,30 @@ export function sessionsFor(
  * the checker cannot read is unverified, not a pass and not a fail. Guessing
  * either way would be worse than saying so.
  */
-function finalJudgement(
+export function finalJudgement(
   workflow: Workflow, snapshot: Snapshot, why: string, taken: readonly string[],
 ): AttemptResult {
+  // A server error outranks the expectation check entirely, and has to be
+  // decided before judgeAll ever runs. The control plane's own launch day
+  // readiness review found the failure this guards against: a page erroring
+  // with "relation customers does not exist" was judged only on whether its
+  // words matched three different rewrites of an expectation, none of which
+  // could ever match, because the page never rendered anything to match
+  // against. Every one of those runs came back UNVERIFIED with a note about
+  // wording, and nothing the runner already knew, the response status it had
+  // right here, ever reached the report. An application that answered is not
+  // an unread expectation; it is a failed one, and the reader should not have
+  // to go to af logs to learn that.
+  if (snapshot.status !== undefined && snapshot.status >= 400) {
+    return {
+      cause: 'application-error',
+      detail:
+        `The page at ${snapshot.url} answered HTTP ${snapshot.status} instead of rendering. ` +
+        `A page that errors cannot show what ${workflow.name} expected, so this is a failure of ` +
+        `the application, not an unread expectation. Read the response body or af logs for the cause.`,
+      taken,
+    };
+  }
   switch (judgeAll(workflow.expect, snapshot.text)) {
     case 'met':
       return { cause: 'succeeded', detail: 'Every expectation is visible on the page.', taken };
