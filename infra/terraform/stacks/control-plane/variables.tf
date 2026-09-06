@@ -294,7 +294,7 @@ variable "alerting_enabled" {
   # Cross-variable validation, which Terraform allows from 1.9 and which this
   # stack already requires. The alternative is a precondition inside the
   # alerting module, and this one has to fail at plan time on the STACK, before
-  # anybody reads a diff that would create nine rules pointed at nothing.
+  # anybody reads a diff that would create twelve rules pointed at nothing.
   validation {
     condition     = !var.alerting_enabled || var.app_base_url != ""
     error_message = "alerting_enabled needs app_base_url set, because the availability test has to ask for the name a customer uses. A probe against the generated azurecontainerapps.io address stays green while DNS, the domain binding or the certificate is broken, which is most of the ways this service becomes unreachable without the application doing anything wrong."
@@ -326,6 +326,15 @@ variable "alert_sms_number" {
   type      = string
   default   = ""
   sensitive = true
+}
+
+# The module's default, restated rather than omitted, because tools/inputcheck
+# refuses an input that arrives without one. The measured value for production
+# and the reasoning behind it are in production.tfvars.
+variable "response_time_threshold_ms" {
+  type        = number
+  default     = 2000
+  description = "Average response time in milliseconds over fifteen minutes above which the slow-responses alert pages. Only read when alerting_enabled is true."
 }
 
 # ---------------------------------------------------------------------------

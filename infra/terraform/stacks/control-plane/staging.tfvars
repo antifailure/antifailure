@@ -148,3 +148,22 @@ site_origin = "https://antifailure.dev,https://www.antifailure.dev"
 # in production. No project key here: staging's own hosted usage would land in
 # the same PostHog project as production's and read as customers.
 posthog_region = "us"
+
+# ---------------------------------------------------------------------------
+# Alerting.
+# ---------------------------------------------------------------------------
+
+# OFF, which is the stack's default, restated so the decision is visible in the
+# file that is the whole configuration of this environment. Staging is where a
+# bad deploy is supposed to be caught, so it breaks on purpose several times a
+# week, and a page for that is a page somebody learns to ignore.
+alerting_enabled = false
+
+# Stated even though nothing reads it while alerting is off, so that turning
+# alerting on here is a one line change with a threshold somebody chose rather
+# than one inherited from a default. Staging runs on a B1ms database and a
+# single replica, and its ordinary response time is not production's, so this
+# is production's number with headroom rather than a measurement: 4000, twice
+# production's 2000, because staging is allowed to be slow and is not allowed
+# to page anybody for it.
+response_time_threshold_ms = 4000

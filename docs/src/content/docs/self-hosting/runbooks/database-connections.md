@@ -2,7 +2,7 @@
 title: Database connections
 description: Active connections peaked above 80 percent of what the server will hand the application.
 sidebar:
-  order: 15
+  order: 16
 ---
 
 **Alert:** `database-connections`. **Severity 2.**

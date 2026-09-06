@@ -11,6 +11,7 @@ output "alert_names" {
       azurerm_monitor_metric_alert.server_errors.name,
       azurerm_monitor_metric_alert.restart_loop.name,
       azurerm_monitor_metric_alert.replicas_below_minimum.name,
+      azurerm_monitor_metric_alert.slow_responses.name,
       azurerm_monitor_metric_alert.database_storage.name,
       azurerm_monitor_metric_alert.database_connections.name,
       azurerm_monitor_metric_alert.database_cpu.name,

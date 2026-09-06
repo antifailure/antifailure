@@ -20,7 +20,7 @@ configuration and every value in it says why it differs from staging. One apply
 produces the resource group, a zone redundant Postgres with geo redundant
 backups, the Key Vault, the bootstrap and maintenance jobs, the application on
 two replicas, the DNS records for `app.antifailure.dev`, the managed
-certificate, the custom domain binding, and eleven alert rules with an action
+certificate, the custom domain binding, and twelve alert rules with an action
 group.
 
 ## What Terraform cannot own, and why

@@ -312,12 +312,37 @@ cd_principal_id = "f99916dc-1e11-4305-8e03-1e116a1e93e1"
 # alerting with no receiver fails at plan: an action group with no receivers
 # creates cleanly, attaches to every rule, reports healthy, and tells nobody.
 #
-# What it costs, which is mostly one line: nine metric alert rules at 0.10 a
+# What it costs, which is mostly one line: twelve metric alert rules at 0.10 a
 # month each, and an availability test billed per execution per location. Three
 # locations every five minutes is 26,280 executions a month at 0.00056, so
 # 14.72. Cutting to two locations would halve it and would also mean one
 # region's network problem could reach the two-failure threshold on its own.
 alerting_enabled = true
+
+# TWO SECONDS, AND WHERE THE NUMBER COMES FROM.
+#
+# Every other rule on the app watches a failure: a 5xx, a restart, a missing
+# replica. This one watches the degradation none of those can see, a service
+# that answers every request correctly and slowly, which is what a saturated
+# replica set, a blocked connection pool or one slow query on the hot path
+# looks like from outside. The metric is the ingress's ResponseTime, averaged
+# across every request over fifteen minutes.
+#
+# Measured on this app over the two days before the rule was written, 576 five
+# minute buckets with traffic in every one of them:
+#
+#   successful requests averaged 216 ms, and the busiest hour 334 ms
+#   the worst single five minute average was 587 ms
+#   the slowest single request in any hour was 6043 ms
+#
+# So 2000 is more than three times the worst five minute average the service
+# has produced and roughly ten times an ordinary one, far enough that a couple
+# of fifteen second statement timeouts inside one window cannot reach it on
+# their own, and close enough that a stall a customer would describe as "the
+# console is hanging" crosses it within its first fifteen minutes. It is also a number
+# to revisit once there is a month of real traffic: the runbook says how to
+# read the series that decides it.
+response_time_threshold_ms = 2000
 
 # ---------------------------------------------------------------------------
 # The operator portal.

@@ -9,7 +9,7 @@ sidebar:
   order: 9
 ---
 
-Eleven alert rules watch the hosted control plane. Each one names its runbook in
+Twelve alert rules watch the hosted control plane. Each one names its runbook in
 its own description, so the page arrives in the email and the SMS rather than
 having to be found. This is the index of those pages.
 
@@ -27,6 +27,7 @@ it is the same page production sends.
 | `database-unreachable` | 0 | [The database is not answering](/docs/self-hosting/runbooks/database-unreachable) |
 | `server-errors` | 1 | [Server errors](/docs/self-hosting/runbooks/server-errors) |
 | `restart-loop` | 1 | [Revision health](/docs/self-hosting/runbooks/revision-health) |
+| `slow-responses` | 1 | [Slow responses](/docs/self-hosting/runbooks/slow-responses) |
 | `bootstrap-job-failed` | 1 | [A job failed](/docs/self-hosting/runbooks/job-failed) |
 | `maintenance-job-failed` | 1 | [A job failed](/docs/self-hosting/runbooks/job-failed) |
 | `replicas-below-minimum` | 2 | [Revision health](/docs/self-hosting/runbooks/revision-health) |
@@ -39,7 +40,8 @@ Each name is prefixed with the stack's own, so the production rule for the first
 row is `afcpprod-unreachable`.
 
 Severity 0 means the service is down for customers. Severity 1 means it is
-failing and probably visible. Severity 2 and 3 are warnings with hours or days
+failing and probably visible, and answering slowly counts as failing: the one
+rule that reads a duration rather than a failure sits at that rank on purpose. Severity 2 and 3 are warnings with hours or days
 in them, and neither should be looked at before the sun is up.
 
 One more control lives outside Azure and pages through GitHub instead: [the

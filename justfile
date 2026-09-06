@@ -1126,10 +1126,16 @@ sitesmoke:
 sitesmoke-deployed origin="https://antifailure.dev":
     go run ./tools/sitesmoke -root . -origin {{origin}}
 
-# Mocked providers exercise the rendered payment references without cloud access.
+# Mocked providers exercise the rendered payment references without cloud
+# access, and the alerting module's rules against the metric each one claims
+# to read. The second half exists because the module had ten rules and no
+# test, and a rule on a metric name a container app does not emit creates
+# cleanly and evaluates nothing.
 test-infra-config:
     terraform -chdir=infra/terraform/modules/control-plane init -backend=false -input=false
     terraform -chdir=infra/terraform/modules/control-plane test
+    terraform -chdir=infra/terraform/modules/alerting init -backend=false -input=false
+    terraform -chdir=infra/terraform/modules/alerting test
 
 # No file in the tree carries a merge conflict marker.
 #

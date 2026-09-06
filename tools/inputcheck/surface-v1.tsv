@@ -164,6 +164,7 @@ terraform:modules/alerting	variable	name	string	required
 terraform:modules/alerting	variable	postgres_server_id	string	required
 terraform:modules/alerting	variable	probe_url	string	required
 terraform:modules/alerting	variable	resource_group_name	string	required
+terraform:modules/alerting	variable	response_time_threshold_ms	number	optional
 terraform:modules/alerting	variable	restart_threshold	number	optional
 terraform:modules/alerting	variable	tags	map(string)	optional
 terraform:modules/alerting	variable	usable_connections	number	required
@@ -329,6 +330,7 @@ terraform:stacks/control-plane	variable	provider_key_secret_enabled	bool	optiona
 terraform:stacks/control-plane	variable	public_url	string	optional
 terraform:stacks/control-plane	variable	resend_api_key_secret_name	string	optional
 terraform:stacks/control-plane	variable	resource_group_name	string	optional
+terraform:stacks/control-plane	variable	response_time_threshold_ms	number	optional
 terraform:stacks/control-plane	variable	self_serve_signup	bool	optional
 terraform:stacks/control-plane	variable	signin_allowlist	list(string)	required
 terraform:stacks/control-plane	variable	signup_url	string	optional

@@ -106,6 +106,16 @@ variable "restart_threshold" {
   description = "Container restarts on one replica in fifteen minutes. One restart is a liveness probe doing its job; three is a loop."
 }
 
+variable "response_time_threshold_ms" {
+  type        = number
+  default     = 2000
+  description = "Average response time in milliseconds, across every request over fifteen minutes, above which the slow-responses rule pages. In milliseconds because that is the unit the ResponseTime metric is emitted in, so the number in the alert's description is the number on the chart. The default is roughly ten times what production answers in on an ordinary day; the measurement is beside the production value."
+  validation {
+    condition     = var.response_time_threshold_ms > 0
+    error_message = "A threshold of zero fires on every window that carried a request, which is a rule that pages continuously and is switched off within a day."
+  }
+}
+
 variable "database_storage_percent" {
   type    = number
   default = 80

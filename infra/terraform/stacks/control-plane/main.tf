@@ -201,4 +201,8 @@ module "alerting" {
   # connection ceiling cannot drift apart.
   usable_connections = module.control_plane.usable_connections
   min_replicas       = var.min_replicas
+
+  # Milliseconds, measured against the production app's own ResponseTime
+  # series. The number and how it was arrived at are in the tfvars.
+  response_time_threshold_ms = var.response_time_threshold_ms
 }
