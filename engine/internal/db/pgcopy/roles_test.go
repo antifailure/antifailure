@@ -293,6 +293,10 @@ func describeRoleForTest(t *testing.T, ctx context.Context, admin, role string) 
 func TestACopyCarriesARoleNamedOnlyByAGrant(t *testing.T) {
 	admin := adminForRolesTest(t)
 	targetAdmin, named := os.LookupEnv("AF_TEST_TARGET_CLUSTER_URL")
+	if !named && os.Getenv("AF_REQUIRE_DATABASE") != "" {
+		t.Fatal("AF_REQUIRE_DATABASE is set and AF_TEST_TARGET_CLUSTER_URL is not, so the two cluster copy proof " +
+			"would skip on the runner that exists to run it; start the second Postgres and name it")
+	}
 	if !named {
 		t.Skip("skipped: AF_TEST_TARGET_CLUSTER_URL is not set, and a copy between two databases on ONE cluster cannot lack a role; " +
 			"start a second Postgres and name it to run the two cluster proof")

@@ -480,6 +480,33 @@ jobs:
           docker exec af-cp-test psql -U postgres -d antifailure -tAc \
             "SHOW shared_preload_libraries" | grep -q pg_stat_statements
 
+      # A SECOND CLUSTER, BECAUSE ROLES ARE CLUSTER WIDE.
+      #
+      # The copy tool recreates, in the target, the roles the source names in
+      # its policies and grants. A copy between two databases on ONE cluster
+      # can never lack a role, so on one cluster that code is exercised by
+      # nothing and the test that proves it skipped here with a message nobody
+      # read. This repository's own twin was unbuildable for two days on
+      # exactly that path. The proof needs a target that has never heard of
+      # the source's roles, which is a separate server, and this is it. Also
+      # what `just db` starts, so local and CI agree.
+      - name: Start a second Postgres, for the copy tests
+        run: |
+          set -euo pipefail
+          docker run -d --name af-cp-target -p 55433:5432 \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+          ready=0
+          for _ in $(seq 1 90); do
+            if docker exec af-cp-target psql -U postgres -d antifailure -tAc 'select 1' \
+                 > /dev/null 2>&1; then
+              ready=1; break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then
+            docker logs af-cp-target; echo "the second postgres never came up"; exit 1
+          fi
+
       - name: Test
         # The race detector always. A data race that only shows up under load
         # is the kind of bug this product exists to find, and shipping one
@@ -490,6 +517,10 @@ jobs:
           # suites run for real rather than skipping.
           GOTOOLCHAIN: local
           AF_TEST_DATABASE_URL: postgres://postgres:test@127.0.0.1:55432/antifailure
+          # The other server, for the copy tests that need a target with none
+          # of the source's roles. Under AF_REQUIRE_DATABASE its absence is a
+          # failure, not a skip.
+          AF_TEST_TARGET_CLUSTER_URL: postgres://postgres:test@127.0.0.1:55433/antifailure
           # And if that Postgres is not there, say so loudly rather than
           # skipping every test that needed it.
           AF_REQUIRE_DATABASE: '1'

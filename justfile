@@ -296,10 +296,20 @@ db:
     @docker exec af-cp-test psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
       || { echo "postgres never accepted a query"; exit 1; }
     @echo "up on 55432"
+    @docker rm -f af-cp-target > /dev/null 2>&1 || true
+    docker run -d --name af-cp-target -p 55433:5432 \
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+    @for i in $(seq 1 90); do \
+      docker exec af-cp-target psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 && break; \
+      sleep 1; \
+    done
+    @docker exec af-cp-target psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 \
+      || { echo "the second postgres never accepted a query"; exit 1; }
+    @echo "up on 55433, the second cluster the copy tests need; export AF_TEST_TARGET_CLUSTER_URL=postgres://postgres:test@127.0.0.1:55433/antifailure"
 
-# Remove it again.
+# Remove them again.
 db-down:
-    @docker rm -f af-cp-test > /dev/null 2>&1 || true
+    @docker rm -f af-cp-test af-cp-target > /dev/null 2>&1 || true
     @echo "removed"
 
 # Install the JavaScript dependencies.
