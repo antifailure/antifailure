@@ -1244,45 +1244,61 @@ describe('the terms describe guards that are really in the engine', () => {
   /**
    * THE ONE THAT IS A LIMIT RATHER THAN A GUARANTEE, and the reason it is here.
    *
-   * The terms deliberately say the verification scan reads "the column types
-   * that can hold a sentence" and samples rows, rather than saying it reads
-   * every column. That wording is exact, and it is exact because it is
-   * currently generous: the scan's type list and the masking default's type
-   * list are the same six entries, so a citext or text[] column is masked by
-   * neither and read by neither.
+   * This used to pin a literal six type allowlist, `data_type IN ('text',
+   * 'character varying', 'character', 'json', 'jsonb', 'xml')`, because that
+   * was what the scan read and the terms said so in the weaker words "the
+   * column types that can hold a sentence". The scan was widened after it was
+   * found saying clean about a bytea column holding sealed key material, and
+   * this assertion is what sent the change to the terms page: a pinned list
+   * that grows makes the page understate the product, and one that shrinks
+   * makes it overstate it. It did its job, so it is kept, pointed at the
+   * mechanism the scan has now instead of at the list it used to have.
    *
-   * Writing the stronger sentence would have been a lie. Writing this weaker
-   * one and leaving it unguarded would let somebody later widen the scan,
-   * making the page understate the product, or narrow it, making the page
-   * overstate it. So the list itself is pinned. Changing it sends whoever
-   * changed it to the sentence on the terms page that describes it.
+   * What the page may now say, and what these assertions hold it to: the scan
+   * reads every column it can read as text, names the ones it cannot along
+   * with their types, and fails rather than passes when such a column has no
+   * rule and a name that says it holds a secret. It still samples rows, and it
+   * is still not a proof that no personal data survives.
    */
-  it('pins the column types the verification scan can see, which the terms describe as a limit', async () => {
+  it('pins the mechanism the verification scan uses, which the terms describe as a limit', async () => {
     const source = await engine('internal/verify/scan.go')
+    // Not an allowlist of readable types any more. Every column is listed and
+    // classified, and only the structural types, the numbers, times, booleans
+    // and uuids that cannot hold a sentence at all, are dropped before the
+    // classification. Narrowing this back to a literal type list is what this
+    // catches.
     assert.match(
       source,
-      /c\.data_type IN \('text', 'character varying', 'character', 'json', 'jsonb', 'xml'\)/,
-      'the set of column types the verification scan reads has changed. The terms page describes ' +
-        'this scan as covering "the column types that can hold a sentence" and as a check that a ' +
-        'rule missed a column rather than a proof that no personal data survives. If the list ' +
-        'grew, that sentence now understates the product. If it shrank, it overstates it. Either ' +
-        'way the page needs rereading, and so does the matching list in ' +
-        'internal/masking/rules.go looksSensitive, which is the same six types and is what ' +
-        'decides whether an unclassified column is emptied.',
+      /if structuralTypes\[strings\.ToLower\(c\.typ\)\] \{\n\t\t\tcontinue\n\t\t\}\n\t\tc\.kind = classify\(c\.typ\)/,
+      'the verification scan no longer lists every column and classifies it. The terms page says ' +
+        'it reads every column it can read as text and names the ones it cannot, and that ' +
+        'sentence is only true while the column listing drops nothing but the structural types.',
+    )
+    // The half that turns "I could not read it" into a refusal. Without this
+    // the page's second sentence, that such a column fails rather than passes,
+    // is false.
+    assert.match(
+      source,
+      /const DetectorUnreadSensitive = "unread-sensitive-name"/,
+      'the finding raised for a column the scan cannot read, that nothing masks, and whose name ' +
+        'says it holds a secret is gone. The terms page says that column fails the scan.',
     )
   })
 
-  it('keeps the scan and the masking default agreeing about which types matter', async () => {
-    // The two lists are the reason the sentence on the terms page is worded as
-    // a limit. If they ever disagree, one layer is covering something the
-    // other is not, and the honest description of the pair changes.
+  it('keeps the masking default covering the types it says it covers', async () => {
+    // The scan and this list used to be the same six entries, and the terms
+    // described the pair together. They are deliberately different now: the
+    // scan reads everything it can read, and this is the narrower question of
+    // which unclassified column the built in rules EMPTY. Widening it would
+    // empty columns nobody asked to have emptied, so it stays, and the page
+    // no longer describes the two as one list.
     const rules = await engine('internal/masking/rules.go')
     assert.match(
       rules,
       /func looksSensitive[\s\S]{0,400}case "text", "character varying", "character", "json", "jsonb", "xml":/,
-      'looksSensitive no longer covers the same types as the verification scan. The masking ' +
-        'default and the scan that backstops it are supposed to be described together on the ' +
-        'terms page, and they can no longer be.',
+      'looksSensitive no longer covers the six text types the built in rules empty an ' +
+        'unclassified column of. The terms page says a project with no rules file still gets the ' +
+        'built in set, and this is what that set acts on.',
     )
   })
 })

@@ -418,10 +418,12 @@ export function TermsPage() {
         <Prose className="mt-10">
           <p>
             The limit worth stating next to that last row, because a reader would otherwise assume
-            more than is true: the verification scan reads the column types that can hold a
-            sentence, and samples rows rather than reading every row. It is a check that a masking
-            rule missed a column entirely, which is the failure it is built for. It is not a proof
-            that no personal data survives anywhere in a schema, and it is not offered as one.
+            more than is true: the verification scan reads every column it can read as text, names
+            in its report the ones it cannot and their types, and samples rows rather than reading
+            every row. A column it cannot read, that no masking rule covers, and whose name says it
+            holds a secret fails the scan rather than passing it. It is a check that a masking rule
+            missed a column entirely, which is the failure it is built for. It is not a proof that
+            no personal data survives anywhere in a schema, and it is not offered as one.
           </p>
         </Prose>
       </PageSection>
