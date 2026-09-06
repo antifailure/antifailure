@@ -165,6 +165,7 @@ import {
   postHogMethodsFor,
   type PostHogUpstreams,
 } from './analytics/posthog.ts'
+import type { PostHogSink } from './analytics/posthog-sink.ts'
 import { decideSignIn, extensionRoutes } from './extensions.ts'
 import { validateLead, recordLead, leadMessage, type LeadNotifier } from './enterprise/leads.ts'
 import { mountApplicationRoutes } from './recruitment/routes.ts'
@@ -214,6 +215,16 @@ export interface ServerOptions {
    * worse answer.
    */
   postHog?: { bases: PostHogUpstreams; fetchImpl?: typeof fetch } | null
+
+  /**
+   * Where this process reports its OWN hosted usage to PostHog, or absent.
+   *
+   * A DIFFERENT THING FROM `postHog` ABOVE, which forwards a browser's
+   * requests. This one sends events from here: which hosted MCP tool was
+   * called and how a brokered model call went. Absent sends nothing, which is
+   * the right default for somebody self-hosting this: their usage is theirs.
+   */
+  postHogSink?: PostHogSink | null
 
   /** Who may sign in at all. Null is open, which is the self-hosted default.
    *  See parseAllowlist: an empty list is closed to everyone, not open. */
@@ -888,6 +899,7 @@ export function createServer(options: ServerOptions) {
   }
 
   mountHostedMcp(app, {
+    postHog: options.postHogSink ?? null,
     base: {
       pool: options.pool, clock, github: options.github, stripe: options.stripe ?? null,
       appBaseUrl: options.appBaseUrl ?? '', mailer: options.emailSignIn?.mailer ?? null,
@@ -2340,6 +2352,10 @@ export function createServer(options: ServerOptions) {
           sealingKey: options.sealingKey!,
           prices: options.modelPrices ?? {},
           ...(options.providerBases ? { bases: options.providerBases } : {}),
+          ...(options.postHogSink ? { postHog: options.postHogSink } : {}),
+          // The pseudonym rather than the organization, and taken from the
+          // recorder so there is one per organization rather than two.
+          orgSurrogate: analytics.surrogate(caller),
         },
         provider as Provider,
         caller,

@@ -24,11 +24,13 @@
 // this system's logs, which is the same rule the rest of the product follows
 // about production data.
 
+import { randomUUID } from 'node:crypto'
 import type { Pool } from '@antifailure/db'
 import type { Clock } from '../clock.ts'
 import { borrowKey, recordSpend, ProviderKeyError } from './store.ts'
 import { costOf, usageFrom, PricingError, type Price } from './pricing.ts'
 import type { Provider } from './seal.ts'
+import type { PostHogSink } from '../analytics/posthog-sink.ts'
 
 export class ProxyError extends Error {
   readonly status: number
@@ -61,6 +63,21 @@ export interface ProxyOptions {
   fetchImpl?: typeof fetch
   /** Overridden in tests, so nothing here reaches a real provider. */
   bases?: Partial<Record<Provider, string>>
+  /**
+   * Where a brokered model call is reported, or absent.
+   *
+   * ONLY HERE, AND ONLY BECAUSE THIS IS WHERE THE CONTROL PLANE ITSELF BROKERS
+   * AND BILLS THE CALL. What is sent is the model, the provider, the token
+   * counts the provider itself reported, how long it took, and a pseudonymous
+   * organization. NEVER THE PROMPT AND NEVER THE COMPLETION: the prompt is the
+   * page a customer's application rendered and the completion is what a model
+   * said about it, and this file already refuses to log either for the same
+   * reason. PostHog's own schema makes those two fields optional, so leaving
+   * them out is the supported shape rather than a workaround.
+   */
+  postHog?: PostHogSink | null
+  /** The organization pseudonym, from analytics.surrogate. Never the org id. */
+  orgSurrogate?: string | null
 }
 
 export interface ProxyResult {
@@ -123,6 +140,10 @@ export async function forward(
 
   const doFetch = options.fetchImpl ?? fetch
   const base = options.bases?.[provider] ?? spec.base
+  // Measured around the outbound call only, so it is the provider's latency
+  // rather than this process's queueing. Milliseconds here; the sink converts
+  // to seconds, which is what PostHog's $ai_latency means.
+  const startedAt = Date.now()
   const res = await doFetch(base + spec.path, {
     method: 'POST',
     headers: {
@@ -133,6 +154,7 @@ export async function forward(
     body: requestBody,
   })
 
+  const latencyMs = Date.now() - startedAt
   const body = await res.text()
 
   // Usage comes from the provider's own answer rather than from counting
@@ -163,6 +185,24 @@ export async function forward(
         provider,
         usd: costUsd,
         period: borrowed.budget.period,
+      })
+      // AFTER the spend is recorded, and never awaited. The spend is the thing
+      // that must not be lost; an analytics event is not, and putting a
+      // vendor's availability in front of a charge already made would be the
+      // wrong order for the one path in this file that handles money.
+      options.postHog?.aiGenerated({
+        model,
+        provider,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        latencyMs,
+        // The trace is the run this call belongs to as far as anything here can
+        // see, which is one request. A real chain would carry its own id in;
+        // inventing one per call is honest about that rather than implying a
+        // grouping this does not have.
+        traceId: randomUUID(),
+        costUsd,
+        orgSurrogate: options.orgSurrogate ?? null,
       })
     }
   }

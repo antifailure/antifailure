@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { startApi, seedOrg, dropOrg, signInAs, type ApiHarness, type Org, type SignedIn } from './harness.ts'
 import { registerMcpClient, approveMcpAuthorization, redeemMcpAuthorization, identifyMcpToken } from '../src/auth/mcp.ts'
 import type { Actor } from '../src/trpc.ts'
+import { createPostHogSink } from '../src/analytics/posthog-sink.ts'
 
 const resource = 'http://app.test/mcp'
 interface RpcReply { result: { serverInfo?: { name: string }; content: [{ text: string }] } }
@@ -250,5 +251,136 @@ describe('hosted MCP authorization and reachable tools', () => {
       cookie: owner.cookie, 'x-antifailure-csrf': owner.csrfToken, 'content-type': 'application/json',
     }, body: JSON.stringify(flow.request) })
     assert.equal(response.headers.get('cache-control'), 'no-store')
+  })
+})
+
+// A real tool call over a real transport actually reports, and reports what it
+// is supposed to.
+//
+// WHY THIS IS HERE AND NOT ONLY IN posthog-sink.test.ts. That suite drives the
+// sink directly and proves the payload is right. It proves nothing about
+// whether anything ever CALLS it, which is the defect class this repository
+// keeps finding in itself: a function with no reachable call site is a dead,
+// shippable gap that looks like a working feature. So this goes in through the
+// front door, a JSON-RPC tools/call over the mounted protocol server with a
+// real token and a real database, and asserts on what came out the other side.
+//
+// It also asserts the thing that is hardest to see and worst to get wrong: that
+// the ARGUMENTS did not travel. The call below passes a repository name, which
+// is a customer's, and the assertion is that no part of it reached the sink.
+describe('a hosted MCP tool call reports itself, and reports only what it may', () => {
+  let api: ApiHarness
+  let org: Org
+  let owner: SignedIn
+  const registered: string[] = []
+  const sent: { event: string; distinctId: string; properties: Record<string, unknown> }[] = []
+
+  // THE REAL SINK, with a fake PostHog client under it, and the difference is
+  // not academic. The first version of this used a hand written sink double
+  // that rebuilt the payload itself, so the payload assertions below were
+  // checking the test's own reconstruction rather than the code that ships.
+  // Mutation proved it: threading a tool's arguments through the real sink left
+  // this suite GREEN while posthog-sink.test.ts went red, which means this
+  // suite was answering a nearby question. Now the only fake is the transport.
+  const sink = createPostHogSink({
+    projectKey: 'phc_public',
+    region: 'us',
+    client: {
+      capture(payload: unknown) {
+        sent.push(payload as { event: string; distinctId: string; properties: Record<string, unknown> })
+      },
+      async shutdown() {},
+    } as never,
+  })
+
+  before(async () => {
+    api = await startApi({ postHogSink: sink })
+    org = await seedOrg(api.admin, 'hosted-mcp-reporting')
+    owner = await signInAs(api, org, 'owner')
+  })
+  after(async () => {
+    if (registered.length) await api.admin`DELETE FROM mcp_clients WHERE client_id = ANY(${registered})`
+    await dropOrg(api.admin, org.orgId)
+    await api.close()
+  })
+
+  async function tokenFor(scopes = 'mcp:read') {
+    const client = await registerMcpClient(api.pool, { client_name: 'Reporting client', redirect_uris: ['https://client.test/callback'] })
+    registered.push(client.client_id)
+    const verifier = randomBytes(32).toString('base64url')
+    const challenge = createHash('sha256').update(verifier).digest('base64url')
+    const request = {
+      client_id: client.client_id, redirect_uri: 'https://client.test/callback', response_type: 'code',
+      code_challenge: challenge, code_challenge_method: 'S256', scope: scopes, resource,
+    }
+    const approved = await approveMcpAuthorization(api.pool, api.clock, {
+      userId: owner.userId, orgId: org.orgId, label: 'Reporting owner', role: 'owner', sessionId: '', plan: 'free',
+    }, request, resource)
+    const redeemed = await redeemMcpAuthorization(api.pool, api.clock, {
+      grant_type: 'authorization_code', client_id: client.client_id,
+      redirect_uri: request.redirect_uri, resource, code_verifier: verifier,
+      code: new URL(approved.redirect).searchParams.get('code')!,
+    }, resource)
+    return redeemed.access_token as string
+  }
+
+  const call = (token: string, name: string, args: unknown) =>
+    api.fetch('/mcp', { method: 'POST', headers: {
+      authorization: `Bearer ${token}`, 'content-type': 'application/json',
+      accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25',
+    }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })
+
+  test('a successful call arrives at the sink, named and timed', async () => {
+    sent.length = 0
+    const token = await tokenFor()
+    const response = await call(token, 'list_projects', {})
+    assert.equal(response.status, 200)
+    assert.equal(sent.length, 1, 'the tool call reported nothing, so the sink has no live caller')
+    assert.equal(sent[0]!.event, 'mcp_tool_called')
+    assert.equal(sent[0]!.properties.tool, 'list_projects')
+    assert.equal(sent[0]!.properties.outcome, 'ok')
+    assert.ok((sent[0]!.properties.duration_ms as number) >= 0)
+  })
+
+  test('the arguments do not travel, and neither does the organization', async () => {
+    // THE ASSERTION THAT MATTERS. `repository` is the customer's, and so is the
+    // org_id the token authorized. What may be reported is the tool name, the
+    // outcome, the duration and a pseudonym; a payload carrying either of the
+    // other two is a customer's data in a vendor's store.
+    sent.length = 0
+    const token = await tokenFor('mcp:write')
+    await call(token, 'start_environment', { repository: org.repository })
+    assert.equal(sent.length, 1)
+    const payload = JSON.stringify(sent[0])
+    assert.ok(!payload.includes(org.repository), `the repository name reached the sink: ${payload}`)
+    assert.ok(!payload.includes(org.orgId), 'the organization id reached the sink rather than its pseudonym')
+    assert.deepEqual(
+      Object.keys(sent[0]!.properties).sort(),
+      ['duration_ms', 'outcome', 'surface', 'tool'],
+      'the reported payload grew a field',
+    )
+  })
+
+  test('a refusal is reported as a refusal rather than not at all', async () => {
+    // The read token cannot start an environment. A refused call that reports
+    // nothing leaves a client repeatedly denied looking like a client nobody
+    // uses, which is the opposite of what the number is for.
+    sent.length = 0
+    const token = await tokenFor('mcp:read')
+    await call(token, 'start_environment', { repository: org.repository })
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0]!.properties.tool, 'start_environment')
+    assert.equal(sent[0]!.properties.outcome, 'refused')
+  })
+
+  test('the identifier is the pseudonym the first party store already holds', async () => {
+    // One pseudonym per organization rather than two. If this recomputed its
+    // own, PostHog and our own analytics would hold two different identifiers
+    // for one customer, which is one more thing to correlate and one more place
+    // to leak the real one.
+    sent.length = 0
+    const token = await tokenFor()
+    await call(token, 'list_projects', {})
+    assert.equal(sent[0]!.distinctId, api.analytics.surrogate(org.orgId))
   })
 })
