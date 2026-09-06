@@ -70,11 +70,30 @@ rehearsed on purpose.
 twice. The grey that carried most of it was retuned once, in the token, and
 the pages that hand-picked their own greys now use it.
 
+**The first pull request after installing the App said nothing was verified.**
+The App posts a check on every pull request, and the workflow it commits only
+reported back when a repository variable was set, which the pull request body
+and the docs both called optional. So the first check a new customer saw waited
+forty five minutes and then read "Nothing was verified", beside a green Actions
+job with the same name. The committed workflow reports through the control
+plane's own address now, the job is named for what it does rather than for the
+check, and a workflow run that finishes without reporting concludes the check
+at once and says what to set.
+
+**A second editor window killed the first one's rehearsal.** Two `af mcp`
+processes sharing one state directory meant the second to start concluded the
+first's running experiment had been abandoned, and settled it as "the server
+stopped" while that server was still driving a browser. A run now records the
+process that owns it and is only settled when that process is gone, a tool
+refused by the branch lock names the holder instead of listing causes that
+were not the cause, and the read only tools take no lock at all.
+
 <!-- relnotes:omit -->
 Also: the footer asked every visitor to request access, on all forty nine
-pages, months after the invitation wall came down, and the render boundary
-added in v1.3.3 promised a reference it showed only when the error carried
-one.
+pages, months after the invitation wall came down; the render boundary added
+in v1.3.3 promised a reference it showed only when the error carried one; and
+the version bump rewrote a dependency that happened to share our version
+number, which no runner would have noticed and every laptop would.
 <!-- relnotes:end -->
 
 ## v1.3.3
