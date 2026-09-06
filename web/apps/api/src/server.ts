@@ -38,6 +38,7 @@ import {
   adminSignOut,
   clearedAdminCookie,
   looksSameOrigin,
+  namesOperatorProcedure,
   readAdminSessionCookie,
   resolveAdminSession,
 } from './admin/session.ts'
@@ -3285,8 +3286,18 @@ export function createServer(options: ServerOptions) {
       // for while admincsrf.test.ts went on passing. The suite below now
       // presents the prefixed name as well, which is the assertion that can say
       // no to this.
+      //
+      // ONLY FOR A REQUEST THAT NAMES AN OPERATOR PROCEDURE, and this clause
+      // was missing until launch night. Without it the check ran on every
+      // mutation a browser holding the operator cookie made, including the
+      // customer mutations that browser made with its customer session, which
+      // the block above had already checked. An operator who is also a
+      // customer could not press Subscribe to team; the console sent the
+      // product token, this refused for want of the operator one, and the
+      // message named a header the Plan page has no reason to know about.
+      // namesOperatorProcedure holds the rule and its own tests.
       const adminToken = readAdminSessionCookie(c.req.header('cookie'))
-      if (adminToken) {
+      if (adminToken && namesOperatorProcedure(c.req.path)) {
         const operator = await resolveAdminSession(options.pool, adminToken, clock.now())
         if (operator) {
           if (
