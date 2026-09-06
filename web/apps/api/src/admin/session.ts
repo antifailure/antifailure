@@ -164,6 +164,28 @@ export const ADMIN_CSRF_HEADER = 'x-antifailure-admin-csrf'
  * `admin.` with the dot, so `administrator.anything` is not caught by
  * accident, and the bare `admin` for a router-level call.
  */
+/**
+ * The other direction, and it was missing for a night after the first one
+ * was fixed. A request that names a CUSTOMER procedure is checked against the
+ * customer token and nothing else, whatever other cookies travel with it. The
+ * operator portal sends only the operator token with an operator mutation,
+ * and a browser that also holds the customer cookie, which is every operator
+ * on the team, had that mutation refused for want of the customer token:
+ * "Mark reviewed" on a job application answered 403 naming a header the
+ * portal has no reason to send. Same shape as namesOperatorProcedure, seen
+ * from the other cookie.
+ *
+ * A batch that mixes both namespaces is both kinds of request and both
+ * checks apply to it, because each check refuses the request as a unit.
+ */
+export function namesCustomerProcedure(path: string): boolean {
+  const procedures = path.replace(/^\/trpc\/?/, '').split('?')[0] ?? ''
+  return procedures
+    .split(',')
+    .map((procedure) => decodeURIComponent(procedure))
+    .some((procedure) => procedure !== '' && procedure !== 'admin' && !procedure.startsWith('admin.'))
+}
+
 export function namesOperatorProcedure(path: string): boolean {
   const procedures = path.replace(/^\/trpc\/?/, '').split('?')[0] ?? ''
   return procedures

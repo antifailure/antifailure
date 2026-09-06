@@ -52,7 +52,7 @@ import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { available, dropOrg, seedOrg, signInAs, startApi, type ApiHarness } from './harness.ts'
-import { namesOperatorProcedure } from '../src/admin/session.ts'
+import { namesCustomerProcedure, namesOperatorProcedure } from '../src/admin/session.ts'
 
 const hasDatabase = await available()
 
@@ -231,6 +231,53 @@ function guardUnder(secureCookies: boolean) {
         }
       })
 
+      it('an OPERATOR mutation by an operator who is also a customer is checked against the operator token only', async () => {
+        // The mirror of the case two above, found the next morning: the portal
+        // sends the operator token with an operator mutation, the browser also
+        // holds the customer cookie, and the customer gate used to refuse it
+        // for want of the customer token. Through the transport, the route
+        // answers 404 for a flag that does not exist, which is the same proof
+        // the real-token case uses.
+        const org = await seedOrg(h.admin, 'csrf-both3')
+        try {
+          const customer = await signInAs(h, org, 'owner', 'csrf-both3')
+          const answered = await mutateAs({ 'x-antifailure-admin-csrf': csrf }, () => `${customer.cookie}; ${cookie}`)
+          const text = await answered.text()
+          assert.doesNotMatch(
+            text,
+            /x-antifailure-csrf header from GET \/auth\/session/,
+            'an operator mutation was refused for want of the CUSTOMER token; the customer cookie being present is not what makes a request a customer request',
+          )
+          assert.equal(answered.status, 404, text)
+        } finally {
+          await dropOrg(h.admin, org.orgId)
+        }
+      })
+
+      it('a CUSTOMER mutation with the customer cookie alone still needs the customer token', async () => {
+        // The customer gate seen on its own, so that narrowing it to customer
+        // procedures cannot be satisfied by switching it off: no token is
+        // refused with the customer sentence, the right token gets through to
+        // the route.
+        const org = await seedOrg(h.admin, 'csrf-cust')
+        try {
+          const customer = await signInAs(h, org, 'owner', 'csrf-cust')
+          const post = (headers: Record<string, string>) =>
+            h.fetch('/trpc/subscriptions.checkout', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', cookie: customer.cookie, ...headers },
+              body: JSON.stringify({ plan: 'team' }),
+            })
+          const refused = await post({})
+          assert.equal(refused.status, 403)
+          assert.match(await refused.text(), /x-antifailure-csrf header from GET \/auth\/session/)
+          const allowed = await post({ 'x-antifailure-csrf': customer.csrfToken })
+          assert.notEqual(allowed.status, 403, await allowed.text())
+        } finally {
+          await dropOrg(h.admin, org.orgId)
+        }
+      })
+
       it('a QUERY needs no token, or the portal could not render before it had one', async () => {
         const read = await h.fetch('/trpc/admin.flags.list', { headers: { cookie } })
         assert.equal(read.status, 200)
@@ -276,5 +323,18 @@ describe('which requests the operator transport check applies to', () => {
   it('the dot is part of the rule, so a namespace that merely starts with the letters is not caught', () => {
     assert.equal(namesOperatorProcedure('/trpc/administrator.anything'), false)
     assert.equal(namesOperatorProcedure('/trpc/adminstuff'), false)
+  })
+})
+
+describe('which requests the customer transport check applies to', () => {
+  it('a customer procedure, alone or anywhere in a batch', () => {
+    assert.equal(namesCustomerProcedure('/trpc/subscriptions.checkout'), true)
+    assert.equal(namesCustomerProcedure('/trpc/admin.flags.list,subscriptions.current?batch=1'), true)
+  })
+  it('an operator procedure is not one, whatever cookies travel with it', () => {
+    assert.equal(namesCustomerProcedure('/trpc/admin.administration.applications.review'), false)
+    assert.equal(namesCustomerProcedure('/trpc/admin.flags.kill,admin.flags.list?batch=1'), false)
+    assert.equal(namesCustomerProcedure('/trpc/admin'), false)
+    assert.equal(namesCustomerProcedure('/trpc/'), false)
   })
 })

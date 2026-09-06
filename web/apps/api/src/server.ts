@@ -38,6 +38,7 @@ import {
   adminSignOut,
   clearedAdminCookie,
   looksSameOrigin,
+  namesCustomerProcedure,
   namesOperatorProcedure,
   readAdminSessionCookie,
   resolveAdminSession,
@@ -3242,8 +3243,15 @@ export function createServer(options: ServerOptions) {
     // Only mutations are checked. A query cannot change anything, and requiring
     // a token on reads would mean the page cannot render before it has one.
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      //
+      // ONLY FOR A REQUEST THAT NAMES A CUSTOMER PROCEDURE. The night the
+      // operator check below learned that lesson, this one did not: an
+      // operator whose browser also held the customer cookie pressed "Mark
+      // reviewed" in the portal, which sends the operator token with an
+      // operator mutation, and this refused it for want of the customer
+      // token. namesCustomerProcedure is the mirror of namesOperatorProcedure.
       const token = readCookie(c.req.header('cookie'), SESSION_COOKIE)
-      if (token) {
+      if (token && namesCustomerProcedure(c.req.path)) {
         const session = await resolveSession(options.pool, clock, token)
         if (session && !csrfMatches(token, c.req.header(CSRF_HEADER))) {
           return c.json(
