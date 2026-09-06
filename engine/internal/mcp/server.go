@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"sync"
+	"sync/atomic"
 )
 
 // The protocol versions this server speaks, newest first.
@@ -275,7 +276,7 @@ func (s *Server) handleInitialize(req request) {
 			"tools": map[string]any{"listChanged": false},
 		},
 		"serverInfo": map[string]any{
-			"name": serverName, "version": buildVersion, "title": "Antifailure",
+			"name": serverName, "version": engineVersion(), "title": "Antifailure",
 		},
 		"instructions": s.instructions(),
 	})
@@ -459,11 +460,29 @@ func trimForMessage(s string) string {
 }
 
 // buildVersion is stamped by the command that constructs the server.
-var buildVersion = "dev"
+//
+// An atomic rather than a plain string, because Serve writes it and every
+// tool that reports the engine version reads it, and two servers can be
+// constructed in one process: the test suite does exactly that, one per test,
+// in parallel, and the race detector caught SetBuildVersion racing
+// checkPrerequisites on the engine job of an unrelated commit. A plain
+// variable was correct for one server per process and wrong the first time
+// there were two.
+var buildVersion atomic.Pointer[string]
+
+func init() {
+	dev := "dev"
+	buildVersion.Store(&dev)
+}
 
 // SetBuildVersion records the engine version for the handshake.
 func SetBuildVersion(v string) {
 	if v != "" {
-		buildVersion = v
+		buildVersion.Store(&v)
 	}
+}
+
+// engineVersion is the version the handshake and the tools report.
+func engineVersion() string {
+	return *buildVersion.Load()
 }
