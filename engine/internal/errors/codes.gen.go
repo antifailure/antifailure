@@ -282,6 +282,9 @@ const (
 	// There is already a masking file at {path}, and 'af mask init' would
 	// overwrite the rules in it.
 	AFMSK012 Code = "AF-MSK-012"
+	// Verification could not read {table}.{column} ({type}), no masking
+	// rule covers it, and its name says it holds a secret.
+	AFMSK013 Code = "AF-MSK-013"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -1373,6 +1376,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/masking",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFMSK013: {
+		Code:      AFMSK013,
+		Area:      "MSK",
+		Message:   "Verification could not read {table}.{column} ({type}), no masking rule covers it, and its name says it holds a secret.",
+		NextStep:  "Give {table}.{column} a rule in masking.yaml, nullify or hash_hex, and refresh the golden. A column the scan cannot read is masked by the rules or by nothing.",
+		Docs:      "concepts/verification",
+		Retryable: false,
+		ExitCode:  ExitVerification,
 	},
 	AFNET001: {
 		Code:      AFNET001,

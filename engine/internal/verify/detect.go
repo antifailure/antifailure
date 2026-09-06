@@ -51,9 +51,18 @@ const (
 // The set is deliberately narrow on shapes that produce false positives at
 // scale. A detector that fires on every UUID or every long hex string makes an
 // operator turn verification off, and a verification nobody runs protects
-// nothing. The cost of that narrowness is covered by the source value check,
-// which catches whatever the shape detectors miss by looking for the actual
-// values that were in the source.
+// nothing.
+//
+// Nothing covers the cost of that narrowness. This comment used to say a
+// "source value check" did, one that looked for the actual values that were
+// in the source, and no such check exists anywhere in this package or has
+// ever existed. A comment describing a mitigation that is not in the code is
+// worse than no comment: it is the sentence that makes a reviewer stop
+// looking, and it stood here while Stripe customer identifiers were copied
+// unchanged into every golden. What is true is narrower and worth saying
+// plainly: a value these detectors do not recognise is a value the scan does
+// not see, and the masking rules, not the scan, are what keep it out. The
+// scan is a check on the rules, not a replacement for them.
 func Detectors() []Detector {
 	return []Detector{
 		{
@@ -69,6 +78,12 @@ func Detectors() []Detector {
 			Describe: "A credential carrying a known provider prefix.",
 			Severity: SeverityHigh,
 			Match:    matchCredential,
+		},
+		{
+			Name:     "provider-identifier",
+			Describe: "A third party object identifier carrying a known provider prefix, such as a Stripe customer, subscription, invoice or payment method.",
+			Severity: SeverityHigh,
+			Match:    matchProviderIdentifier,
 		},
 		{
 			Name:     "payment-card",
@@ -411,6 +426,95 @@ var credentialPrefixes = []string{
 	"github" + "_pat_", "AK" + "IA", "AS" + "IA", "xo" + "xb-", "xo" + "xp-",
 	"S" + "G.", "sk" + "-ant-", "sb" + "p_", "na" + "pi_", "np" + "m_",
 	"AI" + "za", "dp" + ".st.", "dp" + ".pt.",
+	// PostHog project and personal keys, and a Resend key. A project key is
+	// public by design and still names the one project it belongs to.
+	"ph" + "c_", "ph" + "x_",
+}
+
+// identifierPrefixes are the object identifier families a third party issues
+// once and never changes. None of them is a secret, and every one of them is
+// a live pointer into a real account: anybody who has seen a Stripe customer
+// id in an invoice email or the Stripe dashboard can use it to say which real
+// customer a masked row in a preview environment corresponds to, and it works
+// the same in every environment because the value is the same in every
+// environment.
+//
+// The credential detector above has Stripe's secret key prefixes and did not
+// have these, which is why a scan of a column of Stripe customer ids returned
+// no findings: nothing in the set was built to recognise one.
+var identifierPrefixes = []string{
+	"cus_", "sub_", "in_", "pm_", "price_", "prod_", "evt_", "pi_", "ch_",
+	"cs_test_", "cs_live_", "cs_", "si_", "seti_", "txn_", "inv_", "po_", "re_",
+}
+
+// matchProviderIdentifier reports whether a value carries a provider object
+// id: one of the prefixes above at the start of a token, followed by a body
+// of letters and digits long enough to be an identifier rather than a word.
+//
+// Twelve alphanumerics with no underscore, carrying at least one digit and
+// one capital letter, is what separates cus_NffrFeUfNV2Hib from in_progress,
+// sub_category_default and in_flightRequests: a word after the prefix is
+// short, or has an underscore in it, or is letters only, and an identifier is
+// none of those. A real identifier is random base62, so one in about twelve
+// of the fourteen character bodies has no digit and is missed. That is a per
+// value miss rate, and the scan is looking for a column: two thousand sampled
+// rows of real identifiers cannot all be the unlucky twelfth.
+//
+// The digit and capital rule is also what keeps a masked identifier out of
+// the findings. The prefixed_id transform writes a body of lowercase hex, so
+// it has no capital letter and never matches, for the same reason the email
+// detector skips the reserved domains and the card detector skips 4242.
+func matchProviderIdentifier(s string) bool {
+	for _, p := range identifierPrefixes {
+		from := 0
+		for {
+			i := strings.Index(s[from:], p)
+			if i < 0 {
+				break
+			}
+			i += from
+			from = i + 1
+			if i > 0 && isIdentChar(s[i-1]) {
+				continue // the prefix is the tail of a longer word
+			}
+			body := identifierBody(s[i+len(p):])
+			if len(body) >= 12 && looksIssued(body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isIdentChar(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// identifierBody returns the run of letters and digits at the start of s.
+func identifierBody(s string) string {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			continue
+		}
+		return s[:i]
+	}
+	return s
+}
+
+// looksIssued reports whether a body has the mix of a random base62 identifier:
+// at least one digit and at least one capital letter.
+func looksIssued(body string) bool {
+	digit, upper := false, false
+	for i := 0; i < len(body); i++ {
+		switch c := body[i]; {
+		case c >= '0' && c <= '9':
+			digit = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		}
+	}
+	return digit && upper
 }
 
 func matchCredential(s string) bool {

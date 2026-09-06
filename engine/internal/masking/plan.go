@@ -109,6 +109,37 @@ func BuildPlan(tables []Table, assignments []Assignment, rulesHash string) Plan 
 // Runnable reports whether the plan can be executed.
 func (p Plan) Runnable() bool { return len(p.Problems) == 0 }
 
+// CopiedUnchanged returns the unclassified columns that ship as they are.
+//
+// Two different things share the Unclassified list. Most of it is emptied by
+// the fail closed default, which is a question with a safe answer already in
+// place. The rest is copied unchanged: a NOT NULL text column, a bytea, an
+// enum, an array, anything the default has no way to empty. That is a
+// question with NO answer in place, and it was printed once, at the bottom of
+// af mask plan, and read by nothing downstream. Every command that publishes
+// or lists a golden now carries this count, so the number of columns that
+// hold exactly what production held travels with the copy it describes.
+func (p Plan) CopiedUnchanged() []Assignment {
+	var out []Assignment
+	for _, a := range p.Unclassified {
+		if a.Transform == "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// CopiedUnchangedNames returns the same columns as schema.table.column, which
+// is the form the verification scan and the attestation carry.
+func (p Plan) CopiedUnchangedNames() []string {
+	cols := p.CopiedUnchanged()
+	out := make([]string, 0, len(cols))
+	for _, a := range cols {
+		out = append(out, a.Table.String()+"."+a.Column.Name)
+	}
+	return out
+}
+
 // Columns counts the columns being rewritten.
 func (p Plan) Columns() int {
 	n := 0

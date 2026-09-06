@@ -621,6 +621,14 @@ func (o *Orchestrator) maskDatabase(
 			"%d columns matched no rule and may hold something: %s",
 			len(plan.Unclassified), masking.DescribeColumns(plan.Unclassified, 6)))
 	}
+	if copied := plan.CopiedUnchanged(); len(copied) > 0 {
+		// The half of that list the default could not empty. These hold
+		// exactly what production holds, and the sentence above did not
+		// distinguish them from the ones that were emptied.
+		o.progress(fmt.Sprintf(
+			"%d columns copied unchanged with no rule: %s",
+			len(copied), masking.DescribeColumns(copied, 6)))
+	}
 
 	// Counted here rather than read off the executor because the callback is
 	// what the percentage has to be derived from, and it reports one table at a
@@ -689,9 +697,14 @@ func (o *Orchestrator) verifyDatabase(
 	o.event(s, events.MaskVerifying, "reading the masked copy back",
 		events.F("phase", "verifying"))
 
+	unruled, err := o.unruledColumns(ctx, conn)
+	if err != nil {
+		return verify.Report{}, "", err
+	}
 	report, err := verify.Scan(ctx, conn, verify.Options{
 		Now:      func() time.Time { return o.opts.Clock.Now() },
 		Progress: func(line string) { o.progress("verification: " + line) },
+		Unruled:  unruled,
 	})
 	if err != nil {
 		return report, "", aferrors.Wrap(err, aferrors.AFMSK002,
@@ -753,8 +766,35 @@ func (o *Orchestrator) verifyDatabase(
 	o.event(s, events.MaskVerified,
 		fmt.Sprintf("verified %d columns across %d tables", report.Columns, report.Tables),
 		events.F("tables", report.Tables), events.F("columns", report.Columns),
-		events.F("rows_sampled", report.RowsSampled), events.F("verified", true))
+		events.F("rows_sampled", report.RowsSampled), events.F("verified", true),
+		events.F("columns_unread", len(report.Unread)),
+		events.F("columns_unruled", len(report.Unruled)))
+	if len(report.Unruled) > 0 {
+		o.progress(fmt.Sprintf("%d columns copied unchanged with no rule", len(report.Unruled)))
+	}
 	return report, string(body), nil
+}
+
+// unruledColumns names the columns masking copied unchanged because no rule
+// covered them, for the verification scan to carry.
+//
+// Computed here, beside the scan, rather than handed down from the masking
+// step, because three of the four paths that verify a database never masked
+// it: af mask verify reads a branch somebody already masked, af golden verify
+// reads a published golden, and a pull reads what another machine published.
+// The rules file on this machine is the one thing all four have, and a plan
+// built from it against the database being scanned is exactly the list af
+// mask plan would print at the bottom.
+func (o *Orchestrator) unruledColumns(ctx context.Context, conn *pgx.Conn) ([]string, error) {
+	rules, hash, err := o.rules()
+	if err != nil {
+		return nil, err
+	}
+	tables, err := masking.ReadCatalog(ctx, conn)
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+	}
+	return masking.BuildPlan(tables, rules.Assign(tables), hash).CopiedUnchangedNames(), nil
 }
 
 // describeSkip splits one of verify.Scan's skipped lines into the fields the
@@ -966,8 +1006,13 @@ func (o *Orchestrator) MaskVerify(ctx context.Context) (verify.Report, error) {
 	}
 	defer closeConn()
 
+	unruled, err := o.unruledColumns(ctx, conn)
+	if err != nil {
+		return verify.Report{}, err
+	}
 	return verify.Scan(ctx, conn, verify.Options{
-		Now: func() time.Time { return o.opts.Clock.Now() },
+		Now:     func() time.Time { return o.opts.Clock.Now() },
+		Unruled: unruled,
 	})
 }
 
@@ -1158,7 +1203,12 @@ func (o *Orchestrator) VerifyGolden(ctx context.Context, version string) (verify
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
+	unruled, err := o.unruledColumns(ctx, conn)
+	if err != nil {
+		return verify.Report{}, err
+	}
 	return verify.Scan(ctx, conn, verify.Options{
-		Now: func() time.Time { return o.opts.Clock.Now() },
+		Now:     func() time.Time { return o.opts.Clock.Now() },
+		Unruled: unruled,
 	})
 }

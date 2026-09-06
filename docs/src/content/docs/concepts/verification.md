@@ -19,6 +19,67 @@ copy ──> mask ──> scan ──> attestation ──> golden
                     └── anything found: nothing is published
 ```
 
+## What the scan reads, and what it says it did not
+
+Strings, JSON and XML are read as they are. Arrays, enums and extension types
+are read through their text form. A `bytea` column is decoded as UTF-8 where
+it decodes, because a secret pasted into a binary column is text in a binary
+coat. Numbers, times, booleans and identifiers the database generates are not
+read, because their text form cannot carry a sentence somebody typed.
+
+Anything else is listed as not readable by the scanner, with the type that made
+it so:
+
+```
+✓ clean  231 columns across 55 tables, 6111 rows sampled
+  ! public.provider_keys.ciphertext: 4 of 4 sampled values are binary rather than text and could not be read (masked by its rule)
+  0 columns copied unchanged with no rule.
+```
+
+That line is the difference between "the scan found nothing" and "the scan
+found nothing in what it opened". Until it existed the scan read six text
+types and nothing else, said clean, and a `bytea` holding a sealed private key
+was neither read, nor skipped, nor counted. `af mask plan` on the same database
+listed it as copied unchanged. Two instruments, one database, opposite answers,
+and the one that said clean was the one that gated publication.
+
+The scan cannot fail every column it cannot read; an environment with no enum
+columns is no environment. It fails the narrow case where three facts line up:
+it cannot read the column, no masking rule covers it, and the name says what
+it holds.
+
+```
+AF-MSK-013 Verification could not read public.sso_connection_secrets.sp_private_key
+(bytea), no masking rule covers it, and its name says it holds a secret.
+  Next: Give public.sso_connection_secrets.sp_private_key a rule in
+  masking.yaml, nullify or hash_hex, and refresh the golden.
+```
+
+The words are `secret`, `key`, `token`, `private`, `ciphertext`, `password` and
+`credential`, in the table name or the column name. A rule on the column, any
+rule, turns the failure into a note.
+
+## Third party identifiers
+
+The detectors know Stripe's object identifier families as well as its secret
+keys: `cus_`, `sub_`, `in_`, `pm_`, `price_` and the rest, a prefix at the
+start of a token followed by a body of at least twelve letters and digits
+carrying a digit and a capital. A column of real customer ids trips it; a
+column masked with `prefixed_id` does not, because the masked body is lowercase
+hex. A Stripe identifier is not a secret, and it is exactly the kind of value
+the scan exists to catch: one that says which real customer a row belongs to,
+the same in every environment.
+
+## Columns copied unchanged
+
+The scan does not know the rules. The command that runs it does, and it hands
+the scan the list of columns masking copied unchanged because no rule covered
+them. The scan carries that list into its report, so the attestation records
+the count and the names, `af golden list` shows the count beside `verified`,
+and `inspect_goldens` returns it. A verified golden with 145 of these is a
+different thing from one with none, and the listing used to say `verified`
+about both.
+
 ## Why the check is separate from the rules
 
 Because the rules are written by people. A column added last month has no rule,
@@ -104,7 +165,8 @@ exemption with no sentence beside it is a decision nobody can check later, and
 ## The attestation
 
 A signed statement: which version, which rules, which detectors ran, how many
-rows and columns were scanned, and what was found. It is stored with the golden
+rows and columns were scanned, which columns the scanner could not read, which
+columns masking copied unchanged with no rule, and what was found. It is stored with the golden
 so anyone holding an environment can read what was checked without asking the
 engine.
 

@@ -12,6 +12,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/masking"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 )
 
 // MaskPlanJSON is the machine readable plan.
@@ -26,7 +27,12 @@ type MaskPlanJSON struct {
 	Rows         int64            `json:"rows_estimated"`
 	Assignments  []AssignmentJSON `json:"assignments"`
 	Unclassified []AssignmentJSON `json:"unclassified"`
-	Problems     []AssignmentJSON `json:"problems"`
+	// CopiedUnchanged counts the unclassified columns the default could not
+	// empty, which ship holding exactly what production holds. It is the
+	// number that used to be discoverable only by reading the unclassified
+	// list to the end and counting the ones that did not say emptied.
+	CopiedUnchanged int              `json:"copied_unchanged"`
+	Problems        []AssignmentJSON `json:"problems"`
 }
 
 // AssignmentJSON is one column's decision.
@@ -58,6 +64,96 @@ type VerifyJSON struct {
 	SampleSize  int           `json:"sample_size"`
 	Findings    []FindingJSON `json:"findings"`
 	Skipped     []string      `json:"skipped,omitempty"`
+	// Unread names the columns the scanner could not read, with the type
+	// that made them unreadable, so clean is read as a claim about the
+	// columns that were opened and not about these.
+	Unread []UnreadJSON `json:"unread,omitempty"`
+	// Unruled names the columns masking copied unchanged because no rule
+	// covered them, and UnruledCount is how many. The count is a field of
+	// its own so a script can read it without counting a list.
+	Unruled      []string `json:"unruled,omitempty"`
+	UnruledCount int      `json:"unruled_count"`
+}
+
+// UnreadJSON is one column the scanner could not read.
+type UnreadJSON struct {
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Type   string `json:"type"`
+	Reason string `json:"reason"`
+	Ruled  bool   `json:"ruled"`
+}
+
+// verifyJSON renders a report for every command that carries one, so the
+// four of them cannot drift into four different documents.
+func verifyJSON(report verify.Report) VerifyJSON {
+	doc := VerifyJSON{
+		Clean: report.Clean(), Tables: report.Tables, Columns: report.Columns,
+		RowsSampled: report.RowsSampled, SampleSize: report.SampleSize,
+		Skipped: report.Skipped, Unruled: report.Unruled, UnruledCount: len(report.Unruled),
+	}
+	for _, f := range report.Findings {
+		doc.Findings = append(doc.Findings, FindingJSON{
+			Table: f.Schema + "." + f.Table, Column: f.Column,
+			Detector: f.Detector, Example: f.Example, Rows: f.Rows,
+		})
+	}
+	for _, u := range report.Unread {
+		doc.Unread = append(doc.Unread, UnreadJSON{
+			Table: u.Schema + "." + u.Table, Column: u.Column, Type: u.Type,
+			Reason: u.Reason, Ruled: u.Ruled,
+		})
+	}
+	return doc
+}
+
+// verifyFailure is the error for a report that is not clean.
+//
+// A finding first, because a column the scan read and disliked is the more
+// specific answer, and the unread finding gets its own code because the fix
+// it asks for is a rule rather than a detector. Then a skip. This used to
+// index Findings[0] on any unclean report, and a report whose only problem
+// is a skipped column has no findings, so the strict Clean() that counts a
+// skip turned a silent pass into an index out of range.
+func verifyFailure(report verify.Report) error {
+	if len(report.Findings) > 0 {
+		f := report.Findings[0]
+		if f.Detector == verify.DetectorUnreadSensitive {
+			return aferrors.Coded(aferrors.AFMSK013,
+				"table", f.Schema+"."+f.Table, "column", f.Column, "type", f.Example)
+		}
+		return aferrors.Coded(aferrors.AFMSK002,
+			"detector", f.Detector, "table", f.Schema+"."+f.Table, "column", f.Column)
+	}
+	if len(report.Skipped) > 0 {
+		where, detail, _ := strings.Cut(report.Skipped[0], ": ")
+		table, column := where, ""
+		if i := strings.LastIndex(where, "."); i >= 0 {
+			table, column = where[:i], where[i+1:]
+		}
+		return aferrors.Coded(aferrors.AFMSK011, "table", table, "column", column, "detail", detail)
+	}
+	return nil
+}
+
+// printVerifyCoverage says what the scan did not read and what masking left
+// alone, after the verdict line of every command that verifies.
+//
+// Printed on a clean result as well as a failed one, which is the point: a
+// clean line followed by nothing used to be the whole story, and the story
+// had a bytea column in it that the scan never opened.
+func printVerifyCoverage(env *Env, report verify.Report) {
+	for _, s := range report.Skipped {
+		env.Out.Printf("  %s could not be read: %s\n", env.Out.S(StyleWarn, SymbolWarn), s)
+	}
+	for _, u := range report.Unread {
+		ruled := "no rule, copied unchanged"
+		if u.Ruled {
+			ruled = "masked by its rule"
+		}
+		env.Out.Printf("  %s %s (%s)\n", env.Out.S(StyleWarn, SymbolWarn), u, ruled)
+	}
+	env.Out.Printf("  %d columns copied unchanged with no rule.\n", len(report.Unruled))
 }
 
 // FindingJSON is one value that still looks real.
@@ -190,6 +286,7 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 				doc := MaskPlanJSON{
 					RulesHash: res.RulesHash, Runnable: plan.Runnable(), Source: res.Source,
 					Tables: len(plan.Tables), Columns: plan.Columns(), Rows: plan.Rows(),
+					CopiedUnchanged: len(plan.CopiedUnchanged()),
 				}
 				for _, t := range plan.Tables {
 					for _, a := range t.Columns {
@@ -213,8 +310,15 @@ func newMaskPlanCommand(env *Env) *cobra.Command {
 			if res.Source != "" {
 				env.Out.Printf("  Read from %s.\n", res.Source)
 			}
-			env.Out.Printf("  %d columns across %d tables, about %d rows.\n\n",
+			env.Out.Printf("  %d columns across %d tables, about %d rows.\n",
 				plan.Columns(), len(plan.Tables), plan.Rows())
+			// The count that matters, at the top, beside the count that
+			// reassures. It used to be discoverable only by reading the
+			// unclassified list at the very end and counting the rows that
+			// did not say emptied, which on this repository was 145 lines
+			// after several hundred lines of assignments.
+			env.Out.Printf("  %d columns have no rule, and %d of those are copied unchanged.\n\n",
+				len(plan.Unclassified), len(plan.CopiedUnchanged()))
 			env.Out.Raw(plan.Explain())
 
 			if len(plan.Unclassified) > 0 {
@@ -284,13 +388,16 @@ produced, so trying it on a branch first is the way to iterate on rules.`),
 			if env.Out.Format == FormatJSON {
 				return env.Out.JSON(map[string]any{
 					"tables": res.Tables, "rows": res.Rows,
-					"duration": res.Duration.Round(time.Millisecond).String(),
-					"resumed":  res.Resumed,
+					"duration":         res.Duration.Round(time.Millisecond).String(),
+					"resumed":          res.Resumed,
+					"copied_unchanged": len(res.CopiedUnchanged),
+					"unruled":          res.CopiedUnchanged,
 				})
 			}
 			env.Out.Status(env.Out.S(StyleGood, SymbolOK), "masked",
 				fmt.Sprintf("%d rows across %d tables in %s",
 					res.Rows, res.Tables, res.Duration.Round(time.Second)))
+			env.Out.Printf("  %d columns copied unchanged with no rule.\n", len(res.CopiedUnchanged))
 			env.Out.Hint("Check it with", "af mask verify")
 			return nil
 		},
@@ -305,8 +412,15 @@ func newMaskVerifyCommand(env *Env) *cobra.Command {
 		Use:   "verify",
 		Short: "Read the data back and report anything that still looks real",
 		Long: strings.TrimSpace(`
-Reads a sample of every text column and runs the same detectors that would find
-the data if it leaked.
+Reads a sample of every column it can read as text and runs the same detectors
+that would find the data if it leaked. Strings, JSON, arrays and enums are read
+through their text form; a bytea column is decoded as UTF-8 where it decodes.
+A column of a type the scanner cannot read is listed as not readable rather
+than passed over, and when no masking rule covers such a column and its name
+says it holds a secret, the check fails.
+
+The count of columns masking copied unchanged because no rule covered them is
+printed beside the verdict, whichever way the verdict went.
 
 Masking that is not checked is masking somebody believes in. A rule that missed
 a column, a transform that failed on a null, a table added last week: each
@@ -323,25 +437,11 @@ produces data that looks masked and is not, and none of them announces itself.`)
 			}
 
 			if env.Out.Format == FormatJSON {
-				doc := VerifyJSON{
-					Clean: report.Clean(), Tables: report.Tables, Columns: report.Columns,
-					RowsSampled: report.RowsSampled, SampleSize: report.SampleSize,
-					Skipped: report.Skipped,
-				}
-				for _, f := range report.Findings {
-					doc.Findings = append(doc.Findings, FindingJSON{
-						Table: f.Schema + "." + f.Table, Column: f.Column,
-						Detector: f.Detector, Example: f.Example, Rows: f.Rows,
-					})
-				}
-				if err := env.Out.JSON(doc); err != nil {
+				if err := env.Out.JSON(verifyJSON(report)); err != nil {
 					return err
 				}
 				if !report.Clean() {
-					return silent(aferrors.Coded(aferrors.AFMSK002,
-						"detector", report.Findings[0].Detector,
-						"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
-						"column", report.Findings[0].Column))
+					return silent(verifyFailure(report))
 				}
 				return nil
 			}
@@ -350,9 +450,7 @@ produces data that looks masked and is not, and none of them announces itself.`)
 				env.Out.Status(env.Out.S(StyleGood, SymbolOK), "clean",
 					fmt.Sprintf("%d columns across %d tables, %d rows sampled",
 						report.Columns, report.Tables, report.RowsSampled))
-				for _, s := range report.Skipped {
-					env.Out.Printf("  %s could not be read: %s\n", env.Out.S(StyleWarn, SymbolWarn), s)
-				}
+				printVerifyCoverage(env, report)
 				return nil
 			}
 
@@ -360,14 +458,12 @@ produces data that looks masked and is not, and none of them announces itself.`)
 			for _, f := range report.Findings {
 				env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
 			}
+			printVerifyCoverage(env, report)
 			env.Out.Println("")
 			env.Out.Println(env.Out.Wrap(
 				"A golden in this state cannot be branched. Add a rule for each column above "+
 					"with 'af mask plan' to see what is covered.", 0))
-			return aferrors.Coded(aferrors.AFMSK002,
-				"detector", report.Findings[0].Detector,
-				"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
-				"column", report.Findings[0].Column)
+			return verifyFailure(report)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to check, defaulting to the checked out one")

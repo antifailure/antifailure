@@ -93,6 +93,12 @@ type Result struct {
 	Duration time.Duration
 	// Resumed reports whether the run picked up from a checkpoint.
 	Resumed bool
+	// CopiedUnchanged names the columns the plan left exactly as they were
+	// because no rule covered them and the default could not empty them.
+	// Carried on the result so that the command that ran the plan can say
+	// so beside its own success line, rather than leaving the fact in a plan
+	// nobody re-reads.
+	CopiedUnchanged []string
 }
 
 // Apply runs a plan against a database.
@@ -106,7 +112,7 @@ func (e *Executor) Apply(ctx context.Context, conn *pgx.Conn, plan Plan) (Result
 			len(plan.Problems), describeProblems(plan.Problems))
 	}
 	started := e.clock.Now()
-	var res Result
+	res := Result{CopiedUnchanged: plan.CopiedUnchangedNames()}
 
 	for _, tp := range plan.Tables {
 		rows, resumed, err := e.applyTable(ctx, conn, tp)

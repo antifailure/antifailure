@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -49,8 +50,60 @@ type Finding struct {
 
 // String renders a finding for a person.
 func (f Finding) String() string {
+	if f.Detector == DetectorUnreadSensitive {
+		// Not a value the scan read and disliked, a column it could not read
+		// at all. Rows and Example would be a count of nothing and an
+		// excerpt of nothing, so the sentence says what is actually known.
+		return fmt.Sprintf("%s.%s.%s is not readable by the scanner (%s), has no masking "+
+			"rule, and its name says it holds a secret",
+			f.Schema, f.Table, f.Column, f.Example)
+	}
 	return fmt.Sprintf("%s.%s.%s holds %s (%d of the sampled rows, for example %s)",
 		f.Schema, f.Table, f.Column, f.Detector, f.Rows, f.Example)
+}
+
+// DetectorUnreadSensitive is the finding raised for a column the scanner could
+// not read, that no rule covers, and whose name says it holds a secret.
+//
+// It exists because the scan used to say clean about columns it never opened.
+// verify read six text types and nothing else, so a bytea column called
+// sp_private_key or ciphertext was invisible to it: not read, not skipped, not
+// counted, and the report that came back said clean with zero findings while
+// af mask plan, on the same database, listed the column as COPIED UNCHANGED.
+// Two instruments, one database, opposite answers, and the one that said
+// clean was the one that gated publication.
+//
+// A column the scanner cannot read is a column about which it knows nothing,
+// and the strict reading of nothing is the one this package takes everywhere
+// else. It cannot fail every unreadable column, because a preview environment
+// with no enum columns is no preview environment. So it fails the narrow case
+// where three facts line up: the scanner cannot read it, nobody wrote a rule
+// for it, and the name is one the detectors would already treat as a secret.
+const DetectorUnreadSensitive = "unread-sensitive-name"
+
+// UnreadColumn is a column the scanner could not read as text.
+//
+// Listed rather than silently passed over, which is the whole point of the
+// list. A column the scan never opened is not a column that passed, and until
+// this existed nothing in the report said which columns those were. Distinct
+// from Skipped, which is a column the scan tried to read and could not: this
+// is a column the scan knows it cannot read from the type alone.
+type UnreadColumn struct {
+	Schema string `json:"schema"`
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	// Type is the Postgres type that made it unreadable.
+	Type string `json:"type"`
+	// Reason is one sentence for a person, in the form the CLI prints.
+	Reason string `json:"reason"`
+	// Ruled reports whether a masking rule covers the column. A column
+	// nobody could read and nobody masked is copied as it was.
+	Ruled bool `json:"ruled"`
+}
+
+// String renders the column the way the CLI prints it.
+func (u UnreadColumn) String() string {
+	return fmt.Sprintf("%s.%s.%s: %s", u.Schema, u.Table, u.Column, u.Reason)
 }
 
 // Report is the result of a scan.
@@ -74,6 +127,30 @@ type Report struct {
 	// Skipped names columns that could not be read, with the reason. A column
 	// nobody could read is not a column that passed.
 	Skipped []string `json:"skipped,omitempty"`
+	// Unread names the columns the scanner could not read as text, by type,
+	// so that "clean" is a claim about the columns it opened and not about
+	// the ones it never could. Recorded in the attestation for the same
+	// reason SampleSize is: a reader deciding whether to trust the scan has
+	// to be able to see what it did not cover.
+	Unread []UnreadColumn `json:"unread,omitempty"`
+	// Unruled names the columns masking copied unchanged because no rule
+	// named them, as the caller reported them from the plan. The scan does
+	// not know the rules; the caller does, and this is how the count travels
+	// from the plan, where it was printed once at the bottom, into the
+	// attestation, the golden listing and the JSON of every command that
+	// reads back a golden.
+	Unruled []string `json:"unruled,omitempty"`
+}
+
+// CoverageRecorded reports whether this report was made by a scanner that
+// recorded what it could not read and what masking left alone.
+//
+// The first scanner recorded neither, and a listing that read its empty
+// lists as zero would say "0 columns copied unchanged" about a golden made
+// under rules that copied 145. Zero and unknown are different facts, and the
+// scanner version is what tells them apart.
+func (r Report) CoverageRecorded() bool {
+	return r.Scanner != "" && r.Scanner != "antifailure/verify/1"
 }
 
 // Clean reports whether the golden may be branched.
@@ -111,6 +188,12 @@ type Options struct {
 	Progress func(string)
 	// Now is the time source.
 	Now func() time.Time
+	// Unruled names the columns masking copied unchanged because no rule
+	// covered them, as schema.table.column. It is what decides whether an
+	// unreadable column with a secret's name is a finding or a note: with a
+	// rule the column was rewritten, whatever the scanner can see of it, and
+	// without one it holds exactly what production held.
+	Unruled []string
 }
 
 // Scan reads back a database and reports what still looks real.
@@ -122,21 +205,37 @@ func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
 		opts.Now = time.Now
 	}
 	report := Report{
-		Scanner: "antifailure/verify/1", StartedAt: opts.Now().UTC(),
+		Scanner: "antifailure/verify/2", StartedAt: opts.Now().UTC(),
 		SampleSize: opts.SampleSize,
 	}
 
-	columns, err := textColumns(ctx, conn)
+	columns, err := scannableColumns(ctx, conn)
 	if err != nil {
 		return report, err
 	}
+	unruled := map[string]bool{}
+	for _, name := range opts.Unruled {
+		unruled[name] = true
+	}
+	report.Unruled = append([]string(nil), opts.Unruled...)
+	sort.Strings(report.Unruled)
 
 	seenTables := map[string]bool{}
 	for _, c := range columns {
 		seenTables[c.schema+"."+c.table] = true
+		ruled := !unruled[c.schema+"."+c.table+"."+c.column]
+
+		if c.kind == kindUnread {
+			// Known from the type alone, before a row is read. Said in the
+			// report rather than passed over, and turned into a finding when
+			// the column is one that nothing masked and whose name says what
+			// it holds.
+			report.noteUnread(c, "not readable by the scanner: "+c.typ, ruled)
+			continue
+		}
 		report.Columns++
 
-		rows, sampled, scanErr := scanColumn(ctx, conn, c, opts.SampleSize)
+		rows, sampled, opaque, scanErr := scanColumn(ctx, conn, c, opts.SampleSize)
 		if scanErr != nil {
 			// A column that could not be read is recorded rather than ignored.
 			// Ignoring it would let an unreadable column count as a clean one.
@@ -146,6 +245,16 @@ func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
 		}
 		report.RowsSampled += int64(sampled)
 		report.Findings = append(report.Findings, rows...)
+		if opaque > 0 {
+			// A bytea column is read as UTF-8 where it decodes, and a value
+			// that does not decode is binary the detectors cannot see into.
+			// The column is then partly read at best, and the part that was
+			// not read is said out loud, with the same consequence for a
+			// secret's name as a type the scanner cannot read at all.
+			report.noteUnread(c, fmt.Sprintf(
+				"%d of %d sampled values are binary rather than text and could not be read",
+				opaque, sampled), ruled)
+		}
 
 		if opts.Progress != nil && len(rows) > 0 {
 			opts.Progress(rows[0].String())
@@ -167,22 +276,100 @@ func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
 	return report, nil
 }
 
-type columnRef struct{ schema, table, column string }
+// columnKind is how the scanner reads a column, decided from its type.
+type columnKind int
 
-// textColumns lists the columns worth reading.
+const (
+	// kindText is read through a ::text cast and handed to the detectors.
+	// Strings, JSON, XML, and everything whose text form is what a person
+	// would see: arrays, enums, extension types, network addresses.
+	kindText columnKind = iota
+	// kindBytea is read as raw bytes and decoded as UTF-8 where it decodes.
+	// A secret pasted into a bytea column is text in a binary coat, and the
+	// coat is cheap to take off.
+	kindBytea
+	// kindUnread is a type the scanner has no way to read as text. It is
+	// listed rather than passed over.
+	kindUnread
+)
+
+type columnRef struct {
+	schema, table, column, typ string
+	kind                       columnKind
+}
+
+// structuralTypes are the types whose text form cannot carry a sentence
+// somebody typed: numbers, times, booleans, and identifiers the database
+// generates. They are not read and not listed, because a listing of every
+// bigint in the schema as "not readable" is a listing nobody reads, which is
+// the same as no listing.
 //
-// Only the ones that can hold a string. A bigint cannot hold an email address,
-// and reading every numeric column of every table to prove it would multiply
-// the scan for nothing.
-func textColumns(ctx context.Context, conn *pgx.Conn) ([]columnRef, error) {
+// The same list masking's classifier calls knownStructural, kept in step by a
+// test in that package rather than by sharing the code, because the two
+// packages are on opposite sides of a boundary this one is not allowed to
+// cross: verify must not trust masking's opinion of anything.
+var structuralTypes = map[string]bool{
+	"smallint": true, "integer": true, "bigint": true, "decimal": true,
+	"numeric": true, "real": true, "double precision": true, "money": true,
+	"smallserial": true, "serial": true, "bigserial": true, "boolean": true,
+	"uuid": true, "date": true, "time": true, "time without time zone": true,
+	"time with time zone": true, "timestamp": true,
+	"timestamp without time zone": true, "timestamp with time zone": true,
+	"interval": true, "oid": true, "bit": true, "bit varying": true,
+}
+
+// KindOf classifies a Postgres type the way the scanner reads it: "text" for
+// a type read through its text form, "bytea" for one decoded as UTF-8 where
+// it decodes, "unread" for one the scanner cannot read, and "structural" for
+// one it does not need to. Exported so the CLI's help and the tests can say
+// which is which without a database.
+func KindOf(dataType string) string {
+	switch classify(dataType) {
+	case kindText:
+		return "text"
+	case kindBytea:
+		return "bytea"
+	}
+	if structuralTypes[strings.ToLower(dataType)] {
+		return "structural"
+	}
+	return "unread"
+}
+
+func classify(dataType string) columnKind {
+	switch strings.ToLower(dataType) {
+	case "text", "character varying", "character", "json", "jsonb", "xml",
+		"citext", "name",
+		// information_schema reports every array as ARRAY and every enum,
+		// domain and extension type as USER-DEFINED. Their text form is what
+		// a person sees, and it is what the detectors run over.
+		"array", "user-defined",
+		// Network types locate somebody, and ::text renders them the way the
+		// ip detector reads them.
+		"inet", "cidr", "macaddr", "macaddr8",
+		"tsvector", "tsquery":
+		return kindText
+	case "bytea":
+		return kindBytea
+	}
+	return kindUnread
+}
+
+// scannableColumns lists every column the scan has an opinion about.
+//
+// Everything that is not structural. This used to be six text types and
+// nothing else, and the cost of that was not the columns it skipped, it was
+// that the report did not say it had skipped them: a bytea holding a sealed
+// private key and an enum were equally invisible, and "clean" covered both.
+func scannableColumns(ctx context.Context, conn *pgx.Conn) ([]columnRef, error) {
 	const query = `
-SELECT c.table_schema, c.table_name, c.column_name
+SELECT c.table_schema, c.table_name, c.column_name, c.data_type
 FROM information_schema.columns c
 JOIN information_schema.tables t
   ON t.table_schema = c.table_schema AND t.table_name = c.table_name
 WHERE t.table_type = 'BASE TABLE'
   AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
-  AND c.data_type IN ('text', 'character varying', 'character', 'json', 'jsonb', 'xml')
+  AND c.table_schema NOT LIKE 'pg_toast%'
 ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 
 	rows, err := conn.Query(ctx, query)
@@ -194,36 +381,103 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 	var out []columnRef
 	for rows.Next() {
 		var c columnRef
-		if err := rows.Scan(&c.schema, &c.table, &c.column); err != nil {
+		if err := rows.Scan(&c.schema, &c.table, &c.column, &c.typ); err != nil {
 			return nil, fmt.Errorf("verify: listing columns: %w", err)
 		}
+		if structuralTypes[strings.ToLower(c.typ)] {
+			continue
+		}
+		c.kind = classify(c.typ)
 		out = append(out, c)
 	}
 	return out, rows.Err()
 }
 
+// sensitiveNameWords are the words in a table or column name that say the
+// column holds something that grants access. The list is the one the built in
+// masking rules and the credential detector already act on, written down once
+// more here because this package must not import that one.
+var sensitiveNameWords = []string{
+	"secret", "key", "token", "private", "ciphertext", "password", "credential",
+}
+
+// SensitiveName reports whether a table or column name says the column holds
+// a secret. Exported for the documentation test that keeps the CLI's own
+// description of the rule honest.
+func SensitiveName(table, column string) bool {
+	lower := strings.ToLower(table + " " + column)
+	for _, w := range sensitiveNameWords {
+		if strings.Contains(lower, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// noteUnread records a column the scan could not read, and raises a finding
+// when it is also unmasked and named like a secret.
+func (r *Report) noteUnread(c columnRef, reason string, ruled bool) {
+	r.Unread = append(r.Unread, UnreadColumn{
+		Schema: c.schema, Table: c.table, Column: c.column, Type: c.typ,
+		Reason: reason, Ruled: ruled,
+	})
+	if ruled || !SensitiveName(c.table, c.column) {
+		return
+	}
+	r.Findings = append(r.Findings, Finding{
+		Schema: c.schema, Table: c.table, Column: c.column,
+		Detector: DetectorUnreadSensitive, Example: c.typ,
+	})
+}
+
 // scanColumn reads a sample of one column and runs the detectors over it.
-func scanColumn(ctx context.Context, conn *pgx.Conn, c columnRef, limit int) ([]Finding, int, error) {
+//
+// It returns the findings, how many rows it sampled, and how many of those it
+// could not turn into text, which is only ever non zero for bytea.
+func scanColumn(
+	ctx context.Context, conn *pgx.Conn, c columnRef, limit int,
+) ([]Finding, int, int, error) {
+	expr := quoteIdent(c.column) + "::text"
+	if c.kind == kindBytea {
+		// Raw, not cast. A bytea cast to text is its hex form, "\x6162",
+		// which no detector matches, and which is how a secret in a bytea
+		// column would have passed a scan that read it.
+		expr = quoteIdent(c.column)
+	}
 	sql := fmt.Sprintf(
-		`SELECT %s::text FROM %s.%s WHERE %s IS NOT NULL LIMIT %d`,
-		quoteIdent(c.column), quoteIdent(c.schema), quoteIdent(c.table),
+		`SELECT %s FROM %s.%s WHERE %s IS NOT NULL LIMIT %d`,
+		expr, quoteIdent(c.schema), quoteIdent(c.table),
 		quoteIdent(c.column), limit)
 
 	rows, err := conn.Query(ctx, sql)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer rows.Close()
 
 	counts := map[string]int{}
 	examples := map[string]string{}
-	sampled := 0
+	sampled, opaque := 0, 0
 	for rows.Next() {
 		var value string
-		if err := rows.Scan(&value); err != nil {
-			return nil, sampled, err
+		if c.kind == kindBytea {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return nil, sampled, opaque, err
+			}
+			sampled++
+			decoded, ok := decodeText(raw)
+			if !ok {
+				opaque++
+				continue
+			}
+			value = decoded
+		} else {
+			if err := rows.Scan(&value); err != nil {
+				return nil, sampled, opaque, err
+			}
+			sampled++
 		}
-		sampled++
 		for _, d := range Detectors() {
 			if d.Match(value) {
 				counts[d.Name]++
@@ -234,7 +488,7 @@ func scanColumn(ctx context.Context, conn *pgx.Conn, c columnRef, limit int) ([]
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, sampled, err
+		return nil, sampled, opaque, err
 	}
 
 	var out []Finding
@@ -245,7 +499,25 @@ func scanColumn(ctx context.Context, conn *pgx.Conn, c columnRef, limit int) ([]
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Detector < out[j].Detector })
-	return out, sampled, nil
+	return out, sampled, opaque, nil
+}
+
+// decodeText reports whether raw bytes are text a detector can read.
+//
+// Valid UTF-8 with no control characters other than the whitespace a text
+// file carries. A random salt or a ciphertext is valid UTF-8 with vanishing
+// probability and full of control bytes when it is, so the test separates
+// the two cleanly without pretending to know what the bytes mean.
+func decodeText(raw []byte) (string, bool) {
+	if len(raw) == 0 || !utf8.Valid(raw) {
+		return "", false
+	}
+	for _, b := range raw {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' {
+			return "", false
+		}
+	}
+	return string(raw), true
 }
 
 // excerpt renders enough of a value to recognise its shape and not enough to
@@ -354,6 +626,27 @@ func (a Attestation) payload() ([]byte, error) {
 	}
 	sum := sha256.Sum256(body)
 	return []byte(hex.EncodeToString(sum[:])), nil
+}
+
+// ParseAttestation reads an attestation back out of its JSON, and reports
+// whether it was one.
+//
+// For the commands that list goldens. The attestation is the durable record
+// of what a version was verified as holding, and the counts it carries, of
+// columns the scan could not read and of columns copied unchanged, are the
+// counts af golden list and inspect_goldens print beside "verified". Reading
+// them from the attestation rather than recomputing them is what makes the
+// listing describe the golden that exists rather than the rules file that
+// exists now.
+func ParseAttestation(raw string) (Attestation, bool) {
+	var a Attestation
+	if raw == "" || json.Unmarshal([]byte(raw), &a) != nil {
+		return Attestation{}, false
+	}
+	if a.Report.Scanner == "" {
+		return Attestation{}, false
+	}
+	return a, true
 }
 
 // GenerateKey returns a new signing key.

@@ -92,6 +92,8 @@ func init() {
 	register(urlTransform{})
 	register(creditCardTransform{})
 	register(preserveTransform{})
+	register(prefixedIDTransform{})
+	register(repositoryTransform{})
 }
 
 // pass returns the input unchanged, and is the shared null handling every
@@ -998,4 +1000,118 @@ func (preserveTransform) PreservesUniqueness() bool { return true }
 
 func (preserveTransform) Apply(_ *Key, _ Column, in *string) (*string, error) {
 	return in, nil
+}
+
+// prefixedIDTransform replaces a third party object identifier while keeping
+// the prefix that says what kind of thing it is.
+//
+// A Stripe customer id is cus_ followed by fourteen base62 characters, a
+// subscription is sub_ and twenty four, and the application never parses the
+// body: it stores the id, compares it, and hands it back to Stripe. What it
+// does look at is the prefix, and a value with the wrong one is a value the
+// billing code refuses on sight. So the prefix survives, everything up to and
+// including the last underscore, and the body is replaced by a keyed hash of
+// the same length rendered as lowercase hex.
+//
+// Lowercase hex on purpose. A real identifier is random base62 and all but
+// certainly carries a capital letter; the verification scan's provider
+// identifier detector requires one, so a masked body never reads as a real
+// one. That is the same arrangement the email transform has with its reserved
+// domains: the shape says which side of the mask a value is on.
+//
+// Equality is preserved and nothing else is, which is what an identifier that
+// is joined on across five tables and never displayed wants. Uniqueness is
+// preserved by construction: the body is a hash of the whole value, so two
+// distinct inputs collide only if the hash does.
+type prefixedIDTransform struct{}
+
+func (prefixedIDTransform) Name() string { return "prefixed_id" }
+
+func (prefixedIDTransform) Describe() string {
+	return "Replaces a third party identifier such as cus_ABC123 with one of the same length and prefix, the body being a keyed hash in lowercase hex. Equality and joins survive; the real account it pointed at does not."
+}
+
+func (prefixedIDTransform) PreservesUniqueness() bool { return true }
+
+func (prefixedIDTransform) Apply(k *Key, c Column, in *string) (*string, error) {
+	if nullOK(in) {
+		return nil, nil
+	}
+	if *in == "" {
+		return in, nil
+	}
+	prefix, body := "", *in
+	if i := strings.LastIndexByte(*in, '_'); i >= 0 {
+		prefix, body = (*in)[:i+1], (*in)[i+1:]
+	}
+	// At least sixteen characters of body, so an identifier with a short one
+	// still gets sixty four bits of hash behind it and cannot be found by
+	// enumerating the space. A longer original keeps its own length.
+	width := len([]rune(body))
+	if width < 16 {
+		width = 16
+	}
+	if width > 128 {
+		width = 128
+	}
+	// The hash is over the whole value rather than the body, so cus_x and
+	// sub_x, which are different things, do not share a body.
+	b := prfBytes(k.Sub(c), *in, (width+1)/2)
+	return str(prefix + hex.EncodeToString(b)[:width]), nil
+}
+
+// repositoryTransform replaces an owner/name the way GitHub spells it.
+//
+// It exists because of one column, repositories.full_name, and one argument
+// about it. The column is the customer's real GitHub organization and
+// repository, which names the customer as surely as their company name does,
+// and the same rules file already replaces that customer's GitHub handle in
+// two other tables with the username transform. Leaving the repository name
+// alone put the handle back in a third. Hashing it would have kept the
+// customer out and made the environment matrix, which is a list of these
+// names, unreadable.
+//
+// So each half is replaced the way a handle is. The owner goes through the
+// username transform under the column's own link, which is how it comes out
+// as the SAME synthetic handle the organization's github_login gets when the
+// two rules share a link; the name goes through it under a derived identity,
+// so the two halves cannot be told to be one value. The result reads as a
+// repository, sorts as one, and stays unique per owner because both halves
+// are unique in their own right.
+type repositoryTransform struct{}
+
+func (repositoryTransform) Name() string { return "repository" }
+
+func (repositoryTransform) Describe() string {
+	return "Replaces an owner/name repository reference with synthetic handles for both halves, the owner masking identically to a username column that shares its link."
+}
+
+func (repositoryTransform) PreservesUniqueness() bool { return true }
+
+func (repositoryTransform) Apply(k *Key, c Column, in *string) (*string, error) {
+	if nullOK(in) {
+		return nil, nil
+	}
+	if *in == "" {
+		return in, nil
+	}
+	owner, name, found := strings.Cut(*in, "/")
+	if !found {
+		// Not owner/name, so there is no owner to keep in step with anything.
+		// A handle is still the honest replacement.
+		return usernameTransform{}.Apply(k, c, in)
+	}
+	maskedOwner, err := usernameTransform{}.Apply(k, c, &owner)
+	if err != nil {
+		return nil, err
+	}
+	nameCol := Column{Schema: c.Schema, Table: c.Table, Name: c.Name + "/name"}
+	if c.Link != "" {
+		nameCol = Column{Link: c.Link + "/name"}
+	}
+	maskedName, err := usernameTransform{}.Apply(k, nameCol, &name)
+	if err != nil {
+		return nil, err
+	}
+	return str(*maskedOwner + "/" + *maskedName), nil
 }

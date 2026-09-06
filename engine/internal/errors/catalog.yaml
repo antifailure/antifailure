@@ -638,6 +638,13 @@ errors:
     docs: concepts/masking
     retryable: false
     exit_code: 3
+  - code: AF-MSK-013
+    area: MSK
+    message: "Verification could not read {table}.{column} ({type}), no masking rule covers it, and its name says it holds a secret."
+    next_step: "Give {table}.{column} a rule in masking.yaml, nullify or hash_hex, and refresh the golden. A column the scan cannot read is masked by the rules or by nothing."
+    docs: concepts/verification
+    retryable: false
+    exit_code: 7
   - code: AF-NET-001
     area: NET
     message: "The request to {host} was blocked by rule {rule}."

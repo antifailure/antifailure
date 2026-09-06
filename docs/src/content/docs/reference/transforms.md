@@ -35,8 +35,10 @@ before anything runs.
 | `numeric_noise` | no | Moves a number by up to ten percent, keeping its sign, scale, and decimal places, so totals stay the right order of magnitude. |
 | `phone` | no | Replaces the digits of a phone number in place, keeping its length, punctuation, and country prefix so that format checks still pass. |
 | `postcode` | no | Rewrites a postal code in place, keeping letters as letters and digits as digits so the country's format still validates. |
+| `prefixed_id` | yes | Replaces a third party identifier such as cus_ABC123 with one of the same length and prefix, the body being a keyed hash in lowercase hex. Equality and joins survive; the real account it pointed at does not. |
 | `preserve` | yes | Leaves the value unchanged. Use it to record that a column was reviewed and found safe, rather than leaving it out. |
 | `region` | no | Replaces a state or subdivision code with a synthetic two letter one. For a column holding the full name of a region, use city or nullify instead. |
+| `repository` | yes | Replaces an owner/name repository reference with synthetic handles for both halves, the owner masking identically to a username column that shares its link. |
 | `string_fpe` | no | Replaces a string with one of the same length, keeping digits as digits and letters as letters so a format check still matches. |
 | `url` | no | Keeps a URL's scheme and path shape, replacing its host with a synthetic one at example.test. |
 | `username` | yes | Replaces a handle with a unique synthetic one made of a word and a number. |
@@ -90,7 +92,7 @@ unique constraint users_email_key.
 ```
 
 <!-- unique:start -->
-`email`, `hash_hex`, `preserve`, `username` and `uuid_remap` preserve uniqueness.
+`email`, `hash_hex`, `prefixed_id`, `preserve`, `repository`, `username` and `uuid_remap` preserve uniqueness.
 <!-- unique:end -->
 
 `name`, `city`, `company` and the rest do not, because two people can share a

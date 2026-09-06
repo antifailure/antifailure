@@ -175,11 +175,15 @@ type maskingPlanDoc struct {
 	// own; they are the list somebody has to answer.
 	Unclassified      []unmaskedColumnDoc `json:"unclassified_columns,omitempty"`
 	UnclassifiedTotal int                 `json:"unclassified_total"`
-	Problems          []unmaskedColumnDoc `json:"problems,omitempty"`
-	ProblemsTotal     int                 `json:"problems_total"`
-	Metrics           []Metric            `json:"metrics,omitempty"`
-	Note              string              `json:"note,omitempty"`
-	EvidenceNote      string              `json:"evidence_note,omitempty"`
+	// CopiedUnchangedTotal is how many of those the default could not empty,
+	// so they ship holding exactly what production holds. The other kind is
+	// emptied; this kind is the one to answer first.
+	CopiedUnchangedTotal int                 `json:"copied_unchanged_total"`
+	Problems             []unmaskedColumnDoc `json:"problems,omitempty"`
+	ProblemsTotal        int                 `json:"problems_total"`
+	Metrics              []Metric            `json:"metrics,omitempty"`
+	Note                 string              `json:"note,omitempty"`
+	EvidenceNote         string              `json:"evidence_note,omitempty"`
 }
 
 type maskedTableDoc struct {
@@ -235,6 +239,7 @@ func maskingPlan(ctx context.Context, readers maskingReaders) (any, *Fault) {
 		Tables: []maskedTableDoc{}, TablesTotal: len(plan.Tables),
 		ColumnsTotal: plan.Columns(), RowsEstimate: plan.Rows(),
 		UnclassifiedTotal: len(plan.Unclassified), ProblemsTotal: len(plan.Problems),
+		CopiedUnchangedTotal: len(plan.CopiedUnchanged()),
 	}
 
 	for i, tp := range plan.Tables {
@@ -289,6 +294,10 @@ func maskingPlan(ctx context.Context, readers maskingReaders) (any, *Fault) {
 			Unit: "columns",
 		},
 		{
+			Name: "columns_copied_unchanged_with_no_rule", Value: float64(len(plan.CopiedUnchanged())),
+			Unit: "columns",
+		},
+		{
 			Name: "columns_that_cannot_be_masked", Value: float64(len(plan.Problems)),
 			Unit: "columns", Threshold: &zero, Breached: len(plan.Problems) > 0,
 		},
@@ -327,13 +336,22 @@ func maskingPlanSummary(doc *maskingPlanDoc) string {
 		doc.RowsEstimate, plural(int(min64(doc.RowsEstimate, 2)), "row", "rows"))
 
 	if doc.UnclassifiedTotal > 0 {
+		// Two outcomes, said apart. This used to say every unclassified
+		// column was emptied by the fail closed default, and on this
+		// repository 145 of them were not: a NOT NULL text column, a bytea,
+		// an enum or an array has nothing the default can write, so it is
+		// copied as it is, and the sentence that said emptied was the reason
+		// nobody looked.
+		emptied := doc.UnclassifiedTotal - doc.CopiedUnchangedTotal
 		fmt.Fprintf(&b,
-			"%d %s covered by no rule and %s emptied by the fail closed default rather "+
-				"than by a decision anybody made. That is the list to answer: a column "+
-				"nobody looked at is a question, not an answer. ",
+			"%d %s covered by no rule: %d emptied by the fail closed default rather "+
+				"than by a decision anybody made, and %d copied unchanged because the "+
+				"default could not empty %s. The copied ones hold exactly what production "+
+				"holds and are the list to answer first. ",
 			doc.UnclassifiedTotal,
 			plural(doc.UnclassifiedTotal, "column is", "columns are"),
-			plural(doc.UnclassifiedTotal, "is", "are"))
+			emptied, doc.CopiedUnchangedTotal,
+			plural(doc.CopiedUnchangedTotal, "it", "them"))
 	}
 	if !doc.Runnable {
 		fmt.Fprintf(&b,
@@ -565,6 +583,15 @@ type maskingVerifyDoc struct {
 	// the scan read and disliked, a skip is one it never saw.
 	Skipped      []string `json:"skipped,omitempty"`
 	SkippedTotal int      `json:"skipped_total"`
+	// Unread names columns the scanner could not read as text, by type. A
+	// column the scan never opened is not one it can say clean about, and
+	// until this list existed the result did not say which those were.
+	Unread      []string `json:"unread,omitempty"`
+	UnreadTotal int      `json:"unread_total"`
+	// Unruled names the columns masking copied unchanged because no rule
+	// covered them. They hold exactly what production holds.
+	Unruled      []string `json:"unruled,omitempty"`
+	UnruledTotal int      `json:"unruled_total"`
 	Metrics      []Metric `json:"metrics,omitempty"`
 	// ExamplesWithheld is always true. The scanner keeps a redacted excerpt of
 	// each value it recognised, and even a redacted excerpt of real data is
@@ -602,7 +629,21 @@ func maskingVerification(ctx context.Context, readers maskingReaders) (any, *Fau
 		Tables: rep.Tables, Columns: rep.Columns, RowsSampled: rep.RowsSampled,
 		SampleSize: rep.SampleSize, Findings: []maskingFindingDoc{},
 		FindingsTotal: len(rep.Findings), SkippedTotal: len(rep.Skipped),
+		UnreadTotal: len(rep.Unread), UnruledTotal: len(rep.Unruled),
 		ExamplesWithheld: true,
+	}
+	for i, u := range rep.Unread {
+		if i >= maxMaskingFindings {
+			break
+		}
+		out.Unread = append(out.Unread, safeProse(u.String(), 300))
+	}
+	for i, u := range rep.Unruled {
+		if i >= maxMaskingFindings {
+			break
+		}
+		name, _ := safeIdentifier(u)
+		out.Unruled = append(out.Unruled, name)
 	}
 	for i, f := range rep.Findings {
 		if i >= maxMaskingFindings {
@@ -635,6 +676,8 @@ func maskingVerification(ctx context.Context, readers maskingReaders) (any, *Fau
 			Name: "columns_that_could_not_be_read", Value: float64(len(rep.Skipped)),
 			Unit: "columns", Threshold: &zero, Breached: len(rep.Skipped) > 0,
 		},
+		{Name: "columns_not_readable_by_the_scanner", Value: float64(len(rep.Unread)), Unit: "columns"},
+		{Name: "columns_copied_unchanged_with_no_rule", Value: float64(len(rep.Unruled)), Unit: "columns"},
 		{Name: "columns_scanned", Value: float64(rep.Columns), Unit: "columns"},
 		{Name: "rows_sampled", Value: float64(rep.RowsSampled), Unit: "rows"},
 	}
@@ -687,6 +730,14 @@ func maskingVerifySummary(rep verify.Report, doc *maskingVerifyDoc) string {
 		b.WriteString("Nothing that still looks real, and nothing unreadable, in what was " +
 			"sampled. ")
 	}
+	if len(rep.Unread) > 0 {
+		fmt.Fprintf(&b, "%d %s not readable by the scanner because of %s type, so clean "+
+			"says nothing about %s. ",
+			len(rep.Unread), plural(len(rep.Unread), "column is", "columns are"),
+			plural(len(rep.Unread), "its", "their"), plural(len(rep.Unread), "it", "them"))
+	}
+	fmt.Fprintf(&b, "%d %s copied unchanged with no masking rule. ",
+		len(rep.Unruled), plural(len(rep.Unruled), "column was", "columns were"))
 	b.WriteString("The values are not reported, not even the redacted excerpts the " +
 		"scanner keeps, because an excerpt of real data is real data.")
 	return b.String()

@@ -1264,8 +1264,15 @@ af mask preview --table users --rows 5
 
 Read the data back and report anything that still looks real.
 
-Reads a sample of every text column and runs the same detectors that would find
-the data if it leaked.
+Reads a sample of every column it can read as text and runs the same detectors
+that would find the data if it leaked. Strings, JSON, arrays and enums are read
+through their text form; a bytea column is decoded as UTF-8 where it decodes.
+A column of a type the scanner cannot read is listed as not readable rather
+than passed over, and when no masking rule covers such a column and its name
+says it holds a secret, the check fails.
+
+The count of columns masking copied unchanged because no rule covered them is
+printed beside the verdict, whichever way the verdict went.
 
 Masking that is not checked is masking somebody believes in. A rule that missed
 a column, a transform that failed on a null, a table added last week: each

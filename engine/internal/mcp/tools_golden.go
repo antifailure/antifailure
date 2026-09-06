@@ -130,6 +130,18 @@ type goldenVersionDoc struct {
 	// Mine says whether this project may branch it. A version made for
 	// another project is refused by the engine rather than branched.
 	Mine bool `json:"branchable_by_this_project"`
+	// CopiedUnchanged is how many columns masking left exactly as production
+	// had them because no rule covered them, and UnruledColumns names them,
+	// both read from the version's own attestation. A verified golden with
+	// 145 of these is a different thing from one with none, and this listing
+	// said verified about both.
+	CopiedUnchanged int      `json:"columns_copied_unchanged_with_no_rule"`
+	UnruledColumns  []string `json:"unruled_columns,omitempty"`
+	// UnreadColumns is how many columns the scan could not read by type.
+	UnreadColumns int `json:"columns_not_readable_by_the_scanner"`
+	// Attested says whether those counts were read from an attestation at
+	// all. False on a version made before the attestation carried them.
+	Attested bool `json:"attestation_carries_counts"`
 }
 
 type publishedGoldenDoc struct {
@@ -275,6 +287,12 @@ func describeGoldens(
 		if !v.CreatedAt.IsZero() {
 			doc.CreatedAt = v.CreatedAt.UTC().Format(time.RFC3339)
 			doc.AgeHours = time.Since(v.CreatedAt).Hours()
+		}
+		if att, ok := verify.ParseAttestation(v.Attestation); ok && att.Report.CoverageRecorded() {
+			doc.Attested = true
+			doc.CopiedUnchanged = len(att.Report.Unruled)
+			doc.UnreadColumns = len(att.Report.Unread)
+			doc.UnruledColumns = boundIdentifiers(att.Report.Unruled, maxUnclassifiedColumns)
 		}
 		if branchable == "" && isMine && v.Verified {
 			branchable = id
@@ -504,6 +522,12 @@ type goldenDoc struct {
 	// read is not a column that passed, and the engine's own Clean() counts
 	// it, so it is reported rather than folded into the finding count.
 	SkippedColumns int `json:"verification_columns_skipped"`
+	// UnreadColumns is what the scan could not read by type, and
+	// UnruledColumns is what masking copied unchanged with no rule. Both are
+	// what "verified" did not cover, and both travel in the attestation.
+	UnreadColumns  int      `json:"verification_columns_not_readable"`
+	UnruledColumns int      `json:"columns_copied_unchanged_with_no_rule"`
+	Unruled        []string `json:"unruled_columns,omitempty"`
 	// Findings are columns that still hold something that looks like real
 	// data. The value found is NEVER reproduced: it is by definition the
 	// production data this whole subsystem exists to keep out of a copy.
@@ -518,6 +542,19 @@ type goldenFindingDoc struct {
 	Rows     int64  `json:"rows"`
 }
 
+// boundIdentifiers passes at most limit names through safeIdentifier.
+func boundIdentifiers(names []string, limit int) []string {
+	out := make([]string, 0, len(names))
+	for i, name := range names {
+		if i >= limit {
+			break
+		}
+		safe, _ := safeIdentifier(name)
+		out = append(out, safe)
+	}
+	return out
+}
+
 func goldenBody(outcome goldenOutcome) *ResultBody {
 	doc := goldenDoc{
 		Action: outcome.Action, Verified: outcome.Verified, Branchable: outcome.Verified,
@@ -525,6 +562,9 @@ func goldenBody(outcome goldenOutcome) *ResultBody {
 		ScanTables: outcome.Report.Tables, ScanColumns: outcome.Report.Columns,
 		ScanRows: outcome.Report.RowsSampled, ScanSample: outcome.Report.SampleSize,
 		SkippedColumns: len(outcome.Report.Skipped),
+		UnreadColumns:  len(outcome.Report.Unread),
+		UnruledColumns: len(outcome.Report.Unruled),
+		Unruled:        boundIdentifiers(outcome.Report.Unruled, maxUnclassifiedColumns),
 		Findings:       []goldenFindingDoc{},
 		ValuesNote: "The values the detectors matched are not reproduced anywhere in this " +
 			"result. They are unmasked production data, which is the exact thing this " +
@@ -614,6 +654,10 @@ func goldenSummary(outcome goldenOutcome, doc goldenDoc) string {
 	case outcome.Verified:
 		fmt.Fprintf(&b, "Nothing that looks like real data survived, so %s is verified and "+
 			"this project can branch environments from it. ", orNotRecorded(doc.Version))
+		fmt.Fprintf(&b, "%d %s copied unchanged with no masking rule, and %d %s not "+
+			"readable by the scanner. ",
+			len(outcome.Report.Unruled), plural(len(outcome.Report.Unruled), "column was", "columns were"),
+			len(outcome.Report.Unread), plural(len(outcome.Report.Unread), "column was", "columns were"))
 	default:
 		b.WriteString("It did not pass, so this version is not published and cannot be " +
 			"branched. ")

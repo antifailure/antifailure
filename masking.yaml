@@ -257,13 +257,25 @@ rules:
     transform: preserve
     why: "names a golden, which is how a branch is traced back to what it came from"
 
+  # Was `preserve`, with a reason that was half right. The built-in rule for
+  # full_name would have made it a person's name, and that is wrong. What the
+  # reason did not say is that owner/repo as GitHub spells it is the customer's
+  # own organization and repository, which names them as surely as
+  # organizations.github_login does, and that column is masked two rules up.
+  # Preserving this one put the handle the other two rules removed back into
+  # a third table. `repository` masks each half the way `username` does, the
+  # owner under the customer link so it comes out as the same synthetic
+  # handle the organization's github_login gets, and the matrix stays a list
+  # of things that read as repositories.
   - table: repositories
     column: full_name
-    transform: preserve
+    transform: repository
+    link: customer
     why: >-
-      the repository this control plane is watching. The built-in rule for
-      full_name would make it a person's name, which is wrong twice: it is not
-      a person, and the matrix is unreadable without it
+      the customer's own GitHub organization and repository, which names them.
+      The owner half masks identically to organizations.github_login, so the
+      matrix still reads as one customer's repositories rather than a list of
+      hashes
   - table: repositories
     column: default_branch
     transform: preserve
@@ -381,6 +393,212 @@ rules:
     column: plan
     transform: preserve
     why: "free, team, or enterprise"
+
+  # ---------------------------------------------------------------------------
+  # Billing.
+  #
+  # None of these columns had a rule. Every one of them is NOT NULL text, so
+  # the fail-closed default could not empty them, and `af mask plan` listed all
+  # nine as COPIED UNCHANGED, at the bottom, after several hundred lines of
+  # assignments. `af mask verify` then said clean, because its detectors knew
+  # Stripe's secret key prefixes and not its object identifiers, and
+  # `af golden list` said verified.
+  #
+  # A Stripe customer id is a live pointer into a real Stripe account. Stripe
+  # issues it once and it never changes, so anybody who has seen it in an
+  # invoice email, a support ticket or the Stripe dashboard can say which real
+  # customer a masked row in a preview environment belongs to, and it works
+  # the same in every environment because the value is the same in every
+  # environment. That is exactly the correlation masking exists to remove.
+  #
+  # `prefixed_id` keeps the cus_ or sub_ or in_ and replaces the body with a
+  # keyed hash of the same length, so the billing code still recognises the
+  # kind of thing it is holding, the unique constraints hold, and the same
+  # customer maps to the same fake customer in all five tables because the
+  # rules share one link. The masked body is lowercase hex, which the
+  # verification scan's provider identifier detector does not report, so the
+  # scan can still catch a real one.
+  # ---------------------------------------------------------------------------
+
+  - table: billing_customers
+    column: stripe_customer_id
+    transform: prefixed_id
+    link: stripe
+    why: "a live pointer into a real Stripe account, unique, joined on from four other tables"
+  - table: billing_events
+    column: stripe_customer_id
+    transform: prefixed_id
+    link: stripe
+    why: "the same customer, on the event that named it"
+  - table: billing_events
+    column: stripe_event_id
+    transform: prefixed_id
+    link: stripe
+    why: "the primary key, and Stripe's own identifier for a delivery"
+  - table: invoices
+    column: stripe_customer_id
+    transform: prefixed_id
+    link: stripe
+    why: "the same customer, on the invoice"
+  - table: invoices
+    column: stripe_invoice_id
+    transform: prefixed_id
+    link: stripe
+    why: "Stripe's identifier for a real invoice, unique"
+  - table: invoices
+    column: stripe_subscription_id
+    transform: prefixed_id
+    link: stripe
+    why: >-
+      the subscription an invoice bills. Nullable, so the default would have
+      emptied it; masked with the same link as subscriptions.stripe_subscription_id
+      instead so the join between the two survives
+  - table: payment_methods
+    column: stripe_customer_id
+    transform: prefixed_id
+    link: stripe
+    why: "the same customer, on the card"
+  - table: payment_methods
+    column: stripe_payment_method_id
+    transform: prefixed_id
+    link: stripe
+    why: "Stripe's identifier for a real card on file, unique"
+  - table: subscriptions
+    column: stripe_customer_id
+    transform: prefixed_id
+    link: stripe
+    why: "the same customer, on the subscription"
+  - table: subscriptions
+    column: stripe_subscription_id
+    transform: prefixed_id
+    link: stripe
+    why: "Stripe's identifier for a real subscription, unique"
+
+  # The rest of the billing vocabulary. None of it names a customer; all of it
+  # is the same for every customer on the same plan, and the billing page is
+  # blank without it.
+  - table: subscriptions
+    column: plan
+    transform: preserve
+    why: "free, team, or enterprise, the same plan names organizations.plan holds"
+  - table: subscriptions
+    column: status
+    transform: preserve
+    why: "Stripe's own status vocabulary, active or past_due or canceled, which decides what a plan entitles"
+  - table: subscriptions
+    column: price_id
+    transform: preserve
+    why: >-
+      names a price in the product catalogue, one of a handful of values shared
+      by every customer on that plan. It identifies the plan, not the customer
+  - table: invoices
+    column: status
+    transform: preserve
+    why: "draft, open, paid, void, or uncollectible"
+  - table: invoices
+    column: currency
+    transform: preserve
+    why: "a currency code"
+  - table: billing_events
+    column: type
+    transform: preserve
+    why: "the event's name in Stripe's vocabulary, such as invoice.paid"
+  - table: payment_methods
+    column: kind
+    transform: preserve
+    why: "card, which is the only value"
+
+  # ---------------------------------------------------------------------------
+  # Columns the verification scan cannot read.
+  #
+  # bytea. The scan reads text, and a bytea column was not text, not skipped
+  # and not counted: it was invisible, and "clean" covered it. The scan now
+  # lists every such column as not readable, and refuses when one has no rule
+  # and a name that says what it holds. Every bytea below is named here so
+  # that none of them is that case.
+  #
+  # Each one is a hash or a sealed value, so what is being removed is the
+  # ability to correlate a copy against production and, for the two sealed
+  # ones, the customer's actual key blob, which the migration that created it
+  # says was designed to live in one datastore and not in a copy anybody can
+  # branch. `hash_hex` rather than `nullify` where the column is NOT NULL.
+  # ---------------------------------------------------------------------------
+
+  # A customer's sealed provider key, AES-256-GCM under a key Postgres never
+  # sees. The copy cannot open it, and does not need to: the api opens a row
+  # with `open()` in web/apps/api/src/providers/seal.ts, and a body the tag
+  # does not authenticate raises SealError, a typed refusal, rather than
+  # crashing. So a hashed ciphertext fails closed at the one place it is read,
+  # and the customer's real blob is not in the copy for anybody to carry off
+  # to somewhere the sealing key also leaked.
+  - table: provider_keys
+    column: ciphertext
+    transform: hash_hex
+    why: >-
+      the customer's sealed API key. Unreadable without the sealing key, and
+      still the customer's own blob; the api's open() refuses a body its tag
+      does not authenticate, so the copy fails closed rather than crashing
+  - table: provider_keys
+    column: nonce
+    transform: hash_hex
+    why: "the nonce the blob was sealed with. A real nonce beside a fake blob is a fact about the real one"
+
+  # The SAML signing key, sealed the same way. Nullable, and optional by
+  # design: "a provider that requires neither does not need one", says the
+  # migration. So null is the shape of a connection that never had one, which
+  # the application already handles, and it is the honest answer for a copy.
+  - table: sso_connection_secrets
+    column: sp_private_key
+    transform: nullify
+    why: >-
+      the sealed SAML signing key. Optional in the schema, so a connection
+      without one is a state the application already handles, and a copy
+      needs the key for nothing
+  - table: sso_connection_secrets
+    column: oidc_client_secret
+    transform: nullify
+    why: >-
+      the sealed OIDC client secret. The built-in *_secret rule would hash it;
+      null is the same refusal at the point of use and holds nothing at all
+
+  # Token hashes. Not the bearer tokens, and still the values that let a copy
+  # be lined up against production row by row.
+  - table: admin_sessions
+    column: token_hash
+    transform: hash_hex
+    why: "a live admin session must not survive into a copy, and the column cannot hold null"
+  - table: admin_users
+    column: password_hash
+    transform: hash_hex
+    why: "an operator's password hash. Rewritten so no real password verifies against the copy"
+  - table: admin_users
+    column: password_salt
+    transform: hash_hex
+    why: "the salt beside it, rewritten for the same reason"
+  - table: invitations
+    column: token_hash
+    transform: hash_hex
+    why: "an unredeemed invitation must not survive into a copy"
+  - table: organization_deletion_exports
+    column: token_hash
+    transform: hash_hex
+    why: "the token that downloads an export, hashed; a copy must not honour it"
+  - table: scim_tokens
+    column: token_hash
+    transform: hash_hex
+    why: "the same, for a token a directory holds"
+  - table: device_authorizations
+    column: device_code_hash
+    transform: hash_hex
+    why: "a device code in flight, hashed and unique, which a copy must not redeem"
+  - table: sso_break_glass_codes
+    column: code_hash
+    transform: hash_hex
+    why: "a recovery code, hashed. The one credential that works when SSO does not"
+  - table: pr_generations
+    column: callback_hash
+    transform: nullify
+    why: "the hash of a callback token in flight, nullable, and useless to a copy"
   - table: organizations
     column: suspended_reason
     transform: free_text
@@ -550,10 +768,16 @@ rules:
   #   device_authorizations.*      a code in flight and the label beside it
   #   sso_login_states.*           a handshake in flight, every column of it
   #   sso_assertions_seen.*        replay protection for assertions now gone
-  #   sso_connection_secrets.*     a certificate, which must not be copied
+  #   sso_connection_secrets.sp_certificate  the public half, emptied
   #   sso_connections.oidc_*       endpoint addresses and a client id
   #   scim_tokens.prefix           the visible half of a token
-  #   provider_keys.*              fingerprint, last4 and version of a key
+  #   provider_keys.fingerprint    fingerprint, last4 and version of a key,
+  #     last4, key_version         copied unchanged: all three are NOT NULL
+  #                                and none of them opens anything
   #
   # `af mask plan` lists every one of them with the reason, which is the
-  # check that this comment is still true.
+  # check that this comment is still true. Its first line says how many
+  # columns have no rule and how many of those are copied unchanged, and the
+  # same two numbers travel into `af mask verify`, the golden's attestation,
+  # `af golden list` and inspect_goldens, so the list at the bottom of the
+  # plan is no longer the only place they are written.

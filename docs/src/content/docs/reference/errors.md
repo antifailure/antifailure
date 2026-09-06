@@ -1076,6 +1076,18 @@ There is already a masking file at {path}, and 'af mask init' would overwrite th
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/masking](/docs/concepts/masking) |
 
+### AF-MSK-013
+
+Verification could not read {table}.{column} ({type}), no masking rule covers it, and its name says it holds a secret.
+
+**What to do.** Give {table}.{column} a rule in masking.yaml, nullify or hash_hex, and refresh the golden. A column the scan cannot read is masked by the rules or by nothing.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/verification](/docs/concepts/verification) |
+
 ## Egress
 
 ### AF-NET-001

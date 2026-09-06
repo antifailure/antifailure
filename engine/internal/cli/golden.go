@@ -10,6 +10,7 @@ import (
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/golden"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 )
 
 // A golden is a masked, verified copy of production that branches are made
@@ -33,6 +34,18 @@ type GoldenJSON struct {
 	// an operator reading it wants to see that two rows differ.
 	Provenance string `json:"provenance,omitempty"`
 	Mine       bool   `json:"mine"`
+	// CopiedUnchanged is how many columns masking left exactly as production
+	// had them because no rule covered them, read from the attestation, and
+	// Unruled names them. Absent when the attestation predates the count,
+	// which CoverageRecorded says.
+	CopiedUnchanged int      `json:"copied_unchanged"`
+	Unruled         []string `json:"unruled,omitempty"`
+	// Unread is how many columns the scan could not read, from the same
+	// attestation. CoverageRecorded says whether the attestation carries
+	// either count at all; a golden verified by the first scanner has
+	// neither, and zero would be the wrong word for that.
+	Unread           int  `json:"unread"`
+	CoverageRecorded bool `json:"coverage_recorded"`
 }
 
 // RefreshJSON is the result of a refresh.
@@ -85,17 +98,7 @@ func newGoldenRefreshCommand(env *Env) *cobra.Command {
 					Version: res.Version, Verified: res.Verified,
 					Tables: res.Tables, Rows: res.Rows,
 					Duration: res.Duration.Round(time.Second).String(),
-					Verify: VerifyJSON{
-						Clean: res.Report.Clean(), Tables: res.Report.Tables,
-						Columns: res.Report.Columns, RowsSampled: res.Report.RowsSampled,
-						SampleSize: res.Report.SampleSize, Skipped: res.Report.Skipped,
-					},
-				}
-				for _, f := range res.Report.Findings {
-					doc.Verify.Findings = append(doc.Verify.Findings, FindingJSON{
-						Table: f.Schema + "." + f.Table, Column: f.Column,
-						Detector: f.Detector, Example: f.Example, Rows: f.Rows,
-					})
+					Verify:   verifyJSON(res.Report),
 				}
 				if err := env.Out.JSON(doc); err != nil {
 					return err
@@ -127,6 +130,7 @@ func newGoldenRefreshCommand(env *Env) *cobra.Command {
 					res.Rows, res.Tables, res.Duration.Round(time.Second)))
 			env.Out.Printf("  Verified %d columns across %d tables, %d rows sampled.\n",
 				res.Report.Columns, res.Report.Tables, res.Report.RowsSampled)
+			printVerifyCoverage(env, res.Report)
 			env.Out.Hint("Bring an environment up from it with", "af up")
 			return nil
 		},
@@ -162,12 +166,18 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 			if env.Out.Format == FormatJSON {
 				docs := make([]GoldenJSON, 0, len(goldens))
 				for _, g := range goldens {
-					docs = append(docs, GoldenJSON{
+					doc := GoldenJSON{
 						Version: g.ID, Verified: g.Verified,
 						CreatedAt: g.CreatedAt.UTC().Format(time.RFC3339),
 						SizeBytes: g.SizeBytes, RulesHash: g.RulesHash,
 						Provenance: g.Provenance, Mine: g.Provenance == mine,
-					})
+					}
+					if att, ok := verify.ParseAttestation(g.Attestation); ok && att.Report.CoverageRecorded() {
+						doc.CoverageRecorded = true
+						doc.CopiedUnchanged, doc.Unruled = len(att.Report.Unruled), att.Report.Unruled
+						doc.Unread = len(att.Report.Unread)
+					}
+					docs = append(docs, doc)
 				}
 				return env.Out.JSON(docs)
 			}
@@ -210,15 +220,25 @@ func newGoldenListCommand(env *Env) *cobra.Command {
 				case "":
 					owner = env.Out.S(StyleWarn, "not recorded")
 				}
+				// How many columns hold exactly what production held, beside
+				// the word verified. A verified golden with 145 of them is a
+				// different thing from one with none, and the listing said
+				// verified about both.
+				unruled := "not recorded"
+				if att, ok := verify.ParseAttestation(g.Attestation); ok && att.Report.CoverageRecorded() {
+					unruled = fmt.Sprintf("%d", len(att.Report.Unruled))
+				}
 				rows = append(rows, []string{
-					g.ID, state, g.CreatedAt.Local().Format("2006-01-02 15:04"),
+					g.ID, state, unruled, g.CreatedAt.Local().Format("2006-01-02 15:04"),
 					humanBytes(uint64(g.SizeBytes)), rules, owner,
 				})
 			}
 			env.Out.Table([]Column{
-				Col("VERSION"), Col("STATE"), Col("CREATED"), Num("SIZE"),
+				Col("VERSION"), Col("STATE"), Num("NO RULE"), Col("CREATED"), Num("SIZE"),
 				Flex("RULES"), Flex("FOR"),
 			}, rows)
+			env.Out.Note(StyleDim, "NO RULE is the number of columns copied unchanged with no "+
+				"masking rule, from the golden's own attestation.")
 
 			// What this project publishes, and when it refreshes next. Both
 			// are configuration that used to be invisible: a store nobody can
@@ -495,6 +515,7 @@ skipped it would make the store a way to get an unverified database branched.`),
 				fmt.Sprintf("restored %s from the store and verified it here", res.From))
 			env.Out.Printf("  Verified %d columns across %d tables, %d rows sampled.\n",
 				res.Report.Columns, res.Report.Tables, res.Report.RowsSampled)
+			printVerifyCoverage(env, res.Report)
 			env.Out.Println("  Bring an environment up from it with: af up")
 			return nil
 		},
@@ -527,25 +548,11 @@ here at all.`),
 				return err
 			}
 			if env.Out.Format == FormatJSON {
-				doc := VerifyJSON{
-					Clean: report.Clean(), Tables: report.Tables, Columns: report.Columns,
-					RowsSampled: report.RowsSampled, SampleSize: report.SampleSize,
-					Skipped: report.Skipped,
-				}
-				for _, f := range report.Findings {
-					doc.Findings = append(doc.Findings, FindingJSON{
-						Table: f.Schema + "." + f.Table, Column: f.Column,
-						Detector: f.Detector, Example: f.Example, Rows: f.Rows,
-					})
-				}
-				if err := env.Out.JSON(doc); err != nil {
+				if err := env.Out.JSON(verifyJSON(report)); err != nil {
 					return err
 				}
 				if !report.Clean() {
-					return silent(aferrors.Coded(aferrors.AFMSK002,
-						"detector", report.Findings[0].Detector,
-						"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
-						"column", report.Findings[0].Column))
+					return silent(verifyFailure(report))
 				}
 				return nil
 			}
@@ -553,15 +560,14 @@ here at all.`),
 				env.Out.Status(env.Out.S(StyleGood, SymbolOK), "clean",
 					fmt.Sprintf("%d columns across %d tables, %d rows sampled",
 						report.Columns, report.Tables, report.RowsSampled))
+				printVerifyCoverage(env, report)
 				return nil
 			}
 			for _, f := range report.Findings {
 				env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
 			}
-			return aferrors.Coded(aferrors.AFMSK002,
-				"detector", report.Findings[0].Detector,
-				"table", report.Findings[0].Schema+"."+report.Findings[0].Table,
-				"column", report.Findings[0].Column)
+			printVerifyCoverage(env, report)
+			return verifyFailure(report)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch context to use, defaulting to the checked out one")

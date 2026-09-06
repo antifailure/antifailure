@@ -938,6 +938,17 @@
       "planned": false
     },
     {
+      "code": "AF-MSK-013",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "Verification could not read {table}.{column} ({type}), no masking rule covers it, and its name says it holds a secret.",
+      "resolution": "Give {table}.{column} a rule in masking.yaml, nullify or hash_hex, and refresh the golden. A column the scan cannot read is masked by the rules or by nothing.",
+      "docs": "https://antifailure.dev/docs/concepts/verification",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
       "code": "AF-NET-001",
       "area": "NET",
       "areaName": "Egress",
