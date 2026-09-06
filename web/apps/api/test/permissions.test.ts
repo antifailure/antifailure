@@ -41,6 +41,7 @@ function inputsFor(org: Org): Record<string, unknown> {
     'health': {},
     'permissions': {},
     'repositories.list': { includeArchived: false },
+    'repositories.setup': {},
     'environments.list': { limit: 10 },
     'environments.get': { envId: org.envId },
     'environments.teardown': { envId: org.envId },

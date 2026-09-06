@@ -160,6 +160,11 @@ func (p provenance) describe() string {
 	return strings.Join(parts, ", ")
 }
 
+// empty reports that a golden with this provenance holds no production
+// data: nothing named a source and nothing seeded it, so it is the schema the
+// migrations built and no rows.
+func (p provenance) empty() bool { return p.Source == "" && p.Seed == "" }
+
 // provenanceOf is the identity of the golden this project may branch.
 func (o *Orchestrator) provenanceOf() (provenance, error) {
 	_, rules, err := o.rules()

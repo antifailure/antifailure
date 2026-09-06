@@ -228,7 +228,7 @@ func TestTheRungsBelowTheManifestWaitOnItRatherThanGuessing(t *testing.T) {
 	e, _ := startEnv(t, dir)
 	stages := firstRun(t.Context(), e, startProbeFor(t, t.TempDir()))
 
-	for _, name := range []string{"the database source", "a golden", "an environment",
+	for _, name := range []string{"the database source", "masking rules", "a golden", "an environment",
 		"workflows to run", "evidence on disk"} {
 		s := stageNamed(t, stages, name)
 		if s.state != StageUnchecked {
@@ -616,4 +616,68 @@ func TestAConfiguredKeyIsReportedWithoutTheKey(t *testing.T) {
 	if !strings.Contains(k.detail, "anthropic") {
 		t.Errorf("the detail %q does not say which provider is configured", k.detail)
 	}
+}
+
+// The masking rules rung, in each of its states. Done when the file the
+// manifest names exists; pending with the command that writes it when a
+// source is named and the file is not there; waiting on the source otherwise,
+// because with no source there is no schema to write rules from.
+func TestTheMaskingRulesRungFollowsTheSourceAndTheFile(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, startManifest+`
+database:
+  provider: docker
+  version: 17
+`)
+	e, _ := startEnv(t, dir)
+	probe := startProbeFor(t, t.TempDir())
+
+	s := stageNamed(t, firstRun(t.Context(), e, probe), "masking rules")
+	if s.state != StageUnchecked || !s.downstream {
+		t.Fatalf("with no source the rung is %q (downstream %v), want unchecked and waiting: %s",
+			s.state, s.downstream, s.detail)
+	}
+	if !strings.Contains(s.why, "source_url_env") {
+		t.Errorf("the reason %q does not name the setting that would change it", s.why)
+	}
+
+	writeManifest(t, dir, startManifest+`
+database:
+  provider: docker
+  version: 17
+  source_url_env: PRODUCTION_DATABASE_URL
+`)
+	s = stageNamed(t, firstRun(t.Context(), e, probe), "masking rules")
+	if s.state != StagePending {
+		t.Fatalf("with a source and no file the rung is %q, want pending: %s", s.state, s.detail)
+	}
+	if s.command != "af mask init" {
+		t.Errorf("the rung offers %q, want af mask init", s.command)
+	}
+
+	write(t, dir, "masking.yaml", "rules: []\n")
+	s = stageNamed(t, firstRun(t.Context(), e, probe), "masking rules")
+	if s.state != StageDone {
+		t.Fatalf("with the file there the rung is %q, want done: %s", s.state, s.detail)
+	}
+	if !strings.Contains(s.detail, "masking.yaml") {
+		t.Errorf("the detail %q does not name the file", s.detail)
+	}
+}
+
+// The rung sits directly after the source it depends on, so the list reads in
+// the order the reader will do things.
+func TestTheMaskingRulesRungComesRightAfterTheSource(t *testing.T) {
+	dir := t.TempDir()
+	e, _ := startEnv(t, dir)
+	stages := firstRun(t.Context(), e, startProbeFor(t, t.TempDir()))
+	for i, s := range stages {
+		if s.name == "the database source" {
+			if i+1 >= len(stages) || stages[i+1].name != "masking rules" {
+				t.Fatalf("the rung after the source is %q, want masking rules", stages[i+1].name)
+			}
+			return
+		}
+	}
+	t.Fatal("no source rung")
 }

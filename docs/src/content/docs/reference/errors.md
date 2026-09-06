@@ -792,6 +792,18 @@ Nothing ran, because of the fork policy on the base branch. {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [getting-started/pull-requests](/docs/getting-started/pull-requests) |
 
+### AF-GH-004
+
+The github block could not be added to {path}, so the manifest was left as it was: {detail}
+
+**What to do.** Add 'github: {mode: actions, comment: true, fork_policy: label}' to the manifest by hand, then run 'af explain' to check it.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [getting-started/pull-requests](/docs/getting-started/pull-requests) |
+
 ## Infrastructure
 
 ### AF-INF-002
@@ -930,18 +942,6 @@ The manifest at {path} declares schema version {found}, which this build does no
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [reference/manifest](/docs/reference/manifest) |
 
-### AF-MAN-004
-
-'af init' has questions to ask and this session has no terminal to ask them on.
-
-**What to do.** Pass --non-interactive to accept every default, and --answer id=value for anything that has no default.
-
-| | |
-| --- | --- |
-| Exit code | `2` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [reference/cli#af-init](/docs/reference/cli#af-init) |
-
 ### AF-MAN-005
 
 The manifest at {path} is larger than the {limit} limit.
@@ -1003,6 +1003,18 @@ Verification could not read {table}.{column}, so the golden was not verified: {d
 | Exit code | `7` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification) |
+
+### AF-MSK-012
+
+There is already a masking file at {path}, and 'af mask init' would overwrite the rules in it.
+
+**What to do.** Edit the file, or pass --force to replace it with rules written from the schema.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
 
 ## Egress
 

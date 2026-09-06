@@ -443,6 +443,63 @@ af fidelity -o json
 | --- | --- | --- |
 | `--branch` | - | Branch to inventory, defaulting to the checked out one. |
 
+### `af github`
+
+Connect this repository's pull requests to Antifailure.
+
+The pull request integration runs in the repository's own GitHub Actions,
+because an environment needs Docker, Postgres and a browser beside the code
+under test, and the masked data stays inside the customer's own runner.
+
+One workflow file makes that happen, and these commands write it.
+
+```
+af github
+```
+
+```
+af github init
+```
+
+Subcommands:
+
+- [`af github init`](#af-github-init) Write the workflow that checks every pull request.
+
+### `af github init`
+
+Write the workflow that checks every pull request.
+
+Writes .github/workflows/antifailure.yml, the same file af init writes when
+the checkout has a github.com remote, into a repository that already has a
+manifest. The file calls a reusable workflow in the antifailure repository, so
+it is short and rarely needs to change.
+
+It is safe to run twice. A file identical to the template is left as it is and
+said to be. A file that differs is left alone unless --force replaces it,
+because a workflow somebody edited is theirs.
+
+The manifest gains a github block when it has none, naming the three settings
+the file depends on: the mode, whether a comment is left, and the fork policy.
+
+Every secret the check can use is optional and is printed here by name, never
+by value. The one repository variable a hosted control plane needs is printed
+the same way.
+
+```
+af github init [flags]
+```
+
+```
+# Writes .github/workflows/antifailure.yml and names the optional secrets.
+af github init
+# Replace a workflow file somebody edited with the template.
+af github init --force
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--force` | `false` | Replace a workflow file that differs from the template. |
+
 ### `af golden`
 
 Manage the masked copies branches are made from.
@@ -1076,6 +1133,7 @@ af mask plan
 Subcommands:
 
 - [`af mask apply`](#af-mask-apply) Rewrite this environment's data according to the plan.
+- [`af mask init`](#af-mask-init) Read the schema and write masking.yaml with a rule for every column.
 - [`af mask plan`](#af-mask-plan) Show what masking would do, column by column.
 - [`af mask preview`](#af-mask-preview) Show what a few rows would look like after masking.
 - [`af mask verify`](#af-mask-verify) Read the data back and report anything that still looks real.
@@ -1102,6 +1160,39 @@ af mask apply
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to mask, defaulting to the checked out one. |
+
+### `af mask init`
+
+Read the schema and write masking.yaml with a rule for every column.
+
+Reads the schema of the database source, or of this environment's branch when
+one is up, decides every column the way the built in rules would, and writes
+the result to masking.yaml as one explicit rule per column.
+
+The file it writes leaves the plan with nothing to ask. A column a built in
+rule recognises gets that rule restated with its reason. A column nothing
+recognises gets a rule that empties it, with a reason saying it was
+unrecognised and is emptied until somebody says otherwise. Numbers, times and
+identifiers get no rule, because nothing is done to them.
+
+It refuses to replace a file that is already there unless --force is passed,
+because the rules somebody edited are the most valuable thing in it.
+
+```
+af mask init [flags]
+```
+
+```
+# Reads the schema and writes masking.yaml with a rule for every column
+# that needs one, so af mask plan has nothing left to ask.
+af mask init
+af mask init --force
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch whose environment to read, defaulting to the checked out one. |
+| `--force` | `false` | Replace a masking file that is already there. |
 
 ### `af mask plan`
 

@@ -63,6 +63,58 @@ If you set `AF_CONTROL_PLANE_TOKEN` anyway, the engine uses it and does not ask
 for an identity. That is the path for a self-hosted engine that is not running
 in GitHub Actions, and it stays supported.
 
+## The reusable workflow and the action
+
+The file in a customer's repository is about thirty lines, and the reason is
+that it does almost nothing itself. Its one job calls a reusable workflow in
+this repository, and that workflow calls the action:
+
+```yaml
+jobs:
+  check:
+    uses: antifailure/antifailure/.github/workflows/check.yml@v1
+    secrets: inherit
+    with:
+      dispatch: ${{ toJSON(inputs) }}
+      control-plane: ${{ vars.AF_CONTROL_PLANE }}
+```
+
+**`.github/workflows/check.yml`** is the reusable workflow. It runs on the
+caller's event with the caller's `github` context, so the fork label gate and
+the concurrency group read the caller's pull request, which is where they
+belong. It checks out with `fetch-depth: 0`, because `af change` diffs against
+the merge base, runs `af change` once to learn which variables the manifest
+reads, and then calls the action with exactly those secrets, each looked up by
+name. It exists as a workflow rather than only as an action because of that
+last part: a composite action cannot read a caller's secrets, and
+`secrets: inherit` is only available to a reusable workflow.
+
+**`action.yml`** is the action, `antifailure/antifailure@v1`. It installs `af`,
+installs the agent runner when the command needs a browser, works out what the
+change touches, runs the command, tells a control plane what happened when
+there is one, and leaves the comment otherwise. Every input reaches a script
+through `env:` rather than through an expression inside a `run:` block, so an
+input carrying a quote cannot become a command.
+
+The secret selection is the part worth understanding. `af change` writes the
+variables the manifest names, `database.source_url_env` among them, to its step
+outputs as `secrets`. The reusable workflow looks each one up in the caller's
+secrets by that name, twelve slots at most, and hands the action name and value
+pairs under `env:`. The action exports each pair under its name. Nothing else
+in the caller's secret store is read, which is what code scanning requires and
+what a first version of the workflow got wrong by passing `toJSON(secrets)`.
+Anything the caller already set through `env:` is left alone. A repository
+whose manifest names `PRODUCTION_DATABASE_URL` therefore needs a secret of that
+name and nothing in its workflow file mentions it.
+
+**`v1`** is a moving tag. The release workflow moves it to every final release
+`v1.x.y` after the release is published, and never to a prerelease, so a
+customer's file names the major version once and follows the releases without
+a line to change. The `version` input pins the `af` binary the action installs,
+and is separate from the tag: the tag chooses the workflow and the action, the
+input chooses the engine. Both inputs, every output, and the case for calling
+the action directly are on [the action reference](/docs/reference/action).
+
 ## The check
 
 One check run per commit, named **Antifailure**, so a branch protection rule can
@@ -398,6 +450,39 @@ A missing permission is checked before the workflow file is looked for, so a
 403 hides whether the file is even there: granting the permission can reveal a
 second thing to fix.
 
+## The pull request the App opens
+
+Installing the App on a repository that has no workflow file is enough to get
+one. The control plane records a setup row for each repository an installation
+covers, and a sweeper works through them: it looks for
+`.github/workflows/antifailure.yml` on the default branch, and when the file is
+there the row is marked present and nothing else happens. When it is not, the
+sweeper creates a branch called `antifailure/setup` from the default branch,
+writes the file there, and opens a pull request titled **Check every pull
+request with Antifailure**. An existing branch of that name is reused rather
+than refused.
+
+The pull request's body says what will happen once it is merged, that nothing
+runs until then, what the fork policy does, the optional secrets by name, and
+the one repository variable the hosted control plane needs. The webhook that
+records the installation makes no GitHub call itself; the sweeper does the
+work, so a burst of installations cannot time out a webhook delivery.
+
+Writing a file needs **Contents: Read and write** on the App. An installation
+that granted only read cannot have a branch created for it, and the row is
+marked as needing permission with the remedy in one sentence, rather than
+retried until it fails. Widening an existing App's permission asks every
+installation to accept the new grant, which
+[Standing up production](/docs/self-hosting/production#9-create-the-production-github-app)
+walks through. Five failed attempts of any other kind mark the row failed with
+the last error kept.
+
+The console shows every state. The environments page and the empty
+organization shell carry a "Getting connected" list with one line per
+repository, its state, and a link to the pull request when there is one, so an
+installation that is waiting on a merge or a permission is visible rather than
+silently absent.
+
 ## Starting a run from the console
 
 The console's **Create environment**, **Run agents**, **Run load**, **Run
@@ -412,125 +497,16 @@ accepts a dispatch:
 ```yaml
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   workflow_dispatch:
     inputs:
-      command:     { type: choice, options: [up, down, agents, load, scenario, explore], default: up }
-      workflows:   { required: false, default: '' }
-      duration:    { required: false, default: '' }
-      scale:       { required: false, default: '' }
-      seed:        { required: false, default: '' }
-      concurrency: { required: false, default: '' }
-      run_id:      { required: false, default: '' }
-```
-
-`up` and `down` bring the environment up and take it away. The four other
-values run a [workload](/docs/concepts/workloads), and the step that handles
-them is one `af workload run` invocation rather than a case arm per verb. That
-command refuses an input the verb's own command has no flag for, rather than
-dropping it, and writes a result document carrying what was measured and the
-plain `af` command that reproduces it.
-
-The values are verbs rather than the kind names the control plane stores, and
-that is deliberate. GitHub reads this trigger list from your **default
-branch** and answers a dispatch carrying an undeclared value with a 422, which
-looks exactly like the file being missing. Renaming them would make every copy
-of this file already in the wild start failing on the values that work today.
-`scenario` and `explore` need this newer file; the rest work on the older one.
-
-`examples/github-workflow.yml` carries the whole file. Two things about this
-cost an afternoon if you meet them the hard way: GitHub reads the trigger list
-from the **default branch**, so adding `workflow_dispatch` on a feature branch
-alone changes nothing, and a dispatch to a workflow without it answers 404
-rather than saying what is wrong.
-
-The console checks all of that when you choose a repository, not when you press
-the button, and says what is missing in the form. It does not disable the
-button: the check can be a few seconds out of date by the width of whatever you
-just did on GitHub, and a form that refuses to submit because of a stale read
-is worse than one that tries and tells you.
-
-`agents` resolves to a browser workflow and `load` to an observed load mix. The
-result says which kind a verb resolved to, so nobody has to infer it.
-
-GitHub refuses a dispatch that carries an input the workflow does not declare,
-so a workflow still carrying the older four-input block runs `up`, `agents` and
-`load` and refuses `scenario` and `explore`. Copy the current example over
-your file on the default branch to get the rest. Nothing is lost while you
-have not: the workload run is recorded either way, and an engine can claim it.
-
-The control plane records nothing about the environment when it dispatches.
-The run appears in your Actions tab, and the environment appears in the console
-when the engine reports it, the same way it does for a run you started
-yourself. A workload run is the one thing it does record before dispatching,
-because the run names a definition that lives only in the control plane, and
-"asked for and never picked up" is a state you need to be able to see.
-
-## The one secret without which nothing appears in the console
-
-The workflow needs `AF_CONTROL_PLANE_TOKEN` in its environment. Create one with
-`af token create ci` and put it in the repository's secrets:
-
-```yaml
-env:
-  AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
-```
-
-Nothing about the work needs it. The environment comes up, the agents run, the
-report lands on the pull request, and the job exits with the right code, all
-with no token at all. What it decides is whether any of that is **reported**.
-
-Without it the engine sends no events and claims no hosted run. The console's
-environment list stays empty, and a workload somebody started from the console
-is dispatched, runs to completion, and is recorded as *abandoned* at its
-deadline, because the control plane never heard from it. That reads as a
-plumbing fault in the product and it is a missing repository secret.
-
-If a run is stuck in the console saying nobody reported on it, and the Actions
-tab shows it finishing perfectly well, this is why.
-
-Leave it out if you do not use the hosted control plane. `af ci` on a pull
-request needs none of it.
-
-## What the comment carries
-
-One comment per pull request, edited in place rather than added to. A bot that
-adds a comment on every push is a bot people mute, and a muted bot reports
-nothing.
-
-The comment carries a headline saying what the run amounted to, a link to the
-environment in the console, a row per workflow with its verdict and the detail
-behind it, steps for reproducing anything that did not pass, and a footer naming
-the branch, the commit, the duration and the golden it branched from.
-
-It also carries what the data said. Every invariant the manifest declares is
-asked after the workflows, and a violated one puts the violating rows in the
-comment and the failure in the headline, so a run where every workflow passed
-and the data is broken does not read as a pass.
-
-And it carries what this change does to the database and the network: the
-migrations rehearsed against a branch of the golden, the locks they held, what
-Postgres rewrote, the lint findings, the plans that changed, the hosts the
-environment reached for, whether the branch read back masked, and what teardown
-removed. Each of those is ranked by the manifest's
-[policy block](/docs/concepts/verdicts), worst first, and the ones set to
-`fail` are what stop the merge.
-
-## Signature verification
-
-```
-AF-GH-001 The webhook signature did not verify.
-```
-
-Every delivery is verified against the App's secret before anything is read. An
-unverified webhook is an unauthenticated request asking for an environment to be
-created, so this fails closed and says nothing more: telling a caller why their
-forgery failed helps them forge better.
-
-## API failures
-
-```
-AF-GH-002 The GitHub API rejected the request: 403 Resource not accessible by
-integration.
+      command: { type: choice, default: up, options: [up, down, agents, load, scenario, explore], description: "Which part to run" }
+      workflows: { description: "Comma separated names out of the manifest. Empty means all of them." }
+      duration: { description: "How long to send load for, as a Go duration such as 60s" }
+      scale: { description: "Multiplier on production's rate" }
+      seed: { description: "Makes two runs do the same thing" }
+      concurrency: { description: "Ceiling on requests in flight" }
+      run_id: { description: "Leave it empty. The engine asks." }
 ```
 
 Almost always a permission the App was not granted, or a token from a workflow

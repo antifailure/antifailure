@@ -82,6 +82,12 @@ var commandExamples = map[string]string{
 		"# An inventory of the copy against the thing it is a copy of.\n" +
 		"af fidelity\n" +
 		"af fidelity -o json",
+	"af github": "af github init",
+	"af github init": "" +
+		"# Writes .github/workflows/antifailure.yml and names the optional secrets.\n" +
+		"af github init\n" +
+		"# Replace a workflow file somebody edited with the template.\n" +
+		"af github init --force",
 	"af golden": "af golden list",
 	"af golden gc": "" +
 		"af golden gc\n" +
@@ -132,6 +138,11 @@ var commandExamples = map[string]string{
 		"af logs\n" +
 		"af logs web --tail 100",
 	"af mask": "af mask plan",
+	"af mask init": "" +
+		"# Reads the schema and writes masking.yaml with a rule for every column\n" +
+		"# that needs one, so af mask plan has nothing left to ask.\n" +
+		"af mask init\n" +
+		"af mask init --force",
 	"af mask apply": "" +
 		"# Rewrites this environment's data in place.\n" +
 		"af mask apply",

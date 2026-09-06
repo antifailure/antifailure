@@ -232,6 +232,7 @@ export default defineConfig({
               items: ["reference/schemas/manifest-v1", "reference/schemas/events-v1"],
             },
             "reference/stability",
+            "reference/action",
           ],
         },
         { label: "Security", items: [{ autogenerate: { directory: "security" } }] },

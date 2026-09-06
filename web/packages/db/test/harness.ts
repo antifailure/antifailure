@@ -153,6 +153,10 @@ export async function seedTenant(admin: postgres.Sql, label: string): Promise<Fi
     INSERT INTO repositories (org_id, full_name) VALUES (${orgId}, ${`${slug}/app`}) RETURNING id`
   const repoId = repo!.id
 
+  await admin`
+    INSERT INTO repository_setups (org_id, repository_id, state, pull_request_number, pull_request_url)
+    VALUES (${orgId}, ${repoId}, 'opened', 1, ${`https://github.com/${slug}/app/pull/1`})`
+
   const [env] = await admin<{ id: string }[]>`
     INSERT INTO environments (org_id, repository_id, env_id, branch, state)
     VALUES (${orgId}, ${repoId}, ${`env-${slug}`}, 'main', 'running') RETURNING id`

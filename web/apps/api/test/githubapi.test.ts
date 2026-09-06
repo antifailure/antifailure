@@ -243,6 +243,145 @@ describe('the GitHub repository client', () => {
     answer('GET /repos/acme/app/actions/runs/10', 404, { message: 'Not Found' })
     assert.equal(await client().workflowRun(7, 'acme/app', 10), null)
   })
+
+  // The setup pull request. Five calls that between them are the first thing
+  // this control plane writes into a customer's repository, so the wire shape
+  // of each is asserted rather than trusted to a fake.
+
+  it('reads a missing workflow file as absent, and a refusal as the read permission', async () => {
+    answers.clear()
+    seen.length = 0
+    answer('GET /repos/acme/app/contents/.github/workflows/antifailure.yml?ref=main', 404, {
+      message: 'Not Found',
+    })
+    assert.equal(
+      await client().fileExists(7, 'acme/app', '.github/workflows/antifailure.yml', 'main'),
+      false,
+    )
+    answer('GET /repos/acme/app/contents/.github/workflows/antifailure.yml?ref=main', 200, {
+      sha: 'blob',
+    })
+    assert.equal(
+      await client().fileExists(7, 'acme/app', '.github/workflows/antifailure.yml', 'main'),
+      true,
+    )
+    answer('GET /repos/acme/app/contents/.github/workflows/antifailure.yml?ref=main', 403, {
+      message: 'Resource not accessible by integration',
+    })
+    await assert.rejects(
+      () => client().fileExists(7, 'acme/app', '.github/workflows/antifailure.yml', 'main'),
+      (err: unknown) => err instanceof GitHubPermissionError && err.permission === 'contents: read',
+    )
+  })
+
+  it('reads a branch head from the ref object, and refuses one that names no commit', async () => {
+    answers.clear()
+    answer('GET /repos/acme/app/git/ref/heads/main', 200, { object: { sha: 'c'.repeat(40) } })
+    assert.equal(await client().branchHead(7, 'acme/app', 'main'), 'c'.repeat(40))
+    answer('GET /repos/acme/app/git/ref/heads/main', 200, { object: {} })
+    await assert.rejects(
+      () => client().branchHead(7, 'acme/app', 'main'),
+      (err: unknown) => err instanceof GitHubApiError && /named no commit/.test(err.message),
+    )
+  })
+
+  it('creates a branch as a fully qualified ref, and reuses one that already exists', async () => {
+    answers.clear()
+    seen.length = 0
+    answer('POST /repos/acme/app/git/refs', 201, { ref: 'refs/heads/antifailure/setup' })
+    await client().createBranch(7, 'acme/app', 'antifailure/setup', 'c'.repeat(40))
+    const sent = JSON.parse(seen.at(-1)!.body) as Record<string, unknown>
+    assert.equal(sent.ref, 'refs/heads/antifailure/setup')
+    assert.equal(sent.sha, 'c'.repeat(40))
+
+    // 422 with this body is a dead sweeper's branch, and it is the branch that
+    // was asked for. Any other 422 is a refusal.
+    answer('POST /repos/acme/app/git/refs', 422, { message: 'Reference already exists' })
+    await client().createBranch(7, 'acme/app', 'antifailure/setup', 'c'.repeat(40))
+    answer('POST /repos/acme/app/git/refs', 422, { message: 'Object does not exist' })
+    await assert.rejects(
+      () => client().createBranch(7, 'acme/app', 'antifailure/setup', 'c'.repeat(40)),
+      (err: unknown) => err instanceof GitHubApiError && err.status === 422,
+    )
+    // And a missing write permission is named as such.
+    answer('POST /repos/acme/app/git/refs', 403, { message: 'Resource not accessible by integration' })
+    await assert.rejects(
+      () => client().createBranch(7, 'acme/app', 'antifailure/setup', 'c'.repeat(40)),
+      (err: unknown) => err instanceof GitHubPermissionError && err.permission === 'contents: write',
+    )
+  })
+
+  it('writes the file base64 encoded on the branch, with the blob sha when replacing one', async () => {
+    answers.clear()
+    seen.length = 0
+    const path = '.github/workflows/antifailure.yml'
+    answer(`GET /repos/acme/app/contents/${path}?ref=antifailure%2Fsetup`, 404, { message: 'Not Found' })
+    answer(`PUT /repos/acme/app/contents/${path}`, 201, { content: { sha: 'new' } })
+    await client().putFile(7, 'acme/app', {
+      path,
+      branch: 'antifailure/setup',
+      message: 'Add the Antifailure workflow',
+      content: 'name: Antifailure\n',
+    })
+    let sent = JSON.parse(seen.at(-1)!.body) as Record<string, unknown>
+    assert.equal(sent.branch, 'antifailure/setup')
+    assert.equal(sent.message, 'Add the Antifailure workflow')
+    assert.equal(Buffer.from(sent.content as string, 'base64').toString('utf8'), 'name: Antifailure\n')
+    assert.equal('sha' in sent, false, 'a fresh file was sent with a sha')
+
+    // The file is already on the branch, from a dead sweeper. GitHub refuses a
+    // PUT that replaces content without naming the blob it replaces.
+    answer(`GET /repos/acme/app/contents/${path}?ref=antifailure%2Fsetup`, 200, { sha: 'oldblob' })
+    answer(`PUT /repos/acme/app/contents/${path}`, 200, { content: { sha: 'newer' } })
+    await client().putFile(7, 'acme/app', {
+      path,
+      branch: 'antifailure/setup',
+      message: 'Add the Antifailure workflow',
+      content: 'name: Antifailure\n',
+    })
+    sent = JSON.parse(seen.at(-1)!.body) as Record<string, unknown>
+    assert.equal(sent.sha, 'oldblob')
+  })
+
+  it('opens the pull request, and finds the open one when GitHub says it already exists', async () => {
+    answers.clear()
+    seen.length = 0
+    answer('POST /repos/acme/app/pulls', 201, {
+      number: 12,
+      html_url: 'https://github.com/acme/app/pull/12',
+    })
+    const input = { title: 'T', head: 'antifailure/setup', base: 'main', body: 'B' }
+    assert.deepEqual(await client().createPullRequest(7, 'acme/app', input), {
+      number: 12,
+      url: 'https://github.com/acme/app/pull/12',
+    })
+    const sent = JSON.parse(seen.at(-1)!.body) as Record<string, unknown>
+    assert.equal(sent.head, 'antifailure/setup')
+    assert.equal(sent.base, 'main')
+
+    // The last holder died after opening it. GitHub answers 422 and the open
+    // one is found by its head, so the row records the pull request that
+    // exists rather than failing five times over one that does.
+    answer('POST /repos/acme/app/pulls', 422, {
+      message: 'Validation Failed',
+      errors: [{ message: 'A pull request already exists for acme:antifailure/setup.' }],
+    })
+    answer('GET /repos/acme/app/pulls?state=open&head=acme%3Aantifailure%2Fsetup&per_page=1', 200, [
+      { number: 12, html_url: 'https://github.com/acme/app/pull/12' },
+    ])
+    assert.deepEqual(await client().createPullRequest(7, 'acme/app', input), {
+      number: 12,
+      url: 'https://github.com/acme/app/pull/12',
+    })
+
+    // A 422 for any other reason, or one where nothing open is found, is a
+    // refusal and not a silent success.
+    answer('GET /repos/acme/app/pulls?state=open&head=acme%3Aantifailure%2Fsetup&per_page=1', 200, [])
+    await assert.rejects(
+      () => client().createPullRequest(7, 'acme/app', input),
+      (err: unknown) => err instanceof GitHubApiError && err.status === 422,
+    )
+  })
 })
 
 describe('what reaches a pull request comment', () => {

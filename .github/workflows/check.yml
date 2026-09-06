@@ -1,0 +1,156 @@
+# The reusable workflow behind every customer's .github/workflows/antifailure.yml.
+#
+# A customer's file is about twenty five lines and calls this one with
+# `secrets: inherit`. That inheritance is the reason this exists as a workflow
+# and not only as an action: a composite action cannot read the caller's
+# secrets, so every customer would have to name each one in their own file,
+# and the one that matters most, the production database, has a name only
+# their manifest knows.
+#
+# Only the secrets the manifest names reach the action. `af change` reads the
+# manifest and reports the variable names it uses, and each of those is looked
+# up in the caller's secrets by name, one per slot, so a secret the manifest
+# never mentions is never read. The first version of this file passed
+# `toJSON(secrets)`, every secret the caller had, and code scanning refused it
+# as excessive exposure. It was right: the action needs three or four values,
+# and handing it the whole store to find them was the easy shape, not the
+# safe one.
+#
+# This file runs on the CALLER's event, with the caller's `github` context,
+# so the fork label gate and the concurrency group below read the caller's
+# pull request, which is where they belong.
+#
+# Nothing here is the product. `examples/github-workflow.yml` is what a
+# customer sees, `action.yml` is what does the work, and this is the join.
+name: Antifailure check
+
+on:
+  workflow_call:
+    inputs:
+      dispatch:
+        description: >-
+          The workflow_dispatch inputs of the caller as JSON, which is what
+          `toJSON(inputs)` produces. Empty or `{}` on a pull request, and
+          then the command is `ci`.
+        type: string
+        required: false
+        default: '{}'
+      control-plane:
+        description: >-
+          Address of a hosted control plane, usually `vars.AF_CONTROL_PLANE`.
+          Empty skips the two calls to it and the job comments for itself.
+        type: string
+        required: false
+        default: ''
+      version:
+        description: >-
+          The Antifailure release to install, such as v1.2.1. Empty installs
+          the latest release.
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  antifailure:
+    name: Antifailure
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A `labeled` or `unlabeled` event that is not the approval label skips
+    # the job. Everything else runs, including `unlabeled` of the approval
+    # label, so a withdrawn approval reaches `af ci` and is refused there
+    # rather than leaving the last result standing.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+      github.event.label.name == 'antifailure:allow'
+    # One check per branch. A push while the last run is still building
+    # cancels it on a pull request. A dispatch from the control plane is
+    # never cancelled, because "Run agents" must not kill the environment
+    # "Create environment" is building.
+    concurrency:
+      group: antifailure-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `af change` diffs against the merge base, and the default one
+          # commit deep clone has none.
+          fetch-depth: 0
+
+      # Which variables the manifest reads, before anything is looked up.
+      #
+      # The action installs `af` and runs `af change` again for its own
+      # report; this earlier run exists only to learn the names, because a
+      # secret can be selected by name in an expression and nowhere else.
+      - name: Install Antifailure
+        env:
+          AF_VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$AF_VERSION_INPUT" ]; then export AF_VERSION="$AF_VERSION_INPUT"; fi
+          curl -fsSL https://antifailure.dev/install.sh | sh
+      - id: change
+        name: Which secrets the manifest names
+        run: af change > /dev/null
+      - id: names
+        # One output per slot, out of the comma separated list `af change`
+        # wrote. Twelve slots: a manifest names a database, a provider key,
+        # and a credential per sandbox rule, and twelve is more than any
+        # manifest in this repository's examples names. A thirteenth is
+        # reported rather than dropped, so it is a red job and not a run
+        # against a live credential.
+        env:
+          AF_SECRET_NAMES: ${{ steps.change.outputs.secrets }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra names <<< "$AF_SECRET_NAMES" || true
+          if [ "${#names[@]}" -gt 12 ]; then
+            echo "::error::the manifest names ${#names[@]} secrets and this workflow passes at most 12: ${AF_SECRET_NAMES}"
+            exit 1
+          fi
+          for i in $(seq 1 12); do
+            echo "s$i=${names[$((i - 1))]:-}" >> "$GITHUB_OUTPUT"
+          done
+
+      - uses: antifailure/antifailure@v1
+        with:
+          version: ${{ inputs.version }}
+          dispatch: ${{ inputs.dispatch }}
+          control-plane: ${{ inputs['control-plane'] }}
+        env:
+          # The four the workflow has always mapped, by name.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AF_MASKING_KEY: ${{ secrets.AF_MASKING_KEY }}
+          AF_CONTROL_PLANE_TOKEN: ${{ secrets.AF_CONTROL_PLANE_TOKEN }}
+          STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          # The ones the manifest names, each looked up by that name. An
+          # empty slot looks up nothing. The action exports every pair whose
+          # name and value are both set, under the name.
+          AF_SECRET_1_NAME: ${{ steps.names.outputs.s1 }}
+          AF_SECRET_1: ${{ steps.names.outputs.s1 && secrets[steps.names.outputs.s1] || '' }}
+          AF_SECRET_2_NAME: ${{ steps.names.outputs.s2 }}
+          AF_SECRET_2: ${{ steps.names.outputs.s2 && secrets[steps.names.outputs.s2] || '' }}
+          AF_SECRET_3_NAME: ${{ steps.names.outputs.s3 }}
+          AF_SECRET_3: ${{ steps.names.outputs.s3 && secrets[steps.names.outputs.s3] || '' }}
+          AF_SECRET_4_NAME: ${{ steps.names.outputs.s4 }}
+          AF_SECRET_4: ${{ steps.names.outputs.s4 && secrets[steps.names.outputs.s4] || '' }}
+          AF_SECRET_5_NAME: ${{ steps.names.outputs.s5 }}
+          AF_SECRET_5: ${{ steps.names.outputs.s5 && secrets[steps.names.outputs.s5] || '' }}
+          AF_SECRET_6_NAME: ${{ steps.names.outputs.s6 }}
+          AF_SECRET_6: ${{ steps.names.outputs.s6 && secrets[steps.names.outputs.s6] || '' }}
+          AF_SECRET_7_NAME: ${{ steps.names.outputs.s7 }}
+          AF_SECRET_7: ${{ steps.names.outputs.s7 && secrets[steps.names.outputs.s7] || '' }}
+          AF_SECRET_8_NAME: ${{ steps.names.outputs.s8 }}
+          AF_SECRET_8: ${{ steps.names.outputs.s8 && secrets[steps.names.outputs.s8] || '' }}
+          AF_SECRET_9_NAME: ${{ steps.names.outputs.s9 }}
+          AF_SECRET_9: ${{ steps.names.outputs.s9 && secrets[steps.names.outputs.s9] || '' }}
+          AF_SECRET_10_NAME: ${{ steps.names.outputs.s10 }}
+          AF_SECRET_10: ${{ steps.names.outputs.s10 && secrets[steps.names.outputs.s10] || '' }}
+          AF_SECRET_11_NAME: ${{ steps.names.outputs.s11 }}
+          AF_SECRET_11: ${{ steps.names.outputs.s11 && secrets[steps.names.outputs.s11] || '' }}
+          AF_SECRET_12_NAME: ${{ steps.names.outputs.s12 }}
+          AF_SECRET_12: ${{ steps.names.outputs.s12 && secrets[steps.names.outputs.s12] || '' }}

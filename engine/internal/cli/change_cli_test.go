@@ -201,3 +201,82 @@ func TestChange_ReportsAMissingDiffFile(t *testing.T) {
 	require.NotZero(t, res.code)
 	assert.Contains(t, res.stderr, "AF-DET-011")
 }
+
+// The two outputs that let a job export exactly the secrets the manifest
+// reads. Names, never values: the job looks each one up in the caller's
+// secrets, and a name missing here is a secret the engine never sees.
+func TestChange_NamesTheVariablesTheManifestReads(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "api"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "antifailure.yaml"), []byte(`
+version: 1
+name: shop
+services:
+  - name: web
+    path: api
+    port: 3000
+    env:
+      - name: RESEND_API_KEY
+        sandbox: true
+      - name: SENTRY_DSN
+        from: SENTRY_DSN_PREVIEW
+      - name: NODE_ENV
+        value: test
+database:
+  provider: neon
+  project: shop
+  api_key_env: NEON_API_KEY
+  source_url_env: PRODUCTION_DATABASE_URL
+egress:
+  default: block
+  rules:
+    - host: api.stripe.com
+      mode: sandbox
+      credential: STRIPE_SECRET_KEY
+auth:
+  adapter: clerk
+  sandbox: true
+  token_env: CLERK_SECRET_KEY
+personas:
+  - name: shopper
+    email: shopper@example.com
+workflows:
+  - name: checkout
+    persona: shopper
+    description: Sign in, put the sample item in the basket, pay with the test card and see the order confirmation.
+`), 0o600))
+	diff := filepath.Join(dir, "pr.diff")
+	require.NoError(t, os.WriteFile(diff, []byte(codeDiff), 0o600))
+	outputs := filepath.Join(dir, "outputs.txt")
+
+	res := runCLI(t, dir, map[string]string{"GITHUB_OUTPUT": outputs}, "change", "--diff", diff)
+	require.Zero(t, res.code, res.stderr)
+
+	written, err := os.ReadFile(outputs)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(written)), "\n")
+	assert.Contains(t, lines, "source_url_env=PRODUCTION_DATABASE_URL")
+	assert.Contains(t, lines,
+		"secrets=CLERK_SECRET_KEY,NEON_API_KEY,PRODUCTION_DATABASE_URL,RESEND_API_KEY,SENTRY_DSN_PREVIEW,STRIPE_SECRET_KEY",
+		"every variable the manifest reads a credential from, sorted, and nothing that holds a literal value")
+	assert.NotContains(t, string(written), "NODE_ENV",
+		"a variable with a literal value is not a secret the job has to export")
+}
+
+// With no source the key is still written, empty, so a workflow expression
+// reads an empty string rather than a missing output.
+func TestChange_WritesAnEmptySourceKeyWhenTheManifestNamesNone(t *testing.T) {
+	t.Parallel()
+	dir := changeProject(t, codeDiff)
+	outputs := filepath.Join(dir, "outputs.txt")
+
+	res := runCLI(t, dir, map[string]string{"GITHUB_OUTPUT": outputs},
+		"change", "--diff", filepath.Join(dir, "pr.diff"))
+	require.Zero(t, res.code, res.stderr)
+	written, err := os.ReadFile(outputs)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(written)), "\n")
+	assert.Contains(t, lines, "source_url_env=")
+	assert.Contains(t, lines, "secrets=")
+}

@@ -17,9 +17,38 @@ import {
   grantRemedy,
   type CheckRunInput,
   type IssueComment,
+  type OpenedPullRequest,
+  type PullRequestInput,
+  type PutFileInput,
   type RepositoryApi,
   type WorkflowRunStatus,
 } from './api.ts'
+
+/** One file on one branch of one repository. */
+export interface FakeFile {
+  repository: string
+  branch: string
+  path: string
+  content: string
+}
+
+export interface FakePullRequest extends OpenedPullRequest, PullRequestInput {
+  repository: string
+}
+
+/** What the setup sweeper asked of the repository, in order. A test asserting
+ *  that the sweeper made four calls and not five reads this rather than
+ *  inferring it from the end state. */
+export interface RecordedCall {
+  method:
+    | 'fileExists'
+    | 'branchHead'
+    | 'createBranch'
+    | 'putFile'
+    | 'createPullRequest'
+  repository: string
+  detail: string
+}
 
 export interface FakeCheckRun extends CheckRunInput {
   id: number
@@ -55,6 +84,12 @@ export class FakeRepositoryApi implements RepositoryApi {
   private readonly checkRuns = new Map<number, FakeCheckRun>()
   private readonly comments = new Map<number, FakeComment>()
   private readonly runs = new Map<number, FakeWorkflowRun>()
+  /** Keyed `repository@branch`, the commit the branch points at. */
+  private readonly branches = new Map<string, string>()
+  /** Keyed `repository@branch:path`. */
+  private readonly files = new Map<string, FakeFile>()
+  private readonly pulls: FakePullRequest[] = []
+  readonly calls: RecordedCall[] = []
   private nextId = 1000
   private failure: { message: string; status: number } | null = null
 
@@ -102,15 +137,118 @@ export class FakeRepositoryApi implements RepositoryApi {
     return this.runs.get(id)
   }
 
+  /** Gives a repository a branch at a commit, the way a repository having a
+   *  default branch does. The setup sweeper cannot start without one. */
+  addBranch(repository: string, branch: string, sha: string): void {
+    this.branches.set(`${repository}@${branch}`, sha)
+  }
+
+  /** Puts a file on a branch, the way a customer who already wrote their own
+   *  workflow did. */
+  addFile(file: FakeFile): void {
+    this.files.set(`${file.repository}@${file.branch}:${file.path}`, file)
+  }
+
+  fileOn(repository: string, branch: string, path: string): FakeFile | undefined {
+    return this.files.get(`${repository}@${branch}:${path}`)
+  }
+
+  branchSha(repository: string, branch: string): string | undefined {
+    return this.branches.get(`${repository}@${branch}`)
+  }
+
+  get pullRequests(): readonly FakePullRequest[] {
+    return this.pulls
+  }
+
   private require(permission: string): void {
     if (this.failure) {
       const { message, status } = this.failure
       this.failure = null
       throw new GitHubApiError(message, status)
     }
-    if (!this.granted.has(permission)) {
+    // Contents write implies read at GitHub, and a fake that made a test grant
+    // both would be asking the test to know something the real one never asks.
+    const held =
+      this.granted.has(permission) ||
+      (permission === 'contents: read' && this.granted.has('contents: write'))
+    if (!held) {
       throw new GitHubPermissionError(permission, grantRemedy(permission))
     }
+  }
+
+  async fileExists(
+    _installationId: number,
+    repository: string,
+    path: string,
+    ref: string,
+  ): Promise<boolean> {
+    this.calls.push({ method: 'fileExists', repository, detail: `${path}@${ref}` })
+    this.require('contents: read')
+    return this.files.has(`${repository}@${ref}:${path}`)
+  }
+
+  async branchHead(_installationId: number, repository: string, branch: string): Promise<string> {
+    this.calls.push({ method: 'branchHead', repository, detail: branch })
+    this.require('contents: read')
+    const sha = this.branches.get(`${repository}@${branch}`)
+    if (!sha) throw new GitHubApiError(`no branch ${branch} in ${repository}`, 404)
+    return sha
+  }
+
+  async createBranch(
+    _installationId: number,
+    repository: string,
+    branch: string,
+    sha: string,
+  ): Promise<void> {
+    this.calls.push({ method: 'createBranch', repository, detail: `${branch}@${sha}` })
+    this.require('contents: write')
+    // The real one answers 422 "Reference already exists" and the client
+    // reuses the branch. The fake keeps the existing commit for the same
+    // reason: a retry must not move a branch somebody has already pushed to.
+    if (this.branches.has(`${repository}@${branch}`)) return
+    this.branches.set(`${repository}@${branch}`, sha)
+  }
+
+  async putFile(_installationId: number, repository: string, input: PutFileInput): Promise<void> {
+    this.calls.push({ method: 'putFile', repository, detail: `${input.path}@${input.branch}` })
+    this.require('contents: write')
+    if (!this.branches.has(`${repository}@${input.branch}`)) {
+      throw new GitHubApiError(`no branch ${input.branch} in ${repository}`, 404)
+    }
+    this.files.set(`${repository}@${input.branch}:${input.path}`, {
+      repository,
+      branch: input.branch,
+      path: input.path,
+      content: input.content,
+    })
+  }
+
+  async createPullRequest(
+    _installationId: number,
+    repository: string,
+    input: PullRequestInput,
+  ): Promise<OpenedPullRequest> {
+    this.calls.push({ method: 'createPullRequest', repository, detail: `${input.head}->${input.base}` })
+    this.require('pull requests: write')
+    // GitHub refuses a second pull request with the same head and base, and
+    // the client finds the open one instead. The fake does the same, because
+    // a retry that opened a second pull request is the defect the sweeper's
+    // idempotence is supposed to prevent.
+    const open = this.pulls.find(
+      (p) => p.repository === repository && p.head === input.head && p.base === input.base,
+    )
+    if (open) return { number: open.number, url: open.url }
+    const number = this.nextId++
+    const opened: FakePullRequest = {
+      ...input,
+      repository,
+      number,
+      url: `https://github.com/${repository}/pull/${number}`,
+    }
+    this.pulls.push(opened)
+    return { number, url: opened.url }
   }
 
   async findCheckRun(
