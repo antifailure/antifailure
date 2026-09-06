@@ -3,6 +3,7 @@ package insights
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"path"
 	"regexp"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Tool is the migration tool a repository uses.
@@ -58,6 +61,13 @@ type MigrationSet struct {
 	// files, and saying so is better than reporting an empty set that reads
 	// like a repository with no migrations at all.
 	Reason string `json:"reason,omitempty"`
+	// Declared says the manifest named the directory, so nothing here was
+	// inferred. A report reads differently when the project said where its
+	// migrations are and when the engine guessed.
+	Declared bool `json:"declared,omitempty"`
+	// Ledger is the table a project's own runner records applied files in,
+	// for a plain SQL directory. Empty means probe the usual names.
+	Ledger string `json:"ledger,omitempty"`
 }
 
 // SQLAvailable reports whether the migrations can be read as SQL.
@@ -76,6 +86,62 @@ func (s MigrationSet) SQLAvailable() bool { return len(s.Migrations) > 0 }
 // where the SQL is, because a rehearsal replays SQL. The two agree on the
 // tool and would be wrong to disagree, so the marker files are the same ones.
 func Discover(fsys fs.FS) MigrationSet {
+	return discover(fsys, nil)
+}
+
+// Locate is Discover with the manifest in hand.
+//
+// A manifest that declares database.migrations wins outright, and nothing is
+// inferred: the project said where its files are, and a guess that disagreed
+// would rehearse the wrong directory with a straight face. Without the
+// declaration, the services' paths steer the fallback search for a plain SQL
+// directory, so a monorepo with two candidates picks the one beside the
+// service that migrates.
+//
+// This is the entry point every caller should use. Discover alone is kept for
+// the callers and tests that have a tree and no manifest.
+func Locate(fsys fs.FS, m *schema.Manifest) MigrationSet {
+	var hints []string
+	if m != nil {
+		if m.Database != nil && m.Database.Migrations != nil {
+			return Declared(fsys, m.Database.Migrations)
+		}
+		for _, svc := range m.Services {
+			if svc.Path != "" {
+				hints = append(hints, path.Clean(svc.Path))
+			}
+		}
+	}
+	return discover(fsys, hints)
+}
+
+// Declared reads the directory the manifest names.
+//
+// The result is a plain SQL set whether or not the directory exists or holds
+// anything: an empty declared directory is reported as declared and empty,
+// which is a different fact from "no tool was recognised" and has a different
+// fix. The versions are the file names, which is what a runner that records
+// filenames writes to its ledger; Applied matches the stem and the leading
+// number too, for a runner that records one of those instead.
+func Declared(fsys fs.FS, d *schema.Migrations) MigrationSet {
+	dir := path.Clean(d.Dir)
+	set := sqlFilesIn(fsys, dir, func(name string) string { return name })
+	set.Tool = ToolSQLDir
+	set.Declared = true
+	set.Ledger = d.Table
+	if len(set.Migrations) == 0 {
+		if _, err := fs.Stat(fsys, dir); err != nil {
+			set.Reason = "the manifest declares database.migrations.dir as " + dir +
+				", and there is no such directory in this checkout"
+		} else {
+			set.Reason = "the manifest declares database.migrations.dir as " + dir +
+				", and it holds no .sql files"
+		}
+	}
+	return set
+}
+
+func discover(fsys fs.FS, hints []string) MigrationSet {
 	for _, find := range []func(fs.FS) (MigrationSet, bool){
 		findPrisma, findSupabase, findDrizzle, findFlyway,
 		findRails, findDjango, findAlembic, findKnex, findSQLDir,
@@ -83,6 +149,9 @@ func Discover(fsys fs.FS) MigrationSet {
 		if set, ok := find(fsys); ok {
 			return set
 		}
+	}
+	if set, ok := findNumberedSQLDir(fsys, hints); ok {
+		return set
 	}
 	return MigrationSet{}
 }
@@ -236,6 +305,110 @@ func findSQLDir(fsys fs.FS) (MigrationSet, bool) {
 	return MigrationSet{}, false
 }
 
+// findNumberedSQLDir is the last resort: a directory of numbered SQL files
+// anywhere in the tree, applied by a script of the project's own.
+//
+// This is the shape a project has when it outgrew a tool or never wanted one:
+// 0001_init.sql, 0002_rls.sql, and a forty line runner that applies whatever
+// the ledger has not seen. The fixed list in findSQLDir looks at the root
+// only, so a monorepo keeping its files at web/packages/db/migrations was
+// answered with "no migration tool was recognised" while the manifest declared
+// lock thresholds for exactly those files.
+//
+// The name of the directory is not required to be "migrations", because the
+// files' own names are the stronger signal: two or more .sql files that begin
+// with a number and an underscore are a sequence somebody applies in order.
+// A single such file is not enough, since a schema.sql beside a 001_seed.sql is
+// not a migration directory.
+//
+// Candidates are ranked, not merged. A directory under one of the hinted
+// service paths wins; among the rest the shallowest wins; ties break by name.
+// Directories that hold other people's projects are skipped: examples,
+// fixtures, test data, vendored code and anything dot prefixed.
+func findNumberedSQLDir(fsys fs.FS, hints []string) (MigrationSet, bool) {
+	type candidate struct {
+		dir   string
+		depth int
+		hint  bool
+		count int
+	}
+	var found []candidate
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if p != "." && skipForMigrations(path.Base(p)) {
+			return fs.SkipDir
+		}
+		depth := strings.Count(p, "/") + 1
+		if p == "." {
+			depth = 0
+		}
+		if depth > maxMigrationDepth {
+			return fs.SkipDir
+		}
+		entries, err := fs.ReadDir(fsys, p)
+		if err != nil {
+			return nil
+		}
+		n := 0
+		for _, e := range entries {
+			if !e.IsDir() && numberedSQL.MatchString(e.Name()) {
+				n++
+			}
+		}
+		if n < 2 {
+			return nil
+		}
+		c := candidate{dir: p, depth: depth, count: n}
+		for _, h := range hints {
+			if p == h || strings.HasPrefix(p, h+"/") {
+				c.hint = true
+			}
+		}
+		found = append(found, c)
+		return nil
+	})
+	if len(found) == 0 {
+		return MigrationSet{}, false
+	}
+	sort.Slice(found, func(i, j int) bool {
+		a, b := found[i], found[j]
+		if a.hint != b.hint {
+			return a.hint
+		}
+		if a.depth != b.depth {
+			return a.depth < b.depth
+		}
+		return a.dir < b.dir
+	})
+	set := sqlFilesIn(fsys, found[0].dir, func(name string) string { return name })
+	set.Tool = ToolSQLDir
+	return set, true
+}
+
+// maxMigrationDepth bounds the fallback walk. Five levels reaches
+// web/packages/db/migrations with room to spare and stops short of walking a
+// whole node_modules that escaped the skip list under another name.
+const maxMigrationDepth = 5
+
+// skipForMigrations names the directories the fallback never looks inside,
+// because what they hold is somebody else's project or a copy of this one.
+func skipForMigrations(base string) bool {
+	if strings.HasPrefix(base, ".") {
+		return true
+	}
+	switch base {
+	case "node_modules", "vendor", "examples", "example", "testdata", "fixtures",
+		"fixture", "dist", "build", "target", "tmp", "docs", "__pycache__":
+		return true
+	}
+	return false
+}
+
 // sqlFilesIn reads every .sql file in a directory, in name order, taking each
 // one's version from the supplied function.
 func sqlFilesIn(fsys fs.FS, dir string, version func(string) string) MigrationSet {
@@ -305,6 +478,7 @@ var (
 	flywayName  = regexp.MustCompile(`^V[0-9]`)
 	digitsFront = regexp.MustCompile(`^[0-9]+`)
 	flywayRe    = regexp.MustCompile(`^V([0-9._]+)__`)
+	numberedSQL = regexp.MustCompile(`^[0-9]+_.*\.sql$`)
 )
 
 func leadingDigits(name string) string { return digitsFront.FindString(name) }
@@ -383,6 +557,9 @@ func historyQuery(t Tool) (string, bool) {
 // touched, which means every migration is pending, and that is the normal
 // state of a fresh branch in a project that keeps its schema elsewhere.
 func (s MigrationSet) Applied(ctx context.Context, conn *pgx.Conn) (map[string]bool, error) {
+	if s.Tool == ToolSQLDir {
+		return s.appliedFromLedger(ctx, conn)
+	}
 	query, ok := historyQuery(s.Tool)
 	if !ok {
 		return nil, nil
@@ -408,17 +585,162 @@ func (s MigrationSet) Applied(ctx context.Context, conn *pgx.Conn) (map[string]b
 }
 
 // Pending is the migrations on disk that the database has not recorded.
+//
+// A plain SQL directory has no tool to say what its runner writes to the
+// ledger, so a file counts as applied when the ledger holds its name, its stem
+// or its leading number. Those are the three things a forty line runner
+// records, and the leading number is only consulted when it is at least three
+// digits, because a ledger holding "1" says nothing about 1_init.sql.
 func (s MigrationSet) Pending(applied map[string]bool) []Migration {
 	if applied == nil {
 		return s.Migrations
 	}
 	var out []Migration
 	for _, m := range s.Migrations {
-		if !applied[m.Version] {
-			out = append(out, m)
+		if applied[m.Version] {
+			continue
 		}
+		if s.Tool == ToolSQLDir && recordedUnderAnotherName(m, applied) {
+			continue
+		}
+		out = append(out, m)
 	}
 	return out
+}
+
+func recordedUnderAnotherName(m Migration, applied map[string]bool) bool {
+	if applied[m.Name] || applied[stem(m.Name)] {
+		return true
+	}
+	if digits := leadingDigits(m.Name); len(digits) >= 3 && applied[digits] {
+		return true
+	}
+	return false
+}
+
+// ledgerTables are the names a hand written runner gives its history table,
+// tried in order when the manifest does not say.
+var ledgerTables = []string{"schema_migrations", "migrations"}
+
+// ledgerColumns are the columns such a table records the file under, tried
+// in order. The first one the table has is read.
+var ledgerColumns = []string{"name", "version", "filename", "migration", "id"}
+
+// appliedFromLedger reads a plain SQL directory's history from the table the
+// project's own runner keeps.
+//
+// The engine cannot know what a script it has never seen writes, so it looks
+// for the shape every such script converges on: one table, one text column
+// holding the file. This repository's own runner is the case that produced
+// it: schema_migrations(name text primary key, digest text, applied_at
+// timestamptz), and until the rehearsal read it every file from 0001 was
+// pending against a branch that already held forty of them.
+//
+// A ledger that is absent, or present under a shape not recognised here, is
+// not an error. The result is nil, which Pending reads as "everything on disk
+// is pending", and Rehearse says so in the report rather than failing.
+func (s MigrationSet) appliedFromLedger(ctx context.Context, conn *pgx.Conn) (map[string]bool, error) {
+	tables := ledgerTables
+	if s.Ledger != "" {
+		tables = []string{s.Ledger}
+	}
+	for _, table := range tables {
+		column, ok, err := ledgerColumn(ctx, conn, table)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		rows, err := conn.Query(ctx,
+			"SELECT "+quoteIdent(column)+"::text FROM "+quoteQualified(table))
+		if err != nil {
+			if isUndefinedTable(err) {
+				continue
+			}
+			return nil, err
+		}
+		applied := map[string]bool{}
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			applied[v] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return applied, nil
+	}
+	if s.Ledger != "" {
+		return nil, fmt.Errorf("the ledger table %s named by database.migrations.table does not "+
+			"exist on the branch, or has none of the columns %s", s.Ledger,
+			strings.Join(ledgerColumns, ", "))
+	}
+	return nil, nil
+}
+
+// ledgerColumn finds which of the known columns a ledger table has, using the
+// catalog rather than a probing SELECT so that a missing table is a plain
+// false and not an error to classify.
+func ledgerColumn(ctx context.Context, conn *pgx.Conn, table string) (string, bool, error) {
+	schemaName, tableName := splitQualified(table)
+	rows, err := conn.Query(ctx, `
+SELECT column_name FROM information_schema.columns
+WHERE table_name = $1
+  AND table_schema = COALESCE($2, current_schema())
+  AND data_type IN ('text', 'character varying', 'character', 'integer', 'bigint', 'numeric')`,
+		tableName, nullIfEmpty(schemaName))
+	if err != nil {
+		return "", false, err
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return "", false, err
+		}
+		have[c] = true
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, err
+	}
+	for _, c := range ledgerColumns {
+		if have[c] {
+			return c, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func splitQualified(name string) (schemaName, table string) {
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		return name[:i], name[i+1:]
+	}
+	return "", name
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+func quoteQualified(name string) string {
+	schemaName, table := splitQualified(name)
+	if schemaName == "" {
+		return quoteIdent(table)
+	}
+	return quoteIdent(schemaName) + "." + quoteIdent(table)
 }
 
 // isUndefinedTable reports whether the error is Postgres saying the relation

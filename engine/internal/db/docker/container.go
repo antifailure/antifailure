@@ -91,6 +91,16 @@ func (p *Provider) startWithRetry(
 		&container.Config{
 			Image:  img,
 			Labels: all,
+			// The image's own entrypoint, told to preload pg_stat_statements.
+			// It has to be preloaded at start: created without the preload,
+			// the extension exists and records nothing, so the insights read
+			// a permanently empty table and reported that statement timing
+			// was unavailable on every environment this provider made. The
+			// same two flags the repository's own CI Postgres is started
+			// with, so a local branch and a CI branch measure the same thing.
+			// A committed golden image keeps the entrypoint, so this holds
+			// for a candidate, a golden and a branch alike.
+			Cmd: statisticsCmd,
 			Env: []string{
 				"POSTGRES_PASSWORD=" + managedPassword,
 				"POSTGRES_USER=antifailure",
@@ -264,4 +274,14 @@ func (p *Provider) connString(port int) secrets.Value {
 	return secrets.NewFrom(fmt.Sprintf(
 		"postgres://antifailure:%s@127.0.0.1:%d/antifailure?sslmode=disable",
 		managedPassword, port), "docker")
+}
+
+// statisticsCmd is the command every container this provider starts runs:
+// the image's postgres, with the statistics module preloaded. Exported to the
+// test that proves a branch was started with it, because the proof has to
+// read what the server says rather than what this file says.
+var statisticsCmd = []string{
+	"postgres",
+	"-c", "shared_preload_libraries=pg_stat_statements",
+	"-c", "pg_stat_statements.track=all",
 }

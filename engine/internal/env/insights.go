@@ -204,7 +204,7 @@ func (o *Orchestrator) rolling(
 	}
 	return o.rollingCheck(ctx, s, rollingInputs{
 		Config: rc, Golden: golden, Statements: d.statements,
-		Set: insights.Discover(os.DirFS(o.opts.Root)), RunnerPath: opts.RunnerPath,
+		Set: insights.Locate(os.DirFS(o.opts.Root), o.opts.Manifest), RunnerPath: opts.RunnerPath,
 	}), full.Off
 }
 
@@ -218,7 +218,7 @@ func (o *Orchestrator) rolling(
 func (o *Orchestrator) rehearsalBranch(
 	ctx context.Context, s *session,
 ) (*insights.Target, func(), string, error) {
-	set := insights.Discover(os.DirFS(o.opts.Root))
+	set := insights.Locate(os.DirFS(o.opts.Root), o.opts.Manifest)
 
 	version, why, err := o.environmentGolden(ctx, s)
 	if err != nil {
@@ -310,7 +310,14 @@ func (o *Orchestrator) applierFor(
 	}
 	if set.Tool == insights.ToolNone {
 		return nil, "the migrations were not rehearsed: no migration tool was recognised in " +
-			"this repository", nil
+			"this repository. A project that applies its own directory of SQL files can " +
+			"name it under database.migrations.dir in antifailure.yaml", nil
+	}
+	if set.Tool == insights.ToolSQLDir && set.Reason != "" {
+		// A declared directory that is empty or absent. Nothing to replay,
+		// and the reason names the manifest key that points at the wrong
+		// place, which is the fix.
+		return nil, "the migrations were not rehearsed: " + set.Reason, nil
 	}
 
 	svc, ok := migratingService(o.opts.Manifest)

@@ -456,3 +456,24 @@ func TestLint_ReportsTheRowCountThatMakesItAnOutage(t *testing.T) {
 	f := lintOne(t, "ALTER TABLE orders ALTER COLUMN total TYPE bigint;")
 	require.EqualValues(t, 40_000_000, f[0].Rows)
 }
+
+// The table a CREATE INDEX locks is the one after ON, found as a word.
+//
+// This repository's own migration 0037 creates environment_usage_org_idx ON
+// environment_usage(org_id, created_at). The keyword was searched for as a
+// substring of the folded statement, where " ON " had become "ON", and the
+// first ON in that statement is the one inside envirONment. The finding named
+// a table called ment_usage_org_idx and looked its row count up under that
+// name, so a real table's real size never reached the reader.
+func TestLint_NamesTheIndexedTableNotAWordInsideTheIndexName(t *testing.T) {
+	t.Parallel()
+	f := lintOne(t, "CREATE INDEX environment_usage_org_idx ON environment_usage(org_id, created_at);")
+	require.NotEmpty(t, f)
+	for _, finding := range f {
+		require.Equal(t, "environment_usage", finding.Table, "%s named %q", finding.Rule, finding.Table)
+	}
+	// A partial index, where the column list is followed by a WHERE.
+	f = lintOne(t, "CREATE INDEX sessions_open_idx ON sessions (user_id)\n  WHERE revoked_at IS NULL;")
+	require.NotEmpty(t, f)
+	require.Equal(t, "sessions", f[0].Table)
+}

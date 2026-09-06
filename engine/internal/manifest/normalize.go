@@ -193,6 +193,18 @@ func normalizeDatabase(m *schema.Manifest) {
 	if d.Golden.Storage == "" {
 		d.Golden.Storage = schema.StorageLocal
 	}
+	if d.Migrations != nil {
+		// The root itself confines to an empty string, and that is left as
+		// written so the validator can name it rather than report no
+		// directory at all.
+		if c, ok := confine(d.Migrations.Dir); ok && c != "" {
+			d.Migrations.Dir = c
+		}
+		if d.Migrations.Format == "" {
+			d.Migrations.Format = "sql"
+		}
+		d.Migrations.Table = strings.TrimSpace(d.Migrations.Table)
+	}
 	if d.Subset == nil {
 		d.Subset = &schema.Subset{}
 	}

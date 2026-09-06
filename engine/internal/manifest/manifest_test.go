@@ -1109,3 +1109,69 @@ personas:
 `)))
 	require.Contains(t, msg, "sign_in_path")
 }
+
+// A project whose migrate command is its own script names its directory, and
+// af explain shows what the rehearsal will do with it. This repository is the
+// case: numbered SQL under web/packages/db/migrations, applied by a script,
+// and the rehearsal answered INCONCLUSIVE with "no migration tool was
+// recognised" while policy.migration_lock declared thresholds for those files.
+func TestDatabaseMigrations_DeclaredAndExplained(t *testing.T) {
+	t.Parallel()
+	m := mustParse(t, `
+version: 1
+name: shop
+services:
+  - name: api
+    port: 8080
+    migrate: node bootstrap.mjs
+database:
+  migrations:
+    dir: ./web/packages/db/migrations/
+    table: schema_migrations
+`)
+	require.NotNil(t, m.Database.Migrations)
+	require.Equal(t, "web/packages/db/migrations", m.Database.Migrations.Dir, "normalised like every other path")
+	require.Equal(t, "sql", m.Database.Migrations.Format, "the one format is the default")
+
+	out := strings.Join(strings.Fields(manifest.Explain(m, 0)), " ")
+	require.Contains(t, out, "migrations web/packages/db/migrations, replayed as sql by the rehearsal, "+
+		"pending read from schema_migrations")
+
+	// Undeclared, the page says the tool is recognised from the tree and
+	// names the key a project with its own runner should set.
+	plain := strings.Join(strings.Fields(manifest.Explain(mustParse(t, minimal), 0)), " ")
+	require.Contains(t, plain, "database.migrations.dir")
+}
+
+func TestDatabaseMigrations_Validated(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, block, path, want string
+	}{
+		{"no dir", "    format: sql\n", "database.migrations.dir", "names no directory"},
+		{"escapes the repository", "    dir: ../elsewhere/migrations\n", "database.migrations.dir", "not a directory inside the repository"},
+		{"the root itself", "    dir: .\n", "database.migrations.dir", "not a directory inside the repository"},
+		{"unknown format", "    dir: db/migrations\n    format: python\n", "database.migrations.format", "not one the rehearsal can read"},
+		{"a ledger that is not a name", "    dir: db/migrations\n    table: \"schema_migrations; DROP TABLE users\"\n", "database.migrations.table", "not a table name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := parse(t, "version: 1\nname: shop\nservices:\n  - name: web\n    port: 3000\n"+
+				"database:\n  migrations:\n"+tc.block)
+			ps := problems(t, err)
+			found := false
+			for _, p := range ps {
+				if p.Path == tc.path && strings.Contains(p.Message, tc.want) {
+					found = true
+				}
+			}
+			require.True(t, found, "want %s saying %q, got:\n%s", tc.path, tc.want, messages(ps))
+		})
+	}
+
+	// A typo of the key gets a suggestion, which is what the known keys list
+	// is for.
+	_, err := parse(t, "version: 1\nname: shop\nservices:\n  - name: web\n    port: 3000\n"+
+		"database:\n  migration:\n    dir: db/migrations\n")
+	require.Contains(t, messages(problems(t, err)), "migrations")
+}

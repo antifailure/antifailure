@@ -371,6 +371,39 @@
           "type": "string",
           "maxLength": 1024,
           "description": "Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env."
+        },
+        "migrations": {
+          "$ref": "#/$defs/migrations"
+        }
+      }
+    },
+    "migrations": {
+      "title": "Migrations",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dir"
+      ],
+      "description": "Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. Declared, the rehearsal replays the files in this directory and nothing is inferred from the tree.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Directory of .sql files, relative to the repository root, applied in filename order. A directory of numbered files such as 0042_add_index.sql is also recognised without this key when no tool is; declaring it removes the guess."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "sql"
+          ],
+          "default": "sql",
+          "description": "How the files are read. Only sql exists."
+        },
+        "table": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$",
+          "maxLength": 128,
+          "description": "The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried."
         }
       }
     },

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -372,6 +373,28 @@ func (v *validator) database(m *schema.Manifest) {
 			v.add("database.golden.storage_url",
 				fmt.Sprintf("Storage is set to %s and no URL is given.", d.Golden.Storage),
 				"Add the container or bucket URL. Credentials come from the secrets subsystem, never from the URL.")
+		}
+	}
+	if d.Migrations != nil {
+		mg := d.Migrations
+		if strings.TrimSpace(mg.Dir) == "" {
+			v.add("database.migrations.dir",
+				"The migrations block names no directory.",
+				"Give the directory of .sql files, relative to the repository root, for example db/migrations.")
+		} else if c, ok := confine(mg.Dir); !ok || c == "" {
+			v.add("database.migrations.dir",
+				fmt.Sprintf("The migrations directory %q is not a directory inside the repository.", mg.Dir),
+				"Use a path relative to the repository root, not the root itself and not a path outside it.")
+		}
+		if mg.Format != "" && mg.Format != "sql" {
+			v.add("database.migrations.format",
+				fmt.Sprintf("The migrations format %q is not one the rehearsal can read.", mg.Format),
+				"Only sql exists: a directory of .sql files applied in filename order.")
+		}
+		if mg.Table != "" && !ledgerTableName.MatchString(mg.Table) {
+			v.add("database.migrations.table",
+				fmt.Sprintf("The ledger table %q is not a table name.", mg.Table),
+				"Use a bare or schema qualified identifier, for example schema_migrations or app.migrations.")
 		}
 	}
 	if d.Subset != nil && d.Subset.Enabled {
@@ -1694,3 +1717,8 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 	}
 	return nil
 }
+
+// ledgerTableName is what database.migrations.table may be: a bare or schema
+// qualified identifier, because it is interpolated into a query and anything
+// else would be a second way to run SQL from the manifest.
+var ledgerTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)

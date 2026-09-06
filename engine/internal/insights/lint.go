@@ -509,19 +509,43 @@ func splitType(t string) (string, int) {
 // tableAfter pulls the identifier following a keyword, skipping the noise
 // words that can sit between it and the name.
 func tableAfter(sql, keyword string) string {
-	upper := fold(sql)
-	i := strings.Index(upper, fold(keyword))
-	if i < 0 {
+	// Matched word by word rather than as a substring of the folded text.
+	// fold turns " ON " into "ON", and a substring search for that found the
+	// ON inside envirONment_usage_org_idx, so every CREATE INDEX on this
+	// repository's own tables was reported as locking "ment_usage_org_idx",
+	// a table that does not exist, with the row count of one.
+	words := strings.Fields(fold(sql))
+	kw := strings.Fields(fold(keyword))
+	if len(kw) == 0 {
 		return ""
 	}
-	// fold collapses whitespace, so an index into it is not an index into sql.
-	// Work on the folded text and take the identifier from there; identifiers
-	// are returned lower cased anyway.
-	rest := strings.Fields(upper[i+len(fold(keyword)):])
-	for _, word := range rest {
+	start := -1
+	for i := 0; i+len(kw) <= len(words); i++ {
+		match := true
+		for j := range kw {
+			if words[i+j] != kw[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			start = i + len(kw)
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	for _, word := range words[start:] {
 		switch word {
 		case "IF", "NOT", "EXISTS", "ONLY", "CONCURRENTLY", "TABLE", "VERBOSE":
 			continue
+		}
+		// ON environment_usage(org_id) has no space before the column list,
+		// which is how this repository writes it, so the identifier ends at
+		// the parenthesis rather than at the whitespace.
+		if j := strings.IndexByte(word, '('); j > 0 {
+			word = word[:j]
 		}
 		return bareTable(unquote(word))
 	}

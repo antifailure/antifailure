@@ -365,8 +365,14 @@ the SQL it finds:
 | Supabase CLI | `supabase/migrations/*.sql` | `supabase_migrations.schema_migrations.version` |
 | Drizzle | the directory beside `meta/_journal.json` | the file stem |
 | Flyway | `db/migration`, `sql`, or `src/main/resources/db/migration` | `flyway_schema_history.version` |
-| A plain SQL directory | `migrations`, `db/migrations`, `sql/migrations` | the file stem |
+| A plain SQL directory | `migrations`, `db/migrations`, `sql/migrations`, or any directory of numbered files such as `0042_add_index.sql`, nearest the service that migrates | the project's own ledger, read from `schema_migrations` or `migrations` by filename, stem or number |
+| A declared directory | `database.migrations.dir` in the manifest, and nothing is inferred | `database.migrations.table`, or the same probe |
 | Rails, Django, Alembic, Knex | not read: the tool runs in the service's image | the tool's own history table |
+
+A project that applies its own directory of SQL files with a script of its own
+should declare it, because a guess that lands on the wrong directory rehearses
+the wrong migrations with a straight face. See
+[the manifest reference](/docs/reference/manifest#migrations).
 
 Flyway is ordered by version rather than by filename, because it compares
 versions component by component and numerically: `V1.1` comes after `V1`, while

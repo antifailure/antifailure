@@ -142,6 +142,32 @@ exported on the laptop that started it.
 | `max_branches` | The plan's concurrent branch limit. |
 | `golden` | `schedule`, `max_age`, `retain`, `storage`, `storage_url`. |
 | `subset` | See below. |
+| `migrations` | See below. For a project that applies its own directory of SQL files. |
+
+### `migrations`
+
+```yaml
+  migrations:
+    dir: web/packages/db/migrations
+    format: sql
+    table: schema_migrations
+```
+
+The migration rehearsal recognises Prisma, the Supabase CLI, Drizzle, Flyway,
+Rails, Django, Alembic and Knex from their marker files, and a directory of
+numbered `.sql` files from the files themselves. A project that applies such a
+directory with a script of its own, `node migrate.mjs` say, has no marker to
+recognise, and without this block the rehearsal has to find the directory by
+searching the tree. Declaring it removes the search: the files in `dir` are
+replayed in filename order, each statement timed, and nothing is inferred.
+
+`table` names the ledger the script records applied files in, so the pending
+set against a branch is computed the way the script computes it. A file counts
+as applied when its name, its stem or its leading number appears in the
+table's `name`, `version`, `filename`, `migration` or `id` column. Left unset,
+`schema_migrations` and `migrations` are tried, and a branch with neither is
+reported as one where every file is pending. `format` has one value, `sql`,
+and it is the default.
 
 ### `subset`
 

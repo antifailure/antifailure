@@ -140,6 +140,30 @@ type Database struct {
 	Golden      *Golden `json:"golden,omitempty" yaml:"golden,omitempty"`
 	Subset      *Subset `json:"subset,omitempty" yaml:"subset,omitempty"`
 	Seed        string  `json:"seed,omitempty" yaml:"seed,omitempty"`
+	// Migrations says where the SQL migrations live, for a project whose
+	// migrate command is its own script rather than a tool the rehearsal
+	// recognises from the tree. Declared, nothing is inferred.
+	Migrations *Migrations `json:"migrations,omitempty" yaml:"migrations,omitempty"`
+}
+
+// Migrations declares a project's own migration files.
+//
+// The rehearsal recognises Prisma, Supabase, Drizzle, Flyway and a handful of
+// others from their marker files. A project that applies a directory of
+// numbered SQL files with a script of its own has no marker to recognise, and
+// the rehearsal used to answer INCONCLUSIVE for it while the manifest declared
+// lock thresholds that could never fire. This names the directory instead.
+type Migrations struct {
+	// Dir is the directory of .sql files, relative to the repository root.
+	Dir string `json:"dir" yaml:"dir"`
+	// Format is how the files are read. Only sql exists, and it is the
+	// default; it is here so a second format can be added without a second
+	// key.
+	Format string `json:"format,omitempty" yaml:"format,omitempty"`
+	// Table is the ledger the project's own runner records applied files in,
+	// so the rehearsal can tell what is pending against a branch the way the
+	// runner itself would. Empty probes the usual names.
+	Table string `json:"table,omitempty" yaml:"table,omitempty"`
 }
 
 // GoldenStorage names where dumps and attestations live.

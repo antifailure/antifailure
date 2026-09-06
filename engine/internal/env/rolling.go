@@ -243,7 +243,7 @@ func (o *Orchestrator) rollingControl(
 	base, release, err := o.bringUpPreviousRelease(ctx, s, previousRelease{
 		envID: o.envID + rollingControlSuffix, tree: in.tree, manifest: in.manifest,
 		golden: in.golden, specs: in.specs, only: only,
-		set: insights.Discover(os.DirFS(in.tree)),
+		set: insights.Locate(os.DirFS(in.tree), in.manifest),
 	})
 	if release != nil {
 		defer release()

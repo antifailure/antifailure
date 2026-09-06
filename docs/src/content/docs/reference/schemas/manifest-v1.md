@@ -107,6 +107,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `golden` | [Golden](#golden) | no | The masked, verified copy every environment branches from. |
 | `masking_rules` | string | no | Path to the masking rules file, relative to the repository root. Defaults to `masking.yaml`. Max length 512. |
 | `max_branches` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
+| `migrations` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | `project` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
 | `provider` | `docker`, `neon`, `supabase`, `dblab` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service. Defaults to `docker`. |
 | `seed` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
@@ -259,6 +260,16 @@ One journey document and how hard to run it.
 | `path` | string | **yes** | The scenario document, relative to the repository root. Max length 512. |
 | `sessions` | integer | no | How many sessions walk the journey at once. Defaults to `1`. Minimum 1, maximum 1000. |
 | `start_after` | string | no | Delay before this scenario starts, so one journey can burst while another is already running. Matches `^[0-9]+(ms\|s\|m)$`. |
+
+## Migrations
+
+Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. Declared, the rehearsal replays the files in this directory and nothing is inferred from the tree.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `dir` | string | **yes** | Directory of .sql files, relative to the repository root, applied in filename order. A directory of numbered files such as 0042_add_index.sql is also recognised without this key when no tool is; declaring it removes the guess. Max length 512. |
+| `format` | `sql` | no | How the files are read. Only sql exists. Defaults to `sql`. |
+| `table` | string | no | The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`. |
 
 ## Oracle
 

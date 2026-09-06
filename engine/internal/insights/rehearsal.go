@@ -108,6 +108,14 @@ func Rehearse(
 		r.Missing = append(r.Missing,
 			"the migration tool's history table could not be read, so every migration on "+
 				"disk is treated as pending: "+short(err))
+	} else if applied == nil && set.Tool == ToolSQLDir {
+		// Said out loud, because a rehearsal of forty files that production
+		// applied months ago would fail on the first CREATE TABLE and read
+		// as a broken migration rather than as a ledger nobody named.
+		r.Missing = append(r.Missing,
+			"no ledger table was found on the branch under "+strings.Join(ledgerTables, " or ")+
+				", so every file in "+set.Dir+" is treated as pending. Name the table the "+
+				"project's runner writes under database.migrations.table")
 	}
 	r.Pending = set.Pending(applied)
 
@@ -334,6 +342,16 @@ func (a *SQLApplier) Apply(
 			return out, err
 		}
 		for _, st := range Split(m.Name, m.SQL) {
+			if isTransactionControl(st.SQL) {
+				// The file carries its own BEGIN and COMMIT, which is what a
+				// runner that sends the whole file as one simple query wants
+				// from it. Here each file already runs inside one transaction,
+				// so the file's COMMIT would end that transaction early and
+				// leave the statements after it, and the Commit below, outside
+				// of it. Skipped rather than executed, and not timed, because
+				// a COMMIT that takes no time is not a finding.
+				continue
+			}
 			start := time.Now()
 			_, err := tx.Exec(ctx, st.SQL)
 			ms := float64(time.Since(start).Microseconds()) / 1000
@@ -351,4 +369,14 @@ func (a *SQLApplier) Apply(
 		}
 	}
 	return out, nil
+}
+
+// isTransactionControl reports whether a statement opens or closes a
+// transaction, which the SQL applier does on the file's behalf.
+func isTransactionControl(sql string) bool {
+	switch firstWord(sql) {
+	case "BEGIN", "COMMIT", "END", "START", "ROLLBACK":
+		return true
+	}
+	return false
 }

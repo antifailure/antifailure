@@ -125,6 +125,19 @@ func Explain(m *schema.Manifest, width int) string {
 				"project makes for itself, never another project's golden", 15, width))
 	}
 	fmt.Fprintf(&b, "  masking      %s\n", value(d.MaskingRules, 15, width))
+	if d.Migrations != nil {
+		ledger := "the ledger probed at schema_migrations or migrations"
+		if d.Migrations.Table != "" {
+			ledger = "pending read from " + d.Migrations.Table
+		}
+		fmt.Fprintf(&b, "  migrations   %s\n", value(fmt.Sprintf(
+			"%s, replayed as %s by the rehearsal, %s",
+			d.Migrations.Dir, d.Migrations.Format, ledger), 15, width))
+	} else {
+		fmt.Fprintf(&b, "  migrations   %s\n", value(
+			"not declared, so the rehearsal recognises the tool from the tree; "+
+				"a project with its own runner should name database.migrations.dir", 15, width))
+	}
 	fmt.Fprintf(&b, "  golden       %s\n", value(fmt.Sprintf("refresh %s, keep %d, storage %s",
 		orNone(d.Golden.Schedule, "on demand"), d.Golden.Retain, d.Golden.Storage), 15, width))
 	if d.Subset.Enabled {

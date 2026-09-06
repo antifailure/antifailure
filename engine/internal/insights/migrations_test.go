@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/insights"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 func file(body string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(body)} }
@@ -178,4 +179,146 @@ func TestDiscover_FlywayOrdersByVersionRatherThanByFilename(t *testing.T) {
 		set.Migrations[0].Version, set.Migrations[1].Version,
 		set.Migrations[2].Version, set.Migrations[3].Version,
 	})
+}
+
+// A project with its own runner names its directory, and nothing is inferred.
+//
+// This repository is the case. Its migrations are numbered SQL files under
+// web/packages/db/migrations applied by a forty line script, and the rehearsal
+// answered "no migration tool was recognised" for the product's own control
+// plane while the manifest declared lock thresholds for exactly those files.
+func TestLocate_ReadsTheDirectoryTheManifestDeclares(t *testing.T) {
+	t.Parallel()
+	m := &schema.Manifest{
+		Services: []schema.Service{{Name: "api", Path: "web/apps/api", Migrate: "node bootstrap.mjs"}},
+		Database: &schema.Database{Migrations: &schema.Migrations{
+			Dir: "web/packages/db/migrations", Format: "sql", Table: "schema_migrations",
+		}},
+	}
+	set := insights.Locate(fstest.MapFS{
+		"web/packages/db/migrations/0001_init.sql": file("CREATE TABLE users (id int);"),
+		"web/packages/db/migrations/0002_rls.sql":  file("ALTER TABLE users ENABLE ROW LEVEL SECURITY;"),
+		"web/packages/db/src/migrate.ts":           file("export async function migrate() {}"),
+		// A Prisma directory elsewhere in the tree, which inference would
+		// have chosen first. The declaration has to win over it.
+		"tools/prisma/migrations/20240101000000_x/migration.sql": file("SELECT 1;"),
+	}, m)
+	require.Equal(t, insights.ToolSQLDir, set.Tool)
+	require.True(t, set.Declared, "the report must be able to say the project named this directory")
+	require.Equal(t, "web/packages/db/migrations", set.Dir)
+	require.Equal(t, "schema_migrations", set.Ledger)
+	require.Len(t, set.Migrations, 2)
+	// The runner records the filename, so that is the version.
+	require.Equal(t, "0001_init.sql", set.Migrations[0].Version)
+	require.Equal(t, "0002_rls.sql", set.Migrations[1].Version)
+	require.Empty(t, set.Reason)
+}
+
+func TestLocate_ADeclaredDirectoryThatIsMissingIsSaidNotGuessed(t *testing.T) {
+	t.Parallel()
+	m := &schema.Manifest{Database: &schema.Database{
+		Migrations: &schema.Migrations{Dir: "db/migrations"},
+	}}
+	set := insights.Locate(fstest.MapFS{
+		"migrations/0001_init.sql": file("SELECT 1;"),
+		"migrations/0002_more.sql": file("SELECT 2;"),
+	}, m)
+	require.Equal(t, insights.ToolSQLDir, set.Tool)
+	require.True(t, set.Declared)
+	require.Empty(t, set.Migrations, "a wrong declaration must not fall back to a guess")
+	require.Contains(t, set.Reason, "database.migrations.dir")
+	require.Contains(t, set.Reason, "no such directory")
+
+	empty := insights.Locate(fstest.MapFS{
+		"db/migrations/README.md": file("nothing here yet"),
+	}, m)
+	require.Empty(t, empty.Migrations)
+	require.Contains(t, empty.Reason, "holds no .sql files")
+}
+
+// Without a declaration, a directory of numbered files anywhere reasonable in
+// the tree is recognised. The fixed root list never reached a monorepo's
+// packages directory.
+func TestDiscover_FindsANumberedSQLDirectoryDeepInTheTree(t *testing.T) {
+	t.Parallel()
+	set := insights.Discover(fstest.MapFS{
+		"web/packages/db/migrations/0001_init.sql": file("CREATE TABLE t (id int);"),
+		"web/packages/db/migrations/0002_more.sql": file("ALTER TABLE t ADD COLUMN c int;"),
+		"web/packages/db/migrations/notes.md":      file("not sql"),
+		// Other people's projects, which are not this one's migrations even
+		// when they are shallower.
+		"examples/go-api/migrations/0001_init.sql":   file("SELECT 1;"),
+		"examples/go-api/migrations/0002_orders.sql": file("SELECT 2;"),
+		"engine/testdata/migrations/0001_a.sql":      file("SELECT 1;"),
+		"engine/testdata/migrations/0002_b.sql":      file("SELECT 2;"),
+		"node_modules/pkg/migrations/0001_a.sql":     file("SELECT 1;"),
+		"node_modules/pkg/migrations/0002_b.sql":     file("SELECT 2;"),
+	})
+	require.Equal(t, insights.ToolSQLDir, set.Tool)
+	require.False(t, set.Declared)
+	require.Equal(t, "web/packages/db/migrations", set.Dir)
+	require.Len(t, set.Migrations, 2)
+	require.Equal(t, "0001_init.sql", set.Migrations[0].Version)
+}
+
+func TestDiscover_OneNumberedFileIsNotAMigrationDirectory(t *testing.T) {
+	t.Parallel()
+	// A schema.sql beside a 001_seed.sql is a project with a schema and a
+	// seed, not a sequence anybody applies in order.
+	set := insights.Discover(fstest.MapFS{
+		"db/schema.sql":   file("CREATE TABLE t (id int);"),
+		"db/001_seed.sql": file("INSERT INTO t VALUES (1);"),
+	})
+	require.Equal(t, insights.ToolNone, set.Tool)
+	require.Empty(t, set.Migrations)
+}
+
+func TestLocate_TheServicePathSteersBetweenTwoCandidates(t *testing.T) {
+	t.Parallel()
+	tree := fstest.MapFS{
+		"billing/migrations/0001_init.sql": file("SELECT 1;"),
+		"billing/migrations/0002_more.sql": file("SELECT 2;"),
+		"shop/db/migrations/0001_init.sql": file("SELECT 1;"),
+		"shop/db/migrations/0002_more.sql": file("SELECT 2;"),
+	}
+	// The service that migrates lives under shop, so shop's directory is the
+	// one its migrate command applies, even though billing's is shallower.
+	m := &schema.Manifest{Services: []schema.Service{{Name: "web", Path: "shop", Migrate: "./migrate.sh"}}}
+	require.Equal(t, "shop/db/migrations", insights.Locate(tree, m).Dir)
+
+	// With no service path to go on, the shallowest wins and the choice is
+	// stable.
+	require.Equal(t, "billing/migrations", insights.Locate(tree, &schema.Manifest{}).Dir)
+	require.Equal(t, "billing/migrations", insights.Discover(tree).Dir)
+}
+
+// A hand written ledger records whichever of three things its author chose.
+func TestPending_MatchesALedgerThatRecordsTheNameTheStemOrTheNumber(t *testing.T) {
+	t.Parallel()
+	set := insights.Locate(fstest.MapFS{
+		"migrations/0001_init.sql":   file("SELECT 1;"),
+		"migrations/0002_rls.sql":    file("SELECT 2;"),
+		"migrations/0003_orders.sql": file("SELECT 3;"),
+		"migrations/0004_index.sql":  file("SELECT 4;"),
+	}, &schema.Manifest{Database: &schema.Database{Migrations: &schema.Migrations{Dir: "migrations"}}})
+	require.Len(t, set.Migrations, 4)
+
+	pending := set.Pending(map[string]bool{
+		"0001_init.sql": true, // the filename, as this repository's runner writes it
+		"0002_rls":      true, // the stem
+		"0003":          true, // the leading number
+	})
+	require.Len(t, pending, 1)
+	require.Equal(t, "0004_index.sql", pending[0].Name)
+
+	// A short number is not evidence. A ledger holding "1" says nothing about
+	// 1_init.sql, so a set numbered without padding stays pending.
+	short := insights.Declared(fstest.MapFS{
+		"m/1_init.sql": file("SELECT 1;"),
+		"m/2_more.sql": file("SELECT 2;"),
+	}, &schema.Migrations{Dir: "m"})
+	require.Len(t, short.Pending(map[string]bool{"1": true, "2": true}), 2)
+
+	// nil means no ledger was read, and everything is pending.
+	require.Len(t, set.Pending(nil), 4)
 }

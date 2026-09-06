@@ -35,12 +35,14 @@ package insights
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Report is what the database noticed.
@@ -137,13 +139,21 @@ func Collect(ctx context.Context, conn *pgx.Conn, limit int) (Report, error) {
 	}
 	var report Report
 
+	// The extension is created here rather than expected. On a branch the
+	// role is a superuser and the module is preloaded, so CREATE EXTENSION
+	// is a one line fix for a view that would otherwise never exist: the
+	// module records from server start whether or not the view is there, so
+	// creating it now exposes everything the environment ran. Where the role
+	// cannot, the statement fails and the query below says so.
+	installErr := installStatementStatistics(ctx, conn)
+
 	queries, err := collectQueries(ctx, conn, limit)
 	if err != nil {
-		// The extension is the common reason and it is not a failure. Saying
-		// so is the whole point: silence here reads as nothing to report.
-		report.Missing = append(report.Missing,
-			"query statistics need the pg_stat_statements extension, which is not available here: "+
-				short(err))
+		// Not a failure of the run, and never silent: silence here reads as
+		// nothing to report. The message names the reason it was not
+		// available, because "not available" alone sent people to install
+		// an extension that was installed and not preloaded.
+		report.Missing = append(report.Missing, statementStatisticsUnavailable(err, installErr))
 	} else {
 		report.Queries = queries
 	}
@@ -394,4 +404,44 @@ func (r Report) Explain() string {
 		fmt.Fprintf(&b, "Not measured: %s\n", m)
 	}
 	return b.String()
+}
+
+// installStatementStatistics creates the pg_stat_statements view where the
+// role may. The error is kept for the message rather than returned, because
+// the query that follows is the real test of whether statistics can be read.
+func installStatementStatistics(ctx context.Context, conn *pgx.Conn) error {
+	_, err := conn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+	return err
+}
+
+// statementStatisticsUnavailable says why statement timing could not be read,
+// in the words that lead to the fix.
+//
+// Three different situations used to print the same "relation does not exist":
+// the module not preloaded, so the extension cannot record and creating it
+// fails; a role that may not create extensions; and a server that has no
+// pg_stat_statements at all. Each has a different fix, and each is named.
+func statementStatisticsUnavailable(queryErr, installErr error) string {
+	const lead = "statement timing is unavailable: query statistics need the pg_stat_statements " +
+		"extension, "
+	if installErr == nil {
+		return lead + "which could not be read here: " + short(queryErr)
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(installErr, &pgErr) {
+		switch pgErr.Code {
+		case "55000":
+			// object_not_in_prerequisite_state: "pg_stat_statements must be
+			// loaded via shared_preload_libraries".
+			return lead + "which this server was started without preloading. Start Postgres " +
+				"with -c shared_preload_libraries=pg_stat_statements; the extension records " +
+				"nothing otherwise: " + short(installErr)
+		case "42501":
+			return lead + "and this role may not create it. Create it once as a superuser with " +
+				"CREATE EXTENSION pg_stat_statements: " + short(installErr)
+		case "0A000", "58P01":
+			return lead + "which this server does not have installed: " + short(installErr)
+		}
+	}
+	return lead + "which could not be created here: " + short(installErr)
 }

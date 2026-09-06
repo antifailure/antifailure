@@ -148,6 +148,17 @@ database:
   # refresh` is run against a database somebody stood up locally; set in CI to
   # the staging control plane.
   source_url_env: AF_STAGING_DATABASE_URL
+  # The api's migrate step is our own runner, web/packages/db/src/migrate.ts,
+  # which applies these files in name order and records each one's filename in
+  # schema_migrations. No marker file says so, and the rehearsal answered
+  # INCONCLUSIVE for this very repository, "no migration tool was recognised",
+  # while policy.migration_lock below declared thresholds that could never
+  # fire. Declared, the rehearsal replays exactly these files and reads the
+  # same ledger the runner does to decide what is pending.
+  migrations:
+    dir: web/packages/db/migrations
+    format: sql
+    table: schema_migrations
   golden:
     # Refreshed nightly and never used past a week. A golden older than that is
     # a copy of a schema that has moved on, and branching from it produces

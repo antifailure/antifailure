@@ -833,24 +833,197 @@ func TestCollect_FindsThePlantedNPlusOne(t *testing.T) {
 	require.Greater(t, diff.Busier[0].Factor, 50.0)
 }
 
-func TestCollect_SaysSoWhenTheExtensionIsMissing(t *testing.T) {
+// Collect makes the view itself. The module records from server start whether
+// or not the view exists, so a branch whose Postgres was started with the
+// preload and nothing else has every statement the environment ran waiting
+// behind one CREATE EXTENSION. The rehearsal reported "statement timing
+// unavailable" on every Docker branch until this ran it.
+func TestCollect_CreatesTheStatisticsViewItself(t *testing.T) {
+	db, done := requireDatabase(t, "insightsmakesview")
+	defer done()
+	ctx := context.Background()
+
+	_, _ = db.conn.Exec(ctx, "DROP EXTENSION IF EXISTS pg_stat_statements")
+	var preload string
+	require.NoError(t, db.conn.QueryRow(ctx, "SHOW shared_preload_libraries").Scan(&preload))
+	if !strings.Contains(preload, "pg_stat_statements") {
+		t.Skipf("skipped: this server was started without the preload (%q), so the view "+
+			"cannot record and the case cannot be shown here", preload)
+	}
+
+	var id int64
+	_ = db.conn.QueryRow(ctx, "SELECT id FROM orders WHERE user_id = $1 LIMIT 1", 7).Scan(&id)
+	r, err := insights.Collect(ctx, db.conn, 20)
+	require.NoError(t, err)
+	for _, m := range r.Missing {
+		require.NotContains(t, m, "pg_stat_statements",
+			"the view should have been created rather than reported missing")
+	}
+	var seen bool
+	for _, q := range r.Queries {
+		if strings.Contains(q.Text, "orders") {
+			seen = true
+		}
+	}
+	require.True(t, seen, "the statement run before Collect must be in the report: %+v", r.Queries)
+}
+
+// Where the view cannot be created, the report says which of the three reasons
+// it was, because they have three different fixes.
+func TestCollect_SaysWhyWhenTheExtensionCannotBeCreated(t *testing.T) {
 	db, done := requireDatabase(t, "insightsnostats")
 	defer done()
 	ctx := context.Background()
 
 	_, _ = db.conn.Exec(ctx, "DROP EXTENSION IF EXISTS pg_stat_statements")
-	r, err := insights.Collect(ctx, db.conn, 20)
+	// A role that may connect and read, and may not CREATE anything in the
+	// database, which is what a hosted branch's application role looks like.
+	_, _ = db.conn.Exec(ctx, "DROP ROLE IF EXISTS af_insights_reader")
+	_, err := db.conn.Exec(ctx, "CREATE ROLE af_insights_reader LOGIN PASSWORD 'reader'")
+	require.NoError(t, err)
+	defer func() { _, _ = db.conn.Exec(ctx, "DROP ROLE IF EXISTS af_insights_reader") }()
+
+	u := db.url.Reveal()
+	at := strings.LastIndex(u, "@")
+	scheme := strings.Index(u, "://")
+	require.True(t, at > 0 && scheme > 0)
+	readerURL := u[:scheme+3] + "af_insights_reader:reader" + u[at:]
+	reader, err := pgx.Connect(ctx, readerURL)
+	require.NoError(t, err)
+	defer func() { _ = reader.Close(ctx) }()
+
+	r, err := insights.Collect(ctx, reader, 20)
 	require.NoError(t, err)
 
-	var probe int
-	if err := db.conn.QueryRow(ctx,
-		"SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'").Scan(&probe); err == nil {
-		t.Skip("skipped: the extension could not be removed, so there is nothing to prove")
-	}
 	// An insight that silently reports nothing because an extension is
 	// missing looks exactly like a clean bill of health.
-	require.NotEmpty(t, r.Missing)
-	require.Contains(t, strings.Join(r.Missing, " "), "pg_stat_statements")
+	joined := strings.Join(r.Missing, " ")
+	require.Contains(t, joined, "statement timing is unavailable")
+	require.Contains(t, joined, "pg_stat_statements")
+	require.Contains(t, joined, "this role may not create it",
+		"the reason has to be the one that leads to the fix")
+}
+
+// The pending set for a plain SQL directory comes from the ledger the project's
+// own runner keeps, read the way the runner reads it.
+//
+// This repository's runner records the filename in schema_migrations.name.
+// Before the ledger was read, every file from 0001 was pending against a
+// branch that already held forty of them, and the rehearsal would have failed
+// on the first CREATE TABLE and reported a broken migration.
+func TestApplied_ReadsAHandWrittenLedgerByFilename(t *testing.T) {
+	db, done := requireDatabase(t, "insightsledger")
+	defer done()
+	ctx := context.Background()
+
+	_, err := db.conn.Exec(ctx, `
+CREATE TABLE schema_migrations (
+  name        text PRIMARY KEY,
+  digest      text NOT NULL,
+  applied_at  timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations (name, digest) VALUES ('0001_init.sql', 'x'), ('0002_rls.sql', 'y');`)
+	require.NoError(t, err)
+
+	files := fstest.MapFS{
+		"web/packages/db/migrations/0001_init.sql":   file("CREATE TABLE users (id int);"),
+		"web/packages/db/migrations/0002_rls.sql":    file("ALTER TABLE users ENABLE ROW LEVEL SECURITY;"),
+		"web/packages/db/migrations/0003_orders.sql": file("ALTER TABLE orders ADD COLUMN ledger_col text;"),
+	}
+	declared := &schema.Manifest{Database: &schema.Database{Migrations: &schema.Migrations{
+		Dir: "web/packages/db/migrations", Table: "schema_migrations",
+	}}}
+	set := insights.Locate(files, declared)
+
+	applied, err := set.Applied(ctx, db.conn)
+	require.NoError(t, err)
+	require.True(t, applied["0001_init.sql"])
+	require.True(t, applied["0002_rls.sql"])
+	pending := set.Pending(applied)
+	require.Len(t, pending, 1, "two of three are in the ledger")
+	require.Equal(t, "0003_orders.sql", pending[0].Name)
+
+	// Unnamed, the usual names are probed and the same answer comes back.
+	probed := insights.Locate(files, &schema.Manifest{Database: &schema.Database{
+		Migrations: &schema.Migrations{Dir: "web/packages/db/migrations"},
+	}})
+	applied, err = probed.Applied(ctx, db.conn)
+	require.NoError(t, err)
+	require.Len(t, probed.Pending(applied), 1)
+
+	// And the whole rehearsal applies only the pending file, so the CREATE
+	// TABLE production ran months ago is never replayed.
+	r, err := insights.Rehearse(ctx, db.conn, db.watch, db.url, set,
+		&insights.SQLApplier{}, insights.LargeTableRows)
+	require.NoError(t, err)
+	require.False(t, r.Failed, r.Error)
+	require.Len(t, r.Pending, 1)
+	for _, m := range r.Missing {
+		require.NotContains(t, m, "no ledger table was found")
+	}
+	var exists bool
+	require.NoError(t, db.conn.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'orders' "+
+			"AND column_name = 'ledger_col')").Scan(&exists))
+	require.True(t, exists)
+}
+
+func TestApplied_ANamedLedgerThatIsMissingIsReportedNotGuessed(t *testing.T) {
+	db, done := requireDatabase(t, "insightsnoledger")
+	defer done()
+	ctx := context.Background()
+
+	set := insights.Declared(fstest.MapFS{
+		"m/0001_a.sql": file("SELECT 1;"),
+		"m/0002_b.sql": file("SELECT 2;"),
+	}, &schema.Migrations{Dir: "m", Table: "app.history"})
+	_, err := set.Applied(ctx, db.conn)
+	require.Error(t, err, "a table the manifest named and the branch lacks is a wrong manifest")
+	require.Contains(t, err.Error(), "database.migrations.table")
+
+	// Unnamed and absent, the answer is nil and the rehearsal says so in the
+	// report rather than failing: a fresh project has no ledger yet.
+	set.Ledger = ""
+	applied, err := set.Applied(ctx, db.conn)
+	require.NoError(t, err)
+	require.Nil(t, applied)
+	r, err := insights.Rehearse(ctx, db.conn, db.watch, db.url, set,
+		&insights.SQLApplier{}, insights.LargeTableRows)
+	require.NoError(t, err)
+	require.Contains(t, strings.Join(r.Missing, " "), "no ledger table was found")
+	require.Len(t, r.Pending, 2)
+}
+
+// A file that carries its own BEGIN and COMMIT is applied as one transaction,
+// which is what its author meant, rather than committing halfway through the
+// applier's own transaction.
+func TestRehearse_AppliesAFileThatCarriesItsOwnTransaction(t *testing.T) {
+	db, done := requireDatabase(t, "insightsowntx")
+	defer done()
+	ctx := context.Background()
+
+	r := rehearse(t, db, map[string]string{
+		"0001_own_tx.sql": `
+/* A comment before the transaction, as this repository's files have. */
+BEGIN;
+
+ALTER TABLE orders ADD COLUMN own_tx_a text;
+ALTER TABLE orders ADD COLUMN own_tx_b text;
+
+COMMIT;
+`,
+	})
+	require.False(t, r.Failed, r.Error)
+	require.Len(t, r.Statements, 2, "BEGIN and COMMIT are the applier's to run, not statements to time")
+	for _, st := range r.Statements {
+		require.NotEqual(t, "BEGIN", st.SQL)
+		require.NotEqual(t, "COMMIT", st.SQL)
+	}
+	var n int
+	require.NoError(t, db.conn.QueryRow(ctx,
+		"SELECT count(*) FROM information_schema.columns WHERE table_name = 'orders' "+
+			"AND column_name IN ('own_tx_a', 'own_tx_b')").Scan(&n))
+	require.Equal(t, 2, n)
 }
 
 func TestRun_HonoursEveryCheckTheManifestTurnedOff(t *testing.T) {
