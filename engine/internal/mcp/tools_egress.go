@@ -256,7 +256,7 @@ func unavailableReason(err error) string {
 		return "No environment is running for this branch, so there is no decision log yet. " +
 			"Bring one up with af up."
 	}
-	return "The environment's decision log could not be read. The server log says why."
+	return withCause("The environment's decision log could not be read.", err)
 }
 
 func describePolicy(eng *policy.Engine) egressPolicyDoc {

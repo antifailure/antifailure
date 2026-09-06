@@ -236,7 +236,7 @@ func inspectEnvironments(
 			return nil, &Fault{
 				Code: FaultSafetyUnavailable,
 				Detail: "The runtime could not be asked what is running, so this says " +
-					"nothing about the environment. The server log says why.",
+					"nothing about the environment.",
 				Retryable: true, wrapped: err,
 			}
 		}
@@ -250,7 +250,7 @@ func inspectEnvironments(
 			return nil, &Fault{
 				Code: FaultSafetyUnavailable,
 				Detail: "The runtime's inventory could not be read, so this says nothing " +
-					"about what the machine is holding. The server log says why.",
+					"about what the machine is holding.",
 				Retryable: true, wrapped: err,
 			}
 		}
@@ -290,7 +290,7 @@ func inspectEnvironments(
 				Code: FaultSafetyUnavailable,
 				Detail: "The control plane could not be read. It needs a credential: " +
 					"somebody has to run af login at a terminal, or set an engine token in " +
-					"this server's environment. The server log says which failed.",
+					"this server's environment.",
 				Retryable: true, wrapped: err,
 			}
 		}
@@ -666,7 +666,7 @@ func sweepFault(err error) *Fault {
 		Code: FaultSafetyUnavailable,
 		Detail: "The sweep could not run, so nothing was planned and nothing was removed. " +
 			"It needs the runtime that holds the environments and a lock no other sweep is " +
-			"holding. The server log says which was missing.",
+			"holding.",
 		Retryable: true, wrapped: err,
 	}
 }
@@ -850,7 +850,7 @@ func extensionFault(err error) *Fault {
 	return &Fault{
 		Code: FaultSafetyUnavailable,
 		Detail: "The expiry could not be moved, so the environment still expires when it " +
-			"already did. The server log says why.",
+			"already did.",
 		Retryable: true, wrapped: err,
 	}
 }
@@ -1079,7 +1079,7 @@ func messagesFault(err error) *Fault {
 		Code: FaultSafetyUnavailable,
 		Detail: "The captured messages could not be read, so this says nothing about what " +
 			"the application sent. There is usually no environment running for this branch; " +
-			"bring one up with af up. The server log says which failed.",
+			"bring one up with af up.",
 		Retryable: true, wrapped: err,
 	}
 }
@@ -1425,7 +1425,7 @@ func sendWebhookEvent(
 			Code: FaultSafetyUnavailable,
 			Detail: "The event could not be delivered, so the application did not receive " +
 				"it. There is usually no environment running for this branch, or the " +
-				"manifest sets no webhook_path for this provider. The server log says which.",
+				"manifest sets no webhook_path for this provider.",
 			Retryable: true, wrapped: err,
 		}
 	}

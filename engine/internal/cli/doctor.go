@@ -134,12 +134,37 @@ something is wrong and stops is worse than no diagnostic, because it costs the
 same attention and yields nothing.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			report := RunDoctor(cmd.Context(), env, systemProber{getenv: env.Getenv})
-			return renderDoctor(env, report)
+			prober := systemProber{getenv: env.Getenv}
+			if env.Out.Format == FormatJSON {
+				return renderDoctor(env, RunDoctor(cmd.Context(), env, prober))
+			}
+			return runDoctorText(cmd.Context(), env, prober, doctorChecks)
 		},
 	}
 }
 
+// runDoctorText is the terminal form: each line is printed the moment its
+// check answers, in the order they answer, and the summary follows the last.
+//
+// On 2026-09-06 this command printed nothing for over two minutes and then
+// all fifteen checks at once, because a Docker daemon that was slow to
+// respond held back the thirteen checks that had already finished. A
+// diagnostic that withholds fourteen answers behind the one it does not have
+// is the diagnostic the command's own Long text warns against. The JSON form
+// is unchanged: one document, at the end, in catalog order.
+func runDoctorText(ctx context.Context, env *Env, p Prober, checks []doctorCheck) error {
+	renderDoctorHeader(env, doctorPlatform())
+	report := runDoctor(ctx, env, p, checks, func(c CheckResult) {
+		env.Out.Status(symbolFor(c.Status), c.Name, c.Detail)
+	})
+	return renderDoctorSummary(env, report)
+}
+
+// renderDoctor prints a finished report in one go.
+//
+// It is what the JSON form uses, which is one document at the end, and what
+// a caller with a report already in hand uses. The command's own text form
+// streams instead; see newDoctorCommand.
 func renderDoctor(env *Env, report DoctorReport) error {
 	if env.Out.Format == FormatJSON {
 		if err := env.Out.JSON(report); err != nil {
@@ -151,13 +176,25 @@ func renderDoctor(env *Env, report DoctorReport) error {
 		return nil
 	}
 
-	env.Out.Section("Antifailure doctor")
-	env.Out.Printf("  %s\n", env.Out.S(StyleDim, report.Platform))
-	env.Out.Println("")
+	renderDoctorHeader(env, report.Platform)
 	for _, c := range report.Checks {
 		env.Out.Status(symbolFor(c.Status), c.Name, c.Detail)
 	}
+	return renderDoctorSummary(env, report)
+}
 
+func renderDoctorHeader(env *Env, platform string) {
+	env.Out.Section("Antifailure doctor")
+	env.Out.Printf("  %s\n", env.Out.S(StyleDim, platform))
+	env.Out.Println("")
+}
+
+// renderDoctorSummary prints what to do and the verdict, after every line.
+//
+// The problems are listed in the catalog's order whatever order the lines
+// above arrived in, so the section reads the same on a fast machine and a
+// slow one.
+func renderDoctorSummary(env *Env, report DoctorReport) error {
 	var problems []CheckResult
 	for _, c := range report.Checks {
 		if c.Status == CheckFail || c.Status == CheckWarn {
@@ -236,37 +273,81 @@ func silent(err error) error {
 	return &silentError{}
 }
 
-// RunDoctor executes every check. It is exported so that af up can run the
-// subset it depends on before doing any work, rather than failing halfway
-// through with a confusing message.
+// doctorCheck is one question about the machine.
+type doctorCheck func(context.Context, *Env, Prober) CheckResult
+
+// doctorChecks is the catalog, in the order the report lists them.
+var doctorChecks = []doctorCheck{
+	checkCLIRelease,
+	checkProjectManifest,
+	checkDocker,
+	checkDockerPlatform,
+	checkDiskSpace,
+	checkStateDirectory,
+	checkPortRange,
+	checkDNS,
+	checkOutbound,
+	checkKernelIsolation,
+	checkProxyEnvironment,
+	checkGit,
+	checkPostgresClient,
+	checkModelKey,
+	checkWebhookDelivery,
+	checkLeftoverEnvironments,
+}
+
+func doctorPlatform() string {
+	return fmt.Sprintf("%s/%s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
+}
+
+// RunDoctor executes every check and returns them in the catalog's order. It
+// is exported so that af up can run the subset it depends on before doing any
+// work, rather than failing halfway through with a confusing message.
 func RunDoctor(ctx context.Context, env *Env, p Prober) DoctorReport {
-	checks := []func(context.Context, *Env, Prober) CheckResult{
-		checkCLIRelease,
-		checkProjectManifest,
-		checkDocker,
-		checkDockerPlatform,
-		checkDiskSpace,
-		checkStateDirectory,
-		checkPortRange,
-		checkDNS,
-		checkOutbound,
-		checkKernelIsolation,
-		checkProxyEnvironment,
-		checkGit,
-		checkPostgresClient,
-		checkModelKey,
-		checkLeftoverEnvironments,
+	return runDoctor(ctx, env, p, doctorChecks, nil)
+}
+
+// runDoctor runs every check at once and hands each result to observe the
+// moment it lands, in the order they land. The report is in catalog order
+// regardless, so the JSON form and the summary do not depend on which probe
+// answered first.
+//
+// At once rather than in turn, because the checks are independent questions
+// and two of them wait on something outside this process: the daemon and the
+// network. A daemon that takes two minutes to answer used to make every check
+// after it in the list wait two minutes too, and the person running this saw
+// nothing at all until it did. Each check has its own probe and reads the
+// environment without writing to it, which is what makes running them
+// together safe.
+func runDoctor(
+	ctx context.Context, env *Env, p Prober, checks []doctorCheck, observe func(CheckResult),
+) DoctorReport {
+	type landed struct {
+		index  int
+		result CheckResult
+	}
+	// Buffered to the number of checks, so a check that finishes while the
+	// consumer is printing never blocks and no goroutine outlives the call.
+	results := make(chan landed, len(checks))
+	for i, fn := range checks {
+		go func(i int, fn doctorCheck) {
+			results <- landed{index: i, result: fn(ctx, env, p)}
+		}(i, fn)
 	}
 	report := DoctorReport{
 		OK:       true,
-		Platform: fmt.Sprintf("%s/%s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version()),
+		Platform: doctorPlatform(),
+		Checks:   make([]CheckResult, len(checks)),
 	}
-	for _, fn := range checks {
-		r := fn(ctx, env, p)
-		if r.Status == CheckFail {
+	for range checks {
+		l := <-results
+		report.Checks[l.index] = l.result
+		if l.result.Status == CheckFail {
 			report.OK = false
 		}
-		report.Checks = append(report.Checks, r)
+		if observe != nil {
+			observe(l.result)
+		}
 	}
 	return report
 }

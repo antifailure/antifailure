@@ -36,8 +36,9 @@ type Diagnosis struct {
 // DiagnosticCheck is one question about the machine and its answer.
 type DiagnosticCheck struct {
 	Name string
-	// Status is pass, fail, warn or skip. A skip is a check that did not
-	// apply or could not be run, and it is never a pass.
+	// Status is pass, fail, warn or skip. A skip is a check that does not
+	// apply on this machine. It is never a pass, and it is never in the way
+	// either: it is reported with its reason and decides nothing.
 	Status string
 	Detail string
 	// Remediation is what to do about it. Every check carries one, including
@@ -304,9 +305,9 @@ func checkPrerequisites(
 					"available. Run af doctor at a terminal.")
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
 		} else if d, err := diagnose(ctx); err != nil {
-			out.NotChecked = append(out.NotChecked,
+			out.NotChecked = append(out.NotChecked, withCause(
 				"the machine: the checks could not be run, so nothing here says whether "+
-					"this machine can run anything. The server log says why.")
+					"this machine can run anything.", err))
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
 		} else {
 			out.Platform = safeText(d.Platform, 120)
@@ -325,9 +326,9 @@ func checkPrerequisites(
 					"af runner check at a terminal.")
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
 		} else if r, err := runner(ctx); err != nil {
-			out.NotChecked = append(out.NotChecked,
+			out.NotChecked = append(out.NotChecked, withCause(
 				"the browser agents: the runner could not be inspected, so nothing here "+
-					"says whether a browser can be driven. The server log says why.")
+					"says whether a browser can be driven.", err))
 			out.Verdict = worseVerdict(out.Verdict, verdictUndetermined)
 		} else {
 			section := runnerSectionDoc{sectionDoc: describeDiagnosticChecks(r.Checks)}
@@ -366,7 +367,13 @@ func describeDiagnosticChecks(checks []DiagnosticCheck) sectionDoc {
 			Remediation: safeText(c.Remediation, 400),
 		}
 		doc.Checks = append(doc.Checks, entry)
-		if entry.Result == "fail" || entry.Result == "skip" {
+		// Only a failure is in the way. A skip is listed with its reason in
+		// Checks and never here: the first version put skips in this list
+		// too, so on a Mac, where packet filtering is always skipped because
+		// the Docker virtual machine handles it, the summary named "Packet
+		// filtering" and "Corporate proxy" as things to fix while their own
+		// remediation read "No action needed".
+		if entry.Result == "fail" {
 			doc.Blocked = append(doc.Blocked, entry)
 		}
 	}
@@ -407,17 +414,20 @@ func normaliseVerdict(v string) string {
 // machineVerdict maps a diagnosis onto the same three words the runner check
 // uses, so one result does not carry two vocabularies.
 //
-// A skipped check makes it undetermined rather than ready. That is the whole
-// point of the third word: a check that did not run is not a check that
-// passed, and reporting it as one is the defect this repository keeps finding
-// in its own instruments.
+// A failure decides it. A status this package does not know makes it
+// undetermined, because a word that arrived from the other side of the
+// boundary unrecognised must not read as a pass. A skip decides nothing: in
+// the doctor's vocabulary a skip is a check that does not apply on this
+// machine, and it is reported in Checks with its reason so nobody mistakes it
+// for a pass. Before this, a skip made the whole machine undetermined, which
+// on every Mac was permanent, since packet filtering is always skipped there.
 func machineVerdict(d Diagnosis) string {
 	verdict := verdictReady
 	for _, c := range d.Checks {
 		switch normaliseResult(c.Status) {
 		case "fail":
 			return verdictBlocked
-		case "skip", "unknown":
+		case "unknown":
 			verdict = verdictUndetermined
 		}
 	}
@@ -603,7 +613,7 @@ func newDescribeAccountTool(p *Project, read readAccount) *Tool {
 					Code: FaultSafetyUnavailable,
 					Detail: "The control plane could not be asked, so this says nothing " +
 						"about who this machine is. It is reachable over the network or it " +
-						"is not; the server log says which failed.",
+						"is not.",
 					Retryable: true, wrapped: err,
 				}
 			}
@@ -803,8 +813,8 @@ func (f *orchestratorFactory) account(ctx context.Context, includeProviders bool
 				"model provider keys. Somebody has to sign in again asking for it, at a " +
 				"terminal."
 		default:
-			spend.Unavailable = "the control plane did not answer with the stored keys. " +
-				"The server log says why."
+			spend.Unavailable = withCause(
+				"the control plane did not answer with the stored keys.", err)
 		}
 		out.Providers = &spend
 		return out, nil

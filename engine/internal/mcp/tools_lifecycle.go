@@ -118,7 +118,7 @@ func runBringUp(
 			Code: FaultSafetyUnavailable,
 			Detail: "The environment did not come up, so there is nothing to drive. " +
 				"Anything it did create before failing is journaled and can be removed " +
-				"with teardown_environment. The server log says what stopped it.",
+				"with teardown_environment.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -256,8 +256,7 @@ func runTeardown(
 			Code: FaultSafetyUnavailable,
 			Detail: "The teardown could not be run, so the environment may still exist " +
 				"and is still recorded in the journal. Nothing was lost; nothing was " +
-				"removed either. Retry once the provider is reachable, or run af down. " +
-				"The server log says what stopped it.",
+				"removed either. Retry once the provider is reachable, or run af down.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -536,7 +535,7 @@ func statusUnavailableReason(err error) string {
 		return "The runtime reported no answer. Check that the container runtime is " +
 			"running with af doctor."
 	}
-	return "The container runtime could not be reached. The server log says why."
+	return withCause("The container runtime could not be reached.", err)
 }
 
 // describeEnvironment renders a result from Up or from Status.
@@ -789,7 +788,7 @@ func logsUnavailableReason(err error) string {
 		return "Nothing is running for this branch, so there is no output to read. " +
 			"Bring an environment up with start_environment."
 	}
-	return "The runtime could not return the services' output. The server log says why."
+	return withCause("The runtime could not return the services' output.", err)
 }
 
 // bringUp creates the environment through the orchestrator.

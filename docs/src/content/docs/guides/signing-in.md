@@ -173,6 +173,25 @@ happen, so nobody is left believing a token is dead when it is not.
 `af logout` clears both the keyring and the file, because a machine can hold
 both if a login happened before the keyring worked.
 
+## When the stored credential is not one
+
+`af login` writes a small JSON document to the keyring or to
+`~/.antifailure/credentials/`. If what is there does not decode, every command
+that reads it says so with one code:
+
+```
+AF-SEC-006 The credential stored in /Users/you/.antifailure/credentials/https---app.antifailure.dev.json
+           is not in this tool's format: invalid character 'K' looking for beginning of value
+  Next: Sign in again with 'af login', which replaces it. Nothing but 'af login'
+        writes there, so if another tool or a hand edit did, move that aside first.
+  More: https://antifailure.dev/docs/guides/signing-in
+```
+
+The decoder's own words are kept because they say where the format stopped
+being this tool's, which is what tells a pasted keychain export apart from a
+truncated write. `af whoami`, `af provider list` and `af token list` all read
+the same store, so they all print this rather than each its own version.
+
 ## When it stops working
 
 A token stops identifying you the moment your membership is removed, even

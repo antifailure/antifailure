@@ -333,7 +333,7 @@ func fidelityUnavailable(err error) string {
 		return "No environment is running for this branch, so there is nothing to take an " +
 			"inventory of. Bring one up with af up."
 	}
-	return "The environment could not be asked what it reproduces. The server log says why."
+	return withCause("The environment could not be asked what it reproduces.", err)
 }
 
 func fidelitySummary(

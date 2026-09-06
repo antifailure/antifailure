@@ -222,7 +222,7 @@ func maskingPlan(ctx context.Context, readers maskingReaders) (any, *Fault) {
 			Detail: "The masking plan could not be built, so this says nothing about what " +
 				"masking would do. A plan needs a schema to read, which is this " +
 				"environment's branch when one is up and the configured source database " +
-				"when one is not. The server log says which failed.",
+				"when one is not.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -422,7 +422,7 @@ func maskingSample(ctx context.Context, readers maskingReaders, args map[string]
 			Detail: "The rows could not be sampled, so this says nothing about whether the " +
 				"rules fire. Sampling reads this environment's branch, so it needs one to " +
 				"be running; bring one up with af up, or ask the plan question instead, " +
-				"which needs no environment. The server log says what failed.",
+				"which needs no environment.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -591,7 +591,7 @@ func maskingVerification(ctx context.Context, readers maskingReaders) (any, *Fau
 			Detail: "The data could not be read back, so nothing here says whether masking " +
 				"worked. That is not a clean result: a scan that could not run has found " +
 				"nothing because it looked at nothing. It reads this environment's branch, " +
-				"so it needs one to be running. The server log says what failed.",
+				"so it needs one to be running.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -798,7 +798,7 @@ func runMaskApply(
 			Detail: "The data was not rewritten. A plan with unresolved problems is refused " +
 				"before anything is written rather than partly run, because a half masked " +
 				"table is neither real nor safe. Ask inspect_data_masking the plan question " +
-				"to see what could not be assigned. The server log says what failed.",
+				"to see what could not be assigned.",
 			Retryable: true,
 			wrapped:   err,
 		}

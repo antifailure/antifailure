@@ -905,8 +905,7 @@ func planChecks(ctx context.Context, analyse analyseChange, base, head string) (
 			Code: FaultSafetyUnavailable,
 			Detail: "The diff could not be read, so nothing here says what this change " +
 				"touches. The usual cause is a base ref this checkout does not have, " +
-				"which happens in a shallow clone; name one it does have as base. The " +
-				"server log says which ref failed.",
+				"which happens in a shallow clone; name one it does have as base.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -1219,7 +1218,7 @@ func invariantsUnavailable(err error) string {
 		return "No environment is running for this branch, so there is no database to ask. " +
 			"Bring one up with af up."
 	}
-	return "The environment's database could not be reached. The server log says why."
+	return withCause("The environment's database could not be reached.", err)
 }
 
 func invariantsSummary(out invariantsResult) string {
@@ -1340,7 +1339,7 @@ func runComparison(
 			Code: FaultSafetyUnavailable,
 			Detail: "The comparison could not be completed, so it says nothing about the " +
 				"change. It needs a baseline revision this checkout can resolve and enough " +
-				"room for a second environment. The server log says which was missing.",
+				"room for a second environment.",
 			Retryable: true,
 			wrapped:   err,
 		}

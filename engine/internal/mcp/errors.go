@@ -3,7 +3,10 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // Fault is a tool level failure, addressed to a model rather than a person.
@@ -15,7 +18,8 @@ import (
 // fields that would be ignored and one exit code that can never be reached,
 // this package keeps its own small closed vocabulary and states the mapping
 // here. Engine errors that arise underneath a tool keep their AF code and are
-// reported inside the Detail of the fault that wraps them.
+// reported inside the fault that wraps them, as Cause, with the same message,
+// next step and link the CLI prints for the same failure.
 //
 // The vocabulary is closed on purpose. A caller can branch on Code, and a code
 // that is invented at a call site is a code no caller can branch on.
@@ -31,9 +35,12 @@ type Fault struct {
 	// Retryable says whether the identical call could later succeed.
 	Retryable bool
 	// wrapped is the underlying engine error, kept for the server log on
-	// standard error. It is never rendered into the result, because an
-	// internal error string is a way for details of the host to reach a
-	// caller that has no business seeing them.
+	// standard error. A raw error string is never rendered into the result,
+	// because it is a way for details of the host to reach a caller that has
+	// no business seeing them. A CATALOGUED error is different: its message
+	// and next step are the product's own words with the fields filled in,
+	// the same words the CLI prints, and those are rendered as the fault's
+	// Cause. See describeCause.
 	wrapped error
 }
 
@@ -149,14 +156,115 @@ type faultDocument struct {
 	Detail    string `json:"detail"`
 	Field     string `json:"field,omitempty"`
 	Retryable bool   `json:"retryable"`
+	// Cause is the engine's own explanation of what failed underneath the
+	// tool, when the engine had one. It is absent for a raw error, whose
+	// text is a description of the host and stays in the server log.
+	Cause *causeDocument `json:"cause,omitempty"`
+}
+
+// causeDocument is a catalogued engine error, in the shape the CLI prints it.
+//
+// On 2026-09-06 a held branch lock made af golden list print AF-RUN-003 with
+// the holder's process id, when it took the lock, and what to do, while the
+// MCP tool asking the identical question returned SAFETY_UNAVAILABLE and
+// "the server log says why". No tool on the server reads that log. An agent
+// on the MCP surface had a dead end where a person at a terminal had a
+// process id and a one line fix. The four fields here are the four lines the
+// CLI prints, so the two surfaces cannot explain the same failure
+// differently.
+type causeDocument struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Next    string `json:"next,omitempty"`
+	More    string `json:"more"`
+	// Retryable is the catalog's own answer, which can differ from the
+	// fault's: a lock held by a live process clears on its own, a rejected
+	// credential does not.
+	Retryable bool `json:"retryable"`
 }
 
 // document renders the caller facing form.
 func (f *Fault) document() faultDocument {
 	return faultDocument{
-		Kind: "error", Code: string(f.Code), Detail: f.Detail,
-		Field: f.Field, Retryable: f.Retryable,
+		Kind: "error", Code: string(f.Code), Detail: withCause(f.Detail, f.wrapped),
+		Field: f.Field, Retryable: f.Retryable, Cause: describeCause(f.wrapped),
 	}
+}
+
+// describeCause renders the catalogued error underneath err, or nil.
+//
+// Only a catalogued error is rendered. Its message and next step are
+// sentences this repository wrote, with the fields it chose to fill in, and
+// they are exactly what the CLI prints on a terminal for the same failure.
+// The raw error that a catalogued one may itself wrap is not rendered, the
+// same as the CLI, which prints it only under a verbose flag: that text is
+// written by a driver or the operating system and can name a host or a path.
+func describeCause(err error) *causeDocument {
+	var coded *aferrors.Error
+	if err == nil || !aferrors.As(err, &coded) {
+		return nil
+	}
+	return &causeDocument{
+		Code:      string(coded.Code()),
+		Message:   safeText(coded.Message(), 600),
+		Next:      safeText(coded.NextStep(), 600),
+		More:      coded.DocsURL(),
+		Retryable: coded.Retryable(),
+	}
+}
+
+// explainCause is describeCause as one run of prose, for a detail or a
+// summary that has to carry the reason in the same string.
+func explainCause(err error) string {
+	c := describeCause(err)
+	if c == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(c.Code)
+	b.WriteString(": ")
+	b.WriteString(c.Message)
+	if c.Next != "" {
+		b.WriteString(" Next: ")
+		b.WriteString(c.Next)
+	}
+	b.WriteString(" More: ")
+	b.WriteString(c.More)
+	return b.String()
+}
+
+// serverLogSentence matches the sentence a first version of every
+// unavailable result ended with, "the server log says why" and its variants,
+// with whatever punctuation joined it to the sentence before.
+var serverLogSentence = regexp.MustCompile(`(?i)(;\s*|\s+|^)the server log says[^.]*\.`)
+
+// withCause finishes an unavailable detail with the reason, when there is one.
+//
+// The sentence pointing at the server log is removed whatever err is. The
+// caller of a tool cannot read that log: the only logs tool on the server
+// reads the application under test, and pointing at a log with no way to
+// read it is worse than not mentioning a log at all. In its place goes the
+// engine's own explanation when the failure is catalogued, and otherwise an
+// honest sentence about where the cause went and how a person can see it.
+func withCause(detail string, err error) string {
+	detail = strings.TrimSpace(serverLogSentence.ReplaceAllStringFunc(detail, func(m string) string {
+		if strings.HasPrefix(m, ";") {
+			return "."
+		}
+		return ""
+	}))
+	if err == nil {
+		return detail
+	}
+	reason := explainCause(err)
+	if reason == "" {
+		reason = "The cause was written to this server's standard error, which no tool " +
+			"here reads; the same command at a terminal prints it."
+	}
+	if detail == "" {
+		return reason
+	}
+	return detail + " " + reason
 }
 
 // asFault converts any error into a fault, so that no path can return an

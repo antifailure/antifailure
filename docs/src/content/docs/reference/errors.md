@@ -1468,6 +1468,18 @@ The variable {name} could not be looked up: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/secrets](/docs/guides/secrets) |
 
+### AF-SEC-006
+
+The credential stored in {location} is not in this tool's format: {detail}
+
+**What to do.** Sign in again with 'af login', which replaces it. Nothing but 'af login' writes there, so if another tool or a hand edit did, move that aside first.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [guides/signing-in](/docs/guides/signing-in) |
+
 ### AF-SEC-010
 
 The environment certificate could not be created: {detail}

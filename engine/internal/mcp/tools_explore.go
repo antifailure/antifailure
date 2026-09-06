@@ -140,7 +140,7 @@ func runWorkflows(
 			Detail: "The workflows could not be driven, so this says nothing about the " +
 				"application. The usual causes are that nothing is running for this " +
 				"branch, that the browser runner is not installed, or that the manifest " +
-				"declares no workflows. The server log says which.",
+				"declares no workflows.",
 			Retryable: true,
 			wrapped:   err,
 		}
@@ -269,6 +269,14 @@ type workflowDoc struct {
 	// path on the host. A caller that wants it runs af test and looks.
 	HasVideo bool `json:"has_video"`
 	HasTrace bool `json:"has_trace"`
+	// RequestsNotMade is how many requests the page could not make, usually
+	// because the egress policy refused them, and FirstNotMade is the first
+	// of them. The CLI has printed this line under every workflow since the
+	// network evidence existed; this result omitted it, so an agent reading
+	// PASS here saw less than a person reading the same run at a terminal,
+	// and a page that half loaded looked whole.
+	RequestsNotMade int    `json:"requests_the_page_could_not_make"`
+	FirstNotMade    string `json:"first_request_not_made,omitempty"`
 }
 
 // invariantDoc is one invariant's answer, WITHOUT the rows behind it.
@@ -316,6 +324,16 @@ type workflowsDoc struct {
 // neutralised and clipped, because a failure that will not say what happened
 // is a failure nobody can act on, and the bound is what keeps a page from
 // spending a caller's whole context.
+// firstOf is the first request the page could not make, bounded and
+// neutralised: the text is the browser's account of the application's own
+// request, and the application is untrusted input.
+func firstOf(failed []string) string {
+	if len(failed) == 0 {
+		return ""
+	}
+	return neutralize(failed[0], 300)
+}
+
 func describeWorkflows(rep *env.TestReport) *workflowsDoc {
 	doc := &workflowsDoc{
 		Total:  len(rep.Results),
@@ -341,6 +359,8 @@ func describeWorkflows(rep *env.TestReport) *workflowsDoc {
 			Detail:   neutralize(w.Outcome.Detail, 400),
 			Steps:    len(w.Steps), DurationMs: w.DurationMs,
 			HasVideo: w.Evidence.Video != "", HasTrace: w.Evidence.Trace != "",
+			RequestsNotMade: len(w.Evidence.Failed),
+			FirstNotMade:    firstOf(w.Evidence.Failed),
 		})
 	}
 	if doc.Results == nil {
@@ -557,7 +577,7 @@ func runExploration(
 			Detail: "The exploration could not be run, so nothing was observed. The usual " +
 				"causes are that nothing is running for this branch, that the manifest " +
 				"declares no goals under explore, or that the browser runner is not " +
-				"installed. The server log says which.",
+				"installed.",
 			Retryable: true,
 			wrapped:   err,
 		}

@@ -155,7 +155,7 @@ func newDescribeModelKeyTool(p *Project, read readModelKey) *Tool {
 				return nil, &Fault{
 					Code: FaultSafetyUnavailable,
 					Detail: "The places a model key can be stored could not be read, so this " +
-						"says nothing about what a run would use. The server log says why.",
+						"says nothing about what a run would use.",
 					Retryable: true, wrapped: err,
 				}
 			}
@@ -309,7 +309,7 @@ func newVerifyModelKeyTool(p *Project, probe probeModelKey) *Tool {
 				return nil, &Fault{
 					Code: FaultSafetyUnavailable,
 					Detail: "The key could not be looked up, so no call was made and this " +
-						"says nothing about whether it works. The server log says why.",
+						"says nothing about whether it works.",
 					Retryable: true, wrapped: err,
 				}
 			}

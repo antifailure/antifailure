@@ -410,6 +410,13 @@ The rows behind a violated invariant are **not** returned. They come out of a
 branch of a masked copy of production, and masked is not public. The count is
 reported so somebody can go and look, and `af invariants` shows the rows.
 
+Each workflow carries `requests_the_page_could_not_make` and, when there were
+any, `first_request_not_made`: the count and the first of the requests the
+browser could not complete, usually because the egress policy refused them.
+`af test` has always printed that line under a workflow, and a passing verdict
+here used to omit it, so a page that half loaded read as whole to an agent
+and as suspect to a person looking at the same run.
+
 ### `explore_for_friction`
 
 Sends agents at the goals declared under `explore` with no script, and reports
@@ -572,6 +579,13 @@ means one could not be answered at all, which is neither, and is never reported
 as ready: a check that did not run is not a check that passed. Anything this
 build could not look at is listed under `not_checked` rather than left out,
 because a section that vanishes reads as a section that passed.
+
+Only a failed check appears under `blocking`. A check with result `skip` is one
+that does not apply on this machine, packet filtering on a Mac for instance,
+where the Docker virtual machine does the work. It is listed under `checks` with
+its reason and it decides nothing: it is neither in the way nor a pass. An
+earlier version listed skips as blocking, and the first tool an agent called
+told it to fix two things whose own remediation read "No action needed".
 
 ### `inspect_environments`
 
@@ -806,6 +820,18 @@ terminal belonging to somebody who is allowed to see it.
 | `RUN_NOT_CANCELLABLE` | A cancel of a run that already finished. |
 | `UNSUPPORTED` | A tool this build does not serve. |
 | `INTERNAL` | A defect in the server. The cause is written to the server log, not returned. |
+
+When the failure underneath a tool is one the engine has a code for, the error
+carries it as `cause`: the `AF-` code, the message with its fields filled in,
+the next step, and the documentation link, which are the four lines the CLI
+prints for the same failure. `detail` repeats them in prose. A branch lock held
+by another process, say, comes back as `AF-RUN-003` with the process id and
+"run 'af down'", exactly as `af golden list` would print it at a terminal.
+Before this, the same call said "the server log says why", and no tool on the
+server reads that log. A cause the engine has no code for is still not
+returned, because a driver's or the operating system's text can name a host
+or a path; the detail says it went to the server's standard error and that
+the same command at a terminal prints it.
 
 ## What `project_id` is for
 

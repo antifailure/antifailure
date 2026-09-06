@@ -202,7 +202,7 @@ func inspectGoldens(
 			Code: FaultSafetyUnavailable,
 			Detail: "The golden versions could not be listed, so this says nothing about " +
 				"what this project can branch. The database provider has to be reachable " +
-				"for that; the server log says why it was not.",
+				"for that.",
 			Retryable: true, wrapped: err,
 		}
 	}
@@ -236,8 +236,8 @@ func inspectGoldens(
 			// an unreachable store look identical and mean opposite things,
 			// and reporting the second as the first is how "nothing has been
 			// published" gets said about a store nobody could read.
-			out.PublishedUnavailable = "This project's golden store could not be listed, " +
-				"so nothing here says whether anything is published. The server log says why."
+			out.PublishedUnavailable = withCause("This project's golden store could not be "+
+				"listed, so nothing here says whether anything is published.", err)
 		case store != "":
 			out.PublishedStore = store
 			out.Published = describePublished(objects)
@@ -458,7 +458,7 @@ func runPrepareGolden(
 			Detail: "The operation could not be carried out, so this says nothing about " +
 				"whether a golden is available. A refresh needs the production credential " +
 				"and a database provider, a pull needs a configured store, and a verify " +
-				"needs the version to exist. The server log says which was missing.",
+				"needs the version to exist.",
 			Retryable: true, wrapped: err,
 		}
 	}

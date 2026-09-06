@@ -99,7 +99,7 @@ func runMigrationRehearsal(
 			Code: FaultSafetyUnavailable,
 			Detail: "The rehearsal could not be run, so this says nothing about the " +
 				"migration. A rehearsal needs a verified golden to branch from and a " +
-				"database provider to branch it with. The server log says which was missing.",
+				"database provider to branch it with.",
 			Retryable: true,
 			wrapped:   err,
 		}

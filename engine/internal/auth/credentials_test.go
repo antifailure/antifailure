@@ -12,6 +12,8 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/auth"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // fakeRing is an in-memory keyring, so these tests never touch a real one.
@@ -293,3 +295,50 @@ func TestLocationNamesWhereTheTokenActuallyIs(t *testing.T) {
 }
 
 var _ = errors.Is
+
+func TestACredentialThatDoesNotDecodeIsACodedError(t *testing.T) {
+	// What af whoami, af provider list and af token list printed on
+	// 2026-09-06: "Error: the stored credential is not readable: invalid
+	// character 'K' looking for beginning of value". No code, no next step,
+	// no link, the one error in the session that did not explain itself.
+	// The store is where every one of those commands reads, so the store is
+	// where the failure is given its code.
+	dir := t.TempDir()
+	store := &auth.Store{Ring: nil, Dir: dir}
+	require.NoError(t, store.Save(auth.Credential{
+		ControlPlane: "https://app.dev.antifailure.dev", Token: "afu_fine",
+	}))
+	path := store.Location("https://app.dev.antifailure.dev")
+	require.NoError(t, os.WriteFile(path, []byte("Keychain export, not JSON\n"), 0o600))
+
+	_, err := store.Load("https://app.dev.antifailure.dev")
+
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(err, &coded), "got %T: %v", err, err)
+	require.Equal(t, aferrors.AFSEC006, coded.Code())
+	require.Contains(t, coded.Message(), path, "the message names the file")
+	require.Contains(t, coded.Message(), "invalid character 'K'",
+		"the decoder's own text is kept, because it says where the format stopped being ours")
+	require.Contains(t, coded.NextStep(), "af login")
+	require.False(t, errors.Is(err, auth.ErrNotSignedIn),
+		"a credential that exists and does not decode is not the same as no credential")
+}
+
+func TestAKeyringEntryThatDoesNotDecodeNamesTheKeyring(t *testing.T) {
+	ring := newFakeRing()
+	store := &auth.Store{Ring: ring, Dir: t.TempDir()}
+	require.NoError(t, store.Save(auth.Credential{
+		ControlPlane: "https://app.dev.antifailure.dev", Token: "afu_fine",
+	}))
+	for name := range ring.items {
+		ring.items[name] = "not json"
+	}
+
+	_, err := store.Load("https://app.dev.antifailure.dev")
+
+	var coded *aferrors.Error
+	require.True(t, aferrors.As(err, &coded), "got %T: %v", err, err)
+	require.Equal(t, aferrors.AFSEC006, coded.Code())
+	require.Contains(t, coded.Message(), "keyring",
+		"the location is the keyring, not a file that was never read")
+}

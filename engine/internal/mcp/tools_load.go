@@ -329,7 +329,7 @@ func runLoadTest(
 			Detail: "The traffic could not be sent, so this says nothing about how the " +
 				"branch performs. Load is sent at an environment rather than creating " +
 				"one, so the usual cause is that nothing is running for this branch: " +
-				"bring one up with start_environment. The server log says which it was.",
+				"bring one up with start_environment.",
 			Retryable: true,
 			wrapped:   err,
 		}

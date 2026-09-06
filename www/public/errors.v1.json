@@ -1290,6 +1290,17 @@
       "planned": false
     },
     {
+      "code": "AF-SEC-006",
+      "area": "SEC",
+      "areaName": "Secrets",
+      "message": "The credential stored in {location} is not in this tool's format: {detail}",
+      "resolution": "Sign in again with 'af login', which replaces it. Nothing but 'af login' writes there, so if another tool or a hand edit did, move that aside first.",
+      "docs": "https://antifailure.dev/docs/guides/signing-in",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-SEC-010",
       "area": "SEC",
       "areaName": "Secrets",

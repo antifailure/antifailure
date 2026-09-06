@@ -167,20 +167,89 @@ func TestCheckPrerequisites_ScopeMachineDoesNotTouchTheRunner(t *testing.T) {
 	require.Empty(t, out.NotChecked, "a scope nobody asked for is not an unchecked thing")
 }
 
-func TestMachineVerdict_ASkippedCheckIsUndeterminedAndNotReady(t *testing.T) {
+func TestMachineVerdict_ASkippedCheckDecidesNothing(t *testing.T) {
 	t.Parallel()
-	// A check that did not run is not a check that passed. This is the exact
-	// shape of the defect that made af runner check report a runner ready on
-	// a tree it had just said it could not read.
-	require.Equal(t, verdictUndetermined, machineVerdict(Diagnosis{
+	// A skip is a check that does not apply here, and it is reported as
+	// exactly that. It neither passes nor blocks: on a Mac packet filtering
+	// is skipped on every run, and a verdict that could never be ready there
+	// is a verdict nobody reads.
+	require.Equal(t, verdictReady, machineVerdict(Diagnosis{
 		OK: true, Checks: []DiagnosticCheck{
 			{Name: "docker", Status: "ok"},
 			{Name: "kernel isolation", Status: "skip"},
 		},
 	}))
-	require.Equal(t, verdictReady, machineVerdict(Diagnosis{
-		OK: true, Checks: []DiagnosticCheck{{Name: "docker", Status: "ok"}},
+	// OK left true on purpose: the failure alone decides, without help
+	// from the doctor's own summary flag.
+	require.Equal(t, verdictBlocked, machineVerdict(Diagnosis{
+		OK: true, Checks: []DiagnosticCheck{
+			{Name: "kernel isolation", Status: "skip"},
+			{Name: "docker", Status: "fail"},
+		},
 	}))
+}
+
+func TestCheckPrerequisites_ASkippedCheckIsNeverBlocking(t *testing.T) {
+	t.Parallel()
+	// What the first tool an agent calls said on 2026-09-06: verdict
+	// BLOCKED, and a blocking list of three, two of which were skips whose
+	// own remediation read "No action needed". An agent that trusted it
+	// stalled on a false block or spent a turn fixing a proxy that was
+	// never wrong. Only the failure is in the way; the skip is listed among
+	// the checks with its reason and nowhere else.
+	tool := newCheckPrerequisitesTool(testProject(t),
+		func(context.Context) (Diagnosis, error) {
+			return Diagnosis{
+				OK: false, Platform: "darwin/arm64",
+				Checks: []DiagnosticCheck{
+					{Name: "CLI version", Status: "fail",
+						Detail:      "1.3.0 is older than the latest release, v1.3.2",
+						Remediation: "Run 'af update'."},
+					{Name: "Packet filtering", Status: "skip",
+						Detail:      "handled inside the Docker virtual machine on this platform",
+						Remediation: "No action needed."},
+					{Name: "Corporate proxy", Status: "skip",
+						Detail: "no proxy variables are set", Remediation: "No action needed."},
+				},
+			}, nil
+		},
+		nil)
+
+	out := mustInvoke(t, tool, `{"project_id":"test-project","scope":"machine"}`).(prerequisitesResult)
+
+	require.Equal(t, verdictBlocked, out.Verdict)
+	require.Len(t, out.Machine.Blocked, 1)
+	require.Equal(t, "CLI version", out.Machine.Blocked[0].Name)
+	require.Len(t, out.Machine.Checks, 3, "the skips are still reported, with their reasons")
+	require.Equal(t, "skip", out.Machine.Checks[1].Result)
+	require.Contains(t, out.Summary, "1 of which is in the way: CLI version")
+	require.NotContains(t, out.Summary, "Packet filtering")
+}
+
+func TestCheckPrerequisites_OnlySkipsIsReady(t *testing.T) {
+	t.Parallel()
+	// The same machine with the CLI up to date. Nothing failed, two checks
+	// do not apply, and the verdict is ready rather than undetermined,
+	// because a skip that carries its own reason is an answer, not a
+	// question left open.
+	tool := newCheckPrerequisitesTool(testProject(t),
+		func(context.Context) (Diagnosis, error) {
+			return Diagnosis{
+				OK: true, Platform: "darwin/arm64",
+				Checks: []DiagnosticCheck{
+					{Name: "Docker daemon", Status: "pass"},
+					{Name: "Packet filtering", Status: "skip",
+						Detail: "handled inside the Docker virtual machine on this platform"},
+				},
+			}, nil
+		},
+		nil)
+
+	out := mustInvoke(t, tool, `{"project_id":"test-project","scope":"machine"}`).(prerequisitesResult)
+
+	require.Equal(t, verdictReady, out.Verdict)
+	require.Empty(t, out.Machine.Blocked)
+	require.NotContains(t, out.Summary, "in the way")
 }
 
 func TestMachineVerdict_AStatusThisPackageDoesNotKnowIsNotAPass(t *testing.T) {

@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 )
 
 // service namespaces entries so two tools on one machine cannot collide.
@@ -147,7 +149,7 @@ func (s *Store) Load(controlPlane string) (Credential, error) {
 		case err == nil:
 			var c Credential
 			if err := json.Unmarshal([]byte(raw), &c); err != nil {
-				return Credential{}, fmt.Errorf("the stored credential is not readable: %w", err)
+				return Credential{}, unreadable(s.Location(controlPlane), err)
 			}
 			return c, nil
 		case errors.Is(err, secrets.ErrNotFound):
@@ -173,9 +175,25 @@ func (s *Store) Load(controlPlane string) (Credential, error) {
 	}
 	var c Credential
 	if err := json.Unmarshal(body, &c); err != nil {
-		return Credential{}, fmt.Errorf("the stored credential is not readable: %w", err)
+		return Credential{}, unreadable(path, err)
 	}
 	return c, nil
+}
+
+// unreadable is a stored credential that does not decode.
+//
+// Coded, so that every command reading the store prints the same shape as
+// every other failure: the code, what is wrong, what to do, and where to read
+// more. Before this it was a bare wrap of the decoder's error, and af whoami,
+// af provider list and af token list all printed "invalid character 'K'
+// looking for beginning of value" with no code, no next step and no link,
+// the one error in a whole session that did not explain itself. The
+// decoder's text is kept as the detail because it says where in the file the
+// format stopped being this tool's, which is the fact a reader deciding
+// between "sign in again" and "somebody else wrote this" needs.
+func unreadable(location string, cause error) error {
+	return aferrors.Wrap(cause, aferrors.AFSEC006,
+		"location", location, "detail", cause.Error())
 }
 
 // Delete removes the credential for a control plane from everywhere it might be.
