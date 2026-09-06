@@ -241,7 +241,60 @@ jobs:
           npx playwright install --with-deps chromium
         working-directory: runner
 
+      # THE SOURCE IS THE BASE OF THE PULL REQUEST, NOT ITS HEAD.
+      #
+      # A customer's golden is copied from production, and production runs the
+      # code that is already merged. The pull request's own migration has never
+      # touched it, so the twin is where that migration runs for the first
+      # time, against a copy that carries the ledger of everything before it.
+      # That ordering is what this job exists to rehearse, and until this step
+      # it never did: the head's own seeder shaped the source, every migration
+      # was recorded as applied before the golden was made, and the twin had
+      # nothing left to run. Migration 0037 granted to a role the copy did not
+      # carry, every branch made from a real golden died on it, and this job
+      # was green on the pull request that merged it, because here 0037 had
+      # already run before the copy.
+      #
+      # So on a pull request the base commit's own tree shapes the source: its
+      # migrations and its seeder, run by its own dependencies, in a worktree
+      # outside the workspace so that nothing under test can find a second
+      # manifest. The head's migrations then run inside the twin the way they
+      # will run against the customer's copy. On the schedule there is no base
+      # and the tree shapes itself, which is the case where nothing is pending.
+      - name: Check out the base of this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          echo "base=$RUNNER_TEMP/base" >> "$GITHUB_ENV"
+
+      - name: Shape the staging database, at the base
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run seed --workspace @antifailure/db
+        working-directory: ${{ env.base }}/web
+        env:
+          AF_MIGRATION_DATABASE_URL: ${{ env.AF_STAGING_DATABASE_URL }}
+
+      # Said out loud, so a run's log answers "did the twin run anything" without
+      # anybody diffing two trees. Zero is a fine answer for a pull request that
+      # carries no migration; it is the wrong answer for one that does.
+      - name: The migrations the twin runs for the first time
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          pending=$(comm -13 <(ls "$base/web/packages/db/migrations") <(ls web/packages/db/migrations) || true)
+          count=$(printf '%s' "$pending" | grep -c . || true)
+          echo "$count migrations exist at the head and not at the base, so they run inside the twin and nowhere before it"
+          [ -z "$pending" ] || printf '%s\n' "$pending" | sed 's/^/  /'
+
       - name: Shape the staging database
+        if: github.event_name != 'pull_request'
         # Migrations and then a deterministic seed, both from one script: the
         # seeder applies the migrations itself, because a seed against a schema
         # it did not create is a seed that fails on the first column somebody
