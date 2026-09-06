@@ -316,6 +316,12 @@ type Result struct {
 	// environment has somebody to sign in as rather than leaving it to be
 	// discovered when a sign in fails.
 	Personas int
+	// EmptySource reports that the golden this environment branched holds no
+	// production data, because database.source_url_env names nothing and no
+	// seed command was run. The report says so at the top, because an
+	// environment on an empty database looks exactly like one on a masked
+	// copy of production to everything except the rows.
+	EmptySource bool
 }
 
 // session holds everything Up opens and must close.
@@ -1191,11 +1197,12 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		return result, err
 	}
 
-	golden, branch, dbURL, migrateURL, err := o.database(ctx, s)
+	golden, branch, dbURL, migrateURL, emptySource, err := o.database(ctx, s)
 	if err != nil {
 		return result, err
 	}
 	result.Golden = golden
+	result.EmptySource = emptySource
 
 	specs, built, cached, err := o.buildServices(ctx, s)
 	if err != nil {
@@ -1520,12 +1527,17 @@ func serviceField(line string, names map[string]bool) []events.Field {
 // transaction pooler does not support the session level features migrations
 // use. A provider with no pool returns the same string twice, which is the
 // honest answer for it.
-func (o *Orchestrator) database(ctx context.Context, s *session) (string, provider.Branch, secrets.Value, secrets.Value, error) {
+//
+// The last result says whether the golden it chose was built from nothing.
+// It is decided from the provenance the golden was selected by rather than
+// from the manifest alone, so a golden reused from an earlier run answers for
+// what it holds and not for what the manifest says today.
+func (o *Orchestrator) database(ctx context.Context, s *session) (string, provider.Branch, secrets.Value, secrets.Value, bool, error) {
 	var zero provider.Branch
 
 	goldens, err := s.dbProv.ListGoldens(ctx)
 	if err != nil {
-		return "", zero, secrets.Value{}, secrets.Value{}, err
+		return "", zero, secrets.Value{}, secrets.Value{}, false, err
 	}
 
 	// Whose golden it is, not merely that something produced it.
@@ -1547,7 +1559,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	// made for this work or it was not.
 	prov, provErr := o.provenanceOf()
 	if provErr != nil {
-		return "", zero, secrets.Value{}, secrets.Value{}, provErr
+		return "", zero, secrets.Value{}, secrets.Value{}, false, provErr
 	}
 	want := prov.digest()
 	version, refused := pickGolden(goldens, want)
@@ -1574,14 +1586,14 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		// the first.
 		source, sourceErr := o.sourceURL(ctx)
 		if sourceErr != nil {
-			return "", zero, secrets.Value{}, secrets.Value{}, sourceErr
+			return "", zero, secrets.Value{}, secrets.Value{}, false, sourceErr
 		}
 		if source.IsZero() {
-			return "", zero, secrets.Value{}, secrets.Value{},
+			return "", zero, secrets.Value{}, secrets.Value{}, false,
 				aferrors.Coded(aferrors.AFDB016,
 					"variable", o.opts.Manifest.Database.SourceURLEnv)
 		}
-		return "", zero, secrets.Value{}, secrets.Value{},
+		return "", zero, secrets.Value{}, secrets.Value{}, false,
 			aferrors.Coded(aferrors.AFDB012, "count", fmt.Sprint(refused))
 	}
 
@@ -1606,7 +1618,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 			}
 		}
 		if version == "" {
-			return "", zero, secrets.Value{}, secrets.Value{}, aferrors.Coded(
+			return "", zero, secrets.Value{}, secrets.Value{}, false, aferrors.Coded(
 				aferrors.AFORC009, "version", pinned)
 		}
 		o.progress("branching the database from " + version + ", pinned by the caller")
@@ -1615,8 +1627,9 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		// rehearsal, where the version is pinned precisely so two environments
 		// share it, was the run the control plane heard nothing about.
 		o.announceGolden(s, goldens, version, "golden "+version+" is pinned")
-		return o.branchFrom(ctx, s, version,
-			"pinned by the caller, "+prov.describe())
+		o.noteEmptySource(prov)
+		return withEmpty(prov.empty())(o.branchFrom(ctx, s, version,
+			"pinned by the caller, "+prov.describe()))
 	}
 
 	// A cron expression on a laptop has nothing to fire it, so the next
@@ -1631,7 +1644,7 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 	if version != "" {
 		why, dueErr := o.RefreshDue(ctx, s, goldens)
 		if dueErr != nil {
-			return "", zero, secrets.Value{}, secrets.Value{}, dueErr
+			return "", zero, secrets.Value{}, secrets.Value{}, false, dueErr
 		}
 		if why != "" {
 			o.progress("refreshing the golden first: " + why)
@@ -1651,8 +1664,12 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 
 	if version == "" {
 		o.progress("no golden yet, creating one")
+		// Said here, where the golden is made, and not only in the report.
+		// An empty golden and a masked copy of production produce the same
+		// progress lines, the same events and the same green environment,
+		// and the difference is every row.
 		o.event(s, events.GoldenRefreshing, "no golden yet, creating one",
-			events.F("phase", "refreshing"))
+			events.F("phase", "refreshing"), events.F("empty_source", prov.empty()))
 		seed := ""
 		if o.opts.Manifest.Database != nil {
 			seed = o.opts.Manifest.Database.Seed
@@ -1663,17 +1680,17 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		// through building one.
 		key, keyErr := o.MaskingKey(ctx, s)
 		if keyErr != nil {
-			return "", zero, secrets.Value{}, secrets.Value{}, keyErr
+			return "", zero, secrets.Value{}, secrets.Value{}, false, keyErr
 		}
 		rules, hash, rulesErr := o.rules()
 		if rulesErr != nil {
-			return "", zero, secrets.Value{}, secrets.Value{}, rulesErr
+			return "", zero, secrets.Value{}, secrets.Value{}, false, rulesErr
 		}
 
 		gv, refreshErr := s.dbProv.RefreshGolden(ctx,
 			o.seedGoldenSpec(s, seed, key, rules, hash, want))
 		if refreshErr != nil {
-			return "", zero, secrets.Value{}, secrets.Value{}, refreshErr
+			return "", zero, secrets.Value{}, secrets.Value{}, false, refreshErr
 		}
 		version = gv.ID
 		o.event(s, events.GoldenReady, "golden "+version+" is ready", o.goldenFields(gv)...)
@@ -1684,7 +1701,32 @@ func (o *Orchestrator) database(ctx context.Context, s *session) (string, provid
 		// than one extra event.
 		o.announceGolden(s, goldens, version, "golden "+version+" is verified")
 	}
-	return o.branchFrom(ctx, s, version, prov.describe())
+	o.noteEmptySource(prov)
+	return withEmpty(prov.empty())(o.branchFrom(ctx, s, version, prov.describe()))
+}
+
+// EmptySourceSentence is what af up prints and af ci reports when the golden
+// was built from nothing. One sentence, the same in both places, so a reader
+// who saw it in a terminal recognises it on a pull request.
+const EmptySourceSentence = "This ran on an empty database. database.source_url_env names " +
+	"nothing, so the migrations built the schema and no production data was masked or " +
+	"branched. Set database.source_url_env: PRODUCTION_DATABASE_URL and add that secret " +
+	"to the repository."
+
+// noteEmptySource prints the sentence once per run, before the branch is
+// made, when the golden about to be branched holds no production data.
+func (o *Orchestrator) noteEmptySource(p provenance) {
+	if p.empty() {
+		o.progress(EmptySourceSentence)
+	}
+}
+
+// withEmpty threads the empty source answer through branchFrom's five results
+// so the two branching paths cannot disagree about it.
+func withEmpty(empty bool) func(string, provider.Branch, secrets.Value, secrets.Value, error) (string, provider.Branch, secrets.Value, secrets.Value, bool, error) {
+	return func(v string, b provider.Branch, d, m secrets.Value, err error) (string, provider.Branch, secrets.Value, secrets.Value, bool, error) {
+		return v, b, d, m, empty, err
+	}
 }
 
 // branchFrom creates this environment's branch of a chosen golden.

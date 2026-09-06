@@ -11,8 +11,8 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/change"
 	"github.com/antifailure/antifailure/engine/internal/env"
-	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/report"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // af change is the sentence that makes the rest of this product's cost
@@ -56,7 +56,7 @@ still says what the diff touches, and reports every check as unavailable
 because nothing is configured to run it.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			profile, err := changeProfile(cmd.Context(), e, branch,
+			profile, m, drafted, err := changeProfile(cmd.Context(), e, branch,
 				env.ChangeOptions{Base: base, Head: head, DiffPath: diff, Getenv: e.Getenv})
 			if err != nil {
 				return err
@@ -66,12 +66,16 @@ because nothing is configured to run it.`),
 				// The same marker af ci's report carries, so a workflow that
 				// writes this one and then overwrites it with the full report
 				// updates one comment rather than leaving two.
-				body := report.Marker + "\n" + profile.Markdown()
+				body := report.Marker + "\n"
+				if drafted {
+					body += report.DraftedSentence + "\n\n"
+				}
+				body += profile.Markdown()
 				if wErr := os.WriteFile(output, []byte(body), 0o644); wErr != nil {
 					e.Out.Printf("  could not write the section to %s: %v\n", output, wErr)
 				}
 			}
-			writeChangeOutputs(e, profile)
+			writeChangeOutputs(e, profile, m)
 			// Beside the plan, because this step is the one whose file gets
 			// posted when nothing else runs, so its own comment step needs the
 			// same answer af ci gives.
@@ -79,6 +83,11 @@ because nothing is configured to run it.`),
 
 			if e.Out.Format == FormatJSON {
 				return e.Out.JSON(profile)
+			}
+			if drafted {
+				e.Out.Section("No antifailure.yaml here, so one was drafted")
+				e.Out.Println(e.Out.Wrap("The checks below are read from a manifest drafted from "+
+					"the repository. Run 'af init' and commit the file to make it yours.", 2))
 			}
 			e.Out.Section("What this change touches")
 			e.Out.Raw(profile.Explain())
@@ -111,23 +120,41 @@ because nothing is configured to run it.`),
 // exists and does not parse must not quietly downgrade to none, because the
 // output would then say no checks are configured to somebody who configured
 // them and has a typo.
-func changeProfile(ctx context.Context, e *Env, branch string, opts env.ChangeOptions) (*change.Profile, error) {
-	o, err := orchestrator(e, branch, false)
+//
+// With no manifest a draft is tried first, the same draft af ci runs on, so
+// that the two commands a pull request job runs agree about which checks
+// exist. Only when nothing can be drafted does this fall back to the profile
+// with no manifest, where every check is reported unavailable.
+func changeProfile(
+	ctx context.Context, e *Env, branch string, opts env.ChangeOptions,
+) (*change.Profile, *schema.Manifest, bool, error) {
+	o, m, err := orchestratorWithManifest(e, branch)
 	if err == nil {
-		return o.Change(ctx, opts)
+		p, cErr := o.Change(ctx, opts)
+		return p, m, false, cErr
+	}
+	if !isNoManifest(err) {
+		return nil, nil, false, err
 	}
 
-	var coded *aferrors.Error
-	if !aferrors.As(err, &coded) || coded.Entry.Code != aferrors.AFMAN001 {
-		return nil, err
+	root := gitRoot(e.WorkDir)
+	if d, dErr := draftManifest(ctx, e, root); dErr == nil {
+		o, m, oErr := orchestratorWithManifest2(e, lifecycleOptions{
+			branch: branch, manifest: d.Manifest, root: d.Root,
+		})
+		if oErr == nil {
+			p, cErr := o.Change(ctx, opts)
+			return p, m, true, cErr
+		}
 	}
-	return change.ForRepo(ctx, nil, change.Source{
-		Root:     gitRoot(e.WorkDir),
+	p, err := change.ForRepo(ctx, nil, change.Source{
+		Root:     root,
 		Base:     opts.Base,
 		Head:     opts.Head,
 		DiffPath: opts.DiffPath,
 		Getenv:   opts.Getenv,
 	})
+	return p, nil, false, err
 }
 
 // gitRoot asks git where the repository starts, since without a manifest
@@ -162,7 +189,12 @@ func gitRoot(dir string) string {
 // on every run including the ones that are false. A key that appears only when
 // it is true reads as an empty string in a workflow expression, and an empty
 // string is not false to somebody debugging at eleven at night.
-func writeChangeOutputs(e *Env, p *change.Profile) {
+//
+// Two more keys name what the manifest reads, so the job can export exactly
+// those out of the caller's secrets: source_url_env is the one variable whose
+// name only the manifest knows, and secrets is every variable the manifest
+// names, comma separated. Names only. No value passes through here.
+func writeChangeOutputs(e *Env, p *change.Profile, m *schema.Manifest) {
 	path := e.Getenv("GITHUB_OUTPUT")
 	if path == "" {
 		return
@@ -186,6 +218,8 @@ func writeChangeOutputs(e *Env, p *change.Profile) {
 	}
 	sort.Strings(selected)
 	b.WriteString("selected=" + strings.Join(selected, ",") + "\n")
+	b.WriteString("source_url_env=" + sourceURLEnv(m) + "\n")
+	b.WriteString("secrets=" + strings.Join(manifestSecrets(m), ",") + "\n")
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
@@ -196,4 +230,62 @@ func writeChangeOutputs(e *Env, p *change.Profile) {
 	if _, err := f.WriteString(b.String()); err != nil {
 		e.Out.Printf("  could not write the plan to GITHUB_OUTPUT: %v\n", err)
 	}
+}
+
+// sourceURLEnv is the variable naming the production database, or empty.
+func sourceURLEnv(m *schema.Manifest) string {
+	if m == nil || m.Database == nil {
+		return ""
+	}
+	return m.Database.SourceURLEnv
+}
+
+// manifestSecrets names every variable the manifest reads a credential from,
+// sorted and without duplicates: the production database, a hosted database
+// provider's key, every sandbox rule's credential, every service variable read
+// from the runner's environment or replaced by a sandbox value, and a hosted
+// authentication provider's token.
+//
+// Names only. This is the list a job exports from the caller's secrets, and
+// a name that is missing here is a secret the job never sees, which for the
+// database means an empty golden and for a sandbox rule means the live
+// credential goes out.
+func manifestSecrets(m *schema.Manifest) []string {
+	if m == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name != "" {
+			seen[name] = true
+		}
+	}
+	if m.Database != nil {
+		add(m.Database.SourceURLEnv)
+		add(m.Database.APIKeyEnv)
+	}
+	if m.Egress != nil {
+		for _, r := range m.Egress.Rules {
+			add(r.Credential)
+		}
+	}
+	for _, s := range m.Services {
+		for _, v := range s.Env {
+			switch {
+			case v.From != "":
+				add(v.From)
+			case v.Sandbox:
+				add(v.Name)
+			}
+		}
+	}
+	if m.Auth != nil {
+		add(m.Auth.TokenEnv)
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -189,6 +189,7 @@ func firstRun(ctx context.Context, e *Env, p startProbe) []stage {
 		runnerState(ctx, e, p),
 		manifestStage,
 		databaseState(ctx, e, m),
+		maskingRulesState(m, root),
 		goldenState(e, m, root),
 		environmentState(ctx, e, m, p),
 		workflowState(m),
@@ -486,6 +487,49 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest) stage {
 	s.state = StageDone
 	s.detail = fmt.Sprintf("%s, project %s, %s found", provider, m.Database.Project, name)
 	return s
+}
+
+// maskingRulesState reports whether masking.yaml has been written.
+//
+// Done when the file the manifest names exists. Pending, with the command
+// that writes it, when the manifest names a production source and the file
+// is not there, because that is the state af init leaves a project in and
+// the next command is the one thing the reader needs. Waiting otherwise: with
+// no source there is no schema to write rules from, so the rung is answered
+// by the source rung above it and says so rather than pretending to a
+// decision of its own.
+func maskingRulesState(m *schema.Manifest, root string) stage {
+	if m == nil {
+		return waitingOnManifest("masking rules")
+	}
+	if m.Database == nil {
+		return stage{name: "masking rules", state: StageDone,
+			detail: "no database, so nothing is masked"}
+	}
+	rules := m.Database.MaskingRules
+	if rules == "" {
+		rules = manifest.DefaultMaskingRules
+	}
+	path := rules
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, rules)
+	}
+	if _, err := os.Stat(path); err == nil {
+		return stage{name: "masking rules", state: StageDone, detail: rules}
+	}
+	if m.Database.SourceURLEnv == "" {
+		return stage{
+			name: "masking rules", state: StageUnchecked, downstream: true,
+			detail: "after the database source",
+			why:    "database.source_url_env names nothing, so there is no schema to write rules from yet",
+		}
+	}
+	return stage{
+		name: "masking rules", state: StagePending, command: "af mask init",
+		detail: rules + " is not there, so the built in rules decide every column",
+		prose: "Reads the schema of the database named by " + m.Database.SourceURLEnv +
+			" and writes one rule per column, so the plan has nothing left to ask.",
+	}
 }
 
 // goldenState is one of the two rungs this command will not answer.

@@ -73,6 +73,7 @@ gate: _reports
     run "no credential in the tree"      just scanrepo
     run "commands in the docs exist"     just docexamples
     run "documented paths exist"         just claimcheck
+    run "the GitHub surfaces agree"      just actioncheck
     run "the license is detectable"      just licensecheck
     run "the sidebar order is chosen"    just sidebarcheck
     run "runbook numbers agree"          just runbookcheck
@@ -913,6 +914,12 @@ forbidden:
 # Every repository path our documents point at exists.
 claimcheck:
     go run ./tools/claimcheck .
+
+# action.yml, the reusable workflow and the example workflow pass each other
+# inputs GitHub interprets at three different moments, and the example has two
+# embedded copies. Nothing else parses the three together.
+actioncheck:
+    go run ./tools/actioncheck .
 
 # Every variable the product names at a user is one the documentation explains.
 #

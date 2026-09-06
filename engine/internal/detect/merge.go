@@ -291,10 +291,19 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 		if c.kind == schema.ServiceWeb {
 			switch {
 			case c.port == 0:
+				// A default even here, and it is the language's own. The
+				// question used to carry none, so a run with no terminal had
+				// nothing to take and refused with AF-DET-004, which for a
+				// pull request check meant no check at all. A port that is
+				// wrong is found in seconds by a readiness probe that never
+				// answers; a check that never ran is found by nobody.
+				port, why := defaultPort(c)
 				*questions = append(*questions, Question{
-					ID:     "service." + c.name + ".port",
-					Prompt: fmt.Sprintf("Which port does %s listen on?", c.name),
-					Why:    "No port was found in the code, a Dockerfile, or a compose file.",
+					ID:      "service." + c.name + ".port",
+					Prompt:  fmt.Sprintf("Which port does %s listen on?", c.name),
+					Options: []string{strconv.Itoa(port)},
+					Default: strconv.Itoa(port),
+					Why:     "No port was found in the code, a Dockerfile, or a compose file. " + why,
 				})
 			case len(c.portConflicts) > 0:
 				options := []string{strconv.Itoa(c.port)}
@@ -337,14 +346,85 @@ func mergeServices(findings []Finding, questions *[]Question) []schema.Service {
 			})
 		}
 		if c.command == "" && c.build == nil && c.kind != schema.ServiceCron {
-			*questions = append(*questions, Question{
+			q := Question{
 				ID:     "service." + c.name + ".command",
 				Prompt: fmt.Sprintf("What command starts %s?", c.name),
 				Why:    "No start script, Dockerfile command, or Procfile entry was found.",
-			})
+			}
+			// The conventional start where the language has one. Where it
+			// does not, the question keeps no default and an unattended run
+			// still refuses with AF-DET-004, because a made up command is
+			// worse than a question: it fails inside a container, in a log,
+			// ten seconds later.
+			if cmd, why := defaultCommand(c); cmd != "" {
+				q.Options, q.Default = []string{cmd}, cmd
+				q.Why += " " + why
+			}
+			*questions = append(*questions, q)
 		}
 	}
 	return out
+}
+
+// languageOf names the toolchain a candidate is built with, from the analyzer
+// that declared it or the framework it was recognised by. Empty when neither
+// says, which is what a bare Dockerfile with no EXPOSE looks like.
+func languageOf(c *candidate) string {
+	switch c.framework {
+	case "django", "fastapi", "flask":
+		return "python"
+	case "go":
+		return "go"
+	case "rails":
+		return "ruby"
+	}
+	for _, lang := range []string{"node", "python", "go", "ruby"} {
+		if c.declaredBy[lang] {
+			return lang
+		}
+	}
+	if c.framework != "" {
+		// Every framework the node analyzer recognises reaches here, since
+		// the three other languages name theirs above.
+		return "node"
+	}
+	return ""
+}
+
+// defaultPort is the port a service is assumed to listen on when nothing in
+// the repository says, with the sentence that explains the assumption.
+func defaultPort(c *candidate) (int, string) {
+	switch languageOf(c) {
+	case "node":
+		return 3000, "3000 is what a node server listens on unless told otherwise."
+	case "python":
+		return 8000, "8000 is what a python server listens on unless told otherwise."
+	case "go":
+		return 8080, "8080 is what a go server listens on unless told otherwise."
+	case "ruby":
+		return 3000, "3000 is what a ruby server listens on unless told otherwise."
+	}
+	return 3000, "3000 is the most common port for a web service, and the language was not recognised."
+}
+
+// defaultCommand is the conventional start command for the language, or
+// empty when the language has none worth guessing.
+func defaultCommand(c *candidate) (string, string) {
+	switch c.framework {
+	case "django":
+		return "python manage.py runserver 0.0.0.0:$PORT",
+			"Django applications start with manage.py unless a server such as gunicorn is configured."
+	case "rails":
+		return "bundle exec rails server -p $PORT",
+			"Rails applications start with the rails server command."
+	}
+	switch languageOf(c) {
+	case "node":
+		return "npm start", "npm start is what a node application runs when package.json declares no start script of its own."
+	case "go":
+		return "go run .", "go run . builds and starts the package in the service directory."
+	}
+	return "", ""
 }
 
 // absorbPort records a port proposal, keeping the best evidence and turning a
@@ -671,6 +751,17 @@ func mergeDatabase(findings []Finding, services []schema.Service, questions *[]Q
 	if db.URLEnv == "" {
 		db.URLEnv = "DATABASE_URL"
 	}
+	// The variable naming PRODUCTION, when the repository already has one.
+	// A .env.example listing PRODUCTION_DATABASE_URL is a repository that has
+	// already decided what the source is called, and writing that name into
+	// database.source_url_env is what lets af init draft the masking rules
+	// from the real schema in the same run.
+	for _, f := range OfKind(findings, KindEnvVar) {
+		if isProductionURLName(f.Subject) {
+			db.SourceURLEnv = f.Subject
+			break
+		}
+	}
 
 	// Migration commands live on services, so the database section only needs
 	// to know a golden refresh is possible.
@@ -680,6 +771,19 @@ func mergeDatabase(findings []Finding, services []schema.Service, questions *[]Q
 		}
 	}
 	return db
+}
+
+// isProductionURLName recognises the names a repository gives the read only
+// connection string of production, as distinct from the one the application
+// itself reads.
+func isProductionURLName(name string) bool {
+	switch name {
+	case "PRODUCTION_DATABASE_URL", "PROD_DATABASE_URL", "PRODUCTION_DB_URL",
+		"PROD_DB_URL", "SOURCE_DATABASE_URL", "DATABASE_URL_PRODUCTION",
+		"DATABASE_URL_PROD", "PRODUCTION_POSTGRES_URL", "PROD_POSTGRES_URL":
+		return true
+	}
+	return false
 }
 
 func isDatabaseURLName(name string) bool {

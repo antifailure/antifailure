@@ -34,6 +34,21 @@ type Config struct {
 	Clock   clock.Clock
 	Getenv  func(string) string
 	Version string
+	// Diagnose runs the machine checks behind check_prerequisites, and
+	// RunnerReady inspects the browser agent runner behind the same tool.
+	//
+	// They are function values filled in by the command rather than calls
+	// this package makes, and that is not a style choice. Both checks live in
+	// the package that builds the command, and that package imports this one,
+	// so this one can never import it back. Reimplementing either here would
+	// give two instruments that can disagree about the same machine, which is
+	// the exact defect this repository keeps finding in its own gates.
+	//
+	// A nil value is reported by the tool as NOT CHECKED. It is never
+	// reported as a pass, because a check that did not run is not a check
+	// that succeeded.
+	Diagnose    func(context.Context) (Diagnosis, error)
+	RunnerReady func(context.Context) (RunnerReadiness, error)
 }
 
 // Serve binds a project, restores its runs and serves until the input ends.
@@ -96,6 +111,37 @@ func Serve(ctx context.Context, cfg Config) error {
 	server.Register(newCancelRunTool(project, store))
 	server.Register(newInspectEgressTool(project, orch.observe))
 	server.Register(newRehearseMigrationTool(project, engine, orch.rehearse))
+	server.Register(newRunLoadTestTool(project, engine, orch.sendLoad))
+	server.Register(newRunWorkflowsTool(project, engine, orch.driveWorkflows))
+	server.Register(newExploreTool(project, engine, orch.driveExploration))
+	server.Register(newStartEnvironmentTool(project, engine, orch.bringUp))
+	server.Register(newTeardownTool(project, engine, orch.tearDown))
+	server.Register(newDescribeEnvironmentTool(project, orch.readStatus))
+	server.Register(newReadLogsTool(project, orch.readLogs))
+	server.Register(newFidelityTool(project, orch.fidelity))
+	server.Register(newExplainErrorTool(project))
+	server.Register(newExplainConfigTool(project))
+	server.Register(newPlanChecksTool(project, orch.analyseChange))
+	server.Register(newInvariantsTool(project, orch.invariants))
+	server.Register(newCompareReleasesTool(project, engine, orch.compareReleases))
+	server.Register(newInspectMaskingTool(project, orch.maskingReaders()))
+	server.Register(newApplyMaskingTool(project, engine, orch.maskApply))
+	server.Register(newCheckPrerequisitesTool(project, cfg.Diagnose, cfg.RunnerReady))
+	server.Register(newDescribeAccountTool(project, orch.account))
+	server.Register(newInspectEnvironmentsTool(
+		project, orch.status, orch.inventory, orch.pullEnvironment))
+	server.Register(newRemoveExpiredEnvironmentsTool(project, orch.sweep))
+	server.Register(newExtendEnvironmentTool(project, orch.extend))
+	server.Register(newReadMessagesTool(project, orch.messages, orch.waitForMessage))
+	server.Register(newListWebhookEventsTool(project))
+	server.Register(newSendWebhookEventTool(project, orch.deliver))
+	server.Register(newInspectGoldensTool(
+		project, orch.goldens, orch.publishedGoldens, orch.goldenPolicy))
+	server.Register(newPrepareGoldenTool(project, engine, orch.prepare))
+	server.Register(newRemoveOldGoldensTool(
+		project, orch.goldens, orch.goldenPolicy, orch.destroyGolden))
+	server.Register(newDescribeModelKeyTool(project, orch.modelKey))
+	server.Register(newVerifyModelKeyTool(project, orch.probeModel))
 
 	_, _ = fmt.Fprintf(cfg.Log, "af mcp: serving project %q from %s\n", project.ID, project.Root)
 

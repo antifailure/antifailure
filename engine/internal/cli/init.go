@@ -108,6 +108,18 @@ type InitReport struct {
 	Findings         int               `json:"findings"`
 	Partial          bool              `json:"partial"`
 	UnassignedImages []string          `json:"unassigned_images,omitempty"`
+	// Written is every file the command wrote, the manifest first.
+	Written []string `json:"written"`
+	// Workflow says what happened to .github/workflows/antifailure.yml:
+	// written, unchanged, differs, or none when the checkout has no
+	// github.com remote.
+	Workflow string `json:"workflow"`
+	// MaskingRules says what happened to masking.yaml: written, or the
+	// reason it was not.
+	MaskingRules string `json:"masking_rules"`
+	// NoTerminal reports that questions took their defaults because there
+	// was no terminal to ask them on and --non-interactive was not passed.
+	NoTerminal bool `json:"no_terminal,omitempty"`
 }
 
 func runInit(ctx context.Context, env *Env, opts initOptions) error {
@@ -138,6 +150,19 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	// built to catch exactly this could not see them. Seeded first, then the
 	// questions add to it.
 	assumed := assumedByConstruction(res.Draft)
+	// No terminal means no questions, and no questions means the defaults.
+	//
+	// This used to refuse with AF-MAN-004 and tell the reader to pass
+	// --non-interactive, which in a CI job and in every script was the
+	// only thing they could have done anyway. A refusal whose sole remedy is
+	// the flag the situation implies is a flag that should not need passing.
+	// Every question has a default now, so the defaults are what a run with
+	// nobody at the keyboard gets, listed under Assumed like any other.
+	noTerminal := false
+	if !opts.nonInteractive && !env.Interactive() {
+		opts.nonInteractive = true
+		noTerminal = true
+	}
 	if len(res.Questions) > 0 {
 		if err := resolveQuestions(env, res, opts, assumed); err != nil {
 			return err
@@ -145,6 +170,13 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 	}
 	if err := applyRemainingAnswers(res, opts); err != nil {
 		return err
+	}
+
+	// The workflow, when the checkout is on GitHub. Decided before the draft
+	// is rendered, because the manifest carries the block the workflow reads.
+	onGitHub := githubRemote(env.WorkDir)
+	if onGitHub {
+		res.Draft.GitHub = draftGitHub()
 	}
 
 	// The draft is normalized and validated before it is written, so af init
@@ -189,12 +221,85 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		EgressRules: len(res.Draft.Egress.Rules), Questions: res.Questions,
 		UnassignedImages: res.UnassignedImages,
 		Assumed:          assumed, Findings: len(res.Findings), Partial: res.Partial,
+		Written: []string{manifestPath}, Workflow: "none", NoTerminal: noTerminal,
 	}
+	var extra []initExtra
+	if onGitHub {
+		wfPath, outcome, wErr := writeWorkflow(gitWorkTree(env.WorkDir), false)
+		if wErr != nil {
+			return wErr
+		}
+		switch outcome {
+		case workflowWritten:
+			report.Workflow = "written"
+			report.Written = append(report.Written, wfPath)
+		case workflowUnchanged:
+			report.Workflow = "unchanged"
+			extra = append(extra, initExtra{StyleDim,
+				short(env.WorkDir, wfPath) + " is already the workflow af init writes, so it was left as it is."})
+		case workflowDiffers:
+			report.Workflow = "differs"
+			extra = append(extra, initExtra{StyleWarn,
+				short(env.WorkDir, wfPath) + " already exists and differs from the workflow af init writes, " +
+					"so it was left alone. 'af github init --force' replaces it."})
+		}
+	} else {
+		extra = append(extra, initExtra{StyleDim,
+			"No workflow was written, because this checkout has no github.com remote. " +
+				"'af github init' writes one later."})
+	}
+
+	// The masking rules, when production can be reached from here. Detection
+	// sets database.source_url_env only when the repository already names
+	// its production variable, and the variable has to hold something in
+	// this shell, so most first runs land on the second sentence and are
+	// told the two things that would change that.
+	report.MaskingRules, extra = initMaskingRules(ctx, env, res.Draft, extra)
+
 	if env.Out.Format == FormatJSON {
 		return env.Out.JSON(report)
 	}
-	renderInitSummary(env, res, assumed, manifestPath)
+	renderInitSummary(env, res, assumed, report, extra)
 	return nil
+}
+
+// initExtra is one more line under Written, with the style it is said in.
+type initExtra struct {
+	style Style
+	text  string
+}
+
+// initMaskingRules writes masking.yaml from the source's schema when the
+// manifest names a source and this shell holds it, and says why otherwise.
+//
+// It returns the one line the summary prints and the JSON field carries,
+// rather than an error, because af init has already written the manifest and
+// a masking file that could not be written is a next step, not a failure of
+// the command that just succeeded.
+func initMaskingRules(
+	ctx context.Context, env *Env, m *schema.Manifest, extra []initExtra,
+) (string, []initExtra) {
+	if m.Database == nil || m.Database.SourceURLEnv == "" {
+		return "not written, no database source yet: set database.source_url_env, then run af mask init",
+			append(extra, initExtra{StyleDim,
+				"Masking rules were not written, because there is no database source yet. " +
+					"Set database.source_url_env, then run 'af mask init' to write them from the schema."})
+	}
+	if env.Getenv(m.Database.SourceURLEnv) == "" {
+		line := fmt.Sprintf("not written, %s is not set in this shell: set it, then run af mask init",
+			m.Database.SourceURLEnv)
+		return line, append(extra, initExtra{StyleDim,
+			fmt.Sprintf("Masking rules were not written, because %s is not set in this shell. "+
+				"Set it, then run 'af mask init' to write them from the schema.", m.Database.SourceURLEnv)})
+	}
+	written, err := writeMaskingRules(ctx, env, "", false)
+	if err != nil {
+		return "not written: " + err.Error(), append(extra, initExtra{StyleWarn,
+			"Masking rules were not written: " + err.Error() + " Run 'af mask init' once that is fixed."})
+	}
+	return fmt.Sprintf("written from %d tables", written.Tables), append(extra, initExtra{StyleDim,
+		fmt.Sprintf("Masking rules written to %s from %d tables, %d columns.",
+			short(env.WorkDir, written.Path), written.Tables, written.Columns)})
 }
 
 // validationDetail pulls the readable half out of the validator's own error.
@@ -238,16 +343,21 @@ func assumedByConstruction(draft *schema.Manifest) map[string]string {
 }
 
 func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed map[string]string) error {
-	// A question needs somewhere to ask it. Without a terminal the read blocks
-	// forever, which in a script or a CI job looks exactly like a hang, so the
-	// refusal has to happen before the first prompt rather than at it.
-	if !opts.nonInteractive && !env.Interactive() {
-		return aferrors.Coded(aferrors.AFMAN004, "path", env.WorkDir)
-	}
+	// A question needs somewhere to ask it, and runInit has already turned a
+	// run with no terminal into a non interactive one. So by here either
+	// there is a terminal or nothing will be asked, and a read that would
+	// block forever cannot be reached.
 	for i := range res.Questions {
 		q := &res.Questions[i]
 		answer, given := opts.answers[q.ID]
 		switch {
+		case given && answer == "" && q.Default != "":
+			// `--answer id=` with nothing after the equals sign is the
+			// default, said explicitly. It used to be refused with the
+			// error for a question that has no default, which was wrong
+			// twice over once every question had one.
+			answer = q.Default
+			assumed[q.ID] = answer
 		case given:
 		case opts.nonInteractive:
 			answer = q.Default
@@ -282,14 +392,7 @@ func resolveQuestions(env *Env, res *detect.Result, opts initOptions, assumed ma
 				assumed[q.ID] = "Not configured: " + q.Migration + ". Configure migrations before af up."
 				continue
 			}
-			applied := false
-			for j := range res.Draft.Services {
-				if res.Draft.Services[j].Name == answer && res.Draft.Services[j].Migrate == "" {
-					res.Draft.Services[j].Migrate = q.Migration
-					applied = true
-				}
-			}
-			if !applied {
+			if !applyMigrationAnswer(res.Draft, *q, answer) {
 				return aferrors.Coded(aferrors.AFDET006, "id", q.ID+"="+answer, "known", strings.Join(q.Options, ", "))
 			}
 			continue
@@ -436,7 +539,7 @@ func answerIDs(m *schema.Manifest) []string {
 	return ids
 }
 
-func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, path string) {
+func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, report InitReport, extra []initExtra) {
 	env.Out.Section("Detected")
 	rows := make([][]string, 0, len(res.Draft.Services))
 	for _, s := range res.Draft.Services {
@@ -479,8 +582,14 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 			block.Add(id, assumed[id])
 		}
 		block.Flush()
-		env.Out.Note(StyleDim,
-			"These were not detected with confidence. Check them before you commit.")
+		if report.NoTerminal {
+			env.Out.Note(StyleDim,
+				"There was no terminal to ask on, so every question took its default. "+
+					"These were not detected with confidence. Check them before you commit.")
+		} else {
+			env.Out.Note(StyleDim,
+				"These were not detected with confidence. Check them before you commit.")
+		}
 	}
 	if res.Partial {
 		env.Out.Note(StyleWarn,
@@ -488,7 +597,12 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 	}
 
 	env.Out.Section("Written")
-	env.Out.Printf("  %s\n", path)
+	for _, path := range report.Written {
+		env.Out.Printf("  %s\n", short(env.WorkDir, path))
+	}
+	for _, e := range extra {
+		env.Out.Note(e.style, e.text)
+	}
 	env.Out.Println("")
 	env.Out.Hint("Read it, edit anything that looks wrong, then run", "af up")
 }

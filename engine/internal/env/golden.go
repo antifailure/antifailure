@@ -825,6 +825,51 @@ func (o *Orchestrator) MaskPlan(ctx context.Context) (*PlanResult, error) {
 	}, nil
 }
 
+// DraftResult is what MaskDraft read, for the command that writes it down.
+type DraftResult struct {
+	Tables []masking.Table
+	// Assignments are what the built in rules alone decided, column by
+	// column, which is what a fresh masking.yaml is written from.
+	Assignments []masking.Assignment
+	// Source names the database the schema was read from.
+	Source string
+}
+
+// MaskDraft reads a schema and classifies it with the built in rules alone.
+//
+// The built in rules alone, deliberately, and not the rule set the manifest
+// names. This is what `af mask init` writes masking.yaml from, and a draft
+// that read the file it is about to replace would be a draft of the wrong
+// thing: a rule somebody wrote and then asked to have regenerated would come
+// back restated as though the defaults had chosen it.
+func (o *Orchestrator) MaskDraft(ctx context.Context) (*DraftResult, error) {
+	rules, err := masking.NewRuleSet(nil)
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+	}
+	conn, closeConn, source, err := o.connectForPlan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer closeConn()
+
+	tables, err := masking.ReadCatalog(ctx, conn)
+	if err != nil {
+		return nil, aferrors.Wrap(err, aferrors.AFMSK010, "detail", err.Error())
+	}
+	return &DraftResult{Tables: tables, Assignments: rules.Assign(tables), Source: source}, nil
+}
+
+// MaskingRulesPath is where the manifest says the rules live, resolved
+// against the repository root.
+func (o *Orchestrator) MaskingRulesPath() string {
+	rules := manifest.DefaultMaskingRules
+	if o.opts.Manifest.Database != nil && o.opts.Manifest.Database.MaskingRules != "" {
+		rules = o.opts.Manifest.Database.MaskingRules
+	}
+	return filepath.Join(o.opts.Root, filepath.FromSlash(strings.TrimPrefix(rules, "./")))
+}
+
 // connectForPlan opens the branch if there is one and the source if there is
 // not, and says which it opened.
 //

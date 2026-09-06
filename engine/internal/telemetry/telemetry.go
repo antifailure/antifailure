@@ -43,6 +43,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -118,6 +119,13 @@ type Telemetry struct {
 	spanEnd func()
 
 	warn func(string)
+
+	// noCredential is the exchange's own reason when this run could obtain no
+	// credential, recorded where it fails and said once, at Close, together
+	// with what became of the events, so a failed exchange is one warning and
+	// not a warning followed by a second one about its consequence.
+	credMu       sync.Mutex
+	noCredential string
 }
 
 // Attach connects a bus to the local log, the control plane, and tracing.
@@ -265,18 +273,38 @@ func (t *Telemetry) attachControlPlane(
 	// this condition every such run would trade an identity against the hosted
 	// instance, be refused because the repository is not connected to it, and
 	// print a warning about a service the user has never heard of.
+	// Deferred, not performed. Every af process on a runner reaches this line,
+	// and most of them never send a batch: eight engine tokens were minted per
+	// workflow run and five of them never appeared in a request, so the token
+	// directory filled with credentials issued for messages that did not exist.
+	// The client mints on its first request instead, through the same renew it
+	// uses when the control plane refuses an expired one. A process that sends
+	// nothing now mints nothing.
+	//
+	// The failure is reported the same way it always was, on the warning
+	// channel with the exchange's own reason, only later: when the first batch
+	// is attempted rather than at startup. The commonest reason to see it is a
+	// pull request from a fork, where GitHub declines to mint an identity on
+	// purpose.
 	if token == "" && baseURL != "" && controlplane.WorkflowIdentityAvailable(lookup) {
-		minted, err := mint(ctx)
-		if err != nil {
-			// Reported and survived, like everything else here. The commonest
-			// reason to land on this line is a pull request from a fork, where
-			// GitHub declines to mint an identity on purpose.
-			return fmt.Errorf("this run is not reported to the control plane: %w", err)
+		renew = func(ctx context.Context) (string, error) {
+			minted, err := mint(ctx)
+			if err != nil {
+				// Recorded here with the exchange's own reason and said at
+				// Close, because the sink reports a batch it could not deliver
+				// as a batch kept for the next command, which is true and is
+				// not the cause, and the two belong in one sentence.
+				t.credMu.Lock()
+				if t.noCredential == "" {
+					t.noCredential = err.Error()
+				}
+				t.credMu.Unlock()
+				return "", fmt.Errorf("this run is not reported to the control plane: %w", err)
+			}
+			return minted, nil
 		}
-		token = minted
-		renew = mint
 	}
-	if token == "" {
+	if token == "" && renew == nil {
 		return nil
 	}
 	client, err := controlplane.New(controlplane.Options{
@@ -378,12 +406,26 @@ func (t *Telemetry) Close(ctx context.Context) error {
 	// control plane outage, and a user who is told so can tell it apart from a
 	// dashboard that has silently stopped updating. Events genuinely lost are
 	// reported by the sink's own error.
+	t.credMu.Lock()
+	reason := t.noCredential
+	t.credMu.Unlock()
+	owed := 0
 	if t.spool != nil {
-		if owed := t.spool.Pending(); owed > 0 {
-			t.warn(fmt.Sprintf(
-				"%d batches of events are waiting for the control plane and will be sent by "+
-					"the next command that reaches it", owed))
-		}
+		owed = t.spool.Pending()
+	}
+	switch {
+	case reason != "" && owed > 0:
+		t.warn(fmt.Sprintf(
+			"this run is not reported to the control plane: %s; %d batches of events are kept "+
+				"and will be sent by the next command that reaches it", reason, owed))
+	case reason != "":
+		t.warn("this run is not reported to the control plane: " + reason)
+	case owed > 0:
+		t.warn(fmt.Sprintf(
+			"%d batches of events are waiting for the control plane and will be sent by "+
+				"the next command that reaches it", owed))
+	}
+	if t.spool != nil {
 		if dropped := t.spool.Dropped(); dropped > 0 {
 			t.warn(fmt.Sprintf(
 				"%d events were discarded because the spool is full; the dashboard will have a gap",

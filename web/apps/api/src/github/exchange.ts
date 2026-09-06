@@ -142,9 +142,13 @@ export interface ExchangedToken {
  * unverified claim is a limiter an attacker fills on somebody else's behalf.
  */
 export function repositoryLimiter(clock: Clock): RateLimiter {
-  // A job exchanges once. Twenty at once covers an organization starting a
-  // large matrix build in one repository; a sustained two a second is not a
-  // build.
+  // A job exchanges once per engine session that has something to send. That
+  // was believed to be once per job when this was written, and it was eight:
+  // af ci opens eight sessions and every one of them minted on startup. The
+  // engine now mints on first use, so a session that sends nothing exchanges
+  // nothing and a job settles at about three. Twenty at once still covers an
+  // organization starting a large matrix build in one repository; a sustained
+  // two a second is not a build.
   return new RateLimiter(clock, { rate: 2, burst: 20 })
 }
 

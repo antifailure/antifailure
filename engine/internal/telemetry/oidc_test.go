@@ -210,13 +210,20 @@ type mintingRun struct {
 // closes, which is the whole lifecycle a command has.
 func runOne(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
 	t.Helper()
-	return runWith(t, r, h, env, true, "")
+	return runWith(t, r, h, env, true, "", true)
+}
+
+// runSilently is the same, for a command that emits nothing worth reporting,
+// which is most of them on a runner.
+func runSilently(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
+	t.Helper()
+	return runWith(t, r, h, env, true, "", false)
 }
 
 // runWithoutAddress is the same, for a repository that names no control plane.
 func runWithoutAddress(t *testing.T, r *runner, h *hosted, env map[string]string) *mintingRun {
 	t.Helper()
-	return runWith(t, r, h, env, false, "")
+	return runWith(t, r, h, env, false, "", true)
 }
 
 // runSignedIn is the same, for a machine somebody has run af login on. The CLI
@@ -224,11 +231,11 @@ func runWithoutAddress(t *testing.T, r *runner, h *hosted, env map[string]string
 // hands it over the same way.
 func runSignedIn(t *testing.T, r *runner, h *hosted, env map[string]string, stored string) *mintingRun {
 	t.Helper()
-	return runWith(t, r, h, env, true, stored)
+	return runWith(t, r, h, env, true, stored, true)
 }
 
 func runWith(
-	t *testing.T, r *runner, h *hosted, env map[string]string, addressed bool, stored string,
+	t *testing.T, r *runner, h *hosted, env map[string]string, addressed bool, stored string, emit bool,
 ) *mintingRun {
 	t.Helper()
 
@@ -274,7 +281,9 @@ func runWith(
 	})
 	require.NoError(t, err)
 
-	bus.Info("shop-main-a1b2", events.EnvReady, "the environment is ready")
+	if emit {
+		bus.Info("shop-main-a1b2", events.EnvReady, "the environment is ready")
+	}
 	require.NoError(t, tel.Close(t.Context()))
 
 	// Read the way the NEXT command reads it: a fresh spool over the same
@@ -325,6 +334,25 @@ func TestTheSinkMintsFromTheWorkflowIdentityWhenNoTokenIsSet(t *testing.T) {
 	require.Equal(t, 1, run.plane.exchangeCount(), "the identity was exchanged exactly once")
 	require.Equal(t, []string{"Bearer signed.workflow.identity"}, run.plane.identities,
 		"and what was presented for it was the runner's identity")
+}
+
+// The leak this closes. Eight engine tokens per workflow run, five of them
+// never used: every af process minted one on startup whether or not it had a
+// batch to send. The token directory is where a person notices a credential
+// they did not expect, and it was full of ones nobody had asked for.
+func TestACommandThatSendsNothingMintsNothing(t *testing.T) {
+	r := &runner{value: "signed.workflow.identity"}
+	h := &hosted{issued: "minted-for-this-job"}
+
+	run := runSilently(t, r, h, map[string]string{
+		identityURLEnv:   "present",
+		identityTokenEnv: "the-runners-request-token",
+	})
+
+	require.Equal(t, 0, run.runner.calls(), "no identity was requested from the runner")
+	require.Equal(t, 0, run.plane.exchangeCount(), "and nothing was presented for exchange")
+	require.Empty(t, run.plane.ingested())
+	require.Empty(t, run.warned, "and a command that had nothing to say was not warned about: %v", run.warned)
 }
 
 // The audience is a security property rather than a detail.
@@ -423,6 +451,12 @@ func TestARefusedExchangeIsReportedAndTheRunCarriesOn(t *testing.T) {
 	require.Len(t, run.log, 1, "the run is unaffected")
 	require.True(t, warnedAbout(run.warned, "not connected here"),
 		"the control plane's own reason is carried through: %v", run.warned)
+	// And in the same sentence, what became of the event: kept, not dropped.
+	// The eager mint of old built no sink on refusal and the event was gone;
+	// a user told only the reason would still assume that.
+	require.True(t, warnedAbout(run.warned, "1 batches of events are kept"),
+		"the one warning also says the batch is kept for the next command: %v", run.warned)
+	require.Len(t, run.warned, 1, "and it is one warning, not a reason followed by a consequence")
 }
 
 // The credential is short lived by design, so a run outlives it.

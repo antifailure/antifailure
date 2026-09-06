@@ -69,6 +69,27 @@ Without the link, `users.id` and `orders.user_id` get different new UUIDs, every
 order becomes an orphan, and the environment looks like a customer base with no
 orders. Nothing errors. That is why it is worth stating explicitly.
 
+## Writing the rules from the schema
+
+```sh
+af mask init      # reads the source database, writes masking.yaml
+```
+
+`af mask init` connects to the source the manifest names, reads the catalog,
+and runs the classifier over it. It writes one rule per column that carries
+personal data, restating the default that matched with its `why`, and one
+explicit rule per column the classifier could not place, so the file records a
+decision for every column rather than leaving the unplaced ones to the
+inconvenient default. `af mask plan` on the result reports zero problems and
+zero unmatched columns, which is the point: the first plan you read is one
+where every row is a choice to confirm rather than a gap to fill.
+
+It refuses to overwrite a `masking.yaml` that exists. Pass `--force` to
+replace one, and read the diff, because a rule you edited by hand is what the
+rewrite would lose. `af init` runs the same code when the source resolves at
+init time, and says either that the rules were written from N tables or that
+they were not written because there is no source yet.
+
 ## Planning before applying
 
 ```sh

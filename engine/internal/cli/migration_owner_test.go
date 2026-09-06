@@ -68,10 +68,20 @@ func migrationOwnerFixture(t *testing.T) string {
 	return dir
 }
 
+// The one question that still has no default, because a migration command
+// found outside every service has no service it can be guessed onto. The
+// refusal names the flag that answers it, and not the flag the run already
+// passed: an error that instructs the reader to do the thing they just did is
+// a dead end, and --non-interactive used to answer a question it could not
+// default with "pass --non-interactive".
 func TestMigrationOwner_UnattendedRunRefusesToGuess(t *testing.T) {
 	dir := migrationOwnerFixture(t)
 	got := runCLI(t, dir, nil, "init", "--non-interactive")
+	require.NotZero(t, got.code)
 	require.Contains(t, got.stderr, "AF-DET-004")
+	require.Contains(t, got.stderr, "--answer migration."+filepath.Base(dir)+".service=")
+	require.NotContains(t, got.stderr, "Pass --non-interactive", "the run already passed it")
+	require.NoFileExists(t, filepath.Join(dir, "antifailure.yaml"))
 }
 
 func TestMigrationOwner_AnswerReachesWrittenManifest(t *testing.T) {

@@ -752,3 +752,77 @@ func TestARefusedBatchRenewsAtMostOncePerFloor(t *testing.T) {
 		t.Fatalf("a refusal past the floor caused %d exchanges in total, want 2", got)
 	}
 }
+
+// A client built with no credential and a way to get one mints on the first
+// request and not before, presents what it minted, and does not present the
+// identity again for a batch retried within the minute after a failure.
+func TestTheFirstRequestMintsTheCredentialAndNotTheConstructor(t *testing.T) {
+	var mu sync.Mutex
+	var bearers []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		bearers = append(bearers, r.Header.Get("authorization"))
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"accepted":1}`))
+	}))
+	defer srv.Close()
+
+	mints := 0
+	fake := clock.NewFake(time.Unix(1700000000, 0).UTC())
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: srv.URL, Token: "", Clock: fake, Redactor: redact.New(), HTTP: srv.Client(),
+		Renew: func(context.Context) (string, error) { mints++; return "minted-on-demand", nil },
+	})
+	if err != nil {
+		t.Fatalf("a client with a way to obtain a credential must build: %v", err)
+	}
+	if mints != 0 {
+		t.Fatalf("the constructor minted %d credential(s); it must mint none", mints)
+	}
+
+	ev := []controlplane.Event{{ID: "evt-1", Type: "env.ready", OccurredAt: fake.Now()}}
+	if _, err := c.Send(context.Background(), ev); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if _, err := c.Send(context.Background(), ev); err != nil {
+		t.Fatalf("second send: %v", err)
+	}
+	if mints != 1 {
+		t.Fatalf("two sends minted %d time(s); the first mints and the second reuses", mints)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bearers) != 2 || bearers[0] != "Bearer minted-on-demand" || bearers[1] != "Bearer minted-on-demand" {
+		t.Fatalf("the minted credential was not what was presented: %v", bearers)
+	}
+}
+
+// A first attempt that fails is bounded like a renewal: a retry inside the
+// minute does not present the identity a second time.
+func TestAFailedFirstMintIsNotRepeatedWithinTheMinute(t *testing.T) {
+	mints := 0
+	fake := clock.NewFake(time.Unix(1700000000, 0).UTC())
+	c, err := controlplane.New(controlplane.Options{
+		BaseURL: "https://plane.example", Token: "", Clock: fake, Redactor: redact.New(),
+		Renew: func(context.Context) (string, error) { mints++; return "", errors.New("declined") },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := []controlplane.Event{{ID: "evt-1", Type: "env.ready", OccurredAt: fake.Now()}}
+	if _, err := c.Send(context.Background(), ev); err == nil {
+		t.Fatal("a send with no obtainable credential must fail")
+	}
+	if _, err := c.Send(context.Background(), ev); err == nil {
+		t.Fatal("still no credential")
+	}
+	if mints != 1 {
+		t.Fatalf("two failed sends presented the identity %d time(s); the second is inside RenewFloor", mints)
+	}
+	fake.Advance(controlplane.RenewFloor)
+	_, _ = c.Send(context.Background(), ev)
+	if mints != 2 {
+		t.Fatalf("after RenewFloor the identity may be presented again; presented %d time(s)", mints)
+	}
+}
