@@ -14,6 +14,38 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.2
+
+v1.3.1 fixed the transport check that refused an operator's customer
+mutations. This fixes the same check seen from the other cookie, found the
+next morning by the same person, and is cut alone for the same reason.
+
+**An operator who was also a customer could not run any operator mutation
+from the portal.** The portal sends the operator token with an operator
+mutation, which is all it knows about. A browser that also holds the customer
+cookie had that mutation refused by the customer transport check with 403
+"needs the x-antifailure-csrf header from GET /auth/session", because that
+check keyed on its cookie being present rather than on the request naming one
+of its procedures. Mark reviewed on a job application was the first casualty.
+The customer check now applies to requests that name a customer procedure and
+to nothing else, the mirror of what v1.3.1 did for the operator check, and a
+batch that mixes both namespaces is checked both ways. The suite covers both
+orderings of both cookies, and each gate's own refusal and acceptance over
+HTTP, so neither gate can be switched off or widened back without going red.
+
+### What moves when this tag is pushed
+
+**No migrations, no configuration.** The image and only the image.
+
+<!-- relnotes:omit -->
+
+### Fixed
+
+* An operator who was also a customer could not press Mark reviewed, or run
+  any other operator mutation from the portal.
+
+<!-- relnotes:end -->
+
 ## v1.3.1
 
 v1.3.0 switched billing on in production and the first person to press
