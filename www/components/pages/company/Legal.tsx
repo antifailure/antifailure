@@ -866,7 +866,7 @@ export function DpaPage() {
             "No SOC 2 report, no ISO 27001 certificate, and no third-party penetration test. None is claimed anywhere on this site.",
             "Monitoring we will not vouch for from here. Alert rules, an availability test and runbooks are written and version controlled, and production is configured to create them (alerting_enabled is true in infra/terraform/stacks/control-plane/production.tfvars). Whether that configuration has been applied to the live subscription is not something you can check from outside this company, and it is not something this page will assert on your behalf. Ask for the evidence and it will be produced or the claim withdrawn.",
             "No self-service account or organization deletion. Closing an account or removing an organization is carried out by hand against the database by somebody who can reach it. Two things you can do yourself: export your audit log, which is an endpoint, and delete a stored model provider key, which is also an endpoint. There is no self-service export of anything else.",
-            "No SLA, no support commitment, and no published uptime history. Production is deployed and answering, at app.antifailure.dev, with a separate staging deployment at app.dev.antifailure.dev. Access is invitation only. What does not exist is anything you could hold us to about how long it stays up.",
+            "No SLA, no support commitment, and no published uptime history. Production is deployed and answering, at app.antifailure.dev, with a separate staging deployment at app.dev.antifailure.dev. What does not exist is anything you could hold us to about how long it stays up.",
           ]}
         />
         <Prose className="mt-10">
