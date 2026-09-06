@@ -232,27 +232,34 @@ try {
     let [role] = await sql`
       SELECT rolbypassrls AS bypass FROM pg_roles WHERE rolname = ${operatorRole}
     `
-    // INSIDE A PREVIEW, AND ONLY THERE, a missing operator role is created.
+    // INSIDE A PREVIEW, AND ONLY THERE, the operator role is made usable.
     //
-    // A preview's database is a golden restored into a fresh container, and a
-    // dump carries no cluster roles: the migrations that created
-    // antifailure_admin and handed it its grants ran against the source, and
-    // the branch arrives with the schema at head and the role absent. The
-    // refusal below is right for an installation, where a role that exists
-    // is the proof the migrations ran, and wrong here, where nothing will ever
-    // run them again. The application in a preview already connects as the
-    // container's superuser, so a second login with every grant on the schema
+    // A dump carries no cluster roles. The golden copy recreates the ones a
+    // grant names, as NOLOGIN shells with no BYPASSRLS and none of the grants
+    // 0023 handed out, because a dump drops privileges too; an older golden
+    // carries no role at all. Either way the migrations that made
+    // antifailure_admin what it is ran against the source and never run
+    // again, so the refusals below, right for an installation where the role
+    // being whole is the proof the migrations ran, would refuse every preview
+    // forever. The application in a preview already connects as the
+    // container's superuser, so a portal login with every grant on the schema
     // widens nothing; it is what lets the operator portal be rehearsed at all.
     // AF_ENV_ID is set by the engine for an environment it created and by
-    // nothing else, which is the same signal personas.mjs keys on.
-    if (!role && process.env.AF_ENV_ID) {
+    // nothing else, the same signal personas.mjs keys on.
+    if (process.env.AF_ENV_ID && (!role || !role.bypass)) {
       const literal = passwordLiteral(operatorPassword, 'AF_ADMIN_DATABASE_URL')
-      await sql.unsafe(`CREATE ROLE ${operatorRole} LOGIN NOSUPERUSER BYPASSRLS PASSWORD ${literal}`)
+      // ALTER for the shell the copy recreated, CREATE for the golden that
+      // carried nothing; CREATE refuses a role that exists.
+      await sql.unsafe(
+        `${role ? 'ALTER' : 'CREATE'} ROLE ${operatorRole} LOGIN NOSUPERUSER BYPASSRLS PASSWORD ${literal}`,
+      )
       await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${operatorRole}`)
       await sql.unsafe(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${operatorRole}`)
       await sql.unsafe(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${operatorRole}`)
       await sql.unsafe(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${operatorRole}`)
-      console.log(`created operator role ${operatorRole} for this preview, with every grant on the schema`)
+      console.log(
+        `${role ? 'completed' : 'created'} operator role ${operatorRole} for this preview, with every grant on the schema`,
+      )
       ;[role] = await sql`
         SELECT rolbypassrls AS bypass FROM pg_roles WHERE rolname = ${operatorRole}
       `
