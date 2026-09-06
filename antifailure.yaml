@@ -173,6 +173,13 @@ personas:
     email: owner@antifailure.test
     role: owner
     login: magic_link
+    # The console's sign-in screen, which every console route shows when
+    # signed out. Named so that a workflow starting inside the operator portal
+    # still signs the owner in at the console: the search for a form begins at
+    # the workflow's start path, and the portal's form has an email field too,
+    # so the runner typed the owner's address there and then waited for a
+    # "Send a sign-in link" button the portal does not have.
+    sign_in_path: /environments
 
   - name: viewer
     email: viewer@antifailure.test

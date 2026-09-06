@@ -359,3 +359,11 @@ test('a shared word still outranks a named control', async () => {
   const action = await next(review, page({ controls: ['Preview Applicant', 'Continue'] }));
   assert.match('Continue', (action as { control: RegExp }).control);
 });
+
+test('a named control is pressed once, so the next name in the description gets its turn', async () => {
+  // The applicant's name is still in the document behind the drawer it
+  // opened, and a modal dialog intercepts a second press on it.
+  const pressed: Action[] = [{ kind: 'click', control: /^Preview Applicant$/i, why: 'y' }];
+  const action = await next(review, page({ controls: ['Preview Applicant', 'Mark reviewed'] }), pressed);
+  assert.match('Mark reviewed', (action as { control: RegExp }).control);
+});

@@ -346,7 +346,13 @@ export class DeterministicPlanner implements Planner {
     // sat on the page, is the failure this closes. It is not a script: no
     // order is given, only the presence of the control decides when, and a
     // model reading the page decides for itself.
-    const named = namedControls(workflow, snapshot).find((c) => pressedBefore(c) < 2);
+    // Once each, not twice like a shared word. A named control that was
+    // pressed did its job; the description's next name is the next step. The
+    // twice rule exists for a submit after a field was filled, and pressing
+    // an applicant's name again while the drawer it opened is still up is a
+    // click that a modal dialog intercepts, and the whole workflow blocks on
+    // the ten second timeout it takes to say so.
+    const named = namedControls(workflow, snapshot).find((c) => pressedBefore(c) < 1);
     const control = answeredSomething
       ? (submit ?? (snapshot.submits.length > 0 ? undefined : (known ?? named)))
       : (known ?? named ?? submit);

@@ -229,9 +229,34 @@ try {
       process.exit(2)
     }
 
-    const [role] = await sql`
+    let [role] = await sql`
       SELECT rolbypassrls AS bypass FROM pg_roles WHERE rolname = ${operatorRole}
     `
+    // INSIDE A PREVIEW, AND ONLY THERE, a missing operator role is created.
+    //
+    // A preview's database is a golden restored into a fresh container, and a
+    // dump carries no cluster roles: the migrations that created
+    // antifailure_admin and handed it its grants ran against the source, and
+    // the branch arrives with the schema at head and the role absent. The
+    // refusal below is right for an installation, where a role that exists
+    // is the proof the migrations ran, and wrong here, where nothing will ever
+    // run them again. The application in a preview already connects as the
+    // container's superuser, so a second login with every grant on the schema
+    // widens nothing; it is what lets the operator portal be rehearsed at all.
+    // AF_ENV_ID is set by the engine for an environment it created and by
+    // nothing else, which is the same signal personas.mjs keys on.
+    if (!role && process.env.AF_ENV_ID) {
+      const literal = passwordLiteral(operatorPassword, 'AF_ADMIN_DATABASE_URL')
+      await sql.unsafe(`CREATE ROLE ${operatorRole} LOGIN NOSUPERUSER BYPASSRLS PASSWORD ${literal}`)
+      await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${operatorRole}`)
+      await sql.unsafe(`GRANT ALL ON ALL TABLES IN SCHEMA public TO ${operatorRole}`)
+      await sql.unsafe(`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${operatorRole}`)
+      await sql.unsafe(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${operatorRole}`)
+      console.log(`created operator role ${operatorRole} for this preview, with every grant on the schema`)
+      ;[role] = await sql`
+        SELECT rolbypassrls AS bypass FROM pg_roles WHERE rolname = ${operatorRole}
+      `
+    }
     if (!role) {
       console.error(
         `role ${operatorRole} does not exist. The migrations create antifailure_admin with the ` +
