@@ -19,9 +19,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import { IconSignOut, LogoMark } from "@/components/icons";
-import { Button, Field, Lede, Standalone, inputClass } from "@/components/ui";
+import { Button, Field, Lede, Standalone, inputClass, NavLink as RailLink } from "@/components/ui";
 import { ADMIN_NAV, ADMIN_OVERVIEW } from "@/lib/admin-nav";
 import type { AdminNavItem } from "@/lib/admin-nav";
 import { adminSignIn, adminSignOut, operatorMay, useAdminContext } from "@/lib/admin";
@@ -197,7 +196,7 @@ function NavLink({ item, onNavigate }: { item: AdminNavItem; onNavigate?: () => 
   const { Icon } = item;
   return (
     <li>
-      <Link
+      <RailLink
         href={item.href}
         onClick={onNavigate}
         aria-current={current ? "page" : undefined}
@@ -216,7 +215,7 @@ function NavLink({ item, onNavigate }: { item: AdminNavItem; onNavigate?: () => 
             Flags" does not fit 232px on one line, and an entry ending in an
             ellipsis is an entry somebody has to click to identify. */}
         <span className="min-w-0">{item.label}</span>
-      </Link>
+      </RailLink>
     </li>
   );
 }

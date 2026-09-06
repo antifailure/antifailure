@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ApiError } from "@/lib/api";
 import { ago, when } from "@/lib/format";
 import { LogoMark } from "@/components/icons";
@@ -886,5 +887,50 @@ export function Loaded<T>({
       {stale}
       {children(state.data)}
     </>
+  );
+}
+
+/**
+ * A sidebar link that is fetched when somebody reaches for it, not when the
+ * page renders.
+ *
+ * Next prefetches every Link in the viewport as soon as it appears. The rail
+ * holds a dozen of them, so every page load fired a dozen requests for
+ * segment payloads named like `/load/__next.!KGFwcCk.load.__PAGE__.txt`, each
+ * carrying the encoded route group in its path, before the person had done
+ * anything. Somebody reading the network panel on the Plan page saw those
+ * and asked, reasonably, what they were doing there.
+ *
+ * `prefetch={false}` in the App Router disables the fetch on viewport AND on
+ * hover, so this puts the hover half back by hand: the router is asked for
+ * the segment when the pointer or the keyboard focus reaches the link, which
+ * is long enough before the click that navigation still feels instant, and
+ * only for the one link the person is about to use.
+ */
+export function NavLink({
+  href,
+  onClick,
+  className,
+  children,
+  ...rest
+}: React.ComponentProps<typeof Link>) {
+  const router = useRouter();
+  const target = typeof href === "string" ? href : href.pathname ?? null;
+  const warm = () => {
+    if (target) router.prefetch(target);
+  };
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      onMouseEnter={warm}
+      onFocus={warm}
+      onTouchStart={warm}
+      onClick={onClick}
+      className={className}
+      {...rest}
+    >
+      {children}
+    </Link>
   );
 }

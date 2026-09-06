@@ -23,7 +23,7 @@ import {
 import { rest, type Session } from "@/lib/api";
 import { useSessionContext } from "@/components/session";
 import { may, mayReadAnalytics } from "@/lib/roles";
-import { Button, Field, Lede, LinkButton, Standalone, inputClass } from "@/components/ui";
+import { Button, Field, Lede, LinkButton, Standalone, inputClass, NavLink } from "@/components/ui";
 
 /**
  * Where to come back to after signing in.
@@ -345,7 +345,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
         const active = pathname === href;
         return (
           <li key={href}>
-            <Link
+            <NavLink
               href={href}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
@@ -357,7 +357,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             >
               <Icon className={`h-4 w-4 shrink-0 ${active ? "text-ink" : "text-dim"}`} />
               {label}
-            </Link>
+            </NavLink>
           </li>
         );
       })}
@@ -554,7 +554,7 @@ export function Shell({ children }: { children: ReactNode }) {
                     const active = pathname === item.href;
                     return (
                       <li key={item.href}>
-                        <Link
+                        <NavLink
                           href={item.href}
                           aria-current={active ? "page" : undefined}
                           className={`flex h-9 items-center rounded-md px-2.5 text-[13px] tracking-snug transition-colors ${
@@ -564,7 +564,7 @@ export function Shell({ children }: { children: ReactNode }) {
                           }`}
                         >
                           {item.label}
-                        </Link>
+                        </NavLink>
                       </li>
                     );
                   })}
