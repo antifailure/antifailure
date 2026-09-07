@@ -652,6 +652,23 @@ const (
 	// instrument whose job is to say "this is not production" reported it as
 	// faithful because it was not looking.
 	FidelityDatastores FidelityDimension = "datastores"
+	// FidelityTopology is how many instances of each service are running,
+	// against how many the manifest asked for.
+	//
+	// The other half of the same finding the datastores dimension closed.
+	// Replicas was a dead manifest field until both runtimes honoured it, and
+	// a manifest asking for three instances silently ran one, so nothing that
+	// only breaks above one instance could appear in a twin: leader election,
+	// double processing of a queue, a cache coherent with one instance and not
+	// two, a sticky session assumption. The runtimes run the count now, and
+	// this is the dimension that says whether they did.
+	//
+	// A service that names no count has said nothing about how many instances
+	// production runs, and a twin running one of it is neither shown to
+	// reproduce that nor shown not to. So it is reported unmeasured rather
+	// than reproduced, which is the same refusal the runtime dimension makes
+	// for the same reason.
+	FidelityTopology FidelityDimension = "topology"
 )
 
 // AllFidelityDimensions returns every dimension, in the order the inventory
@@ -660,6 +677,7 @@ func AllFidelityDimensions() []FidelityDimension {
 	return []FidelityDimension{
 		FidelityServices, FidelityDatabase, FidelityThirdParty,
 		FidelityAuth, FidelityRuntime, FidelityTraffic, FidelityDatastores,
+		FidelityTopology,
 	}
 }
 

@@ -25,12 +25,20 @@ import (
 // called it faithful. The instrument whose entire job is to say "this is not
 // production" was the last thing that would have told anybody.
 //
-// So the dimension reports these as unmeasured, with the reason, rather than
-// leaving them out. Unmeasured keeps them out of the score in both directions,
-// which is correct: nothing here has shown that a second datastore reproduces
-// production and nothing here has shown that it does not. What changes is that
-// the report now carries the sentence, in the exclusions list every reader of
-// the headline is pointed at.
+// So the dimension reports these rather than leaving them out, and which of
+// two states each gets turns on what the manifest declared for it.
+//
+// A store the manifest declares golden is ABSENT, and it is counted. The
+// manifest asked for a masked, verified copy of production in it and this
+// build has none, which is a fact about the environment and not a gap in what
+// can be seen. That is the line that makes the score go down on exactly the
+// stack this dimension was added for.
+//
+// A store recognised from a service image, or declared with any other stance,
+// is UNMEASURED, which keeps it out of the score in both directions: nothing
+// here has shown that it reproduces production and nothing here has shown that
+// it does not. Either way the report carries the sentence, in the exclusions
+// list every reader of the headline is pointed at.
 
 // datastores reports every datastore in the environment other than the primary
 // database.
@@ -57,11 +65,7 @@ func datastores(obs Observation) Dimension {
 			continue
 		}
 		declared[ds.Name] = true
-		found = append(found, Component{
-			Name:   ds.Name,
-			State:  Unmeasured,
-			Detail: declaredReason(ds),
-		})
+		found = append(found, declaredComponent(ds))
 	}
 
 	for _, svc := range obs.Manifest.Services {
@@ -95,15 +99,42 @@ func datastores(obs Observation) Dimension {
 	return d
 }
 
+// declaredComponent is one store the manifest declares, in the state the
+// declaration and this build together put it in.
+//
+// TWO STATES, and which one a stance gets is the whole of this function.
+//
+// A stance of golden is ABSENT. The manifest asked for a masked, verified copy
+// of production in this store, this build has no such thing, and that is a
+// fact about the environment rather than a gap in what can be seen: there is
+// one golden, one masking pass, one verification scan and one branch, and all
+// four are the primary Postgres. Nothing has to read a ClickHouse to know that
+// nothing built a golden for it. So it is counted, in the denominator, and the
+// score goes down, which is the point: an analytics product's twin holding
+// masked Postgres metadata and zero events must not score as a faithful twin,
+// and until this it did, because unmeasured kept the one store the product is
+// about out of the number in both directions.
+//
+// Every other stance stays UNMEASURED. Nothing in this build starts a second
+// store, rebuilds one from the branch or creates a topic in one, so whether an
+// empty store came up empty on purpose or came up at all is genuinely unknown
+// here. A store reported reproduced because somebody declared it empty would
+// be the report believing a manifest instead of an environment, which is the
+// failure one level up from the one the dimension was added for. L4.4 is the
+// lane that makes those three into first class outcomes; this one must not
+// pre-empt it by scoring a declaration.
+func declaredComponent(ds schema.Datastore) Component {
+	c := Component{Name: ds.Name, Detail: declaredReason(ds)}
+	if ds.Stance == schema.StanceGolden {
+		c.State = Absent
+		return c
+	}
+	c.State = Unmeasured
+	return c
+}
+
 // declaredReason says what the manifest chose for a store and what this build
 // has done about it, which are two different sentences and both belong here.
-//
-// Unmeasured for every stance, including empty, and that is the honest answer
-// rather than a cautious one. Nothing in this build starts a second store,
-// reads one, rebuilds one or creates a topic in one; what exists is the
-// declaration. A store reported as reproduced because somebody declared it
-// empty would be the report believing a manifest instead of an environment,
-// which is the failure one level up from the one the dimension was added for.
 func declaredReason(ds schema.Datastore) string {
 	var b strings.Builder
 	b.WriteString("a ")
@@ -133,9 +164,21 @@ func stanceGap(stance schema.DatastoreStance) string {
 		return "nothing here ran that rebuild, so nothing knows whether it would succeed"
 	case schema.StanceTopicsOnly:
 		return "nothing here created a topic, so the broker is a declaration rather than a shape"
+	case schema.StanceGolden:
+		// The four facts named one by one rather than summarised. The database
+		// dimension reports a branch as its golden, its attestation, its
+		// tables and its rows; this store has none of those, and naming each
+		// is what tells somebody which four things would have to appear before
+		// this line changes.
+		return "nothing here built one: no golden, no attestation, no tables and no rows. " +
+			"There is one golden, one masking pass, one verification scan and one branch, " +
+			"and all four are the primary Postgres"
 	default:
-		return "this build reproduces the primary database only, so nothing here read its " +
-			"contents and nothing here can say whether it holds production's data or came up empty"
+		// A stance no build of this engine knows. Validation refuses one, so
+		// reaching here means a manifest parsed by a newer engine than the one
+		// reading it, and the honest sentence is that this build did nothing
+		// rather than a guess at what the stance meant.
+		return "this build does not know that stance, so nothing here acted on it"
 	}
 }
 

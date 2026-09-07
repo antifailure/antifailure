@@ -19,7 +19,9 @@ traffic        not measured: the manifest does not ask for traffic, so there is 
 
 datastores     not measured: no service declares a datastore beside the primary database, which is recognised here by a service's image or its name
 
-5 of 7 measured components are production's own, which is 71 percent. 3 components and dimensions are excluded and named below.
+topology       not measured: no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+
+5 of 7 measured components are production's own, which is 71 percent. 4 components and dimensions are excluded and named below.
 A component is production's own when the environment reaches the real thing.
 A substitution, a refusal and an absence are all counted and none of them
 counts as reproduced. Nothing unmeasured is counted either way.
@@ -27,4 +29,5 @@ counts as reproduced. Nothing unmeasured is counted either way.
 Not measured, and so not counted:
   datastores     no service declares a datastore beside the primary database, which is recognised here by a service's image or its name
   runtime        the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+  topology       no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
   traffic        the manifest does not ask for traffic, so there is none to reproduce

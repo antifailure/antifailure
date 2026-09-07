@@ -131,6 +131,7 @@ func Build(obs Observation) Inventory {
 			runtime(obs),
 			traffic(obs),
 			datastores(obs),
+			topology(obs),
 		},
 	}
 }
@@ -187,9 +188,10 @@ func services(obs Observation) Dimension {
 // more than one, and it names both numbers. A twin whose manifest asks for
 // three and whose runtime is running one is not the topology somebody
 // declared, and the fidelity report is the one place whose whole job is to say
-// so. The dimension that scores that difference rather than describing it is a
-// separate piece of work; this line is what makes the difference visible at
-// all instead of nowhere.
+// so. This line DESCRIBES the difference and the topology dimension SCORES it,
+// which is the separate piece of work this comment used to say was still
+// outstanding. Both are kept: somebody reading the services table sees the
+// count beside the service it belongs to, and the score changes in one place.
 func describeService(s schema.Service, r provider.RunningService) string {
 	kind := string(s.Kind)
 	if kind == "" {

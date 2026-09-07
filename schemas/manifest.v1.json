@@ -1223,7 +1223,8 @@
               "auth",
               "runtime",
               "traffic",
-              "datastores"
+              "datastores",
+              "topology"
             ]
           },
           "uniqueItems": true,
