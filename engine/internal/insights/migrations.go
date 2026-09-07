@@ -560,8 +560,16 @@ func (l *locator) holdsAFlywayMigration(dir string) bool {
 // whole node_modules that escaped the skip list under another name.
 const maxMigrationDepth = 5
 
-// skipForMigrations names the directories the fallback never looks inside,
-// because what they hold is somebody else's project or a copy of this one.
+// skipForMigrations names the directories the search never looks inside,
+// because what they hold is somebody else's project or a build of this one.
+//
+// It used to guard one fallback. It now guards every marker, which is what
+// deepening the search made necessary: a dependency shipping its own
+// prisma/migrations is that dependency's schema, and answering with it would
+// rehearse somebody else's migrations with a straight face.
+//
+// docs/src/content/docs/concepts/insights.md prints this list in full. A
+// document that names seven of thirteen reads as though it named all of them.
 func skipForMigrations(base string) bool {
 	if strings.HasPrefix(base, ".") {
 		return true

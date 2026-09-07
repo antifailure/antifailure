@@ -425,10 +425,13 @@ Where more than one candidate exists, the one under a path a service in the
 manifest declares wins, and then the shallowest. Ties keep the order the walk
 found them in, which is lexical, so the answer is the same on every run. So a
 monorepo with two migration directories rehearses the one beside the service
-that migrates rather than whichever the filesystem returned first. Directories
-holding somebody else's project are never looked inside: `node_modules`,
-`vendor`, `examples`, `testdata`, `fixtures`, `dist`, `build` and anything
-beginning with a dot.
+that migrates rather than whichever the filesystem returned first.
+
+Directories holding somebody else's project, or a build of this one, are never
+looked inside. The list in full: `node_modules`, `vendor`, `examples`,
+`example`, `testdata`, `fixtures`, `fixture`, `dist`, `build`, `target`, `tmp`,
+`docs`, `__pycache__`, and anything whose name begins with a dot. A dependency
+that ships its own `prisma/migrations` is that dependency's schema, not yours.
 
 A project that applies its own directory of SQL files with a script of its own
 should declare it, because a guess that lands on the wrong directory rehearses
