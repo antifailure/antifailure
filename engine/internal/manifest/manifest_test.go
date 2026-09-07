@@ -572,9 +572,11 @@ func TestNormalize_AppliesEveryDefault(t *testing.T) {
 	require.Equal(t, schema.ServiceWeb, m.Services[0].Kind)
 	require.Equal(t, "/", m.Services[0].HealthPath)
 	require.Equal(t, "180s", m.Services[0].HealthTimeout)
-	require.Equal(t, 1, m.Services[0].Replicas)
-	require.Equal(t, "1", m.Services[0].Resources.CPU)
-	require.Equal(t, "1Gi", m.Services[0].Resources.Memory)
+	// replicas and resources are deliberately not defaulted. Nothing reads
+	// any of the three, validate refuses one an author writes, and a default
+	// here would put a refused key into every normalized manifest.
+	require.Zero(t, m.Services[0].Replicas)
+	require.Nil(t, m.Services[0].Resources)
 	require.Equal(t, schema.BuildAuto, m.Services[0].Build.Strategy)
 
 	require.Equal(t, schema.DBDocker, m.Database.Provider)

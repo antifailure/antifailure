@@ -542,6 +542,17 @@ const (
 	FidelityRuntime FidelityDimension = "runtime"
 	// FidelityTraffic is where the endpoint mix comes from.
 	FidelityTraffic FidelityDimension = "traffic"
+	// FidelityDatastores is every datastore in the environment other than the
+	// primary database: what each one is, and whether anything here reproduced
+	// its contents.
+	//
+	// It exists because the absence was invisible. Database is a single struct
+	// and it is Postgres, so a ClickHouse or a Redis declared as a service is
+	// started empty and no dimension above says a word about it. An analytics
+	// product's twin held a masked Postgres and zero events, and the one
+	// instrument whose job is to say "this is not production" reported it as
+	// faithful because it was not looking.
+	FidelityDatastores FidelityDimension = "datastores"
 )
 
 // AllFidelityDimensions returns every dimension, in the order the inventory
@@ -549,7 +560,7 @@ const (
 func AllFidelityDimensions() []FidelityDimension {
 	return []FidelityDimension{
 		FidelityServices, FidelityDatabase, FidelityThirdParty,
-		FidelityAuth, FidelityRuntime, FidelityTraffic,
+		FidelityAuth, FidelityRuntime, FidelityTraffic, FidelityDatastores,
 	}
 }
 

@@ -158,11 +158,15 @@ at `af up` with **AF-RUN-044** rather than handed to services as a connection
 string that will never resolve. Use a database the environment can already
 reach.
 
-Cron services are placed as ordinary Deployments rather than CronJobs, and the
-manifest's `replicas` and `resources` are not applied. Neither value reaches any
-runtime today: they are dropped between the manifest and the runtime contract,
-so honouring them here alone would mean one runtime enforcing a cap the other
-silently ignores.
+Cron services are placed as ordinary Deployments rather than CronJobs.
+
+The manifest's `replicas` and `resources` are **refused at validation** rather
+than applied. Neither value reaches any runtime: they are dropped between the
+manifest and the runtime contract, so honouring them here alone would mean one
+runtime enforcing a cap the other ignores. Until both do, a manifest carrying
+either one is rejected by name, because a service that quietly ran as one
+instance under `replicas: 3` was the worse of the two answers: the run went
+green having proved nothing about the case its author was worried about.
 
 ## Teardown
 

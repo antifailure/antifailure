@@ -82,6 +82,7 @@ gate: _reports
     run "no commit attributes itself"    just attribution
     run "documented manifests are valid" just manifestcheck
     run "closed sets are counted right"  just constcheck
+    run "every manifest field is read or refused" just fieldsweep
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
     run "the site calls routes that exist" just routecheck
@@ -1388,6 +1389,22 @@ _generated:
       docs/src/content/docs/guides/dashboard.md \
       engine/internal/hud/testdata \
       docs/src/content/docs/reference/schemas
+
+# Every manifest field either does something or is refused.
+#
+# The failure it exists for: replicas, resources.cpu, resources.memory and
+# workflows[].tags were all in the schema, all documented, and all read by
+# nothing, so a manifest asking for three instances of a worker got one and the
+# run went green having never started a second one.
+#
+# In `gate` as well as in `just test-tools`, which runs the same check as a Go
+# test. Two call sites rather than one because they answer to different
+# readers: the test is what turns a pull request red, and this is what prints
+# the number and the list behind it for somebody who wants to look. The
+# `-ambiguous` half prints the size of the check's own blind spot, which is the
+# part a number nobody can interrogate would leave out.
+fieldsweep:
+    go run ./tools/fieldsweep -root . -ambiguous
 
 # Regenerate and keep the result.
 generate:

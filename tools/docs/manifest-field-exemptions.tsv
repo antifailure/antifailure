@@ -1,0 +1,38 @@
+# Manifest fields nothing reads, with the decision that covers each one.
+#
+# FOUR tab separated fields: the field as Struct.Field in
+# engine/pkg/schema/manifest.go, the KIND of decision, WHERE in the tree that
+# decision is written down, and WHY.
+#
+# The kinds, and each one is checked against the tree rather than believed:
+#
+#   refused   Validation says no. The third column is the dotted path the
+#             refusal names, and engine/internal/manifest/validate.go has to
+#             contain it. Deleting a refusal and leaving its row here fails.
+#
+#   label     Nothing reads it and that is the decision, because the value is
+#             for whoever reads the manifest rather than for the engine. The
+#             third column is <definition>.<property> in
+#             schemas/manifest.v1.json, and that entry has to carry a
+#             description. An undocumented label and a field somebody forgot to
+#             wire look exactly alike from the outside, and the description is
+#             the only thing that tells them apart.
+#
+# THE LABEL KIND EXISTS BECAUSE REFUSING ONE WAS WRONG. workflows[].tags was
+# refused here first, on the grounds that nothing reads it. Eleven deliberate
+# groupings then failed to parse, in the examples and in this repository's own
+# antifailure.yaml, written by people labelling their workflows who never
+# expected the engine to do anything with them. What was actually missing was
+# the description.
+#
+# A row for a field something now reads, or for a field that no longer exists,
+# is reported rather than ignored. An exemption that has outlived its reason is
+# how a check goes quiet.
+#
+# THERE IS NO KIND HERE FOR A FIELD THAT IS SIMPLY UNFINISHED. A field somebody
+# intends to implement gets implemented, or it gets refused until it is.
+Service.Replicas	refused	.replicas	Nothing reads it. Both runtimes start exactly one container per service, so a manifest asking for three instances got one and the run proved nothing about the case its author was worried about.
+Resources.CPU	refused	.resources.cpu	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
+Resources.Memory	refused	.resources.memory	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
+LoadThresholds.QueryCountIncrease	refused	load.thresholds.query_count_increase	Nothing measures it. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression.
+Workflow.Tags	label	workflow.tags	A grouping for whoever reads the manifest. The engine does not select or print on it, and the schema says so, so nobody writing tags: [smoke] is promised a way to run just the smoke ones.

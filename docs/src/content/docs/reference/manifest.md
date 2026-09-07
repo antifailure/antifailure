@@ -52,10 +52,10 @@ what it deliberately does not cover.
 | `health_timeout` | duration | Default `180s`. |
 | `migrate` | string | Runs to completion before the service starts, with an elevated connection. See below. |
 | `schedule` | cron | For `kind: cron`. |
-| `replicas` | int | Default 1. |
+| `replicas` | int | Refused. Nothing reads it, so a service carrying it would still run one instance. |
 | `depends_on` | list | Other services that must start first. |
 | `env` | list | Variables this service needs, by name. |
-| `resources` | block | `cpu` and `memory`. |
+| `resources` | block | `cpu` and `memory`, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
 | `build` | block | See below. |
 
 ### What a service is given
@@ -223,7 +223,7 @@ and to the exit code.
 | Key | Notes |
 | --- | --- |
 | `enabled` | On by default. Turning it off means the inventory is not taken, which is not the same as everything having passed. |
-| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`. See [inventory](/docs/concepts/inventory). |
+| `require` | Dimensions every component of which must be reproduced: `services`, `database`, `third_party`, `auth`, `runtime`, `traffic`, `datastores`. See [inventory](/docs/concepts/inventory). |
 
 There is no threshold here. A single percentage hides the one dimension that
 matters to a particular change, so what a manifest requires is a dimension by

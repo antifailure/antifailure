@@ -14,9 +14,6 @@ import (
 const (
 	DefaultHealthPath    = "/"
 	DefaultHealthTimeout = "180s"
-	DefaultReplicas      = 1
-	DefaultCPU           = "1"
-	DefaultMemory        = "1Gi"
 	DefaultPostgres      = 17
 	DefaultURLEnv        = "DATABASE_URL"
 	DefaultMaskingRules  = "masking.yaml"
@@ -126,18 +123,13 @@ func normalizeService(s *schema.Service) {
 	if s.HealthTimeout == "" {
 		s.HealthTimeout = DefaultHealthTimeout
 	}
-	if s.Replicas == 0 {
-		s.Replicas = DefaultReplicas
-	}
-	if s.Resources == nil {
-		s.Resources = &schema.Resources{}
-	}
-	if s.Resources.CPU == "" {
-		s.Resources.CPU = DefaultCPU
-	}
-	if s.Resources.Memory == "" {
-		s.Resources.Memory = DefaultMemory
-	}
+	// replicas, resources.cpu and resources.memory are not defaulted here, and
+	// that is the point of the change that removed it. Nothing reads any of
+	// the three, so a default was a value the engine wrote down and never
+	// consulted, and validate refuses one an author writes. Filling them in
+	// anyway would put a key the engine refuses into every normalized
+	// manifest, which is exactly what TestNormalize_IsIdempotent caught: the
+	// manifest this function produced no longer parsed.
 	if s.Build == nil {
 		s.Build = &schema.Build{}
 	}

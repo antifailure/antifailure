@@ -161,8 +161,8 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 10,
-          "default": 1,
-          "description": "How many instances to run."
+          "deprecated": true,
+          "description": "Not read by anything, and refused by the engine. Both runtimes start exactly one container per service, so a manifest asking for three instances got one and nothing said so."
         },
         "resources": {
           "$ref": "#/$defs/resources"
@@ -282,21 +282,21 @@
     },
     "resources": {
       "title": "Resources",
-      "description": "What one replica of a service is allowed to use. Absent means the runtime decides, which locally means no limit and on a cluster means the namespace default.",
+      "description": "Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "cpu": {
           "type": "string",
           "pattern": "^[0-9]+(\\.[0-9]+)?m?$",
-          "default": "1",
-          "description": "CPU limit, in cores or millicores."
+          "deprecated": true,
+          "description": "Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none."
         },
         "memory": {
           "type": "string",
           "pattern": "^[0-9]+(Mi|Gi|M|G)$",
-          "default": "1Gi",
-          "description": "Memory limit."
+          "deprecated": true,
+          "description": "Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none."
         }
       }
     },
@@ -773,7 +773,8 @@
           "items": {
             "type": "string",
             "maxLength": 40
-          }
+          },
+          "description": "Labels for the person reading the manifest, and nothing else. The engine does not read them: no command selects workflows by tag and no report prints one, so grouping workflows here groups them for a reader and not for a run. Name the workflows with --only to run a subset. This key had no description at all until somebody counted the fields nothing reads, which is how a label and a broken promise came to look alike."
         }
       }
     },
@@ -1162,7 +1163,8 @@
               "third_party",
               "auth",
               "runtime",
-              "traffic"
+              "traffic",
+              "datastores"
             ]
           },
           "uniqueItems": true,

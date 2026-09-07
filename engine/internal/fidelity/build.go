@@ -130,6 +130,7 @@ func Build(obs Observation) Inventory {
 			auth(obs),
 			runtime(obs),
 			traffic(obs),
+			datastores(obs),
 		},
 	}
 }
