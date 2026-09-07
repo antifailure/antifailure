@@ -32,7 +32,8 @@ anybody.
 | `auth` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | `runtime` | Where the environment runs. |
 | `traffic` | Where the endpoint mix comes from, through the same code the load run uses. |
-| `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. Nothing does yet, so each one is reported `unmeasured` by name. |
+| `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares `golden` is `absent`, because nothing here builds a golden for a second store. The others are `unmeasured` by name. |
+| `topology` | How many instances of each service are running, against how many the manifest asked for. |
 
 Nothing is estimated and nothing is a constant somebody typed because the
 report needed a number.
@@ -73,9 +74,14 @@ The cases that produce it today:
   answers depends on the host the application reaches.
 - A persona created through a provider's own API rather than in the branch,
   which nothing here can read without calling it.
-- Every datastore other than the primary database. There is one golden, one
-  masking pass and one branch, and they are Postgres, so a ClickHouse or a
-  Redis declared as a service comes up empty and nothing here read it.
+- A datastore other than the primary database whose declared stance is not
+  `golden`. Nothing here starts a second store, rebuilds one from the branch or
+  creates a topic in one, so whether an `empty` store came up empty on purpose
+  is genuinely unknown. A store declared `golden` is not in this list: it is
+  `absent`, and the next section says why.
+- A service that names no instance count, in the `topology` dimension. It runs
+  one because one is what an omitted key means, not because anything compared
+  that against production.
 
 A dimension the manifest never asked for is excluded too, whole, with the
 reason. An environment that sends no traffic at all has not reproduced traffic
@@ -124,9 +130,27 @@ ClickHouse. Every query path that matters is untested and every chart is blank.
 The inventory used to score that environment on its services, its branch, its
 hosts, its personas and its traffic and call it faithful, because none of its
 dimensions was looking at the second store. The `datastores` dimension is that
-absence, written down. Each store is reported `unmeasured` with the reason,
-which keeps it out of the score in both directions: nothing here has shown that
-it reproduces production, and nothing here has shown that it does not.
+absence, written down.
+
+Which state a store gets turns on what the manifest declared for it.
+
+A store declared `golden` is `absent`, and it is counted. The manifest asked
+for a masked, verified copy of production in it, this build has none, and
+nothing has to read a ClickHouse to know that nothing built a golden for it.
+That is a fact about the environment rather than a gap in what can be seen, so
+it belongs in the denominator, and the report names the four things that are
+missing: no golden, no attestation, no tables and no rows.
+
+A store declared `empty`, `derived` or `topics_only` is `unmeasured`, which
+keeps it out of the score in both directions. Nothing here starts a second
+store, rebuilds one from the branch or creates a topic in one, so a store
+reported reproduced because somebody declared it empty would be the report
+believing a manifest instead of an environment.
+
+That is the number going down on purpose. A stack shaped like an analytics
+product scored 100 percent before, and scores 90 after, on the same
+observation, because the one store the product is about is now in the
+denominator. `just benchmark` runs the harness that produced both numbers.
 
 A store is recognised two ways. A [declared datastore](/docs/reference/manifest)
 is the better one, because it carries the stance somebody chose for it and the
@@ -140,6 +164,39 @@ from what the service is called, so an old manifest is not silently reported as
 having no second store at all. One whose image this build does not recognise
 and whose service carries an unrelated name is invisible to both signals, and
 the dimension says which two it used when it finds none.
+
+## One instance of every service, and the report that could not see it
+
+`replicas` was a manifest field nothing read until both runtimes honoured it.
+A manifest asking for three instances silently ran one, and the `services`
+dimension called that service `reproduced`, because it asks whether a service
+is up and stops there. So every bug that only appears above one instance was
+invisible in the one report whose job is to say what a twin does not reproduce:
+leader election, a queue processed twice, a cache coherent with one instance
+and not two, a sticky session assumption, a migration safe against one writer.
+
+The `topology` dimension counts instances against the count each service asked
+for.
+
+```
+topology       absent (2 absent, 2 unmeasured)
+  web          absent       1 of 3 instances, so anything that only breaks above one instance can still pass here
+  worker       absent       1 of 2 instances, so anything that only breaks above one instance can still pass here
+  events       unmeasured   this service names no count, so it runs one and nothing says whether production runs one
+  cache        unmeasured   this service names no count, so it runs one and nothing says whether production runs one
+```
+
+A service that names no count is `unmeasured` rather than `reproduced`. The
+manifest's count is the only statement anybody has made about how many
+instances a service runs; a service that declares none has made no statement,
+and the environment runs one of it because one is what an omitted key means.
+Calling that reproduced would put a number in the numerator that nothing
+measured, which is the same refusal the `runtime` dimension makes one level up.
+
+When no service in the manifest names a count at all, the whole dimension is
+excluded with one line saying so, rather than a row per service repeating it.
+That is every manifest written before `replicas` was honoured, and the score
+those manifests get is unchanged.
 
 ## Requiring a dimension
 
@@ -162,10 +219,17 @@ the first is how a check stops being believed.
 manifest says what production runs on, so there is no other side to the
 comparison. Requiring it fails with `AF-FID-002` saying so.
 
-`datastores` is reported and is not measurable today, for a different reason:
-nothing in this build reproduces a datastore other than the primary Postgres.
-Requiring it fails with `AF-FID-002` naming each store, which is the honest
-answer rather than a pass.
+`datastores` is measurable only as far as the stances go. A store declared
+`golden` is `absent`, so requiring the dimension on a manifest whose stores are
+all `golden` fails with `AF-FID-001`, which is a fact about the environment.
+Any store on another stance is unmeasured, and one of those in the manifest
+takes the whole dimension to `AF-FID-002` naming it, which is the honest answer
+rather than a pass.
+
+`topology` is measurable for every service that names an instance count, and a
+count that is short fails with `AF-FID-001`. A manifest where some service
+names no count fails with `AF-FID-002` naming it, and one where no service does
+fails the same way with the dimension excluded whole.
 
 Turning the inventory off with `enabled: false` means it is not taken, which is
 not the same as everything having passed, and the command says so rather than

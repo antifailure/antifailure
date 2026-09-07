@@ -503,9 +503,18 @@ benchmark:
     # directory as its working directory rather than the one just was invoked
     # from. A relative path here wrote the report into engine/internal.
     out="$(cd {{reports}} && pwd)/benchmark-datastores-${stamp}.md"
+    score="$(cd {{reports}} && pwd)/benchmark-fidelity-score-${stamp}.md"
     cd engine && AF_BENCHMARK_OUT="$out" \
       go test ./internal/fidelity -run TestBenchmarkDatastoresPerEnvironment -count=1
     echo "wrote {{reports}}/benchmark-datastores-${stamp}.md"
+    # The fidelity score before and after the topology and golden datastore
+    # dimensions, on one analytics shaped manifest. The before half is a report
+    # recorded from an older checkout rather than computed here, because a
+    # before number produced by the after code is a simulation of the old
+    # instrument rather than a measurement of it.
+    AF_SCORE_BENCHMARK_OUT="$score" \
+      go test ./internal/fidelity -run TestBenchmarkTheFidelityScoreBeforeAndAfter -count=1
+    echo "wrote {{reports}}/benchmark-fidelity-score-${stamp}.md"
     # The database providers, which is a different question and a different
     # report: how long the first golden takes per gigabyte and how long a
     # branch takes, per provider. It is slow on purpose, because it creates
@@ -513,10 +522,12 @@ benchmark:
     # AF_PGURL_ADMIN_URL, or AF_TEST_DATABASE_URL, says which Postgres to run
     # it against; without either it uses the one `just db` starts.
     #
-    # The two halves write to different places and the difference is not
-    # settled: this one writes into benchmarks/, which is committed, because a
-    # number a customer is quoted has to be readable without running anything,
-    # and the datastore half writes into {{reports}}/, which is gitignored.
+    # The halves write to different places and the difference is not settled:
+    # this one and the cross store one below write into benchmarks/, which is
+    # committed, because a number a customer is quoted has to be readable
+    # without running anything, and the two fidelity halves above write into
+    # {{reports}}/, which is gitignored. The sentence used to say "the two
+    # halves" and there are four now.
     AF_BENCHMARK=1 go test ./internal/db/pgurl -run TestBenchmark -v -count=1 -timeout 60m
     # The cross store number, which is a third question again: of the
     # identifiers that appear in more than one of an environment's stores, how

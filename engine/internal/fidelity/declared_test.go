@@ -38,8 +38,15 @@ func TestADeclaredStanceIsCarriedIntoTheReport(t *testing.T) {
 	inv := fidelity.Build(analyticsStack(t))
 
 	events := componentState(t, inv, schema.FidelityDatastores, "events")
-	require.Equal(t, fidelity.Unmeasured, events.State)
+	// Absent rather than unmeasured, and this is the change L4.7 made. The
+	// manifest asked for a masked, verified copy of production in this store
+	// and this build has none, which is a fact about the environment rather
+	// than a gap in what can be seen. See TestADeclaredGoldenStoreIsCounted
+	// for what that does to the score.
+	require.Equal(t, fidelity.Absent, events.State)
 	require.Contains(t, events.Detail, "a clickhouse declared golden")
+	require.Contains(t, events.Detail,
+		"no golden, no attestation, no tables and no rows")
 
 	bus := componentState(t, inv, schema.FidelityDatastores, "bus")
 	require.Contains(t, bus.Detail, "a kafka declared topics_only")

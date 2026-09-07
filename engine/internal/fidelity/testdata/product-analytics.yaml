@@ -1,0 +1,48 @@
+version: 1
+name: product-analytics
+
+# The stack section 4 of the plan is written about, and the one this lane's
+# number is measured on. A web tier behind three instances, a worker behind
+# two, the primary Postgres, and two stores beside it: the ClickHouse every
+# event lives in, which is the product, and a Redis that is correct to start
+# empty and says so.
+#
+# No egress rules and no load, so that the third party and traffic dimensions
+# are excluded whole and the number is about the two things this lane changed
+# rather than about a mock pack.
+
+services:
+  - name: web
+    port: 8000
+    replicas: 3
+  - name: worker
+    kind: worker
+    replicas: 2
+  - name: events
+    kind: worker
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-server:24.3
+  - name: cache
+    kind: worker
+    build:
+      strategy: image
+      image: redis:7
+
+database:
+  provider: docker
+  version: 17
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: a cache is rebuilt from the primary and a copy would be noise
+
+personas:
+  - name: buyer
+    email: buyer@example.test

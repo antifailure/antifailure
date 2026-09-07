@@ -578,11 +578,13 @@ func TestExplainCarriesTheDefinitionAndTheExclusions(t *testing.T) {
 	require.Contains(t, text,
 		"5 of 6 measured components are production's own, which is 83 percent.",
 		"the headline dropped the count the percentage is derived from")
-	// Four rather than three since the datastores dimension arrived. An
-	// environment with no second store excludes it whole, with the sentence
-	// saying how it looked, which is the point: the report now carries a line
-	// about datastores whether or not it found any.
-	require.Contains(t, text, "4 components and dimensions are excluded and named below.")
+	// Five rather than four since the topology dimension arrived, and four
+	// rather than three since the datastores one did. An environment with no
+	// second store excludes datastores whole, and one whose services name no
+	// instance count excludes topology whole, each with the sentence saying
+	// how it looked. That is the point of both: the report carries a line
+	// about each whether or not it found anything.
+	require.Contains(t, text, "5 components and dimensions are excluded and named below.")
 
 	require.Contains(t, text, "A component is production's own when the environment reaches the real thing.")
 	require.Contains(t, text, "Nothing unmeasured is counted either way.")
