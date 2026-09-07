@@ -105,6 +105,16 @@ exits `7` too, and says which of the three ways to settle it applies: name the
 directory under `database.migrations`, turn the check off in the manifest, or
 pass the flag for one run.
 
+**The rolling deploy check below does the opposite, and the difference is the
+default rather than an inconsistency.** A rolling check that could not run exits
+`0` and says so. That check is conditional: `when: risky` is the default and it
+runs only when the pending migrations contain something the previous release
+could notice, so "did not run" is the ORDINARY outcome for a purely additive
+migration and exiting non zero for it would fire on most runs of most
+repositories. The migration rehearsal has no such condition. It is what this
+command is for, it was asked for on every run that did not decline it, and a
+rehearsal that did not happen is therefore a gap rather than a normal Tuesday.
+
 A tool that IS recognised but whose migrations are not SQL is not this case.
 Rails, Django, Alembic and Knex are applied by running the project's own
 migrate command in the service's image, so the check did run, and the note
