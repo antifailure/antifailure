@@ -99,6 +99,19 @@ func (d *destinations) permit(ip net.IP) error {
 	return nil
 }
 
+// isLocal reports whether an address is on the environment's own network.
+//
+// Separate from permit, which answers a different question: permit says
+// whether the sidecar may open an address at all, and this says whether the
+// address is INSIDE the environment. The internal paths need the second one,
+// because a name with no dot is internal by shape and a name is not an
+// address: on a machine whose resolver carries a search domain, a single label
+// resolves to something on the corporate network, and forwarding to it without
+// a policy decision would be an escape wearing an internal name.
+func (d *destinations) isLocal(ip net.IP) bool {
+	return d.local != nil && d.local.Contains(ip)
+}
+
 // isSharedAddressSpace reports whether an address is in 100.64.0.0/10.
 //
 // Named separately because Go has no predicate for it and it is not private

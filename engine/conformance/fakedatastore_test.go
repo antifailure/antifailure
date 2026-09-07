@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -50,6 +51,10 @@ const (
 	dsFlawHealthErrorsWhenGone     = "health-errors-when-gone"
 	dsFlawCancelledBranchIsHidden  = "cancelled-branch-is-hidden"
 	dsFlawLeaksOnRefresh           = "leaks-on-refresh"
+	dsFlawGoldenSurvivesDestroy    = "golden-survives-destroy"
+	dsFlawEmptyGoldenListing       = "empty-golden-listing"
+	dsFlawListingDropsProvenance   = "listing-drops-provenance"
+	dsFlawDestroyGoldenTwiceErrors = "destroy-golden-twice-errors"
 )
 
 // dsState is what the fake owns, shared across the instances one run builds.
@@ -61,17 +66,26 @@ const (
 type dsState struct {
 	mu       sync.Mutex
 	seq      int
-	goldens  map[string]bool   // version id -> verified
+	goldens  map[string]golden // version id -> what was published
 	branches map[string]string // environment id -> provider ref
 	live     map[string]string // provider ref -> environment id
+	goldenOf map[string]string // provider ref -> the version it was branched from
 	orphans  map[string]bool   // resources nothing will ever remove
+}
+
+// golden is a published version, as the fake remembers it.
+type golden struct {
+	verified   bool
+	provenance string
+	rulesHash  string
 }
 
 func newDSState() *dsState {
 	return &dsState{
-		goldens:  map[string]bool{},
+		goldens:  map[string]golden{},
 		branches: map[string]string{},
 		live:     map[string]string{},
+		goldenOf: map[string]string{},
 		orphans:  map[string]bool{},
 	}
 }
@@ -143,7 +157,9 @@ func (f *fakeDatastore) publish(spec provider.GoldenSpec, attestation string, ve
 	defer f.state.mu.Unlock()
 	f.state.seq++
 	id := fmt.Sprintf("gv_fake_%s_%d", spec.RulesHash, f.state.seq)
-	f.state.goldens[id] = verified
+	f.state.goldens[id] = golden{
+		verified: verified, provenance: spec.Provenance, rulesHash: spec.RulesHash,
+	}
 	if f.flaw == dsFlawLeaksOnRefresh {
 		// A resource that carries the version's identifier and that nothing
 		// removes, which is what the end of suite check is for. It is not a
@@ -160,6 +176,54 @@ func (f *fakeDatastore) publish(spec provider.GoldenSpec, attestation string, ve
 	}
 }
 
+func (f *fakeDatastore) ListGoldens(_ context.Context) ([]provider.GoldenVersion, error) {
+	if f.flaw == dsFlawEmptyGoldenListing {
+		return nil, nil
+	}
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	out := make([]provider.GoldenVersion, 0, len(f.state.goldens))
+	for id, g := range f.state.goldens {
+		gv := provider.GoldenVersion{
+			ID: id, Verified: g.verified, Provenance: g.provenance,
+			RulesHash: g.rulesHash, ProviderRef: id,
+		}
+		if f.flaw == dsFlawListingDropsProvenance {
+			// The plausible one, and the reason the behaviour checks the
+			// field rather than only the identifier. A listing that reports
+			// the version and forgets what it was made for makes every
+			// version unselectable, and it does it silently: the engine sees
+			// a golden that belongs to nobody and refreshes again.
+			gv.Provenance = ""
+		}
+		out = append(out, gv)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out, nil
+}
+
+func (f *fakeDatastore) DestroyGolden(_ context.Context, version string) error {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	if _, present := f.state.goldens[version]; !present && f.flaw == dsFlawDestroyGoldenTwiceErrors {
+		return fmt.Errorf("no such golden %s", version)
+	}
+	for env, ref := range f.state.branches {
+		if f.state.goldenOf[ref] == version {
+			// A version something still branches, refused. The fake carries
+			// this because the interface promises it, and a fake that was
+			// lenient where the contract is strict would let a provider be
+			// written against the fake's rules.
+			return fmt.Errorf("the golden %s is still branched by %s", version, env)
+		}
+	}
+	if f.flaw == dsFlawGoldenSurvivesDestroy {
+		return nil
+	}
+	delete(f.state.goldens, version)
+	return nil
+}
+
 func (f *fakeDatastore) Branch(ctx context.Context, version, envID string) (provider.Branch, error) {
 	cancelled := ctx.Err() != nil
 	if cancelled && f.flaw != dsFlawCancelledBranchIsHidden {
@@ -169,7 +233,8 @@ func (f *fakeDatastore) Branch(ctx context.Context, version, envID string) (prov
 	f.state.mu.Lock()
 	defer f.state.mu.Unlock()
 
-	verified, ok := f.state.goldens[version]
+	g, ok := f.state.goldens[version]
+	verified := g.verified
 	if !ok {
 		return provider.Branch{}, aferrors.Coded(aferrors.AFDB004, "version", version)
 	}
@@ -183,6 +248,7 @@ func (f *fakeDatastore) Branch(ctx context.Context, version, envID string) (prov
 	f.state.seq++
 	ref := fmt.Sprintf("br_fake_%s_%d", envID, f.state.seq)
 	f.state.branches[envID] = ref
+	f.state.goldenOf[ref] = version
 	if !cancelled || f.flaw != dsFlawCancelledBranchIsHidden {
 		f.state.live[ref] = envID
 	}
@@ -200,6 +266,7 @@ func (f *fakeDatastore) Destroy(_ context.Context, b provider.Branch) error {
 		return nil
 	}
 	delete(f.state.live, b.ProviderRef)
+	delete(f.state.goldenOf, b.ProviderRef)
 	if f.state.branches[b.EnvID] == b.ProviderRef {
 		delete(f.state.branches, b.EnvID)
 	}

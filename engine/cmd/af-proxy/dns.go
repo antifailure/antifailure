@@ -30,13 +30,54 @@ import (
 // image is built from source carried in the engine binary, with no module
 // downloads, so everything it uses has to be the standard library.
 
+// inside decides which names are the environment's own.
+//
+// ONE predicate, shared by the resolver and by the proxy, and that is the
+// whole reason it is a type rather than a method. The two halves of this
+// sidecar had different answers: the resolver treated a service name, the
+// database and any single label name as internal and forwarded the lookup, and
+// the proxy had never heard of the list and evaluated every host against the
+// egress policy. A client that reads http_proxy and ignores no_proxy, which
+// busybox wget does and which is what a great many small images ship, then had
+// its call to another service in the same environment refused as egress: the
+// name resolved to the right container and the request went to the sidecar
+// anyway. Two notions of internal that disagree is one of them being wrong.
+type inside struct {
+	named map[string]bool
+}
+
+func newInside(names []string) inside {
+	set := map[string]bool{}
+	for _, n := range names {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+			set[n] = true
+		}
+	}
+	return inside{named: set}
+}
+
+// has reports whether a name is inside this environment.
+func (i inside) has(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if i.named[name] {
+		return true
+	}
+	// A single label with no dot is a container name or an alias on one of
+	// the environment's networks. Nothing outside is addressed that way:
+	// there is no public name without a dot in it.
+	if !strings.Contains(name, ".") {
+		return true
+	}
+	return strings.HasSuffix(name, ".localhost") || name == "localhost"
+}
+
 // dnsServer answers lookups for the environment.
 type dnsServer struct {
 	// self is the address every external name resolves to.
 	self net.IP
 	// internal are the names that must resolve normally: other services, the
-	// database, and the sidecar itself.
-	internal map[string]bool
+	// database, the datastores, and the sidecar itself.
+	internal inside
 	// upstream is Docker's embedded resolver, which knows the environment's
 	// own names.
 	upstream string
@@ -47,13 +88,10 @@ type dnsServer struct {
 }
 
 func newDNSServer(self net.IP, internal []string, upstream string, emit func(record)) *dnsServer {
-	set := map[string]bool{}
-	for _, n := range internal {
-		if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
-			set[n] = true
-		}
+	return &dnsServer{
+		self: self, internal: newInside(internal), upstream: upstream,
+		emit: emit, logged: map[string]bool{},
 	}
-	return &dnsServer{self: self, internal: set, upstream: upstream, emit: emit, logged: map[string]bool{}}
 }
 
 // serve answers queries until the connection fails.
@@ -134,17 +172,7 @@ func (d *dnsServer) answer(query []byte) []byte {
 	}
 }
 
-func (d *dnsServer) isInternal(name string) bool {
-	if d.internal[name] {
-		return true
-	}
-	// A single label with no dot is a container name or an alias on one of
-	// the environment's networks. Nothing outside is addressed that way.
-	if !strings.Contains(name, ".") {
-		return true
-	}
-	return strings.HasSuffix(name, ".localhost") || name == "localhost"
-}
+func (d *dnsServer) isInternal(name string) bool { return d.internal.has(name) }
 
 // note records the first time a name is intercepted, so the decision log shows
 // what the environment looked up as well as what it connected to. A name that

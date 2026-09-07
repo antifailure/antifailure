@@ -62,19 +62,25 @@ type Kind string
 
 const (
 	KindDatabaseBranch Kind = "database.branch"
-	KindGoldenVersion  Kind = "golden.version"
-	KindContainer      Kind = "container"
-	KindVolume         Kind = "volume"
-	KindNetwork        Kind = "network"
-	KindImage          Kind = "image"
-	KindZFSDataset     Kind = "zfs.dataset"
-	KindNamespace      Kind = "k8s.namespace"
-	KindDeployment     Kind = "k8s.deployment"
-	KindDNSRecord      Kind = "dns.record"
-	KindStorageObject  Kind = "storage.object"
-	KindWebhook        Kind = "webhook.registration"
-	KindSandboxObject  Kind = "sandbox.object"
-	KindRunnerProcess  Kind = "runner.process"
+	// KindDatastoreBranch is a branch of a store other than the primary
+	// database. It is a separate kind rather than the same one because the
+	// compensating deleter is a different provider: one environment can hold a
+	// Postgres branch and a ClickHouse branch, and a replay that could not tell
+	// them apart would hand each to the wrong one.
+	KindDatastoreBranch Kind = "datastore.branch"
+	KindGoldenVersion   Kind = "golden.version"
+	KindContainer       Kind = "container"
+	KindVolume          Kind = "volume"
+	KindNetwork         Kind = "network"
+	KindImage           Kind = "image"
+	KindZFSDataset      Kind = "zfs.dataset"
+	KindNamespace       Kind = "k8s.namespace"
+	KindDeployment      Kind = "k8s.deployment"
+	KindDNSRecord       Kind = "dns.record"
+	KindStorageObject   Kind = "storage.object"
+	KindWebhook         Kind = "webhook.registration"
+	KindSandboxObject   Kind = "sandbox.object"
+	KindRunnerProcess   Kind = "runner.process"
 )
 
 // Record is one journalled resource.

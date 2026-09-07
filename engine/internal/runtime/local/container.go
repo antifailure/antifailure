@@ -567,6 +567,11 @@ func (r *Runtime) envList(spec provider.EnvSpec, s provider.ServiceSpec) []strin
 			internal = append(internal, other.Name)
 		}
 	}
+	// And the stores the environment provides, for exactly the reason the
+	// services are here. A datastore is not a service and is not the database,
+	// so it was in neither list, and the one address a manifest declaring a
+	// masked ClickHouse most wants to reach was the one the policy refused.
+	internal = append(internal, spec.Datastores...)
 	noProxy := strings.Join(internal, ",")
 	vars["NO_PROXY"] = noProxy
 	vars["no_proxy"] = noProxy

@@ -106,7 +106,7 @@ func (o *Orchestrator) deleters(s *session, cli *client.Client, cliErr error) (*
 		// it. So the Docker deleters are left unregistered, which makes their
 		// records Skipped and therefore reported, rather than silently treated
 		// as compensated.
-		return o.databaseDeleters(reg, s), nil
+		return o.datastoreDeleters(o.databaseDeleters(reg, s), s), nil
 	}
 
 	// The local runtime records a resource by the NAME it is about to create
@@ -147,7 +147,7 @@ func (o *Orchestrator) deleters(s *session, cli *client.Client, cliErr error) (*
 			return dockerutil.RemoveVolume(ctx, cli, handle(rec))
 		}))
 
-	return o.databaseDeleters(reg, s), nil
+	return o.datastoreDeleters(o.databaseDeleters(reg, s), s), nil
 }
 
 // databaseDeleters registers the branch compensation.

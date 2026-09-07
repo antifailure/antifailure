@@ -61,6 +61,36 @@ type Datastore interface {
 	// RefreshGolden builds a new masked, verified copy. A datastore that
 	// declares Golden false returns ErrNoGolden.
 	RefreshGolden(ctx context.Context, spec GoldenSpec) (GoldenVersion, error)
+	// ListGoldens returns the versions this datastore holds, newest first.
+	//
+	// The engine chooses which version an environment branches, and it cannot
+	// choose one it cannot see. Without this, every `af up` would have to
+	// refresh, which means copying production's events again for an
+	// environment that could have branched the copy made ten minutes ago, and
+	// the alternative, the engine keeping its own list of what the provider
+	// owns, is a second record of the same fact that drifts from the first the
+	// moment a version is removed anywhere else.
+	//
+	// Every version's Provenance travels with it, because a golden pool is
+	// SHARED: several projects can keep their goldens on one server, and
+	// selecting the newest verified version and nothing else is how one
+	// project's environment ends up holding another's production data. That
+	// has already happened twice to the primary database.
+	ListGoldens(ctx context.Context) ([]GoldenVersion, error)
+	// DestroyGolden removes a version. Removing one that is already gone
+	// succeeds, and a version something still branches is refused.
+	//
+	// It is here because without it a datastore that can make goldens has no
+	// way to remove one, and a golden is the largest thing this interface
+	// creates: a copy of production's events, per refresh, forever. The
+	// conformance suite said so in its own words, that a datastore has no
+	// DestroyGolden and that this was "the one place this suite cannot clean
+	// up after itself", and a suite that cannot clean up after itself is one
+	// whose leak check cannot fail. Adding the method is what turns that
+	// admitted gap into a checked behaviour.
+	//
+	// A store that declares Golden false has none to remove and returns nil.
+	DestroyGolden(ctx context.Context, version string) error
 	// Branch creates this environment's copy. Calling it twice with the same
 	// environment identifier returns the same branch, the same idempotency
 	// contract Database has and for the same reason: the engine retries after

@@ -171,6 +171,10 @@ type GoldenResult struct {
 	// Published names the store the golden was copied to, empty when this
 	// project publishes nowhere.
 	Published string
+	// Datastores is what each declared datastore's refresh did, in manifest
+	// order. Empty when the manifest declares none, which is every project
+	// whose twin is one Postgres.
+	Datastores []DatastoreGolden
 	// PublishError is why the copy did not happen, when a store was
 	// configured. It is reported rather than returned: the golden exists and
 	// can be branched here, and failing the whole refresh would throw away the
@@ -435,6 +439,14 @@ func (o *Orchestrator) refreshWithin(ctx context.Context, s *session) (*GoldenRe
 		} else {
 			result.Published = store.Name()
 		}
+	}
+	// The rest of the twin. A project whose events are the point would
+	// otherwise have a command that refreshes its metadata and no command at
+	// all for its events, and `af up` would refuse to branch a store nothing
+	// could make a golden of.
+	if err := o.refreshDatastores(ctx, s, result); err != nil {
+		result.Duration = o.opts.Clock.Since(started)
+		return result, err
 	}
 	result.Duration = o.opts.Clock.Since(started)
 	return result, nil

@@ -538,6 +538,17 @@ benchmark:
     # without AF_TEST_CLICKHOUSE_URL, it starts and removes a container.
     AF_BENCHMARK=1 go test ./internal/masking -run TestBenchmarkCrossStoreJoinKeys \
       -v -count=1 -timeout 30m
+    # Events in the twin, which was zero: a manifest could declare a second
+    # store and nothing copied anything into it, so every chart in the
+    # environment drew nothing. This one loads a production shaped events
+    # table, refreshes a golden of it, masks it, verifies it, branches it, and
+    # reports the count beside the refresh and branch times. It writes into
+    # benchmarks/ for the same reason the two above do, and it takes its size
+    # from AF_BENCHMARK_EVENTS so that a customer can run it at their own row
+    # count. It needs a ClickHouse; without one, and without
+    # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
+    AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
+      -v -count=1 -timeout 60m
 
 # The fast ones, for a tight loop.
 test-short:

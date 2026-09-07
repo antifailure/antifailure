@@ -72,6 +72,7 @@ func (r *Runtime) startProxy(
 	envID string,
 	egress *schema.Egress,
 	serviceNames []string,
+	datastores []string,
 	ca *envcert.Authority,
 	credentials map[string]secrets.Value,
 	mockPacks []string,
@@ -143,7 +144,7 @@ func (r *Runtime) startProxy(
 	cfg := sidecarConfig{
 		Egress:   orEmptyEgress(egress),
 		Subnet:   subnet,
-		Internal: append([]string{DatabaseAlias, ProxyAlias}, serviceNames...),
+		Internal: append(append([]string{DatabaseAlias, ProxyAlias}, serviceNames...), datastores...),
 		EnvID:    envID,
 	}
 	if ca != nil {

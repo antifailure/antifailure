@@ -433,6 +433,11 @@
           "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
           "maxLength": 40,
           "description": "The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others."
+        },
+        "source_url_env": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching."
         }
       }
     },

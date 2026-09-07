@@ -43,6 +43,7 @@ var sources = []string{
 	"cmd/af-proxy/capture.go",
 	"cmd/af-proxy/sandbox.go",
 	"cmd/af-proxy/limit.go",
+	"cmd/af-proxy/internal.go",
 	"cmd/af-proxy/synth.go",
 	"pkg/livekey/livekey.go",
 	"internal/mockpack/mockpack.go",

@@ -97,6 +97,7 @@ func main() {
 		limits:      newLimiter(),
 		destinations: newDestinations(
 			engine.Rules(), cfg.Subnet, engine.AllowsIPv6()),
+		internal: newInside(cfg.Internal),
 		// Read from this process's environment rather than from the
 		// configuration file, so a key never passes through something the
 		// engine wrote to disk.
@@ -331,6 +332,11 @@ type proxy struct {
 	// destinations refuse the addresses the environment must not reach
 	// through this sidecar, whatever the policy says about the name.
 	destinations *destinations
+	// internal are the environment's own names, and a request for one is not
+	// egress. It is the SAME predicate the resolver uses, which is the point:
+	// a name the resolver sends to the real container and the proxy refuses is
+	// one the sidecar has two opinions about.
+	internal inside
 	// resolve turns a name into addresses. Nil means the system resolver,
 	// which is what the sidecar always uses; a test sets it to say what a
 	// name resolves to.
@@ -392,6 +398,16 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *proxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	host, port := splitHostPort(r.Host, 443)
+
+	// Inside the environment, so not egress. The same reasoning as the plain
+	// path, and the tunnel is opened without reading inside it: an internal
+	// connection is not something the policy has an opinion about, and
+	// terminating one would need a certificate for a name that is not on the
+	// public internet.
+	if p.internal.has(host) && p.resolvesInside(r.Context(), host) {
+		p.tunnelInternal(w, host, port, started)
+		return
+	}
 
 	req := policy.Request{Host: host, Port: port, Method: http.MethodConnect, Path: "/", TLS: true}
 	d := p.engine.Evaluate(req)
@@ -522,6 +538,24 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, port := splitHostPort(r.URL.Host, 80)
+
+	// A request for something inside the environment is not egress, whichever
+	// door it arrived through.
+	//
+	// A well behaved client never sends one here at all: the name resolves to
+	// the real container and no_proxy keeps it off this port. A client that
+	// reads http_proxy and ignores no_proxy sends it anyway, and until this
+	// existed it was evaluated against the egress policy and refused, so
+	// whether one service could reach another depended on which HTTP library
+	// the application happened to use. It is the same defect the CONNECT path
+	// and the plain path each had for the modes, arriving a third time.
+	//
+	// Nothing is reachable here that was not reachable already: this is the
+	// same connection the client would have made directly, made on its behalf.
+	if p.internal.has(host) && p.resolvesInside(r.Context(), host) {
+		p.serveInternal(w, r, host, port, started)
+		return
+	}
 
 	req := policy.Request{Host: host, Port: port, Method: r.Method, Path: r.URL.Path, TLS: false}
 	d := p.engine.Evaluate(req)

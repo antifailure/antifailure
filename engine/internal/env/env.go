@@ -343,6 +343,10 @@ type session struct {
 	tel     *telemetry.Telemetry
 	journal *journal.Journal
 	dbProv  provider.Database
+	// stores are the datastores other than the primary database, opened
+	// lazily by the commands that need one. A nil slice means they have not
+	// been opened; an empty one means the manifest declares none.
+	stores  []*datastoreHandle
 	runtime provider.Runtime
 	builder *build.DockerBuilder
 }
@@ -356,6 +360,11 @@ func (s *session) close() {
 	}
 	if s.runtime != nil {
 		_ = s.runtime.Close()
+	}
+	for _, store := range s.stores {
+		if store != nil && store.prov != nil {
+			_ = store.prov.Close()
+		}
 	}
 	if s.dbProv != nil {
 		_ = s.dbProv.Close()
@@ -1439,7 +1448,19 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	result.Golden = golden
 	result.EmptySource = emptySource
 
-	specs, built, cached, err := o.buildServices(ctx, s)
+	// The second store, and every one after it, before the services are built.
+	//
+	// Before rather than after, because a store the environment PROVIDES is
+	// not also built as a service: a manifest that declares a datastore called
+	// events and a service called events is declaring one thing twice, and
+	// starting both would put two ClickHouses on one network under one name,
+	// with Docker answering half the application's queries with the empty one.
+	storeVars, providedStores, err := o.datastores(ctx, s)
+	if err != nil {
+		return result, err
+	}
+
+	specs, built, cached, err := o.buildServices(ctx, s, providedStores)
 	if err != nil {
 		return result, err
 	}
@@ -1531,6 +1552,20 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	o.opts.Redactor.Register(insideURL.Reveal())
 	o.opts.Redactor.Register(insideMigrateURL.Reveal())
 
+	// The datastores' addresses, rewritten the same way and for the same
+	// reason: the provider hands out an address on the host's loopback, and a
+	// service in a container is not on the host's loopback. Each store joins
+	// the environment's network under its OWN name, so an application already
+	// configured to reach a store called events reaches it without a line of
+	// change.
+	if len(storeVars) > 0 {
+		rewritten, attachErr := o.attachDatastores(ctx, s, storeVars, recordIntent)
+		if attachErr != nil {
+			return result, attachErr
+		}
+		storeVars = rewritten
+	}
+
 	// An authority is generated only when something in the policy needs the
 	// sidecar to read inside TLS. An environment whose rules are all plain
 	// allow or block never terminates a connection, and asking its services to
@@ -1547,6 +1582,7 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
+		Datastores:           providedStores,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
@@ -1583,6 +1619,21 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		return result, err
 	}
 	spec.MockPacks = packs
+
+	// Every service receives every datastore's address, under the variable
+	// named after the store. A service that declared the variable itself keeps
+	// its own value, which is what lets somebody point one service at
+	// something else without editing the engine.
+	for name, value := range storeVars {
+		for i := range spec.Services {
+			if spec.Services[i].Env == nil {
+				spec.Services[i].Env = map[string]secrets.Value{}
+			}
+			if _, set := spec.Services[i].Env[name]; !set {
+				spec.Services[i].Env[name] = value
+			}
+		}
+	}
 
 	// Every service receives the signing secrets for the providers whose
 	// callbacks this environment will send, so that af webhook trigger and the
@@ -2037,16 +2088,35 @@ func (o *Orchestrator) branchFrom(
 
 // buildServices builds an image for every service in the manifest.
 func (o *Orchestrator) buildServices(
-	ctx context.Context, s *session,
+	ctx context.Context, s *session, provided []string,
 ) ([]provider.ServiceSpec, int, int, error) {
 	ig, err := readIgnore(o.buildRoot())
 	if err != nil {
 		return nil, 0, 0, err
 	}
 
+	// A service the environment provides as a datastore is not built and not
+	// started, and the line says so on every run. It is how the store used to
+	// be declared, before a datastore could be, and the two mean the same
+	// thing: an image of ClickHouse with nothing in it, versus a masked copy
+	// of production's events. Building it as well would spend a pull and a
+	// container to start the empty one beside the full one, under the same
+	// name.
+	byDatastore := map[string]bool{}
+	for _, name := range provided {
+		byDatastore[name] = true
+	}
+
 	var specs []provider.ServiceSpec
 	built, cached := 0, 0
 	for _, svc := range o.opts.Manifest.Services {
+		if byDatastore[svc.Name] {
+			o.progress(fmt.Sprintf(
+				"the environment provides %s as a datastore, holding a masked copy of "+
+					"production, so the service declaring it is not started and %s still "+
+					"resolves to the store", svc.Name, svc.Name))
+			continue
+		}
 		image, wasCached, err := o.buildOne(ctx, s, svc, ig)
 		if err != nil {
 			return nil, built, cached, err
@@ -2456,6 +2526,12 @@ func (o *Orchestrator) teardown(ctx context.Context, s *session, envID string) *
 		td.Removed++
 		o.progress("removed the database branch")
 	}
+
+	// The datastores, after the runtime and beside the database, for the same
+	// reason the database is where it is: a service still running against a
+	// store that has been taken away produces a page of errors that has
+	// nothing to do with why the environment went away.
+	o.datastoreTeardown(ctx, s, envID, td)
 
 	// The rolling deploy check's own environments, which carry identifiers of
 	// their own so the sweep above does not see them. They exist only while

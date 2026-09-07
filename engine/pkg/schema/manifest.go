@@ -297,6 +297,20 @@ type Datastore struct {
 	// From names the datastore a derived store is rebuilt from. Required for
 	// the derived stance and refused for the others.
 	From string `json:"from,omitempty" yaml:"from,omitempty"`
+	// SourceURLEnv names the variable holding this store's production
+	// connection string, which is what a golden of it is copied from.
+	//
+	// The same key database.source_url_env is, arriving for the second store,
+	// and it is a variable name rather than a URL for the same reason: the
+	// value is a credential for production and a manifest is checked in.
+	//
+	// Empty is allowed and produces an EMPTY golden, which is said out loud
+	// on every refresh rather than left to be discovered. That is the same
+	// answer the primary database gives a project that has not connected
+	// production yet, and it is deliberately not a refusal: a store whose
+	// tables are created by migrations is still worth branching, and refusing
+	// would make the first `af up` on a new project impossible.
+	SourceURLEnv string `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
 }
 
 // Mode is what happens to an outbound request.
