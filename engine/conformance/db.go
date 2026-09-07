@@ -413,9 +413,11 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 // for the same reason. Randomness cannot collide by construction, where every
 // derivation so far has collided along an axis nobody thought about.
 //
-// The one-second resolution in provider.NewGoldenVersionID is the underlying
-// sharp edge and is still there: two refreshes in one second is not something
-// only a test does. This stops the suite depending on it either way.
+// The one-second resolution in provider.NewGoldenVersionID was the underlying
+// sharp edge, and this comment used to end by saying it was still there. It is
+// not: that identifier now carries microseconds, because two refreshes in one
+// second is not something only a test does. This still stops the suite
+// depending on the timestamp either way.
 func (h *harness) rulesHash() string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {

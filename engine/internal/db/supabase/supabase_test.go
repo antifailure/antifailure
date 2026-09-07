@@ -51,7 +51,7 @@ func TestAGoldenVersionSurvivesTheRoundTripThroughABranchName(t *testing.T) {
 	version := provider.NewGoldenVersionID(time.Unix(1767225600, 0), "abcdef1234567890")
 	name := PrefixGolden + version
 	require.Equal(t, version, strings.TrimPrefix(name, PrefixGolden))
-	require.Equal(t, "gv_20260101000000_abcdef12", version)
+	require.Equal(t, "gv_20260101000000000000_abcdef12", version)
 }
 
 func TestAnAnnotationRoundTrips(t *testing.T) {
