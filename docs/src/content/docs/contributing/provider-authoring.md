@@ -257,6 +257,47 @@ nothing:
   real one, so both `nc -z` and `pg_isready` answer yes during a window where
   the next query fails.
 
+## Writing a datastore
+
+`provider.Database` is Postgres and there is one of it. Everything else an
+environment holds is a `provider.Datastore`: a ClickHouse, a Redis, a Kafka, a
+search index. The interface is deliberately smaller, because a second store has
+no pooled endpoint, no reset and no golden pool of its own to enumerate.
+
+```go
+func TestMyStore(t *testing.T) {
+    conformance.RunDatastore(t, factory, conformance.DatastoreOptions{})
+}
+```
+
+`conformance.DatastoreBehaviors()` lists what it checks. The suite checks the
+CONTRACT rather than the contents, because the interface covers stores whose
+only shared query language is none: that a refresh masks before it verifies and
+publishes nothing when verification fails, that branching twice for one
+environment produces one branch, that destroying twice succeeds, that a
+connection string is a secret. Your own store's contents are the subject of
+your own package's tests, where there is a client that can read them.
+
+**A store that holds no golden is not a broken one.** A cache is correct to
+start empty, and the manifest says so with `stance: empty`. Declare
+`Golden: false` and answer `provider.ErrNoGolden`, and the suite runs the
+behaviours that shape can pass and skips the rest by name. A generic error
+there is the thing to avoid: the engine cannot tell it from a broken
+connection, so a declared stance becomes a failure.
+
+The suite ships with its own fake and its own self test, in
+`engine/conformance/datastore_selftest_test.go`. Every behaviour has a flaw
+pointed at it and a test that fails if adding a behaviour does not add one, so
+"this assertion has been shown to go red" is something a test says rather than
+something a reviewer hopes.
+
+One of those controls is contrived and says so in place. `ConnString_IsASecret`
+is enforced by the type, exactly as described above, so the only way to reach
+the observation the assertion looks for is a value whose plaintext IS the
+redaction marker. It is kept because the suite checks the rendering rather than
+trusting the signature, and a signature that stopped returning `secret.Value`
+would make it violable for real.
+
 ## Before you open a pull request
 
 Run `just gate`. It runs everything CI runs, in CI's order, so a green gate

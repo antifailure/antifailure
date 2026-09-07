@@ -187,6 +187,78 @@ A production shaped slice rather than the whole database. `virtual_relationships
 is for joins your schema does not declare as foreign keys, which are the ones a
 subset silently breaks.
 
+## `datastores`
+
+Every store the environment holds, and what is done about each one's contents.
+
+```yaml
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: a cache is rebuilt from the primary and a copy would be noise
+
+  - name: search
+    engine: elasticsearch
+    stance: derived
+    from: primary
+
+  - name: bus
+    engine: kafka
+    stance: topics_only
+```
+
+| Key | Notes |
+| --- | --- |
+| `name` | Unique, and usable as a hostname. `primary` is reserved. |
+| `engine` | What the store runs: `postgres`, `clickhouse`, `redis`, `kafka`, `elasticsearch` and so on. Open rather than a fixed list. |
+| `provider` | Which implementation provides the engine, where more than one can. |
+| `stance` | Required. See below. |
+| `because` | Why that stance was chosen, carried into the fidelity report as written. Required for `empty`. |
+| `from` | The store a `derived` one is rebuilt from. Required for `derived` and refused for the rest. |
+
+The `database` block above is not replaced and does not move. It normalizes
+into the entry named `primary`, so a manifest that declares only `database:`
+already has a datastores list and never has to write one, and every later part
+of the engine reads one list rather than a struct and a list.
+
+### The stances
+
+| Stance | What happens |
+| --- | --- |
+| `golden` | A masked, verified copy that environments branch from, which is what `database:` has always meant. |
+| `empty` | The store starts with nothing in it, on purpose, and `because` says why. |
+| `derived` | The store is rebuilt from the one named in `from`, once that one is ready. |
+| `topics_only` | Topics and consumer groups are created, with no messages. |
+
+**There is no default, and a datastore that declares no stance is refused.**
+That refusal is the point of the key. Not every store should be cloned: a cache
+is correct to start empty and copying one would be copying noise and calling it
+fidelity, and a broker usually wants topics rather than a replay of production
+traffic. So the right answer differs per store and only the person writing the
+manifest knows it.
+
+What a default would do instead is choose silently, once per manifest. An
+analytics product's twin held a masked Postgres and zero events, because the
+events live in ClickHouse and ClickHouse came up empty; nobody decided that,
+every query path that mattered was tested against a store with nothing in it,
+and the run went green. `empty` is a legitimate answer. An invisible `empty` is
+not, which is why it is written down and why `because` is required with it.
+
+### What this build does with them
+
+The manifest declares datastores, the validator refuses one with no stance, and
+the [component inventory](/docs/concepts/inventory) names every declared store with
+the stance somebody chose for it. Nothing yet refreshes a golden for a second
+store, branches one, or creates a topic in one, so every declared store is
+reported as unmeasured with the reason. The interface those implementations
+have to satisfy is `provider.Datastore`, and the suite that decides whether one
+of them is finished is `conformance.RunDatastore`.
+
 ## `egress`
 
 | Key | Notes |

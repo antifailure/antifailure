@@ -486,6 +486,27 @@ test-ee:
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
 
+# The numbers this repository is allowed to quote.
+#
+# No number is quotable unless the harness that produced it is in this
+# repository, the methodology is published beside it, and a customer can run it
+# against their own stack and get their own number. That is not a tax, it is
+# the pitch: "here is the number, here is the harness, run it on your data" is
+# a claim a slide cannot make. A number older than the code that produced it is
+# withdrawn rather than rounded, so each run writes a dated report.
+benchmark:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p {{reports}}
+    stamp=$(date -u +%Y-%m-%d)
+    # Absolute, because `go test` runs a test binary with the PACKAGE
+    # directory as its working directory rather than the one just was invoked
+    # from. A relative path here wrote the report into engine/internal.
+    out="$(cd {{reports}} && pwd)/benchmark-datastores-${stamp}.md"
+    cd engine && AF_BENCHMARK_OUT="$out" \
+      go test ./internal/fidelity -run TestBenchmarkDatastoresPerEnvironment -count=1
+    echo "wrote {{reports}}/benchmark-datastores-${stamp}.md"
+
 # The fast ones, for a tight loop.
 test-short:
     cd engine && go test ./... -short -count=1 -timeout 10m

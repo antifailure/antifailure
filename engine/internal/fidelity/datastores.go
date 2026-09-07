@@ -44,14 +44,39 @@ import (
 func datastores(obs Observation) Dimension {
 	d := Dimension{Name: schema.FidelityDatastores}
 
-	found := make([]Component, 0, len(obs.Manifest.Services))
-	for _, s := range obs.Manifest.Services {
-		engine, image := datastoreEngine(s)
+	found := make([]Component, 0, len(obs.Manifest.Datastores)+len(obs.Manifest.Services))
+	declared := map[string]bool{}
+	for _, ds := range obs.Manifest.Datastores {
+		// The primary is the entry database: normalizes into, and the database
+		// dimension above measures it properly: which golden it came from,
+		// whether that golden was verified, whether the attestation still
+		// checks out. Reporting it here as well would count one store twice
+		// and would put the one store this build DOES reproduce into the
+		// dimension whose subject is the ones it does not.
+		if ds.Name == schema.PrimaryDatastore {
+			continue
+		}
+		declared[ds.Name] = true
+		found = append(found, Component{
+			Name:   ds.Name,
+			State:  Unmeasured,
+			Detail: declaredReason(ds),
+		})
+	}
+
+	for _, svc := range obs.Manifest.Services {
+		if declared[svc.Name] {
+			// Declared and running as a service is the ordinary case for a
+			// store the environment starts itself. The declaration is the
+			// better answer of the two, because it carries the stance.
+			continue
+		}
+		engine, image := datastoreEngine(svc)
 		if engine == "" {
 			continue
 		}
 		found = append(found, Component{
-			Name:   s.Name,
+			Name:   svc.Name,
 			State:  Unmeasured,
 			Detail: datastoreReason(engine, image),
 		})
@@ -68,6 +93,50 @@ func datastores(obs Observation) Dimension {
 	sort.Slice(found, func(i, j int) bool { return found[i].Name < found[j].Name })
 	d.Components = found
 	return d
+}
+
+// declaredReason says what the manifest chose for a store and what this build
+// has done about it, which are two different sentences and both belong here.
+//
+// Unmeasured for every stance, including empty, and that is the honest answer
+// rather than a cautious one. Nothing in this build starts a second store,
+// reads one, rebuilds one or creates a topic in one; what exists is the
+// declaration. A store reported as reproduced because somebody declared it
+// empty would be the report believing a manifest instead of an environment,
+// which is the failure one level up from the one the dimension was added for.
+func declaredReason(ds schema.Datastore) string {
+	var b strings.Builder
+	b.WriteString("a ")
+	b.WriteString(ds.Engine)
+	b.WriteString(" declared ")
+	b.WriteString(string(ds.Stance))
+	if ds.Stance == schema.StanceDerived && ds.From != "" {
+		b.WriteString(" from ")
+		b.WriteString(ds.From)
+	}
+	if ds.Because != "" {
+		b.WriteString(", because ")
+		b.WriteString(ds.Because)
+	}
+	b.WriteString(", and ")
+	b.WriteString(stanceGap(ds.Stance))
+	return b.String()
+}
+
+// stanceGap is what this build has NOT done for a stance, in the words
+// somebody has to act on.
+func stanceGap(stance schema.DatastoreStance) string {
+	switch stance {
+	case schema.StanceEmpty:
+		return "nothing here started it, so the declaration is recorded and unchecked"
+	case schema.StanceDerived:
+		return "nothing here ran that rebuild, so nothing knows whether it would succeed"
+	case schema.StanceTopicsOnly:
+		return "nothing here created a topic, so the broker is a declaration rather than a shape"
+	default:
+		return "this build reproduces the primary database only, so nothing here read its " +
+			"contents and nothing here can say whether it holds production's data or came up empty"
+	}
 }
 
 // datastoreReason says why the component could not be measured, in the words

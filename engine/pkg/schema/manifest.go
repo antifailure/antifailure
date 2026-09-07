@@ -18,6 +18,7 @@ type Manifest struct {
 	Name       string      `json:"name,omitempty" yaml:"name,omitempty"`
 	Services   []Service   `json:"services,omitempty" yaml:"services,omitempty"`
 	Database   *Database   `json:"database,omitempty" yaml:"database,omitempty"`
+	Datastores []Datastore `json:"datastores,omitempty" yaml:"datastores,omitempty"`
 	Egress     *Egress     `json:"egress,omitempty" yaml:"egress,omitempty"`
 	Personas   []Persona   `json:"personas,omitempty" yaml:"personas,omitempty"`
 	Auth       *Auth       `json:"auth,omitempty" yaml:"auth,omitempty"`
@@ -198,6 +199,90 @@ type Subset struct {
 type VirtualRelationship struct {
 	From string `json:"from" yaml:"from"`
 	To   string `json:"to" yaml:"to"`
+}
+
+// DatastoreStance is what the environment does about one datastore's contents.
+//
+// A stance is DECLARED, never defaulted, and a datastore that names none is
+// refused at validation. That refusal is the whole reason this type is a
+// closed set rather than a string with a sensible fallback. An analytics
+// product's twin held a masked Postgres and zero events, because the events
+// live in ClickHouse and ClickHouse came up empty; nobody chose that, and
+// nothing said it out loud. A default here would have chosen it again, once
+// per manifest, silently.
+//
+// Not every store should be cloned, and pretending otherwise is its own
+// failure. A cache is CORRECT to start empty and a copy of one would be noise.
+// So empty is a legitimate answer. An invisible empty is not.
+type DatastoreStance string
+
+const (
+	// StanceGolden is a masked, verified copy that environments branch from,
+	// which is what the primary database has always had.
+	StanceGolden DatastoreStance = "golden"
+	// StanceEmpty starts the store with nothing in it, on purpose, and the
+	// manifest says why. A cache rebuilt from the primary is the case this
+	// exists for.
+	StanceEmpty DatastoreStance = "empty"
+	// StanceDerived rebuilds the store from another one after that one is
+	// ready, which is how a search index is built from the Postgres branch
+	// rather than cloned separately and left stale against it.
+	StanceDerived DatastoreStance = "derived"
+	// StanceTopicsOnly creates topics and consumer groups with no messages,
+	// which is what a broker usually wants and a replay of production traffic
+	// is not.
+	StanceTopicsOnly DatastoreStance = "topics_only"
+)
+
+// AllDatastoreStances returns every stance, in the order the documentation
+// introduces them.
+func AllDatastoreStances() []DatastoreStance {
+	return []DatastoreStance{StanceGolden, StanceEmpty, StanceDerived, StanceTopicsOnly}
+}
+
+// PrimaryDatastore is the name the primary database normalizes into.
+//
+// database: stays exactly as it was and becomes the datastores entry called
+// this, so every manifest written before the list existed keeps working and
+// there is one code path afterwards rather than two. It is reserved: a
+// manifest cannot declare a second datastore under this name.
+const PrimaryDatastore = "primary"
+
+// Datastore is one store the environment holds, and what is done about its
+// contents.
+//
+// The list exists because Database is a single struct and it is Postgres.
+// There was one golden, one masking pass, one verification scan and one
+// branch, and everything else a manifest declared was an empty container that
+// no part of the report mentioned. A stack of an application, six workers,
+// ClickHouse, Redis and Kafka STARTED, which is genuinely a lot, and held
+// production's data in exactly one of those five places.
+type Datastore struct {
+	// Name identifies the store in the environment and in the report. Unique
+	// within the manifest, and "primary" is reserved for the entry database:
+	// normalizes into.
+	Name string `json:"name" yaml:"name"`
+	// Engine is what the store runs, such as postgres, clickhouse or redis. It
+	// is open rather than a closed set on purpose: the closed set here would
+	// be a list of engines this build happens to have a provider for, and a
+	// manifest that names one it does not have is refused by the provider
+	// lookup, by name, which is a better message than "unknown engine".
+	Engine string `json:"engine" yaml:"engine"`
+	// Provider names the implementation, for an engine that more than one
+	// thing can provide. Empty means the engine's own default.
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	// Stance is what happens to this store's contents. Required; a datastore
+	// that declares none is refused.
+	Stance DatastoreStance `json:"stance,omitempty" yaml:"stance,omitempty"`
+	// Because is the declared reason for the stance, in the words of whoever
+	// chose it, and it is carried into the fidelity report as written. An
+	// empty store nobody explained and an empty store somebody decided on look
+	// identical in a running environment; this is the only thing that tells
+	// them apart afterwards.
+	Because string `json:"because,omitempty" yaml:"because,omitempty"`
+	// From names the datastore a derived store is rebuilt from. Required for
+	// the derived stance and refused for the others.
+	From string `json:"from,omitempty" yaml:"from,omitempty"`
 }
 
 // Mode is what happens to an outbound request.

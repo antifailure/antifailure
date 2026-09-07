@@ -623,6 +623,16 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// convenience is what makes the gate satisfiable, not a substitute
 		// for it. `go test ./tools/prmerge` is what runs in `gate`.
 		"merge": true,
+		// Measures rather than decides. It produces the numbers this
+		// repository is allowed to quote, writing a dated report per run, and
+		// a measurement has no pass and no fail to contribute to a gate: the
+		// answer is whatever the code currently does, which is the point of
+		// taking it. What KEEPS the harness honest is a gate, and it already
+		// is one: the assertions live in
+		// engine/internal/fidelity/benchmark_test.go and run inside
+		// `just test-engine`, so a benchmark that stopped measuring what it
+		// claims goes red there rather than being noticed by nobody.
+		"benchmark": true,
 	}
 
 	var uncalled []string

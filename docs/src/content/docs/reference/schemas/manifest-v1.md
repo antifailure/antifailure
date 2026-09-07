@@ -16,6 +16,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `auth` | [auth](#auth) | no | How personas come to exist. |
 | `change` | [Change](#change) | no | How a pull request's diff is classified. |
 | `database` | [Database](#database) | no | Where the environment's Postgres comes from, and how the production copy is made safe before anyone can branch from it. |
+| `datastores` | list of [Datastore](#datastore) | no | Every store the environment holds, and what is done about each one's contents. The database: block above normalizes into the entry named primary, so a manifest that declares only database: already has this list and does not have to write it. A stance is declared rather than defaulted, because an empty ClickHouse nobody chose looks exactly like an empty ClickHouse somebody decided on. Max items 25. |
 | `egress` | [Egress](#egress) | no | What the environment may reach on the network. |
 | `explore` | [Explore](#explore) | no | Agents that pursue a goal with no declared workflow, discover the paths an application offers, and report where it costs somebody effort without failing. |
 | `fidelity` | [Fidelity](#fidelity) | no | The component inventory: what the environment reproduces, what stands in for something, and what it could not reproduce at all. |
@@ -115,6 +116,19 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `version` | `14`, `15`, `16`, `17`, `18` | no | Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not. Defaults to `17`. |
+
+## Datastore
+
+One store the environment holds. Database is a single struct and it is Postgres, so before this list existed there was one golden, one masking pass, one verification scan and one branch, and every other store a manifest declared was an empty container no part of the report mentioned.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `because` | string | no | Why this stance was chosen, in the words of whoever chose it. It is carried into the fidelity report as written. An empty store nobody explained and an empty store somebody decided on look identical in a running environment, and this is the only thing that tells them apart afterwards. Required for the empty stance. Max length 512. |
+| `engine` | string | **yes** | What the store runs, such as `postgres`, `clickhouse`, `redis`, `kafka` or `elasticsearch`. Open rather than a fixed list: a manifest naming an engine this build has no provider for is refused by the provider lookup, by name, which says more than an unknown value would. Max length 40, matches `^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`. |
+| `from` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `name` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `provider` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
+| `stance` | `golden`, `empty`, `derived`, `topics_only` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
 
 ## Egress
 

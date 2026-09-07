@@ -1,0 +1,30 @@
+services       reproduced (2 reproduced)
+  web          reproduced   web at http://127.0.0.1:8080
+  worker       reproduced   worker, running
+
+database       reproduced (2 reproduced)
+  data         reproduced   12 tables over 184000 rows, branched from gv_20260830120000_abcd1234
+  provenance   reproduced   golden gv_20260830120000_abcd1234, 41 columns read back over 82000 rows sampled
+
+third_party    substituted (2 substituted)
+  api.resend.… substituted  recorded into the inbox and answered with the provider's documented success shape
+  api.stripe.… substituted  answered offline by the stripe pack, which keeps what was created, so a read after a write returns it
+
+auth           reproduced (1 reproduced)
+  buyer        reproduced   signs in with password, in public.users
+
+runtime        not measured: the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+
+traffic        not measured: the manifest does not ask for traffic, so there is none to reproduce
+
+datastores     not measured: no service declares a datastore beside the primary database, which is recognised here by a service's image or its name
+
+5 of 7 measured components are production's own, which is 71 percent. 3 components and dimensions are excluded and named below.
+A component is production's own when the environment reaches the real thing.
+A substitution, a refusal and an absence are all counted and none of them
+counts as reproduced. Nothing unmeasured is counted either way.
+
+Not measured, and so not counted:
+  datastores     no service declares a datastore beside the primary database, which is recognised here by a service's image or its name
+  runtime        the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+  traffic        the manifest does not ask for traffic, so there is none to reproduce

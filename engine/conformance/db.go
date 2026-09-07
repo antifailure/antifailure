@@ -418,12 +418,18 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 // not: that identifier now carries microseconds, because two refreshes in one
 // second is not something only a test does. This still stops the suite
 // depending on the timestamp either way.
-func (h *harness) rulesHash() string {
+func (h *harness) rulesHash() string { return randomRulesHash(h.t) }
+
+// randomRulesHash is the shared implementation, because the datastore suite
+// needs the same property for the same reason and a second copy of this
+// reasoning is a second place for it to be got wrong.
+func randomRulesHash(t *testing.T) string {
+	t.Helper()
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		// A fallback that returned a constant would reintroduce the collision
 		// this exists to prevent, so it is loud instead.
-		h.t.Fatalf("no randomness available for a rules hash: %v", err)
+		t.Fatalf("no randomness available for a rules hash: %v", err)
 	}
 	return hex.EncodeToString(b[:])
 }
