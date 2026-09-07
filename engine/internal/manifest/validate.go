@@ -397,6 +397,18 @@ func (v *validator) database(m *schema.Manifest) {
 			"The database declares both a source and a seed command.",
 			"A golden is built either from production or from a seed, not both. Remove one.")
 	}
+	if d.Provider == schema.DBPgURL && d.Project != "" {
+		// Refused rather than ignored, which is the rule this repository
+		// learned from replicas, resources.cpu and resources.memory: a field
+		// the engine accepts and never reads is a field somebody writes,
+		// commits, and believes. pgurl has no account and therefore no
+		// project; the server it uses is named by api_key_env, because for
+		// this provider the connection string IS the credential.
+		v.add("database.project",
+			"The pgurl provider has no project, and this manifest sets one.",
+			"Remove database.project. Name the server that holds the goldens and the branches "+
+				"with database.api_key_env, which is the variable holding its connection string.")
+	}
 	if _, ok := confine(d.MaskingRules); !ok {
 		v.add("database.masking_rules",
 			fmt.Sprintf("The masking rules path %q resolves outside the repository.", d.MaskingRules), "")

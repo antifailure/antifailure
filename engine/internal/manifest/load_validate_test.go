@@ -168,6 +168,23 @@ func TestParse_RefusesQueryCountIncreaseBecauseNothingReadsIt(t *testing.T) {
 	}
 }
 
+func TestParse_RefusesAProjectForTheProviderThatHasNone(t *testing.T) {
+	t.Parallel()
+	// The same rule as query_count_increase above, one field along. pgurl has
+	// no account and therefore no project: the server it uses is named by
+	// api_key_env, because for that provider the connection string is the
+	// credential. Accepting the field and reading nothing is how somebody
+	// writes it, commits it, and believes it.
+	body := minimal + "\ndatabase:\n  provider: pgurl\n  project: my-project\n"
+	msg := messages(problems(t, mustFail(t, body)))
+	require.Contains(t, msg, "The pgurl provider has no project")
+	require.Contains(t, msg, "database.api_key_env")
+
+	// And the providers that do have one keep it.
+	require.NotNil(t, mustParse(t, minimal+
+		"\ndatabase:\n  provider: neon\n  project: my-project\n").Database)
+}
+
 func TestNormalize_LeavesQueryCountIncreaseAloneWhenNobodySetIt(t *testing.T) {
 	t.Parallel()
 	// The normalizer used to fill it in, which meant every manifest carried a

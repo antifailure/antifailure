@@ -118,6 +118,10 @@ const (
 	DBNeon     DBProvider = "neon"
 	DBSupabase DBProvider = "supabase"
 	DBDBLab    DBProvider = "dblab"
+	// DBPgURL is any reachable Postgres, named by a connection string rather
+	// than by an account. It is the provider for every server nobody wrote a
+	// provider for.
+	DBPgURL DBProvider = "pgurl"
 )
 
 // Database says where the environment's Postgres comes from.

@@ -131,14 +131,14 @@ exported on the laptop that started it.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `docker` (default), `neon`, `supabase`, or `dblab`. |
+| `provider` | `docker` (default), `neon`, `supabase`, `dblab`, or `pgurl`. |
 | `version` | Postgres major, 14 through 18, default 17. Match it to production: a golden on a different major is an environment running a Postgres your application does not. |
 | `url_env` | The variable services receive the connection string in. |
 | `source_url_env` | Names the variable holding production's read only URL. |
 | `masking_rules` | Path to the rules, default `masking.yaml`. |
 | `seed` | A command run against a fresh golden candidate. |
-| `project` | For a hosted provider, its project identifier. |
-| `api_key_env` | Names the variable holding that provider's API key. |
+| `project` | For a hosted provider, its project identifier. `pgurl` has none and refuses one. |
+| `api_key_env` | Names the variable holding that provider's API key. For `pgurl` it names the connection string of the server the goldens and branches live on, which is the credential in that case. |
 | `max_branches` | The plan's concurrent branch limit. |
 | `golden` | `schedule`, `max_age`, `retain`, `storage`, `storage_url`. |
 | `subset` | See below. |

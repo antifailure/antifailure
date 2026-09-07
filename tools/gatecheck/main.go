@@ -629,9 +629,14 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// answer is whatever the code currently does, which is the point of
 		// taking it. What KEEPS the harness honest is a gate, and it already
 		// is one: the assertions live in
-		// engine/internal/fidelity/benchmark_test.go and run inside
+		// engine/internal/fidelity/benchmark_test.go and in
+		// engine/internal/db/pgurl/benchmark_test.go, both of which run inside
 		// `just test-engine`, so a benchmark that stopped measuring what it
-		// claims goes red there rather than being noticed by nobody.
+		// claims goes red there rather than being noticed by nobody. The
+		// database half is also slow by construction, because it creates and
+		// copies databases of the sizes it is asked for, and its answer moves
+		// with the machine's load: a gate that cannot say no on a busy morning
+		// is a gate people learn to ignore.
 		"benchmark": true,
 	}
 

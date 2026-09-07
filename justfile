@@ -506,6 +506,18 @@ benchmark:
     cd engine && AF_BENCHMARK_OUT="$out" \
       go test ./internal/fidelity -run TestBenchmarkDatastoresPerEnvironment -count=1
     echo "wrote {{reports}}/benchmark-datastores-${stamp}.md"
+    # The database providers, which is a different question and a different
+    # report: how long the first golden takes per gigabyte and how long a
+    # branch takes, per provider. It is slow on purpose, because it creates
+    # databases of the sizes in AF_BENCHMARK_ROWS and copies them.
+    # AF_PGURL_ADMIN_URL, or AF_TEST_DATABASE_URL, says which Postgres to run
+    # it against; without either it uses the one `just db` starts.
+    #
+    # The two halves write to different places and the difference is not
+    # settled: this one writes into benchmarks/, which is committed, because a
+    # number a customer is quoted has to be readable without running anything,
+    # and the datastore half writes into {{reports}}/, which is gitignored.
+    AF_BENCHMARK=1 go test ./internal/db/pgurl -run TestBenchmark -v -count=1 -timeout 60m
 
 # The fast ones, for a tight loop.
 test-short:

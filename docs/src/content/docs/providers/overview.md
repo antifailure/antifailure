@@ -11,7 +11,7 @@ outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, or supabase
+  provider: docker   # or neon, supabase, dblab, or pgurl
   version: 17
 ```
 
@@ -23,6 +23,7 @@ database:
 | [`neon`](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
 | [`dblab`](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [`supabase`](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
+| [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
 
 `docker` is the default and needs nothing. It is the right choice for a
 repository whose database is small enough that copying it is not the slow part.
@@ -35,6 +36,13 @@ one full size copy of production on ZFS and hands out thin clones of it, on
 your hardware, with nothing leaving your network. The cost is that you run it:
 it needs ZFS, a machine large enough to hold production once, and its own data
 retrieval configured against your source.
+
+`pgurl` is the one for every Postgres nobody wrote a provider for: a self
+hosted cluster, a machine at a host with no API, a managed Postgres whose
+vendor is not in this list. It needs no account and no vendor at all, only a
+server it may create databases on. Branch time is not flat there, and the
+measured seconds per gigabyte are published in `benchmarks/` rather than
+described.
 
 `supabase` is the right choice when your application already lives there.
 Branch time is not flat, because Supabase creates a branch with no data in it

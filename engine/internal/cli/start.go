@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
+	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	"github.com/antifailure/antifailure/engine/internal/env"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/golden"
@@ -499,13 +500,38 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest, g goldenFind
 	// empty golden from it, and now refuses with AF-DB-016, so the command
 	// whose whole job is to say where you are was the last thing still saying
 	// this was fine.
+	if provider == schema.DBPgURL {
+		// Before the source, and only when it BLOCKS. The source rung answers
+		// whether there is anything to copy; this one answers whether the
+		// place the copy goes exists at all, and for this provider that is a
+		// separate variable that af up refuses without.
+		//
+		// Checked first because the source rung returns for every provider
+		// whose manifest names a source, which is nearly all of them, and a
+		// rung placed after it would never run on the configuration people
+		// actually write. That is the same defect this rung's neighbour was
+		// written for: a step reporting the setup as fine while the thing af
+		// up needs is missing.
+		if ps := pgurlState(ctx, e, m); ps.state != StageDone {
+			return ps
+		}
+	}
 	if src := sourceState(ctx, e, m, string(provider), g); src != nil {
+		if provider == schema.DBPgURL {
+			// Where the copy lands, appended to where it comes from, because
+			// for this provider those are two different servers and a reader
+			// looking at one line should see both.
+			src.detail += ", into " + pgurlHost(ctx, e, m)
+		}
 		return *src
 	}
 	if provider == schema.DBDocker {
 		s.state = StageDone
 		s.detail = "docker, so it comes from the daemon checked above"
 		return s
+	}
+	if provider == schema.DBPgURL {
+		return pgurlState(ctx, e, m)
 	}
 	// A hosted provider needs a project and a key, and both are read from
 	// the manifest and the same secret chain the orchestrator would use.
@@ -536,6 +562,58 @@ func databaseState(ctx context.Context, e *Env, m *schema.Manifest, g goldenFind
 	s.state = StageDone
 	s.detail = fmt.Sprintf("%s, project %s, %s found", provider, m.Database.Project, name)
 	return s
+}
+
+// pgurlState reports the server the goldens and branches live on.
+//
+// pgurl has no project. Everything it needs is in one variable, and checking
+// THAT rather than the project is what stops this rung telling somebody to set
+// a field their provider does not have. It reports the same thing af up would
+// refuse on.
+func pgurlState(ctx context.Context, e *Env, m *schema.Manifest) stage {
+	s := stage{name: "the database source"}
+	name := pgurlVariable(m)
+	value, _, found, err := modelChain(e).Lookup(ctx, name)
+	switch {
+	case err != nil:
+		s.state, s.why = StageUnchecked, "a source in the chain could not be read: "+err.Error()
+		s.detail = "not checked"
+	case !found || value.IsZero():
+		s.state = StageBlocked
+		s.detail = fmt.Sprintf("pgurl is configured and %s was not found", name)
+		s.prose = fmt.Sprintf("Set %s to the connection string of the server that will hold "+
+			"the goldens and the branches. It is not your production database: this provider "+
+			"creates a database per golden and a database per environment on it.", name)
+		s.command = "af secret set " + name
+	default:
+		s.state = StageDone
+		// The host and port, never the URL. The value is a connection string
+		// with a password in it and this line is printed.
+		s.detail = fmt.Sprintf("pgurl, on %s, from %s", pgurldb.HostPortOf(value), name)
+	}
+	return s
+}
+
+// pgurlHost is the host and port the goldens go to, for a line about something
+// else. Never the URL: it carries a password and this is printed.
+func pgurlHost(ctx context.Context, e *Env, m *schema.Manifest) string {
+	name := pgurlVariable(m)
+	value, _, found, err := modelChain(e).Lookup(ctx, name)
+	if err != nil || !found {
+		return "the server named by " + name
+	}
+	host := pgurldb.HostPortOf(value)
+	if host == "" {
+		return "the server named by " + name
+	}
+	return host
+}
+
+func pgurlVariable(m *schema.Manifest) string {
+	if m != nil && m.Database != nil && m.Database.APIKeyEnv != "" {
+		return m.Database.APIKeyEnv
+	}
+	return pgurldb.DefaultVariable
 }
 
 // maskingRulesState reports whether masking.yaml has been written.

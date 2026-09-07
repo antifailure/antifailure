@@ -160,6 +160,14 @@ const (
 	// The migrations were not rehearsed, so this run says nothing about
 	// them: {detail}
 	AFDB033 Code = "AF-DB-033"
+	// The Postgres server named by {variable}, at {host}, could not be
+	// reached: {detail}
+	AFDB034 Code = "AF-DB-034"
+	// The role {role} on {host} may not create databases.
+	AFDB035 Code = "AF-DB-035"
+	// The database {database} on {host} was not created by Antifailure and
+	// will not be dropped or written to.
+	AFDB036 Code = "AF-DB-036"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -991,6 +999,33 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitVerification,
+	},
+	AFDB034: {
+		Code:      AFDB034,
+		Area:      "DB",
+		Message:   "The Postgres server named by {variable}, at {host}, could not be reached: {detail}",
+		NextStep:  "The pgurl provider keeps goldens and branches on a server you name, which is not your source database. Check that {variable} holds a connection string for a server this machine can reach.",
+		Docs:      "providers/pgurl",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFDB035: {
+		Code:      AFDB035,
+		Area:      "DB",
+		Message:   "The role {role} on {host} may not create databases.",
+		NextStep:  "The pgurl provider makes one database per golden and one per environment, so the role named by {variable} needs CREATEDB. Run: ALTER ROLE {role} CREATEDB.",
+		Docs:      "providers/pgurl",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFDB036: {
+		Code:      AFDB036,
+		Area:      "DB",
+		Message:   "The database {database} on {host} was not created by Antifailure and will not be dropped or written to.",
+		NextStep:  "Rename or remove that database yourself if it is disposable, or point the provider at a server that does not already hold one by that name. Nothing here is deleted on the strength of its name.",
+		Docs:      "providers/pgurl",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFDET001: {
 		Code:      AFDET001,

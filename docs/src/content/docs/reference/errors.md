@@ -712,6 +712,42 @@ The migrations were not rehearsed, so this run says nothing about them: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/insights](/docs/concepts/insights) |
 
+### AF-DB-034
+
+The Postgres server named by {variable}, at {host}, could not be reached: {detail}
+
+**What to do.** The pgurl provider keeps goldens and branches on a server you name, which is not your source database. Check that {variable} holds a connection string for a server this machine can reach.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [providers/pgurl](/docs/providers/pgurl) |
+
+### AF-DB-035
+
+The role {role} on {host} may not create databases.
+
+**What to do.** The pgurl provider makes one database per golden and one per environment, so the role named by {variable} needs CREATEDB. Run: ALTER ROLE {role} CREATEDB.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/pgurl](/docs/providers/pgurl) |
+
+### AF-DB-036
+
+The database {database} on {host} was not created by Antifailure and will not be dropped or written to.
+
+**What to do.** Rename or remove that database yourself if it is disposable, or point the provider at a server that does not already hold one by that name. Nothing here is deleted on the strength of its name.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [providers/pgurl](/docs/providers/pgurl) |
+
 ## Detection
 
 ### AF-DET-001

@@ -320,10 +320,11 @@
             "docker",
             "neon",
             "supabase",
-            "dblab"
+            "dblab",
+            "pgurl"
           ],
           "default": "docker",
-          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service."
+          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name."
         },
         "version": {
           "type": "integer",
@@ -362,7 +363,7 @@
         },
         "api_key_env": {
           "type": "string",
-          "description": "The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider."
+          "description": "The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider. For the pgurl provider it names the connection string of the server that holds the goldens and the branches, which is the credential in that case, and defaults to PGURL_ADMIN_URL."
         },
         "max_branches": {
           "type": "integer",
