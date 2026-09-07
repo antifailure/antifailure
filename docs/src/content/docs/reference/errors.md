@@ -700,6 +700,18 @@ The previous release does not survive this migration: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/insights](/docs/concepts/insights) |
 
+### AF-DB-033
+
+The migrations were not rehearsed, so this run says nothing about them: {detail}
+
+**What to do.** The report above names what was missing. Fix that, or pass --no-rehearsal to say the run is deliberately without it: a check that could not run must not exit like one that passed.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/insights](/docs/concepts/insights) |
+
 ## Detection
 
 ### AF-DET-001

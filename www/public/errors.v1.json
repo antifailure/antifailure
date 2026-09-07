@@ -608,6 +608,17 @@
       "planned": false
     },
     {
+      "code": "AF-DB-033",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The migrations were not rehearsed, so this run says nothing about them: {detail}",
+      "resolution": "The report above names what was missing. Fix that, or pass --no-rehearsal to say the run is deliberately without it: a check that could not run must not exit like one that passed.",
+      "docs": "https://antifailure.dev/docs/concepts/insights",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
       "code": "AF-DET-001",
       "area": "DET",
       "areaName": "Detection",

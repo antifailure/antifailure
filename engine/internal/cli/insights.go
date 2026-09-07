@@ -82,38 +82,18 @@ nothing.`),
 				}
 			}
 
-			if e.Out.Format == FormatJSON {
-				return e.Out.JSON(full)
+			if e.Out.Format != FormatJSON {
+				e.Out.Section("Database insights")
+				e.Out.Raw(full.Explain())
 			}
 
-			e.Out.Section("Database insights")
-			e.Out.Raw(full.Explain())
-
-			if opts.Baseline == nil {
+			if e.Out.Format != FormatJSON && opts.Baseline == nil {
 				e.Out.Println(e.Out.Wrap(
 					"No baseline, so query counts are not compared. Save one on main with "+
 						"--save and pass it here with --baseline: a query running 412 times "+
 						"means nothing without knowing it ran 4 times before.", 0))
 			}
-			if full.Rehearsal != nil && full.Rehearsal.Failed {
-				// The report is printed first and the command still fails. A
-				// migration that fails on a branch with production's shape is
-				// one that would have failed in production, so exiting zero
-				// would turn the whole check into a note nobody reads.
-				return aferrors.Coded(aferrors.AFDB030, "detail", full.Rehearsal.Error)
-			}
-			if full.Rolling.Failed() {
-				// Non zero for the same reason, and only for a proven break.
-				// A rolling check that could not run exits zero and says so,
-				// because a blocked check and a broken change must never be
-				// the same exit code.
-				return aferrors.Coded(aferrors.AFDB032, "detail", rollingDetail(full.Rolling))
-			}
-			if full.Clean() {
-				e.Out.Status(e.Out.S(StyleGood, SymbolOK), "nothing to report",
-					"from the checks that ran")
-			}
-			return nil
+			return insightsResult(e, full)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "How many queries to show")
@@ -126,6 +106,110 @@ nothing.`),
 		"Which commit the previous release is, overriding the manifest")
 	cmd.Flags().StringVar(&runner, "runner", "", "Path to the runner's entry point")
 	return cmd
+}
+
+// insightsResult renders the run in whichever format was asked for and
+// returns the exit, which is the same exit either way.
+//
+// The format used to decide both. `af insights -o json` returned the moment
+// the document was written, so every exit below it was unreachable and the
+// command reported SUCCESS on a migration that had failed on a branch with
+// production's shape. Adding `-o json` turned a break into a pass. `af ci` in
+// this package already keeps these apart, writeReport rendering and ciExit
+// deciding, and two commands in one tool must not disagree about whether a
+// break is a break.
+//
+// Order matters and it is the reverse of what reads naturally. A proven break
+// is reported before a blocked check, because a run that both broke and could
+// not measure something is a break, and the break is the more urgent.
+func insightsResult(e *Env, full insights.Full) error {
+	if e.Out.Format == FormatJSON {
+		if err := e.Out.JSON(full); err != nil {
+			return err
+		}
+		if err := insightsBreaks(full); err != nil {
+			return err
+		}
+		// No summary line in JSON: the document carries blocked itself. The
+		// exit still has to say so, which is what this returns.
+		_, err := insightsSummary(full)
+		return err
+	}
+	if err := insightsBreaks(full); err != nil {
+		return err
+	}
+	return printInsightsSummary(e, full)
+}
+
+// insightsBreaks is the proven breaks, and only the proven breaks.
+func insightsBreaks(full insights.Full) error {
+	if full.Rehearsal != nil && full.Rehearsal.Failed {
+		// A migration that fails on a branch with production's shape is one
+		// that would have failed in production, so exiting zero would turn
+		// the whole check into a note nobody reads.
+		return aferrors.Coded(aferrors.AFDB030, "detail", full.Rehearsal.Error)
+	}
+	if full.Rolling.Failed() {
+		// Non zero for the same reason, and only for a proven break. A
+		// rolling check that could not run exits zero and says so, because a
+		// blocked check and a broken change must never be the same exit code.
+		return aferrors.Coded(aferrors.AFDB032, "detail", rollingDetail(full.Rolling))
+	}
+	return nil
+}
+
+// printInsightsSummary writes the last line, or writes nothing at all.
+//
+// The guard is the whole point and it is why this is a function rather than
+// four lines inside RunE: an empty line from insightsSummary must produce no
+// output, not a bare ok with nothing after it. That is testable here against a
+// buffer and was not testable inside a cobra RunE that needs a database.
+func printInsightsSummary(e *Env, full insights.Full) error {
+	line, err := insightsSummary(full)
+	if line != "" {
+		e.Out.Status(e.Out.S(StyleGood, SymbolOK), line, "from the checks that ran")
+	}
+	return err
+}
+
+// insightsSummary is the last line and the exit code, decided together.
+//
+// They are decided together because they were decided apart, and that is the
+// defect this function exists for. af insights said "the migrations were not
+// rehearsed: no migration tool was recognised in this repository" in its body
+// and then printed
+//
+//	ok  nothing to report
+//
+// and exited zero. Every individual sentence was honest and the last line was
+// not, and the last line is the one a developer reads.
+//
+// Three states, three answers, and the middle one is the new one:
+//
+//   - a proven break exits 5 or 8 and is handled by the caller before this,
+//     because a run that both broke and could not measure something is a
+//     break and the break is the more urgent fact;
+//   - a check that was asked for and did not run exits 7 and prints no ok,
+//     because a blocked check and a passing one must not be the same exit
+//     code;
+//   - everything else is a pass and says so.
+//
+// Exit 7 rather than reusing a failure code, for the reason already written
+// into the rolling check above: a blocked check and a broken change must
+// never be the same exit code, or people learn to ignore the one that cries
+// wolf. 7 is the code this catalog already gives to "could not verify".
+//
+// An empty line means print nothing, which is the case where a check found
+// something and has already printed it.
+func insightsSummary(full insights.Full) (string, error) {
+	if full.IsBlocked() {
+		return "", aferrors.Coded(aferrors.AFDB033, "detail",
+			strings.Join(full.Blocked, "; "))
+	}
+	if full.Clean() {
+		return "nothing to report", nil
+	}
+	return "", nil
 }
 
 // rollingDetail is the one sentence the failure carries out to the exit code.

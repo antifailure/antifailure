@@ -85,6 +85,7 @@ func (o *Orchestrator) RunInsights(
 		runOpts.NoRehearsalReason = why
 	} else if opts.SkipRehearsal {
 		runOpts.NoRehearsalReason = "the migrations were not rehearsed, because --no-rehearsal was given"
+		runOpts.RehearsalDeclined = true
 	}
 
 	full, err := insights.Run(ctx, runOpts)

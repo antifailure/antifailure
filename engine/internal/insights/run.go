@@ -141,6 +141,12 @@ type Options struct {
 	// Empty falls back to a general message, which is right when the caller
 	// simply had nothing to rehearse.
 	NoRehearsalReason string
+	// RehearsalDeclined says the caller chose not to rehearse, so a run
+	// without one is a decision rather than a blocked check. --no-rehearsal
+	// is the only thing that sets it. Without it, a rehearsal the manifest
+	// asked for and did not get is reported as blocked and the command exits
+	// in a way CI can tell apart from a pass.
+	RehearsalDeclined bool
 	// Progress receives lines already safe to print.
 	Progress func(string)
 }
@@ -168,7 +174,29 @@ type Full struct {
 	Off []string `json:"off,omitempty"`
 	// Missing names what could not be measured, and why.
 	Missing []string `json:"missing,omitempty"`
+	// Blocked names the checks that were asked for and did not run.
+	//
+	// Three states, not two, and the distinction is the whole point. Off is a
+	// decision somebody made. Missing collects everything that could not be
+	// measured, including things that do not change the verdict, like an
+	// extension nobody installed. Blocked is the narrow one the summary line
+	// reads: the headline check was asked for and did not execute, so the run
+	// proves nothing about the thing it exists to prove.
+	//
+	// The report already followed this rule three sentences at a time and the
+	// summary did not. af insights said "the migrations were not rehearsed"
+	// in its body and then printed "ok  nothing to report" and exited zero,
+	// and the last line is the one a developer reads. It is the same shape as
+	// rollingBlocked beside rollingOff below, which got it right first.
+	Blocked []string `json:"blocked,omitempty"`
 }
+
+// Blocked reports whether a check that was asked for did not run.
+//
+// Callers branch on this rather than on Clean, because a run with nothing to
+// report and a run that could not look are the same shape and different
+// facts.
+func (f Full) IsBlocked() bool { return len(f.Blocked) > 0 }
 
 // Clean reports whether every check that ran found nothing.
 func (f Full) Clean() bool {
@@ -256,6 +284,24 @@ func Run(ctx context.Context, opts Options) (Full, error) {
 				return f, err
 			}
 			f.Rehearsal = &r
+			if r.Tool == ToolNone {
+				// The rehearsal ran and had nothing to rehearse, which is
+				// the same defect wearing different clothes: discovery
+				// failed, every statement timing and lock sample below is
+				// over an empty set, and the run would otherwise summarise
+				// as ok. A tool that WAS recognised but whose migrations are
+				// not SQL is not this case; those carry their own reason and
+				// are applied by the project's own migrate command.
+				//
+				// A project that genuinely has no migrations says so, and
+				// the message names all three ways to say it.
+				blocked := "no migration tool was recognised anywhere in this repository, so " +
+					"the rehearsal had nothing to rehearse. Name the directory under " +
+					"database.migrations, or turn the check off with " +
+					"insights.migration_rehearsal: false, or pass --no-rehearsal for one run"
+				f.Missing = append(f.Missing, blocked)
+				f.Blocked = append(f.Blocked, blocked)
+			}
 		} else if opts.Config.PlanDiff {
 			// Plan diff without a rehearsal has nothing to change the plan,
 			// so say so rather than reporting no findings.
@@ -290,6 +336,13 @@ func Run(ctx context.Context, opts Options) (Full, error) {
 				"to rehearse them against"
 		}
 		f.Missing = append(f.Missing, reason)
+		if !opts.RehearsalDeclined {
+			// Blocked as well as missing. Declining the rehearsal is a
+			// decision and stays a decision: --no-rehearsal asked for this,
+			// so summarising it as ok is honest. Everything else here is the
+			// headline check failing to run, which is not.
+			f.Blocked = append(f.Blocked, reason)
+		}
 	}
 
 	// With no rehearsal branch, a saved baseline is the other way to have two

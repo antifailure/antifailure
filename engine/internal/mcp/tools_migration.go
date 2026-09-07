@@ -134,10 +134,18 @@ func runMigrationRehearsal(
 // rule Verdict itself applies to findings, so the ranking is shared even
 // though the shape of the run is not.
 func nativeVerdict(full insights.Full, findings []report.Finding) string {
-	if full.Rehearsal == nil {
+	if full.Rehearsal == nil || full.IsBlocked() {
 		// Nothing was rehearsed. Every other field may be populated and none
 		// of it is evidence about the migrations, so this is unverified
 		// rather than a pass with no findings.
+		//
+		// IsBlocked catches the case a nil check cannot see: a rehearsal that
+		// RAN against a repository where discovery found no migration tool.
+		// It times nothing, lints nothing and produces no findings, so the
+		// counts below are all zero and the verdict was pass. That is the same
+		// defect the CLI's summary line had, reached through a different door,
+		// and fixing one without the other would leave an agent being told
+		// PASS about migrations nobody looked at.
 		return report.VerdictUnverified
 	}
 	fail, warn := report.Run{Findings: findings}.Counts()
