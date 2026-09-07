@@ -18,16 +18,18 @@ committed. It used to go stale anyway, because for a long time the
 generator ran only while building a release and nothing compared its
 output against this file.
 
-## Go modules (96)
+## Go modules (98)
 
 - `github.com/aymanbagabas/go-osc52/v2` v2.0.1
 - `github.com/cespare/xxhash/v2` v2.3.0
 - `github.com/charmbracelet/bubbletea` v1.3.10
-- `github.com/charmbracelet/colorprofile` v0.2.3-0.20250311203215-f60798e515dc
+- `github.com/charmbracelet/colorprofile` v0.4.1
 - `github.com/charmbracelet/lipgloss` v1.1.0
-- `github.com/charmbracelet/x/ansi` v0.10.1
-- `github.com/charmbracelet/x/cellbuf` v0.0.13-0.20250311204145-2c3ea96c31dd
-- `github.com/charmbracelet/x/term` v0.2.1
+- `github.com/charmbracelet/x/ansi` v0.11.8
+- `github.com/charmbracelet/x/cellbuf` v0.0.15
+- `github.com/charmbracelet/x/term` v0.2.2
+- `github.com/clipperhouse/displaywidth` v0.11.0
+- `github.com/clipperhouse/uax29/v2` v2.7.0
 - `github.com/containerd/errdefs` v1.0.0
 - `github.com/containerd/errdefs/pkg` v0.3.0
 - `github.com/davecgh/go-spew` v1.1.2-0.20180830191138-d8f796af33cc
@@ -62,9 +64,9 @@ output against this file.
 - `github.com/jackc/pgx/v5` v5.10.0
 - `github.com/jackc/puddle/v2` v2.2.2
 - `github.com/json-iterator/go` v1.1.12
-- `github.com/lucasb-eyer/go-colorful` v1.2.0
+- `github.com/lucasb-eyer/go-colorful` v1.4.0
 - `github.com/mattn/go-isatty` v0.0.24
-- `github.com/mattn/go-runewidth` v0.0.16
+- `github.com/mattn/go-runewidth` v0.0.24
 - `github.com/moby/docker-image-spec` v1.3.1
 - `github.com/modern-go/concurrent` v0.0.0-20180306012644-bacd9c7ef1dd
 - `github.com/modern-go/reflect2` v1.0.3-0.20250322232337-35a7c28c31ee
@@ -90,7 +92,7 @@ output against this file.
 - `go.opentelemetry.io/otel/trace` v1.46.0
 - `go.yaml.in/yaml/v2` v2.4.4
 - `go.yaml.in/yaml/v3` v3.0.5
-- `golang.org/x/crypto` v0.55.0
+- `golang.org/x/crypto` v0.56.0
 - `golang.org/x/net` v0.58.0
 - `golang.org/x/oauth2` v0.36.0
 - `golang.org/x/sync` v0.22.0
@@ -108,10 +110,10 @@ output against this file.
 - `k8s.io/klog/v2` v2.140.0
 - `k8s.io/kube-openapi` v0.0.0-20260721132016-d427ff9ee9ad
 - `k8s.io/utils` v0.0.0-20260626114624-be93311217bd
-- `modernc.org/libc` v1.74.4
+- `modernc.org/libc` v1.75.6
 - `modernc.org/mathutil` v1.7.1
-- `modernc.org/memory` v1.11.0
-- `modernc.org/sqlite` v1.57.0
+- `modernc.org/memory` v1.12.1
+- `modernc.org/sqlite` v1.58.0
 - `sigs.k8s.io/json` v0.0.0-20250730193827-2d320260d730
 - `sigs.k8s.io/randfill` v1.0.0
 - `sigs.k8s.io/structured-merge-diff/v6` v6.4.2
