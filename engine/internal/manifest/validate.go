@@ -166,6 +166,7 @@ func (v *validator) services(m *schema.Manifest) {
 
 		v.build(base, s)
 		v.env(base, s)
+		v.deadFields(base, s)
 
 		if _, err := ParseDuration(s.HealthTimeout); err != nil {
 			v.add(base+".health_timeout",
@@ -175,6 +176,48 @@ func (v *validator) services(m *schema.Manifest) {
 	}
 
 	v.dependencies(m, names)
+}
+
+// deadFields refuses the three service fields nothing reads.
+//
+// The same judgement loadThresholds applies to query_count_increase, and it is
+// here for the same reason. replicas, resources.cpu and resources.memory are
+// in schemas/manifest.v1.json, so the reference documents them and a manifest
+// carrying them parses without a word. Nothing then reads them. The local
+// runtime never mentions replicas, both Kubernetes Deployments hardcode one
+// replica in internal/runtime/k8s/objects.go, and neither runtime emits a CPU
+// or a memory limit at all. A manifest asking for three instances of a worker
+// got one, and the run went green having proved nothing about the case its
+// author was worried about.
+//
+// That silence is the defect rather than the missing feature. Somebody writes
+// replicas: 3 to reproduce a double processing bug, is quietly given one
+// instance, and reads the green run as the bug being absent. A refusal costs
+// them a line in the manifest; the silence costs them the finding.
+//
+// Only a value somebody wrote is refused. normalize fills all three in on
+// every manifest that omits them, so refusing the engine's own defaults would
+// fail every manifest rather than the ones making a promise the engine cannot
+// keep.
+func (v *validator) deadFields(base string, s *schema.Service) {
+	if declaredAt(v.doc, base+".replicas") {
+		v.add(base+".replicas",
+			fmt.Sprintf("Nothing reads replicas, so service %q would run one instance whatever this says.", s.Name),
+			"Both runtimes start exactly one container per service. Remove the key rather than "+
+				"leaving a number in the manifest that no part of the engine consults.")
+	}
+	if declaredAt(v.doc, base+".resources.cpu") {
+		v.add(base+".resources.cpu",
+			fmt.Sprintf("Nothing reads resources.cpu, so service %q would run with no CPU limit at all.", s.Name),
+			"Neither runtime emits a resource requirement, so this cap is not applied anywhere. "+
+				"Remove it rather than leaving a limit in the manifest that nothing enforces.")
+	}
+	if declaredAt(v.doc, base+".resources.memory") {
+		v.add(base+".resources.memory",
+			fmt.Sprintf("Nothing reads resources.memory, so service %q would run with no memory limit at all.", s.Name),
+			"Neither runtime emits a resource requirement, so this cap is not applied anywhere. "+
+				"Remove it rather than leaving a limit in the manifest that nothing enforces.")
+	}
 }
 
 func (v *validator) build(base string, s *schema.Service) {

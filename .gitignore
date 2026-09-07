@@ -143,6 +143,7 @@ runner/artifacts/
 /errgen
 /eventcheck
 /execcheck
+/fieldsweep
 /figurecheck
 /gatecheck
 /installcheck

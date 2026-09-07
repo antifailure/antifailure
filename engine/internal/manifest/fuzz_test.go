@@ -60,7 +60,11 @@ func FuzzParse(f *testing.F) {
 			t.Fatalf("Parse returned a manifest that is not normalized: %+v", m)
 		}
 		for _, s := range m.Services {
-			if s.Build == nil || s.Resources == nil {
+			// Resources is not in this invariant. It is not defaulted,
+			// because nothing reads it and validate refuses an author who
+			// writes it, so a normalized manifest carries it only when the
+			// author did and that manifest does not parse.
+			if s.Build == nil {
 				t.Fatalf("service %q is not normalized", s.Name)
 			}
 		}

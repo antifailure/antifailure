@@ -364,12 +364,12 @@ One request sent to both versions.
 
 ## Resources
 
-What one replica of a service is allowed to use. Absent means the runtime decides, which locally means no limit and on a cluster means the namespace default.
+Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `cpu` | string | no | CPU limit, in cores or millicores. Defaults to `1`. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
-| `memory` | string | no | Memory limit. Defaults to `1Gi`. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
+| `cpu` | string | no | Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
+| `memory` | string | no | Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
 
 ## Rolling compatibility
 
@@ -411,8 +411,8 @@ One process the environment runs. A service is built from the repository, given 
 | `name` | string | **yes** | Unique within the manifest. Appears in hostnames, logs, and container names. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `path` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | `port` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
-| `replicas` | integer | no | How many instances to run. Defaults to `1`. Minimum 1, maximum 10. |
-| `resources` | [Resources](#resources) | no | What one replica of a service is allowed to use. |
+| `replicas` | integer | no | Not read by anything, and refused by the engine. Both runtimes start exactly one container per service, so a manifest asking for three instances got one and nothing said so. Minimum 1, maximum 10. |
+| `resources` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
 | `schedule` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
 ## Subset
@@ -442,5 +442,5 @@ One thing the agents do, written as a goal rather than a script. The runner deci
 | `persona` | string | no | Which persona runs it. Defaults to the first persona. Max length 40. |
 | `personas` | list of string | no | The personas this workflow signs in as, in order, in one browser, for a person who holds more than one session at once: an operator who is also a customer, an account with a second sign-in surface. Each is signed in through its own strategy and the sessions accumulate; the last one named is the identity the workflow acts as. Mutually exclusive with persona. Min items 1, max items 5. |
 | `start_path` | string | no | Where to begin. Defaults to the application root. Defaults to `/`. Max length 512. |
-| `tags` | list of string | no | Max items 20. |
+| `tags` | list of string | no | Labels for the person reading the manifest, and nothing else. The engine does not read them: no command selects workflows by tag and no report prints one, so grouping workflows here groups them for a reader and not for a run. Name the workflows with --only to run a subset. This key had no description at all until somebody counted the fields nothing reads, which is how a label and a broken promise came to look alike. Max items 20. |
 

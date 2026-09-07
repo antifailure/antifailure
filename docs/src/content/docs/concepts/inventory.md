@@ -32,6 +32,7 @@ anybody.
 | `auth` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | `runtime` | Where the environment runs. |
 | `traffic` | Where the endpoint mix comes from, through the same code the load run uses. |
+| `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. Nothing does yet, so each one is reported `unmeasured` by name. |
 
 Nothing is estimated and nothing is a constant somebody typed because the
 report needed a number.
@@ -72,6 +73,9 @@ The cases that produce it today:
   answers depends on the host the application reaches.
 - A persona created through a provider's own API rather than in the branch,
   which nothing here can read without calling it.
+- Every datastore other than the primary database. There is one golden, one
+  masking pass and one branch, and they are Postgres, so a ClickHouse or a
+  Redis declared as a service comes up empty and nothing here read it.
 
 A dimension the manifest never asked for is excluded too, whole, with the
 reason. An environment that sends no traffic at all has not reproduced traffic
@@ -107,6 +111,28 @@ created is a better reproduction than one whose pack returns canned answers,
 and both are better than a host the policy blocks. The report distinguishes
 all three rather than averaging them into one word.
 
+## A second datastore is not reproduced, and the report says so
+
+There is one golden, one masking pass, one verification scan and one branch,
+and all four are Postgres. A ClickHouse, a Redis, a Kafka or an Elasticsearch
+declared as a service starts as an empty container.
+
+For a stack shaped like an analytics product that is the whole product: the
+twin holds masked Postgres metadata and zero events, because the events are in
+ClickHouse. Every query path that matters is untested and every chart is blank.
+
+The inventory used to score that environment on its services, its branch, its
+hosts, its personas and its traffic and call it faithful, because none of its
+dimensions was looking at the second store. The `datastores` dimension is that
+absence, written down. Each store is reported `unmeasured` with the reason,
+which keeps it out of the score in both directions: nothing here has shown that
+it reproduces production, and nothing here has shown that it does not.
+
+A store is recognised from the manifest, by the image a service runs or by what
+the service is called. A store whose image this build does not recognise and
+whose service carries an unrelated name is still invisible, and the dimension
+says which two signals it used when it finds none.
+
 ## Requiring a dimension
 
 ```yaml
@@ -127,6 +153,11 @@ the first is how a check stops being believed.
 `runtime` is reported and is not comparable today, because nothing in the
 manifest says what production runs on, so there is no other side to the
 comparison. Requiring it fails with `AF-FID-002` saying so.
+
+`datastores` is reported and is not measurable today, for a different reason:
+nothing in this build reproduces a datastore other than the primary Postgres.
+Requiring it fails with `AF-FID-002` naming each store, which is the honest
+answer rather than a pass.
 
 Turning the inventory off with `enabled: false` means it is not taken, which is
 not the same as everything having passed, and the command says so rather than
