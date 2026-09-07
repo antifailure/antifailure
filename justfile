@@ -499,7 +499,11 @@ benchmark:
     set -euo pipefail
     mkdir -p {{reports}}
     stamp=$(date -u +%Y-%m-%d)
-    cd engine && AF_BENCHMARK_OUT="../{{reports}}/benchmark-datastores-${stamp}.md" \
+    # Absolute, because `go test` runs a test binary with the PACKAGE
+    # directory as its working directory rather than the one just was invoked
+    # from. A relative path here wrote the report into engine/internal.
+    out="$(cd {{reports}} && pwd)/benchmark-datastores-${stamp}.md"
+    cd engine && AF_BENCHMARK_OUT="$out" \
       go test ./internal/fidelity -run TestBenchmarkDatastoresPerEnvironment -count=1
     echo "wrote {{reports}}/benchmark-datastores-${stamp}.md"
 
