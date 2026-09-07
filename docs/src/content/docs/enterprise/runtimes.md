@@ -39,8 +39,15 @@ lasts until somebody investigates.
 
 ## The community edition
 
-One runtime, the local one. `runtime.provider` in the manifest names `local`
-and `kubernetes`, and only `local` is built; asking for the other is refused
-with a message rather than quietly substituted.
+Two runtimes, both built. `runtime.provider` in the manifest names `local` and
+`kubernetes`, and this page said for a long time that only `local` existed.
+That was stale rather than cautious: the Kubernetes runtime builds a Deployment,
+a Service and an Ingress per web service and has been selectable the whole time.
+Any other name is refused with a message rather than quietly substituted, and
+the message lists the two this build has.
+
+What the enterprise edition adds here is not a third runtime. It is placement
+across several of them at once: the requirements, the tags and the scheduling
+described above.
 
 Related: [scheduling](/docs/concepts/scheduling), [licensing](/docs/enterprise/licensing).

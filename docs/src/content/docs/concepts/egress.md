@@ -70,6 +70,52 @@ preview from looking like an attack to somebody's rate limiter.
 
 `fixtures` names a pack for `mock` mode.
 
+## Matching a host
+
+A rule names one host, or a shape that several hosts share.
+
+| Pattern | Matches |
+| --- | --- |
+| `api.stripe.com` | that host and nothing else |
+| `10.0.0.1` | that address, and not a name that resolves to it |
+| `*.stripe.com` | one label or more before `.stripe.com`, but not `stripe.com` itself |
+| `email.*.amazonaws.com` | exactly one label where the star is, so every SES region and no other service |
+| `*.s3.*.amazonaws.com` | a bucket in any region, in the virtual hosted form |
+
+A star anywhere but the front stands for exactly one label. That is what lets a
+rule name an AWS service rather than the whole account: every regional endpoint
+is `<service>.<region>.amazonaws.com`, so the only leading wildcard that reaches
+S3 also reaches SES, SQS, STS and Secrets Manager. Antifailure's own catalog
+took that wildcard once, in `capture` mode under a mail rule, and an S3 `PUT`
+was answered with a mail provider's success.
+
+A star has to be a whole label. `web-*.example.com` is refused rather than read
+as a prefix somebody did not write, and a pattern of nothing but stars is
+refused because it matches every host while reading as though it named one.
+Only a bare `*` matches everything, and only in `block` mode.
+
+Specificity decides, never order. An exact host beats everything. A pattern
+whose stars are all interior beats a leading wildcard, because it pins both
+ends and the number of labels. Among leading wildcards, the one that pins more
+text after the star wins, so `*.s3.*.amazonaws.com` beats `*.amazonaws.com`. A
+`*.amazonaws.com` block and an `email.*.amazonaws.com` capture can therefore sit
+in one manifest, and neither reaches the other's hosts.
+
+## Capture answers as the provider would, or refuses
+
+`capture` returns the shape the provider's own client expects to parse, because
+an application that gets a 200 with the wrong body from its mail provider
+usually carries on and fails three steps later in a way that looks like an
+application bug. Resend, SendGrid, Postmark, Mailgun, Twilio, Amazon SES and
+Slack each have a handler.
+
+For anything else, capture records the body and answers `200 {}`, which is a
+guess. It makes that guess only when the rule **names the host**: an exact host,
+an address, or a pattern whose stars are all interior. A host swept in by a
+leading wildcard, or reached through `default: capture` with no rule at all, is
+refused instead, with a decision saying so, because an invented success is
+believed and nobody wrote that host down.
+
 ## Reading a decision
 
 ```sh

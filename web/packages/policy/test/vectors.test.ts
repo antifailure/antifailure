@@ -112,8 +112,11 @@ describe('compilation refuses what the engine refuses', () => {
   const refused: [string, string][] = [
     ['', 'the host is empty'],
     ['*.', 'a wildcard needs a domain after it'],
-    ['api.*.com', 'a wildcard is only allowed at the start'],
-    ['*.exa*mple.com', 'a wildcard is only allowed at the start'],
+    ['*.exa*mple.com', 'a star stands for one whole label'],
+    ['web-*.example.com', 'a star stands for one whole label'],
+    ['api.*com', 'a star stands for one whole label'],
+    ['*.*', 'a pattern of stars alone matches every host'],
+    ['*.*.*', 'a pattern of stars alone matches every host'],
     ['host:0', 'the port is not valid'],
     ['host:70000', 'the port is not valid'],
   ]

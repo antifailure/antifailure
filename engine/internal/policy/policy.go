@@ -95,13 +95,30 @@ type Decision struct {
 	// why records what matched. It is a value rather than a sentence because
 	// building the sentence allocates, and Evaluate runs on every outbound
 	// request while the sentence is read only when something is printed.
-	why  why
-	host string
-	note string
+	why       why
+	host      string
+	note      string
+	namesHost bool
 }
 
 // Matched reports whether a rule decided, rather than the default.
 func (d Decision) Matched() bool { return d.RuleHost != "" }
+
+// NamesHost reports whether the rule that decided is about this service in
+// particular, rather than about whatever happens to sit under a domain.
+//
+// It is true for an exact host, for an address, and for a pattern whose stars
+// are all interior, such as email.*.amazonaws.com, because that pattern pins
+// the service label and the label count and can only ever reach one service.
+// It is false for a leading wildcard, for a match all, and for the default.
+//
+// The distinction is not cosmetic and it is not about ranking. There are
+// answers Antifailure will give for a host somebody named and must not give
+// for a host that merely ended in the right domain: the sidecar fabricates a
+// provider's success shape for the first and refuses to fabricate one for the
+// second. *.amazonaws.com under a mail rule is how an S3 PUT was answered 200
+// with an empty body by a handler that believed it was holding an email.
+func (d Decision) NamesHost() bool { return d.namesHost }
 
 // Allowed reports whether the request reaches the real destination.
 //
@@ -156,6 +173,7 @@ const (
 	hostExactly
 	hostAddress
 	hostSuffixed
+	hostLabelled
 )
 
 func (w why) String() string {
@@ -169,6 +187,9 @@ func (w why) String() string {
 		b.WriteString("the address matches")
 	case hostSuffixed:
 		b.WriteString("the host ends in ")
+		b.WriteString(w.suffix)
+	case hostLabelled:
+		b.WriteString("one label fills each star in ")
 		b.WriteString(w.suffix)
 	}
 	if w.method {
@@ -212,6 +233,14 @@ type compiled struct {
 	// hostSuffix is set for a wildcard rule, and is the part after the star,
 	// including the leading dot.
 	hostSuffix string
+	// hostLabels is set for a pattern carrying a star that is not the sole
+	// leading one, split into labels, where "*" stands for exactly one label.
+	// hostAnyPrefix records that the pattern also began with "*.", which
+	// covers one or more labels rather than one. hostPattern is the whole
+	// normalized pattern, which is what the decision quotes back.
+	hostLabels    []string
+	hostAnyPrefix bool
+	hostPattern   string
 	// matchAll is set for the rule that matches every host.
 	matchAll bool
 	// ip is set when the rule names an address rather than a name.
@@ -224,6 +253,11 @@ type compiled struct {
 	methods map[string]bool
 	// specificity ranks the rule before any request arrives.
 	specificity int
+	// namesHost records that this pattern can only ever reach one service,
+	// which is what Decision.NamesHost reports. Computed here rather than from
+	// the why, because a leading star and an interior star produce the same
+	// why and mean opposite things about consent.
+	namesHost bool
 }
 
 // New compiles an egress section into an engine.
@@ -266,7 +300,7 @@ func compile(r schema.EgressRule, index int) (compiled, error) {
 
 	host := strings.ToLower(strings.TrimSpace(r.Host))
 	if host == "" {
-		return c, fmt.Errorf("the host is empty")
+		return c, errEmptyHost
 	}
 
 	if h, port, err := net.SplitHostPort(host); err == nil {
@@ -287,19 +321,16 @@ func compile(r schema.EgressRule, index int) (compiled, error) {
 	switch {
 	case host == "*":
 		c.matchAll = true
-	case strings.HasPrefix(host, "*."):
+	case strings.HasPrefix(host, "*.") && !strings.Contains(host[2:], "*"):
 		suffix := host[1:] // keep the leading dot
-		if strings.Contains(suffix[1:], "*") {
-			// A star in the middle would need a real glob engine, and a glob
-			// engine is a place to hide a pattern that takes exponential time.
-			// Prefix wildcards cover every case a manifest needs.
-			return c, fmt.Errorf("a wildcard is only allowed at the start, as *.example.com")
-		}
 		c.hostSuffix = suffix
-	default:
-		if strings.Contains(host, "*") {
-			return c, fmt.Errorf("a wildcard is only allowed at the start, as *.example.com")
+	case strings.Contains(host, "*"):
+		labels, anyPrefix, err := compileStarLabels(host)
+		if err != nil {
+			return c, err
 		}
+		c.hostLabels, c.hostAnyPrefix, c.hostPattern = labels, anyPrefix, host
+	default:
 		if ip := net.ParseIP(host); ip != nil {
 			c.ip = ip
 		} else {
@@ -324,8 +355,101 @@ func compile(r schema.EgressRule, index int) (compiled, error) {
 		}
 	}
 
+	c.namesHost = c.hostExact != "" || c.ip != nil || (c.hostLabels != nil && !c.hostAnyPrefix)
 	c.specificity = specificityOf(c)
 	return c, nil
+}
+
+// errStarPlacement is the one sentence a misplaced star gets, in the engine
+// and in the validator alike, so that a manifest refused by one is refused in
+// the same words by the other.
+var errStarPlacement = fmt.Errorf(
+	"a star stands for one whole label, as *.example.com or email.*.example.com")
+
+// errEmptyHost keeps the empty rule and the misplaced star apart, because the
+// two are different mistakes and one message for both sends the reader to the
+// wrong place.
+var errEmptyHost = fmt.Errorf("the host is empty")
+
+// errStarsOnly refuses a pattern made only of stars, which matches every host
+// while reading as though it named one.
+var errStarsOnly = fmt.Errorf(
+	"a pattern of stars alone matches every host. Only * may do that, and only in block mode")
+
+// compileStarLabels reads a pattern whose star is not the sole leading one,
+// such as email.*.amazonaws.com or *.s3.*.amazonaws.com, into a vector of
+// labels in which a star stands for exactly one label.
+//
+// AWS is why this shape exists. Every regional service is
+// <service>.<region>.amazonaws.com and every virtual hosted bucket is
+// <bucket>.s3.<region>.amazonaws.com, so the only leading wildcard that
+// reaches S3 is *.amazonaws.com, which also reaches SES, SQS, STS and every
+// other service in the account. A catalog choosing between thirty regions per
+// service and one wildcard that swallows the whole cloud chooses the wildcard,
+// and that entry is what this pattern exists to replace.
+//
+// A star is a whole label and never part of one, and it never covers a dot.
+// That is what keeps this from being a glob: matching splits the host on dots
+// once and compares label to label, so there is no backtracking, no nesting,
+// and no pattern whose cost depends on the input. web-*.example.com is refused
+// rather than read as a prefix match nobody wrote.
+//
+// A LEADING star keeps the meaning it has always had, which is one or more
+// labels rather than exactly one. Changing that would silently narrow every
+// *.example.com rule already written.
+func compileStarLabels(host string) (labels []string, anyPrefix bool, err error) {
+	if strings.HasPrefix(host, "*.") {
+		anyPrefix, host = true, host[2:]
+	}
+	if host == "" {
+		return nil, false, errStarPlacement
+	}
+	literal := false
+	for _, label := range strings.Split(host, ".") {
+		if label == "" {
+			return nil, false, errStarPlacement
+		}
+		if label != "*" && strings.Contains(label, "*") {
+			return nil, false, errStarPlacement
+		}
+		if label != "*" {
+			literal = true
+		}
+		labels = append(labels, label)
+	}
+	// A pattern of nothing but stars names no host at all. *.* reads as a
+	// narrowing of *.example.com and is in fact every host with two or more
+	// labels, which is the whole internet, and it would walk straight past the
+	// rule that only * may match everything and only in block mode.
+	if !literal {
+		return nil, false, errStarsOnly
+	}
+	return labels, anyPrefix, nil
+}
+
+// matchStarLabels reports whether a host satisfies a compiled label vector.
+func matchStarLabels(labels []string, anyPrefix bool, host string) bool {
+	parts := strings.Split(host, ".")
+	if anyPrefix {
+		// The leading star covers at least one label, so *.s3.*.amazonaws.com
+		// does not match s3.us-east-1.amazonaws.com itself. An apex and its
+		// subdomains are frequently operated differently.
+		if len(parts) <= len(labels) {
+			return false
+		}
+		parts = parts[len(parts)-len(labels):]
+	} else if len(parts) != len(labels) {
+		return false
+	}
+	for i, want := range labels {
+		if parts[i] == "" {
+			return false
+		}
+		if want != "*" && want != parts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // specificityOf ranks a rule.
@@ -339,6 +463,7 @@ func specificityOf(c compiled) int {
 		exactHost    = 1 << 20
 		ipHost       = 1 << 20 // an address is as specific as an exact name
 		wildcardHost = 1 << 12
+		labelledHost = 1 << 16
 		anyHost      = 0
 		perPathChar  = 1 << 2
 		hasMethod    = 1 << 10
@@ -358,6 +483,18 @@ func specificityOf(c compiled) int {
 		// A longer suffix is more specific: *.api.example.com beats
 		// *.example.com.
 		score += wildcardHost + len(c.hostSuffix)
+	case c.hostLabels != nil && c.hostAnyPrefix:
+		// Still a suffix rule, so it is ranked as one and by the same measure:
+		// the text after the leading star. *.s3.*.amazonaws.com pins more of
+		// that text than *.amazonaws.com does and outranks it accordingly.
+		score += wildcardHost + len(c.hostPattern) - 1
+	case c.hostLabels != nil:
+		// A pattern with no leading star pins the label count as well as both
+		// ends, so it says strictly more than any suffix: email.*.amazonaws.com
+		// beats *.amazonaws.com on every host they both match. It still loses
+		// to an exact host, and the weights are far enough apart that no length
+		// term can close either gap.
+		score += labelledHost + len(c.hostPattern)
 	}
 	if len(c.paths) > 0 {
 		score += perPathChar * len(c.paths[0])
@@ -420,6 +557,7 @@ func (e *Engine) Evaluate(req Request) Decision {
 			why:         why,
 			host:        host,
 			note:        c.rule.Note,
+			namesHost:   c.namesHost,
 		}
 	}
 	return Decision{Mode: e.fallback, host: host}
@@ -481,6 +619,11 @@ func (c *compiled) matches(host string, port int, method, path string) (why, boo
 			return w, false
 		}
 		w.host, w.suffix = hostSuffixed, c.hostSuffix
+	case c.hostLabels != nil:
+		if !matchStarLabels(c.hostLabels, c.hostAnyPrefix, host) {
+			return w, false
+		}
+		w.host, w.suffix = hostLabelled, c.hostPattern
 	default:
 		return w, false
 	}
@@ -619,6 +762,38 @@ func (c *compiled) matchesHost(host string, port int) bool {
 		return ip != nil && ip.Equal(c.ip)
 	case c.hostSuffix != "":
 		return strings.HasSuffix(host, c.hostSuffix) && len(host) > len(c.hostSuffix)
+	case c.hostLabels != nil:
+		return matchStarLabels(c.hostLabels, c.hostAnyPrefix, host)
+	}
+	return false
+}
+
+// InspectsAnyHost reports whether this policy needs TLS terminated for
+// anything at all, which is what decides whether a certificate is issued.
+//
+// It reads the compiled rules rather than asking InspectsHost about a host
+// built from each pattern, and that is the whole point of it existing. The
+// caller used to strip a leading "*." off the rule's host and ask about the
+// remainder, which answers correctly for an exact host and for *.example.com
+// and silently wrongly for anything else: email.*.amazonaws.com does not match
+// itself, so a policy whose only capture rule had a star in the middle would
+// have been told no certificate was needed, and the mode would have quietly
+// degraded to a host rule on a tunnel nobody could read inside.
+func (e *Engine) InspectsAnyHost() bool {
+	if inspectMode(e.fallback) {
+		return true
+	}
+	for i := range e.rules {
+		c := &e.rules[i]
+		// A rule pinned to another port cannot decide an HTTPS request, and
+		// asking for a certificate on its behalf would mean every service in
+		// the environment trusts a key issued for a rule about Redis.
+		if c.port != 0 && c.port != 443 {
+			continue
+		}
+		if len(c.paths) > 0 || c.methods != nil || inspectMode(c.rule.Mode) {
+			return true
+		}
 	}
 	return false
 }

@@ -105,8 +105,9 @@ func hostOf(t *testing.T, raw string) string {
 // sells the audit as much as the refusal.
 type sidecar struct {
 	*proxy
-	mu  sync.Mutex
-	log []record
+	mu       sync.Mutex
+	log      []record
+	messages []message
 }
 
 func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
@@ -134,12 +135,27 @@ func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
 		defer close(done)
 		dec := json.NewDecoder(pr)
 		for {
+			// Decoded twice from one line rather than once into a record. A
+			// captured message and a decision share the stream and share only
+			// the event field, so a record is the whole of a decision and the
+			// shell of a message, and a test asserting on what was captured
+			// needs the message itself.
+			var raw json.RawMessage
+			if err := dec.Decode(&raw); err != nil {
+				return
+			}
 			var r record
-			if err := dec.Decode(&r); err != nil {
+			if err := json.Unmarshal(raw, &r); err != nil {
 				return
 			}
 			s.mu.Lock()
 			s.log = append(s.log, r)
+			if r.Event == "message" {
+				var m message
+				if err := json.Unmarshal(raw, &m); err == nil {
+					s.messages = append(s.messages, m)
+				}
+			}
 			s.mu.Unlock()
 		}
 	}()
@@ -158,6 +174,32 @@ func (s *sidecar) decisions() []record {
 	out := make([]record, len(s.log))
 	copy(out, s.log)
 	return out
+}
+
+// waitForMessage returns the first captured message, or fails.
+//
+// Separate from waitFor because a message is not a decision: waiting for a
+// record whose event is "message" proves a line was written and says nothing
+// about what it held, and what it held is the whole point of capture mode.
+func (s *sidecar) waitForMessage(t *testing.T) message {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		if len(s.messages) > 0 {
+			m := s.messages[0]
+			s.mu.Unlock()
+			return m
+		}
+		s.mu.Unlock()
+		if time.Now().After(deadline) {
+			for _, r := range s.decisions() {
+				t.Logf("record: %+v", r)
+			}
+			t.Fatal("nothing was captured into the inbox")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // waitFor gives the log encoder a moment to catch up and returns the first

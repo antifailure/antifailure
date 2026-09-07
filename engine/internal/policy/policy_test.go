@@ -52,15 +52,18 @@ func TestNew_EmptyDefaultBecomesBlock(t *testing.T) {
 func TestNew_RefusesARuleItCannotCompile(t *testing.T) {
 	t.Parallel()
 	for name, host := range map[string]string{
-		"empty":            "",
-		"whitespace":       "   ",
-		"middle wildcard":  "api.*.example.com",
-		"trailing star":    "example.*",
-		"bare star suffix": "*.",
-		"inner star":       "*.api.*.com",
-		"bad port":         "example.com:notaport",
-		"zero port":        "example.com:0",
-		"huge port":        "example.com:70000",
+		"empty":              "",
+		"whitespace":         "   ",
+		"bare star suffix":   "*.",
+		"star inside label":  "*.exa*mple.com",
+		"star glued to text": "web-*.example.com",
+		"star as a suffix":   "api.*com",
+		"star glued behind":  "*.example*.com",
+		"stars only":         "*.*",
+		"more stars only":    "*.*.*",
+		"bad port":           "example.com:notaport",
+		"zero port":          "example.com:0",
+		"huge port":          "example.com:70000",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := New(&schema.Egress{Rules: []schema.EgressRule{rule(host, schema.ModeAllow)}})

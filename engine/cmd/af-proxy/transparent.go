@@ -84,10 +84,11 @@ func (p *proxy) serveTransparentHTTP(conn net.Conn) {
 	}
 
 	if d.Mode == schema.ModeCapture {
-		rec.Status = http.StatusOK
+		// Emitted after the capture, so that a capture this build refuses is
+		// logged as the refusal it was rather than as the 200 it is not.
+		p.capture(conn, req, preq, d, &rec)
 		rec.Duration = time.Since(started).String()
 		p.emit(rec)
-		p.capture(conn, req, host)
 		return
 	}
 
