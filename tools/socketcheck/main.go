@@ -160,16 +160,30 @@ func Check(root string) (Report, error) { return check(root, notConsulted) }
 func check(root string, unconsulted map[string]string) (Report, error) {
 	var report Report
 	dir := filepath.Join(root, "engine", "pkg", "extension")
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.ParseComments)
+	// The files are listed and parsed one at a time rather than through
+	// parser.ParseDir, which is deprecated, and collected into a slice rather
+	// than an ast.Package, which is deprecated too. Nothing here needs either:
+	// this reads one package whose name is known.
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return report, fmt.Errorf("reading %s: %w", dir, err)
 	}
-	pkg, ok := pkgs["extension"]
-	if !ok {
-		return report, fmt.Errorf("no package extension in %s", dir)
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") ||
+			strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
+		if perr != nil {
+			return report, fmt.Errorf("reading %s: %w", filepath.Join(dir, name), perr)
+		}
+		files = append(files, file)
+	}
+	if len(files) == 0 {
+		return report, fmt.Errorf("no Go files in %s", dir)
 	}
 
 	interfaces := map[string]*ast.InterfaceType{}
@@ -180,7 +194,7 @@ func check(root string, unconsulted map[string]string) (Report, error) {
 	importPath := map[*ast.File]map[string]string{}
 	var addMethods, readerMethods []*ast.FuncDecl
 
-	for _, f := range pkg.Files {
+	for _, f := range files {
 		importPath[f] = map[string]string{}
 		for _, imp := range f.Imports {
 			path, uerr := strconv.Unquote(imp.Path.Value)
@@ -248,7 +262,7 @@ func check(root string, unconsulted map[string]string) (Report, error) {
 		}
 		sort.Strings(socket.Readers)
 		if iface, isIface := interfaces[socket.Name]; isIface {
-			socket.Foreign = foreignTypes(iface, structs, local, importPath, pkg)
+			socket.Foreign = foreignTypes(iface, structs, local, importPath, files)
 		} else {
 			report.Problems = append(report.Problems, fmt.Sprintf(
 				"%s registers %s, which is not an interface in this package",
@@ -364,7 +378,7 @@ func mentionsField(d *ast.FuncDecl, field string) bool {
 // same defect one step further in.
 func foreignTypes(
 	iface *ast.InterfaceType, structs map[string]*ast.StructType, local map[string]bool,
-	importPath map[*ast.File]map[string]string, pkg *ast.Package,
+	importPath map[*ast.File]map[string]string, files []*ast.File,
 ) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -377,7 +391,7 @@ func foreignTypes(
 				if !ok {
 					return true
 				}
-				path := lookupImport(importPath, pkg, prefix.Name)
+				path := lookupImport(importPath, files, prefix.Name)
 				if strings.Contains(path, "/engine/internal/") && !seen[path] {
 					seen[path] = true
 					out = append(out, prefix.Name+"."+t.Sel.Name)
@@ -402,8 +416,8 @@ func foreignTypes(
 
 // lookupImport resolves an identifier prefix to an import path, in whichever
 // file of the package declares it.
-func lookupImport(importPath map[*ast.File]map[string]string, pkg *ast.Package, name string) string {
-	for _, f := range pkg.Files {
+func lookupImport(importPath map[*ast.File]map[string]string, files []*ast.File, name string) string {
+	for _, f := range files {
 		if path, ok := importPath[f][name]; ok {
 			return path
 		}
@@ -426,9 +440,20 @@ func engineCalls(root string) (map[string]string, error) {
 				}
 				return err
 			}
+			// Relative to the root rather than a substring of the absolute
+			// path. A substring test made the answer depend on how the root
+			// was spelled: "../.." put a slash in front of "engine" and
+			// skipped the socket package, "." did not, so the same tree
+			// reported six sockets consulted from the test and eight from the
+			// command line. The eight were Validate calling its own readers,
+			// which is the inventory this gate exists to see past.
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
 			if d.IsDir() || !strings.HasSuffix(path, ".go") ||
 				strings.HasSuffix(path, "_test.go") ||
-				strings.Contains(filepath.ToSlash(path), "/engine/pkg/extension/") {
+				strings.HasPrefix(filepath.ToSlash(rel), "engine/pkg/extension/") {
 				return nil
 			}
 			fset := token.NewFileSet()

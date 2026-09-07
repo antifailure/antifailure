@@ -205,6 +205,123 @@ func TestARegistrationNothingCanEvenReadIsReported(t *testing.T) {
 	}
 }
 
+const selfCallingExtension = `package extension
+
+import (
+	"context"
+	"sync"
+
+	"github.com/antifailure/antifailure/engine/pkg/provider"
+)
+
+type PolicyHook interface {
+	Name() string
+	Check(ctx context.Context) error
+}
+
+type DatabaseProvider interface {
+	Name() string
+	Open(ctx context.Context, cfg Config) (provider.Database, error)
+}
+
+type Config struct {
+	Root string
+}
+
+type Registry struct {
+	mu       sync.RWMutex
+	policy   []PolicyHook
+	database []DatabaseProvider
+}
+
+func (r *Registry) AddPolicy(h PolicyHook) { r.policy = append(r.policy, h) }
+
+func (r *Registry) CheckPolicy(ctx context.Context) error {
+	for _, h := range r.policy {
+		if err := h.Check(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Registry) AddDatabaseProvider(p DatabaseProvider) {
+	r.database = append(r.database, p)
+}
+
+func (r *Registry) Validate() error {
+	for _, n := range r.databaseNames() {
+		_ = n
+	}
+	return nil
+}
+
+func (r *Registry) databaseNames() []string {
+	var out []string
+	for _, p := range r.database {
+		out = append(out, p.Name())
+	}
+	return out
+}
+
+func (r *Registry) Registered() []string {
+	var out []string
+	for _, h := range r.policy {
+		out = append(out, h.Name())
+	}
+	for _, p := range r.database {
+		out = append(out, p.Name())
+	}
+	return out
+}
+`
+
+func TestTheAnswerDoesNotDependOnHowTheRootIsSpelled(t *testing.T) {
+	t.Parallel()
+	// It did. The socket package was skipped by a substring test against the
+	// path, so a root of "../.." matched "/engine/pkg/extension/" and a root
+	// of "." did not. The same tree then reported six sockets consulted from
+	// the test and eight from the command line, and the two extra were the
+	// registry's own Validate calling its own readers, which is exactly the
+	// inventory this gate exists to see past. A gate whose answer depends on
+	// how it was invoked is worse than no gate.
+	root := tree(t, selfCallingExtension, goodEngine)
+
+	direct, err := check(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indirect, err := check(filepath.Join(root, "..", filepath.Base(root)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(direct.Sockets) != len(indirect.Sockets) {
+		t.Fatalf("%d sockets one way and %d the other", len(direct.Sockets), len(indirect.Sockets))
+	}
+	for i := range direct.Sockets {
+		if direct.Sockets[i].ConsultedAt != indirect.Sockets[i].ConsultedAt {
+			t.Fatalf("%s is consulted at %q one way and %q the other",
+				direct.Sockets[i].Name, direct.Sockets[i].ConsultedAt,
+				indirect.Sockets[i].ConsultedAt)
+		}
+	}
+}
+
+func TestARegistryReaderCalledOnlyByTheRegistryIsNotAConsultation(t *testing.T) {
+	t.Parallel()
+	// The same defect in its own right. A private reader called from Validate,
+	// inside the socket package, is the registry checking its own
+	// registrations rather than the engine asking for one. Counting it would
+	// report a socket as plugged in the moment it had a field, which is the
+	// AuditSink case this gate was written for.
+	engine := strings.Replace(goodEngine, "\t_, _ = r.DatabaseProviderNamed(\"docker\")", "", 1)
+
+	got := problems(t, tree(t, selfCallingExtension, engine), nil)
+	if !strings.Contains(got, "nothing in the engine calls") {
+		t.Fatalf("a socket read only by the registry itself was reported as consulted: %q", got)
+	}
+}
+
 // TestThisRepository is the gate itself.
 func TestThisRepository(t *testing.T) {
 	report, err := Check("../..")
