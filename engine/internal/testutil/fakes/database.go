@@ -539,10 +539,13 @@ func (b *broken) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		for i, env := range b.abandoned {
+			// No environment identifier, which is the truthful shape of this
+			// leak: the resource exists, the caller was told nothing, and
+			// nothing in the inventory attributes it to anything either.
+			_ = env
 			out = append(out, provider.Resource{
-				Kind:  "branch",
-				ID:    fmt.Sprintf("br-abandoned-by-a-cancelled-call-%d", i),
-				EnvID: env,
+				Kind: "branch",
+				ID:   fmt.Sprintf("br-abandoned-by-a-cancelled-call-%d", i),
 			})
 		}
 	}

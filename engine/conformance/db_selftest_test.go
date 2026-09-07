@@ -390,6 +390,18 @@ func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 	}
 	t.Log(b.String())
 
+	if len(rows) < len(fakes.Faults()) {
+		// A -test.run naming one fault is how somebody debugs a red row, and
+		// a completeness claim made from one row would fail every such run
+		// for a reason that has nothing to do with what they are looking at.
+		// The claim is not weakened: an unfiltered run is what CI does, and
+		// fakes.TestEveryConformanceBehaviorHasAFault checks the same
+		// completeness structurally, without running anything.
+		t.Logf("a filtered run: %d of %d faults ran, so the completeness claim is not made here",
+			len(rows), len(fakes.Faults()))
+		return
+	}
+
 	var missing []string
 	for _, beh := range all {
 		if !proved[beh.Name] {

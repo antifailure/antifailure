@@ -507,11 +507,14 @@ func TestCancellationLeavesAnUntrackedResource(t *testing.T) {
 	}
 	inv, _ := p.Inventory(ctx)
 	for _, r := range inv {
-		if r.EnvID == "env" {
+		if strings.Contains(r.ID, "abandoned-by-a-cancelled-call") {
+			if r.EnvID != "" {
+				t.Fatalf("the resource must be attributed to nothing, and it names %q", r.EnvID)
+			}
 			return
 		}
 	}
-	t.Fatal("and leave a resource for that environment in the inventory")
+	t.Fatal("and leave a resource in the inventory that nothing owns")
 }
 
 func TestGoldenGCDropsAReferencedVersion(t *testing.T) {
