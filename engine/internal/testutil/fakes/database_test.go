@@ -490,31 +490,43 @@ func TestHealthErrorsOnDestroyed(t *testing.T) {
 	}
 }
 
-func TestCancellationLeavesAnUntrackedResource(t *testing.T) {
-	ctx := context.Background()
-	w := fakes.NewInMemoryDatabase()
-	v, _ := w.RefreshGolden(ctx, spec())
+func TestTheTwoCancellationFaultsLeaveTheirResourceDifferently(t *testing.T) {
+	// Two shapes of one leak, and the difference is the whole reason there are
+	// two: the conformance behaviour admits an unexplained resource through
+	// two separate clauses, and a clause no fault exercises is a claim nobody
+	// has checked.
+	for fault, wantEnv := range map[fakes.Fault]string{
+		fakes.CancellationLeavesAnUntrackedResource:     "",
+		fakes.CancellationLeavesAResourceItDidNotReturn: "env",
+	} {
+		t.Run(string(fault), func(t *testing.T) {
+			ctx := context.Background()
+			w := fakes.NewInMemoryDatabase()
+			v, _ := w.RefreshGolden(ctx, spec())
 
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	p := fakes.Break(w, fakes.CancellationLeavesAnUntrackedResource)
-	b, err := p.Branch(cancelled, v.ID, "env")
-	if err == nil {
-		t.Fatal("the fault must report the failure")
-	}
-	if b.ProviderRef != "" {
-		t.Fatal("and name nothing, which is what makes the resource untrackable")
-	}
-	inv, _ := p.Inventory(ctx)
-	for _, r := range inv {
-		if strings.Contains(r.ID, "abandoned-by-a-cancelled-call") {
-			if r.EnvID != "" {
-				t.Fatalf("the resource must be attributed to nothing, and it names %q", r.EnvID)
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			p := fakes.Break(w, fault)
+			b, err := p.Branch(cancelled, v.ID, "env")
+			if err == nil {
+				t.Fatal("the fault must report the failure")
 			}
-			return
-		}
+			if b.ProviderRef != "" {
+				t.Fatal("and name nothing, which is what makes the resource untrackable")
+			}
+			inv, _ := p.Inventory(ctx)
+			for _, r := range inv {
+				if !strings.Contains(r.ID, "abandoned-by-a-cancelled-call") {
+					continue
+				}
+				if r.EnvID != wantEnv {
+					t.Fatalf("the resource should be attributed to %q and names %q", wantEnv, r.EnvID)
+				}
+				return
+			}
+			t.Fatal("and leave a resource in the inventory the caller was never given")
+		})
 	}
-	t.Fatal("and leave a resource in the inventory that nothing owns")
 }
 
 func TestGoldenGCDropsAReferencedVersion(t *testing.T) {

@@ -158,9 +158,17 @@ const (
 
 	// CancellationLeavesAnUntrackedResource creates the branch anyway when the
 	// context is already cancelled, reports the failure with no identifier,
-	// and leaves the resource in the inventory. Nothing owns it and nothing
-	// will ever remove it.
+	// and leaves the resource in the inventory attributed to nothing. Nothing
+	// owns it and nothing will ever remove it.
 	CancellationLeavesAnUntrackedResource Fault = "cancellation-leaves-an-untracked-resource"
+
+	// CancellationLeavesAResourceItDidNotReturn is the same leak by a
+	// provider that knows perfectly well whose it is: the inventory names the
+	// environment, and the failed call named nothing, so teardown has no
+	// identifier to destroy and only a full inventory sweep could ever find
+	// it. It is a separate fault because it is caught by a separate clause,
+	// and a clause no fault exercises is a claim nobody has checked.
+	CancellationLeavesAResourceItDidNotReturn Fault = "cancellation-leaves-a-resource-it-did-not-return"
 
 	// GoldenGCDropsAReferencedVersion allows destroying a golden that a live
 	// branch was created from.
@@ -194,32 +202,33 @@ func Faults() []Fault {
 // exist in one and not the other, which is a disagreement a table driven test
 // silently skips rather than reports.
 var catches = map[Fault]string{
-	CapabilitiesContradictThemselves:      "Capabilities_AreSelfConsistent",
-	PublishesUnverifiedGolden:             "Refresh_ProducesAVerifiedGolden",
-	SkipsMasking:                          "Refresh_CallsMaskThenVerify",
-	PublishesWhenVerificationFails:        "Refresh_RefusesToPublishWhenVerificationFails",
-	RefusesWithoutSayingSo:                "Branch_RefusesAnUnverifiedGolden",
-	ListOmitsWhatWasPublished:             "List_ReturnsWhatWasCreated",
-	ListDropsTheProvenance:                "List_ReturnsTheProvenanceThatWasRecorded",
-	BranchLosesTheGoldensRows:             "Branch_ReadsAKnownRow",
-	BranchIsNotIdempotent:                 "Branch_IsIdempotentByEnvironment",
-	BranchAcceptsUnverified:               "Branch_RefusesAnUnverifiedGolden",
-	BranchAcceptsAMissingGolden:           "Branch_RefusesAMissingGolden",
-	BranchSharesTheGoldensStorage:         "Branch_IsIsolatedFromTheGolden",
-	BranchesShareOneDatabase:              "Branch_IsIsolatedFromOtherBranches",
-	ResetKeepsTheWrites:                   "Reset_ReturnsToGoldenState",
-	DestroyLeavesItInTheInventory:         "Destroy_RemovesTheBranch",
-	DestroyTwiceErrors:                    "Destroy_OfSomethingAlreadyGoneSucceeds",
-	ConnStringIsEmpty:                     "ConnString_IsASecret",
-	PooledEqualsDirect:                    "ConnString_PooledWorksWhenDeclared",
-	InventoryHidesResources:               "Inventory_ListsLiveResources",
-	HealthReportsALiveBranchUnreachable:   "Health_ReportsAReachableBranch",
-	HealthErrorsOnDestroyed:               "Health_ReportsADestroyedBranch",
-	IgnoresTheDeclaredBranchLimit:         "Concurrency_RespectsTheDeclaredLimit",
-	CancellationLeavesAnUntrackedResource: "Cancellation_LeavesNoUntrackedResource",
-	GoldenGCDropsAReferencedVersion:       "GoldenGC_RefusesAReferencedVersion",
-	RefreshRebuildsExistingBranches:       "Refresh_DoesNotDisturbExistingBranches",
-	RefreshReusesTheVersionIdentifier:     "Refresh_DoesNotDisturbExistingBranches",
+	CapabilitiesContradictThemselves:          "Capabilities_AreSelfConsistent",
+	PublishesUnverifiedGolden:                 "Refresh_ProducesAVerifiedGolden",
+	SkipsMasking:                              "Refresh_CallsMaskThenVerify",
+	PublishesWhenVerificationFails:            "Refresh_RefusesToPublishWhenVerificationFails",
+	RefusesWithoutSayingSo:                    "Branch_RefusesAnUnverifiedGolden",
+	ListOmitsWhatWasPublished:                 "List_ReturnsWhatWasCreated",
+	ListDropsTheProvenance:                    "List_ReturnsTheProvenanceThatWasRecorded",
+	BranchLosesTheGoldensRows:                 "Branch_ReadsAKnownRow",
+	BranchIsNotIdempotent:                     "Branch_IsIdempotentByEnvironment",
+	BranchAcceptsUnverified:                   "Branch_RefusesAnUnverifiedGolden",
+	BranchAcceptsAMissingGolden:               "Branch_RefusesAMissingGolden",
+	BranchSharesTheGoldensStorage:             "Branch_IsIsolatedFromTheGolden",
+	BranchesShareOneDatabase:                  "Branch_IsIsolatedFromOtherBranches",
+	ResetKeepsTheWrites:                       "Reset_ReturnsToGoldenState",
+	DestroyLeavesItInTheInventory:             "Destroy_RemovesTheBranch",
+	DestroyTwiceErrors:                        "Destroy_OfSomethingAlreadyGoneSucceeds",
+	ConnStringIsEmpty:                         "ConnString_IsASecret",
+	PooledEqualsDirect:                        "ConnString_PooledWorksWhenDeclared",
+	InventoryHidesResources:                   "Inventory_ListsLiveResources",
+	HealthReportsALiveBranchUnreachable:       "Health_ReportsAReachableBranch",
+	HealthErrorsOnDestroyed:                   "Health_ReportsADestroyedBranch",
+	IgnoresTheDeclaredBranchLimit:             "Concurrency_RespectsTheDeclaredLimit",
+	CancellationLeavesAnUntrackedResource:     "Cancellation_LeavesNoUntrackedResource",
+	CancellationLeavesAResourceItDidNotReturn: "Cancellation_LeavesNoUntrackedResource",
+	GoldenGCDropsAReferencedVersion:           "GoldenGC_RefusesAReferencedVersion",
+	RefreshRebuildsExistingBranches:           "Refresh_DoesNotDisturbExistingBranches",
+	RefreshReusesTheVersionIdentifier:         "Refresh_DoesNotDisturbExistingBranches",
 }
 
 // Catches maps each fault to the conformance behaviour that must fail when it
@@ -457,7 +466,8 @@ func (b *broken) ListGoldens(ctx context.Context) ([]provider.GoldenVersion, err
 }
 
 func (b *broken) Branch(ctx context.Context, version, envID string) (provider.Branch, error) {
-	if b.is(CancellationLeavesAnUntrackedResource) && ctx.Err() != nil {
+	if (b.is(CancellationLeavesAnUntrackedResource) || b.is(CancellationLeavesAResourceItDidNotReturn)) &&
+		ctx.Err() != nil {
 		b.mu.Lock()
 		b.abandoned = append(b.abandoned, envID)
 		b.mu.Unlock()
@@ -535,18 +545,18 @@ func (b *broken) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	if err != nil {
 		return out, err
 	}
-	if b.is(CancellationLeavesAnUntrackedResource) {
+	if b.is(CancellationLeavesAnUntrackedResource) || b.is(CancellationLeavesAResourceItDidNotReturn) {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		for i, env := range b.abandoned {
-			// No environment identifier, which is the truthful shape of this
-			// leak: the resource exists, the caller was told nothing, and
-			// nothing in the inventory attributes it to anything either.
-			_ = env
-			out = append(out, provider.Resource{
+			r := provider.Resource{
 				Kind: "branch",
 				ID:   fmt.Sprintf("br-abandoned-by-a-cancelled-call-%d", i),
-			})
+			}
+			if b.is(CancellationLeavesAResourceItDidNotReturn) {
+				r.EnvID = env
+			}
+			out = append(out, r)
 		}
 	}
 	return out, nil
