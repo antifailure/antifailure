@@ -104,13 +104,13 @@ Where the environment's Postgres comes from, and how the production copy is made
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `api_key_env` | string | no | The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider. |
+| `api_key_env` | string | no | The name of the variable holding the provider's API key. Named rather than carried: a manifest is committed and a key is not. Defaults to NEON_API_KEY for the neon provider. For the pgurl provider it names the connection string of the server that holds the goldens and the branches, which is the credential in that case, and defaults to PGURL_ADMIN_URL. |
 | `golden` | [Golden](#golden) | no | The masked, verified copy every environment branches from. |
 | `masking_rules` | string | no | Path to the masking rules file, relative to the repository root. Defaults to `masking.yaml`. Max length 512. |
 | `max_branches` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | `migrations` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | `project` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| `provider` | `docker`, `neon`, `supabase`, `dblab` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service. Defaults to `docker`. |
+| `provider` | `docker`, `neon`, `supabase`, `dblab`, `pgurl` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to `docker`. |
 | `seed` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |

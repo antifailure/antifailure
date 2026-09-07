@@ -123,18 +123,22 @@ var notASurface = map[string]string{
 	"THIRD_PARTY_NOTICES.md": "generated from the dependency set",
 	"antifailure.yaml":       "this repository's own dogfood manifest, not a shipped one",
 	"assets":                 "brand images used outside the product",
-	"cspell.json":            "the spelling dictionary",
-	"deploy":                 "only deploy/docker and deploy/helm ship; cd, status and blog-redirect are our own operations",
-	"docs":                   "documentation, which has its own gates for links, claims and prose",
-	"examples":               "examples, which the docs gates compile",
-	"go.work":                "the Go workspace",
-	"go.work.sum":            "a lock file",
-	"infra":                  "our own cloud, not anything a customer installs",
-	"justfile":               "the gates themselves",
-	"lychee.toml":            "link checker configuration",
-	"masking.yaml":           "this repository's own dogfood masking policy",
-	"observability":          "our own dashboards and alert rules",
-	"tools":                  "the gates themselves",
+	"benchmarks": "dated measurement reports. A run records what one machine did at one " +
+		"moment, which is an observation rather than a change anybody's install can see; " +
+		"the harness that produces them is in engine and the recipe is in the justfile, " +
+		"and both of those are classified already",
+	"cspell.json":   "the spelling dictionary",
+	"deploy":        "only deploy/docker and deploy/helm ship; cd, status and blog-redirect are our own operations",
+	"docs":          "documentation, which has its own gates for links, claims and prose",
+	"examples":      "examples, which the docs gates compile",
+	"go.work":       "the Go workspace",
+	"go.work.sum":   "a lock file",
+	"infra":         "our own cloud, not anything a customer installs",
+	"justfile":      "the gates themselves",
+	"lychee.toml":   "link checker configuration",
+	"masking.yaml":  "this repository's own dogfood masking policy",
+	"observability": "our own dashboards and alert rules",
+	"tools":         "the gates themselves",
 }
 
 // exemptWithin names the things inside a surface that are not behaviour.

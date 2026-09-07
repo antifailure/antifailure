@@ -2,7 +2,10 @@ package env
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -10,6 +13,7 @@ import (
 	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -93,6 +97,21 @@ func TestAProviderThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.
 		require.Error(t, err, "%s was accepted", kind)
 		require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
 		require.Contains(t, err.Error(), string(kind))
+
+		// And it names every provider this build DOES have. The list is
+		// hand written beside a switch, so the two drift the moment somebody
+		// adds a case and not a name, and the drift is silent: the refusal
+		// still reads like a complete sentence while telling a reader that
+		// the provider they should have used does not exist. That is exactly
+		// what happened when pgurl landed on top of the registry work; git
+		// merged both sides without a conflict and neither side was wrong on
+		// its own.
+		for _, built := range []schema.DBProvider{
+			schema.DBDocker, schema.DBNeon, schema.DBSupabase, schema.DBDBLab, schema.DBPgURL,
+		} {
+			require.Contains(t, err.Error(), string(built),
+				"the refusal does not name %s, which this build has", built)
+		}
 	}
 }
 
@@ -180,6 +199,81 @@ func TestDBLabWithoutATokenIsRefusedRatherThanRunningWithoutOne(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
 	require.Contains(t, err.Error(), "MY_DBLAB_TOKEN")
+}
+
+func TestAManifestAskingForPgURLGetsPgURL(t *testing.T) {
+	// The one provider whose constructor connects, because everything it does
+	// needs a reachable server and a role that may create databases, and both
+	// are decidable in one round trip. So this needs a Postgres to select at
+	// all, which is also the point: selection that succeeded against an
+	// unreachable server would be selection that proves nothing.
+	url := pgurlTestServer(t)
+	p, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBPgURL, APIKeyEnv: "MY_PGURL",
+	}, map[string]string{"MY_PGURL": url}).newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "pgurl", p.Name())
+	require.IsType(t, &pgurldb.Provider{}, p)
+
+	// A cloud provider has nothing to attach: its connection string already
+	// works from inside a container, and this one's points at a server that
+	// was never ours to put on a network.
+	type attachable interface {
+		AttachToNetwork(ctx context.Context, ref, networkID, alias string) (int, error)
+	}
+	_, ok := p.(attachable)
+	require.False(t, ok, "pgurl must not be attachable; there is nothing to attach")
+}
+
+func TestThePgURLVariableDefaultsToTheOneTheProviderDocuments(t *testing.T) {
+	url := pgurlTestServer(t)
+	p, err := orchestrator(t, &schema.Database{Provider: schema.DBPgURL},
+		map[string]string{pgurldb.DefaultVariable: url}).
+		newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	require.Equal(t, "pgurl", p.Name())
+}
+
+func TestPgURLWithoutItsVariableSaysWhichOneIsMissing(t *testing.T) {
+	// No project to be missing here, which is the difference between this
+	// provider and the three above it: one variable holds the whole address of
+	// the server, credential included. Naming it is the only actionable thing
+	// this refusal can say.
+	_, err := orchestrator(t, &schema.Database{
+		Provider: schema.DBPgURL, APIKeyEnv: "MY_PGURL",
+	}, nil).newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSEC001))
+	require.Contains(t, err.Error(), "MY_PGURL")
+}
+
+// pgurlTestServer returns the shared Postgres, or skips.
+func pgurlTestServer(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("AF_PGURL_ADMIN_URL")
+	if url == "" {
+		url = os.Getenv("AF_TEST_DATABASE_URL")
+	}
+	if url == "" {
+		url = "postgres://postgres:test@127.0.0.1:55432/antifailure"
+	}
+	db, err := sql.Open("pgx", url)
+	if err == nil {
+		defer func() { _ = db.Close() }()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var one int
+		err = db.QueryRowContext(ctx, "SELECT 1").Scan(&one)
+	}
+	if err != nil {
+		if os.Getenv("AF_REQUIRE_DATABASE") != "" {
+			t.Fatalf("AF_REQUIRE_DATABASE is set and the shared Postgres did not answer: %v", err)
+		}
+		t.Skipf("skipped: no Postgres answered: %v", err)
+	}
+	return url
 }
 
 func TestAnEmptyProviderIsDockerAndTheVersionFollowsTheManifest(t *testing.T) {

@@ -619,6 +619,39 @@
       "planned": false
     },
     {
+      "code": "AF-DB-034",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The Postgres server named by {variable}, at {host}, could not be reached: {detail}",
+      "resolution": "The pgurl provider keeps goldens and branches on a server you name, which is not your source database. Check that {variable} holds a connection string for a server this machine can reach.",
+      "docs": "https://antifailure.dev/docs/providers/pgurl",
+      "retryable": true,
+      "exitCode": 5,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-035",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The role {role} on {host} may not create databases.",
+      "resolution": "The pgurl provider makes one database per golden and one per environment, so the role named by {variable} needs CREATEDB. Run: ALTER ROLE {role} CREATEDB.",
+      "docs": "https://antifailure.dev/docs/providers/pgurl",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-DB-036",
+      "area": "DB",
+      "areaName": "Database",
+      "message": "The database {database} on {host} was not created by Antifailure and will not be dropped or written to.",
+      "resolution": "Rename or remove that database yourself if it is disposable, or point the provider at a server that does not already hold one by that name. Nothing here is deleted on the strength of its name.",
+      "docs": "https://antifailure.dev/docs/providers/pgurl",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-DET-001",
       "area": "DET",
       "areaName": "Detection",

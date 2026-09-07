@@ -15,6 +15,7 @@ burstable
 BYPASSRLS
 bytea
 cobra
+CREATEDB
 cspell
 dblab
 dbname
@@ -40,6 +41,7 @@ millicores
 ndjson
 neon
 pgbouncer
+pgurl
 pgvector
 PKCE
 pooler
@@ -47,6 +49,7 @@ postgres
 posthog
 Procfile
 reprovision
+Scaleway
 SCIM
 semgrep
 SIEM

@@ -32,6 +32,7 @@ import (
 	dblabdb "github.com/antifailure/antifailure/engine/internal/db/dblab"
 	dockerdb "github.com/antifailure/antifailure/engine/internal/db/docker"
 	neondb "github.com/antifailure/antifailure/engine/internal/db/neon"
+	pgurldb "github.com/antifailure/antifailure/engine/internal/db/pgurl"
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
@@ -1112,6 +1113,36 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 			MaxBranches: db.MaxBranches,
 		})
 
+	case schema.DBPgURL:
+		// No project, and that is the difference between this provider and the
+		// three above it. There is no account to name: the whole address of
+		// the server, credential included, is the one variable this reads, so
+		// a manifest that sets database.project for pgurl is refused by
+		// validation rather than silently ignored.
+		name := m.Database.APIKeyEnv
+		if name == "" {
+			name = pgurldb.DefaultVariable
+		}
+		adminURL, _, found, err := o.secretChain().Lookup(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if !found || adminURL.IsZero() {
+			return nil, aferrors.Coded(aferrors.AFSEC001,
+				"names", name,
+				"sources", strings.Join(o.secretChain().Considered(ctx), ", "))
+		}
+		p, err := pgurldb.New(ctx, pgurldb.Options{
+			AdminURL:    adminURL,
+			Variable:    name,
+			Clock:       o.opts.Clock,
+			MaxBranches: m.Database.MaxBranches,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+
 	default:
 		// A registered provider is consulted here, after every built-in one
 		// and never before them, so a registration adds a provider and can
@@ -1160,6 +1191,7 @@ func (o *Orchestrator) databaseProviderNames() []string {
 	out := []string{
 		string(schema.DBDocker), string(schema.DBNeon),
 		string(schema.DBSupabase), string(schema.DBDBLab),
+		string(schema.DBPgURL),
 	}
 	return append(out, o.extensions().DatabaseProviderNames()...)
 }
