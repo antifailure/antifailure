@@ -19,15 +19,19 @@
 // broken one behavior at a time. A suite nobody has proved can fail is a suite
 // that proves nothing.
 //
-// That second rule is met by the runtime suite, in fakeruntime_test.go and
-// runtime_selftest_test.go, and is NOT yet met by the database suite below.
-// This paragraph used to claim it for both, which was the more comfortable of
-// the two things it could have said and the wrong one: STATUS.md has recorded
-// the gap for some time, and a package doc asserting a guarantee the package
-// does not make is exactly the kind of thing this suite exists to catch in
-// other people's code. The runtime files are the pattern to copy; the cost is
-// an afternoon and the thing it buys is knowing that a green run means
-// anything at all.
+// That second rule is met by both suites. The runtime suite is proved by
+// fakeruntime_test.go and runtime_selftest_test.go; the database suite by
+// db_selftest_test.go, against the two fakes in internal/testutil/fakes. Every
+// one of the twenty four behaviours below has a fault that turns it red, and
+// the self test fails if one of them stops going red, if a behaviour passes by
+// skipping, or if a recorded gap quietly closes without the record being
+// removed.
+//
+// This paragraph used to say the database half was not done, which was true
+// for long enough that STATUS.md carried it. What made it worth closing is
+// what the closing found: two behaviours were asserting something other than
+// what they claimed, and neither could have been noticed by a run that stayed
+// green.
 package conformance
 
 import (
@@ -936,30 +940,73 @@ func (h *harness) concurrencyRespectsTheLimit(ctx context.Context) {
 	}
 }
 
+// cancellationLeavesNothingUntracked asserts the rule the interface states: a
+// cancelled create leaves either no resource or one the journal already knows
+// about.
+//
+// It used to assert the opposite of that, and the self test is what found it.
+// The old body failed when the call reported an error, returned a provider
+// reference, AND the inventory listed that reference: that is a provider doing
+// exactly the right thing, telling you what it made so teardown can remove it.
+// Meanwhile the case the rule is about, a resource created and NOT named in
+// the result, was not looked for at all, because the loop only ran when the
+// result named something. The error message said "that the caller has no
+// identifier for" while the code required the caller to have one.
+//
+// So the polarity was wrong in both directions at once: red for the correct
+// provider, green for the leaking one. It passed everywhere because no shipped
+// provider creates anything on a cancelled call, which is the same reason
+// nobody noticed.
 func (h *harness) cancellationLeavesNothingUntracked(ctx context.Context) {
+	const env = "env_conformance00017"
 	gv := h.refresh(ctx)
+
+	before := map[string]bool{}
+	for _, r := range h.inventory(ctx) {
+		before[r.ID] = true
+	}
+
 	cancelCtx, cancel := context.WithCancel(ctx)
 	cancel()
-
-	b, err := h.p.Branch(cancelCtx, gv.ID, "env_conformance00017")
+	b, err := h.p.Branch(cancelCtx, gv.ID, env)
 	if err == nil {
 		// Succeeding despite cancellation is allowed, as long as the resource
 		// is reported, because then the journal and the leak detector can see
 		// it. Silently creating something nothing knows about is not.
+		h.created.add(b.ProviderRef)
 		h.t.Cleanup(func() { _ = h.p.Destroy(context.Background(), b) })
 	}
-	inv, invErr := h.p.Inventory(ctx)
-	if invErr != nil {
-		h.t.Fatalf("Inventory after a cancelled branch: %v", invErr)
-	}
-	if err != nil && b.ProviderRef != "" {
-		for _, r := range inv {
-			if r.ID == b.ProviderRef {
-				h.t.Fatal("a cancelled branch reported failure and left a resource behind " +
-					"that the caller has no identifier for")
-			}
+
+	for _, r := range h.inventory(ctx) {
+		if before[r.ID] || (b.ProviderRef != "" && r.ID == b.ProviderRef) {
+			continue
 		}
+		// Go runs test packages in parallel and goldens are shared on purpose,
+		// so a resource that appeared mid behaviour is not automatically this
+		// call's. What claims this environment is, and so is an unattributed
+		// branch, because every other package's branches carry their own
+		// environment identifier.
+		attributedHere := r.EnvID == env
+		attributedToNothing := r.Kind == "branch" && r.EnvID == ""
+		if !attributedHere && !attributedToNothing {
+			continue
+		}
+		h.t.Fatalf("a cancelled branch left %s (%s) behind and reported %q as the identifier "+
+			"it created; nothing the caller holds names that resource, so teardown and the "+
+			"leak detector will both miss it for ever", r.ID, r.Kind, b.ProviderRef)
 	}
+}
+
+// inventory is the provider's own list, failing the behavior rather than
+// returning a partial one. A behavior that carried on with an empty list after
+// an inventory error would be asserting against nothing.
+func (h *harness) inventory(ctx context.Context) []provider.Resource {
+	h.t.Helper()
+	items, err := h.p.Inventory(ctx)
+	if err != nil {
+		h.t.Fatalf("Inventory: %v", err)
+	}
+	return items
 }
 
 func (h *harness) goldenGCRefusesAReferencedVersion(ctx context.Context) {
