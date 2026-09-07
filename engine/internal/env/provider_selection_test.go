@@ -13,6 +13,8 @@ import (
 	supabasedb "github.com/antifailure/antifailure/engine/internal/db/supabase"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -238,7 +240,7 @@ func TestARuntimeThisBuildDoesNotHaveIsRefusedRatherThanSubstituted(t *testing.T
 	})
 	require.NoError(t, err)
 
-	_, err = o.newRuntime()
+	_, err = o.newRuntime(context.Background())
 	require.Error(t, err)
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
 	require.Contains(t, err.Error(), "nomad")
@@ -261,7 +263,7 @@ func TestTheKubernetesRuntimeIsBuiltRatherThanRefused(t *testing.T) {
 	// nothing on the rest. What IS asserted is the thing this build changed:
 	// kubernetes is no longer refused as a runtime this build does not have.
 	// Anything else it fails with is a fact about the machine.
-	rt, err := o.newRuntime()
+	rt, err := o.newRuntime(context.Background())
 	if err != nil {
 		require.NotErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002),
 			"kubernetes was refused as a runtime this build does not have, and it has it")
@@ -286,7 +288,7 @@ func TestAnUnsetRuntimeIsLocal(t *testing.T) {
 			Clock:    clock.New(),
 		})
 		require.NoError(t, err)
-		r, err := o.newRuntime()
+		r, err := o.newRuntime(context.Background())
 		if err != nil {
 			// No Docker daemon on this machine is a different failure from the
 			// manifest being refused, and only the second is under test here.
@@ -296,4 +298,123 @@ func TestAnUnsetRuntimeIsLocal(t *testing.T) {
 		require.NotNil(t, r)
 		_ = r.Close()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Registered providers.
+//
+// Everything above this line is about the providers this build carries. These
+// are about the ones it does not: a build outside this repository registers a
+// provider through engine/pkg/extension, and the selection above has to reach
+// it. Before this the switches ended at a default that refused, so the only
+// way to add a provider was to edit this file.
+
+func TestARegisteredDatabaseProviderIsBuiltWhenTheManifestNamesIt(t *testing.T) {
+	db := newFakeDB("acmedb")
+	reg := extension.NewRegistry()
+	reg.AddDatabaseProvider(&fakeDBProvider{name: "acmedb", db: db})
+
+	o := orchestrator(t, &schema.Database{Provider: "acmedb"}, nil)
+	o.opts.Extensions = reg
+
+	p, err := o.newDatabaseProvider(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "acmedb", p.Name())
+	require.Equal(t, 1, db.opened)
+}
+
+func TestARegisteredRuntimeIsBuiltWhenTheManifestNamesIt(t *testing.T) {
+	rt := &fakeRT{name: "acmert"}
+	reg := extension.NewRegistry()
+	reg.AddRuntimeProvider(&fakeRTProvider{name: "acmert", rt: rt})
+
+	o, err := New(Options{
+		Root:     t.TempDir(),
+		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: "acmert"}},
+		Branch:   "main",
+		Clock:    clock.New(),
+	})
+	require.NoError(t, err)
+	o.opts.Extensions = reg
+
+	built, err := o.newRuntime(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "acmert", built.Name())
+}
+
+func TestARefusalNamesTheRegisteredProvidersAsWellAsTheBuiltInOnes(t *testing.T) {
+	// A build that registered a provider and then misspelled it in the
+	// manifest used to be told the name was wrong by a message that did not
+	// mention the provider the build has, which sends somebody looking for a
+	// registration that is already there.
+	// The name in the manifest is deliberately not a substring of the
+	// registered one and does not contain it. A near miss like "acmedbb"
+	// against "acmedb" passes this assertion from the quoted name alone, which
+	// is how this test first passed against a message that listed nothing.
+	reg := extension.NewRegistry()
+	reg.AddDatabaseProvider(&fakeDBProvider{name: "aurora", db: newFakeDB("aurora")})
+	reg.AddRuntimeProvider(&fakeRTProvider{name: "nomad", rt: &fakeRT{name: "nomad"}})
+
+	o := orchestrator(t, &schema.Database{Provider: "arora"}, nil)
+	o.opts.Extensions = reg
+	_, err := o.newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFMAN002))
+	require.Contains(t, err.Error(), "aurora",
+		"the refusal does not name the registered provider this build has")
+	require.Contains(t, err.Error(), "docker")
+
+	r, err := New(Options{
+		Root:     t.TempDir(),
+		Manifest: &schema.Manifest{Name: "app", Runtime: &schema.Runtime{Provider: "nmad"}},
+		Branch:   "main",
+		Clock:    clock.New(),
+	})
+	require.NoError(t, err)
+	r.opts.Extensions = reg
+	_, err = r.newRuntime(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nomad",
+		"the refusal does not name the registered runtime this build has")
+	require.Contains(t, err.Error(), "kubernetes")
+}
+
+func TestARegistrationUnderABuiltInNameStopsTheCommandRatherThanBeingIgnored(t *testing.T) {
+	// The switches consult the registry only in their default, so a provider
+	// registered as "docker" would never be selected. Silently ignoring it is
+	// how somebody ships a build they believe replaces the Docker provider.
+	reg := extension.NewRegistry()
+	reg.AddDatabaseProvider(&fakeDBProvider{name: "docker", db: newFakeDB("docker")})
+
+	o := orchestrator(t, &schema.Database{Provider: schema.DBDocker}, nil)
+	o.opts.Extensions = reg
+
+	_, err := o.open(context.Background(), "af up")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "docker")
+	require.Contains(t, err.Error(), "cannot replace")
+}
+
+func TestAProviderThatReturnsNothingAndNoErrorIsReportedRatherThanDereferenced(t *testing.T) {
+	// The same defect the comment above newDatabaseProvider's switch describes,
+	// from the other side: a registration returning a nil interface would pass
+	// the caller's nil guard and crash in Close, and af down would segfault
+	// rather than say what was wrong.
+	reg := extension.NewRegistry()
+	reg.AddDatabaseProvider(&nilProvider{name: "hollow"})
+
+	o := orchestrator(t, &schema.Database{Provider: "hollow"}, nil)
+	o.opts.Extensions = reg
+	_, err := o.newDatabaseProvider(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "hollow")
+}
+
+type nilProvider struct{ name string }
+
+func (p *nilProvider) Name() string { return p.name }
+func (p *nilProvider) Open(
+	context.Context, extension.DatabaseConfig,
+) (provider.Database, error) {
+	return nil, nil
 }

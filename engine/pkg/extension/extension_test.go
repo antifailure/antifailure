@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 // The whole point of this package is that with nothing registered it does
@@ -266,4 +267,244 @@ func TestConcurrentRegistrationAndUseIsSafe(t *testing.T) {
 	}
 	<-done
 	<-sources
+}
+
+// ---------------------------------------------------------------------------
+// The provider sockets.
+//
+// Before these existed the engine chose a database provider, a runtime and a
+// golden store from switches whose default refused, so adding one meant
+// editing engine/internal/env, which is unimportable from outside the module.
+// These tests are about the half that lives here: what a registration is, what
+// the registry refuses, and that an empty registry still answers nothing. The
+// half that matters more, that the engine actually CONSULTS them, is tested in
+// engine/internal/env, because a socket nothing plugs into is exactly the gap
+// this package already shipped once.
+
+type fakeDatabaseProvider struct {
+	name string
+	seen extension.DatabaseConfig
+}
+
+func (f *fakeDatabaseProvider) Name() string { return f.name }
+func (f *fakeDatabaseProvider) Open(
+	_ context.Context, cfg extension.DatabaseConfig,
+) (provider.Database, error) {
+	f.seen = cfg
+	return nil, errors.New("not built in this test")
+}
+
+type fakeRuntimeProvider struct{ name string }
+
+func (f *fakeRuntimeProvider) Name() string { return f.name }
+func (f *fakeRuntimeProvider) Open(
+	context.Context, extension.RuntimeConfig,
+) (provider.Runtime, error) {
+	return nil, errors.New("not built in this test")
+}
+
+type fakeDatastoreProvider struct{ name, engine string }
+
+func (f *fakeDatastoreProvider) Name() string   { return f.name }
+func (f *fakeDatastoreProvider) Engine() string { return f.engine }
+func (f *fakeDatastoreProvider) Open(
+	context.Context, extension.DatastoreConfig,
+) (extension.Datastore, error) {
+	return nil, errors.New("not built in this test")
+}
+
+type fakeGoldenStore struct{ name string }
+
+func (f *fakeGoldenStore) Name() string { return f.name }
+func (f *fakeGoldenStore) Open(extension.ObjectStoreConfig) (extension.ObjectStore, error) {
+	return nil, errors.New("not built in this test")
+}
+
+type fakeEmulator struct {
+	name  string
+	hosts []string
+	image string
+}
+
+func (f *fakeEmulator) Name() string    { return f.name }
+func (f *fakeEmulator) Hosts() []string { return f.hosts }
+func (f *fakeEmulator) Container() extension.EmulatorContainer {
+	return extension.EmulatorContainer{Image: f.image, Port: 4566}
+}
+
+const pinnedImage = "localstack/localstack@sha256:" +
+	"0000000000000000000000000000000000000000000000000000000000000000"
+
+func TestAnEmptyRegistryHasNoProviders(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+
+	_, ok := r.DatabaseProviderNamed("anything")
+	require.False(t, ok)
+	_, ok = r.DatastoreProviderNamed("anything")
+	require.False(t, ok)
+	_, ok = r.RuntimeProviderNamed("anything")
+	require.False(t, ok)
+	_, ok = r.GoldenStoreNamed("anything")
+	require.False(t, ok)
+	_, ok = r.EmulatorNamed("anything")
+	require.False(t, ok)
+
+	require.Empty(t, r.DatabaseProviderNames())
+	require.Empty(t, r.DatastoreProviderNames())
+	require.Empty(t, r.RuntimeProviderNames())
+	require.Empty(t, r.GoldenStoreNames())
+	require.Empty(t, r.EmulatorNames())
+	require.True(t, r.Empty())
+	require.NoError(t, r.Validate(nil))
+}
+
+func TestARegisteredProviderIsFoundByNameAndListed(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	r.AddDatabaseProvider(&fakeDatabaseProvider{name: "aurora"})
+	r.AddDatastoreProvider(&fakeDatastoreProvider{name: "clickhouse", engine: "clickhouse"})
+	r.AddRuntimeProvider(&fakeRuntimeProvider{name: "nomad"})
+	r.AddGoldenStore(&fakeGoldenStore{name: "gcs"})
+	r.AddEmulator(&fakeEmulator{name: "s3", hosts: []string{"s3.amazonaws.com"}, image: pinnedImage})
+
+	db, ok := r.DatabaseProviderNamed("aurora")
+	require.True(t, ok)
+	require.Equal(t, "aurora", db.Name())
+	require.Equal(t, []string{"aurora"}, r.DatabaseProviderNames())
+	require.Equal(t, []string{"clickhouse"}, r.DatastoreProviderNames())
+	require.Equal(t, []string{"nomad"}, r.RuntimeProviderNames())
+	require.Equal(t, []string{"gcs"}, r.GoldenStoreNames())
+	require.Equal(t, []string{"s3"}, r.EmulatorNames())
+
+	// af license status prints this, and an operator asking why a manifest was
+	// refused needs to see whether the provider it names is plugged in at all.
+	require.Equal(t, []string{
+		"database-provider:aurora",
+		"datastore-provider:clickhouse",
+		"emulator:s3",
+		"golden-store:gcs",
+		"runtime:nomad",
+	}, r.Registered())
+	require.False(t, r.Empty())
+}
+
+func TestARegistryWithOnlyAProviderIsNotEmpty(t *testing.T) {
+	t.Parallel()
+	// Empty() gates whole code paths, including whether the engine bothers to
+	// validate registrations at all. A registry holding only a provider that
+	// reported itself as the community no-op would have its provider silently
+	// unchecked.
+	for _, add := range []func(*extension.Registry){
+		func(r *extension.Registry) { r.AddDatabaseProvider(&fakeDatabaseProvider{name: "a"}) },
+		func(r *extension.Registry) { r.AddDatastoreProvider(&fakeDatastoreProvider{name: "b"}) },
+		func(r *extension.Registry) { r.AddRuntimeProvider(&fakeRuntimeProvider{name: "c"}) },
+		func(r *extension.Registry) { r.AddGoldenStore(&fakeGoldenStore{name: "d"}) },
+		func(r *extension.Registry) {
+			r.AddEmulator(&fakeEmulator{name: "e", hosts: []string{"h"}, image: pinnedImage})
+		},
+	} {
+		r := extension.NewRegistry()
+		add(r)
+		require.False(t, r.Empty())
+	}
+}
+
+func TestARegistrationUnderABuiltInNameIsRefusedRatherThanIgnored(t *testing.T) {
+	t.Parallel()
+	// The engine consults the registry only after its own switch, so this
+	// registration would never be used. Ignoring it silently is how somebody
+	// ships a build they believe replaces the Docker provider and does not.
+	r := extension.NewRegistry()
+	r.AddDatabaseProvider(&fakeDatabaseProvider{name: "docker"})
+
+	err := r.Validate(map[string][]string{
+		extension.SocketDatabaseProvider: {"docker", "neon"},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "docker")
+	require.Contains(t, err.Error(), "cannot replace")
+}
+
+func TestTwoProvidersUnderOneNameAreRefused(t *testing.T) {
+	t.Parallel()
+	// Whichever was registered first would answer, so the build is not the one
+	// its author is reading.
+	r := extension.NewRegistry()
+	r.AddDatabaseProvider(&fakeDatabaseProvider{name: "aurora"})
+	r.AddDatabaseProvider(&fakeDatabaseProvider{name: "aurora"})
+
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "aurora")
+}
+
+func TestAProviderWithNoNameIsRefused(t *testing.T) {
+	t.Parallel()
+	// Nothing in a manifest could ask for it, so it is a registration that can
+	// only ever be dead.
+	r := extension.NewRegistry()
+	r.AddRuntimeProvider(&fakeRuntimeProvider{name: "  "})
+
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no name")
+}
+
+func TestAnEmulatorPinnedByATagIsRefused(t *testing.T) {
+	t.Parallel()
+	// An emulator answers for a production API. A tag that moves changes what
+	// an environment was tested against with nothing in the repository
+	// changing, which is the whole reason every other image here is pinned.
+	r := extension.NewRegistry()
+	r.AddEmulator(&fakeEmulator{
+		name: "s3", hosts: []string{"s3.amazonaws.com"}, image: "localstack/localstack:3.4",
+	})
+
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "digest")
+
+	ok := extension.NewRegistry()
+	ok.AddEmulator(&fakeEmulator{
+		name: "s3", hosts: []string{"s3.amazonaws.com"}, image: pinnedImage,
+	})
+	require.NoError(t, ok.Validate(nil))
+}
+
+func TestAnEmulatorThatAnswersForNoHostIsRefused(t *testing.T) {
+	t.Parallel()
+	// No request could ever reach it, so it is a registration that looks like
+	// coverage and is not.
+	r := extension.NewRegistry()
+	r.AddEmulator(&fakeEmulator{name: "s3", image: pinnedImage})
+
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no hosts")
+}
+
+func TestConcurrentProviderRegistrationAndUseIsSafe(t *testing.T) {
+	t.Parallel()
+	// Registration happens at startup and selection happens per command. The
+	// race detector is the only thing that would catch them overlapping.
+	r := extension.NewRegistry()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			r.AddDatabaseProvider(&fakeDatabaseProvider{name: "aurora"})
+			r.AddRuntimeProvider(&fakeRuntimeProvider{name: "nomad"})
+		}
+	}()
+	for range 200 {
+		_, _ = r.DatabaseProviderNamed("aurora")
+		_ = r.DatabaseProviderNames()
+		_, _ = r.RuntimeProviderNamed("nomad")
+		_ = r.RuntimeProviderNames()
+		_ = r.Registered()
+		_ = r.Empty()
+		_ = r.Validate(nil)
+	}
+	<-done
 }

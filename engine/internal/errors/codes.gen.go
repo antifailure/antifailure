@@ -194,6 +194,14 @@ const (
 	// Organization policy {policy} refuses this environment: {detail}
 	AFEE010 Code = "AF-EE-010"
 
+	// Extensions
+	// This build cannot honor one of its own extension registrations:
+	// {detail}
+	AFEXT001 Code = "AF-EXT-001"
+	// The registered {socket} {name} returned nothing and reported no
+	// error.
+	AFEXT002 Code = "AF-EXT-002"
+
 	// Fidelity
 	// The environment does not reproduce {dimension}, which the manifest
 	// requires: {detail}
@@ -1091,6 +1099,24 @@ var catalog = map[Code]Entry{
 		Docs:      "enterprise/policy",
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
+	},
+	AFEXT001: {
+		Code:      AFEXT001,
+		Area:      "EXT",
+		Message:   "This build cannot honor one of its own extension registrations: {detail}",
+		NextStep:  "Fix the registration in the binary that made it. Nothing was created.",
+		Docs:      "contributing/provider-authoring",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
+	},
+	AFEXT002: {
+		Code:      AFEXT002,
+		Area:      "EXT",
+		Message:   "The registered {socket} {name} returned nothing and reported no error.",
+		NextStep:  "Fix the registration to return either something usable or an error saying why it could not. Nothing was created.",
+		Docs:      "contributing/provider-authoring",
+		Retryable: false,
+		ExitCode:  ExitConfiguration,
 	},
 	AFFID001: {
 		Code:      AFFID001,

@@ -36,6 +36,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/events"
+	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/lock"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
@@ -392,6 +393,18 @@ func (o *Orchestrator) open(ctx context.Context, command string) (*session, erro
 // environment it was most certainly meant to take. It takes a lock named for
 // the sweep instead, which also stops two sweeps from running at once.
 func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string) (*session, error) {
+	// Before the lock and before anything is created, because a registration
+	// this build cannot honor is a defect in the build rather than in the run,
+	// and the cheapest moment to say so is the first command. It costs one
+	// call over empty slices in the community build, which registers nothing.
+	//
+	// Here rather than at registration time because registration is a plain
+	// Add with no error to return, and because the reserved names it is
+	// checked against are the engine's, not the registry's.
+	if err := o.extensions().Validate(reservedProviderNames()); err != nil {
+		return nil, aferrors.Coded(aferrors.AFEXT001, "detail", err.Error())
+	}
+
 	s := &session{}
 	stateDir := filepath.Join(o.opts.Root, StateDir)
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -453,7 +466,7 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 		s.close()
 		return nil, err
 	}
-	if s.runtime, err = o.newRuntime(); err != nil {
+	if s.runtime, err = o.newRuntime(ctx); err != nil {
 		s.close()
 		return nil, err
 	}
@@ -484,6 +497,9 @@ func (o *Orchestrator) openLocking(ctx context.Context, command, lockName string
 // cannot write. Anything that can, MaskApply, DestroyGolden, MaskPreview
 // through the masking key it may mint, stays on open.
 func (o *Orchestrator) openReading(ctx context.Context) (*session, error) {
+	if err := o.extensions().Validate(reservedProviderNames()); err != nil {
+		return nil, aferrors.Coded(aferrors.AFEXT001, "detail", err.Error())
+	}
 	s := &session{}
 	stateDir := filepath.Join(o.opts.Root, StateDir)
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -515,10 +531,7 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	registry := o.opts.Extensions
-	if registry == nil {
-		registry = extension.Default
-	}
+	registry := o.extensions()
 
 	// One constructor, shared with af explain and with model key resolution, so
 	// that a command whose job is to say where a value will come from cannot
@@ -799,7 +812,7 @@ func (o *Orchestrator) ttl() time.Duration {
 // af webhook trigger all asked this machine's Docker daemon about it and
 // found nothing. They agreed only because this function refused everything
 // except local.
-func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
+func (o *Orchestrator) newRuntime(ctx context.Context) (provider.Runtime, error) {
 	kind := schema.RuntimeLocal
 	var cfg *schema.Runtime
 	if m := o.opts.Manifest; m != nil && m.Runtime != nil {
@@ -817,19 +830,95 @@ func (o *Orchestrator) newRuntime() (provider.Runtime, error) {
 	case schema.RuntimeKubernetes:
 		return o.newKubernetesRuntime(cfg)
 	default:
+		// A registered runtime is consulted here, after the built-in ones and
+		// never before them, so a registration adds a place environments can
+		// run and can never take over local or kubernetes. A registration
+		// under one of those names is refused by the registry's own validation
+		// rather than quietly losing to this switch.
+		if p, ok := o.extensions().RuntimeProviderNamed(string(kind)); ok {
+			rt, err := p.Open(ctx, extension.RuntimeConfig{
+				Root:              o.opts.Root,
+				Runtime:           runtimeConfigOf(cfg),
+				TTL:               o.ttl(),
+				StateDir:          filepath.Join(o.opts.Root, StateDir),
+				Now:               o.opts.Clock.Now,
+				Lookup:            o.lookupForProvider,
+				ResolveProxyImage: o.resolveProxyImage,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if rt == nil {
+				// Assigned, checked, and returned explicitly for the reason
+				// written out over newDatabaseProvider's switch: a nil pointer
+				// in a non-nil interface passes every nil guard the caller has
+				// and crashes in Close.
+				return nil, aferrors.Coded(aferrors.AFEXT002,
+					"socket", extension.SocketRuntimeProvider, "name", string(kind))
+			}
+			return rt, nil
+		}
 		return nil, aferrors.Coded(aferrors.AFMAN002,
 			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
 			"detail", fmt.Sprintf(
-				"runtime.provider is %q, and this build has the local and kubernetes "+
-					"runtimes. Remove the field or set it to one of those", kind))
+				"runtime.provider is %q, and this build has %s. Remove the field or set "+
+					"it to one of those", kind, listNames(o.runtimeNames())))
 	}
+}
+
+// runtimeNames is every runtime this build can select, built in and registered.
+//
+// The refusal above says what there IS and not only what there is not, and it
+// has to include the registered ones or a build that registered a runtime and
+// then misspelled it in the manifest is told the name is wrong by a message
+// that does not mention the runtime it has.
+func (o *Orchestrator) runtimeNames() []string {
+	out := []string{string(schema.RuntimeLocal), string(schema.RuntimeKubernetes)}
+	return append(out, o.extensions().RuntimeProviderNames()...)
+}
+
+// runtimeConfigOf copies the manifest's runtime block for a registered runtime.
+//
+// A copy rather than the pointer, so a registration cannot edit the manifest
+// the engine goes on reading after it has been built.
+func runtimeConfigOf(cfg *schema.Runtime) schema.Runtime {
+	if cfg == nil {
+		return schema.Runtime{}
+	}
+	return *cfg
+}
+
+// listNames renders a list of names for a sentence a person reads.
+func listNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return "none"
+	case 1:
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// lookupForProvider resolves a declared credential for a registered provider.
+//
+// Through the engine's own chain rather than the process environment, so that
+// a registered provider's credentials are declared and auditable in exactly
+// the way a built-in provider's are, and so that a registered SecretSource
+// serves them too.
+func (o *Orchestrator) lookupForProvider(
+	ctx context.Context, name string,
+) (secrets.Value, bool, error) {
+	value, _, found, err := o.secretChain().Lookup(ctx, name)
+	return value, found, err
 }
 
 // Runtime builds the runtime this manifest asks for.
 //
 // Exported for the commands that inventory a machine rather than act on one
 // environment, which need the same selection and are not part of a lifecycle.
-func (o *Orchestrator) Runtime() (provider.Runtime, error) { return o.newRuntime() }
+func (o *Orchestrator) Runtime(ctx context.Context) (provider.Runtime, error) {
+	return o.newRuntime(ctx)
+}
 
 // newKubernetesRuntime builds the cluster runtime, including finding it a
 // sidecar image.
@@ -1024,13 +1113,55 @@ func (o *Orchestrator) newDatabaseProvider(ctx context.Context) (provider.Databa
 		})
 
 	default:
+		// A registered provider is consulted here, after every built-in one
+		// and never before them, so a registration adds a provider and can
+		// never take one over. A registration under a built-in name is refused
+		// by the registry's own validation rather than quietly losing to this
+		// switch, because a build that believes it has replaced the Docker
+		// provider and has not is worse than one that will not start.
+		if p, ok := o.extensions().DatabaseProviderNamed(string(kind)); ok {
+			db := schema.Database{}
+			if m != nil && m.Database != nil {
+				db = *m.Database
+			}
+			built, err := p.Open(ctx, extension.DatabaseConfig{
+				Root:     o.opts.Root,
+				Database: db,
+				Version:  databaseVersion(m),
+				StateDir: filepath.Join(o.opts.Root, StateDir),
+				Now:      o.opts.Clock.Now,
+				Lookup:   o.lookupForProvider,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if built == nil {
+				// The same explicit nil check every case above makes, for the
+				// reason written over the switch: a nil pointer in a non-nil
+				// interface passes the caller's guard and crashes in Close.
+				return nil, aferrors.Coded(aferrors.AFEXT002,
+					"socket", extension.SocketDatabaseProvider, "name", string(kind))
+			}
+			return built, nil
+		}
 		// Named in the schema and not built here. Saying so is better than
 		// quietly falling back to Docker, which would hand somebody an empty
 		// preview and no reason for it.
 		return nil, aferrors.Coded(aferrors.AFMAN002,
 			"path", filepath.Join(o.opts.Root, "antifailure.yaml"),
-			"detail", fmt.Sprintf("database.provider is %q, which this build does not have", kind))
+			"detail", fmt.Sprintf(
+				"database.provider is %q, which this build does not have. It has %s",
+				kind, listNames(o.databaseProviderNames())))
 	}
+}
+
+// databaseProviderNames is every provider this build can select.
+func (o *Orchestrator) databaseProviderNames() []string {
+	out := []string{
+		string(schema.DBDocker), string(schema.DBNeon),
+		string(schema.DBSupabase), string(schema.DBDBLab),
+	}
+	return append(out, o.extensions().DatabaseProviderNames()...)
 }
 
 // pickGolden chooses the version a branch is made from.
@@ -1094,6 +1225,44 @@ func databaseVersion(m *schema.Manifest) int {
 	return 17
 }
 
+// extensions is the registry this orchestrator consults.
+//
+// Nil means the process wide one, which in the community build is empty, so
+// every consult costs one function call over an empty slice. One accessor
+// rather than the same three lines at each site, because a site that forgot
+// the fallback would consult a registry nothing had ever registered into and
+// report that nothing was plugged in.
+func (o *Orchestrator) extensions() *extension.Registry {
+	if o.opts.Extensions != nil {
+		return o.opts.Extensions
+	}
+	return extension.Default
+}
+
+// reservedProviderNames are the names this build already answers to.
+//
+// Passed to the registry's validation so that a registration under one of them
+// is refused rather than ignored. The engine consults the registry only after
+// its own switch, so an ignored registration is a build somebody believes
+// overrides the Docker provider and which silently does not.
+//
+// Built from the schema's constants rather than written out again, so a
+// provider added to the engine cannot be left off this list.
+func reservedProviderNames() map[string][]string {
+	return map[string][]string{
+		extension.SocketDatabaseProvider: {
+			string(schema.DBDocker), string(schema.DBNeon),
+			string(schema.DBSupabase), string(schema.DBDBLab),
+		},
+		extension.SocketRuntimeProvider: {
+			string(schema.RuntimeLocal), string(schema.RuntimeKubernetes),
+		},
+		extension.SocketGoldenStore: {
+			string(golden.KindLocal), string(golden.KindAzureBlob), string(golden.KindS3),
+		},
+	}
+}
+
 // checkPolicy asks the registered hooks whether this environment may exist.
 //
 // The community build registers nothing, so this returns nil after one call
@@ -1101,10 +1270,7 @@ func databaseVersion(m *schema.Manifest) int {
 // the socket has to be in the thing being extended, and because a hook that
 // only exists in a build nobody runs is a hook nobody has tested.
 func (o *Orchestrator) checkPolicy(ctx context.Context) error {
-	registry := o.opts.Extensions
-	if registry == nil {
-		registry = extension.Default
-	}
+	registry := o.extensions()
 	if registry.Empty() {
 		return nil
 	}
@@ -2242,10 +2408,7 @@ func (o *Orchestrator) teardown(ctx context.Context, s *session, envID string) *
 // becomes a resource leak, which is a strictly worse problem than a missing
 // meter reading.
 func (o *Orchestrator) observe(ctx context.Context, event extension.LifecycleEvent) {
-	registry := o.opts.Extensions
-	if registry == nil {
-		registry = extension.Default
-	}
+	registry := o.extensions()
 	if registry.Empty() {
 		return
 	}
@@ -2256,7 +2419,7 @@ func (o *Orchestrator) observe(ctx context.Context, event extension.LifecycleEve
 
 // Status reports what is currently running.
 func (o *Orchestrator) Status(ctx context.Context) (*Result, error) {
-	rt, err := o.newRuntime()
+	rt, err := o.newRuntime(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2313,7 +2476,7 @@ func (o *Orchestrator) orderByManifest(running []provider.RunningService) {
 
 // Decisions returns what the environment's egress proxy has decided.
 func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decision, error) {
-	rt, err := o.sidecarRuntime()
+	rt, err := o.sidecarRuntime(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2325,7 +2488,7 @@ func (o *Orchestrator) Decisions(ctx context.Context, limit int) ([]local.Decisi
 
 // Messages returns what the environment captured instead of sending.
 func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message, error) {
-	rt, err := o.sidecarRuntime()
+	rt, err := o.sidecarRuntime(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2337,7 +2500,7 @@ func (o *Orchestrator) Messages(ctx context.Context, limit int) ([]local.Message
 func (o *Orchestrator) WaitForMessage(
 	ctx context.Context, to, subject string, timeout time.Duration,
 ) (local.Message, error) {
-	rt, err := o.sidecarRuntime()
+	rt, err := o.sidecarRuntime(ctx)
 	if err != nil {
 		return local.Message{}, err
 	}
@@ -2367,7 +2530,7 @@ func (o *Orchestrator) WaitForMessage(
 func (o *Orchestrator) DeliverWebhook(
 	ctx context.Context, service, path string, body []byte, headers map[string]string,
 ) (local.Delivery, error) {
-	rt, err := o.sidecarRuntime()
+	rt, err := o.sidecarRuntime(ctx)
 	if err != nil {
 		return local.Delivery{}, err
 	}
@@ -2377,7 +2540,7 @@ func (o *Orchestrator) DeliverWebhook(
 
 // Logs returns recent output from the environment's services.
 func (o *Orchestrator) Logs(ctx context.Context, service string, tail int) ([]provider.LogLine, error) {
-	rt, err := o.newRuntime()
+	rt, err := o.newRuntime(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2419,8 +2582,8 @@ type observingRuntime struct {
 
 // sidecarRuntime builds the selected runtime and requires that it can answer
 // questions about its sidecar.
-func (o *Orchestrator) sidecarRuntime() (observingRuntime, error) {
-	rt, err := o.newRuntime()
+func (o *Orchestrator) sidecarRuntime(ctx context.Context) (observingRuntime, error) {
+	rt, err := o.newRuntime(ctx)
 	if err != nil {
 		return observingRuntime{}, err
 	}

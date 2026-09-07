@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/golden"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
 // Every backend runs the same suite, because the point of the interface is
@@ -129,7 +131,7 @@ func runStoreSuite(t *testing.T, open func(t *testing.T) golden.Store) {
 
 func TestLocalStore(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T) golden.Store {
-		s, err := golden.OpenStore(golden.KindLocal, t.TempDir(), nil)
+		s, err := golden.OpenStore(golden.KindLocal, t.TempDir(), nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, s)
 		return s
@@ -148,11 +150,11 @@ func TestLocalStore_ReadsItsDirectoryFromTheEnvironment(t *testing.T) {
 		}
 		return ""
 	}
-	s, err := golden.OpenStore(golden.KindLocal, "$AF_GOLDEN_STORE", env)
+	s, err := golden.OpenStore(golden.KindLocal, "$AF_GOLDEN_STORE", env, nil)
 	require.NoError(t, err)
 	require.Contains(t, s.Name(), dir)
 
-	_, err = golden.OpenStore(golden.KindLocal, "$AF_NOT_SET_ANYWHERE", env)
+	_, err = golden.OpenStore(golden.KindLocal, "$AF_NOT_SET_ANYWHERE", env, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "AF_NOT_SET_ANYWHERE")
 	require.Contains(t, err.Error(), "not set on this machine")
@@ -162,11 +164,11 @@ func TestOpenStore_IsNothingWhenNothingIsConfigured(t *testing.T) {
 	t.Parallel()
 	// No storage_url means goldens live wherever the provider keeps them,
 	// which is the default and is not an error.
-	s, err := golden.OpenStore(golden.KindLocal, "", nil)
+	s, err := golden.OpenStore(golden.KindLocal, "", nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, s)
 
-	_, err = golden.OpenStore("gopher_holes", "/tmp/x", nil)
+	_, err = golden.OpenStore("gopher_holes", "/tmp/x", nil, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "local, azure_blob, s3")
 }
@@ -175,17 +177,17 @@ func TestOpenStore_SaysWhatIsMissingFromARemoteURL(t *testing.T) {
 	t.Parallel()
 	// The message has to name the fix. "invalid URL" sends somebody to read
 	// the source; "the URL is the CONTAINER's" does not.
-	_, err := golden.OpenStore(golden.KindAzureBlob, "https://acct.blob.core.windows.net/", nil)
+	_, err := golden.OpenStore(golden.KindAzureBlob, "https://acct.blob.core.windows.net/", nil, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "names no container")
 
-	_, err = golden.OpenStore(golden.KindAzureBlob, "https://acct.blob.core.windows.net/goldens", nil)
+	_, err = golden.OpenStore(golden.KindAzureBlob, "https://acct.blob.core.windows.net/goldens", nil, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shared access signature")
 
 	// And a message about a URL must not print the signature back out.
 	_, err = golden.OpenStore(golden.KindAzureBlob,
-		"ftp://acct.blob.core.windows.net/goldens?sig=SUPERSECRETSIGNATURE", nil)
+		"ftp://acct.blob.core.windows.net/goldens?sig=SUPERSECRETSIGNATURE", nil, nil)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "SUPERSECRETSIGNATURE",
 		"a message about a URL never prints its credential")
@@ -193,7 +195,7 @@ func TestOpenStore_SaysWhatIsMissingFromARemoteURL(t *testing.T) {
 	// S3 signs with the environment's credential, and says so when it is not
 	// there rather than failing later with a 403.
 	_, err = golden.OpenStore(golden.KindS3, "s3://bucket/goldens",
-		func(string) string { return "" })
+		func(string) string { return "" }, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "AWS_ACCESS_KEY_ID")
 }
@@ -232,7 +234,7 @@ func TestS3Store(t *testing.T) {
 		// buckets is a product that quietly creates bills.
 		prefix := fmt.Sprintf("goldens-%d", time.Now().UnixNano())
 		s, err := golden.OpenStore(golden.KindS3,
-			fmt.Sprintf("%s/%s/%s", endpoint, bucket, prefix), env)
+			fmt.Sprintf("%s/%s/%s", endpoint, bucket, prefix), env, nil)
 		require.NoError(t, err)
 		return s
 	})
@@ -257,7 +259,7 @@ func TestAzureStore(t *testing.T) {
 		base := fmt.Sprintf("%s/%s/%s", endpoint, account, container)
 
 		require.NoError(t, makeContainer(base+"?restype=container&"+sas))
-		s, err := golden.OpenStore(golden.KindAzureBlob, base+"?"+sas, nil)
+		s, err := golden.OpenStore(golden.KindAzureBlob, base+"?"+sas, nil, nil)
 		require.NoError(t, err)
 		return s
 	})
@@ -346,4 +348,124 @@ func makeContainer(u string) error {
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	return fmt.Errorf("creating the container: %s: %s", resp.Status, body)
+}
+
+// ---------------------------------------------------------------------------
+// A store registered from outside this repository.
+
+// memStore is an object store that is not one of the three built in kinds.
+type memStore struct {
+	name    string
+	objects map[string][]byte
+}
+
+func (m *memStore) Name() string { return m.name }
+
+func (m *memStore) Put(_ context.Context, name string, _ int64, body io.Reader) error {
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	m.objects[name] = b
+	return nil
+}
+
+func (m *memStore) Get(_ context.Context, name string) (io.ReadCloser, error) {
+	b, ok := m.objects[name]
+	if !ok {
+		// The sentinel a store outside this module can name, which is the
+		// same value golden.ErrNotFound is.
+		return nil, extension.ErrObjectNotFound
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+func (m *memStore) List(_ context.Context, prefix string) ([]golden.Object, error) {
+	var out []golden.Object
+	for name, b := range m.objects {
+		if strings.HasPrefix(name, prefix) {
+			out = append(out, golden.Object{Name: name, Size: int64(len(b))})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (m *memStore) Delete(_ context.Context, name string) error {
+	delete(m.objects, name)
+	return nil
+}
+
+type memStoreKind struct {
+	name string
+	seen extension.ObjectStoreConfig
+}
+
+func (k *memStoreKind) Name() string { return k.name }
+
+func (k *memStoreKind) Open(cfg extension.ObjectStoreConfig) (extension.ObjectStore, error) {
+	k.seen = cfg
+	// "registered" is in the name so that a test can tell this store from a
+	// built in one by more than the URL it was opened with, which both carry.
+	return &memStore{name: "registered " + k.name + " at " + cfg.URL, objects: map[string][]byte{}}, nil
+}
+
+func TestARegisteredStoreIsOpenedAndIsTheStoreTheEngineUses(t *testing.T) {
+	t.Parallel()
+	// The three built in kinds are the three this repository happens to have
+	// written. A fleet publishing to anything else had no way in short of
+	// editing this package, which is unimportable from outside the module.
+	kind := &memStoreKind{name: "gcs"}
+	reg := extension.NewRegistry()
+	reg.AddGoldenStore(kind)
+
+	s, err := golden.OpenStore("gcs", "gs://bucket/goldens", nil, reg)
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	require.Contains(t, s.Name(), "gs://bucket/goldens")
+	require.Equal(t, "gs://bucket/goldens", kind.seen.URL)
+
+	// And it is a golden.Store with no adapter in between: the interface is
+	// the one in engine/pkg/extension and this package's name for it is an
+	// alias, so a registered store satisfies every call site the engine has.
+	require.NoError(t, s.Put(context.Background(), "gv_1.sql", 3, strings.NewReader("abc")))
+	body, err := s.Get(context.Background(), "gv_1.sql")
+	require.NoError(t, err)
+	defer func() { _ = body.Close() }()
+	got, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.Equal(t, "abc", string(got))
+
+	_, err = s.Get(context.Background(), "missing")
+	require.ErrorIs(t, err, golden.ErrNotFound,
+		"a store outside this module cannot name golden.ErrNotFound, so every "+
+			"absent object would read as a broken store")
+}
+
+func TestAnUnregisteredKindIsRefusedAndTheRefusalListsWhatThereIs(t *testing.T) {
+	t.Parallel()
+	reg := extension.NewRegistry()
+	reg.AddGoldenStore(&memStoreKind{name: "gcs"})
+
+	_, err := golden.OpenStore("gcss", "gs://bucket/goldens", nil, reg)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "local, azure_blob, s3, gcs",
+		"the refusal does not name the store this build has registered")
+}
+
+func TestABuiltInKindIsNeverTakenOverByARegistration(t *testing.T) {
+	t.Parallel()
+	// The registry is consulted after the built in kinds and never before
+	// them, so a registration cannot change where an existing manifest
+	// publishes. Registering one under a built in name is refused where the
+	// registry is validated; here what is proved is that the switch itself
+	// does not consult it first.
+	reg := extension.NewRegistry()
+	reg.AddGoldenStore(&memStoreKind{name: "local"})
+
+	dir := t.TempDir()
+	s, err := golden.OpenStore(golden.KindLocal, dir, nil, reg)
+	require.NoError(t, err)
+	require.Equal(t, "the directory "+dir, s.Name(),
+		"a registration took over the built in local store")
 }

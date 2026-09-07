@@ -85,6 +85,7 @@ gate: _reports
     run "every manifest field is read or refused" just fieldsweep
     run "self-hosting inputs are stable" just inputcheck
     run "documented config can be set"   just wirecheck
+    run "every socket is plugged in"     just socketcheck
     run "the site calls routes that exist" just routecheck
     run "every hostname has an origin"   just origincheck
     run "the smoke waits for real sentences" just sitesmoke
@@ -1049,6 +1050,26 @@ inputcheck:
 # that has stopped being needed is reported so the file cannot rot.
 wirecheck:
     go run ./tools/wirecheck .
+
+# Every extension point in engine/pkg/extension is implementable from outside
+# the engine module, and either consulted by the engine or declared as one that
+# is not.
+#
+# A socket is a promise to two people and only one of them is visible to the
+# compiler. The implementer is outside this module and cannot import anything
+# under engine/internal, so a signature naming a type from there is a socket
+# nobody can implement; that is the defect surfacecheck was written for, in the
+# stable packages, and extension was covered by nothing. The registrant expects
+# the engine to ask, and extension.AuditSink has an interface, a registry, an
+# Add and a forwarding method that NOTHING IN THE ENGINE HAS EVER CALLED, so
+# audit_stream forwards nothing and would still forward nothing after somebody
+# wrote the sinks.
+#
+# Both directions fail: a socket that is not consulted and not listed in the
+# tool is reported, and so is one that is listed and has since been wired up,
+# so the list cannot outlive the gaps it describes.
+socketcheck:
+    go run ./tools/socketcheck .
 
 # The site does not call a control plane route that is not there.
 #

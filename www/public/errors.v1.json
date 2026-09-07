@@ -707,6 +707,28 @@
       "planned": false
     },
     {
+      "code": "AF-EXT-001",
+      "area": "EXT",
+      "areaName": "Extensions",
+      "message": "This build cannot honor one of its own extension registrations: {detail}",
+      "resolution": "Fix the registration in the binary that made it. Nothing was created.",
+      "docs": "https://antifailure.dev/docs/contributing/provider-authoring",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
+      "code": "AF-EXT-002",
+      "area": "EXT",
+      "areaName": "Extensions",
+      "message": "The registered {socket} {name} returned nothing and reported no error.",
+      "resolution": "Fix the registration to return either something usable or an error saying why it could not. Nothing was created.",
+      "docs": "https://antifailure.dev/docs/contributing/provider-authoring",
+      "retryable": false,
+      "exitCode": 3,
+      "planned": false
+    },
+    {
       "code": "AF-FID-001",
       "area": "FID",
       "areaName": "Fidelity",

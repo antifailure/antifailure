@@ -10,7 +10,8 @@
 #   area       MAN manifest, DET detection, SEC secrets, DB database,
 #              MSK masking, BLD build, RUN runtime, NET egress, AGT agent,
 #              LOD load, ORC differential oracle, GH GitHub, CP control plane,
-#              INF infrastructure, EE enterprise, SCH scheduling.
+#              INF infrastructure, EE enterprise, SCH scheduling,
+#              EXT extension registrations.
 #   message    One sentence naming what failed. Second person. {placeholders}
 #              are filled at the call site.
 #   next_step  One sentence saying what to do. Never "contact support".
@@ -1230,3 +1231,24 @@ errors:
     docs: concepts/workloads
     retryable: true
     exit_code: 9
+
+  # Extensions. A defect in the BUILD rather than in the repository being
+  # worked on: something registered a provider, a store or an emulator through
+  # engine/pkg/extension and the engine cannot honor the registration. The
+  # manifest and the environment are innocent, which is why these are not
+  # manifest codes, and the person who can fix it is whoever assembled the
+  # binary.
+  - code: AF-EXT-001
+    area: EXT
+    message: "This build cannot honor one of its own extension registrations: {detail}"
+    next_step: "Fix the registration in the binary that made it. Nothing was created."
+    docs: contributing/provider-authoring
+    retryable: false
+    exit_code: 3
+  - code: AF-EXT-002
+    area: EXT
+    message: "The registered {socket} {name} returned nothing and reported no error."
+    next_step: "Fix the registration to return either something usable or an error saying why it could not. Nothing was created."
+    docs: contributing/provider-authoring
+    retryable: false
+    exit_code: 3

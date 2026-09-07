@@ -177,6 +177,7 @@ runner/artifacts/
 /schemadoc
 /sidebarcheck
 /site
+/socketcheck
 /statuscheck
 /surfacecheck
 /tagsync

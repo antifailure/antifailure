@@ -178,7 +178,7 @@ type environment struct {
 }
 
 func listEnvironments(ctx context.Context, e *Env) ([]environment, error) {
-	rt, err := inventoryRuntime(e)
+	rt, err := inventoryRuntime(ctx, e)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +382,7 @@ reaches every project's environments. For a sweep that reads each
 environment's own lifetime instead, see af env reap.`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			rt, err := inventoryRuntime(e)
+			rt, err := inventoryRuntime(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
@@ -577,9 +577,9 @@ func contains(items []string, want string) bool {
 // runtime: with runtime.provider set to kubernetes, the environments are
 // namespaces on a cluster and there is nothing on the local daemon to find. A
 // manifest is what says which, so it is read when there is one.
-func inventoryRuntime(e *Env) (provider.Runtime, error) {
+func inventoryRuntime(ctx context.Context, e *Env) (provider.Runtime, error) {
 	if o, _, err := orchestratorWithManifest(e, ""); err == nil {
-		return o.Runtime()
+		return o.Runtime(ctx)
 	}
 	// Outside a repository there is no manifest to ask, and the only runtime
 	// that could be holding anything on this machine is the local one.
