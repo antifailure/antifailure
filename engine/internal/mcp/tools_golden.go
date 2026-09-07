@@ -82,11 +82,18 @@ type prepareGolden func(ctx context.Context, action, version string) (goldenOutc
 // The pattern is the shape the engine mints, gv_ followed by a timestamp and a
 // hash, so a path, a branch name or a wildcard is refused before it reaches a
 // provider.
+//
+// Twenty is the ceiling on the timestamp and it is load bearing rather than
+// generous. provider.NewGoldenVersionID writes the timestamp to the
+// microsecond, which is exactly twenty digits, because at one second two
+// refreshes inside the same second were handed one identifier. A wider
+// timestamp would be minted by the engine and refused by this server, so
+// pkg/provider has a test that fails if it ever leaves this range.
 func goldenVersionSchema(purpose string) *Schema {
 	return &Schema{
 		Type: "string", MaxLength: 64, MinLength: 4, Pattern: `gv_[0-9]{8,20}_[0-9a-f]{4,32}`,
 		Description: purpose + " It is a version identifier inspect_goldens reports, such " +
-			"as gv_20260830044013_74234e98. It is never a pattern: this server has no " +
+			"as gv_20260830044013125431_74234e98. It is never a pattern: this server has no " +
 			"wildcard and every identifier names one version.",
 	}
 }

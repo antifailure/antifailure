@@ -294,6 +294,31 @@ type Config struct {
 // The format sorts by age as a string, which means a directory listing, a
 // database index, and a human reading a list all agree on the order without
 // parsing anything.
+//
+// The timestamp carries microseconds, and those six digits are the whole point
+// rather than precision for its own sake. The hash is a digest of the masking
+// rules, so two goldens built from the SAME rules are SUPPOSED to carry the
+// same one: it is provenance, not identity. That leaves the timestamp as the
+// only thing telling two goldens apart, and at one second resolution two
+// refreshes inside one second were handed ONE identifier. What followed
+// depended on the store: Postgres refused the second CREATE DATABASE with
+// "already exists", and a store that overwrites rather than refusing would have
+// published one golden over another.
+//
+// Two suites had already worked around it, engine/conformance and
+// internal/masking, by minting a random rules hash per call. That fixed those
+// two and left the edge exactly where it was, and conformance said so in a
+// comment: two refreshes in one second is not something only a test does. The
+// fake Postgres provider still walked into it and reddened the engine job of a
+// pull request that changed four files, none of them Go.
+//
+// Microseconds rather than milliseconds because the pattern the MCP server
+// publishes for this identifier allows eight to twenty digits, and twenty is
+// exactly a microsecond timestamp. It does not make two calls in the same
+// microsecond distinct and nothing without state could: a refresh creates a
+// database, seeds it and masks it, so consecutive ones are milliseconds apart
+// at the very least, and two of THOSE not colliding is the guarantee this
+// needs.
 func NewGoldenVersionID(at time.Time, hash string) string {
 	if len(hash) > 8 {
 		hash = hash[:8]
@@ -301,5 +326,6 @@ func NewGoldenVersionID(at time.Time, hash string) string {
 	for len(hash) < 8 {
 		hash += "0"
 	}
-	return fmt.Sprintf("gv_%s_%s", at.UTC().Format("20060102150405"), hash)
+	at = at.UTC()
+	return fmt.Sprintf("gv_%s%06d_%s", at.Format("20060102150405"), at.Nanosecond()/1000, hash)
 }

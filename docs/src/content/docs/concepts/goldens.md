@@ -24,8 +24,14 @@ A refresh produces a new version. It never rewrites an existing one.
 That is not tidiness. An environment that branched an hour ago has to keep
 seeing the data it branched from, or a test that passed becomes a test that
 fails for a reason nobody can reproduce. A version is identified by
-`gv_<timestamp>_<hash>`, so sorting by name sorts by age, and the hash makes
-two refreshes in the same second distinct.
+`gv_<timestamp>_<hash>`, so sorting by name sorts by age.
+
+The hash does not make two refreshes distinct, and this page used to say that it
+did. It is a digest of the masking rules, so two refreshes under the same rules
+carry the same hash on purpose: it tells you what a golden was made by, not
+which golden it is. Telling two apart is the timestamp's job alone, which is why
+it is written to the microsecond. At one second it was possible to refresh twice
+inside one tick and be handed one identifier for two goldens.
 
 ```sh
 af golden list          # what exists, newest first

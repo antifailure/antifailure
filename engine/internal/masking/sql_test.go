@@ -103,8 +103,8 @@ func TestGoldenIDsFromThisHelperDoNotCollideWithinASecond(t *testing.T) {
 	second := provider.NewGoldenVersionID(at, "masking-test")
 	require.Equal(t, first, second,
 		"the collision this test exists for is supposed to be reproducible")
-	require.Equal(t, "gv_20260829012258_masking-", first,
-		"the id in the CI failure, reproduced exactly")
+	require.Equal(t, "gv_20260829012258000000_masking-", first,
+		"the id in the CI failure, with the microseconds this now carries")
 
 	// What it does now.
 	seen := map[string]bool{}
@@ -144,16 +144,19 @@ func requireDatabase(t *testing.T) (*pgx.Conn, func()) {
 	// A UNIQUE rules hash per call, and it has to be unique in its first eight
 	// characters.
 	//
-	// NewGoldenVersionID builds gv_<timestamp to the second>_<hash[:8]>, so a
-	// constant like "masking-test" truncates to "masking-" and every golden this
-	// helper makes inside the same second gets the SAME id. Two tests in this
-	// package that land in one second then share a golden: the first one's
-	// cleanup drops it, and the second fails with "the golden version
-	// gv_..._masking- no longer exists".
+	// NewGoldenVersionID builds gv_<timestamp>_<hash[:8]>, so a constant like
+	// "masking-test" truncates to "masking-" and every golden this helper makes
+	// at the SAME instant gets the same id. Two tests in this package that
+	// shared one then shared a golden: the first one's cleanup dropped it, and
+	// the second failed with "the golden version gv_..._masking- no longer
+	// exists".
 	//
 	// It passed locally and failed in CI for exactly that reason. The local run
-	// takes minutes and the tests fall in different seconds; a CI runner puts
-	// them in the same one.
+	// takes minutes and the tests fell in different seconds; a CI runner put
+	// them in the same one. The timestamp now carries microseconds, so the
+	// second is no longer the unit two tests have to avoid sharing, but a
+	// unique hash per call is still what this helper owes: it is the only
+	// thing that tells two goldens apart in a listing a human reads.
 	gv, err := p.RefreshGolden(ctx, provider.GoldenSpec{
 		Version: 17, RulesHash: uniqueRulesHash(),
 		Mask:   func(context.Context, secrets.Value) error { return nil },
