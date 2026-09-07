@@ -37,6 +37,11 @@ datastores:
   - name: events
     engine: clickhouse
     stance: golden
+    # The variable holding production's address, because a store that names
+    # none gets a golden of production's shape with none of its rows, and this
+    # stack is the one whose events ARE the product. The report says which of
+    # the two a branch is, so the fixture has to choose.
+    source_url_env: PRODUCTION_CLICKHOUSE_URL
 
   - name: cache
     engine: redis

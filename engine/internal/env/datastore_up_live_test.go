@@ -19,10 +19,12 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/datastore/clickhouse"
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
+	"github.com/antifailure/antifailure/engine/internal/fidelity"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // The lane's second acceptance, and the sentence the whole wave was added for:
@@ -105,7 +107,25 @@ func TestUpLive_AnEnvironmentHoldsAMaskedPostgresAndAMaskedClickHouse(t *testing
 	if os.Getenv("AF_SKIP_DOCKER") != "" {
 		t.Skip("skipped: AF_SKIP_DOCKER is set and this brings an environment up")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	// Forty rather than twenty, and the budget is here to stop a hang rather
+	// than to police the clock.
+	//
+	// This test now takes two full inventories as well as an environment,
+	// before the up and after it, and each of those asks the runtime what is
+	// running, the database provider where the branch came from and the store
+	// provider what its branch holds. A CI runner does the whole thing in
+	// minutes. A laptop running several Docker suites at once has taken this
+	// test twenty six minutes on its own, and the twenty minute budget then
+	// expired in the middle of a query that had nothing to do with anything
+	// already proved, which reads as a broken twin rather than as a slow
+	// machine.
+	//
+	// It is deliberately above the engine suite's own thirty minute timeout,
+	// which means a genuine hang on CI is caught by the suite rather than by
+	// this deadline. That is the right way round: the suite's timeout is the
+	// one that cannot be outrun, and this one exists so that a developer
+	// waiting on a loaded machine gets a result rather than a deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 
 	pgSource := productionPostgres(t)
@@ -169,9 +189,48 @@ func TestUpLive_AnEnvironmentHoldsAMaskedPostgresAndAMaskedClickHouse(t *testing
 	require.False(t, golden.Datastores[0].Empty)
 	require.Positive(t, golden.Datastores[0].Columns)
 
+	// The report BEFORE the environment exists, on this manifest, with a
+	// golden of the events already made and nothing branched. This is the
+	// first half of the pair: the store is absent, and the report names the
+	// four things it does not have.
+	beforeInv, err := o.Fidelity(ctx)
+	require.NoError(t, err)
+	beforeReport := beforeInv.Explain()
+	t.Log("the report with no branch\n\n" + beforeReport)
+	beforeStore := datastoreComponent(t, beforeInv, "events")
+	require.Equal(t, fidelity.Absent, beforeStore.State,
+		"a store nothing branched is not reported as one the environment does not hold")
+	require.Contains(t, beforeStore.Detail, "no golden, no attestation, no tables and no rows")
+
 	result, err := o.Up(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Golden)
+
+	// And the report AFTER, on the same manifest and the same command. The
+	// defect this pair is the check for: the datastores dimension was built
+	// from the manifest alone, so both halves of this pair used to be the
+	// first one, and the instrument said absent about a store holding a
+	// masked, verified copy of production.
+	afterInv, err := o.Fidelity(ctx)
+	require.NoError(t, err)
+	afterReport := afterInv.Explain()
+	t.Log("the report after af up\n\n" + afterReport)
+
+	afterData := datastoreComponent(t, afterInv, "events data")
+	require.Contains(t, afterData.Detail, "1 table over 3 rows",
+		"the environment holds a masked ClickHouse and the report does not say what is in it")
+	require.Contains(t, afterData.Detail, "branched from "+golden.Datastores[0].Version)
+	// Unmeasured rather than reproduced, and the report says why: nothing here
+	// records what production's events store holds, so the branch has not been
+	// shown to reproduce it. The primary database's data component is the same
+	// unknown for the same reason on a manifest with no volume profile.
+	require.Equal(t, fidelity.Unmeasured, afterData.State)
+	require.Contains(t, afterData.Detail, "nothing here says what production's events holds")
+
+	afterProvenance := datastoreComponent(t, afterInv, "events provenance")
+	require.Equal(t, fidelity.Reproduced, afterProvenance.State)
+	require.Contains(t, afterProvenance.Detail, "golden "+golden.Datastores[0].Version)
+	require.Contains(t, afterProvenance.Detail, "still matching its signature")
 
 	// The store the environment provides is not also started as a service, so
 	// there is one ClickHouse on the network and it is the one holding a
@@ -491,4 +550,20 @@ func stripDockerFrames(body []byte) string {
 		body = body[8+size:]
 	}
 	return b.String()
+}
+
+// datastoreComponent pulls one component out of the datastores dimension.
+func datastoreComponent(
+	t *testing.T, inv fidelity.Inventory, name string,
+) fidelity.Component {
+	t.Helper()
+	d, ok := inv.Dimension(schema.FidelityDatastores)
+	require.True(t, ok, "the inventory has no datastores dimension")
+	for _, c := range d.Components {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("the datastores dimension has no component %q: %+v", name, d.Components)
+	return fidelity.Component{}
 }

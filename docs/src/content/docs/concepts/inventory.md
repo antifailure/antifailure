@@ -32,7 +32,7 @@ anybody.
 | `auth` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | `runtime` | Where the environment runs. |
 | `traffic` | Where the endpoint mix comes from, through the same code the load run uses. |
-| `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares `golden` is `absent`, because nothing here builds a golden for a second store. The others are `unmeasured` by name. |
+| `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares `golden` and this environment branched reports what the branch holds and which golden it came from, the way `database` does. One declared `golden` that nothing branched is `absent`. The others are `unmeasured` by name. |
 | `topology` | How many instances of each service are running, against how many the manifest asked for. |
 
 Nothing is estimated and nothing is a constant somebody typed because the
@@ -117,29 +117,55 @@ created is a better reproduction than one whose pack returns canned answers,
 and both are better than a host the policy blocks. The report distinguishes
 all three rather than averaging them into one word.
 
-## A second datastore is not reproduced, and the report says so
+## A second datastore, and what the report says about it
 
-There is one golden, one masking pass, one verification scan and one branch,
-and all four are Postgres. A ClickHouse, a Redis, a Kafka or an Elasticsearch
-declared as a service starts as an empty container.
-
-For a stack shaped like an analytics product that is the whole product: the
-twin holds masked Postgres metadata and zero events, because the events are in
-ClickHouse. Every query path that matters is untested and every chart is blank.
+There was one golden, one masking pass, one verification scan and one branch,
+and all four were Postgres, so a ClickHouse, a Redis, a Kafka or an
+Elasticsearch declared as a service started as an empty container. For a stack
+shaped like an analytics product that was the whole product: the twin held
+masked Postgres metadata and zero events, because the events are in ClickHouse.
+Every query path that mattered was untested and every chart was blank.
 
 The inventory used to score that environment on its services, its branch, its
 hosts, its personas and its traffic and call it faithful, because none of its
 dimensions was looking at the second store. The `datastores` dimension is that
 absence, written down.
 
-Which state a store gets turns on what the manifest declared for it.
+A store declared `golden` is now refreshed, masked, verified and branched like
+the primary, so the twin can hold the events as well as the metadata. The
+dimension is kept and it is what tells you WHICH of the two an environment in
+front of you is.
 
-A store declared `golden` is `absent`, and it is counted. The manifest asked
-for a masked, verified copy of production in it, this build has none, and
-nothing has to read a ClickHouse to know that nothing built a golden for it.
-That is a fact about the environment rather than a gap in what can be seen, so
-it belongs in the denominator, and the report names the four things that are
-missing: no golden, no attestation, no tables and no rows.
+Which state a store gets turns on what the manifest declared for it and on what
+the environment then did about it.
+
+A store declared `golden` that this environment BRANCHED is reported from the
+branch, in two components exactly like the primary database's: `data` says how
+many tables and rows it holds and which golden it came from, and `provenance`
+says whether that golden's signed attestation still matches its own signature.
+That is the report reading the environment. It was worth writing down here
+because the dimension used to read the declaration alone, so it called a store
+holding a masked, verified copy of production `absent`, which understates a
+twin rather than overstating one and is still wrong.
+
+That `data` component is `unmeasured` rather than `reproduced`, and the report
+says why: nothing here records what production's second store holds, so
+whether the branch reproduces it is unknown. It is the rule the primary
+database already follows, arriving one dimension lower. A golden copied from
+whatever `source_url_env` names carries exactly the uncertainty that made a
+branch of two hundred rows report as reproducing a production of four billion,
+and the answer to it for the primary database, the committed volume profile
+under `database.volume`, has no equivalent for a second store yet. The report
+names that rather than counting the store as a copy of production nobody
+checked.
+
+A store declared `golden` that nothing branched is `absent`, and it is counted.
+The manifest asked for a masked, verified copy of production in it, this
+environment has none, and nothing has to read a ClickHouse to know that nothing
+branched a golden for it. That is a fact about the environment rather than a
+gap in what can be seen, so it belongs in the denominator, and the report names
+the four things that are missing: no golden, no attestation, no tables and no
+rows.
 
 A store declared `empty`, `derived` or `topics_only` is `unmeasured`, which
 keeps it out of the score in both directions. Nothing here starts a second
@@ -148,9 +174,11 @@ reported reproduced because somebody declared it empty would be the report
 believing a manifest instead of an environment.
 
 That is the number going down on purpose. A stack shaped like an analytics
-product scored 100 percent before, and scores 90 after, on the same
+product scored 100 percent before, and scores 89 after, on the same
 observation, because the one store the product is about is now in the
-denominator. `just benchmark` runs the harness that produced both numbers.
+denominator. The same stack with that store actually branched scores 100 again,
+with the two components that would need production's own row counts excluded
+and named. `just benchmark` runs the harness that produced all three.
 
 A store is recognised two ways. A [declared datastore](/docs/reference/manifest)
 is the better one, because it carries the stance somebody chose for it and the
@@ -219,12 +247,14 @@ the first is how a check stops being believed.
 manifest says what production runs on, so there is no other side to the
 comparison. Requiring it fails with `AF-FID-002` saying so.
 
-`datastores` is measurable only as far as the stances go. A store declared
-`golden` is `absent`, so requiring the dimension on a manifest whose stores are
-all `golden` fails with `AF-FID-001`, which is a fact about the environment.
-Any store on another stance is unmeasured, and one of those in the manifest
-takes the whole dimension to `AF-FID-002` naming it, which is the honest answer
-rather than a pass.
+`datastores` is measurable for a store declared `golden`, and only as far as
+the stances go for the rest. A store nothing branched is `absent`, so requiring
+the dimension before an `af up` that branches it fails with `AF-FID-001`, which
+is a fact about the environment. A store the environment did branch has its
+provenance measured and its data reported as an unknown, so requiring the
+dimension takes it to `AF-FID-002` naming the `data` component, which is the
+honest answer rather than a pass. Any store on another stance is unmeasured and
+takes the whole dimension to `AF-FID-002` naming it, for the same reason.
 
 `topology` is measurable for every service that names an instance count, and a
 count that is short fails with `AF-FID-001`. A manifest where some service

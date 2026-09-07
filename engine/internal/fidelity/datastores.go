@@ -1,6 +1,7 @@
 package fidelity
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -25,14 +26,31 @@ import (
 // called it faithful. The instrument whose entire job is to say "this is not
 // production" was the last thing that would have told anybody.
 //
-// So the dimension reports these rather than leaving them out, and which of
-// two states each gets turns on what the manifest declared for it.
+// So the dimension reports these rather than leaving them out, and what each
+// gets turns on what the manifest declared for it and on what the environment
+// then did about it.
 //
-// A store the manifest declares golden is ABSENT, and it is counted. The
-// manifest asked for a masked, verified copy of production in it and this
-// build has none, which is a fact about the environment and not a gap in what
-// can be seen. That is the line that makes the score go down on exactly the
-// stack this dimension was added for.
+// A store the manifest declares golden AND the environment branched is
+// reported the way the primary database is: one component for what the branch
+// holds and one for where it came from, carrying the golden, the attestation,
+// the tables and the rows. That half of this file was written when nothing
+// could branch a second store, so the dimension read the declaration alone and
+// called a full store absent, which is a lie in the generous direction and is
+// still a lie. An instrument that understates the twin is not the instrument
+// this repository argues for.
+//
+// What the branch holds is an UNKNOWN rather than a reproduction, and it says
+// why. Nothing here records what production's second store holds, so nothing
+// can say whether the branch reproduces it, and the primary database learned
+// that lesson first: a branch of two hundred rows was reported as reproducing
+// a production of four billion. The tables and the rows are still in the
+// report, and the verdict over them is the one nobody has earned yet.
+//
+// A store declared golden that nothing branched is ABSENT, and it is counted.
+// The manifest asked for a masked, verified copy of production in it and this
+// environment has none, which is a fact about the environment and not a gap in
+// what can be seen. That is the line that makes the score go down on exactly
+// the stack this dimension was added for.
 //
 // A store recognised from a service image, or declared with any other stance,
 // is UNMEASURED, which keeps it out of the score in both directions: nothing
@@ -52,6 +70,14 @@ import (
 func datastores(obs Observation) Dimension {
 	d := Dimension{Name: schema.FidelityDatastores}
 
+	// The stores this environment holds, by name. A store that is not in here
+	// was not branched, and the declaration is then the only thing there is to
+	// report about it.
+	branched := make(map[string]Store, len(obs.Stores))
+	for _, st := range obs.Stores {
+		branched[st.Name] = st
+	}
+
 	found := make([]Component, 0, len(obs.Manifest.Datastores)+len(obs.Manifest.Services))
 	declared := map[string]bool{}
 	for _, ds := range obs.Manifest.Datastores {
@@ -65,6 +91,18 @@ func datastores(obs Observation) Dimension {
 			continue
 		}
 		declared[ds.Name] = true
+		// GOLDEN AND BRANCHED, both. The stance alone is a declaration and an
+		// observation alone is a store nobody asked for a copy of production
+		// in, and neither on its own is grounds for reporting what a branch
+		// holds. A store declared empty, derived or topics_only stays
+		// unmeasured whatever arrives here, which is the rule the lane that
+		// wrote this dimension established and the one this change is
+		// deliberately narrower than.
+		if st, ok := branched[ds.Name]; ok && ds.Stance == schema.StanceGolden {
+			found = append(found, storeDataComponent(ds, st),
+				storeProvenanceComponent(ds.Name, st))
+			continue
+		}
 		found = append(found, declaredComponent(ds))
 	}
 
@@ -99,21 +137,127 @@ func datastores(obs Observation) Dimension {
 	return d
 }
 
-// declaredComponent is one store the manifest declares, in the state the
-// declaration and this build together put it in.
+// storeDataComponent answers whether one store's branch holds production's
+// data.
 //
-// TWO STATES, and which one a stance gets is the whole of this function.
+// dataComponent in build.go with one arm fewer, and it is dropped because a
+// datastore has no such thing rather than because this does not look for it.
+// There is no subset of a second store: the slice is configured for the
+// primary database and taken from it. Nothing here reads a floor either,
+// because the count is what the store says it holds rather than a walk over
+// its rows.
+//
+// The empty arm is the manifest's own entry rather than an observed fact,
+// which is the one place this reads a declaration on purpose. A store that
+// names no source variable gets a golden of production's shape with none of
+// its rows, and that is decided by the manifest before anything runs.
+//
+// Kept beside declaredComponent rather than folded into build.go's version.
+// The two answer about different providers from different observations. What
+// they must agree on is the rule below rather than the code: a component is
+// not called a reproduction until something has compared it against
+// production, and neither of them can call one that on its own.
+func storeDataComponent(ds schema.Datastore, s Store) Component {
+	c := Component{Name: ds.Name + " data"}
+	switch {
+	case s.BranchReason != "":
+		// The branch could not be counted, so there is nothing to hold
+		// against production either. One unknown, reported once.
+		c.State, c.Detail = Unmeasured, s.BranchReason
+		return c
+	case ds.SourceURLEnv == "":
+		// A golden built with no source has production's shape and none of its
+		// rows, and reporting that as a copy of production would be this
+		// dimension overstating in exactly the way it was changed to stop
+		// understating. The refresh says the same sentence out loud when it
+		// makes one.
+		c.State = Substituted
+		c.Detail = describeStore(s) +
+			", and the store declares no source, so this is production's shape with none of its rows"
+	default:
+		c.State = Reproduced
+		c.Detail = describeStore(s) + ", branched from " + orUnknown(s.Golden)
+	}
+	return withoutAVolumeProfile(c, ds)
+}
+
+// withoutAVolumeProfile applies the primary database's own rule to a second
+// store: a branch nothing was compared against has not been shown to reproduce
+// anything.
+//
+// againstProduction in build.go makes that rule for the database, because a
+// golden built from a staging server holding two hundred rows was reported as
+// reproducing a production holding four billion, in the same words and with
+// the same verdict as a full copy. The second store is copied from whatever
+// address source_url_env names, so it carries the identical uncertainty, and
+// reporting it reproduced three hours after that was closed for the primary
+// would be the same defect one dimension lower.
+//
+// So the verdict is downgraded and the reason names what is missing. It does
+// NOT name a command to run, because there is not one: database.volume records
+// what production's Postgres holds and there is no equivalent for a second
+// store yet. Naming a fix that does not exist would be worse than naming the
+// gap, and the report telling somebody what this product cannot yet answer is
+// the thing it is for.
+//
+// It never improves a verdict, exactly as againstProduction never does. A
+// store with no source is still production's shape with none of its rows.
+func withoutAVolumeProfile(c Component, ds schema.Datastore) Component {
+	if c.State == Reproduced {
+		c.State = Unmeasured
+	}
+	c.Detail += ", and nothing here says what production's " + ds.Name +
+		" holds, so whether this branch reproduces it is unknown. The volume profile that " +
+		"answers that for the primary database, under database.volume, has no equivalent " +
+		"for a second store yet"
+	return c
+}
+
+// storeProvenanceComponent answers whether one store's branch can be shown to
+// have come from a golden that was masked and verified.
+//
+// Separate from the data for the reason provenanceComponent is separate from
+// it: a branch full of production's shape whose provenance nothing can check
+// is not the same result as one whose attestation verifies, and a single
+// verdict over both would hide whichever failed. On the second store that
+// distinction is sharper rather than softer, because the second store is
+// where the events are.
+func storeProvenanceComponent(name string, s Store) Component {
+	c := Component{Name: name + " provenance"}
+	switch {
+	case s.GoldenReason != "":
+		c.State, c.Detail = Unmeasured, s.GoldenReason
+	case !s.Attested:
+		c.State, c.Detail = Absent, orUnknown(s.Attestation)
+	default:
+		c.State = Reproduced
+		c.Detail = "golden " + s.Golden + ", " + s.Attestation
+	}
+	return c
+}
+
+// describeStore renders what one store's branch holds.
+func describeStore(s Store) string {
+	return fmt.Sprintf("%s over %s",
+		plural(int64(s.Tables), "table", "tables"), plural(s.Rows, "row", "rows"))
+}
+
+// declaredComponent is one store the manifest declares and this environment
+// does NOT hold a branch of, in the state the declaration puts it in.
+//
+// TWO STATES, and which one a stance gets is the whole of this function. A
+// store the environment branched never reaches here: it is reported by the two
+// components above, from what the branch holds.
 //
 // A stance of golden is ABSENT. The manifest asked for a masked, verified copy
-// of production in this store, this build has no such thing, and that is a
-// fact about the environment rather than a gap in what can be seen: there is
-// one golden, one masking pass, one verification scan and one branch, and all
-// four are the primary Postgres. Nothing has to read a ClickHouse to know that
-// nothing built a golden for it. So it is counted, in the denominator, and the
-// score goes down, which is the point: an analytics product's twin holding
-// masked Postgres metadata and zero events must not score as a faithful twin,
-// and until this it did, because unmeasured kept the one store the product is
-// about out of the number in both directions.
+// of production in this store, this environment has no such thing, and that is
+// a fact about the environment rather than a gap in what can be seen: nothing
+// branched one, so there is nothing to read. So it is counted, in the
+// denominator, and the score goes down, which is the point: an analytics
+// product's twin holding masked Postgres metadata and zero events must not
+// score as a faithful twin, and until the lane that wrote this it did, because
+// unmeasured kept the one store the product is about out of the number in both
+// directions.
 //
 // Every other stance stays UNMEASURED. Nothing in this build starts a second
 // store, rebuilds one from the branch or creates a topic in one, so whether an
@@ -171,8 +315,8 @@ func stanceGap(stance schema.DatastoreStance) string {
 		// is what tells somebody which four things would have to appear before
 		// this line changes.
 		return "nothing here built one: no golden, no attestation, no tables and no rows. " +
-			"There is one golden, one masking pass, one verification scan and one branch, " +
-			"and all four are the primary Postgres"
+			"af golden refresh makes a golden of this store and af up branches it, and " +
+			"this environment holds neither"
 	default:
 		// A stance no build of this engine knows. Validation refuses one, so
 		// reaching here means a manifest parsed by a newer engine than the one
