@@ -157,6 +157,9 @@ const (
 	AFDB031 Code = "AF-DB-031"
 	// The previous release does not survive this migration: {detail}
 	AFDB032 Code = "AF-DB-032"
+	// The migrations were not rehearsed, so this run says nothing about
+	// them: {detail}
+	AFDB033 Code = "AF-DB-033"
 
 	// Detection
 	// No application could be detected in {path}.
@@ -971,6 +974,15 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/insights",
 		Retryable: false,
 		ExitCode:  ExitTestFailure,
+	},
+	AFDB033: {
+		Code:      AFDB033,
+		Area:      "DB",
+		Message:   "The migrations were not rehearsed, so this run says nothing about them: {detail}",
+		NextStep:  "The report above names what was missing. Fix that, or pass --no-rehearsal to say the run is deliberately without it: a check that could not run must not exit like one that passed.",
+		Docs:      "concepts/insights",
+		Retryable: false,
+		ExitCode:  ExitVerification,
 	},
 	AFDET001: {
 		Code:      AFDET001,

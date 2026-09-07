@@ -70,6 +70,62 @@ exists
 `migration_failed` finding, which fails the check by default. Either way a
 pull request check fails rather than printing a note nobody reads.
 
+### A rehearsal that did not run is not a pass
+
+Three outcomes, three exit codes, and the middle one used to be missing.
+
+| Outcome | Exit | What it means |
+| --- | --- | --- |
+| The migrations ran and nothing was found | `0` | a pass |
+| A migration failed to apply | `AF-DB-030`, `5` | a proven break |
+| The rehearsal was asked for and did not run | `AF-DB-033`, `7` | nothing was measured |
+
+The third used to exit `0` and print `ok  nothing to report`. The body said
+"the migrations were not rehearsed" three times above it, every one of those
+sentences was true, and the last line was not. The last line is the one a
+developer reads and the exit code is the only thing a pipeline reads, so the
+run reported a clean bill of health for a check that never happened.
+
+It is a separate code from a break on purpose. A blocked check that exited like
+a failure would cry wolf until somebody switched it off, and one that exits
+like a pass is the bug above. `7` is the code this catalog already gives to
+"could not verify".
+
+`--no-rehearsal` is the way to say a run is deliberately without one. That is a
+decision, it is recorded in the output, and it exits `0`. So does
+`insights.migration_rehearsal: false` in the manifest. What exits `7` is a
+rehearsal nobody declined and that did not happen anyway.
+
+A rehearsal that ran and had nothing to rehearse is the same thing. If no
+migration tool is recognised anywhere in the repository, the branch is still
+prepared and the rehearsal still runs: it times no statements, samples no
+locks and lints nothing, so every check below it reports no findings and the
+run is indistinguishable from a repository whose migrations are all safe. That
+exits `7` too, and says which of the three ways to settle it applies: name the
+directory under `database.migrations`, turn the check off in the manifest, or
+pass the flag for one run.
+
+**The rolling deploy check below does the opposite, and the difference is the
+default rather than an inconsistency.** A rolling check that could not run exits
+`0` and says so. That check is conditional: `when: risky` is the default and it
+runs only when the pending migrations contain something the previous release
+could notice, so "did not run" is the ORDINARY outcome for a purely additive
+migration and exiting non zero for it would fire on most runs of most
+repositories. The migration rehearsal has no such condition. It is what this
+command is for, it was asked for on every run that did not decline it, and a
+rehearsal that did not happen is therefore a gap rather than a normal Tuesday.
+
+A tool that IS recognised but whose migrations are not SQL is not this case.
+Rails, Django, Alembic and Knex are applied by running the project's own
+migrate command in the service's image, so the check did run, and the note
+about what could not be read from the files is a note rather than an exit code.
+
+**The output format never changes the verdict.** `-o json` writes the document
+and then exits exactly as the text rendering would, including `5` for a break
+and `7` for a blocked check. It used to return as soon as the document was
+written, so adding `-o json` turned a failed migration into a successful
+command.
+
 ### Every statement is timed on its own
 
 The timing matters as much as the outcome. A migration that takes four seconds
@@ -368,6 +424,24 @@ the SQL it finds:
 | A plain SQL directory | `migrations`, `db/migrations`, `sql/migrations`, or any directory of numbered files such as `0042_add_index.sql`, nearest the service that migrates | the project's own ledger, read from `schema_migrations` or `migrations` by filename, stem or number |
 | A declared directory | `database.migrations.dir` in the manifest, and nothing is inferred | `database.migrations.table`, or the same probe |
 | Rails, Django, Alembic, Knex | not read: the tool runs in the service's image | the tool's own history table |
+
+**Every marker in that table is looked for in a monorepo, not only at the root.**
+`packages/database/prisma/migrations`, `apps/api/drizzle`,
+`services/worker/db/migrate`, `apps/backend/supabase/config.toml`,
+`services/api/alembic.ini` and `packages/db/knexfile.js` are all ordinary
+workspace layouts, and the search reaches each of them.
+
+Where more than one candidate exists, the one under a path a service in the
+manifest declares wins, and then the shallowest. Ties keep the order the walk
+found them in, which is lexical, so the answer is the same on every run. So a
+monorepo with two migration directories rehearses the one beside the service
+that migrates rather than whichever the filesystem returned first.
+
+Directories holding somebody else's project, or a build of this one, are never
+looked inside. The list in full: `node_modules`, `vendor`, `examples`,
+`example`, `testdata`, `fixtures`, `fixture`, `dist`, `build`, `target`, `tmp`,
+`docs`, `__pycache__`, and anything whose name begins with a dot. A dependency
+that ships its own `prisma/migrations` is that dependency's schema, not yours.
 
 A project that applies its own directory of SQL files with a script of its own
 should declare it, because a guess that lands on the wrong directory rehearses

@@ -364,6 +364,13 @@ errors:
     docs: concepts/insights
     retryable: false
     exit_code: 8
+  - code: AF-DB-033
+    area: DB
+    message: "The migrations were not rehearsed, so this run says nothing about them: {detail}"
+    next_step: "The report above names what was missing. Fix that, or pass --no-rehearsal to say the run is deliberately without it: a check that could not run must not exit like one that passed."
+    docs: concepts/insights
+    retryable: false
+    exit_code: 7
 
   # Masking
   - code: AF-MSK-001

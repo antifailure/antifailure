@@ -142,22 +142,204 @@ func Declared(fsys fs.FS, d *schema.Migrations) MigrationSet {
 }
 
 func discover(fsys fs.FS, hints []string) MigrationSet {
-	for _, find := range []func(fs.FS) (MigrationSet, bool){
-		findPrisma, findSupabase, findDrizzle, findFlyway,
-		findRails, findDjango, findAlembic, findKnex, findSQLDir,
+	l := &locator{fsys: fsys, hints: hints}
+	for _, find := range []func() (MigrationSet, bool){
+		l.findPrisma, l.findSupabase, l.findDrizzle, l.findFlyway,
+		l.findRails, l.findDjango, l.findAlembic, l.findKnex, l.findSQLDir,
 	} {
-		if set, ok := find(fsys); ok {
+		if set, ok := find(); ok {
 			return set
 		}
 	}
-	if set, ok := findNumberedSQLDir(fsys, hints); ok {
+	if set, ok := l.findNumberedSQLDir(); ok {
 		return set
 	}
 	return MigrationSet{}
 }
 
-func findPrisma(fsys fs.FS) (MigrationSet, bool) {
-	dir, ok := firstDirContaining(fsys, "prisma/migrations")
+// locator is a repository being searched, together with what the manifest says
+// about where its services live.
+//
+// Every finder is a method rather than a free function for one reason: the
+// search for a marker has to be the SAME search in all of them, and it has to
+// reach the hints. The version this replaced looked for prisma/migrations at
+// the root and exactly one level below, which finds it in a single service
+// repository and misses packages/database/prisma/migrations, apps/api/drizzle,
+// services/worker/db/migrate and every other ordinary workspace layout. The
+// marker FILES were worse still: supabase/config.toml, alembic.ini, manage.py
+// and knexfile.js were only ever looked for at the root, so a Python service
+// under services/api was answered with "no migration tool was recognised".
+//
+// Measured before this change, against the ten layouts in layouts_test.go
+// drawn from repositories on the prospect list: 1 of 10 discovered.
+type locator struct {
+	fsys  fs.FS
+	hints []string
+	// dirCache is every directory worth looking in, computed once. Nine
+	// finders each walking the tree is nine walks of a repository that can be
+	// large, and they would all get the same answer.
+	dirCache []searchDir
+	walked   bool
+}
+
+// searchDir is one directory the search will look in, with its depth.
+type searchDir struct {
+	path  string
+	depth int
+}
+
+// candidate is one place a marker was found, with what ranks it.
+type candidate struct {
+	dir   string
+	depth int
+	hint  bool
+}
+
+// dirs is the repository root and every directory within maxMigrationDepth of
+// it that is not somebody else's project.
+func (l *locator) dirs() []searchDir {
+	if l.walked {
+		return l.dirCache
+	}
+	l.walked = true
+	_ = fs.WalkDir(l.fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if p != "." && skipForMigrations(path.Base(p)) {
+			return fs.SkipDir
+		}
+		depth := 0
+		if p != "." {
+			depth = strings.Count(p, "/") + 1
+		}
+		if depth > maxMigrationDepth {
+			return fs.SkipDir
+		}
+		l.dirCache = append(l.dirCache, searchDir{path: p, depth: depth})
+		return nil
+	})
+	return l.dirCache
+}
+
+// best ranks the places a marker was found and returns the one to use.
+//
+// A directory under a path the manifest's services name wins, because a
+// monorepo with two of them should rehearse the one beside the service that
+// migrates. Among the rest the shallowest wins, because a repository that has
+// both a real one and a copy under a tool's own directory means the shallow
+// one. Ties break by name, so the answer does not depend on the order the
+// filesystem happened to hand back.
+func (l *locator) best(found []candidate) (string, bool) {
+	if len(found) == 0 {
+		return "", false
+	}
+	// Stable, and the stability IS the tie break. fs.WalkDir documents that
+	// it walks in lexical order and dirs() appends in that order, so equal
+	// candidates arrive sorted by name already. An explicit name comparison
+	// here was a line no fixture could ever fail, on fstest.MapFS or on
+	// os.DirFS, because both sort their directory entries: it agreed with the
+	// order it was breaking ties within. A line that cannot say no is the
+	// thing this file is being changed to stop shipping, so it is gone and
+	// the guarantee is by construction instead.
+	sort.SliceStable(found, func(i, j int) bool {
+		a, b := found[i], found[j]
+		if a.hint != b.hint {
+			return a.hint
+		}
+		return a.depth < b.depth
+	})
+	return found[0].dir, true
+}
+
+// mark builds a candidate for a path, deciding whether a hinted service claims
+// it. The hint is matched against the whole path rather than the base
+// directory, because "the service under shop" means shop and everything below.
+func (l *locator) mark(dir string, depth int) candidate {
+	c := candidate{dir: dir, depth: depth}
+	for _, h := range l.hints {
+		if dir == h || strings.HasPrefix(dir, h+"/") {
+			c.hint = true
+		}
+	}
+	return c
+}
+
+// dirNamed finds rel at the repository root or under any directory near it,
+// and returns the best candidate rather than the first one the walk reached.
+//
+// valid may be nil. Where it is not, a directory that fails it is not a
+// candidate and the search continues, which is the difference between "there
+// is a drizzle directory and it has no journal, so give up" and "find the
+// drizzle directory that has one".
+func (l *locator) dirNamed(rel string, valid func(dir string) bool) (string, bool) {
+	var found []candidate
+	for _, d := range l.dirs() {
+		p := rel
+		if d.path != "." {
+			p = path.Join(d.path, rel)
+		}
+		info, err := fs.Stat(l.fsys, p)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if valid != nil && !valid(p) {
+			continue
+		}
+		found = append(found, l.mark(p, d.depth))
+	}
+	return l.best(found)
+}
+
+// fileNamed finds a marker file at the root or under any directory near it,
+// and returns the directory it is relative to, "." for the root.
+//
+// The directory rather than the file, because every caller wants to look
+// beside it: supabase/config.toml says its migrations are in
+// supabase/migrations, and a manage.py says the Django project is the tree
+// around it.
+func (l *locator) fileNamed(rel string, valid func(p string) bool) (string, bool) {
+	var found []candidate
+	for _, d := range l.dirs() {
+		p := rel
+		if d.path != "." {
+			p = path.Join(d.path, rel)
+		}
+		info, err := fs.Stat(l.fsys, p)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if valid != nil && !valid(p) {
+			continue
+		}
+		found = append(found, l.mark(d.path, d.depth))
+	}
+	return l.best(found)
+}
+
+// under joins a directory found by fileNamed with a path relative to it,
+// keeping "." out of the result.
+func under(dir, rel string) string {
+	if dir == "." || dir == "" {
+		return rel
+	}
+	return path.Join(dir, rel)
+}
+
+// contains reports whether a file holds a string, case insensitively. It is
+// used where a marker file's NAME is not distinctive enough to be trusted on
+// its own once the search goes deeper than the root.
+func (l *locator) contains(p, want string) bool {
+	body, err := fs.ReadFile(l.fsys, p)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(body)), strings.ToLower(want))
+}
+
+func (l *locator) findPrisma() (MigrationSet, bool) {
+	fsys := l.fsys
+	dir, ok := l.dirNamed("prisma/migrations", nil)
 	if !ok {
 		return MigrationSet{}, false
 	}
@@ -184,23 +366,29 @@ func findPrisma(fsys fs.FS) (MigrationSet, bool) {
 	return MigrationSet{Tool: ToolPrisma, Dir: dir, Migrations: out}, true
 }
 
-func findSupabase(fsys fs.FS) (MigrationSet, bool) {
-	if !exists(fsys, "supabase/config.toml") {
+func (l *locator) findSupabase() (MigrationSet, bool) {
+	fsys := l.fsys
+	base, ok := l.fileNamed("supabase/config.toml", nil)
+	if !ok {
 		return MigrationSet{}, false
 	}
 	// Supabase records the leading timestamp, not the whole filename, in
 	// supabase_migrations.schema_migrations.version.
-	set := sqlFilesIn(fsys, "supabase/migrations", leadingDigits)
+	set := sqlFilesIn(fsys, under(base, "supabase/migrations"), leadingDigits)
 	set.Tool = ToolSupabase
 	return set, true
 }
 
-func findDrizzle(fsys fs.FS) (MigrationSet, bool) {
-	dir, ok := firstDirContaining(fsys, "drizzle")
+func (l *locator) findDrizzle() (MigrationSet, bool) {
+	fsys := l.fsys
+	// The journal is part of the predicate rather than a check afterwards. A
+	// repository with a drizzle directory that holds no journal used to end
+	// the search there, so a second one that did have a journal was never
+	// reached.
+	dir, ok := l.dirNamed("drizzle", func(d string) bool {
+		return exists(l.fsys, path.Join(d, "meta", "_journal.json"))
+	})
 	if !ok {
-		return MigrationSet{}, false
-	}
-	if !exists(fsys, path.Join(dir, "meta", "_journal.json")) {
 		return MigrationSet{}, false
 	}
 	// Drizzle hashes the file contents into __drizzle_migrations, which is not
@@ -211,23 +399,14 @@ func findDrizzle(fsys fs.FS) (MigrationSet, bool) {
 	return set, true
 }
 
-func findFlyway(fsys fs.FS) (MigrationSet, bool) {
-	for _, dir := range []string{
+func (l *locator) findFlyway() (MigrationSet, bool) {
+	fsys := l.fsys
+	for _, rel := range []string{
 		"sql", "migrations", "db/migration",
 		"src/main/resources/db/migration",
 	} {
-		entries, err := fs.ReadDir(fsys, dir)
-		if err != nil {
-			continue
-		}
-		found := false
-		for _, e := range entries {
-			if flywayName.MatchString(e.Name()) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		dir, ok := l.dirNamed(rel, l.holdsAFlywayMigration)
+		if !ok {
 			continue
 		}
 		// Flyway records the version between the leading V and the double
@@ -246,8 +425,8 @@ func findFlyway(fsys fs.FS) (MigrationSet, bool) {
 	return MigrationSet{}, false
 }
 
-func findRails(fsys fs.FS) (MigrationSet, bool) {
-	dir, ok := firstDirContaining(fsys, "db/migrate")
+func (l *locator) findRails() (MigrationSet, bool) {
+	dir, ok := l.dirNamed("db/migrate", nil)
 	if !ok {
 		return MigrationSet{}, false
 	}
@@ -258,8 +437,13 @@ func findRails(fsys fs.FS) (MigrationSet, bool) {
 	}, true
 }
 
-func findDjango(fsys fs.FS) (MigrationSet, bool) {
-	if !exists(fsys, "manage.py") {
+func (l *locator) findDjango() (MigrationSet, bool) {
+	// manage.py is not a distinctive enough name to trust anywhere in a tree
+	// the way supabase/config.toml or alembic.ini are, so the file has to say
+	// django. Every manage.py django-admin has ever generated does.
+	if _, ok := l.fileNamed("manage.py", func(p string) bool {
+		return l.contains(p, "django")
+	}); !ok {
 		return MigrationSet{}, false
 	}
 	return MigrationSet{
@@ -269,8 +453,8 @@ func findDjango(fsys fs.FS) (MigrationSet, bool) {
 	}, true
 }
 
-func findAlembic(fsys fs.FS) (MigrationSet, bool) {
-	if !exists(fsys, "alembic.ini") {
+func (l *locator) findAlembic() (MigrationSet, bool) {
+	if _, ok := l.fileNamed("alembic.ini", nil); !ok {
 		return MigrationSet{}, false
 	}
 	return MigrationSet{
@@ -280,8 +464,10 @@ func findAlembic(fsys fs.FS) (MigrationSet, bool) {
 	}, true
 }
 
-func findKnex(fsys fs.FS) (MigrationSet, bool) {
-	if !exists(fsys, "knexfile.js") && !exists(fsys, "knexfile.ts") {
+func (l *locator) findKnex() (MigrationSet, bool) {
+	_, js := l.fileNamed("knexfile.js", nil)
+	_, ts := l.fileNamed("knexfile.ts", nil)
+	if !js && !ts {
 		return MigrationSet{}, false
 	}
 	return MigrationSet{
@@ -291,7 +477,8 @@ func findKnex(fsys fs.FS) (MigrationSet, bool) {
 	}, true
 }
 
-func findSQLDir(fsys fs.FS) (MigrationSet, bool) {
+func (l *locator) findSQLDir() (MigrationSet, bool) {
+	fsys := l.fsys
 	// Last, because every tool above also has a directory of SQL somewhere
 	// and a project with no tool at all is the case this is for.
 	for _, dir := range []string{"migrations", "migrate", "db/migrations", "sql/migrations"} {
@@ -325,34 +512,12 @@ func findSQLDir(fsys fs.FS) (MigrationSet, bool) {
 // service paths wins; among the rest the shallowest wins; ties break by name.
 // Directories that hold other people's projects are skipped: examples,
 // fixtures, test data, vendored code and anything dot prefixed.
-func findNumberedSQLDir(fsys fs.FS, hints []string) (MigrationSet, bool) {
-	type candidate struct {
-		dir   string
-		depth int
-		hint  bool
-		count int
-	}
+func (l *locator) findNumberedSQLDir() (MigrationSet, bool) {
 	var found []candidate
-	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+	for _, d := range l.dirs() {
+		entries, err := fs.ReadDir(l.fsys, d.path)
 		if err != nil {
-			return nil
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		if p != "." && skipForMigrations(path.Base(p)) {
-			return fs.SkipDir
-		}
-		depth := strings.Count(p, "/") + 1
-		if p == "." {
-			depth = 0
-		}
-		if depth > maxMigrationDepth {
-			return fs.SkipDir
-		}
-		entries, err := fs.ReadDir(fsys, p)
-		if err != nil {
-			return nil
+			continue
 		}
 		n := 0
 		for _, e := range entries {
@@ -361,33 +526,33 @@ func findNumberedSQLDir(fsys fs.FS, hints []string) (MigrationSet, bool) {
 			}
 		}
 		if n < 2 {
-			return nil
+			continue
 		}
-		c := candidate{dir: p, depth: depth, count: n}
-		for _, h := range hints {
-			if p == h || strings.HasPrefix(p, h+"/") {
-				c.hint = true
-			}
-		}
-		found = append(found, c)
-		return nil
-	})
-	if len(found) == 0 {
+		found = append(found, l.mark(d.path, d.depth))
+	}
+	dir, ok := l.best(found)
+	if !ok {
 		return MigrationSet{}, false
 	}
-	sort.Slice(found, func(i, j int) bool {
-		a, b := found[i], found[j]
-		if a.hint != b.hint {
-			return a.hint
-		}
-		if a.depth != b.depth {
-			return a.depth < b.depth
-		}
-		return a.dir < b.dir
-	})
-	set := sqlFilesIn(fsys, found[0].dir, func(name string) string { return name })
+	set := sqlFilesIn(l.fsys, dir, func(name string) string { return name })
 	set.Tool = ToolSQLDir
 	return set, true
+}
+
+// holdsAFlywayMigration reports whether a directory holds a file Flyway would
+// apply, which is what makes a directory named "sql" a migration directory
+// rather than a directory of queries.
+func (l *locator) holdsAFlywayMigration(dir string) bool {
+	entries, err := fs.ReadDir(l.fsys, dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && flywayName.MatchString(e.Name()) {
+			return true
+		}
+	}
+	return false
 }
 
 // maxMigrationDepth bounds the fallback walk. Five levels reaches
@@ -395,8 +560,16 @@ func findNumberedSQLDir(fsys fs.FS, hints []string) (MigrationSet, bool) {
 // whole node_modules that escaped the skip list under another name.
 const maxMigrationDepth = 5
 
-// skipForMigrations names the directories the fallback never looks inside,
-// because what they hold is somebody else's project or a copy of this one.
+// skipForMigrations names the directories the search never looks inside,
+// because what they hold is somebody else's project or a build of this one.
+//
+// It used to guard one fallback. It now guards every marker, which is what
+// deepening the search made necessary: a dependency shipping its own
+// prisma/migrations is that dependency's schema, and answering with it would
+// rehearse somebody else's migrations with a straight face.
+//
+// docs/src/content/docs/concepts/insights.md prints this list in full. A
+// document that names seven of thirteen reads as though it named all of them.
 func skipForMigrations(base string) bool {
 	if strings.HasPrefix(base, ".") {
 		return true
@@ -495,33 +668,6 @@ func flywayVersion(name string) string {
 func exists(fsys fs.FS, p string) bool {
 	_, err := fs.Stat(fsys, p)
 	return err == nil
-}
-
-// firstDirContaining finds suffix at the root or one level down, which is
-// where it lives in the single service repository and in the monorepo.
-func firstDirContaining(fsys fs.FS, suffix string) (string, bool) {
-	if info, err := fs.Stat(fsys, suffix); err == nil && info.IsDir() {
-		return suffix, true
-	}
-	entries, err := fs.ReadDir(fsys, ".")
-	if err != nil {
-		return "", false
-	}
-	var found []string
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || e.Name() == "node_modules" {
-			continue
-		}
-		p := path.Join(e.Name(), suffix)
-		if info, err := fs.Stat(fsys, p); err == nil && info.IsDir() {
-			found = append(found, p)
-		}
-	}
-	if len(found) == 0 {
-		return "", false
-	}
-	sort.Strings(found)
-	return found[0], true
 }
 
 // historyQuery is the statement that lists what a tool has already applied.
