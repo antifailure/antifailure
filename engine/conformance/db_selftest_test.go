@@ -119,7 +119,7 @@ func TestDatabaseSuiteChild(t *testing.T) {
 		}
 		p = fakes.Break(p, fault)
 		if u, ok := p.(fakes.Uninjectable); ok {
-			t.Fatalf("%s: %v", notInjected, u)
+			t.Fatalf("%s: the provider %q cannot host the fault %q", notInjected, u.Provider, u.Fault)
 		}
 		return p
 	}
@@ -397,12 +397,13 @@ func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 	})
 	proved := map[string]bool{}
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n%-46s  %-42s  %-8s  %s\n", "BEHAVIOR", "THE BREAK THAT PROVES IT", "BACKEND", "WHAT WENT RED")
+	fmt.Fprintf(&b, "\nEvery row is a subtest of TestDatabaseSuiteChild that went red under the break beside it.\n")
+	fmt.Fprintf(&b, "%-46s  %-46s  %-8s  %s\n", "BEHAVIOR", "THE BREAK THAT PROVES IT", "BACKEND", "WHAT WENT RED")
 	for _, r := range rows {
 		if r.proved {
 			proved[r.behavior] = true
 		}
-		fmt.Fprintf(&b, "%-46s  %-42s  %-8s  %s\n", r.behavior, r.fault, r.backend, r.note)
+		fmt.Fprintf(&b, "%-46s  %-46s  %-8s  %s\n", r.behavior, r.fault, r.backend, r.note)
 	}
 	all := conformance.Behaviors()
 	fmt.Fprintf(&b, "\n%d of %d behaviors proved able to fail.\n", len(proved), len(all))
