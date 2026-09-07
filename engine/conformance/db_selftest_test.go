@@ -157,8 +157,7 @@ func runChild(t *testing.T, c child) (bool, string) {
 		cmd.Env = append(cmd.Env, unverifiedEnv+"=1")
 	}
 	if c.backend == onPG {
-		prefix := requirePostgres(t)
-		cmd.Env = append(cmd.Env, urlEnv+"="+postgresURL(), prefixEnv+"="+prefix)
+		cmd.Env = append(cmd.Env, urlEnv+"="+postgresURL(), prefixEnv+"="+newPostgresPrefix(t))
 	}
 	out, err := cmd.CombinedOutput()
 	text := string(out)
@@ -169,14 +168,15 @@ func runChild(t *testing.T, c child) (bool, string) {
 	return err == nil, text
 }
 
-// requirePostgres returns a database name prefix nothing else will use, after
-// proving the server is there.
+// postgresReachable answers once, in the parent, whether the five behaviours
+// that read rows can be proved on this machine.
 //
-// A skip here is the false green this whole file is against, which is why CI
-// sets AF_REQUIRE_DATABASE: on a developer's machine with no server the five
-// behaviours that need one are honestly skipped and said to be skipped, and in
-// CI their absence fails the job.
-func requirePostgres(t *testing.T) string {
+// Asked here rather than inside each child because the answer changes what the
+// table at the end is allowed to claim. A skip is the false green this whole
+// file is against, so it is never silent: on a developer's machine with no
+// server the rows that need one say so by name, and CI sets AF_REQUIRE_DATABASE
+// so that its absence fails the job instead.
+func postgresReachable(t *testing.T) bool {
 	t.Helper()
 
 	prefix, err := fakes.NewPrefix()
@@ -193,11 +193,22 @@ func requirePostgres(t *testing.T) string {
 			t.Fatalf("AF_REQUIRE_DATABASE is set and there is no usable Postgres at %s: %v",
 				postgresURL(), err)
 		}
-		t.Skipf("skipped: the behaviours that read rows need a Postgres at %s: %v",
+		t.Logf("no Postgres at %s, so the behaviours that read rows cannot be proved here: %v",
 			postgresURL(), err)
+		return false
 	}
 	_ = p.Close()
+	return true
+}
 
+// newPostgresPrefix returns a database name prefix nothing else will use, and
+// sweeps it when the test finishes.
+func newPostgresPrefix(t *testing.T) string {
+	t.Helper()
+	prefix, err := fakes.NewPrefix()
+	if err != nil {
+		t.Fatalf("build a database prefix: %v", err)
+	}
 	t.Cleanup(func() {
 		// The child is a separate process and a behaviour that failed on
 		// purpose legitimately leaves its databases behind, so nothing else
@@ -241,6 +252,9 @@ func TestTheSuitePassesAgainstAProviderThatKeepsItsGuarantees(t *testing.T) {
 // Postgres fake is a correct provider rather than one that happens to satisfy
 // the five behaviours pointed at it.
 func TestThePostgresBackedFakeKeepsEveryGuarantee(t *testing.T) {
+	if !postgresReachable(t) {
+		t.Skipf("skipped: the whole suite needs a Postgres at %s", postgresURL())
+	}
 	passed, out := runChild(t, child{backend: onPG})
 	for _, b := range conformance.Behaviors() {
 		requireRan(t, b.Name, passed, out)
@@ -313,6 +327,7 @@ var unfalsifiableAssertions = map[string]string{
 // completeness assertion at the end is what stops one being added without one.
 func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 	catches := fakes.Catches()
+	pgOK := postgresReachable(t)
 
 	type row struct {
 		behavior string
@@ -328,6 +343,12 @@ func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 		behavior := catches[f]
 		backend := backendFor(behavior)
 		t.Run(string(f), func(t *testing.T) {
+			if backend == onPG && !pgOK {
+				rows = append(rows, row{behavior, f, backend, "", false,
+					"NOT PROVED HERE: no Postgres at " + postgresURL()})
+				t.Skipf("skipped: %s reads rows, which needs a Postgres at %s",
+					behavior, postgresURL())
+			}
 			c := child{backend: backend, behavior: behavior, fault: f}
 			// The one fault whose premise is a version that failed
 			// verification and was published anyway. Without the affordance
@@ -402,18 +423,32 @@ func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 		return
 	}
 
-	var missing []string
+	var missing, needServer []string
 	for _, beh := range all {
-		if !proved[beh.Name] {
-			missing = append(missing, beh.Name)
+		if proved[beh.Name] {
+			continue
+		}
+		missing = append(missing, beh.Name)
+		if fakes.NeedsRows()[beh.Name] {
+			needServer = append(needServer, beh.Name)
 		}
 	}
-	if len(missing) > 0 {
-		t.Fatalf("%d of %d behaviors have never been watched fail: %s.\n"+
-			"A behaviour with no break is a row in a list, not a check. Add a fault in "+
-			"internal/testutil/fakes that violates exactly the property it names.",
-			len(missing), len(all), strings.Join(missing, ", "))
+	if len(missing) == 0 {
+		return
 	}
+	if !pgOK && len(needServer) == len(missing) {
+		// Said out loud rather than counted as proved. CI sets
+		// AF_REQUIRE_DATABASE, which turns the missing server into a failure
+		// before this line, so this is a developer's machine and not the gate.
+		t.Logf("%d of %d proved on this machine. The other %d read rows and there is no "+
+			"Postgres at %s: %s", len(all)-len(missing), len(all), len(missing),
+			postgresURL(), strings.Join(missing, ", "))
+		return
+	}
+	t.Fatalf("%d of %d behaviors have never been watched fail: %s.\n"+
+		"A behaviour with no break is a row in a list, not a check. Add a fault in "+
+		"internal/testutil/fakes that violates exactly the property it names.",
+		len(missing), len(all), strings.Join(missing, ", "))
 }
 
 // firstAssertion pulls the line the child failed on, so the table says what
