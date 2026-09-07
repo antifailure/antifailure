@@ -782,6 +782,7 @@ services:
         sandbox: true
   - name: worker
     kind: worker
+    replicas: 3
   - name: nightly
     kind: cron
     command: node scripts/nightly.js
@@ -819,6 +820,11 @@ load:
 	out := strings.Join(strings.Fields(manifest.Explain(m, 0)), " ")
 	for _, want := range []string{
 		"Application shop", "web", "worker", "nightly", "0 3 * * *",
+		// A manifest asking for three instances of a worker says so on the
+		// page that explains what the environment will be. It is the line
+		// that tells a reader they are looking at a topology rather than a
+		// single copy of everything.
+		"instances 3",
 		"npx prisma migrate deploy", "STRIPE_KEY (sandbox)",
 		"PROD_DATABASE_URL", "never stored",
 		"api.stripe.com", "sandbox", "Billing runs against the Stripe sandbox.",

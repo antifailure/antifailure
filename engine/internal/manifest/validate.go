@@ -168,6 +168,7 @@ func (v *validator) services(m *schema.Manifest) {
 		v.build(base, s)
 		v.env(base, s)
 		v.deadFields(base, s)
+		v.replicas(base, s)
 
 		if _, err := ParseDuration(s.HealthTimeout); err != nil {
 			v.add(base+".health_timeout",
@@ -179,34 +180,64 @@ func (v *validator) services(m *schema.Manifest) {
 	v.dependencies(m, names)
 }
 
-// deadFields refuses the three service fields nothing reads.
+// replicas checks the instance count a service asks for.
+//
+// The field was refused outright until both runtimes honoured it, and the two
+// rules that remain are the two a runtime cannot rescue.
+//
+// A count outside the range is refused rather than clamped. schemas/
+// manifest.v1.json carries the same bounds, but nothing validates a manifest
+// against the JSON Schema at parse time, so the schema alone would let
+// "replicas: 0" through to a runtime that has to decide what nothing means.
+// Zero and one are not the same statement: an omitted key says the author
+// never thought about it and one instance is the answer, and a written zero
+// says they want none, which is a service they should delete rather than one
+// the engine should silently start.
+//
+// A cron service may not ask for more than one. A scheduled job is a side
+// effect the author expects to happen once, and three instances of it happen
+// three times: three invoices, three charges, three nightly emails. That is
+// the exact class of bug instance counts exist to expose, and reproducing it
+// on purpose in the twin is useful, while shipping it as the meaning of a
+// manifest key is not.
+func (v *validator) replicas(base string, s *schema.Service) {
+	if !declaredAt(v.doc, base+".replicas") {
+		return
+	}
+	if s.Replicas < 1 || s.Replicas > schema.MaxReplicas {
+		v.add(base+".replicas",
+			fmt.Sprintf("Service %q asks for %d instances.", s.Name, s.Replicas),
+			fmt.Sprintf("The count runs from 1 to %d. Remove the key to run one.", schema.MaxReplicas))
+		return
+	}
+	if s.Kind == schema.ServiceCron && s.Replicas > 1 {
+		v.add(base+".replicas",
+			fmt.Sprintf("Service %q is a cron service and asks for %d instances.", s.Name, s.Replicas),
+			"Every instance runs the schedule, so three instances send the nightly email three "+
+				"times. Run one, or move the work into a worker that claims it before doing it.")
+	}
+}
+
+// deadFields refuses the two service fields nothing reads.
 //
 // The same judgement loadThresholds applies to query_count_increase, and it is
-// here for the same reason. replicas, resources.cpu and resources.memory are
-// in schemas/manifest.v1.json, so the reference documents them and a manifest
-// carrying them parses without a word. Nothing then reads them. The local
-// runtime never mentions replicas, both Kubernetes Deployments hardcode one
-// replica in internal/runtime/k8s/objects.go, and neither runtime emits a CPU
-// or a memory limit at all. A manifest asking for three instances of a worker
-// got one, and the run went green having proved nothing about the case its
-// author was worried about.
+// here for the same reason. resources.cpu and resources.memory are in
+// schemas/manifest.v1.json, so the reference documents them and a manifest
+// carrying them parses without a word. Nothing then reads them: neither
+// runtime emits a CPU or a memory limit at all, so a cap written here is
+// enforced nowhere and the service carrying it runs with none.
 //
-// That silence is the defect rather than the missing feature. Somebody writes
-// replicas: 3 to reproduce a double processing bug, is quietly given one
-// instance, and reads the green run as the bug being absent. A refusal costs
-// them a line in the manifest; the silence costs them the finding.
+// That silence is the defect rather than the missing feature. A refusal costs
+// the author a line in the manifest; the silence costs them the finding.
 //
-// Only a value somebody wrote is refused. normalize fills all three in on
-// every manifest that omits them, so refusing the engine's own defaults would
-// fail every manifest rather than the ones making a promise the engine cannot
-// keep.
+// replicas was refused here too, and is not any more. It is honoured, in both
+// runtimes, and the rules that remain for it are in replicas below. The
+// refusal was the right answer for exactly as long as the field did nothing.
+//
+// Only a value somebody wrote is refused. normalize fills neither in, so
+// refusing the engine's own defaults would fail every manifest rather than the
+// ones making a promise the engine cannot keep.
 func (v *validator) deadFields(base string, s *schema.Service) {
-	if declaredAt(v.doc, base+".replicas") {
-		v.add(base+".replicas",
-			fmt.Sprintf("Nothing reads replicas, so service %q would run one instance whatever this says.", s.Name),
-			"Both runtimes start exactly one container per service. Remove the key rather than "+
-				"leaving a number in the manifest that no part of the engine consults.")
-	}
 	if declaredAt(v.doc, base+".resources.cpu") {
 		v.add(base+".resources.cpu",
 			fmt.Sprintf("Nothing reads resources.cpu, so service %q would run with no CPU limit at all.", s.Name),

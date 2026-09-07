@@ -365,6 +365,12 @@ func (r *Runtime) proxyObjects(
 			Name: ProxyName, Namespace: namespace, Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
+			// One, always, and not the count any service asked for. The
+			// sidecar is the environment's resolver and its only route out,
+			// and every service is pointed at one address for it. A second
+			// one would answer half the environment's DNS from a second
+			// decision log, so a run's record of what it refused would be
+			// split across two pods and neither would be the whole story.
 			Replicas: int32Ref(1),
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{
 				LabelEnv: envID, LabelComponent: ComponentProxy,
@@ -609,7 +615,15 @@ func (r *Runtime) deploymentFor(
 			Name: s.Name, Namespace: namespace, Labels: labels,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: int32Ref(1),
+			// What the manifest asked for, and one where it asked for
+			// nothing. This used to be a hardcoded one, so a manifest saying
+			// replicas: 3 got a single pod and the run went green having
+			// proved nothing about the case its author was worried about.
+			//
+			// The Service in front of these pods selects on the same labels,
+			// so all of them answer the one name other services resolve, and
+			// kube-proxy spreads connections across them.
+			Replicas: int32Ref(int32(s.Instances())),
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{
 				LabelEnv: spec.EnvID, LabelService: s.Name,
 			}},

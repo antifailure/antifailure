@@ -16,42 +16,44 @@ import (
 // runtime could plausibly get wrong, and each has exactly one behavior in the
 // suite whose job is to catch it.
 const (
-	flawNone                       = ""
-	flawNoName                     = "no-name"
-	flawLiesAboutLogs              = "lies-about-logs"
-	flawAcceptsEmptyEnvID          = "accepts-empty-env-id"
-	flawNoProxy                    = "no-proxy"
-	flawNoURL                      = "no-url"
-	flawDuplicatesOnSecondUp       = "duplicates-on-second-up"
-	flawIgnoresDependencies        = "ignores-dependencies"
-	flawHangsOnCycle               = "hangs-on-cycle"
-	flawIgnoresMissingDependency   = "ignores-missing-dependency"
-	flawStartsAfterFailedMigration = "starts-after-failed-migration"
-	flawRollsBackFailedService     = "rolls-back-failed-service"
-	flawIgnoresJournalRefusal      = "ignores-journal-refusal"
-	flawJournalsUnfindableNames    = "journals-unfindable-names"
-	flawJournalsAfterCreating      = "journals-after-creating"
-	flawLosesServiceKind           = "loses-service-kind"
-	flawNoExitCode                 = "no-exit-code"
-	flawExitCodeWhileRunning       = "exit-code-while-running"
-	flawErrorsOnUnknownEnv         = "errors-on-unknown-env"
-	flawDownLeavesResources        = "down-leaves-resources"
-	flawDownErrorsWhenAbsent       = "down-errors-when-absent"
-	flawDownNotIdempotent          = "down-not-idempotent"
-	flawDownRemovesEverything      = "down-removes-everything"
-	flawEmptyInventory             = "empty-inventory"
-	flawInventoryWithoutEnvID      = "inventory-without-env-id"
-	flawNoPolicyAllowsEverything   = "no-policy-allows-everything"
-	flawBlocksAllowedHost          = "blocks-allowed-host"
-	flawAllowsUnnamedHost          = "allows-unnamed-host"
-	flawHonoursProxyVarsOnly       = "honours-proxy-vars-only"
-	flawRawAddressEscapes          = "raw-address-escapes"
-	flawMetadataReachable          = "metadata-reachable"
-	flawUDPEscapes                 = "udp-escapes"
-	flawNamesCrossEnvironments     = "names-cross-environments"
-	flawNoLogs                     = "no-logs"
-	flawLeaksOnTeardown            = "leaks-on-teardown"
-	flawPodNeverGoverned           = "pod-never-governed"
+	flawNone                        = ""
+	flawNoName                      = "no-name"
+	flawLiesAboutLogs               = "lies-about-logs"
+	flawAcceptsEmptyEnvID           = "accepts-empty-env-id"
+	flawNoProxy                     = "no-proxy"
+	flawNoURL                       = "no-url"
+	flawDuplicatesOnSecondUp        = "duplicates-on-second-up"
+	flawIgnoresDependencies         = "ignores-dependencies"
+	flawHangsOnCycle                = "hangs-on-cycle"
+	flawIgnoresMissingDependency    = "ignores-missing-dependency"
+	flawStartsAfterFailedMigration  = "starts-after-failed-migration"
+	flawRollsBackFailedService      = "rolls-back-failed-service"
+	flawIgnoresJournalRefusal       = "ignores-journal-refusal"
+	flawJournalsUnfindableNames     = "journals-unfindable-names"
+	flawJournalsAfterCreating       = "journals-after-creating"
+	flawLosesServiceKind            = "loses-service-kind"
+	flawNoExitCode                  = "no-exit-code"
+	flawExitCodeWhileRunning        = "exit-code-while-running"
+	flawErrorsOnUnknownEnv          = "errors-on-unknown-env"
+	flawDownLeavesResources         = "down-leaves-resources"
+	flawDownErrorsWhenAbsent        = "down-errors-when-absent"
+	flawDownNotIdempotent           = "down-not-idempotent"
+	flawDownRemovesEverything       = "down-removes-everything"
+	flawEmptyInventory              = "empty-inventory"
+	flawInventoryWithoutEnvID       = "inventory-without-env-id"
+	flawNoPolicyAllowsEverything    = "no-policy-allows-everything"
+	flawBlocksAllowedHost           = "blocks-allowed-host"
+	flawAllowsUnnamedHost           = "allows-unnamed-host"
+	flawHonoursProxyVarsOnly        = "honours-proxy-vars-only"
+	flawRawAddressEscapes           = "raw-address-escapes"
+	flawMetadataReachable           = "metadata-reachable"
+	flawUDPEscapes                  = "udp-escapes"
+	flawNamesCrossEnvironments      = "names-cross-environments"
+	flawNoLogs                      = "no-logs"
+	flawLeaksOnTeardown             = "leaks-on-teardown"
+	flawPodNeverGoverned            = "pod-never-governed"
+	flawIgnoresReplicas             = "ignores-replicas"
+	flawOneInstancePretendsToBeMany = "one-instance-pretends-to-be-many"
 )
 
 // negativeControls pairs each flaw with the behavior that has to notice it.
@@ -98,6 +100,16 @@ var negativeControls = []struct {
 	{flawUDPEscapes, "--- FAIL: TestRuntimeSuiteChild/Egress_CannotBeBypassedByUDP"},
 	{flawNamesCrossEnvironments, "resolved to ANOTHER environment's service"},
 	{flawNoLogs, "--- FAIL: TestRuntimeSuiteChild/Logs_ReturnWhatAServiceWrote"},
+	{flawIgnoresReplicas, "--- FAIL: TestRuntimeSuiteChild/Up_RunsTheNumberOfInstancesAsked"},
+	// The pair that makes the count mean anything.
+	//
+	// A count is a number the runtime writes down, and a runtime that writes
+	// three while running one reports exactly what a correct one does. The
+	// behavior above cannot tell them apart and nothing about it says so, so
+	// without this row the instance count would be a claim the suite checks
+	// against itself. This is the same argument as flawPodNeverGoverned: the
+	// observation has to come from inside.
+	{flawOneInstancePretendsToBeMany, "--- FAIL: TestRuntimeSuiteChild/Up_InstancesAreSeparateProcesses"},
 	// Not a behavior. The leak check runs after every behavior has passed, and
 	// it is the one assertion a green suite can still fail.
 	{flawLeaksOnTeardown, "the suite left"},

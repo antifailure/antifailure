@@ -191,6 +191,26 @@ func TestServices(t *testing.T) {
 		require.Contains(t, c.Detail, "http://127.0.0.1:8080")
 	})
 
+	t.Run("a service asking for more than one instance names both numbers", func(t *testing.T) {
+		// A twin whose manifest asks for three instances and whose runtime is
+		// running one is not the topology somebody declared, and until this
+		// the report said "worker, running" for both. The dimension that
+		// SCORES the difference is separate work; this is what makes the
+		// difference visible at all rather than nowhere.
+		obs := full()
+		obs.Manifest.Services[1].Replicas = 3
+		obs.Running[1].Instances = 2
+		c := componentState(t, fidelity.Build(obs), schema.FidelityServices, "worker")
+		require.Contains(t, c.Detail, "2 of 3 instances")
+	})
+
+	t.Run("a service asking for one instance says nothing about instances", func(t *testing.T) {
+		// The control. A count on every line in every report would train the
+		// eye to skip the line on the one report where it says three.
+		c := componentState(t, fidelity.Build(full()), schema.FidelityServices, "worker")
+		require.NotContains(t, c.Detail, "instances")
+	})
+
 	t.Run("declared and not running is absent", func(t *testing.T) {
 		obs := full()
 		obs.Running = obs.Running[:1]

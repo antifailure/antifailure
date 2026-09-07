@@ -44,6 +44,11 @@ type ServiceJSON struct {
 	Ready  bool   `json:"ready"`
 	State  string `json:"state,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Instances is how many of the service are running. Always present, even
+	// at one, because a consumer reading it as "absent means one" and a
+	// consumer reading it as "absent means unknown" would both be reasonable
+	// and only one of them would be right.
+	Instances int `json:"instances"`
 }
 
 // StatusJSON is the machine readable form of af status.
@@ -496,9 +501,16 @@ func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
 func servicesJSON(services []provider.RunningService) []ServiceJSON {
 	out := make([]ServiceJSON, 0, len(services))
 	for _, s := range services {
+		instances := s.Instances
+		if instances < 1 {
+			// A runtime that predates instance counts reports none, and none
+			// is not what it is running.
+			instances = 1
+		}
 		out = append(out, ServiceJSON{
 			Name: s.Name, Kind: s.Kind, URL: s.URL,
 			Ready: s.Ready, State: s.State, Detail: s.Detail,
+			Instances: instances,
 		})
 	}
 	return out
@@ -516,6 +528,13 @@ func renderServices(e *Env, services []provider.RunningService) {
 		detail := s.URL
 		if detail == "" {
 			detail = s.State
+		}
+		// The instance count only appears when there is more than one of
+		// something, because a count of one on every line is noise on every
+		// environment anybody has ever run and would train the eye to skip
+		// the place the interesting number appears.
+		if s.Instances > 1 {
+			detail = fmt.Sprintf("%s  %d instances", detail, s.Instances)
 		}
 		e.Out.Status(symbol, s.Name, detail)
 		if !s.Ready && s.Detail != "" {

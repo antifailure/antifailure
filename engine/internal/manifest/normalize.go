@@ -127,13 +127,24 @@ func normalizeService(s *schema.Service) {
 	if s.HealthTimeout == "" {
 		s.HealthTimeout = DefaultHealthTimeout
 	}
-	// replicas, resources.cpu and resources.memory are not defaulted here, and
-	// that is the point of the change that removed it. Nothing reads any of
-	// the three, so a default was a value the engine wrote down and never
-	// consulted, and validate refuses one an author writes. Filling them in
-	// anyway would put a key the engine refuses into every normalized
-	// manifest, which is exactly what TestNormalize_IsIdempotent caught: the
-	// manifest this function produced no longer parsed.
+	// replicas is read now, and it is still not defaulted here. Zero means
+	// one at the point of use, in Instances, and writing the one in would put
+	// a key into every normalized manifest that nobody asked for: the
+	// normalized document is the image cache key and the thing a fidelity
+	// report is built from, so a manifest declaring no instance count has to
+	// normalize to what it did before instance counts were honoured.
+	//
+	// Not defaulting is also what lets validation tell "replicas: 0", which
+	// is refused, apart from an omitted key, which is not. normalize runs
+	// first and cannot see the difference between the two once it has filled
+	// one in.
+	//
+	// resources.cpu and resources.memory are not defaulted for the older
+	// reason: nothing reads either, validate refuses one an author writes,
+	// and a default would put a key the engine refuses into every normalized
+	// manifest. That is what TestNormalize_IsIdempotent caught when all three
+	// were defaulted here: the manifest this function produced no longer
+	// parsed.
 	if s.Build == nil {
 		s.Build = &schema.Build{}
 	}

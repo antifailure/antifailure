@@ -24,11 +24,53 @@ import (
 
 // containerName is deterministic, so a second run finds the container the
 // first one made rather than starting a duplicate that fights it for the port.
-func containerName(envID, service string) string {
-	return "af-svc-" + envID + "-" + service
+//
+// The first instance keeps the name it has always had and only the second and
+// later carry an ordinal. That asymmetry is deliberate. Reuse is keyed on the
+// name: an environment created before instance counts were honoured holds a
+// container called af-svc-<env>-<service>, and renaming the first instance
+// would leave that container running, unrecognised by the next Up, holding the
+// same network alias as the container that replaced it. Two processes behind
+// one name is the exact failure this whole lane exists to make visible, and
+// shipping it as an upgrade artefact would be absurd.
+func containerName(envID, service string, ordinal int) string {
+	name := "af-svc-" + envID + "-" + service
+	if ordinal <= 1 {
+		return name
+	}
+	return name + "-" + strconv.Itoa(ordinal)
 }
 
-// startService creates, starts, and waits for one service.
+// startService creates, starts, and waits for every instance of one service.
+//
+// One migration, one ingress, N containers. Each of those counts is a decision
+// rather than an accident of the loop:
+//
+// The migration runs ONCE. It is the schema change the service needs, not
+// something each copy of the service does for itself, and three containers
+// racing the same migration is a failure people have shipped to production
+// often enough that it is one of the bugs this field exists to reproduce, not
+// one to reproduce inside the runtime.
+//
+// The ingress is ONE forwarder for the service, not one per instance. It
+// forwards to the service's name, which every instance answers to, and socat
+// resolves that name per connection, so requests spread across the instances
+// the way a load balancer would. That is what makes a sticky session
+// assumption visible: the second request lands somewhere else.
+//
+// Readiness waits for EVERY instance. Reporting a service ready when one of
+// three has answered is the same lie as reporting three when one is running,
+// and a dependant that starts on it races the two that are still coming up.
+//
+// The limit of that, stated rather than left to be discovered: what is checked
+// per instance is that the container is still running, and what is checked
+// once is that the service answers on its published port. The only address the
+// host can reach is the one forwarder, and a request to it lands on whichever
+// instance the resolver picked, so an instance that is running and not
+// listening is not distinguished here. The cluster runtime has no such
+// limit, because a readiness probe is evaluated per pod. Closing it here needs
+// a probe that runs inside the environment and addresses one container, which
+// is a bigger change than this and belongs with whoever wants it.
 func (r *Runtime) startService(
 	ctx context.Context,
 	spec provider.EnvSpec,
@@ -38,6 +80,7 @@ func (r *Runtime) startService(
 	journal func(string, string) error,
 	progress func(string),
 ) (provider.RunningService, error) {
+	want := s.Instances()
 	running := provider.RunningService{Name: s.Name, Kind: s.Kind}
 
 	if s.Migrate != "" {
@@ -57,60 +100,34 @@ func (r *Runtime) startService(
 		}
 	}
 
-	name := containerName(spec.EnvID, s.Name)
-	if err := journal(kindContainer, name); err != nil {
-		return running, err
-	}
-	// A container left by an interrupted run holds the name. Reusing a running
-	// one keeps Up idempotent; replacing a stopped one is what makes a second
-	// Up after a crash work rather than fail on a name conflict.
-	//
-	// Reused only when it runs the image this Up would start. The image
-	// reference carries a digest of the build context, so a tree edited since
-	// the container started names a different image, and a container from
-	// the old one kept answering every probe with the old code while `af up`
-	// printed ready. A fix was rehearsed that way against the build it was
-	// fixing, and the rehearsal passed. The comparison is on image IDs rather
-	// than tags, because --rebuild produces a new image under the same tag.
-	//
-	// The reused container also used to return here, ready, with no URL and
-	// without the ingress being looked up, so a repeat Up printed a service
-	// with no address. It now takes the same path as a fresh one from the
-	// ingress onwards.
-	var id string
-	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
-		switch {
-		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image):
-			id = existing.ID
-		case existing.State != nil && existing.State.Running:
-			progress(fmt.Sprintf("%s: replacing the running container, which runs an image this tree no longer builds", s.Name))
-			fallthrough
-		default:
-			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
-				return running, rmErr
-			}
+	ids := make([]string, 0, want)
+	for ordinal := 1; ordinal <= want; ordinal++ {
+		id, err := r.startInstance(ctx, spec, s, nets, proxyIP, ordinal, want, journal, progress)
+		if id != "" {
+			// Kept even when this instance failed. startInstance returns the
+			// container it created alongside the error that stopped it from
+			// starting, and that container holds the only explanation of why:
+			// dropping the id would leave the failure findable only by label
+			// and its logs unread.
+			ids = append(ids, id)
 		}
-	}
-
-	if id == "" {
-		created, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
 		if err != nil {
+			// Reported with the instances that did come up rather than with
+			// none. Teardown finds them by label either way, and the ones
+			// that started are the evidence for why the one that did not
+			// failed.
+			running.Instances = len(ids)
+			if len(ids) > 0 {
+				running.ContainerID = ids[0]
+			}
 			return running, err
-		}
-		id = created
-		running.ContainerID = id
-
-		if err := r.installCA(ctx, id, spec); err != nil {
-			return running, err
-		}
-
-		if err := r.cli.ContainerStart(ctx, id, container.StartOptions{}); err != nil {
-			running.State = "failed to start"
-			return running, aferrors.Wrap(err, aferrors.AFRUN040,
-				"detail", fmt.Sprintf("starting %s: %v", s.Name, err))
 		}
 	}
-	running.ContainerID = id
+	// The first instance, because RunningService names one container and this
+	// is the one whose name has no ordinal on it. Logs read every instance by
+	// label rather than through this field.
+	running.ContainerID = ids[0]
+	running.Instances = want
 	running.State = "running"
 
 	// The service itself is on a network with no route out, which is also a
@@ -138,17 +155,101 @@ func (r *Runtime) startService(
 	if timeout <= 0 {
 		timeout = r.readyTimeout
 	}
-	if err := r.waitReady(ctx, s, id, hostPort, timeout, progress); err != nil {
-		running.Detail = r.lastLogLines(ctx, id)
-		return running, err
+	for _, id := range ids {
+		if err := r.waitReady(ctx, s, id, hostPort, timeout, progress); err != nil {
+			running.Detail = r.lastLogLines(ctx, id)
+			return running, err
+		}
 	}
 	running.Ready = true
-	if running.URL != "" {
+	switch {
+	case running.URL != "" && want > 1:
+		progress(fmt.Sprintf("%s: ready at %s, %d instances", s.Name, running.URL, want))
+	case running.URL != "":
 		progress(fmt.Sprintf("%s: ready at %s", s.Name, running.URL))
-	} else {
+	case want > 1:
+		progress(fmt.Sprintf("%s: ready, %d instances", s.Name, want))
+	default:
 		progress(fmt.Sprintf("%s: ready", s.Name))
 	}
 	return running, nil
+}
+
+// startInstance creates and starts one instance of a service and returns its
+// container id.
+func (r *Runtime) startInstance(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	s provider.ServiceSpec,
+	nets networks,
+	proxyIP string,
+	ordinal, want int,
+	journal func(string, string) error,
+	progress func(string),
+) (string, error) {
+	name := containerName(spec.EnvID, s.Name, ordinal)
+	if err := journal(kindContainer, name); err != nil {
+		return "", err
+	}
+	// A container left by an interrupted run holds the name. Reusing a running
+	// one keeps Up idempotent; replacing a stopped one is what makes a second
+	// Up after a crash work rather than fail on a name conflict.
+	//
+	// Reused only when it runs the image this Up would start. The image
+	// reference carries a digest of the build context, so a tree edited since
+	// the container started names a different image, and a container from
+	// the old one kept answering every probe with the old code while `af up`
+	// printed ready. A fix was rehearsed that way against the build it was
+	// fixing, and the rehearsal passed. The comparison is on image IDs rather
+	// than tags, because --rebuild produces a new image under the same tag.
+	//
+	// The reused container also used to return here, ready, with no URL and
+	// without the ingress being looked up, so a repeat Up printed a service
+	// with no address. It now takes the same path as a fresh one from the
+	// ingress onwards.
+	var id string
+	if existing, err := r.cli.ContainerInspect(ctx, name); err == nil {
+		switch {
+		case existing.State != nil && existing.State.Running && r.runsImage(ctx, existing, s.Image):
+			id = existing.ID
+		case existing.State != nil && existing.State.Running:
+			progress(fmt.Sprintf("%s: replacing the running container, which runs an image this tree no longer builds", instanceLabel(s.Name, ordinal, want)))
+			fallthrough
+		default:
+			if rmErr := dockerutil.RemoveContainer(ctx, r.cli, existing.ID); rmErr != nil {
+				return "", rmErr
+			}
+		}
+	}
+	if id != "" {
+		return id, nil
+	}
+
+	created, err := r.create(ctx, spec, s, nets, proxyIP, name, "")
+	if err != nil {
+		return "", err
+	}
+	if err := r.installCA(ctx, created, spec); err != nil {
+		return created, err
+	}
+	if err := r.cli.ContainerStart(ctx, created, container.StartOptions{}); err != nil {
+		return created, aferrors.Wrap(err, aferrors.AFRUN040,
+			"detail", fmt.Sprintf("starting %s: %v", instanceLabel(s.Name, ordinal, want), err))
+	}
+	return created, nil
+}
+
+// instanceLabel names a service in a message, and names the instance too when
+// there is more than one of it.
+//
+// A message reading "worker: failed to start" is a whole service down; the
+// same message when two of the three came up is a different situation, and a
+// reader who cannot tell them apart looks in the wrong place first.
+func instanceLabel(service string, ordinal, want int) string {
+	if want <= 1 {
+		return service
+	}
+	return fmt.Sprintf("%s instance %d of %d", service, ordinal, want)
 }
 
 // runsImage reports whether a container runs the image ref names now.
@@ -541,7 +642,7 @@ func (r *Runtime) runOnce(
 	command string,
 	journal func(string, string) error,
 ) error {
-	name := containerName(spec.EnvID, s.Name+"-migrate")
+	name := containerName(spec.EnvID, s.Name+"-migrate", 1)
 	if err := journal(kindContainer, name); err != nil {
 		return err
 	}

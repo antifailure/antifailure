@@ -1449,7 +1449,16 @@ _generated:
 # The failure it exists for: replicas, resources.cpu, resources.memory and
 # workflows[].tags were all in the schema, all documented, and all read by
 # nothing, so a manifest asking for three instances of a worker got one and the
-# run went green having never started a second one.
+# run went green having never started a second one. replicas is honoured now
+# and both runtimes start the number asked for, which is what an exemption row
+# leaving this ledger is supposed to mean.
+#
+# What this check cannot see, said here because the number sounds larger than
+# it is: it asks whether a field is READ, not whether the value reaches the
+# thing it configures. health_timeout was validated, defaulted, printed by
+# af explain and reported over MCP, and never assigned into the spec a runtime
+# receives, so both runtimes used their own default and this gate counted the
+# field as wired the whole time.
 #
 # In `gate` as well as in `just test-tools`, which runs the same check as a Go
 # test. Two call sites rather than one because they answer to different

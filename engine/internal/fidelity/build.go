@@ -182,15 +182,31 @@ func services(obs Observation) Dimension {
 }
 
 // describeService says what is running, in the words the runtime used.
+//
+// The instance count is part of that sentence whenever the manifest asked for
+// more than one, and it names both numbers. A twin whose manifest asks for
+// three and whose runtime is running one is not the topology somebody
+// declared, and the fidelity report is the one place whose whole job is to say
+// so. The dimension that scores that difference rather than describing it is a
+// separate piece of work; this line is what makes the difference visible at
+// all instead of nowhere.
 func describeService(s schema.Service, r provider.RunningService) string {
 	kind := string(s.Kind)
 	if kind == "" {
 		kind = r.Kind
 	}
+	out := kind + ", running"
 	if r.URL != "" {
-		return kind + " at " + r.URL
+		out = kind + " at " + r.URL
 	}
-	return kind + ", running"
+	if s.Replicas > 1 {
+		running := r.Instances
+		if running < 1 {
+			running = 1
+		}
+		out = fmt.Sprintf("%s, %d of %d instances", out, running, s.Replicas)
+	}
+	return out
 }
 
 func database(obs Observation) Dimension {

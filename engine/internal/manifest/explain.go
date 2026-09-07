@@ -83,6 +83,13 @@ func Explain(m *schema.Manifest, width int) string {
 		if s.Kind == schema.ServiceWeb {
 			fmt.Fprintf(&b, "  %-*s health %s within %s\n", gut, "", s.HealthPath, s.HealthTimeout)
 		}
+		if s.Replicas > 1 {
+			// Only above one, so the line appears where the environment is
+			// not the shape a reader assumes. Printing "instances 1" against
+			// every service in every manifest would train the eye to skip the
+			// line on the one manifest where it says three.
+			fmt.Fprintf(&b, "  %-*s instances %d\n", gut, "", s.Replicas)
+		}
 		if s.Schedule != "" {
 			fmt.Fprintf(&b, "  %-*s schedule %s\n", gut, "", s.Schedule)
 		}

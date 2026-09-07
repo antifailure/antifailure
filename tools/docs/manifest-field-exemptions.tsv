@@ -31,7 +31,6 @@
 #
 # THERE IS NO KIND HERE FOR A FIELD THAT IS SIMPLY UNFINISHED. A field somebody
 # intends to implement gets implemented, or it gets refused until it is.
-Service.Replicas	refused	.replicas	Nothing reads it. Both runtimes start exactly one container per service, so a manifest asking for three instances got one and the run proved nothing about the case its author was worried about.
 Resources.CPU	refused	.resources.cpu	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
 Resources.Memory	refused	.resources.memory	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
 LoadThresholds.QueryCountIncrease	refused	load.thresholds.query_count_increase	Nothing measures it. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression.

@@ -173,6 +173,28 @@ type ServiceSpec struct {
 	DependsOn []string
 	// Migrate is a command to run to completion before the service starts.
 	Migrate string
+	// Replicas is how many instances of this service to run. Zero means one,
+	// which is what every caller that predates instance counts sends.
+	//
+	// The number is here rather than being expanded into that many
+	// ServiceSpecs by the caller, because the instances share one name, one
+	// migration and one dependency edge. A runtime that was handed three
+	// specs would run one migration each, publish three ingresses, and let a
+	// dependant start when the first of the three was ready, and every one of
+	// those is wrong.
+	Replicas int
+}
+
+// Instances is how many containers or pods this service asks for.
+//
+// The single place zero is read as one. Every runtime goes through it, so a
+// runtime cannot decide for itself that an unset count means something else,
+// and there is one line to read to find out what an omitted replicas key does.
+func (s ServiceSpec) Instances() int {
+	if s.Replicas < 1 {
+		return 1
+	}
+	return s.Replicas
 }
 
 // Env is a running environment.
@@ -217,6 +239,19 @@ type RunningService struct {
 	State string
 	// Detail explains a state that is not running, such as an exit code.
 	Detail string
+	// Instances is how many of this service the runtime is actually running.
+	//
+	// One entry per service and a count on it, rather than one entry per
+	// instance. A Deployment with three replicas is one service in the
+	// manifest, and reporting it three times would make af status disagree
+	// with the file somebody wrote. The count is what makes the difference
+	// between three asked for and three running visible at all: without it a
+	// runtime that started one of the three reports exactly what a correct
+	// one does.
+	//
+	// Zero from a runtime that predates instance counts, which every reader
+	// has to treat as one rather than as none.
+	Instances int
 	// ExitCode is the code a finished service exited with, and nil while it
 	// is still running or where the runtime cannot say.
 	//

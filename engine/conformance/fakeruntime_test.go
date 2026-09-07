@@ -90,6 +90,11 @@ type fakeService struct {
 	exit  *int
 	url   string
 	logs  []string
+	// instances is how many of this service are running, which for a fake
+	// that runs nothing means how many identities it produces. Keeping the
+	// number and the identities as two separate things is what lets one flaw
+	// break the count and another break the processes behind it.
+	instances int
 }
 
 func newFakeRuntime(state *fakeState, flaw, allowedHost string) *fakeRuntime {
@@ -244,8 +249,32 @@ func (f *fakeRuntime) place(env *fakeEnv, s provider.ServiceSpec) *fakeService {
 			}
 		}
 	}
-	svc := &fakeService{name: s.Name, kind: s.Kind, state: "running"}
+	svc := &fakeService{name: s.Name, kind: s.Kind, state: "running", instances: s.Instances()}
+	if f.is(flawIgnoresReplicas) {
+		// Runs one whatever was asked for, which is what both runtimes did
+		// before instance counts were honoured.
+		svc.instances = 1
+	}
 	env.services = append(env.services, svc)
+
+	if isInstanceStamp(s.Command) {
+		svc.ready = true
+		// One identity per instance, which is what three real processes
+		// produce and what one real process cannot.
+		stamps := svc.instances
+		if f.is(flawOneInstancePretendsToBeMany) {
+			// The count says three and one process is behind it. Nothing in
+			// the count itself can see this, which is the whole reason the
+			// suite asks the second question.
+			svc.instances = s.Instances()
+			stamps = 1
+		}
+		for i := 1; i <= stamps; i++ {
+			svc.logs = append(svc.logs,
+				fmt.Sprintf("%s%s-%s-%d", instanceMarker, env.id, s.Name, i))
+		}
+		return svc
+	}
 
 	switch {
 	case isServeCommand(s.Command):
@@ -273,9 +302,14 @@ func (f *fakeRuntime) place(env *fakeEnv, s provider.ServiceSpec) *fakeService {
 }
 
 func (f *fakeRuntime) report(s *fakeService) provider.RunningService {
+	instances := s.instances
+	if instances < 1 {
+		instances = 1
+	}
 	out := provider.RunningService{
 		Name: s.name, Kind: s.kind, ContainerID: s.name + "-id",
 		URL: s.url, Ready: s.ready, State: s.state, ExitCode: s.exit,
+		Instances: instances,
 	}
 	if f.is(flawLosesServiceKind) {
 		out.Kind = ""
@@ -327,7 +361,17 @@ func (f *fakeRuntime) Down(ctx context.Context, envID string) (provider.Teardown
 		}}, nil
 	}
 
-	removed := len(env.services) + 2 // the services, the network, the sidecar
+	// Every instance, the network and the sidecar. Counting services rather
+	// than instances would report a three instance environment as having
+	// removed one of its three containers and still call it complete.
+	removed := 2
+	for _, svc := range env.services {
+		if svc.instances < 1 {
+			removed++
+			continue
+		}
+		removed += svc.instances
+	}
 	if f.is(flawLeaksOnTeardown) && !strings.HasPrefix(envID, "afcdn") {
 		// Leaks the network of every environment except the ones the teardown
 		// behaviors inspect afterwards. That is deliberate, and it is the
@@ -377,10 +421,23 @@ func (f *fakeRuntime) Inventory(ctx context.Context) ([]provider.Resource, error
 			Kind: "container/sidecar", ID: id + "-proxy", EnvID: owner, CreatedAt: time.Now().UTC(),
 		})
 		for _, s := range env.services {
-			out = append(out, provider.Resource{
-				Kind: "container/service", ID: id + "-" + s.name, EnvID: owner,
-				CreatedAt: time.Now().UTC(), Labels: map[string]string{"service": s.name},
-			})
+			// One resource per instance, because that is what teardown has to
+			// find. A three instance service leaving two containers behind is
+			// a leak the inventory has to be able to see.
+			instances := s.instances
+			if instances < 1 {
+				instances = 1
+			}
+			for i := 1; i <= instances; i++ {
+				resID := id + "-" + s.name
+				if i > 1 {
+					resID = fmt.Sprintf("%s-%d", resID, i)
+				}
+				out = append(out, provider.Resource{
+					Kind: "container/service", ID: resID, EnvID: owner,
+					CreatedAt: time.Now().UTC(), Labels: map[string]string{"service": s.name},
+				})
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -619,6 +676,17 @@ func serveBody(command string) string {
 	}
 	body, _, _ := strings.Cut(after, "'")
 	return body
+}
+
+// isInstanceStamp recognises the command the suite uses to make each instance
+// of a service announce itself.
+//
+// Recognised by shape rather than run, because this fake starts no processes
+// at all. What it has to reproduce is the OBSERVATION a real runtime produces
+// from that command, which is one line per instance carrying an identity no
+// other instance shares.
+func isInstanceStamp(command string) bool {
+	return strings.Contains(command, instanceMarker) && strings.Contains(command, "hostname")
 }
 
 // echoed recovers what an echo command printed.

@@ -425,7 +425,7 @@ One process the environment runs. A service is built from the repository, given 
 | `name` | string | **yes** | Unique within the manifest. Appears in hostnames, logs, and container names. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `path` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | `port` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
-| `replicas` | integer | no | Not read by anything, and refused by the engine. Both runtimes start exactly one container per service, so a manifest asking for three instances got one and nothing said so. Minimum 1, maximum 10. |
+| `replicas` | integer | no | How many instances of this service to run. Both runtimes start this many, behind the one name other services resolve, so a bug that only appears at more than one instance appears here. Omitted means one. A cron service may not ask for more than one, because a scheduled job that runs on three instances runs three times. Minimum 1, maximum 10. |
 | `resources` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
 | `schedule` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
