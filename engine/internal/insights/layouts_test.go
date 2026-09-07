@@ -1,6 +1,9 @@
 package insights_test
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/fstest"
 
@@ -244,4 +247,59 @@ func TestDiscover_TwoCandidatesAtTheSameDepthAnswerTheSameWayEveryTime(t *testin
 		require.Equal(t, first.Dir, insights.Discover(tree).Dir,
 			"the same repository answered two different directories")
 	}
+}
+
+// TestDiscover_ThisRepositorysOwnMigrationsAreFoundInTheRealTree is the only
+// test here that does not build its own filesystem.
+//
+// Every other case is a fixture, and a fixture is a claim about a shape
+// somebody typed. This one runs the shipped search over the actual repository,
+// with no manifest, so nothing is declared and the answer has to be found. Our
+// own migrations sit at web/packages/db/migrations, four levels down, which the
+// search before this change could not reach: it read the root and one level
+// below it. The acceptance line for this lane names that path, and a fixture
+// spelling it out would have passed without the tool being able to find it
+// here.
+//
+// It fails if the directory moves, and that is the point rather than a
+// maintenance cost. If it moves, the failure says which path was found instead,
+// and the fix is to update this line once the new path is genuinely the right
+// answer.
+func TestDiscover_ThisRepositorysOwnMigrationsAreFoundInTheRealTree(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	set := insights.Locate(os.DirFS(root), nil)
+
+	require.Equal(t, "web/packages/db/migrations", set.Dir,
+		"the search cannot find this repository's own migrations, which is the "+
+			"layout the acceptance line for this change names")
+	require.False(t, set.Declared,
+		"this has to be a search rather than a reading of a declaration, or it "+
+			"proves nothing about discovery")
+	require.NotEmpty(t, set.Migrations,
+		"the directory was found and no migrations were read out of it")
+}
+
+// repositoryRoot walks up from this source file to the directory holding the
+// manifest, rather than assuming a working directory. `go test` runs with the
+// package directory as the working directory, and a relative path would break
+// the moment this package moved.
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok, "the test binary was built without file names, so the "+
+		"repository root cannot be found from here")
+	dir := filepath.Dir(file)
+	for i := 0; i < 10; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "antifailure.yaml")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		require.NotEqual(t, dir, parent,
+			"walked to the filesystem root without finding antifailure.yaml")
+		dir = parent
+	}
+	t.Fatal("antifailure.yaml is not within ten directories of this test file")
+	return ""
 }
