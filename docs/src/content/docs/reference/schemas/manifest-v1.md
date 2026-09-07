@@ -134,7 +134,7 @@ What the environment may do with one host. A rule is per host because that is th
 | --- | --- | --- | --- |
 | `credential` | string | no | Name of the environment variable holding the sandbox credential for this host. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `fixtures` | string | no | Path to a fixture pack or an OpenAPI document for mock mode, relative to the repository root. Max length 512. |
-| `host` | string | **yes** | Host to match. A leading *. matches one or more labels. An IP literal matches only itself. Max length 253. |
+| `host` | string | **yes** | Host to match. A leading *. matches one or more labels. A star anywhere else is one whole label, so email.*.amazonaws.com reaches SES in any region and reaches nothing else, and *.s3.*.amazonaws.com reaches a bucket in any region. An IP literal matches only itself. Max length 253. |
 | `methods` | list of string | no | Restrict the rule to these HTTP methods. Max items 10. |
 | `mode` | `block`, `allow`, `capture`, `mock`, `sandbox`, `synth` | **yes** | block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. synth asks a model to invent a response and marks every result that touched it as unverified. |
 | `note` | string | no | Why this rule exists. Rendered in the network policy view, because a rule nobody can explain is a rule nobody dares remove. Max length 512. |

@@ -75,7 +75,7 @@ export interface Match {
   why: string
 }
 
-type HostMatch = 'any' | 'exactly' | 'address' | 'suffixed'
+type HostMatch = 'any' | 'exactly' | 'address' | 'suffixed' | 'labelled'
 
 interface Why {
   host: HostMatch
@@ -89,6 +89,14 @@ interface Compiled {
   index: number
   hostExact: string
   hostSuffix: string
+  /** Set for a pattern carrying a star that is not the sole leading one,
+   *  split into labels, where "*" stands for exactly one label. hostAnyPrefix
+   *  records that the pattern also began with "*.", which covers one or more
+   *  labels rather than one. hostPattern is the whole normalized pattern,
+   *  which is what the decision quotes back. */
+  hostLabels: string[] | null
+  hostAnyPrefix: boolean
+  hostPattern: string
   matchAll: boolean
   ip: string | null
   port: number
@@ -98,6 +106,14 @@ interface Compiled {
 }
 
 export class PolicyError extends Error {}
+
+/** The one sentence a misplaced star gets, word for word as the engine says
+ *  it, so that a manifest refused by one is refused the same way by the other. */
+const STAR_PLACEMENT = 'a star stands for one whole label, as *.example.com or email.*.example.com'
+
+/** Refuses a pattern made only of stars, which matches every host while
+ *  reading as though it named one. */
+const STARS_ONLY = 'a pattern of stars alone matches every host. Only * may do that, and only in block mode'
 
 /** Renders a request the way a decision log line does. */
 export function requestString(req: Request): string {
@@ -180,7 +196,9 @@ function splitHostPort(value: string): { host: string; port: number } | null {
 
 function compileRule(rule: EgressRule, index: number): Compiled {
   const c: Compiled = {
-    rule, index, hostExact: '', hostSuffix: '', matchAll: false,
+    rule, index, hostExact: '', hostSuffix: '',
+    hostLabels: null, hostAnyPrefix: false, hostPattern: '',
+    matchAll: false,
     ip: null, port: 0, paths: [], methods: null, specificity: 0,
   }
 
@@ -206,20 +224,33 @@ function compileRule(rule: EgressRule, index: number): Compiled {
 
   if (host === '*') {
     c.matchAll = true
-  } else if (host.startsWith('*.')) {
-    const suffix = host.slice(1) // keeps the leading dot
-    if (suffix.slice(1).includes('*')) {
-      throw new PolicyError(
-        `policy: rule ${index} for ${rule.host}: a wildcard is only allowed at the start, as *.example.com`,
-      )
+  } else if (host.startsWith('*.') && !host.slice(2).includes('*')) {
+    c.hostSuffix = host.slice(1) // keeps the leading dot
+  } else if (host.includes('*')) {
+    // A star is a whole label and never part of one, and it never covers a
+    // dot: matching splits the host on dots once and compares label to label,
+    // so there is no backtracking and no pattern whose cost depends on the
+    // input. web-*.example.com is refused rather than read as a prefix match
+    // nobody wrote. A LEADING star keeps the meaning it has always had, which
+    // is one or more labels rather than exactly one.
+    c.hostPattern = host
+    let rest = host
+    if (rest.startsWith('*.')) {
+      c.hostAnyPrefix = true
+      rest = rest.slice(2)
     }
-    c.hostSuffix = suffix
+    const labels = rest === '' ? [] : rest.split('.')
+    if (labels.length === 0 || labels.some((l) => l === '' || (l !== '*' && l.includes('*')))) {
+      throw new PolicyError(`policy: rule ${index} for ${rule.host}: ${STAR_PLACEMENT}`)
+    }
+    // A pattern of nothing but stars names no host at all. *.* reads as a
+    // narrowing of *.example.com and is in fact every host with two or more
+    // labels, which would walk past the rule that only * may match everything.
+    if (labels.every((l) => l === '*')) {
+      throw new PolicyError(`policy: rule ${index} for ${rule.host}: ${STARS_ONLY}`)
+    }
+    c.hostLabels = labels
   } else {
-    if (host.includes('*')) {
-      throw new PolicyError(
-        `policy: rule ${index} for ${rule.host}: a wildcard is only allowed at the start, as *.example.com`,
-      )
-    }
     const ip = parseIP(host)
     if (ip !== null) c.ip = ip
     else c.hostExact = host
@@ -250,6 +281,7 @@ function specificityOf(c: Compiled): number {
   const EXACT_HOST = 1 << 20
   const IP_HOST = 1 << 20 // an address is as specific as an exact name
   const WILDCARD_HOST = 1 << 12
+  const LABELLED_HOST = 1 << 16
   const PER_PATH_CHAR = 1 << 2
   const HAS_METHOD = 1 << 10
   const HAS_PORT = 1 << 11
@@ -264,6 +296,14 @@ function specificityOf(c: Compiled): number {
     score += IP_HOST
   } else if (c.hostSuffix !== '') {
     score += WILDCARD_HOST + c.hostSuffix.length
+  } else if (c.hostLabels !== null && c.hostAnyPrefix) {
+    // Still a suffix rule, so it is ranked as one and by the same measure:
+    // the text after the leading star.
+    score += WILDCARD_HOST + c.hostPattern.length - 1
+  } else if (c.hostLabels !== null) {
+    // A pattern with no leading star pins the label count as well as both
+    // ends, so it says strictly more than any suffix.
+    score += LABELLED_HOST + c.hostPattern.length
   }
   if (c.paths.length > 0) score += PER_PATH_CHAR * c.paths[0]!.length
   if (c.methods !== null) score += HAS_METHOD
@@ -311,6 +351,7 @@ function whyString(w: Why): string {
     case 'exactly': out = 'the host matches exactly'; break
     case 'address': out = 'the address matches'; break
     case 'suffixed': out = `the host ends in ${w.suffix}`; break
+    case 'labelled': out = `one label fills each star in ${w.suffix}`; break
   }
   if (w.method) out += ' and the method is listed'
   if (w.path) out += ` and the path is under ${w.path}`
@@ -341,6 +382,10 @@ function matchRule(c: Compiled, n: Normalized): Why | null {
     if (n.host.length <= c.hostSuffix.length) return null
     w.host = 'suffixed'
     w.suffix = c.hostSuffix
+  } else if (c.hostLabels !== null) {
+    if (!matchStarLabels(c.hostLabels, c.hostAnyPrefix, n.host)) return null
+    w.host = 'labelled'
+    w.suffix = c.hostPattern
   } else {
     return null
   }
@@ -484,7 +529,28 @@ function matchesHostOnly(c: Compiled, host: string, port: number): boolean {
   if (c.hostSuffix !== '') {
     return host.endsWith(c.hostSuffix) && host.length > c.hostSuffix.length
   }
+  if (c.hostLabels !== null) {
+    return matchStarLabels(c.hostLabels, c.hostAnyPrefix, host)
+  }
   return false
+}
+
+/** Reports whether a host satisfies a compiled label vector. */
+function matchStarLabels(labels: string[], anyPrefix: boolean, host: string): boolean {
+  let parts = host.split('.')
+  if (anyPrefix) {
+    // The leading star covers at least one label, so *.s3.*.amazonaws.com does
+    // not match s3.us-east-1.amazonaws.com itself.
+    if (parts.length <= labels.length) return false
+    parts = parts.slice(parts.length - labels.length)
+  } else if (parts.length !== labels.length) {
+    return false
+  }
+  for (let i = 0; i < labels.length; i += 1) {
+    if (parts[i] === '') return false
+    if (labels[i] !== '*' && labels[i] !== parts[i]) return false
+  }
+  return true
 }
 
 function defaultReason(mode: Mode, host: string): string {

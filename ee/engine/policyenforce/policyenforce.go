@@ -292,19 +292,42 @@ func coveredBy(pattern string, masked map[string]bool) bool {
 	return false
 }
 
-// matchesAny reports whether a host matches a deny entry, treating a leading
-// wildcard the way the egress policy does.
+// matchesAny reports whether a host matches a deny entry, treating a wildcard
+// the way the egress policy does.
+//
+// Both wildcard shapes the policy engine compiles are handled here, and that
+// is not tidiness. A deny entry the list understands less well than the
+// manifest does is a deny list that silently permits: an organization writing
+// s3.*.amazonaws.com would have had it compared as a literal string, matched
+// nothing, and refused nothing, while reading in the console as though it
+// covered every region.
 func matchesAny(host string, denied map[string]bool) bool {
 	if denied[host] {
 		return true
 	}
 	for entry := range denied {
-		if !strings.HasPrefix(entry, "*.") {
-			continue
-		}
-		suffix := entry[1:]
-		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
-			return true
+		switch {
+		case strings.HasPrefix(entry, "*."):
+			suffix := entry[1:]
+			if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
+				return true
+			}
+		case strings.Contains(entry, "*"):
+			star := strings.IndexByte(entry, '*')
+			head, tail := entry[:star], entry[star+1:]
+			if !strings.HasSuffix(head, ".") || !strings.HasPrefix(tail, ".") {
+				continue
+			}
+			if !strings.HasPrefix(host, head) || !strings.HasSuffix(host, tail) {
+				continue
+			}
+			middle := len(host) - len(head) - len(tail)
+			if middle < 1 {
+				continue
+			}
+			if !strings.Contains(host[len(head):len(head)+middle], ".") {
+				return true
+			}
 		}
 	}
 	return false

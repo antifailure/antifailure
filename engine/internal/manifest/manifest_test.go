@@ -389,7 +389,13 @@ func TestParse_ReportsThatSynthNeverProducesAPass(t *testing.T) {
 
 func TestParse_RejectsAnInvalidHostPattern(t *testing.T) {
 	t.Parallel()
-	for _, h := range []string{"not a host", "-leading.com", "trailing-.com", "a..b.com", ".leading"} {
+	for _, h := range []string{
+		"not a host", "-leading.com", "trailing-.com", "a..b.com", ".leading",
+		// A star is a whole label or nothing. Reading web-*.example.com as a
+		// prefix match would match hosts nobody wrote down, and a pattern of
+		// stars alone is a match all wearing the clothes of a named rule.
+		"web-*.example.com", "api.*com", "*.exa*mple.com", "*.*", "*.*.*",
+	} {
 		body := minimal + "\negress:\n  rules:\n    - host: '" + h + "'\n      mode: block\n"
 		require.Contains(t, messages(problems(t, mustFail(t, body))), "not a valid hostname",
 			"host %q must be rejected", h)
@@ -398,7 +404,14 @@ func TestParse_RejectsAnInvalidHostPattern(t *testing.T) {
 
 func TestParse_AcceptsValidHostPatterns(t *testing.T) {
 	t.Parallel()
-	for _, h := range []string{"api.stripe.com", "*.stripe.com", "10.0.0.1", "localhost", "api.example.com:8443"} {
+	for _, h := range []string{
+		"api.stripe.com", "*.stripe.com", "10.0.0.1", "localhost", "api.example.com:8443",
+		// The shape the cloud catalog needs. Refusing it here while the policy
+		// engine compiles it would mean af up fails on a manifest af init
+		// wrote, which is the worst version of a disagreement between two
+		// implementations of one rule.
+		"email.*.amazonaws.com", "*.s3.*.amazonaws.com", "sts.*.amazonaws.com",
+	} {
 		body := minimal + "\negress:\n  rules:\n    - host: '" + h + "'\n      mode: block\n"
 		_, err := parse(t, body)
 		require.NoError(t, err, "host %q must be accepted", h)

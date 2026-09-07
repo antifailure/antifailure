@@ -1361,6 +1361,31 @@ func validHostPattern(h string) bool {
 			return false
 		}
 	}
+	// A star anywhere else stands for exactly one label, which is the only way
+	// to name an AWS regional service without naming the whole cloud: every one
+	// of them is <service>.<region>.amazonaws.com and every virtual hosted
+	// bucket is <bucket>.s3.<region>.amazonaws.com, so the only leading
+	// wildcard that reaches S3 also reaches SES and STS.
+	//
+	// Only a whole label is taken out. Everything else the star can appear in
+	// is left where it is and refused by the character check at the end of this
+	// function, which does not allow a star in a hostname label: that is what
+	// rejects web-*.example.com rather than reading it as a prefix nobody
+	// wrote, and it is what rejects *.*, whose stars all come out and leave the
+	// empty name behind. Both were guarded twice here, once redundantly, and
+	// the redundant guard could not be broken in a way any test could see.
+	starLabel := false
+	var kept []string
+	for _, label := range strings.Split(h, ".") {
+		if label == "*" {
+			starLabel = true
+			continue
+		}
+		kept = append(kept, label)
+	}
+	if starLabel {
+		h = strings.Join(kept, ".")
+	}
 	// A port may be attached, and is matched separately by the policy engine.
 	if host, _, err := net.SplitHostPort(h); err == nil {
 		h = host

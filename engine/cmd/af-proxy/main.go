@@ -552,7 +552,7 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch d.Mode {
 	case schema.ModeCapture, schema.ModeMock, schema.ModeSynth:
-		p.serveInsideTheEnvironment(w, r, host, d, &rec, started)
+		p.serveInsideTheEnvironment(w, r, req, d, &rec, started)
 		return
 	}
 
@@ -624,9 +624,10 @@ func (p *proxy) serveHTTP(w http.ResponseWriter, r *http.Request) {
 // code. The body is read first, because a hijacked request's Body is no
 // longer safe to touch.
 func (p *proxy) serveInsideTheEnvironment(
-	w http.ResponseWriter, r *http.Request, host string, d policy.Decision,
+	w http.ResponseWriter, r *http.Request, preq policy.Request, d policy.Decision,
 	rec *record, started time.Time,
 ) {
+	host := preq.Host
 	// The larger of the two limits the modes below apply, so neither is
 	// handed a body this function truncated first. Each still applies its own.
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -652,8 +653,7 @@ func (p *proxy) serveInsideTheEnvironment(
 
 	switch d.Mode {
 	case schema.ModeCapture:
-		rec.Status = http.StatusOK
-		p.capture(conn, r, host)
+		p.capture(conn, r, preq, d, rec)
 	case schema.ModeMock:
 		p.serveMock(conn, r, host, rec)
 	case schema.ModeSynth:

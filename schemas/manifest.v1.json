@@ -554,7 +554,7 @@
         "host": {
           "type": "string",
           "maxLength": 253,
-          "description": "Host to match. A leading *. matches one or more labels. An IP literal matches only itself."
+          "description": "Host to match. A leading *. matches one or more labels. A star anywhere else is one whole label, so email.*.amazonaws.com reaches SES in any region and reaches nothing else, and *.s3.*.amazonaws.com reaches a bucket in any region. An IP literal matches only itself."
         },
         "mode": {
           "type": "string",

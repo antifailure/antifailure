@@ -252,10 +252,13 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 	}
 
 	if d.Mode == schema.ModeCapture {
-		rec.Status = http.StatusOK
+		// The record is emitted after the capture rather than before it, so
+		// that a capture this build refuses is logged as the refusal it was.
+		// Emitting the 200 first and then refusing produced a decision log
+		// that disagreed with the response the application received.
+		p.capture(w, req, preq, d, &rec)
 		rec.Duration = time.Since(started).String()
 		p.emit(rec)
-		p.capture(w, req, host)
 		return false
 	}
 

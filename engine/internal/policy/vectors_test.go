@@ -128,6 +128,34 @@ func corpus() []vectorPolicy {
 			},
 		},
 		{
+			Name: "a star in the middle names one service across every region",
+			Egress: schema.Egress{
+				Default: schema.ModeBlock,
+				Rules: []schema.EgressRule{
+					{Host: "*.amazonaws.com", Mode: schema.ModeBlock,
+						Note: "The cloud is refused unless a rule names the service."},
+					{Host: "email.*.amazonaws.com", Mode: schema.ModeCapture,
+						Note: "Mail is captured into the inbox."},
+					{Host: "*.s3.*.amazonaws.com", Mode: schema.ModeBlock,
+						Note: "An object write lands in the real bucket."},
+				},
+			},
+			Requests: []vectorRequest{
+				// The star covers exactly one label.
+				{Request: vectorReq{Host: "email.us-east-1.amazonaws.com", TLS: true, Path: "/"}},
+				// Neither too few labels nor too many.
+				{Request: vectorReq{Host: "email.amazonaws.com", TLS: true}},
+				{Request: vectorReq{Host: "email.us.east.amazonaws.com", TLS: true}},
+				// A different service under the same domain is the wildcard's.
+				{Request: vectorReq{Host: "s3.us-east-1.amazonaws.com", TLS: true, Path: "/b/k"}},
+				// The leading star still covers one label or more.
+				{Request: vectorReq{Host: "bucket.s3.us-east-1.amazonaws.com", TLS: true, Path: "/k"}},
+				{Request: vectorReq{Host: "a.b.s3.eu-west-1.amazonaws.com", TLS: true, Path: "/k"}},
+				// Case and a trailing dot are the same name here too.
+				{Request: vectorReq{Host: "EMAIL.EU-WEST-2.amazonaws.com.", TLS: true}},
+			},
+		},
+		{
 			Name: "path boundaries: /admin does not cover /administrator",
 			Egress: schema.Egress{
 				Default: schema.ModeBlock,

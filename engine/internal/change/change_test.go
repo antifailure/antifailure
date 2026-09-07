@@ -537,8 +537,13 @@ func TestAnalyze_AttributesAFileToTheServiceWithTheLongestDeclaredPath(t *testin
 // like a change that calls nothing.
 func TestAnalyze_SaysSoWhenTheEgressPolicyWillNotCompile(t *testing.T) {
 	m := billingManifest()
+	// A star glued into a label rather than standing as one. This used to be
+	// api.*.stripe.com, which the engine refused until a star in the middle
+	// came to mean exactly one label, so that a rule could name an AWS service
+	// without naming the whole cloud. That pattern compiles now and this one
+	// still does not: a star is a whole label or it is a mistake.
 	m.Egress = &schema.Egress{Rules: []schema.EgressRule{
-		{Host: "api.*.stripe.com", Mode: schema.ModeAllow},
+		{Host: "web-*.stripe.com", Mode: schema.ModeAllow},
 	}}
 
 	p := change.Analyze(change.Options{

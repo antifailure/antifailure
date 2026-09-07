@@ -126,7 +126,8 @@ const PACKETS: PacketDef[] = [
   },
   {
     // Sandbox mode, not a bucket rewrite. Nothing in the engine rewrites an S3
-    // bucket name; *.amazonaws.com is classified as SES and captured. What the
+    // bucket name, and S3 is not captured either: the catalog names it and
+    // blocks it, on its own hosts rather than under a mail rule. What the
     // proxy really does with a rewrite shape is swap a placeholder credential
     // for the provider's sandbox key on the way out, so the application never
     // holds a working key and the mistake cannot be made.

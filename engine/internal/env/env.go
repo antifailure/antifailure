@@ -754,12 +754,7 @@ func needsInspection(e *schema.Egress) bool {
 		// silently downgrades the policy to host rules.
 		return true
 	}
-	for _, r := range eng.Rules() {
-		if eng.InspectsHost(strings.TrimPrefix(r.Host, "*."), 443) {
-			return true
-		}
-	}
-	return eng.InspectsHost("probe.invalid", 443)
+	return eng.InspectsAnyHost()
 }
 
 // ttl is how long an environment this orchestrator creates may live.

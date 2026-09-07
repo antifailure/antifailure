@@ -82,10 +82,17 @@ var thirdParties = []ThirdParty{
 		EnvHints: []string{"MAILGUN_API_KEY"},
 	},
 	{
-		Name: "Amazon SES", Hosts: []string{"email.us-east-1.amazonaws.com", "*.amazonaws.com"}, Mode: "capture",
+		Name: "Amazon SES", Hosts: []string{"email.*.amazonaws.com"}, Mode: "capture",
 		Why:      "Mail is captured into the inbox so that agents can read it and no real address receives anything.",
-		Packages: []string{"@aws-sdk/client-ses", "@aws-sdk/client-sesv2", "aws-sdk"},
-		EnvHints: []string{"AWS_ACCESS_KEY_ID", "AWS_SES_REGION"},
+		Packages: []string{"@aws-sdk/client-ses", "@aws-sdk/client-sesv2"},
+		EnvHints: []string{"AWS_SES_REGION"},
+	},
+	{
+		Name: "Amazon SES over SMTP", Hosts: []string{"email-smtp.*.amazonaws.com"}, Mode: "block",
+		Why: "The sidecar speaks HTTP, so the SMTP submission port is refused rather than captured. " +
+			"Mail sent this way would not reach the inbox, and an environment able to open it could " +
+			"send to a real address.",
+		EnvHints: []string{"SES_SMTP_USERNAME", "SES_SMTP_PASSWORD"},
 	},
 	{
 		Name: "Twilio", Hosts: []string{"api.twilio.com", "verify.twilio.com"}, Mode: "capture",
@@ -194,6 +201,186 @@ var thirdParties = []ThirdParty{
 		Why:      "The environment's own Upstash database is reached directly.",
 		Packages: []string{"@upstash/redis", "@upstash/ratelimit", "@upstash/qstash"},
 		EnvHints: []string{"UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"},
+	},
+
+	// The clouds.
+	//
+	// Every entry below is block, and every one of them says why in its own
+	// words rather than sharing a sentence, because the cost of reaching each
+	// of these from a preview environment is a different cost. A queue is
+	// consumed by production workers, a secret store hands a production
+	// credential to unreviewed code, and an object write is indistinguishable
+	// from production data once it lands.
+	//
+	// Block is the honest answer until an emulator answers for the service,
+	// and it is a better answer than the one this catalog used to give. The
+	// SES entry above carried *.amazonaws.com, so every AWS host in this
+	// section matched a mail rule and was answered 200 with an empty body by a
+	// handler that believed it was holding an email.
+	//
+	// The hosts are written out per service rather than covered by one
+	// wildcard, because naming the service is the whole point: a refusal that
+	// says "this is S3, and here is why an environment may not write to it"
+	// is a sentence somebody can act on, and one that says "no rule matches"
+	// is not.
+	{
+		Name: "Amazon S3",
+		Hosts: []string{
+			"s3.amazonaws.com", "s3.*.amazonaws.com",
+			"*.s3.amazonaws.com", "*.s3.*.amazonaws.com",
+		},
+		Mode: "block",
+		// Four spellings, which is path style and virtual hosted style, each
+		// global and regional. The dualstack and transfer acceleration
+		// endpoints are NOT here and that is a stated gap rather than an
+		// oversight: they are two further spellings of these same four rules
+		// and eight S3 entries in a generated manifest is a manifest nobody
+		// reads. They still reach nothing, because the default is block; the
+		// refusal says no rule matches rather than naming S3.
+		Why: "An object written from a preview environment lands in the real bucket, where nothing " +
+			"tells it apart from production data afterwards.",
+		Packages: []string{"@aws-sdk/client-s3", "@aws-sdk/lib-storage", "aws-sdk", "boto3",
+			"aws-sdk-go", "aws-sdk-go-v2", "aws-sdk-s3", "fog-aws"},
+		EnvHints: []string{"AWS_S3_BUCKET", "S3_BUCKET", "AWS_BUCKET_NAME"},
+	},
+	{
+		Name: "Amazon SQS", Hosts: []string{"sqs.*.amazonaws.com"}, Mode: "block",
+		Why: "A message sent to a real queue is picked up by production workers, which is a preview " +
+			"environment reaching into production through the back door.",
+		Packages: []string{"@aws-sdk/client-sqs", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"SQS_QUEUE_URL", "AWS_SQS_QUEUE_URL"},
+	},
+	{
+		Name: "Amazon SNS", Hosts: []string{"sns.*.amazonaws.com"}, Mode: "block",
+		Why: "A publish reaches every real subscriber, and some of those subscribers are a phone " +
+			"number and an email address.",
+		Packages: []string{"@aws-sdk/client-sns", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"SNS_TOPIC_ARN", "AWS_SNS_TOPIC_ARN"},
+	},
+	{
+		Name:  "Amazon DynamoDB",
+		Hosts: []string{"dynamodb.*.amazonaws.com", "streams.dynamodb.*.amazonaws.com"},
+		Mode:  "block",
+		Why: "This is a production datastore, and an environment writing to it is writing to " +
+			"production. Antifailure branches Postgres and does not yet branch this.",
+		Packages: []string{"@aws-sdk/client-dynamodb", "@aws-sdk/lib-dynamodb", "dynamoose",
+			"aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"DYNAMODB_TABLE", "AWS_DYNAMODB_TABLE"},
+	},
+	{
+		Name: "Amazon Kinesis", Hosts: []string{"kinesis.*.amazonaws.com"}, Mode: "block",
+		Why: "Records put onto a real stream are read by production consumers and cannot be taken " +
+			"back off it.",
+		Packages: []string{"@aws-sdk/client-kinesis", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"KINESIS_STREAM_NAME"},
+	},
+	{
+		Name: "Amazon EventBridge", Hosts: []string{"events.*.amazonaws.com"}, Mode: "block",
+		Why: "An event on the real bus fans out to every production rule that matches it, and the " +
+			"targets are whatever those rules point at.",
+		Packages: []string{"@aws-sdk/client-eventbridge", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"EVENT_BUS_NAME", "EVENTBRIDGE_BUS_NAME"},
+	},
+	{
+		Name: "AWS Secrets Manager", Hosts: []string{"secretsmanager.*.amazonaws.com"}, Mode: "block",
+		Why: "Reading it hands a production credential to an environment running unreviewed code " +
+			"against a copy of production data, which is the one thing this product exists to stop.",
+		Packages: []string{"@aws-sdk/client-secrets-manager", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"AWS_SECRET_NAME", "SECRETS_MANAGER_SECRET_ID"},
+	},
+	{
+		Name: "AWS Systems Manager Parameter Store", Hosts: []string{"ssm.*.amazonaws.com"}, Mode: "block",
+		Why: "Parameter Store holds production configuration and, through SecureString, production " +
+			"credentials, so it is refused for the same reason Secrets Manager is.",
+		Packages: []string{"@aws-sdk/client-ssm", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"SSM_PARAMETER_PATH", "AWS_SSM_PATH"},
+	},
+	{
+		Name: "AWS STS", Hosts: []string{"sts.amazonaws.com", "sts.*.amazonaws.com"}, Mode: "block",
+		Why: "STS mints credentials. An environment that can call it can hold a production role for " +
+			"an hour, and no rule about any other host applies to what it does with one.",
+		Packages: []string{"@aws-sdk/client-sts", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
+		EnvHints: []string{"AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"},
+	},
+	{
+		Name: "Google Cloud Storage", Hosts: []string{"storage.googleapis.com"}, Mode: "block",
+		Why: "An object written from a preview environment lands in the real bucket. Google ships no " +
+			"official Cloud Storage emulator, which is why this is a refusal rather than a redirect.",
+		Packages: []string{"@google-cloud/storage", "google-cloud-storage", "gcs-resumable-upload"},
+		EnvHints: []string{"GCS_BUCKET", "GOOGLE_CLOUD_STORAGE_BUCKET"},
+	},
+	{
+		Name: "Google Cloud Pub/Sub", Hosts: []string{"pubsub.googleapis.com"}, Mode: "block",
+		Why:      "A message published to a real topic is delivered to production subscribers.",
+		Packages: []string{"@google-cloud/pubsub", "google-cloud-pubsub"},
+		EnvHints: []string{"PUBSUB_TOPIC", "GOOGLE_PUBSUB_TOPIC"},
+	},
+	{
+		Name: "Google Cloud Firestore", Hosts: []string{"firestore.googleapis.com"}, Mode: "block",
+		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
+		Packages: []string{"@google-cloud/firestore", "google-cloud-firestore", "firebase-admin"},
+		EnvHints: []string{"FIRESTORE_PROJECT_ID", "FIRESTORE_EMULATOR_HOST"},
+	},
+	{
+		Name: "Google Secret Manager", Hosts: []string{"secretmanager.googleapis.com"}, Mode: "block",
+		Why: "Reading it hands a production credential to an environment running unreviewed code " +
+			"against a copy of production data.",
+		Packages: []string{"@google-cloud/secret-manager", "google-cloud-secret-manager"},
+		EnvHints: []string{"GOOGLE_SECRET_NAME", "SECRET_MANAGER_PROJECT"},
+	},
+	{
+		Name: "Google Cloud Tasks", Hosts: []string{"cloudtasks.googleapis.com"}, Mode: "block",
+		Why: "A task enqueued on a real queue is dispatched to a production handler, at a time nobody " +
+			"is watching for it.",
+		Packages: []string{"@google-cloud/tasks", "google-cloud-tasks"},
+		EnvHints: []string{"CLOUD_TASKS_QUEUE", "GOOGLE_CLOUD_TASKS_QUEUE"},
+	},
+	{
+		Name: "Azure Blob Storage", Hosts: []string{"*.blob.core.windows.net"}, Mode: "block",
+		Why: "An object written from a preview environment lands in the real container, where nothing " +
+			"tells it apart from production data afterwards.",
+		Packages: []string{"@azure/storage-blob", "azure-storage-blob", "azure-storage"},
+		EnvHints: []string{"AZURE_STORAGE_ACCOUNT", "AZURE_STORAGE_CONNECTION_STRING"},
+	},
+	{
+		Name: "Azure Queue Storage", Hosts: []string{"*.queue.core.windows.net"}, Mode: "block",
+		Why:      "A message sent to a real queue is picked up by production workers.",
+		Packages: []string{"@azure/storage-queue", "azure-storage-queue"},
+		EnvHints: []string{"AZURE_QUEUE_NAME"},
+	},
+	{
+		Name: "Azure Service Bus", Hosts: []string{"*.servicebus.windows.net"}, Mode: "block",
+		Why: "A message on a real topic or queue is delivered to production subscribers. The Microsoft " +
+			"emulator that answers for this needs an MSSQL container beside it, which is weight an " +
+			"environment pays for on purpose rather than by default.",
+		Packages: []string{"@azure/service-bus", "azure-servicebus"},
+		EnvHints: []string{"SERVICEBUS_CONNECTION_STRING", "AZURE_SERVICEBUS_NAMESPACE"},
+	},
+	{
+		Name: "Azure Table Storage", Hosts: []string{"*.table.core.windows.net"}, Mode: "block",
+		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
+		Packages: []string{"@azure/data-tables", "azure-data-tables"},
+		EnvHints: []string{"AZURE_TABLE_NAME"},
+	},
+	{
+		Name: "Azure Files", Hosts: []string{"*.file.core.windows.net"}, Mode: "block",
+		Why: "A file written from a preview environment lands in the real share, where nothing tells " +
+			"it apart from production data afterwards.",
+		Packages: []string{"@azure/storage-file-share", "azure-storage-file-share"},
+		EnvHints: []string{"AZURE_FILE_SHARE_NAME"},
+	},
+	{
+		Name: "Azure Cosmos DB", Hosts: []string{"*.documents.azure.com"}, Mode: "block",
+		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
+		Packages: []string{"@azure/cosmos", "azure-cosmos"},
+		EnvHints: []string{"COSMOS_ENDPOINT", "AZURE_COSMOS_CONNECTION_STRING"},
+	},
+	{
+		Name: "Azure Key Vault", Hosts: []string{"*.vault.azure.net"}, Mode: "block",
+		Why: "Reading it hands a production credential to an environment running unreviewed code " +
+			"against a copy of production data.",
+		Packages: []string{"@azure/keyvault-secrets", "@azure/keyvault-keys", "azure-keyvault-secrets"},
+		EnvHints: []string{"AZURE_KEY_VAULT_URL", "KEY_VAULT_NAME"},
 	},
 }
 

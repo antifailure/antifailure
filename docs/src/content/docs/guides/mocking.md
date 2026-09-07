@@ -55,4 +55,11 @@ success shape. `mock` answers with content from a fixture. Use `capture` when
 you only need the call to succeed, such as sending mail, and `mock` when your
 application reads the response and does something with it.
 
+Resend, SendGrid, Postmark, Mailgun, Twilio, Amazon SES and Slack each have a
+handler that answers what their own client library parses. For any other host,
+capture records the body and answers `200 {}`, and it does that only when the
+rule **names the host**. A host swept in by a leading wildcard is refused
+instead, because an invented success is believed and nobody wrote that host
+down. Name the host in a rule of its own to say you meant it.
+
 Related: [egress](/docs/concepts/egress), [synth](/docs/guides/synth).

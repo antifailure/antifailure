@@ -278,6 +278,220 @@
       ]
     },
     {
+      "name": "a star in the middle names one service across every region",
+      "egress": {
+        "default": "block",
+        "rules": [
+          {
+            "host": "*.amazonaws.com",
+            "mode": "block",
+            "note": "The cloud is refused unless a rule names the service."
+          },
+          {
+            "host": "email.*.amazonaws.com",
+            "mode": "capture",
+            "note": "Mail is captured into the inbox."
+          },
+          {
+            "host": "*.s3.*.amazonaws.com",
+            "mode": "block",
+            "note": "An object write lands in the real bucket."
+          }
+        ]
+      },
+      "requests": [
+        {
+          "request": {
+            "host": "email.us-east-1.amazonaws.com",
+            "path": "/",
+            "tls": true,
+            "string": "GET https://email.us-east-1.amazonaws.com/"
+          },
+          "decision": {
+            "mode": "capture",
+            "rule_host": "email.*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for email.*.amazonaws.com decided capture because one label fills each star in email.*.amazonaws.com. Mail is captured into the inbox."
+          },
+          "chain": [
+            {
+              "host": "email.*.amazonaws.com",
+              "index": 1,
+              "specificity": 65557,
+              "why": "one label fills each star in email.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": true
+        },
+        {
+          "request": {
+            "host": "email.amazonaws.com",
+            "tls": true,
+            "string": "GET https://email.amazonaws.com"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.amazonaws.com decided block because the host ends in .amazonaws.com. The cloud is refused unless a rule names the service."
+          },
+          "chain": [
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "email.us.east.amazonaws.com",
+            "tls": true,
+            "string": "GET https://email.us.east.amazonaws.com"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.amazonaws.com decided block because the host ends in .amazonaws.com. The cloud is refused unless a rule names the service."
+          },
+          "chain": [
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "s3.us-east-1.amazonaws.com",
+            "path": "/b/k",
+            "tls": true,
+            "string": "GET https://s3.us-east-1.amazonaws.com/b/k"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.amazonaws.com decided block because the host ends in .amazonaws.com. The cloud is refused unless a rule names the service."
+          },
+          "chain": [
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "bucket.s3.us-east-1.amazonaws.com",
+            "path": "/k",
+            "tls": true,
+            "string": "GET https://bucket.s3.us-east-1.amazonaws.com/k"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.s3.*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.s3.*.amazonaws.com decided block because one label fills each star in *.s3.*.amazonaws.com. An object write lands in the real bucket."
+          },
+          "chain": [
+            {
+              "host": "*.s3.*.amazonaws.com",
+              "index": 2,
+              "specificity": 4115,
+              "why": "one label fills each star in *.s3.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "a.b.s3.eu-west-1.amazonaws.com",
+            "path": "/k",
+            "tls": true,
+            "string": "GET https://a.b.s3.eu-west-1.amazonaws.com/k"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.s3.*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.s3.*.amazonaws.com decided block because one label fills each star in *.s3.*.amazonaws.com. An object write lands in the real bucket."
+          },
+          "chain": [
+            {
+              "host": "*.s3.*.amazonaws.com",
+              "index": 2,
+              "specificity": 4115,
+              "why": "one label fills each star in *.s3.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "EMAIL.EU-WEST-2.amazonaws.com.",
+            "tls": true,
+            "string": "GET https://EMAIL.EU-WEST-2.amazonaws.com."
+          },
+          "decision": {
+            "mode": "capture",
+            "rule_host": "email.*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for email.*.amazonaws.com decided capture because one label fills each star in email.*.amazonaws.com. Mail is captured into the inbox."
+          },
+          "chain": [
+            {
+              "host": "email.*.amazonaws.com",
+              "index": 1,
+              "specificity": 65557,
+              "why": "one label fills each star in email.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": true
+        }
+      ]
+    },
+    {
       "name": "path boundaries: /admin does not cover /administrator",
       "egress": {
         "default": "block",

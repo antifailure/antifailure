@@ -10,7 +10,7 @@ import (
 
 func parseWith(t *testing.T, host, path, body string) message {
 	t.Helper()
-	h := captureHandlerFor(host, path)
+	h, _ := captureHandlerFor(host, path)
 	req, err := http.NewRequest(http.MethodPost, "https://"+host+path, strings.NewReader(body))
 	require.NoError(t, err)
 	m := h.parse(req, []byte(body))
@@ -96,11 +96,94 @@ func TestCapture_TwilioIsSMSNotEmail(t *testing.T) {
 
 func TestCapture_UnknownProviderKeepsTheBody(t *testing.T) {
 	t.Parallel()
-	// Recording it is better than refusing it. The message is captured either
-	// way and the application usually carries on.
+	// Recording it is better than refusing it, where a rule named the host.
+	// Whether the rule named it is decided in capture rather than here; this
+	// is about the shape kept for a provider nothing recognises.
 	m := parseWith(t, "mail.someone-else.test", "/send", `{"anything":"at all"}`)
 	require.Equal(t, "unknown", m.Provider)
 	require.Contains(t, m.Text, "anything")
+}
+
+func TestCaptureHandlerFor_SaysWhenItIsGuessing(t *testing.T) {
+	t.Parallel()
+	// The second return is the whole fix. It used to fall back silently, and a
+	// silent fallback is how a handler that believed it was holding an email
+	// came to answer for S3.
+	_, known := captureHandlerFor("mail.someone-else.test", "/send")
+	require.False(t, known)
+
+	_, known = captureHandlerFor("api.resend.com", "/emails")
+	require.True(t, known)
+}
+
+func TestCapture_SESQueryAPI(t *testing.T) {
+	t.Parallel()
+	m := parseWith(t, "email.us-east-1.amazonaws.com", "/",
+		"Action=SendEmail&Source=hello%40shopfront.test"+
+			"&Destination.ToAddresses.member.1=a%40example.test"+
+			"&Destination.ToAddresses.member.2=b%40example.test"+
+			"&Message.Subject.Data=Your+code"+
+			"&Message.Body.Text.Data=Your+code+is+481920")
+	require.Equal(t, "ses", m.Provider)
+	require.Equal(t, "email", m.Kind)
+	require.Equal(t, "hello@shopfront.test", m.From)
+	require.Equal(t, []string{"a@example.test", "b@example.test"}, m.To,
+		"the v1 recipient list is numbered from one and an unindexed read finds nothing")
+	require.Equal(t, "481920", m.Code)
+}
+
+func TestCapture_SESv2(t *testing.T) {
+	t.Parallel()
+	m := parseWith(t, "email.eu-west-1.amazonaws.com", "/v2/email/outbound-emails", `{
+		"FromEmailAddress":"hello@shopfront.test",
+		"Destination":{"ToAddresses":["a@example.test"],"CcAddresses":["c@example.test"]},
+		"Content":{"Simple":{"Subject":{"Data":"Confirm your email"},
+			"Body":{"Html":{"Data":"<a href=\"https://shopfront.test/verify?t=abc\">Confirm</a>"}}}}
+	}`)
+	require.Equal(t, "ses", m.Provider)
+	require.Equal(t, []string{"a@example.test", "c@example.test"}, m.To)
+	require.Equal(t, "Confirm your email", m.Subject)
+	require.Equal(t, "https://shopfront.test/verify?t=abc", firstLink(m))
+}
+
+func TestCapture_SESIsNotEveryHostUnderAmazonaws(t *testing.T) {
+	t.Parallel()
+	// The mistake that produced this lane, guarded at the handler as well as
+	// at the catalog. A substring test for amazonaws.com is how the mail
+	// handler came to answer for object storage.
+	_, known := captureHandlerFor("s3.us-east-1.amazonaws.com", "/bucket/key")
+	require.False(t, known)
+	_, known = captureHandlerFor("sqs.eu-west-1.amazonaws.com", "/")
+	require.False(t, known)
+	_, known = captureHandlerFor("email.us-east-1.amazonaws.com", "/")
+	require.True(t, known)
+}
+
+func TestCapture_SlackIsTheShapeItsClientChecks(t *testing.T) {
+	t.Parallel()
+	m := parseWith(t, "slack.com", "/api/chat.postMessage",
+		`{"channel":"#orders","text":"an order was placed"}`)
+	require.Equal(t, "slack", m.Provider)
+	require.Equal(t, []string{"#orders"}, m.To)
+	require.Equal(t, "an order was placed", m.Text)
+
+	var b strings.Builder
+	h, _ := captureHandlerFor("slack.com", "/api/chat.postMessage")
+	h.respond(&b)
+	require.Contains(t, b.String(), `"ok":true`,
+		"every Slack client reads ok first, and an empty object reads as ok false")
+
+	var hook strings.Builder
+	h, _ = captureHandlerFor("hooks.slack.com", "/services/T/B/X")
+	h.respond(&hook)
+	require.Contains(t, hook.String(), "\r\n\r\nok",
+		"an incoming webhook answers with two letters in plain text")
+
+	// The whole label, not the tail of one. A host somebody else owns is not
+	// Slack, and answering as Slack for it is the same mistake in miniature
+	// as answering as SES for the whole of amazonaws.com.
+	_, known := captureHandlerFor("notslack.com", "/api/chat.postMessage")
+	require.False(t, known)
 }
 
 func TestExtractLinks_PutsTheOneTheWorkflowNeedsFirst(t *testing.T) {
@@ -150,6 +233,8 @@ func TestRespond_ReturnsTheShapeEachClientParses(t *testing.T) {
 		"postmark": {"api.postmarkapp.com", "200", `"ErrorCode":0`},
 		"mailgun":  {"api.mailgun.net", "200", `"message"`},
 		"twilio":   {"api.twilio.com", "201", `"sid"`},
+		"ses":      {"email.us-east-1.amazonaws.com", "200", "SendEmailResponse"},
+		"slack":    {"slack.com", "200", `"ok":true`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -158,7 +243,9 @@ func TestRespond_ReturnsTheShapeEachClientParses(t *testing.T) {
 			if name == "twilio" {
 				path = "/2010-04-01/Accounts/AC1/Messages.json"
 			}
-			captureHandlerFor(tc.host, path).respond(&b)
+			h, known := captureHandlerFor(tc.host, path)
+			require.True(t, known, "this provider has a handler and must not fall back")
+			h.respond(&b)
 			out := b.String()
 			require.Contains(t, out, "HTTP/1.1 "+tc.wantStatus)
 			require.Contains(t, out, "X-Antifailure-Captured: true")
