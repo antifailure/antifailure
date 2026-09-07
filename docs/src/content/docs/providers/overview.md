@@ -42,9 +42,15 @@ and the golden has to be copied in, but what you get back is a real Supabase
 project with the Auth, Storage and Realtime services your application is
 calling, which neither of the others can offer. A branch is billed by the hour.
 
-A provider named in the manifest and not built into this binary is refused at
-startup rather than substituted. Falling back to `docker` would hand somebody
-an empty preview with no reason for it.
+A provider named in the manifest and neither built into this binary nor
+registered with it is refused at startup rather than substituted. Falling back
+to `docker` would hand somebody an empty preview with no reason for it. The
+refusal names every provider the build does have, registered ones included, so
+a misspelling is answered rather than merely rejected.
+
+A build outside this repository can add its own without forking the engine.
+[Writing a provider](/docs/contributing/provider-authoring) has the
+registration, which is four lines around `engine/pkg/afcli`.
 
 ## What every provider guarantees
 

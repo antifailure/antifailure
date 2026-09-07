@@ -66,6 +66,7 @@ var areaNames = map[string]string{
 	"FID": "Fidelity",
 	"CPL": "Control plane",
 	"WLD": "Workloads",
+	"EXT": "Extensions",
 }
 
 func main() {

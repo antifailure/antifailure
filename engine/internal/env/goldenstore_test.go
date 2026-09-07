@@ -243,7 +243,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	defer cancel()
 
 	storeDir := t.TempDir()
-	store, err := golden.OpenStore(golden.KindLocal, storeDir, nil)
+	store, err := golden.OpenStore(golden.KindLocal, storeDir, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.Put(ctx, golden.DumpName("gv_halfpublished"), 3,
 		strings.NewReader("abc")))

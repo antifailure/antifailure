@@ -43,7 +43,8 @@ func (o *Orchestrator) goldenStore() (golden.Store, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	s, err := golden.OpenStore(golden.Kind(db.Golden.Storage), db.Golden.StorageURL, getenv)
+	s, err := golden.OpenStore(
+		golden.Kind(db.Golden.Storage), db.Golden.StorageURL, getenv, o.extensions())
 	if err != nil {
 		return nil, aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
 	}

@@ -812,6 +812,32 @@ Organization policy {policy} refuses this environment: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/policy](/docs/enterprise/policy) |
 
+## Extensions
+
+### AF-EXT-001
+
+This build cannot honor one of its own extension registrations: {detail}
+
+**What to do.** Fix the registration in the binary that made it. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [contributing/provider-authoring](/docs/contributing/provider-authoring) |
+
+### AF-EXT-002
+
+The registered {socket} {name} returned nothing and reported no error.
+
+**What to do.** Fix the registration to return either something usable or an error saying why it could not. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | `3` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [contributing/provider-authoring](/docs/contributing/provider-authoring) |
+
 ## Fidelity
 
 ### AF-FID-001

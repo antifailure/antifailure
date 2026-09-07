@@ -53,7 +53,7 @@ func (o *Orchestrator) Fidelity(ctx context.Context) (fidelity.Inventory, error)
 
 // observeRuntime asks the runtime what is running.
 func (o *Orchestrator) observeRuntime(ctx context.Context, obs *fidelity.Observation) {
-	rt, err := o.newRuntime()
+	rt, err := o.newRuntime(ctx)
 	if err != nil {
 		obs.Runtime = "a runtime that could not be built"
 		obs.ServicesReason = "the runtime could not be reached: " + oneLine(err)

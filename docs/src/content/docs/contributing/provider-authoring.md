@@ -100,6 +100,85 @@ is the other reason it exists: a control that needs infrastructure gets
 skipped, and a skipped control is a false green rather than a proof. That is
 the subject of the next two sections.
 
+## Making the engine use it
+
+A provider nobody can select is a provider nobody has. Until a build knows the
+name `mine` means your code, `database.provider: mine` is refused, and being
+refused is the correct behaviour: falling back to `docker` would hand somebody
+an empty preview with no reason for it.
+
+Registration is how a build says so, and it needs no change to this repository.
+`engine/pkg/extension` holds the sockets and `engine/pkg/afcli` runs the same
+command tree the `af` binary runs, so your `main` is a few lines around both:
+
+```go
+package main
+
+import (
+	"context"
+	"os"
+
+	"github.com/antifailure/antifailure/engine/pkg/afcli"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
+)
+
+type registration struct{}
+
+func (registration) Name() string { return "mine" }
+
+func (registration) Open(
+	ctx context.Context, cfg extension.DatabaseConfig,
+) (provider.Database, error) {
+	// cfg carries the manifest's database block, the resolved Postgres major
+	// version, a state directory, the engine's clock, and Lookup, which
+	// resolves a declared credential through the engine's whole chain. Read
+	// credentials through Lookup rather than from the process environment, so
+	// that every one your provider uses is declared and auditable.
+	key, found, err := cfg.Lookup(ctx, cfg.Database.APIKeyEnv)
+	if err != nil || !found {
+		return nil, err
+	}
+	return myprovider.New(key, cfg.Database.Project)
+}
+
+func main() {
+	extension.Default.AddDatabaseProvider(registration{})
+
+	ctx, forced, stop := afcli.WithSignals(context.Background())
+	defer stop()
+	os.Exit(afcli.Run(ctx, forced, os.Args[1:], afcli.Options{}))
+}
+```
+
+Five things can be registered: `AddDatabaseProvider`, `AddDatastoreProvider`,
+`AddRuntimeProvider`, `AddGoldenStore` and `AddEmulator`. Three of them are
+selected by the engine today. `AddDatastoreProvider` and `AddEmulator` have no
+lifecycle behind them yet, because the manifest declares one datastore and no
+egress rule can name an emulator, so registering either of those does nothing
+beyond appearing in `af license status`. Each socket says so in its own
+documentation rather than leaving you to discover it.
+
+Four rules are worth knowing before you rely on this.
+
+**A registration adds a choice and never replaces one.** The engine asks its
+own providers first and the registry only afterwards, so registering under a
+name this build already has would never be used. That is refused at the first
+command rather than ignored, because a build somebody believes replaces the
+Docker provider and silently does not is worse than one that will not start.
+
+**A registered provider is checked exactly as a built in one is.** Masking,
+verification, provenance and the egress policy all live above the provider.
+Nothing here is a way around them.
+
+**A refusal names what this build does have,** registered providers included,
+so a misspelling in the manifest is answered by a message that mentions your
+provider rather than one that lists only the four that ship.
+
+**Run the conformance suite anyway.** Registration decides which provider is
+selected. It says nothing about whether that provider keeps its promises, and
+the suite is the only thing that does.
+
 ## Capabilities, and why skipping has to be loud
 
 Not every provider can do everything. A provider without copy-on-write cannot

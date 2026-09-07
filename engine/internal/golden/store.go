@@ -3,10 +3,10 @@ package golden
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
-	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
 // A Store is where a golden's dump and its attestation live when they live
@@ -21,31 +21,29 @@ import (
 // used. That ordering is the whole point: a dump on its own is a database
 // somebody could have put anything in, and the signed statement of what the
 // verification scan found is what makes it a golden rather than a file.
-type Store interface {
-	// Name identifies the store for a message.
-	Name() string
-	// Put writes an object, replacing one of the same name.
-	Put(ctx context.Context, name string, size int64, body io.Reader) error
-	// Get opens an object. A name that is not there returns ErrNotFound, so a
-	// caller can tell "no golden published yet" from "the store is broken",
-	// which are the same HTTP status on more than one service.
-	Get(ctx context.Context, name string) (io.ReadCloser, error)
-	// List returns the objects under a prefix.
-	List(ctx context.Context, prefix string) ([]Object, error)
-	// Delete removes an object. Removing one that is not there succeeds,
-	// because a retry after a timeout must not fail on the work it already did.
-	Delete(ctx context.Context, name string) error
-}
+//
+// The interface itself lives in engine/pkg/extension, and these are aliases
+// rather than a second declaration.
+//
+// A store is one of the things a build outside this repository may add, and an
+// interface declared in an internal package is one such a build cannot name,
+// let alone implement. Declaring it twice and adapting between them would work
+// and would be two definitions to keep in step, which is exactly how a
+// signature drifts. The alias is an alias and not a wrapper for the same
+// reason engine/internal/secrets keeps the name secrets.Value for a type that
+// lives in engine/pkg/secret: they are the same type to the compiler, so every
+// call site, struct field and type assertion in the engine keeps working and
+// no conversion exists to forget.
+type Store = extension.ObjectStore
 
 // Object is one thing in a store.
-type Object struct {
-	Name     string
-	Size     int64
-	Modified time.Time
-}
+type Object = extension.StoredObject
 
 // ErrNotFound is returned by Get for an object that is not there.
-var ErrNotFound = fmt.Errorf("golden: no such object")
+//
+// The same value a store outside this module returns, because that store
+// cannot import this package to name a sentinel declared here.
+var ErrNotFound = extension.ErrObjectNotFound
 
 // Kind names a storage backend, matching the manifest's values.
 type Kind string
@@ -69,9 +67,14 @@ const (
 // holds a credential. The credential stays in the environment: the URL names
 // the variable holding it, or carries a signature that is itself supplied
 // through one.
-func OpenStore(kind Kind, storageURL string, getenv func(string) string) (Store, error) {
+func OpenStore(
+	kind Kind, storageURL string, getenv func(string) string, reg *extension.Registry,
+) (Store, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
+	}
+	if reg == nil {
+		reg = extension.Default
 	}
 	raw := strings.TrimSpace(storageURL)
 	if raw == "" {
@@ -99,9 +102,41 @@ func OpenStore(kind Kind, storageURL string, getenv func(string) string) (Store,
 	case KindS3:
 		return newS3Store(raw, getenv)
 	default:
+		// Consulted after the built-in kinds and never before them, so a
+		// registration adds a place to publish and can never take over one of
+		// these. A registration under a built-in name is refused where the
+		// registry is validated rather than silently losing to this switch.
+		if s, ok := reg.GoldenStoreNamed(string(kind)); ok {
+			store, err := s.Open(extension.ObjectStoreConfig{URL: raw, Getenv: getenv})
+			if err != nil {
+				return nil, err
+			}
+			if store == nil {
+				// A nil interface here would reach every call site's nil
+				// guard as non-nil and fail inside a method. The engine's own
+				// providers assign, check and return an explicit nil for the
+				// same reason; this is that check for a store it did not
+				// write.
+				return nil, fmt.Errorf(
+					"golden: the registered store %q returned no store and no error", kind)
+			}
+			return store, nil
+		}
 		return nil, fmt.Errorf(
-			"golden: %q is not a storage kind; it is one of local, azure_blob, s3", kind)
+			"golden: %q is not a storage kind; it is one of %s",
+			kind, strings.Join(storageKinds(reg), ", "))
 	}
+}
+
+// storageKinds lists every kind this build can open, built-in and registered.
+//
+// The refusal says what there IS rather than only what there is not, because a
+// build that registered a store and then misspelled it in the manifest is
+// otherwise told the name is wrong by a message that does not mention the
+// store it has.
+func storageKinds(reg *extension.Registry) []string {
+	out := []string{string(KindLocal), string(KindAzureBlob), string(KindS3)}
+	return append(out, reg.GoldenStoreNames()...)
 }
 
 // envRef reads $NAME or ${NAME}, and reports whether the whole string was one.

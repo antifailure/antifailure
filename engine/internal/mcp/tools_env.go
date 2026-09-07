@@ -1656,7 +1656,7 @@ func (f *orchestratorFactory) inventory(ctx context.Context) ([]provider.Resourc
 	if err != nil {
 		return nil, err
 	}
-	rt, err := o.Runtime()
+	rt, err := o.Runtime(ctx)
 	if err != nil {
 		return nil, err
 	}

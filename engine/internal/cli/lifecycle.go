@@ -455,7 +455,7 @@ interrupt at any point leaves something af down can clean up.`),
 // Silent on every failure of its own. This runs while a command is already
 // failing, and a second error about the reporter would bury the first.
 func reportStanding(ctx context.Context, e *Env, o *env.Orchestrator) {
-	rt, err := o.Runtime()
+	rt, err := o.Runtime(ctx)
 	if err != nil {
 		return
 	}
