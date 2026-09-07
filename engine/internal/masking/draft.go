@@ -66,16 +66,22 @@ func linkFor(a Assignment) string {
 }
 
 // unmatchedRule is the rule for a column the classifier could not place.
+//
+// Classified on the canonical type for the same reason Assign is: this file
+// writes down what Assign decided, and a draft that disagreed with the plan it
+// describes would be a rules file that changes the plan the moment somebody
+// applies it.
 func unmatchedRule(a Assignment) Rule {
 	c := a.Column
+	cc := canonical(a.Table, c)
 	r := Rule{Table: a.Table.String(), Column: c.Name}
 	const because = "Nothing recognised this column, so it is emptied until somebody says otherwise."
 	switch {
-	case isJSON(c):
+	case isJSON(cc):
 		r.Transform, r.Why = "empty_json", because
 	case c.Nullable && !c.Unique:
 		r.Transform, r.Why = "nullify", because
-	case !looksSensitive(c):
+	case !looksSensitive(cc):
 		// Not a type this package can rewrite, so no transform would run.
 		// Preserved and said so, which is the one line in the file that is
 		// a question rather than an answer.

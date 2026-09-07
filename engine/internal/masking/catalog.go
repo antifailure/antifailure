@@ -21,6 +21,12 @@ import (
 
 // Table is one table and its columns.
 type Table struct {
+	// Engine is the datastore engine this table was read from, which decides
+	// what its type names mean and how a statement addresses a row in it. Set
+	// by whatever read the catalog. Empty means Postgres, which is what a
+	// Table meant before there was a second engine, and an engine nobody has a
+	// dialect for is refused rather than treated as Postgres.
+	Engine string
 	Schema string
 	Name   string
 	// Columns are in ordinal order, which is the order a person reading the
@@ -131,7 +137,10 @@ ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 		}
 		key := schema + "." + table
 		if _, ok := byTable[key]; !ok {
-			byTable[key] = &Table{Schema: schema, Name: table}
+			// Stamped rather than left to the empty default, so that a table
+			// read from Postgres says so and the compatibility case in
+			// DialectFor covers only values nothing read from a database.
+			byTable[key] = &Table{Engine: enginePostgres, Schema: schema, Name: table}
 			order = append(order, key)
 		}
 		byTable[key].Columns = append(byTable[key].Columns, ColumnInfo{

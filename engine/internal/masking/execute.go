@@ -270,35 +270,10 @@ func (e *Executor) applyChunk(
 	return int64(len(batch)), last, nil
 }
 
-// selectChunk builds the read for one chunk.
+// selectChunk builds the read for one chunk, in the table's own dialect.
 func (tp TablePlan) selectChunk(after string) (string, []any) {
-	key := tp.keyExpr()
-	cols := make([]string, 0, len(tp.Columns)+1)
-	// Cast on the way out, so every key type arrives as a string. A ctid read
-	// natively comes back as a struct that formats as nothing the WHERE clause
-	// will match, which produced an update that silently changed no rows.
-	cols = append(cols, key+"::text")
-	for _, c := range tp.Columns {
-		cols = append(cols, quoteIdent(c.Column.Name))
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "SELECT %s FROM %s", strings.Join(cols, ", "), tp.Table.Qualified())
-	var args []any
-	if after != "" && len(tp.OrderBy) > 0 {
-		// Compared as text, so one code path covers integer keys, uuids, and
-		// anything else somebody used. The order is not the key's natural
-		// order for an integer, and it does not need to be: it only has to be
-		// total and stable, so every row is visited once and a resume picks up
-		// where the last chunk stopped.
-		fmt.Fprintf(&b, " WHERE %s::text > $1", key)
-		args = append(args, after)
-	}
-	fmt.Fprintf(&b, " ORDER BY %s::text", key)
-	if tp.ChunkSize > 0 {
-		fmt.Fprintf(&b, " LIMIT %d", tp.ChunkSize)
-	}
-	return b.String(), args
+	q := tp.Table.dialect().SelectChunk(tp, after)
+	return q.SQL, q.Args
 }
 
 // toStringPtr converts a scanned value to the shape a transform takes.

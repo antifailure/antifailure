@@ -1171,6 +1171,7 @@ describe('the terms describe guards that are really in the engine', () => {
       'internal/dockerutil/dockerutil.go',
       'internal/masking/rules.go',
       'internal/verify/scan.go',
+      'internal/verify/dialect.go',
       'internal/env/golden.go',
     ]) {
       const source = await engine(file).catch(() => '')
@@ -1261,24 +1262,41 @@ describe('the terms describe guards that are really in the engine', () => {
    * is still not a proof that no personal data survives.
    */
   it('pins the mechanism the verification scan uses, which the terms describe as a limit', async () => {
-    const source = await engine('internal/verify/scan.go')
+    // The classification moved when the scanner gained a second engine: it
+    // used to be one Postgres query in scan.go and it is now the shared step
+    // every source goes through, in dialect.go. The claim did not move, so
+    // this follows the code rather than being relaxed, and it is pinned two
+    // ways instead of one.
+    const source = await engine('internal/verify/dialect.go')
     // Not an allowlist of readable types any more. Every column is listed and
     // classified, and only the structural types, the numbers, times, booleans
-    // and uuids that cannot hold a sentence at all, are dropped before the
-    // classification. Narrowing this back to a literal type list is what this
-    // catches.
+    // and uuids that cannot hold a sentence at all, are dropped. Every other
+    // answer assigns a kind rather than skipping, which is what makes the
+    // page's "names the ones it cannot" true.
     assert.match(
       source,
-      /if structuralTypes\[strings\.ToLower\(c\.typ\)\] \{\n\t\t\tcontinue\n\t\t\}\n\t\tc\.kind = classify\(c\.typ\)/,
+      /switch s\.d\.Kind\(c\.Type\) \{\n\t\tcase "structural":[\s\S]{0,400}?return nil\n\t\tcase "bytea":[\s\S]{0,200}?default:\n\t\t\tc\.kind = kindText/,
       'the verification scan no longer lists every column and classifies it. The terms page says ' +
         'it reads every column it can read as text and names the ones it cannot, and that ' +
         'sentence is only true while the column listing drops nothing but the structural types.',
     )
+    // The narrowing this exists to catch, stated as the thing that must NOT
+    // come back. The original defect was a literal six type allowlist in the
+    // listing statement, and a statement that filters by type again is how the
+    // page starts overstating the product without any assertion above noticing.
+    assert.doesNotMatch(
+      source,
+      /data_type IN \(/,
+      'the column listing statement filters by type again. That is the allowlist the scan was ' +
+        'widened away from after it said clean about a bytea holding sealed key material, and ' +
+        'the terms page describes the wider mechanism.',
+    )
     // The half that turns "I could not read it" into a refusal. Without this
     // the page's second sentence, that such a column fails rather than passes,
     // is false.
+    const scan = await engine('internal/verify/scan.go')
     assert.match(
-      source,
+      scan,
       /const DetectorUnreadSensitive = "unread-sensitive-name"/,
       'the finding raised for a column the scan cannot read, that nothing masks, and whose name ' +
         'says it holds a secret is gone. The terms page says that column fails the scan.',

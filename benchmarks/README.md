@@ -60,3 +60,24 @@ golden and nothing is copied. A provider that copies files, which `pgurl` does,
 shows a branch time proportional to the database. Both are legitimate. Only one
 of them is what somebody with a terabyte should buy, and telling them which
 before they run their own trial is why the slow numbers are published here too.
+
+## Cross store join keys
+
+A different question again, and the only figure here that is not a time. An
+environment holds more than one store and the same person is usually in several
+of them, joined on an identifier that is in both. **Of the identifiers that
+appear in more than one store, how many mask to the same value in all of them?**
+
+| Stores | Candidate join keys | Verified identical | Share | Run |
+| --- | --- | --- | --- | --- |
+| Postgres and ClickHouse | 6 | 6 | 100% | `2026-09-07-1307` |
+
+Anything below 100 percent is a bug rather than a slower number. A join key that
+masks to two different values is a join that returns nothing, and a join key
+masked in one store and copied in the other is also a leak. That is what makes
+this worth quoting: it is a figure that can only be said out loud when it is
+perfect, and the same run publishes what it was before the dialect boundary
+existed, which was 3 of 6.
+
+A report that found nothing to compare is not a pass either, and the harness
+refuses one.
