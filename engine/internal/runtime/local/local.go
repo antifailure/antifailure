@@ -223,7 +223,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if spec.CACertPEM != "" {
 		ca = &envcert.Authority{CertPEM: spec.CACertPEM, KeyPEM: spec.CAKeyPEM}
 	}
-	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, ca,
+	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, spec.Datastores, ca,
 		spec.SandboxCredentials, spec.MockPacks, spec.ModelEnv, nets, journal, progress)
 	if err != nil {
 		return env, err
@@ -333,11 +333,25 @@ func needsIngress(services []provider.ServiceSpec) bool {
 // host and port rather than asking the provider for a second form keeps the
 // provider interface honest: it has no idea this environment exists.
 func (r *Runtime) AttachDatabase(ctx context.Context, db Attachable, ref, networkID string, hostURL secrets.Value) (secrets.Value, error) {
-	port, err := db.AttachToNetwork(ctx, ref, networkID, DatabaseAlias)
+	return r.AttachStore(ctx, db, ref, networkID, DatabaseAlias, hostURL)
+}
+
+// AttachStore is the same move for a store that is not the primary database.
+//
+// The alias is the caller's rather than DatabaseAlias, because an environment
+// can hold several stores and each one is reached by its own name: an
+// application configured to talk to a ClickHouse called events finds it at
+// events, with nothing changed. AttachDatabase is this function with the
+// database's alias, so there is one implementation of the rewrite rather than
+// two that agree until somebody edits one.
+func (r *Runtime) AttachStore(
+	ctx context.Context, store Attachable, ref, networkID, alias string, hostURL secrets.Value,
+) (secrets.Value, error) {
+	port, err := store.AttachToNetwork(ctx, ref, networkID, alias)
 	if err != nil {
 		return secrets.Value{}, err
 	}
-	rewritten, err := rewriteHost(hostURL.Reveal(), DatabaseAlias, port)
+	rewritten, err := rewriteHost(hostURL.Reveal(), alias, port)
 	if err != nil {
 		return secrets.Value{}, err
 	}

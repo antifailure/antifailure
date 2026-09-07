@@ -262,6 +262,7 @@ datastores:
 | `stance` | Required. See below. |
 | `because` | Why that stance was chosen, carried into the fidelity report as written. Required for `empty`. |
 | `from` | The store a `derived` one is rebuilt from. Required for `derived` and refused for the rest. |
+| `source_url_env` | The variable holding this store's production connection string, which a `golden` is copied from. Omitted, the golden holds no rows and every refresh says so. |
 
 The `database` block above is not replaced and does not move. It normalizes
 into the entry named `primary`, so a manifest that declares only `database:`
@@ -293,13 +294,47 @@ not, which is why it is written down and why `because` is required with it.
 
 ### What this build does with them
 
-The manifest declares datastores, the validator refuses one with no stance, and
-the [component inventory](/docs/concepts/inventory) names every declared store with
-the stance somebody chose for it. Nothing yet refreshes a golden for a second
-store, branches one, or creates a topic in one, so every declared store is
-reported as unmeasured with the reason. The interface those implementations
-have to satisfy is `provider.Datastore`, and the suite that decides whether one
-of them is finished is `conformance.RunDatastore`.
+**A ClickHouse declared `golden` is refreshed, masked, verified and branched**,
+beside the primary database and by the same commands. `af golden refresh` makes
+a golden of every store the manifest declares as well as of the database, and
+`af up` branches each of them into the environment. The masking rules are one
+`masking.yaml` for the whole twin, so a rule about `distinct_id` covers the
+column wherever it is and one customer masks to one fake customer in both
+stores; the verification scanner reads the second store back with the same
+detectors, and a golden that fails it is never published and can never be
+branched.
+
+Every other stance, and every other engine, is still declaration only: the
+validator refuses a store with no stance and the
+[component inventory](/docs/concepts/inventory) names each one, and nothing here
+starts an `empty` store, runs a `derived` rebuild or creates a topic. A store
+whose engine this build cannot mask is REFUSED rather than published unmasked.
+
+**The fidelity report has not caught up with the branching**, and that is worth
+knowing before you read one. The datastores dimension is built from the
+manifest alone, so it reports a store declared `golden` as absent and names the
+golden, the attestation, the tables and the rows it cannot see, whether or not
+`af up` branched one. What would close it is the dimension reading the branch
+that now exists rather than the declaration, and until it does, the report
+understates a twin that holds a masked second store.
+
+### Reaching a store from a service
+
+Every service is given `AF_DATASTORE_<NAME>_URL` for each store the environment
+provides, and the store answers to its own name on the environment's network:
+an application already configured to talk to a ClickHouse called `events` finds
+it at `events` with nothing changed.
+
+A store the environment provides is not also started as a service. A manifest
+that declares a datastore called `events` and a service called `events` is
+declaring one thing twice, the service being how the store used to be started
+and the datastore being what it holds, so the service is skipped and the run
+says so. Without that there would be two ClickHouses on one network under one
+name, and half the application's queries would go to the empty one.
+
+The interface an implementation has to satisfy is `provider.Datastore`, and the
+suite that decides whether one of them is finished is
+`conformance.RunDatastore`.
 
 ## `egress`
 

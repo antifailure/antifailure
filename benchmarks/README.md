@@ -61,6 +61,41 @@ shows a branch time proportional to the database. Both are legitimate. Only one
 of them is what somebody with a terabyte should buy, and telling them which
 before they run their own trial is why the slow numbers are published here too.
 
+## Events in the twin
+
+The number the second datastore exists for, and it was **zero**. An
+environment held one golden and it was Postgres, so a manifest could declare a
+ClickHouse and the environment started an empty container: for an analytics
+product that is the twin holding the metadata and none of the data, and every
+chart in it drew nothing.
+
+| | Events in the environment's ClickHouse | Refresh | Branch | Runs |
+| --- | --- | --- | --- | --- |
+| Before | 0 | | | |
+| After | 1,000,000 | 1m 24s to 1m 53s | 35 ms to 48 ms | `2026-09-07-1611`, `2026-09-07-1613` |
+
+The before figure is measured rather than asserted: it is a ClickHouse started
+from the image a manifest declares, with the tables its migrations would create
+and nothing in them.
+
+The refresh is paid once and the branch is paid per environment, the same split
+the database providers have. A range rather than a figure for the same reason
+the `pgurl` rows carry one: the two runs are the same commit against the same
+server two minutes apart, at load averages of 25.7 and 18.3 on an eight core
+laptop.
+
+**The branch time does not move with the data.** Three rows and a million rows
+branch in tens of milliseconds either way, and the two runs disagree about
+which of them was faster: 69 ms against 35 ms in the first, 14 ms against 48 ms
+in the second. A branch attaches the golden's partitions and ClickHouse
+hardlinks them, so what is being timed is metadata. The provider still declares
+copy on write FALSE, because a multi disk storage policy copies the parts
+instead and nothing on the client side can see which one a server has. The
+measurement is published here instead of promised in a capability.
+
+`AF_BENCHMARK_EVENTS` sets the row count, so a customer's own number is one
+command away.
+
 ## Cross store join keys
 
 A different question again, and the only figure here that is not a time. An

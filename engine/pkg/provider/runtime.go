@@ -116,6 +116,19 @@ type EnvSpec struct {
 	// to http://localhost:3100 and got a connection refused, four minutes into
 	// a workflow.
 	PublicPorts map[string]int
+	// Datastores are the names of stores the ENVIRONMENT provides, which a
+	// service reaches by name the way it reaches another service.
+	//
+	// They are here because reaching one is not egress. Traffic inside an
+	// environment does not go through the sidecar and is not decided against
+	// the egress policy: a service calling another service, or the database,
+	// is internal, and the runtime builds that list from the service names and
+	// the database's alias. A datastore is neither. Without this the events
+	// store an environment provides is the one internal address the policy
+	// would refuse, and the decision log would show a blocked request to a
+	// host called "events", which reads as the environment being broken rather
+	// than as a list being short.
+	Datastores []string
 	// Egress is the policy the sidecar enforces.
 	//
 	// Nil means block everything. The runtime never decides what a rule means;

@@ -76,6 +76,9 @@ var datastoreBehaviors = []Behavior{
 	{"Refresh_RefusesToPublishWhenVerificationFails", "A refresh whose verification fails publishes nothing.", requiresGolden},
 	{"Branch_IsIdempotentByEnvironment", "Branching twice for one environment returns one branch, not two.", requiresBranching},
 	{"Branch_RefusesAnUnverifiedGolden", "Branching an unverified version fails with AF-MSK-001.", requiresGoldenAndBranch},
+	{"ListGoldens_ReportsWhatARefreshPublished", "A published version appears in the listing, with the provenance it was made for.", requiresGolden},
+	{"DestroyGolden_RemovesTheVersion", "A destroyed golden can no longer be branched, and is no longer listed.", requiresGoldenAndBranch},
+	{"DestroyGolden_OfSomethingAlreadyGoneSucceeds", "Destroying a golden twice is not an error, because a sweep retries.", requiresGolden},
 	{"Destroy_RemovesTheBranch", "A destroyed branch no longer appears in the inventory.", requiresBranching},
 	{"Destroy_OfSomethingAlreadyGoneSucceeds", "Destroying twice is not an error, because teardown retries.", requiresBranching},
 	{"ConnString_IsASecret", "A connection string renders as redacted and carries no plaintext.", requiresBranching},
@@ -246,6 +249,12 @@ func runDatastoreBehavior(ctx context.Context, t *testing.T, name string, factor
 		h.branchIsIdempotent(ctx)
 	case "Branch_RefusesAnUnverifiedGolden":
 		h.branchRefusesUnverified(ctx)
+	case "ListGoldens_ReportsWhatARefreshPublished":
+		h.listGoldensReportsThePublishedVersion(ctx)
+	case "DestroyGolden_RemovesTheVersion":
+		h.destroyGoldenRemovesTheVersion(ctx)
+	case "DestroyGolden_OfSomethingAlreadyGoneSucceeds":
+		h.destroyGoldenTwiceSucceeds(ctx)
 	case "Destroy_RemovesTheBranch":
 		h.destroyRemovesTheBranch(ctx)
 	case "Destroy_OfSomethingAlreadyGoneSucceeds":
@@ -393,6 +402,86 @@ func (h *dsHarness) branchRefusesUnverified(ctx context.Context) {
 		h.t.Errorf("branching an unverified golden failed with %v, and must fail with "+
 			"AF-MSK-001; the engine reads the code to tell a masking refusal from a fault",
 			branchErr)
+	}
+}
+
+// listGoldensReportsThePublishedVersion is what the engine's golden selection
+// rests on.
+//
+// A version that a refresh published and a listing does not report is a
+// version nothing can ever branch, so the engine refreshes again on every
+// command and copies production every time. The provenance is checked as well
+// as the identifier, because selection compares it: a listing that reports the
+// version and drops the provenance makes every version unselectable in exactly
+// the same way, and by the same silent route.
+func (h *dsHarness) listGoldensReportsThePublishedVersion(ctx context.Context) {
+	gv := h.refresh(ctx)
+	listed, err := h.d.ListGoldens(ctx)
+	if err != nil {
+		h.t.Fatalf("ListGoldens: %v", err)
+	}
+	for _, g := range listed {
+		if g.ID != gv.ID {
+			continue
+		}
+		if g.Provenance != gv.Provenance {
+			h.t.Fatalf("the refresh published %s for %q and the listing reports it as %q; "+
+				"the engine selects by provenance and would never choose this version",
+				g.ID, gv.Provenance, g.Provenance)
+		}
+		if !g.Verified {
+			h.t.Fatalf("the version %s was verified when it was published and the listing "+
+				"reports it unverified, so nothing will branch it", g.ID)
+		}
+		return
+	}
+	h.t.Fatalf("the refresh published %s and the listing of %d versions does not contain it, "+
+		"so nothing can ever branch it and every run refreshes again", gv.ID, len(listed))
+}
+
+// destroyGoldenRemovesTheVersion checks the property two ways, and both are
+// worth having.
+//
+// A provider that returns nil from DestroyGolden and keeps the version is one
+// whose sweep reports space it never freed. It has to stop being listed, so
+// that the engine does not choose it, and it has to stop being branchable, so
+// that a caller holding the identifier from before cannot use it. A provider
+// could get either one right on its own.
+func (h *dsHarness) destroyGoldenRemovesTheVersion(ctx context.Context) {
+	gv := h.refresh(ctx)
+	if err := h.d.DestroyGolden(ctx, gv.ID); err != nil {
+		h.t.Fatalf("DestroyGolden: %v", err)
+	}
+	b, err := h.d.Branch(ctx, gv.ID, "env_dsconformance0010")
+	if err == nil {
+		h.created.add(b.ProviderRef)
+		h.destroy(ctx, b)
+		h.t.Fatalf("the golden %s was destroyed and was branched afterwards, so the version "+
+			"is still there and what DestroyGolden freed is nothing", gv.ID)
+	}
+	listed, listErr := h.d.ListGoldens(ctx)
+	if listErr != nil {
+		h.t.Fatalf("ListGoldens: %v", listErr)
+	}
+	for _, g := range listed {
+		if g.ID == gv.ID {
+			h.t.Fatalf("the golden %s was destroyed and is still listed; the engine would "+
+				"choose it and branching it would fail on every environment", gv.ID)
+		}
+	}
+}
+
+// destroyGoldenTwiceSucceeds is the same contract Destroy has, for the same
+// reason: whatever sweeps old versions retries, and an error on the second
+// attempt turns a completed sweep into a stuck one.
+func (h *dsHarness) destroyGoldenTwiceSucceeds(ctx context.Context) {
+	gv := h.refresh(ctx)
+	if err := h.d.DestroyGolden(ctx, gv.ID); err != nil {
+		h.t.Fatalf("DestroyGolden: %v", err)
+	}
+	if err := h.d.DestroyGolden(ctx, gv.ID); err != nil {
+		h.t.Fatalf("destroying an already destroyed golden failed with %v; a sweep retries, "+
+			"and an error on the second attempt turns a completed sweep into a stuck one", err)
 	}
 }
 
@@ -597,17 +686,31 @@ func (h *dsHarness) destroy(ctx context.Context, b provider.Branch) {
 	}
 }
 
-// trackGolden records a golden so the leak check at the end can tell this
-// suite's leftovers from another package's, and removes it when the behaviour
-// finishes.
+// trackGolden records a golden and removes it when the behaviour finishes.
 //
-// A datastore has no DestroyGolden in its interface, which is the one place
-// this suite cannot clean up after itself. It says so rather than pretending:
-// the identifier is tracked so a leak is REPORTED, and the report names the
-// version rather than leaving somebody to find it.
+// It used to only record. The interface had no DestroyGolden, so the suite
+// could not clean up after itself, and its own comment said so: every golden a
+// run published stayed on the server, and the leak check at the end could
+// only report them rather than prevent them. DestroyGolden is now part of the
+// contract, so this destroys what it made, which is what makes the leak check
+// mean something for a golden as well as for a branch.
+//
+// Registered as a cleanup rather than run inline, because a behaviour that
+// fails partway still made a golden and a run that fails must not also leave
+// a copy of a store behind. It is registered after the Close cleanup and
+// therefore runs before it, while the datastore is still usable.
 func (h *dsHarness) trackGolden(id string) {
 	if id == "" {
 		return
 	}
 	h.created.add(id)
+	h.t.Cleanup(func() {
+		// The error is reported rather than swallowed. A sweep that cannot
+		// remove a golden is the leak this exists to prevent, and a silent
+		// one is how a shared server fills up with nobody able to say when it
+		// started.
+		if err := h.d.DestroyGolden(context.Background(), id); err != nil {
+			h.t.Errorf("the golden %s the suite made could not be destroyed: %v", id, err)
+		}
+	})
 }

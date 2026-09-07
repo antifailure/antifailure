@@ -189,8 +189,15 @@ func datastoreReason(engine, image string) string {
 	if image != "" {
 		what += " running " + image
 	}
-	return what + ", and this build reproduces the primary database only, so nothing here " +
-		"read its contents and nothing here can say whether it holds production's data or came up empty"
+	// Recognised from a service and declared nowhere, so nobody chose a stance
+	// for it and nothing copied anything into it. The sentence says that
+	// rather than "this build reproduces the primary database only", which was
+	// true when this file was written and stopped being true the moment a
+	// second store could hold a golden: what is missing here is the
+	// declaration, and the reader can add one.
+	return what + " that nothing in the manifest's datastores list names, so nobody chose a " +
+		"stance for it, nothing here copied anything into it, and nothing here can say " +
+		"whether it holds production's data or came up empty"
 }
 
 // datastoreEngine names the datastore a service runs, and the image it runs it

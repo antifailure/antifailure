@@ -538,6 +538,17 @@ benchmark:
     # without AF_TEST_CLICKHOUSE_URL, it starts and removes a container.
     AF_BENCHMARK=1 go test ./internal/masking -run TestBenchmarkCrossStoreJoinKeys \
       -v -count=1 -timeout 30m
+    # Events in the twin, which was zero: a manifest could declare a second
+    # store and nothing copied anything into it, so every chart in the
+    # environment drew nothing. This one loads a production shaped events
+    # table, refreshes a golden of it, masks it, verifies it, branches it, and
+    # reports the count beside the refresh and branch times. It writes into
+    # benchmarks/ for the same reason the two above do, and it takes its size
+    # from AF_BENCHMARK_EVENTS so that a customer can run it at their own row
+    # count. It needs a ClickHouse; without one, and without
+    # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
+    AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
+      -v -count=1 -timeout 60m
 
 # The fast ones, for a tight loop.
 test-short:
@@ -1623,13 +1634,27 @@ changecheck:
     go run ./tools/changecheck .
 
 # Nothing this repository created is still running.
+#
+# The machine's ClickHouse is the one exception, and it is an exception rather
+# than an oversight. A store server is not an environment resource: goldens and
+# branches are databases on it, several environments share one, and `af down`
+# deliberately leaves it running because starting it costs the better part of a
+# minute and the next `af up` would pay that again. There is exactly one, under
+# a fixed name, so it cannot accumulate, and every branch and every golden
+# inside it is still swept by the suites' own leak checks.
+#
+# docker ps has no label!= filter, so the kind is formatted out and the one
+# exception is dropped here rather than by the daemon.
 leaks:
     #!/usr/bin/env bash
-    left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+    managed=$(docker ps -a --filter label=dev.antifailure.managed \
+      --format '{{{{.ID}} {{{{.Names}} {{{{.Label "dev.antifailure.kind"}}')
+    leaked=$(printf '%s\n' "$managed" | grep -v ' clickhouse-server$' | grep . || true)
+    left=$(printf '%s' "$leaked" | grep -c . || true)
     nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
     echo "containers: $left, networks: $nets"
     if [ "$left" != "0" ] || [ "$nets" != "0" ]; then
-      docker ps -a --filter label=dev.antifailure.managed
+      printf '%s\n' "$leaked"
       echo "something was left behind"
       exit 1
     fi

@@ -64,6 +64,32 @@ var dsNegativeControls = []struct {
 			"so Health_ReportsADestroyedBranch reds too",
 	},
 	{dsFlawDestroyTwiceErrors, dsShapeGolden, "--- FAIL: TestDatastoreSuiteChild/Destroy_OfSomethingAlreadyGoneSucceeds", ""},
+	{
+		dsFlawEmptyGoldenListing, dsShapeGolden,
+		"--- FAIL: TestDatastoreSuiteChild/ListGoldens_ReportsWhatARefreshPublished",
+		"DestroyGolden_RemovesTheVersion passes with this flaw rather than failing, because " +
+			"a version that is never listed is trivially not listed after it is destroyed; " +
+			"the branch half of that behaviour is what still holds it to account",
+	},
+	{
+		dsFlawListingDropsProvenance, dsShapeGolden,
+		"--- FAIL: TestDatastoreSuiteChild/ListGoldens_ReportsWhatARefreshPublished", "",
+	},
+	{
+		dsFlawGoldenSurvivesDestroy, dsShapeGolden,
+		"--- FAIL: TestDatastoreSuiteChild/DestroyGolden_RemovesTheVersion",
+		"nothing else reds: the store answers nil, so the suite's own cleanup is told the " +
+			"golden is gone, and the fake's inventory does not list goldens. The behaviour " +
+			"is the only instrument, which is why it branches the version rather than " +
+			"looking for it",
+	},
+	{
+		dsFlawDestroyGoldenTwiceErrors, dsShapeGolden,
+		"--- FAIL: TestDatastoreSuiteChild/DestroyGolden_OfSomethingAlreadyGoneSucceeds",
+		"DestroyGolden_RemovesTheVersion reds too: it destroys the version in its body and " +
+			"the suite's cleanup destroys it again, which is the second attempt this flaw " +
+			"fails on",
+	},
 	{dsFlawEmptyConnString, dsShapeGolden, "--- FAIL: TestDatastoreSuiteChild/ConnString_IsASecret", ""},
 	{dsFlawRedactedIsThePlaintext, dsShapeGolden, "--- FAIL: TestDatastoreSuiteChild/ConnString_IsASecret", ""},
 	{dsFlawEmptyInventory, dsShapeGolden, "--- FAIL: TestDatastoreSuiteChild/Inventory_ListsLiveResources", ""},

@@ -533,12 +533,26 @@ jobs:
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a
         # suite crashed before its own assertion ran.
+        #
+        # The machine's ClickHouse is the one exception, and it is an exception
+        # rather than an oversight. A store server is not an environment
+        # resource: goldens and branches are databases on it, several
+        # environments share one, and `af down` deliberately leaves it running
+        # because starting it costs the better part of a minute and the next
+        # `af up` would pay that again. There is exactly one, under a fixed
+        # name, so it cannot accumulate; every branch and every golden inside
+        # it is still swept by the suites' own leak checks.
+        # docker ps has no label!= filter, so the kind is formatted out and
+        # the one exception is dropped here rather than by the daemon.
         run: |
-          left=$(docker ps -aq --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
+          managed=$(docker ps -a --filter label=dev.antifailure.managed \
+            --format '{{.ID}} {{.Names}} {{.Label "dev.antifailure.kind"}}')
+          leaked=$(printf '%s\n' "$managed" | grep -v ' clickhouse-server$' | grep . || true)
+          left=$(printf '%s' "$leaked" | grep -c . || true)
           nets=$(docker network ls -q --filter label=dev.antifailure.managed | wc -l | tr -d ' ')
           echo "containers: $left, networks: $nets"
           if [ "$left" != "0" ] || [ "$nets" != "0" ]; then
-            docker ps -a --filter label=dev.antifailure.managed
+            printf '%s\n' "$leaked"
             echo "the test run leaked resources"; exit 1
           fi
 
