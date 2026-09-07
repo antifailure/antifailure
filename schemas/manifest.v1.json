@@ -406,7 +406,7 @@
           "type": "string",
           "pattern": "^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$",
           "maxLength": 40,
-          "description": "What the store runs, such as postgres, clickhouse, redis, kafka or elasticsearch. Open rather than a fixed list: a manifest naming an engine this build has no provider for is refused by the provider lookup, by name, which says more than an unknown value would."
+          "description": "What the store runs, such as `postgres`, `clickhouse`, `redis`, `kafka` or `elasticsearch`. Open rather than a fixed list: a manifest naming an engine this build has no provider for is refused by the provider lookup, by name, which says more than an unknown value would."
         },
         "provider": {
           "type": "string",
