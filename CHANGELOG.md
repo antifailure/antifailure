@@ -14,6 +14,190 @@ and the per change entries are what make it a wall. `just relnotes` refuses an
 unbalanced marker, a second region in one section, an empty region, and a
 section that omits all of itself.
 
+## v1.3.5
+
+A twin was one Postgres and a set of started containers. This release makes it
+two real stores, and makes the report that describes it stop flattering itself.
+
+**A twin of an analytics product held a masked Postgres and zero events.** A
+manifest could declare ClickHouse, Redis and Kafka, pull them as images and
+start every one, and exactly one store held production's data. `database` was a
+single struct and it was Postgres: one golden, one masking pass, one
+verification scan, one branch. `datastores` is a list now, and a ClickHouse
+declared `golden` is refreshed, masked, verified and branched beside the primary
+by the same commands. One `masking.yaml` covers the whole twin, so a rule about
+a customer identifier applies wherever that column lives, and the verification
+scanner reads the second store back with the same detectors. A golden that fails
+verification is never published and can never be branched, in either store. A
+service reaches its store at `AF_DATASTORE_<NAME>_URL` and by its own name on
+the environment network, with nothing changed in the application. Measured on
+one analytics stack: a million events in the twin, masked and verified, where
+there had been none.
+
+**The same customer now masks to the same fake customer in both stores.**
+Masking held one guarantee above the others, that a foreign key still joins
+after the data is rewritten, and it had only ever been asked to hold it inside
+one Postgres. Held across two stores it was not merely unproven, it was wrong:
+three of six join keys were copied unchanged into the second store while the
+Postgres column beside them was masked, which is a broken join and a leak at
+once. It is six of six now, and `af mask crossstore` is the command that says
+so about your own stores rather than about ours.
+
+**The fidelity report scored an empty twin as a faithful copy of production.**
+An environment holding a masked Postgres and an empty ClickHouse reported one
+hundred percent, because the one store the product was about sat in neither half
+of the fraction. Worse, an environment running one instance of a service that
+asked for three reported one hundred percent as well, and printed the instance
+counts on the same page it left them out of the arithmetic. Two dimensions
+close that: `datastores`, which puts a declared store in the denominator and
+names the golden, the attestation, the tables and the rows it cannot see, and
+`topology`, which counts instances against what each service asked for. The
+score goes DOWN, and that is the feature. The same environment that read one
+hundred percent reads eighty nine, and an environment running one of everything
+that asked for several reads sixty seven.
+
+Those two numbers were ninety and seventy for part of this release's
+development, and they fell again before it shipped, which is worth saying
+because of WHY. The denominator moved from ten to nine rather than the numerator
+moving: the volume work below turned the database dimension's data component
+from a reproduction into an unknown for any environment with no volume profile,
+on the grounds that nothing had ever compared that branch against production.
+An unmeasured component sits in neither half of the score. So the number fell a
+second time by the report admitting something it had previously assumed, which
+is the only direction this number is allowed to move for a good reason.
+
+**And the report now has a denominator.** A branch built from a staging database
+with two hundred rows was reported as reproducing production, and production
+held four billion. `af volume record` collects row counts, table and index
+sizes, partition counts and key cardinality over a read only connection, reading
+no row. The report states the share: two hundred thousand rows against six and a
+half billion is 0.0028 percent, and a lock timing measured against that branch
+is a lower bound rather than a prediction. A rehearsal that extrapolates says it
+is extrapolating, names the ratio it multiplied by, and names the assumption
+that a table rewrite grows with row count and an index build on a sorted column
+does not. A profile older than thirty days is refused rather than quoted.
+
+**Any Postgres on earth is a source now.** There were four database providers
+and each was a provider for one product, so a Postgres nobody had written a
+provider for could not be copied at all. `pgurl` takes a connection string.
+Measured at 1.43 GB: fifty five to a hundred and sixty nine seconds per gigabyte
+for the first golden, and eighteen to seventy seven milliseconds to branch it,
+published as the range two runs of one commit actually produced rather than as
+the better of them.
+
+**A provider written outside this repository could be implemented and never
+selected.** `engine/pkg/provider` is documented as the main extension point and
+the constructor that chose between providers was a closed switch, so an
+implementation that satisfied every interface had no way in. Nine sockets are
+registrable from outside the engine module now. Six of the nine are consulted by
+the engine today and the report names the three that are not, rather than
+implying all nine are live.
+
+**A manifest asking for three instances of a service silently got one.**
+`replicas` had been in the schema and the reference since version one, the
+normalizer filled it in, and nothing read it: both Kubernetes Deployments
+hardcoded a single replica and the local runtime never mentioned the field.
+`resources.cpu` and `resources.memory` were dead in the same way. Everything
+that only goes wrong above one instance was therefore invisible in a twin, and
+two of those bug classes are now demonstrated rather than described: a job with
+no leader election charged a customer once at one instance and three times at
+three, and in process state gave one distinct instance across twenty requests at
+one and more than one at three.
+
+### Instruments that could not say no
+
+Four checks were green because they could not fail, which is the failure this
+product exists to find in other people's systems. One of the four is this
+product's own verdict on itself.
+
+**Antifailure's verdict had never said no.** Across the twenty two most recently
+merged pull requests here it read "Every check passed" twenty one times and
+"Nothing was verified" twice, and the failed column had never held a number.
+That is consistent with a product that works and equally consistent with a check
+that cannot refuse, and nothing in the repository distinguished them. Six defect
+classes are now each proved able to make the verdict say no, by name, in the
+report a person reads: a masking rule that leaks a real value, an invariant that
+does not hold, a workflow assertion that fails, a migration that takes a blocking
+lock, a golden that fails verification, and a twin missing a declared datastore.
+Each break is restored afterwards and the case passes again, so the suite proves
+the check is live rather than permanently red, and under `AF_REQUIRE_DATABASE` a
+class that did not run is a failure rather than a quiet skip.
+
+The number that suite produces is six of six in this repository. It is still
+zero of six in production, because making one fire on a real pull request means
+merging a defect on purpose, and that distinction is stated rather than rounded
+up.
+
+Building it found two defects nobody would have found by reading code. A
+migration holding a lock for three seconds produced four findings, one about the
+customer's table and three about the rehearsal's own bookkeeping tables, which
+would have appeared on a stranger's pull request as noise about our internals.
+And `af golden refresh` refused a golden while discarding the reason it refused.
+
+**The database conformance suite had never been shown to refuse anything.** Its
+own package documentation said so. Twenty four behaviours were declared, every
+provider ran them, every run printed ok, and nobody had watched one fail.
+Twenty four of twenty four are now proved able to fail, each with the break that
+proves it.
+
+**`af insights` printed `ok  nothing to report` and exited zero when the
+migration rehearsal was asked for and did not run.** The body of the report was
+honest and the summary line was not, so a run that examined nothing read
+identically to a clean one.
+
+**Two goldens made in the same second were handed one identifier.** The
+identifier carried its timestamp to the second and the hash beside it is a
+digest of the masking rules rather than anything unique, so a second refresh
+inside one second failed on `CREATE DATABASE ... already exists`. Two suites had
+been working around it.
+
+### Fixes
+
+**An S3 write from an environment was answered as a delivered email.** The third
+party catalogue registered `*.amazonaws.com` under Amazon SES in capture mode,
+so every AWS host an application touched matched a mail rule. Thirty concrete
+cloud endpoints are now named individually: before, eighteen were named by a
+rule, twelve were unnamed and seventeen were answered by one wildcard; after,
+thirty are named and none is wildcarded.
+
+**The Kubernetes runtime could not copy any public image into a local cluster**,
+because a cluster's nodes cannot see the daemon that built or pulled the image.
+
+**The deploy's traffic shift could not be retried.** It is tried again when
+Azure refuses it for a reason that will pass, and refused immediately when it
+will not.
+
+**A browser offering to darken the site turned the home page headline white
+over a pale ground.**
+
+<!-- relnotes:omit -->
+
+Every change in this release, by kind.
+
+**Added.** Six defect classes each proved able to make the verdict say no,
+with the break restored and the case passing again. A second datastore beside
+the primary database, with ClickHouse as
+the first engine that is copied rather than declared. An environment that holds
+a masked ClickHouse beside its masked Postgres, put there by `af up`. A
+`replicas` field the runtimes read, so a manifest asking for three instances
+gets three. A `pgurl` provider that takes any reachable Postgres. A provider
+registry that a package outside this repository can register into.
+
+**Changed.** Masking determinism is enforced across stores rather than within
+one, and is checked rather than argued.
+
+**Fixed.** The AWS catalogue entry that answered every Amazon host as email.
+The Kubernetes image copy. Three manifest fields the runtimes never read. The
+insights summary line that reported ok about a rehearsal that never ran. The
+conformance suite that had never said no. A twin holding two hundred rows
+reported as reproducing four billion. A fidelity report blind to an empty
+second store and to instance counts. The dark mode headline on the home page.
+The deploy step that could not retry. Two goldens in one second sharing one
+identifier. A migration rehearsal reporting findings about its own bookkeeping
+tables. `af golden refresh` refusing a golden while discarding the reason.
+
+<!-- relnotes:end -->
+
 ## v1.3.4
 
 The second half of the launch readiness work. v1.3.3 carried what a customer
