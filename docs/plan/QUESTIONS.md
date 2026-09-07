@@ -196,7 +196,8 @@ What has been ruled out, so nobody pays for it twice:
 - The behaviours are not parallel. There is no `t.Parallel` anywhere in
   `internal/db/docker`, so nothing in this suite runs beside itself.
 - The conformance selftest is not a second writer. `conformance/db_selftest_test.go`
-  runs the same suite against an in-memory fake, so it commits no images.
+  runs the same suite against an in-memory fake and a Postgres backed one, and
+  neither commits an image.
 - `DestroyGolden` refuses a version a branch still references, and the harness
   registers its cleanup on the subtest, so the suite's own teardown cannot run
   in this window.

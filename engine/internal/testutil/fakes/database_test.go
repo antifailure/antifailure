@@ -3,153 +3,68 @@ package fakes_test
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/testutil/fakes"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
-// working is a provider.Database that keeps every guarantee the interface
-// documents, in memory. It exists so the faults have something correct to be
-// measured against: a fault is only meaningful as the difference between this
-// and the broken wrapper.
+// The provider that keeps every guarantee is fakes.InMemoryDatabase itself.
 //
-// It holds no data and cannot answer the behaviours that read rows, which is
-// why this file tests the injector rather than the conformance suite. Proving
-// the suite catches these needs a provider with a real database behind it.
-type working struct {
-	goldens   map[string]provider.GoldenVersion
-	branches  map[string]provider.Branch
-	from      map[string]string // branch ref -> golden id
-	destroyed map[string]bool
-}
-
-func newWorking() *working {
-	return &working{
-		goldens:   map[string]provider.GoldenVersion{},
-		branches:  map[string]provider.Branch{},
-		from:      map[string]string{},
-		destroyed: map[string]bool{},
-	}
-}
-
-func (w *working) Name() string                { return "working" }
-func (w *working) Capabilities() provider.Caps { return provider.Caps{Branching: true, Reset: true} }
-
-func (w *working) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error) {
-	url := secrets.New("postgres://candidate")
-	if spec.Mask != nil {
-		if err := spec.Mask(ctx, url); err != nil {
-			return provider.GoldenVersion{}, err
-		}
-	}
-	att := ""
-	if spec.Verify != nil {
-		a, err := spec.Verify(ctx, url)
-		if err != nil {
-			// The guarantee: a failed scan publishes nothing.
-			return provider.GoldenVersion{}, err
-		}
-		att = a
-	}
-	v := provider.GoldenVersion{
-		ID:          "gv_1",
-		CreatedAt:   time.Now(),
-		RulesHash:   spec.RulesHash,
-		Verified:    true,
-		Attestation: att,
-	}
-	w.goldens[v.ID] = v
-	return v, nil
-}
-
-func (w *working) ListGoldens(context.Context) ([]provider.GoldenVersion, error) {
-	out := make([]provider.GoldenVersion, 0, len(w.goldens))
-	for _, v := range w.goldens {
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-func (w *working) DestroyGolden(_ context.Context, version string) error {
-	for _, gid := range w.from {
-		if gid == version {
-			return errors.New("AF-DB-010: that version has a branch")
-		}
-	}
-	delete(w.goldens, version)
-	return nil
-}
-
-func (w *working) Branch(_ context.Context, version, envID string) (provider.Branch, error) {
-	v, ok := w.goldens[version]
-	if !ok {
-		return provider.Branch{}, errors.New("AF-DB-004: no such version")
-	}
-	if !v.Verified {
-		return provider.Branch{}, errors.New("AF-MSK-001: that version is not verified")
-	}
-	if b, ok := w.branches[envID]; ok {
-		return b, nil
-	}
-	b := provider.Branch{EnvID: envID, From: version, ProviderRef: "br_" + envID, CreatedAt: time.Now()}
-	w.branches[envID] = b
-	w.from[b.ProviderRef] = version
-	return b, nil
-}
-
-func (w *working) Reset(context.Context, provider.Branch) error { return nil }
-
-func (w *working) Destroy(_ context.Context, b provider.Branch) error {
-	// Destroying something already gone succeeds, because teardown retries.
-	delete(w.branches, b.EnvID)
-	delete(w.from, b.ProviderRef)
-	w.destroyed[b.ProviderRef] = true
-	return nil
-}
-
-func (w *working) ConnString(context.Context, provider.Branch, provider.ConnMode) (secrets.Value, error) {
-	return secrets.New("postgres://user:pw@host/db"), nil
-}
-
-func (w *working) Inventory(context.Context) ([]provider.Resource, error) {
-	out := make([]provider.Resource, 0, len(w.branches))
-	for _, b := range w.branches {
-		out = append(out, provider.Resource{Kind: "branch", ID: b.ProviderRef, EnvID: b.EnvID})
-	}
-	return out, nil
-}
-
-func (w *working) Health(_ context.Context, b provider.Branch) (provider.Health, error) {
-	if w.destroyed[b.ProviderRef] {
-		return provider.Health{Reachable: false, Detail: "gone"}, nil
-	}
-	return provider.Health{Reachable: true}, nil
-}
-
-func (w *working) Close() error { return nil }
+// This file used to carry a second one, a `working` type that duplicated it
+// method for method. Two implementations of the same guarantees drift, and
+// this one already had: it returned AF-MSK-001 as a plain string where the
+// real fake returns a catalogue error, so a decorator that distinguishes
+// refusals by code was tested against a provider no conformance run uses. The
+// duplicate is gone and the tests below measure a fault as the difference
+// between the shipped fake and the shipped fault.
 
 func spec() provider.GoldenSpec {
 	return provider.GoldenSpec{
-		RulesHash: "abc",
-		Mask:      func(context.Context, secrets.Value) error { return nil },
-		Verify:    func(context.Context, secrets.Value) (string, error) { return "att", nil },
+		RulesHash:  "abc",
+		Provenance: "gp1-fakes",
+		Mask:       func(context.Context, secrets.Value) error { return nil },
+		Verify:     func(context.Context, secrets.Value) (string, error) { return "att", nil },
 	}
 }
 
-// The control. Without this, a fault test proves nothing: every assertion below
-// is "the broken one differs from the working one", and that is only meaningful
-// if the working one actually keeps the guarantee.
+func failingSpec() provider.GoldenSpec {
+	s := spec()
+	s.Verify = func(context.Context, secrets.Value) (string, error) {
+		return "", errors.New("unmasked data found in column email")
+	}
+	return s
+}
+
+// The control. Without this, every fault test below is "the broken one differs
+// from the working one", which is only meaningful if the working one actually
+// keeps the guarantee.
 func TestTheWorkingProviderKeepsEveryGuaranteeUnderTest(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
+
+	caps := w.Capabilities()
+	if !caps.Branching || len(caps.SupportedVersions) == 0 || caps.ExpectedBranchLatency <= 0 {
+		t.Errorf("the capabilities must hang together, got %+v", caps)
+	}
 
 	v, err := w.RefreshGolden(ctx, spec())
 	if err != nil || !v.Verified {
 		t.Fatalf("refresh should publish a verified version, got %+v err %v", v, err)
+	}
+	if v.Provenance != "gp1-fakes" {
+		t.Errorf("the version should carry back the provenance it was made for, got %q", v.Provenance)
+	}
+	if _, err := w.RefreshGolden(ctx, failingSpec()); err == nil {
+		t.Error("a refresh whose verification fails must publish nothing")
+	}
+	if _, err := w.Branch(ctx, "gv_19700101000000_deadbeef", "env"); !errors.Is(err, aferrors.Coded(aferrors.AFDB004)) {
+		t.Errorf("branching a version that does not exist must fail with AF-DB-004, got %v", err)
 	}
 
 	b1, err := w.Branch(ctx, v.ID, "env")
@@ -160,27 +75,89 @@ func TestTheWorkingProviderKeepsEveryGuaranteeUnderTest(t *testing.T) {
 	if b1.ProviderRef != b2.ProviderRef {
 		t.Error("branching twice for one environment should return one branch")
 	}
+	direct, _ := w.ConnString(ctx, b1, provider.ConnDirect)
+	pooled, _ := w.ConnString(ctx, b1, provider.ConnPooled)
+	if direct.Equal(pooled) {
+		t.Error("the pooled endpoint capability is declared, so the two strings must differ")
+	}
 	if err := w.DestroyGolden(ctx, v.ID); err == nil {
 		t.Error("destroying a referenced golden should be refused")
 	}
 	inv, _ := w.Inventory(ctx)
-	if len(inv) != 1 {
-		t.Errorf("inventory should report the live branch, got %d", len(inv))
+	if len(inv) == 0 {
+		t.Error("inventory should report the live branch")
 	}
+	h, err := w.Health(ctx, b1)
+	if err != nil || !h.Reachable {
+		t.Errorf("a live branch should report reachable, got %+v err %v", h, err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if cb, err := w.Branch(cancelled, v.ID, "env-cancelled"); err == nil || cb.ProviderRef != "" {
+		t.Errorf("a cancelled create must make nothing, got %+v err %v", cb, err)
+	}
+
+	// Past the declared limit, which the capability publishes and this
+	// enforces. Two more environments fill it; the third is refused.
+	for _, env := range []string{"env-2", "env-3"} {
+		if _, err := w.Branch(ctx, v.ID, env); err != nil {
+			t.Fatalf("branch %s: %v", env, err)
+		}
+	}
+	if _, err := w.Branch(ctx, v.ID, "env-4"); !errors.Is(err, aferrors.Coded(aferrors.AFDB006)) {
+		t.Errorf("branching past the declared limit must fail with AF-DB-006, got %v", err)
+	}
+
 	if err := w.Destroy(ctx, b1); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
 	if err := w.Destroy(ctx, b1); err != nil {
 		t.Errorf("destroying twice should succeed, got %v", err)
 	}
-	h, err := w.Health(ctx, b1)
+	h, err = w.Health(ctx, b1)
 	if err != nil || h.Reachable {
 		t.Errorf("a destroyed branch should report unreachable without erroring, got %+v err %v", h, err)
 	}
 }
 
+// PublishUnverified is an affordance rather than a fault, and the difference
+// is the whole reason the branch side of Branch_RefusesAnUnverifiedGolden is
+// now reachable. It must produce a version, flag it honestly, and still refuse
+// to branch it.
+func TestPublishUnverifiedFlagsTheVersionAndStillRefusesToBranchIt(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase().PublishUnverified()
+
+	v, err := w.RefreshGolden(ctx, failingSpec())
+	if err != nil {
+		t.Fatalf("the affordance must publish rather than refuse, got %v", err)
+	}
+	if v.ID == "" {
+		t.Fatal("and it must be a version something could try to branch")
+	}
+	if v.Verified {
+		t.Fatal("it must be flagged unverified, or the refusal below is about nothing")
+	}
+	if _, err := w.Branch(ctx, v.ID, "env"); !errors.Is(err, aferrors.Coded(aferrors.AFMSK001)) {
+		t.Fatalf("branching an unverified version must fail with AF-MSK-001, got %v", err)
+	}
+}
+
+func TestCapabilitiesContradictThemselves(t *testing.T) {
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.CapabilitiesContradictThemselves)
+	caps := p.Capabilities()
+	if caps.Branching {
+		t.Fatal("the fault must declare a database provider that cannot branch")
+	}
+	if len(caps.SupportedVersions) != 0 || caps.ExpectedBranchLatency != 0 {
+		t.Error("and it must contradict itself in more than one place, or the behaviour " +
+			"could pass by checking only the one")
+	}
+}
+
 func TestPublishesUnverifiedGolden(t *testing.T) {
-	p := fakes.Break(newWorking(), fakes.PublishesUnverifiedGolden)
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.PublishesUnverifiedGolden)
 	v, err := p.RefreshGolden(context.Background(), spec())
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
@@ -204,7 +181,7 @@ func TestSkipsMasking(t *testing.T) {
 	}
 
 	s, masked, verified := tracked()
-	if _, err := newWorking().RefreshGolden(context.Background(), s); err != nil {
+	if _, err := fakes.NewInMemoryDatabase().RefreshGolden(context.Background(), s); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 	if !*masked || !*verified {
@@ -212,7 +189,7 @@ func TestSkipsMasking(t *testing.T) {
 	}
 
 	s, masked, verified = tracked()
-	p := fakes.Break(newWorking(), fakes.SkipsMasking)
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.SkipsMasking)
 	if _, err := p.RefreshGolden(context.Background(), s); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -226,17 +203,12 @@ func TestSkipsMasking(t *testing.T) {
 }
 
 func TestPublishesWhenVerificationFails(t *testing.T) {
-	s := spec()
-	s.Verify = func(context.Context, secrets.Value) (string, error) {
-		return "", errors.New("unmasked data found in column email")
-	}
-
-	if _, err := newWorking().RefreshGolden(context.Background(), s); err == nil {
+	if _, err := fakes.NewInMemoryDatabase().RefreshGolden(context.Background(), failingSpec()); err == nil {
 		t.Fatal("the working provider must refuse to publish when verification fails")
 	}
 
-	p := fakes.Break(newWorking(), fakes.PublishesWhenVerificationFails)
-	v, err := p.RefreshGolden(context.Background(), s)
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.PublishesWhenVerificationFails)
+	v, err := p.RefreshGolden(context.Background(), failingSpec())
 	if err != nil {
 		t.Fatalf("the fault must publish anyway, got %v", err)
 	}
@@ -245,9 +217,64 @@ func TestPublishesWhenVerificationFails(t *testing.T) {
 	}
 }
 
+func TestRefusesWithoutSayingSo(t *testing.T) {
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.RefusesWithoutSayingSo)
+	v, err := p.RefreshGolden(context.Background(), failingSpec())
+	if err != nil {
+		t.Fatalf("the fault must swallow the refusal, got %v", err)
+	}
+	if v.ID != "" {
+		t.Fatal("and publish nothing, so a caller cannot tell a refusal from a success")
+	}
+}
+
+func TestListOmitsWhatWasPublished(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	p := fakes.Break(w, fakes.ListOmitsWhatWasPublished)
+	v, err := p.RefreshGolden(ctx, spec())
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	real, _ := w.ListGoldens(ctx)
+	if len(real) != 1 {
+		t.Fatalf("the version must really exist, or the fault is measuring nothing; got %d", len(real))
+	}
+	listed, err := p.ListGoldens(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, g := range listed {
+		if g.ID == v.ID {
+			t.Fatal("the fault must drop the version that was just published")
+		}
+	}
+}
+
+func TestListDropsTheProvenance(t *testing.T) {
+	ctx := context.Background()
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.ListDropsTheProvenance)
+	v, err := p.RefreshGolden(ctx, spec())
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if v.Provenance == "" {
+		t.Fatal("the refresh must still return it, or the bug is visible at the call that made it")
+	}
+	listed, _ := p.ListGoldens(ctx)
+	if len(listed) == 0 {
+		t.Fatal("the fault must still list the version, only without its provenance")
+	}
+	for _, g := range listed {
+		if g.Provenance != "" {
+			t.Fatalf("the fault must blank the provenance in the listing, got %q", g.Provenance)
+		}
+	}
+}
+
 func TestBranchIsNotIdempotent(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
 	v, _ := w.RefreshGolden(ctx, spec())
 
 	p := fakes.Break(w, fakes.BranchIsNotIdempotent)
@@ -266,11 +293,11 @@ func TestBranchIsNotIdempotent(t *testing.T) {
 
 func TestBranchAcceptsUnverified(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
-	v, _ := w.RefreshGolden(ctx, spec())
-	g := w.goldens[v.ID]
-	g.Verified = false
-	w.goldens[v.ID] = g
+	w := fakes.NewInMemoryDatabase().PublishUnverified()
+	v, err := w.RefreshGolden(ctx, failingSpec())
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
 
 	if _, err := w.Branch(ctx, v.ID, "env"); err == nil {
 		t.Fatal("the working provider must refuse an unverified version")
@@ -281,9 +308,84 @@ func TestBranchAcceptsUnverified(t *testing.T) {
 	}
 }
 
+func TestBranchAcceptsAMissingGolden(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	if _, err := w.Branch(ctx, "gv_19700101000000_deadbeef", "env"); err == nil {
+		t.Fatal("the working provider must refuse a version that does not exist")
+	}
+	p := fakes.Break(w, fakes.BranchAcceptsAMissingGolden)
+	b, err := p.Branch(ctx, "gv_19700101000000_deadbeef", "env")
+	if err != nil {
+		t.Fatalf("the fault must hand back a branch anyway, got %v", err)
+	}
+	if b.ProviderRef == "" {
+		t.Fatal("and it must look like a usable handle, which is what makes it dangerous")
+	}
+}
+
+func TestIgnoresTheDeclaredBranchLimit(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+	limit := w.Capabilities().MaxConcurrentBranches
+	if limit <= 0 {
+		t.Fatal("the working provider must declare a limit, or there is nothing to ignore")
+	}
+
+	p := fakes.Break(w, fakes.IgnoresTheDeclaredBranchLimit)
+	for i := 0; i < limit; i++ {
+		if _, err := p.Branch(ctx, v.ID, string(rune('a'+i))); err != nil {
+			t.Fatalf("branch %d: %v", i, err)
+		}
+	}
+	if _, err := w.Branch(ctx, v.ID, "one-too-many"); !errors.Is(err, aferrors.Coded(aferrors.AFDB006)) {
+		t.Fatalf("the working provider must refuse past its limit, got %v", err)
+	}
+	if _, err := p.Branch(ctx, v.ID, "one-too-many"); err != nil {
+		t.Fatalf("the fault must branch past the limit it publishes, got %v", err)
+	}
+}
+
+func TestResetKeepsTheWrites(t *testing.T) {
+	// The in-memory provider has no rows and answers ErrUnsupported, which is
+	// itself the observable difference: the fault reports success without
+	// doing anything, and the only way to see that it did nothing is to read
+	// rows back, which is why Reset_ReturnsToGoldenState is a behaviour that
+	// needs Postgres.
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	if err := w.Reset(ctx, provider.Branch{}); err == nil {
+		t.Fatal("the working provider must not claim a reset it cannot do")
+	}
+	p := fakes.Break(w, fakes.ResetKeepsTheWrites)
+	if err := p.Reset(ctx, provider.Branch{}); err != nil {
+		t.Fatalf("the fault must report success and change nothing, got %v", err)
+	}
+}
+
+func TestDestroyLeavesItInTheInventory(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+	b, _ := w.Branch(ctx, v.ID, "env")
+
+	p := fakes.Break(w, fakes.DestroyLeavesItInTheInventory)
+	if err := p.Destroy(ctx, b); err != nil {
+		t.Fatalf("the fault must report success, got %v", err)
+	}
+	inv, _ := p.Inventory(ctx)
+	for _, r := range inv {
+		if r.ID == b.ProviderRef {
+			return
+		}
+	}
+	t.Fatal("the fault must leave the branch in the inventory, which is how a resource outlives its environment")
+}
+
 func TestDestroyTwiceErrors(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
 	v, _ := w.RefreshGolden(ctx, spec())
 	b, _ := w.Branch(ctx, v.ID, "env")
 
@@ -296,9 +398,45 @@ func TestDestroyTwiceErrors(t *testing.T) {
 	}
 }
 
+func TestConnStringIsEmpty(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+	b, _ := w.Branch(ctx, v.ID, "env")
+
+	if c, _ := w.ConnString(ctx, b, provider.ConnDirect); c.IsZero() {
+		t.Fatal("the working provider must hand back a connection string")
+	}
+	p := fakes.Break(w, fakes.ConnStringIsEmpty)
+	c, err := p.ConnString(ctx, b, provider.ConnDirect)
+	if err != nil {
+		t.Fatalf("the fault must report success, got %v", err)
+	}
+	if !c.IsZero() {
+		t.Fatal("the fault must hand back nothing at all")
+	}
+}
+
+func TestPooledEqualsDirect(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+	b, _ := w.Branch(ctx, v.ID, "env")
+
+	if !w.Capabilities().PooledEndpoints {
+		t.Fatal("the working provider must declare the capability, or there is nothing to fake")
+	}
+	p := fakes.Break(w, fakes.PooledEqualsDirect)
+	direct, _ := p.ConnString(ctx, b, provider.ConnDirect)
+	pooled, _ := p.ConnString(ctx, b, provider.ConnPooled)
+	if !pooled.Equal(direct) {
+		t.Fatal("the fault must declare a pooler and hand back the direct endpoint")
+	}
+}
+
 func TestInventoryHidesResources(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
 	v, _ := w.RefreshGolden(ctx, spec())
 	if _, err := w.Branch(ctx, v.ID, "env"); err != nil {
 		t.Fatal(err)
@@ -318,9 +456,28 @@ func TestInventoryHidesResources(t *testing.T) {
 	}
 }
 
+func TestHealthReportsALiveBranchUnreachable(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+	b, _ := w.Branch(ctx, v.ID, "env")
+
+	if h, _ := w.Health(ctx, b); !h.Reachable {
+		t.Fatal("the working provider must report a live branch reachable")
+	}
+	p := fakes.Break(w, fakes.HealthReportsALiveBranchUnreachable)
+	h, err := p.Health(ctx, b)
+	if err != nil {
+		t.Fatalf("the fault must report rather than error, got %v", err)
+	}
+	if h.Reachable {
+		t.Fatal("the fault must call a working branch down")
+	}
+}
+
 func TestHealthErrorsOnDestroyed(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
 	v, _ := w.RefreshGolden(ctx, spec())
 	b, _ := w.Branch(ctx, v.ID, "env")
 	if err := w.Destroy(ctx, b); err != nil {
@@ -333,9 +490,33 @@ func TestHealthErrorsOnDestroyed(t *testing.T) {
 	}
 }
 
+func TestCancellationLeavesAnUntrackedResource(t *testing.T) {
+	ctx := context.Background()
+	w := fakes.NewInMemoryDatabase()
+	v, _ := w.RefreshGolden(ctx, spec())
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	p := fakes.Break(w, fakes.CancellationLeavesAnUntrackedResource)
+	b, err := p.Branch(cancelled, v.ID, "env")
+	if err == nil {
+		t.Fatal("the fault must report the failure")
+	}
+	if b.ProviderRef != "" {
+		t.Fatal("and name nothing, which is what makes the resource untrackable")
+	}
+	inv, _ := p.Inventory(ctx)
+	for _, r := range inv {
+		if r.EnvID == "env" {
+			return
+		}
+	}
+	t.Fatal("and leave a resource for that environment in the inventory")
+}
+
 func TestGoldenGCDropsAReferencedVersion(t *testing.T) {
 	ctx := context.Background()
-	w := newWorking()
+	w := fakes.NewInMemoryDatabase()
 	v, _ := w.RefreshGolden(ctx, spec())
 	if _, err := w.Branch(ctx, v.ID, "env"); err != nil {
 		t.Fatal(err)
@@ -348,6 +529,188 @@ func TestGoldenGCDropsAReferencedVersion(t *testing.T) {
 	if err := p.DestroyGolden(ctx, v.ID); err != nil {
 		t.Fatalf("the fault must report success, got %v", err)
 	}
+}
+
+func TestRefreshReusesTheVersionIdentifier(t *testing.T) {
+	ctx := context.Background()
+	p := fakes.Break(fakes.NewInMemoryDatabase(), fakes.RefreshReusesTheVersionIdentifier)
+	first, err := p.RefreshGolden(ctx, spec())
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	second, err := p.RefreshGolden(ctx, spec())
+	if err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatal("the fault must give two different sets of data one name; versions are immutable")
+	}
+}
+
+// A fault the decorator cannot inject must not be silently not injected.
+//
+// Returning the working provider would make the conformance suite pass and
+// read as the fault surviving undetected, which is the false proof this whole
+// package is against.
+func TestAFaultAProviderCannotHostIsRefusedRatherThanIgnored(t *testing.T) {
+	for _, f := range fakes.ProviderFaults() {
+		if f == fakes.CapabilitiesContradictThemselves {
+			continue // the in-memory fake hosts this one
+		}
+		p := fakes.Break(fakes.NewInMemoryDatabase(), f)
+		u, ok := p.(fakes.Uninjectable)
+		if !ok {
+			t.Errorf("Break returned an ordinary provider for %q, which the in-memory fake "+
+				"cannot host; a suite pointed at it would prove nothing", f)
+			continue
+		}
+		if u.Fault != f {
+			t.Errorf("the refusal names %q rather than %q", u.Fault, f)
+		}
+		if _, err := p.Branch(context.Background(), "v", "env"); err == nil {
+			t.Errorf("every method of the refusal must fail loudly, and Branch did not for %q", f)
+		}
+	}
+}
+
+// The Postgres backed fake, and its four storage faults, at the level of the
+// interface rather than of the conformance suite.
+//
+// The suite proves the behaviours go red. This proves the faults do what their
+// names say, which is the other half: a fault that turned a behaviour red for
+// some unrelated reason would satisfy the suite and mean nothing.
+func TestThePostgresFakeIsCorrectAndItsStorageFaultsAreNot(t *testing.T) {
+	ctx := context.Background()
+	url := postgresURL()
+
+	build := func(t *testing.T, fault fakes.Fault) provider.Database {
+		t.Helper()
+		prefix, err := fakes.NewPrefix()
+		if err != nil {
+			t.Fatalf("prefix: %v", err)
+		}
+		p, err := fakes.NewPostgresDatabase(ctx, fakes.PostgresOptions{
+			AdminURL: url, Prefix: prefix, SeedSQL: seedSQL,
+		})
+		if err != nil {
+			if os.Getenv("AF_REQUIRE_DATABASE") != "" {
+				t.Fatalf("AF_REQUIRE_DATABASE is set and there is no usable Postgres at %s: %v", url, err)
+			}
+			t.Skipf("skipped: these need a Postgres at %s: %v", url, err)
+		}
+		t.Cleanup(func() {
+			c, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := fakes.DropEverything(c, url, prefix); err != nil {
+				t.Errorf("left databases named %s_* behind: %v", prefix, err)
+			}
+		})
+		if fault == "" {
+			return p
+		}
+		return fakes.Break(p, fault)
+	}
+
+	rows := func(t *testing.T, p provider.Database, b provider.Branch) int {
+		t.Helper()
+		conn, err := p.ConnString(ctx, b, provider.ConnDirect)
+		if err != nil {
+			t.Fatalf("conn string: %v", err)
+		}
+		return countUsers(t, conn.Reveal())
+	}
+
+	t.Run("correct", func(t *testing.T) {
+		p := build(t, "")
+		v, err := p.RefreshGolden(ctx, spec())
+		if err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+		a, err := p.Branch(ctx, v.ID, "env_a")
+		if err != nil {
+			t.Fatalf("branch: %v", err)
+		}
+		if n := rows(t, p, a); n != 3 {
+			t.Fatalf("a branch of the golden holds %d rows and should hold 3", n)
+		}
+		writeUser(t, ctx, p, a, "only-in-a@example.test")
+		b, err := p.Branch(ctx, v.ID, "env_b")
+		if err != nil {
+			t.Fatalf("second branch: %v", err)
+		}
+		if n := rows(t, p, b); n != 3 {
+			t.Fatalf("a later branch holds %d rows, so the write reached the golden", n)
+		}
+		if err := p.Reset(ctx, a); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+		if n := rows(t, p, a); n != 3 {
+			t.Fatalf("after a reset the branch holds %d rows and should hold 3", n)
+		}
+	})
+
+	t.Run(string(fakes.BranchLosesTheGoldensRows), func(t *testing.T) {
+		p := build(t, fakes.BranchLosesTheGoldensRows)
+		v, _ := p.RefreshGolden(ctx, spec())
+		b, err := p.Branch(ctx, v.ID, "env_a")
+		if err != nil {
+			t.Fatalf("branch: %v", err)
+		}
+		if n := rows(t, p, b); n != 0 {
+			t.Fatalf("the fault must hand back a branch with no rows, got %d", n)
+		}
+	})
+
+	t.Run(string(fakes.BranchSharesTheGoldensStorage), func(t *testing.T) {
+		p := build(t, fakes.BranchSharesTheGoldensStorage)
+		v, _ := p.RefreshGolden(ctx, spec())
+		a, err := p.Branch(ctx, v.ID, "env_a")
+		if err != nil {
+			t.Fatalf("branch: %v", err)
+		}
+		writeUser(t, ctx, p, a, "only-in-a@example.test")
+		b, err := p.Branch(ctx, v.ID, "env_b")
+		if err != nil {
+			t.Fatalf("second branch: %v", err)
+		}
+		if n := rows(t, p, b); n != 4 {
+			t.Fatalf("the fault must let a write reach the golden, so a later branch holds 4; got %d", n)
+		}
+	})
+
+	t.Run(string(fakes.BranchesShareOneDatabase), func(t *testing.T) {
+		p := build(t, fakes.BranchesShareOneDatabase)
+		v, _ := p.RefreshGolden(ctx, spec())
+		a, _ := p.Branch(ctx, v.ID, "env_a")
+		b, err := p.Branch(ctx, v.ID, "env_b")
+		if err != nil {
+			t.Fatalf("second branch: %v", err)
+		}
+		writeUser(t, ctx, p, b, "only-in-b@example.test")
+		if n := rows(t, p, a); n != 4 {
+			t.Fatalf("the fault must let one branch see another's write, so a holds 4; got %d", n)
+		}
+	})
+
+	t.Run(string(fakes.RefreshRebuildsExistingBranches), func(t *testing.T) {
+		p := build(t, fakes.RefreshRebuildsExistingBranches)
+		first, _ := p.RefreshGolden(ctx, spec())
+		a, err := p.Branch(ctx, first.ID, "env_a")
+		if err != nil {
+			t.Fatalf("branch: %v", err)
+		}
+		writeUser(t, ctx, p, a, "before-refresh@example.test")
+		if n := rows(t, p, a); n != 4 {
+			t.Fatalf("the write did not land: %d rows", n)
+		}
+		if _, err := p.RefreshGolden(ctx, spec()); err != nil {
+			t.Fatalf("second refresh: %v", err)
+		}
+		if n := rows(t, p, a); n != 3 {
+			t.Fatalf("the fault must remake the existing branch from the new version, "+
+				"so it holds 3 again; got %d", n)
+		}
+	})
 }
 
 // Every fault must name the behaviour that catches it, and every name must be
@@ -379,6 +742,27 @@ func TestEveryFaultNamesARealConformanceBehavior(t *testing.T) {
 		if !found {
 			t.Errorf("Catches names fault %q that Faults does not return, so a table driven test would skip it", f)
 		}
+	}
+}
+
+// Every behaviour the suite declares must have at least one fault that breaks
+// it. This is the completeness claim, checked here as well as end to end,
+// because a fault added without a behaviour and a behaviour added without a
+// fault are different mistakes and only one of them is loud.
+func TestEveryConformanceBehaviorHasAFault(t *testing.T) {
+	covered := map[string]bool{}
+	for _, b := range fakes.Catches() {
+		covered[b] = true
+	}
+	var missing []string
+	for _, name := range conformanceBehaviorNames() {
+		if !covered[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("%d behaviours have no fault, so nobody has watched them fail: %s",
+			len(missing), strings.Join(missing, ", "))
 	}
 }
 
