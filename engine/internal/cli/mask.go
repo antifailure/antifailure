@@ -156,6 +156,39 @@ func printVerifyCoverage(env *Env, report verify.Report) {
 	env.Out.Printf("  %d columns copied unchanged with no rule.\n", len(report.Unruled))
 }
 
+// printVerifyRefusal shows every reason a scan will not let a golden through.
+//
+// One printer for the three commands that refuse, because they had three
+// copies of it and one of them was missing a half. `af golden refresh` printed
+// its findings and stopped, then told the reader to add a rule for each column
+// above. On a report whose only problem was a column the scan COULD NOT READ
+// there were no findings, so the refusal printed nothing at all above an
+// instruction pointing at a list that was never there, and the error naming
+// the column went out through silent() with its message discarded. The golden
+// was correctly refused and the reason reached nobody, which is the half of
+// "say no" this product exists to get right.
+func printVerifyRefusal(env *Env, report verify.Report) {
+	for _, f := range report.Findings {
+		env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
+	}
+	printVerifyCoverage(env, report)
+}
+
+// refusalAdvice is what to do about a refusal, which depends on which kind it
+// is.
+//
+// "Add a rule" is the wrong instruction for a column nobody could read: no
+// rule makes an unreadable column readable, and a reader who follows it writes
+// a rule, refreshes, and is refused again for the same reason.
+func refusalAdvice(report verify.Report) string {
+	const preamble = "The golden was not published, so nothing can branch from it. "
+	if len(report.Findings) > 0 {
+		return preamble + "Add a rule for each column above and refresh again."
+	}
+	return preamble + "A column the scan could not read is not a column that passed, so " +
+		"grant the verifier access to each column above, or remove it, and refresh again."
+}
+
 // FindingJSON is one value that still looks real.
 type FindingJSON struct {
 	Table    string `json:"table"`
@@ -454,11 +487,8 @@ produces data that looks masked and is not, and none of them announces itself.`)
 				return nil
 			}
 
-			env.Out.Section("Data that still looks real")
-			for _, f := range report.Findings {
-				env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
-			}
-			printVerifyCoverage(env, report)
+			env.Out.Section("What this branch cannot be trusted about")
+			printVerifyRefusal(env, report)
 			env.Out.Println("")
 			env.Out.Println(env.Out.Wrap(
 				"A golden in this state cannot be branched. Add a rule for each column above "+

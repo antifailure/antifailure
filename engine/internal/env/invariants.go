@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/antifailure/antifailure/engine/internal/invariant"
+	"github.com/antifailure/antifailure/engine/internal/redact"
 )
 
 // InvariantResult is one invariant's outcome, in the shape the report and the
@@ -58,7 +59,23 @@ func (o *Orchestrator) RunInvariants(ctx context.Context) ([]InvariantResult, er
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
-	summary := invariant.Run(ctx, conn, invs, invariant.Options{})
+	return InvariantResults(invariant.Run(ctx, conn, invs, invariant.Options{}),
+		o.opts.Redactor), nil
+}
+
+// InvariantResults carries what the statements said into the shape the report
+// and the JSON output read.
+//
+// Exported and separate from RunInvariants, which needs a live environment,
+// so that a suite pointing a real Postgres at a real invariant can drive the
+// production translation rather than writing its own beside the assertion. A
+// translation written beside the assertion agrees with itself whatever the
+// product does, which is the failure engine/internal/cli/saysno_test.go
+// exists to keep out of the one report a customer reads.
+//
+// Held and Err stay apart here, the same as everywhere else: an invariant
+// that could not be asked has not found anything.
+func InvariantResults(summary invariant.Summary, red *redact.Redactor) []InvariantResult {
 	out := make([]InvariantResult, 0, len(summary.Results))
 	for _, r := range summary.Results {
 		res := InvariantResult{
@@ -71,9 +88,9 @@ func (o *Orchestrator) RunInvariants(ctx context.Context) ([]InvariantResult, er
 			DurationMs:  r.Duration.Milliseconds(),
 		}
 		if r.Err != nil {
-			res.Error = o.opts.Redactor.String(r.Err.Error())
+			res.Error = red.String(r.Err.Error())
 		}
 		out = append(out, res)
 	}
-	return out, nil
+	return out
 }

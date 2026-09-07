@@ -113,6 +113,20 @@ func (s *sampler) run(ctx context.Context, every time.Duration) {
 	}
 }
 
+// bookkeepingPrefix is what this package's own objects on the branch are
+// called. The DDL capture table, its primary key and its sequence all begin
+// with it, and none of them belongs to the change under review.
+//
+// They are excluded from the sample rather than filtered later, so nothing
+// downstream has to know they exist. The event trigger writes a row inside the
+// migration's own transaction, so the capture table carries RowExclusiveLock
+// for exactly as long as the migration runs: a migration that holds a lock for
+// three seconds produced FOUR lock findings, one about the customer's table
+// and three about ours, each telling them to split a statement that never
+// touched it. A check that says no about the wrong thing teaches people to
+// stop reading it, which costs the finding beside it that was true.
+const bookkeepingPrefix = "af_insights_"
+
 const lockQuery = `
 SELECT c.relname, l.mode, COALESCE(a.query, ''), NOT l.granted,
        EXISTS (
@@ -126,10 +140,12 @@ LEFT JOIN pg_stat_activity a ON a.pid = l.pid
 WHERE l.pid <> pg_backend_pid()
   AND l.pid <> ALL($1::int[])
   AND l.locktype = 'relation'
-  AND n.nspname NOT IN ('pg_catalog','information_schema')`
+  AND n.nspname NOT IN ('pg_catalog','information_schema')
+  AND left(c.relname, $2::int) <> $3::text`
 
 func (s *sampler) sample(ctx context.Context, every time.Duration) {
-	rows, err := s.conn.Query(ctx, lockQuery, s.exclude)
+	rows, err := s.conn.Query(ctx, lockQuery, s.exclude,
+		len(bookkeepingPrefix), bookkeepingPrefix)
 	if err != nil {
 		s.mu.Lock()
 		// Keep the first error. A cancelled context at the end of the run
