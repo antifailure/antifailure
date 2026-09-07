@@ -31,10 +31,21 @@ than inside the YAML, so they can be read and run outside a CI log.
    failed migration has already broken the running application.
 2. **The new revision starts at zero traffic** and is checked on its own
    address. A revision that cannot start never receives a real request.
-3. **Traffic shifts.**
+3. **Traffic shifts**, and this one call is retried with backoff. Azure reports
+   a transient ARM lookup failure in the same sentence it uses for a genuinely
+   wrong app name, so the retry asks the app for its own name between attempts
+   and refuses immediately when the answer is that it is not there.
 4. **The public origin is checked**, including which commit answers.
-5. **Any failure after step 2 puts traffic back** on the revision that was
+5. **A failed public origin check puts traffic back** on the revision that was
    serving and deactivates the new one.
+
+Step 5 used to be written here as "any failure after step 2", and that was never
+what the script did in either direction. A failure at step 3 leaves traffic where
+it already was, so there is nothing to put back and the run is red with the
+previous release still serving. A failure after step 4, in the maintenance job
+update or the connection budget check, deliberately does NOT put traffic back,
+because the release passed both health gates and rolling it off would be trading
+a working application for an operational report.
 
 Step 5 is fast only because the app runs in Multiple revision mode: the old
 revision is still up with no traffic, so the way back is one API call. In Single
