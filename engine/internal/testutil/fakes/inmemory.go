@@ -56,6 +56,7 @@ type InMemoryDatabase struct {
 	from      map[string]string
 	destroyed map[string]bool
 	seq       int
+	refSeq    int
 }
 
 // NewInMemoryDatabase returns a provider that keeps every guarantee.
@@ -190,9 +191,16 @@ func (d *InMemoryDatabase) Branch(ctx context.Context, version, envID string) (p
 		return provider.Branch{}, aferrors.Coded(aferrors.AFDB006,
 			"limit", fmt.Sprintf("%d", inMemoryBranchLimit))
 	}
+	// The reference counts up rather than being derived from the environment
+	// identifier, and that is not cosmetic. A fake whose ProviderRef is a pure
+	// function of the environment cannot express non-idempotence at all: two
+	// creations agree by construction, so a control asserting they agree stays
+	// green with the idempotence check removed. Found by mutation, in this
+	// file, after the assertion had been written and believed.
+	d.refSeq++
 	b := provider.Branch{
 		EnvID: envID, From: version,
-		ProviderRef: "br_" + envID,
+		ProviderRef: fmt.Sprintf("br_%s_%03d", envID, d.refSeq),
 		CreatedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	d.branches[envID] = b
