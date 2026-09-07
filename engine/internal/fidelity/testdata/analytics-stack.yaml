@@ -1,0 +1,46 @@
+version: 1
+name: analytics
+
+# The stack this wave exists for, written the way somebody with one would
+# write it. An application, a worker, and three stores beside the primary
+# Postgres, two of which are correct to start empty and one of which holds
+# every event the product is about.
+
+services:
+  - name: web
+    port: 8000
+  - name: worker
+    kind: worker
+  - name: events
+    kind: worker
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-server:24.3
+  - name: cache
+    kind: worker
+    build:
+      strategy: image
+      image: redis:7
+  - name: bus
+    kind: worker
+    build:
+      strategy: image
+      image: confluentinc/cp-kafka:7.6.0
+
+database:
+  provider: docker
+  version: 17
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: a cache is rebuilt from the primary and a copy would be noise
+
+  - name: bus
+    engine: kafka
+    stance: topics_only

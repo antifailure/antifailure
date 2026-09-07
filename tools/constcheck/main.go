@@ -208,6 +208,22 @@ var sets = []decl{
 		context: regexp.MustCompile(`(?i)\bdatabase\b`),
 	},
 	{
+		name:   "datastore stances",
+		file:   "engine/pkg/schema/manifest.go",
+		kind:   constType,
+		symbol: "DatastoreStance",
+		noun:   regexp.MustCompile(`(?i)\bstances?\b`),
+		// "datastore" or "store", because the reference page names them under
+		// a datastores heading and the concept page says store. Nothing else
+		// in these trees uses the word stance for anything, which is why the
+		// noun on its own would have done and the context costs nothing.
+		context: regexp.MustCompile(`(?i)\b(datastores?|stores?)\b`),
+		table: &tableRef{
+			file:    "docs/src/content/docs/reference/manifest.md",
+			heading: "The stances",
+		},
+	},
+	{
 		name:    "third parties detected",
 		file:    "engine/internal/detect/thirdparty.go",
 		kind:    sliceVar,

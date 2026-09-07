@@ -31,6 +31,7 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 
 	v.services(m)
 	v.database(m)
+	v.datastores(m)
 	v.egress(m)
 	v.personas(m)
 	v.auth(m)
@@ -456,6 +457,160 @@ func (v *validator) database(m *schema.Manifest) {
 			}
 		}
 	}
+}
+
+// datastores refuses a store whose stance nobody chose.
+//
+// THE REFUSAL THIS FUNCTION EXISTS FOR is the missing stance, and it is worth
+// saying why it is a refusal rather than a default. An analytics product's
+// twin held a masked Postgres and zero events. Nobody decided that. The events
+// live in ClickHouse, ClickHouse came up empty, and every query path that
+// mattered was tested against a store with nothing in it while the run went
+// green. A default stance of empty would reproduce that silently, once per
+// manifest; a default of golden would try to clone a cache and call the noise
+// fidelity. Neither is the answer, because the answer differs per store and
+// only the person who wrote the manifest knows it.
+//
+// So empty is a legitimate answer here and an INVISIBLE empty is not, which is
+// the same shape as the rest of this file: a manifest key that reads as
+// configuration and behaves as decoration is the defect, not the value it
+// holds.
+func (v *validator) datastores(m *schema.Manifest) {
+	names := map[string]int{}
+	for i := range m.Datastores {
+		d := m.Datastores[i]
+		p := fmt.Sprintf("datastores[%d]", i)
+
+		if d.Name == "" {
+			v.add(p+".name", "The datastore has no name.",
+				"Name it after what the store holds, for example events or cache. Other services reach it by that name.")
+		} else if !validName.MatchString(d.Name) {
+			v.add(p+".name",
+				fmt.Sprintf("The datastore name %q is not usable as a hostname.", d.Name),
+				"Use lower case letters, digits and hyphens, starting and ending with a letter or digit.")
+		} else if first, seen := names[d.Name]; seen {
+			v.add(p+".name",
+				fmt.Sprintf("Two datastores are both named %q.", d.Name),
+				fmt.Sprintf("The first is datastores[%d]. Names have to be unique, because that is how one store is told from another.", first))
+		} else {
+			names[d.Name] = i
+		}
+
+		if d.Engine == "" {
+			v.add(p+".engine", "The datastore names no engine.",
+				"Say what it runs, for example clickhouse, redis, kafka or elasticsearch.")
+		} else if !validEngine.MatchString(d.Engine) {
+			v.add(p+".engine",
+				fmt.Sprintf("The engine %q is not an engine name.", d.Engine),
+				"Use lower case letters, digits, hyphens and underscores, for example clickhouse or elasticsearch.")
+		}
+
+		v.datastoreStance(p, d)
+
+		if d.Name == schema.PrimaryDatastore {
+			v.primaryDatastore(p, d, m)
+		}
+	}
+
+	// A derived store names the one it is rebuilt from, and that one has to
+	// exist. Checked after every name is known, because a manifest is allowed
+	// to declare the source below the store that derives from it.
+	for i := range m.Datastores {
+		d := m.Datastores[i]
+		if d.Stance != schema.StanceDerived || d.From == "" {
+			continue
+		}
+		p := fmt.Sprintf("datastores[%d].from", i)
+		if d.From == d.Name {
+			v.add(p, fmt.Sprintf("The datastore %q is derived from itself.", d.Name),
+				"A derived store is rebuilt from another one after that one is ready. Name the store it reads.")
+			continue
+		}
+		if _, ok := names[d.From]; !ok {
+			v.add(p, fmt.Sprintf("No datastore is named %q.", d.From),
+				"A derived store names the store it is rebuilt from, and the name has to be one this manifest declares.")
+		}
+	}
+}
+
+// datastoreStance is the half of the check that refuses a silent default.
+func (v *validator) datastoreStance(p string, d schema.Datastore) {
+	if d.Stance == "" {
+		v.add(p+".stance",
+			fmt.Sprintf("The datastore %q declares no stance.", orUnnamed(d.Name)),
+			"Say what happens to its contents: golden for a masked, verified copy, empty for a store that is correct to start with nothing, derived to rebuild it from another store, or topics_only for a broker. There is no default, because an empty store nobody chose is how somebody ends up trusting a blank ClickHouse.")
+		return
+	}
+	if !knownStance(d.Stance) {
+		v.add(p+".stance",
+			fmt.Sprintf("The stance %q is not one this engine knows.", d.Stance),
+			"Use golden, empty, derived or topics_only.")
+		return
+	}
+
+	switch d.Stance {
+	case schema.StanceEmpty:
+		if d.Because == "" {
+			v.add(p+".because",
+				fmt.Sprintf("The datastore %q starts empty and does not say why.", orUnnamed(d.Name)),
+				"Write the reason, for example: a cache is rebuilt from the primary and a copy would be noise. It is carried into the fidelity report as written, and it is the only thing that tells a decision apart from an oversight.")
+		}
+	case schema.StanceDerived:
+		if d.From == "" {
+			v.add(p+".from",
+				fmt.Sprintf("The datastore %q is derived and does not say what from.", orUnnamed(d.Name)),
+				"Name the datastore it is rebuilt from, usually primary. A search index built from the branch cannot go stale against it; a clone of one can.")
+		}
+	}
+
+	if d.Stance != schema.StanceDerived && d.From != "" {
+		v.add(p+".from",
+			fmt.Sprintf("The datastore %q names a source and its stance is %s.", orUnnamed(d.Name), d.Stance),
+			"Only a derived store is rebuilt from another one. Either set the stance to derived or remove from.")
+	}
+}
+
+// primaryDatastore keeps the entry database: normalizes into in agreement with
+// database: itself.
+//
+// Overwriting a declared primary would be the silent behaviour this whole
+// change exists to remove: somebody writes neon under datastores and docker
+// under database, and one of the two answers wins without a word.
+func (v *validator) primaryDatastore(p string, d schema.Datastore, m *schema.Manifest) {
+	if d.Engine != DefaultDatastoreEngine {
+		v.add(p+".engine",
+			fmt.Sprintf("The datastore named %s runs %s, and the database: block is Postgres.", schema.PrimaryDatastore, d.Engine),
+			"primary is the entry database: normalizes into. Declare another datastore under its own name.")
+	}
+	if d.Stance != "" && d.Stance != schema.StanceGolden {
+		v.add(p+".stance",
+			fmt.Sprintf("The datastore named %s declares the stance %s, and the database: block is a golden.", schema.PrimaryDatastore, d.Stance),
+			"The primary database is masked, verified and branched. That is what database: has always meant, and it is not something this entry can change.")
+	}
+	if m.Database != nil && d.Provider != "" && d.Provider != string(m.Database.Provider) {
+		v.add(p+".provider",
+			fmt.Sprintf("The datastore named %s says provider %s and database.provider says %s.", schema.PrimaryDatastore, d.Provider, m.Database.Provider),
+			"They are the same store. Set one of them, or set both to the same value.")
+	}
+}
+
+func knownStance(s schema.DatastoreStance) bool {
+	for _, k := range schema.AllDatastoreStances() {
+		if s == k {
+			return true
+		}
+	}
+	return false
+}
+
+// orUnnamed keeps a message readable for the store that has no name yet, which
+// is reported separately and should not turn every other message about it into
+// a pair of empty quotes.
+func orUnnamed(name string) string {
+	if name == "" {
+		return "with no name"
+	}
+	return name
 }
 
 func (v *validator) egress(m *schema.Manifest) {
@@ -1790,3 +1945,12 @@ func mapValue(n *yaml.Node, key string) *yaml.Node {
 // qualified identifier, because it is interpolated into a query and anything
 // else would be a second way to run SQL from the manifest.
 var ledgerTableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
+
+// validName is the shape a datastore name has to take, which is the shape
+// schemas/manifest.v1.json already requires of a service name. A store is
+// reached by name from inside the environment, so it has to be a hostname.
+var validName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+
+// validEngine allows an underscore where validName does not, because engine
+// names are written rather than resolved and a few of them carry one.
+var validEngine = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`)

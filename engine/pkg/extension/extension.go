@@ -271,15 +271,22 @@ type DatabaseProvider interface {
 
 // DatastoreConfig is what a registered datastore provider is given.
 //
-// Settings rather than a manifest block, because the manifest has no
-// datastores list yet. When it gains one this grows a typed field beside
-// Settings rather than replacing it, so a provider written against this keeps
-// compiling.
+// It carries the manifest's own entry for the store, in Datastore, and
+// Settings beside it for whatever a particular provider needs that the
+// manifest does not name. Settings was here first and stays, because removing
+// it would break a provider written against the shape that shipped before the
+// manifest had a datastores list.
 type DatastoreConfig struct {
 	// Root is the repository root.
 	Root string
 	// Name is the datastore's name in the environment, such as "events".
 	Name string
+	// Datastore is the manifest's entry for this store, as a copy, including
+	// the stance somebody declared for it. It is the typed field this struct's
+	// comment promised would arrive beside Settings when the manifest gained a
+	// datastores list, added rather than replacing Settings so that a provider
+	// written against the older shape keeps compiling.
+	Datastore schema.Datastore
 	// StateDir is where the provider may keep local files.
 	StateDir string
 	// Settings carries provider specific values.
@@ -290,70 +297,22 @@ type DatastoreConfig struct {
 	Lookup func(ctx context.Context, name string) (secret.Value, bool, error)
 }
 
-// DatastoreCaps declares what a datastore can do, so that a suite skips a
-// behavior by name rather than passing one it never ran.
-type DatastoreCaps struct {
-	// Engine is the datastore engine, such as "clickhouse" or "redis".
-	Engine string
-	// Branching reports whether an environment can get its own copy.
-	Branching bool
-	// Golden reports whether the store can hold a masked, verified copy at
-	// all. A cache that is correct to start empty declares this false, and
-	// declaring it false is a legitimate answer rather than a missing feature.
-	Golden bool
-	// CopyOnWrite reports whether a branch shares storage with its golden, and
-	// therefore whether branch time is independent of size.
-	CopyOnWrite bool
-}
-
-// Datastore is a store other than the environment's primary Postgres.
+// DatastoreCaps is provider.DatastoreCaps.
 //
-// Deliberately smaller than provider.Database. A second datastore has no
-// pooled endpoint, no reset, and no golden pool of its own to enumerate; what
-// it has is a copy per environment and a way to say how faithful that copy is.
-//
-// It lives here rather than in engine/pkg/provider because the engine has no
-// datastore lifecycle yet: nothing in the manifest declares one and nothing in
-// the orchestrator branches one. When that lands the interface moves to
-// engine/pkg/provider beside Database and an alias stays here, the way
-// engine/internal/secrets keeps the name secrets.Value for a type that lives
-// in engine/pkg/secret. Until then, REGISTERING ONE DOES NOTHING BEYOND
-// APPEARING IN af license status: the registry holds it and no lifecycle asks
-// for it. That is said plainly because a socket nothing consults looks exactly
-// like a working feature from the outside, which is how this repository
-// shipped an audit sink that forwarded nothing.
-type Datastore interface {
-	// Name identifies the datastore in output and in errors.
-	Name() string
-	// Capabilities declares what this datastore can do.
-	Capabilities() DatastoreCaps
-	// RefreshGolden builds a new masked, verified copy. A datastore that
-	// declares Golden false returns ErrNoGolden.
-	RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error)
-	// Branch creates this environment's copy. Calling it twice with the same
-	// environment identifier returns the same branch, the same idempotency
-	// contract provider.Database has and for the same reason: the engine
-	// retries after timeouts and a retry that creates a second resource is how
-	// an orphan is made.
-	Branch(ctx context.Context, version string, envID string) (provider.Branch, error)
-	// Destroy removes a branch. Removing one that is already gone succeeds.
-	Destroy(ctx context.Context, b provider.Branch) error
-	// ConnString returns how to reach a branch, as a value that renders as
-	// [redacted] everywhere text is produced.
-	ConnString(ctx context.Context, b provider.Branch) (secret.Value, error)
-	// Inventory lists everything this datastore holds, which the leak detector
-	// compares against the journal.
-	Inventory(ctx context.Context) ([]provider.Resource, error)
-	// Health reports whether a branch is reachable.
-	Health(ctx context.Context, b provider.Branch) (provider.Health, error)
-	// Close releases the datastore's own resources.
-	Close() error
-}
+// The type moved when the manifest gained a datastores list, which is the move
+// the comment on the old declaration said would happen. The name stays here so
+// that a build registering a datastore against the older engine keeps
+// compiling, the way engine/internal/secrets keeps the name secrets.Value for
+// a type that lives in engine/pkg/secret.
+type DatastoreCaps = provider.DatastoreCaps
 
-// ErrNoGolden is returned by a datastore that holds no golden, which is a
-// declared stance rather than a failure. A cache is rebuilt from the primary
-// and a copy of one would be noise.
-var ErrNoGolden = errors.New("extension: this datastore holds no golden")
+// Datastore is provider.Datastore. See DatastoreCaps for why the name is still
+// here.
+type Datastore = provider.Datastore
+
+// ErrNoGolden is provider.ErrNoGolden. It is the same value rather than a
+// second one, so errors.Is answers the same on either name.
+var ErrNoGolden = provider.ErrNoGolden
 
 // DatastoreProvider builds a datastore.
 type DatastoreProvider interface {

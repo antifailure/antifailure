@@ -71,6 +71,9 @@ const (
 	// The block holds a hundred numbers and a manifest holds at most fifty
 	// personas, so numbering never wraps and two personas never collide.
 	DefaultPersonaPhonePrefix = "+155501"
+	// DefaultDatastoreEngine is what the primary datastore runs, because
+	// database: has only ever meant Postgres.
+	DefaultDatastoreEngine = "postgres"
 )
 
 // normalize fills in every default and cleans every path, exactly once.
@@ -91,6 +94,7 @@ func normalize(m *schema.Manifest, root string) {
 		normalizeService(&m.Services[i])
 	}
 	normalizeDatabase(m)
+	normalizeDatastores(m)
 	normalizeEgress(m)
 	normalizePersonas(m)
 	normalizeAuth(m)
@@ -206,6 +210,64 @@ func normalizeDatabase(m *schema.Manifest) {
 	if d.Subset.FollowDependents == nil {
 		one := 1
 		d.Subset.FollowDependents = &one
+	}
+}
+
+// normalizeDatastores makes the primary database an entry in the list, so that
+// every later package reads one list rather than a struct and a list.
+//
+// database: is untouched and stays the place a golden, a masking rules path, a
+// subset and a schedule are configured. What normalization adds is the entry
+// those settings describe, named primary, so a caller asking "what stores does
+// this environment hold" gets an answer that includes the Postgres instead of
+// having to remember that one store is special and lives somewhere else. That
+// is the whole reason the list is introduced with a normalization rather than
+// beside the old field: two code paths for one question is how the second one
+// gets forgotten.
+//
+// The entry is APPENDED rather than prepended. A declared datastore keeps the
+// index it has in the file, and every problem the validator reports names
+// datastores[i], so prepending would point every message at the line above the
+// one somebody wrote.
+//
+// The primary's stance is golden and is filled in here rather than required,
+// which is the one exception to "a stance is declared, never defaulted". It is
+// not a default in the sense that rule refuses: golden is what database: has
+// meant since it existed, every manifest in the world already says it by
+// writing database: at all, and the validator refuses a declared primary that
+// says anything else rather than overwriting it.
+func normalizeDatastores(m *schema.Manifest) {
+	for i := range m.Datastores {
+		d := &m.Datastores[i]
+		d.Name = strings.TrimSpace(d.Name)
+		d.Engine = strings.ToLower(strings.TrimSpace(d.Engine))
+		d.Provider = strings.ToLower(strings.TrimSpace(d.Provider))
+		d.Stance = schema.DatastoreStance(strings.ToLower(strings.TrimSpace(string(d.Stance))))
+		d.Because = strings.TrimSpace(d.Because)
+		d.From = strings.TrimSpace(d.From)
+	}
+
+	primary := -1
+	for i := range m.Datastores {
+		if m.Datastores[i].Name == schema.PrimaryDatastore {
+			primary = i
+			break
+		}
+	}
+	if primary < 0 {
+		m.Datastores = append(m.Datastores, schema.Datastore{Name: schema.PrimaryDatastore})
+		primary = len(m.Datastores) - 1
+	}
+
+	d := &m.Datastores[primary]
+	if d.Engine == "" {
+		d.Engine = DefaultDatastoreEngine
+	}
+	if d.Stance == "" {
+		d.Stance = schema.StanceGolden
+	}
+	if d.Provider == "" && m.Database != nil {
+		d.Provider = string(m.Database.Provider)
 	}
 }
 

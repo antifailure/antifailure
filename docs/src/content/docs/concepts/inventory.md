@@ -128,10 +128,18 @@ absence, written down. Each store is reported `unmeasured` with the reason,
 which keeps it out of the score in both directions: nothing here has shown that
 it reproduces production, and nothing here has shown that it does not.
 
-A store is recognised from the manifest, by the image a service runs or by what
-the service is called. A store whose image this build does not recognise and
-whose service carries an unrelated name is still invisible, and the dimension
-says which two signals it used when it finds none.
+A store is recognised two ways. A [declared datastore](/docs/reference/manifest)
+is the better one, because it carries the stance somebody chose for it and the
+report says which: a store declared `empty` reads as a decision, with the
+reason written beside it, rather than as a container nobody looked at. The
+entry named `primary` is left out here, since the `database` dimension above
+measures it properly.
+
+A store nothing declares is still recognised from the image a service runs or
+from what the service is called, so an old manifest is not silently reported as
+having no second store at all. One whose image this build does not recognise
+and whose service carries an unrelated name is invisible to both signals, and
+the dimension says which two it used when it finds none.
 
 ## Requiring a dimension
 
