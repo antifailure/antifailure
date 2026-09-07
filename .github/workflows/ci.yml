@@ -89,6 +89,30 @@ jobs:
       - name: The shell the installer tests drive
         run: sudo apt-get update && sudo apt-get install -y zsh
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: runner/package-lock.json
+
+      # The runner and a browser, for the one Go test that drives the real
+      # agent runner end to end.
+      #
+      # engine/internal/cli/saysno_test.go proves the product can refuse a
+      # workflow whose expectation the page contradicts, and it proves it by
+      # opening a real browser on a real page rather than by handing the
+      # renderer a struct that says FAILED. Without these steps that case
+      # skipped here, and a skipped case reads exactly like a passing one in
+      # every summary anybody looks at, which is the defect the whole file was
+      # written against. AF_REQUIRE_RUNNER below turns the skip into a failure,
+      # so a runner that stops being installable is loud rather than quiet.
+      - run: npm ci --no-audit --no-fund
+        working-directory: runner
+
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+        working-directory: runner
+
       - name: Generated files are current
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is
@@ -529,6 +553,10 @@ jobs:
           # claim: a suite that cannot reach the daemon now fails instead of
           # reporting ok having skipped itself.
           AF_REQUIRE_DOCKER: '1'
+          # And the same for the agent runner, which the steps above install.
+          # The refusal suite drives it for real, so a missing runner has to
+          # fail rather than skip.
+          AF_REQUIRE_RUNNER: '1'
 
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a

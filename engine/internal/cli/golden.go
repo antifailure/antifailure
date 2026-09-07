@@ -112,13 +112,9 @@ func newGoldenRefreshCommand(env *Env) *cobra.Command {
 			if refreshErr != nil {
 				if res != nil && !res.Report.Clean() {
 					env.Out.Println("")
-					for _, f := range res.Report.Findings {
-						env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
-					}
+					printVerifyRefusal(env, res.Report)
 					env.Out.Println("")
-					env.Out.Println(env.Out.Wrap(
-						"The golden was not published, so nothing can branch from it. Add a rule for "+
-							"each column above and refresh again.", 0))
+					env.Out.Println(env.Out.Wrap(refusalAdvice(res.Report), 0))
 					return silent(refreshErr)
 				}
 				return refreshErr
@@ -563,10 +559,7 @@ here at all.`),
 				printVerifyCoverage(env, report)
 				return nil
 			}
-			for _, f := range report.Findings {
-				env.Out.Printf("  %s %s\n", env.Out.S(StyleBad, SymbolFail), f)
-			}
-			printVerifyCoverage(env, report)
+			printVerifyRefusal(env, report)
 			return verifyFailure(report)
 		},
 	}

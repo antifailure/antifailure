@@ -20,6 +20,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/report"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -220,24 +221,14 @@ change.`),
 				e.Out.Printf("  %s %s\n", e.Out.S(StyleWarn, SymbolWarn), testErr.Error())
 			}
 			if test != nil {
-				for _, r := range test.Results {
-					run.Workflows = append(run.Workflows, report.Workflow{
-						Name: r.Workflow, Verdict: r.Outcome.Verdict, Detail: r.Outcome.Detail,
-						Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
-					})
-				}
+				run.Workflows = append(run.Workflows, reportWorkflows(test.Results)...)
 				// What the run noticed that belongs to no single workflow.
 				// A synthesized response nobody's window claimed is the case
 				// this exists for, and dropping it here would put the run
 				// back where it started: the fact reaching the engine and
 				// stopping there.
 				run.Notes = append(run.Notes, test.Notes...)
-				for _, i := range test.Invariants {
-					run.Invariants = append(run.Invariants, report.Invariant{
-						Name: i.Name, Description: i.Description, Held: i.Held,
-						Columns: i.Columns, Rows: i.Rows, More: i.More, Error: i.Error,
-					})
-				}
+				run.Invariants = append(run.Invariants, reportInvariants(test.Invariants)...)
 			}
 
 			if decisions, dErr := o.Decisions(ctx, 500); dErr == nil && len(decisions) > 0 {
@@ -438,22 +429,72 @@ func verifyMasking(
 		// prevent.
 		return &report.Verification{Unavailable: err.Error()}
 	}
-	v := &report.Verification{
-		Clean: rep.Clean(), Columns: rep.Columns, RowsSampled: rep.RowsSampled,
-	}
-	for _, f := range rep.Findings {
-		v.Findings = append(v.Findings, f.String())
-	}
-	if len(rep.Skipped) > 0 {
+	v, note := verificationOf(rep)
+	if note != "" {
 		// A column nobody could read is not a column that passed.
-		run.Notes = append(run.Notes, fmt.Sprintf("%d columns could not be read back: %s",
-			len(rep.Skipped), strings.Join(rep.Skipped, ", ")))
+		run.Notes = append(run.Notes, note)
 	}
 	if v.Clean {
 		e.Out.Status(e.Out.S(StyleGood, SymbolOK), "masking verified",
 			fmt.Sprintf("%d columns, %d rows sampled", v.Columns, v.RowsSampled))
 	}
 	return v
+}
+
+// verificationOf turns a scan into what the comment says about it, and the
+// note a scan that could not read a column owes the reader.
+//
+// Split out of verifyMasking, which reads a live environment, so that the one
+// step deciding whether a leaked column reaches the comment can be driven by a
+// scan of a real database without one. saysno_test.go is the caller that
+// exercises it, and the reason it has to exist is the whole subject of that
+// file: a check whose refusal path is only ever described is a check nobody
+// has watched refuse.
+//
+// The empty note rather than a slice, because there is at most one and a
+// caller that appends a slice of length zero reads as though there could be
+// several.
+func verificationOf(rep verify.Report) (*report.Verification, string) {
+	v := &report.Verification{
+		Clean: rep.Clean(), Columns: rep.Columns, RowsSampled: rep.RowsSampled,
+	}
+	for _, f := range rep.Findings {
+		v.Findings = append(v.Findings, f.String())
+	}
+	if len(rep.Skipped) == 0 {
+		return v, ""
+	}
+	return v, fmt.Sprintf("%d columns could not be read back: %s",
+		len(rep.Skipped), strings.Join(rep.Skipped, ", "))
+}
+
+// reportWorkflows carries the runner's results into the comment.
+//
+// Its own function for the same reason as verificationOf: the runner is a
+// subprocess with a JSON boundary, so a test can drive the real one and needs
+// the real translation afterwards rather than a copy of it written beside the
+// assertion. A copy would agree with itself forever.
+func reportWorkflows(results []env.WorkflowResult) []report.Workflow {
+	out := make([]report.Workflow, 0, len(results))
+	for _, r := range results {
+		out = append(out, report.Workflow{
+			Name: r.Workflow, Verdict: r.Outcome.Verdict, Detail: r.Outcome.Detail,
+			Steps: r.Outcome.Reproduction, Trace: r.Evidence.Trace,
+		})
+	}
+	return out
+}
+
+// reportInvariants carries what the data said into the comment.
+func reportInvariants(in []env.InvariantResult) []report.Invariant {
+	out := make([]report.Invariant, 0, len(in))
+	for _, i := range in {
+		out = append(out, report.Invariant{
+			Name: i.Name, Description: i.Description, Held: i.Held,
+			Columns: i.Columns, Rows: i.Rows, More: i.More, Error: i.Error,
+		})
+	}
+	return out
 }
 
 // readDatabase runs the Postgres native checks and turns them into findings.
