@@ -46,6 +46,16 @@ func TestParse_RefusesAStanceItDoesNotKnow(t *testing.T) {
 
 func TestParse_AcceptsEveryStanceTheEngineDeclares(t *testing.T) {
 	t.Parallel()
+	// The membership is asserted before it is iterated, and the mutation pass
+	// is why. Looping over AllDatastoreStances and checking each one parses is
+	// a tautology: delete a stance from the slice and the loop simply stops
+	// testing it, so the check went green against a build that had lost
+	// topics_only entirely. Naming the four is what makes a shrinking set red.
+	require.Equal(t, []schema.DatastoreStance{
+		schema.StanceGolden, schema.StanceEmpty,
+		schema.StanceDerived, schema.StanceTopicsOnly,
+	}, schema.AllDatastoreStances())
+
 	// The control that makes the two refusals above mean something. A check
 	// that says no to everything says nothing, and this is also what holds the
 	// closed set to the values the validator will actually take.

@@ -117,9 +117,27 @@ func TestTheReportNamesEveryStanceDistinctly(t *testing.T) {
 	// A reader with thirty seconds sees the rendered report, not the struct,
 	// so the stance has to survive the rendering.
 	out := fidelity.Build(analyticsStack(t)).Explain()
+
+	// The datastores block, not the whole report. The mutation pass caught
+	// the version of this that searched everything: the services dimension
+	// says "declared and not running" about the same three names, so an
+	// assertion about the report as a whole passes on the strength of a
+	// sentence from a different dimension.
+	block := datastoresBlock(t, out)
 	for _, want := range []string{"declared golden", "declared empty", "declared topics_only"} {
-		require.Containsf(t, out, want, "the rendered report does not say %q", want)
+		require.Containsf(t, block, want, "the datastores block does not say %q:\n%s", want, block)
 	}
-	require.NotContains(t, strings.SplitN(out, "\n\n", 2)[0], "declared",
-		"the datastores dimension has moved above services in the report")
+}
+
+// datastoresBlock returns the datastores dimension's own lines, which is the
+// only part of the report this file has anything to say about.
+func datastoresBlock(t *testing.T, report string) string {
+	t.Helper()
+	for _, block := range strings.Split(report, "\n\n") {
+		if strings.HasPrefix(block, string(schema.FidelityDatastores)) {
+			return block
+		}
+	}
+	t.Fatalf("the rendered report has no datastores block:\n%s", report)
+	return ""
 }
