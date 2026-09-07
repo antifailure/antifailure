@@ -296,6 +296,14 @@ func productionClickHouse(t *testing.T, ctx context.Context) (secrets.Value, cli
 		Progress: func(line string) { t.Log(line) },
 	})
 	if err != nil {
+		if os.Getenv("AF_REQUIRE_DOCKER") != "" {
+			// The same rule the rest of this package follows: a machine that
+			// was supposed to have a daemon and does not is a failure, because
+			// a skip prints nothing and the package reports ok having examined
+			// nothing.
+			t.Fatalf("AF_REQUIRE_DOCKER is set, so this cannot be skipped: "+
+				"no ClickHouse to stand in for production: %v", err)
+		}
 		t.Skipf("skipped: no ClickHouse to stand in for production: %v", err)
 	}
 	name := fmt.Sprintf("af_l42_prod_%d", time.Now().UnixNano()%1e9)
@@ -377,14 +385,51 @@ func chRequest(target secrets.Value, sql string) (string, error) {
 }
 
 // branchConnString is the address of the environment's own Postgres.
+//
+// The failure it reports carries the daemon's own list, because the one time
+// this failed it failed here, with AF-DB-014 for an environment `af up` had
+// just reported ready, and nothing in this test's path removes a branch. A
+// machine running several of these suites at once is the likely answer and a
+// listing taken at the instant it happens is the only thing that could say so:
+// whether the container is absent, stopped, or there under another
+// environment's label.
 func branchConnString(t *testing.T, ctx context.Context, o *Orchestrator) string {
 	t.Helper()
 	s, err := o.openReading(ctx)
 	require.NoError(t, err)
 	defer s.close()
 	url, err := s.dbProv.ConnString(ctx, provider.Branch{EnvID: o.envID}, provider.ConnDirect)
-	require.NoError(t, err)
+	require.NoError(t, err, "the environment came up and its branch is not there. "+
+		"What the daemon holds now:\n%s", managedContainers(t))
 	return url.Reveal()
+}
+
+// managedContainers lists what this repository has running, for a failure that
+// needs to say whether something else took it away.
+func managedContainers(t *testing.T) string {
+	t.Helper()
+	cli, err := dockerutil.Client()
+	if err != nil {
+		return "the daemon could not be reached: " + err.Error()
+	}
+	defer func() { _ = cli.Close() }()
+	list, err := cli.ContainerList(context.Background(), container.ListOptions{
+		All:     true,
+		Filters: dockerutil.Filter(dockerutil.LabelManaged, dockerutil.ManagedValue),
+	})
+	if err != nil {
+		return "the daemon would not list containers: " + err.Error()
+	}
+	var b strings.Builder
+	for _, c := range list {
+		fmt.Fprintf(&b, "  %s %s kind=%s env=%s state=%s\n",
+			c.ID[:12], strings.TrimPrefix(dockerutil.FirstName(c.Names), "/"),
+			c.Labels[dockerutil.LabelKind], c.Labels[dockerutil.LabelEnv], c.State)
+	}
+	if b.Len() == 0 {
+		return "  nothing at all, so something removed every managed container"
+	}
+	return b.String()
 }
 
 // datastoreConnString is the address of the environment's own ClickHouse.

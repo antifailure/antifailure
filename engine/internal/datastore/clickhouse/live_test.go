@@ -47,6 +47,15 @@ func requireServer(t *testing.T) secrets.Value {
 		Progress: func(line string) { t.Log(line) },
 	})
 	if err != nil {
+		// On a laptop with no Docker this is a skip: that machine has not
+		// found a bug. On a machine that was SUPPOSED to have one it is a
+		// failure, because a skip prints nothing and the package reports ok
+		// having examined nothing, which is the state this whole file exists
+		// to avoid being in.
+		if os.Getenv("AF_REQUIRE_DOCKER") != "" {
+			t.Fatalf("AF_REQUIRE_DOCKER is set, so this cannot be skipped: "+
+				"no ClickHouse is reachable and one could not be started: %v", err)
+		}
 		t.Skipf("skipped: no ClickHouse is reachable and one could not be started: %v", err)
 	}
 	// The container is NOT removed. It is the machine's server, shared by
