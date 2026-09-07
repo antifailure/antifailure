@@ -14,6 +14,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/verify"
+	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -120,11 +121,13 @@ func (o *Orchestrator) observeDatabase(
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
-	if tables, rows, atLeast, err := branchSize(ctx, conn); err != nil {
+	if size, err := branchSize(ctx, conn); err != nil {
 		obs.BranchReason = "the branch could not be counted: " + oneLine(err)
 	} else {
-		obs.Tables, obs.Rows, obs.RowsAreAFloor = tables, rows, atLeast
+		obs.Tables, obs.Rows, obs.RowsAreAFloor = size.tables, size.rows, size.atLeast
+		obs.Branch = size.perTable
 	}
+	o.observeVolume(obs)
 	o.observePersonas(ctx, conn, obs)
 }
 
@@ -198,7 +201,7 @@ func (o *Orchestrator) observeAttestation(
 // The count is a floor rather than a total, and the report says "at least" when
 // any table reached the ceiling. A number somebody is going to read as
 // production's row count must not be a number that quietly stopped early.
-func branchSize(ctx context.Context, conn *pgx.Conn) (tables int, rows int64, atLeast bool, err error) {
+func branchSize(ctx context.Context, conn *pgx.Conn) (branchCount, error) {
 	const query = `
 SELECT n.nspname, c.relname, c.reltuples::bigint
 FROM pg_class c
@@ -207,49 +210,82 @@ WHERE c.relkind = 'r'
   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
   AND n.nspname NOT LIKE 'pg_toast%'`
 
+	var out branchCount
 	result, err := conn.Query(ctx, query)
 	if err != nil {
-		return 0, 0, false, err
+		return branchCount{}, err
 	}
 	// Qualified, because two schemas may hold a table of the same name and an
 	// unqualified count would read whichever the search path found, twice.
-	var unanalyzed []string
+	type pending struct{ qualified, name string }
+	var unanalyzed []pending
 	for result.Next() {
 		var schemaName, name string
 		var estimate int64
 		if err := result.Scan(&schemaName, &name, &estimate); err != nil {
 			result.Close()
-			return 0, 0, false, err
+			return branchCount{}, err
 		}
-		tables++
+		out.tables++
 		if estimate < 0 {
-			unanalyzed = append(unanalyzed, pgx.Identifier{schemaName, name}.Sanitize())
+			unanalyzed = append(unanalyzed, pending{
+				qualified: pgx.Identifier{schemaName, name}.Sanitize(),
+				name:      schemaName + "." + name,
+			})
 			continue
 		}
-		rows += estimate
+		out.rows += estimate
+		out.perTable = append(out.perTable,
+			volume.TableRows{Name: schemaName + "." + name, Rows: estimate})
 	}
 	result.Close()
 	if err := result.Err(); err != nil {
-		return 0, 0, false, err
+		return branchCount{}, err
 	}
-	sort.Strings(unanalyzed)
+	sort.Slice(unanalyzed, func(i, j int) bool { return unanalyzed[i].name < unanalyzed[j].name })
 
-	for _, qualified := range unanalyzed {
+	for _, u := range unanalyzed {
 		var n int64
 		q := fmt.Sprintf("SELECT count(*) FROM (SELECT 1 FROM %s LIMIT %d) s",
-			qualified, countCeiling)
+			u.qualified, countCeiling)
 		if err := conn.QueryRow(ctx, q).Scan(&n); err != nil {
 			// One table that will not answer must not discard the count of
-			// every other table. It is reported as a floor either way.
-			atLeast = true
+			// every other table. It is reported as a floor either way, and it
+			// is left out of the per table list rather than entered as zero:
+			// a table nobody could count is not a table holding nothing, and
+			// the volume comparison would read a zero as production data this
+			// branch does not have.
+			out.atLeast = true
 			continue
 		}
 		if n == countCeiling {
-			atLeast = true
+			out.atLeast = true
 		}
-		rows += n
+		out.rows += n
+		out.perTable = append(out.perTable, volume.TableRows{Name: u.name, Rows: n})
 	}
-	return tables, rows, atLeast, nil
+	sort.Slice(out.perTable, func(i, j int) bool { return out.perTable[i].Name < out.perTable[j].Name })
+	return out, nil
+}
+
+// branchCount is what the branch holds, in total and per table.
+//
+// The per table list is the copy's side of the volume comparison, and it is
+// produced by the same walk as the total so the two can never disagree. A
+// second query for the same numbers is a second answer waiting to differ from
+// the first, which is how a report ends up quoting a total that no row in its
+// own table adds up to.
+type branchCount struct {
+	tables   int
+	rows     int64
+	atLeast  bool
+	perTable []volume.TableRows
+}
+
+// observeVolume reads the committed profile of what production holds.
+func (o *Orchestrator) observeVolume(obs *fidelity.Observation) {
+	profile, why := o.volumeProfile()
+	obs.Volume, obs.VolumeReason = profile, why
 }
 
 // countCeiling is where a live count of an unanalyzed table stops.

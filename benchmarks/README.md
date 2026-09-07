@@ -116,3 +116,28 @@ existed, which was 3 of 6.
 
 A report that found nothing to compare is not a pass either, and the harness
 refuses one.
+
+## The share of production a twin holds
+
+The denominator, and the only figure here that is supposed to be tiny.
+**Of the rows production holds, how many are in the twin, per table?**
+
+| Environment | This twin | Production | Share | Run |
+| --- | --- | --- | --- | --- |
+| The analytics twin in `engine/internal/fidelity/testdata` | 184,000 | 6,445,324,600 | 0.0028% | `2026-09-07` |
+
+Until this number existed the fidelity report said `reproduced` for that
+environment and had nothing to compare it against, so a golden built from a
+staging database with two hundred rows in it scored exactly like a full copy of
+a production holding four billion. The same run publishes what the report said
+before, recorded from the instrument at `d02fc3de` rather than recomputed: 9 of
+10 components, 90 percent. With the profile it is 8 of 10, 80 percent, and the
+component that moved says why.
+
+A low share is not a failure of the twin. It is the fact somebody needs before
+quoting a lock timing taken against it, which is why the same sentence carries
+"a timing measured against this branch is a lower bound and not a prediction".
+
+Run `af volume record` against your own database and the table is yours. It
+reads no row: every figure comes from `pg_class`, `pg_stats` and the partition
+catalogs, so a read only role on a replica is enough.

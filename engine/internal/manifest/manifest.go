@@ -508,7 +508,7 @@ var knownKeys = []string{
 	"strategy", "dockerfile", "target", "context", "image", "args", "allow_hosts",
 	"required", "sandbox", "value", "from", "cpu", "memory",
 	"provider", "source_url_env", "url_env", "masking_rules", "golden", "subset", "seed",
-	"max_age", "retain", "storage", "storage_url",
+	"max_age", "retain", "storage", "storage_url", "volume", "profile",
 	"engine", "stance", "because",
 	"enabled", "seed_table", "seed_where", "max_rows", "follow_dependents",
 	"virtual_relationships", "default", "allow_ipv6", "rules",

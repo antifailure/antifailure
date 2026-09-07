@@ -18,6 +18,14 @@ const (
 	DefaultURLEnv        = "DATABASE_URL"
 	DefaultMaskingRules  = "masking.yaml"
 	DefaultGoldenMaxAge  = "168h"
+	// DefaultVolumeMaxAge is thirty days rather than the golden's seven. A
+	// golden is the data and goes stale as fast as the data does; a volume
+	// profile is the SHAPE of the data, which moves at the rate a business
+	// grows. Seven days here would refuse a good denominator every week and
+	// teach somebody to set it to a year, which is the failure the setting
+	// exists to prevent. It mirrors volume.DefaultMaxAge and a test asserts
+	// the two agree.
+	DefaultVolumeMaxAge  = "720h"
 	DefaultGoldenRetain  = 5
 	DefaultSubsetMaxRows = 1000000
 	DefaultTTL           = "24h"
@@ -199,6 +207,14 @@ func normalizeDatabase(m *schema.Manifest) {
 	}
 	if d.Golden.Storage == "" {
 		d.Golden.Storage = schema.StorageLocal
+	}
+	if d.Volume != nil {
+		if c, ok := confine(d.Volume.Profile); ok && c != "" {
+			d.Volume.Profile = c
+		}
+		if d.Volume.MaxAge == "" {
+			d.Volume.MaxAge = DefaultVolumeMaxAge
+		}
 	}
 	if d.Migrations != nil {
 		// The root itself confines to an empty string, and that is left as

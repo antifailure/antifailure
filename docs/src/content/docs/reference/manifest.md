@@ -185,6 +185,40 @@ exported on the laptop that started it.
 | `golden` | `schedule`, `max_age`, `retain`, `storage`, `storage_url`. |
 | `subset` | See below. |
 | `migrations` | See below. For a project that applies its own directory of SQL files. |
+| `volume` | See below. The committed record of what production holds. |
+
+### `volume`
+
+```yaml
+  volume:
+    profile: .antifailure/volume.json
+    max_age: 720h
+```
+
+The denominator. Without it a fidelity report can say a branch holds twelve
+tables over a hundred thousand rows and has nothing to compare that against, so
+a golden built from a staging database with two hundred rows in it reports as
+reproducing a production holding four billion, in the same words and with the
+same verdict as a full copy.
+
+`af volume record` writes the profile from the database `source_url_env` names.
+It reads no row: row counts, table and index sizes, partition counts and how
+much sits in the largest partition, and the cardinality of every column
+anything joins on, all of it from `pg_class`, `pg_stats` and the partition
+catalogs. That is why a read only role on a replica is enough, and why the
+result is safe to commit, which it has to be: the check running on a pull
+request cannot reach production.
+
+With a profile, the database dimension states the fraction per table, and the
+migration rehearsal states what a lock it measured would cost at production's
+row counts, labelled as an extrapolation rather than printed as a second
+measurement.
+
+`max_age` defaults to `720h`, thirty days. A profile older than that is refused
+rather than quoted, the same way a stale golden is refused rather than
+branched: a stale denominator is not a smaller number, it is an unknown one.
+Thirty days rather than the golden's seven because a profile is the shape of
+the data rather than the data, and it moves at the rate a business grows.
 
 ### `migrations`
 

@@ -64,12 +64,15 @@ func (o *Orchestrator) RunInsights(
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
+	profile, why := o.volumeProfile()
 	runOpts := insights.Options{
-		Config:   insights.Configure(o.opts.Manifest.Insights),
-		Branch:   conn,
-		Limit:    opts.Limit,
-		Baseline: opts.Baseline,
-		Progress: o.progress,
+		Config:       insights.Configure(o.opts.Manifest.Insights),
+		Branch:       conn,
+		Limit:        opts.Limit,
+		Baseline:     opts.Baseline,
+		Progress:     o.progress,
+		Volume:       profile,
+		VolumeReason: why,
 	}
 
 	if !opts.SkipRehearsal && runOpts.Config.Enabled &&

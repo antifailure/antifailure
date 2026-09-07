@@ -116,6 +116,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
 | `url_env` | string | no | Name of the environment variable to inject into services with the branch's connection string. Defaults to `DATABASE_URL`. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `version` | `14`, `15`, `16`, `17`, `18` | no | Postgres major version. Match it to the source: a golden built on a different major is an environment running a Postgres your application does not. Defaults to `17`. |
+| `volume` | [Volume](#volume) | no | The committed record of what production holds, which is the denominator every row count in a report is measured against. |
 
 ## Datastore
 
@@ -442,6 +443,15 @@ Take a production shaped slice rather than the whole database. The closure is co
 | `seed_table` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | `seed_where` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | `virtual_relationships` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
+
+## Volume
+
+The committed record of what production holds, which is the denominator every row count in a report is measured against. Without one the fidelity report says a branch holds twelve tables over a hundred thousand rows and has nothing to compare that against, so a golden built from a staging database with two hundred rows in it reports as reproducing a production holding four billion.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data. Defaults to `720h`. Max length 32. |
+| `profile` | string | **yes** | The profile file, relative to the repository root. Written by af volume record from a read only connection to production or a replica, and committed, because the machine that reads it on a pull request cannot reach production. It carries counts, sizes, partition shape and key cardinality, and no data. Max length 512. |
 
 ## Workflow
 
