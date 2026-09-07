@@ -43,15 +43,15 @@ func TestInternal_APlainRequestForAnEnvironmentNameIsForwarded(t *testing.T) {
 	// Default block, which is what an environment with no egress rules has,
 	// and the host is named in the internal list the runtime writes.
 	s := newSidecar(t, &schema.Egress{Default: schema.ModeBlock})
-	s.proxy.internal = newInside([]string{"events"})
+	s.internal = newInside([]string{"events"})
 	// The environment's own network, which is loopback here because that is
 	// where the fixture is. It is what makes the address internal as well as
 	// the name: the guard permits the environment's own subnet, and the
 	// internal path requires the name to resolve into it.
-	s.proxy.destinations = newDestinations(nil, "127.0.0.0/8", false)
+	s.destinations = newDestinations(nil, "127.0.0.0/8", false)
 	// The name has to resolve to the fixture, because the whole point is that
 	// the sidecar dials what the environment's resolver would have returned.
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.IPv4(127, 0, 0, 1)}, nil
 	}
 
@@ -75,7 +75,7 @@ func TestInternal_APlainRequestForAnEnvironmentNameIsForwarded(t *testing.T) {
 // everything, which is the failure this whole component exists to prevent.
 func TestInternal_AnExternalNameIsStillDecided(t *testing.T) {
 	s := newSidecar(t, &schema.Egress{Default: schema.ModeBlock})
-	s.proxy.internal = newInside([]string{"events"})
+	s.internal = newInside([]string{"events"})
 
 	_, status := requestThrough(t, s, "http://api.stripe.com/v1/charges")
 	require.Equal(t, http.StatusForbidden, status,
@@ -101,12 +101,12 @@ func TestInternal_ANameThatIsInternalByShapeAndResolvesOutsideIsStillDecided(t *
 	require.NoError(t, err)
 
 	s := newSidecar(t, &schema.Egress{Default: schema.ModeBlock})
-	s.proxy.internal = newInside(nil)
+	s.internal = newInside(nil)
 	// The environment's network is somewhere else entirely, so the fixture on
 	// loopback is outside it.
-	s.proxy.destinations = newDestinations(
+	s.destinations = newDestinations(
 		[]schema.EgressRule{{Host: "127.0.0.1"}}, "10.99.0.0/16", false)
-	s.proxy.resolve = func(context.Context, string) ([]net.IP, error) {
+	s.resolve = func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.IPv4(127, 0, 0, 1)}, nil
 	}
 

@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -244,7 +245,7 @@ func (c *client) value(ctx context.Context, sql string, params map[string]string
 func decodeRowBinary(r *bufio.Reader, yield func([][]byte) error) error {
 	n, err := binary.ReadUvarint(r)
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			// A statement that returned no header at all returned nothing,
 			// which is what an empty result of a DDL shaped query looks like.
 			return nil
@@ -275,7 +276,7 @@ func decodeRowBinary(r *bufio.Reader, yield func([][]byte) error) error {
 	row := make([][]byte, n)
 	for {
 		if _, err := r.Peek(1); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
