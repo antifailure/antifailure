@@ -44,7 +44,10 @@ describe('every operator route declares a permission', () => {
     // SHRINKING router still clears is an assertion that has quietly stopped
     // checking whether routes moved out of this tree, which is the one thing it
     // exists for.
-    atLeast: 85,
+    // 89 taken by running the walk on this branch's merged tree, the way the
+    // paragraph above says to, rather than by adding one to the number that was
+    // here. This branch adds admin.operators.setPassword.
+    atLeast: 89,
   })
 })
 
@@ -498,6 +501,279 @@ describe('the operator routes', { skip: hasDb ? false : 'no database' }, () => {
         () => adminSignIn(h.pool, { email, password: '' }, new Date()),
         AdminSignInError,
       )
+    })
+
+    describe('setting a password, which is what finishes an invitation', () => {
+      // WHY THIS SUITE IS LONG. The route above proves an invited operator
+      // CANNOT sign in, and that was the whole provisioning story until now:
+      // the only thing that could finish the invitation was a command holding a
+      // connection string. What follows is the other half, and every assertion
+      // reads the row or the sign in back rather than trusting a return value,
+      // because "the mutation resolved" is exactly what a route that writes
+      // nothing also does.
+
+      /** An operator who has never been given a password, as `create` leaves
+       *  one. Made through the ROUTE rather than by INSERT, so the suite is
+       *  testing the pair of routes a person actually uses. */
+      async function invited(caller: Awaited<ReturnType<typeof callerForWithId>>['caller']) {
+        const email = `invited-${randomUUID().slice(0, 8)}@example.test`
+        const made = await caller.admin.operators.create({ email, name: 'Invited', role: 'support' })
+        return { id: made.id, email }
+      }
+
+      async function hashOf(id: string): Promise<Buffer | null> {
+        const [row] = await h.admin<{ password_hash: Buffer | null }[]>`
+          SELECT password_hash FROM admin_users WHERE id = ${id}::uuid`
+        return row!.password_hash
+      }
+
+      test('an invited operator can sign in afterwards, which is the whole point', async () => {
+        const { caller } = await callerForWithId('owner')
+        const { id, email } = await invited(caller)
+        assert.equal(await hashOf(id), null, 'the invitation started with a credential')
+
+        const chosen = 'a-passphrase-chosen-by-the-owner'
+        const result = await caller.admin.operators.setPassword({ adminUserId: id, password: chosen })
+        assert.equal(result.provisioned, true)
+        assert.equal(result.replacedAPassword, false, 'finishing an invitation reported a replacement')
+
+        // The end to end proof. Not "password_hash is not null", which a route
+        // writing garbage would also satisfy: the credential has to open a
+        // session through the real sign in path.
+        const signedIn = await adminSignIn(h.pool, { email, password: chosen }, new Date())
+        assert.ok(signedIn.token, 'the operator still could not sign in after a password was set')
+
+        const listed = await caller.admin.operators.list()
+        assert.equal(
+          listed.find((o) => o.id === id)?.provisioned,
+          true,
+          'the directory still shows the account as unprovisioned',
+        )
+      })
+
+      test('a password under the floor is refused, and the account stays unsignable', async () => {
+        const { caller } = await callerForWithId('owner')
+        const { id } = await invited(caller)
+        await assert.rejects(
+          () => caller.admin.operators.setPassword({ adminUserId: id, password: 'eleven-char' }),
+          (err: Error) => /at least 12/.test(err.message),
+        )
+        assert.equal(await hashOf(id), null, 'a refused password was written anyway')
+      })
+
+      test('a password with a stray newline is refused rather than silently kept', async () => {
+        // The heredoc case. Accepting it writes a credential nobody can ever
+        // retype, because the newline is invisible in every attempt.
+        const { caller } = await callerForWithId('owner')
+        const { id } = await invited(caller)
+        await assert.rejects(
+          () =>
+            caller.admin.operators.setPassword({
+              adminUserId: id,
+              password: 'a-perfectly-fine-passphrase\n',
+            }),
+          (err: Error) => /whitespace/.test(err.message),
+        )
+        assert.equal(await hashOf(id), null, 'a password with a trailing newline was written')
+      })
+
+      test('a reset stops the old password and the sessions it had already opened', async () => {
+        // A password changed because it leaked, that leaves the sessions it
+        // opened alive, is a reset that resets nothing: an operator session
+        // lasts twelve hours and reads every tenant for all of them.
+        const { caller } = await callerForWithId('owner')
+        const { id, email } = await invited(caller)
+        const first = 'the-first-password-they-had'
+        await caller.admin.operators.setPassword({ adminUserId: id, password: first })
+        const theirs = await adminSignIn(h.pool, { email, password: first }, new Date())
+
+        const second = 'the-replacement-password-now'
+        const result = await caller.admin.operators.setPassword({ adminUserId: id, password: second })
+        assert.equal(result.replacedAPassword, true, 'replacing a working password reported an invitation')
+        assert.equal(result.sessionsRevoked, 1, 'the session the old password opened was left alive')
+
+        await assert.rejects(
+          () => adminSignIn(h.pool, { email, password: first }, new Date()),
+          'the old password still signs in',
+        )
+        const again = await adminSignIn(h.pool, { email, password: second }, new Date())
+        assert.ok(again.token, 'the new password does not sign in')
+
+        const { resolveAdminSession } = await import('../src/admin/session.ts')
+        assert.equal(
+          await resolveAdminSession(h.pool, theirs.token, new Date()),
+          null,
+          'a session opened with the old password still resolves',
+        )
+      })
+
+      test('the root operator gets a password, and is still the root operator', async () => {
+        // A DELIBERATE DIFFERENCE FROM THE COMMAND. `set-operator-password`
+        // declines to touch root, because a connection string is not a person.
+        // Here the caller is a named operator and the act is in the chain under
+        // their address. What must not change is everything else about root,
+        // and that is what the reads below are for: this route goes nowhere
+        // near is_root, role or suspended_at, and the 0029 triggers still hold.
+        const { caller } = await callerForWithId('owner')
+        const email = `rootpw-${randomUUID().slice(0, 8)}@example.test`
+        const [made] = await h.admin<{ id: string }[]>`
+          INSERT INTO admin_users (email, name, role, is_root)
+          VALUES (${email}, 'Root', 'owner', true)
+          RETURNING id`
+        const rootId = made!.id
+        try {
+          const password = 'the-root-operators-new-passphrase'
+          await caller.admin.operators.setPassword({ adminUserId: rootId, password })
+          const signedIn = await adminSignIn(h.pool, { email, password }, new Date())
+          assert.ok(signedIn.token, 'the root operator could not sign in with the password just set')
+
+          const [row] = await h.admin<{ is_root: boolean; role: string; suspended_at: Date | null }[]>`
+            SELECT is_root, role, suspended_at FROM admin_users WHERE id = ${rootId}::uuid`
+          assert.equal(row!.is_root, true, 'setting a password stopped root being root')
+          assert.equal(row!.role, 'owner', 'setting a password moved root off owner')
+          assert.equal(row!.suspended_at, null, 'setting a password suspended root')
+        } finally {
+          await h.admin`ALTER TABLE admin_users DISABLE TRIGGER admin_root_is_permanent_del`
+          await h.admin`DELETE FROM admin_users WHERE id = ${rootId}::uuid`
+          await h.admin`ALTER TABLE admin_users ENABLE TRIGGER admin_root_is_permanent_del`
+        }
+      })
+
+      test('setting your own password needs the current one, so a stolen session is not permanent', async () => {
+        // The single reason this check exists. An operator cookie lasts twelve
+        // hours; without it a stolen one buys the account forever, because the
+        // thief sets a password and the revoke cuts the real owner out.
+        const { caller, adminUserId } = await callerForWithId('owner')
+        const before = await hashOf(adminUserId)
+
+        await assert.rejects(
+          () =>
+            caller.admin.operators.setPassword({
+              adminUserId,
+              password: 'a-thief-would-choose-this',
+            }),
+          (err: Error) => /needs your current one/.test(err.message),
+          'an operator set their own password without proving they knew it',
+        )
+        await assert.rejects(
+          () =>
+            caller.admin.operators.setPassword({
+              adminUserId,
+              password: 'a-thief-would-choose-this',
+              currentPassword: 'not-the-current-password',
+            }),
+          (err: Error) => /not your current password/.test(err.message),
+          'a wrong current password was accepted',
+        )
+        assert.deepEqual(await hashOf(adminUserId), before, 'a refused self change wrote a password anyway')
+      })
+
+      test('changing your own password keeps the session doing it and revokes the others', async () => {
+        // The control for the test above, and the behaviour that stops this
+        // being useless: proving knowledge of the current password gets you
+        // through. Signing the operator out of the session they are typing in
+        // would make an ordinary rotation feel like a fault.
+        const email = `self-${randomUUID().slice(0, 8)}@example.test`
+        const { hash, salt } = await hashPassword(password)
+        const [row] = await h.admin<{ id: string }[]>`
+          INSERT INTO admin_users (email, name, role, password_hash, password_salt, password_set_at)
+          VALUES (${email}, 'Self', 'owner', ${hash}, ${salt}, now())
+          RETURNING id`
+        const mine = await adminSignIn(h.pool, { email, password }, new Date())
+        const other = await adminSignIn(h.pool, { email, password }, new Date())
+        const caller = await callerWithToken(mine.token)
+
+        const next = 'the-password-i-rotated-to'
+        const result = await caller.admin.operators.setPassword({
+          adminUserId: row!.id,
+          password: next,
+          currentPassword: password,
+        })
+        assert.equal(result.sessionsRevoked, 1, 'the operators other session was not revoked')
+
+        const { resolveAdminSession } = await import('../src/admin/session.ts')
+        assert.ok(
+          await resolveAdminSession(h.pool, mine.token, new Date()),
+          'the session that changed the password was signed out by doing it',
+        )
+        assert.equal(
+          await resolveAdminSession(h.pool, other.token, new Date()),
+          null,
+          'another session belonging to the same operator survived the change',
+        )
+        assert.ok(await adminSignIn(h.pool, { email, password: next }, new Date()))
+      })
+
+      test('the chain records it at critical and the password is in no part of the entry', async () => {
+        const { caller } = await callerForWithId('owner')
+        const { id, email } = await invited(caller)
+        const secret = 'a-value-that-must-never-be-logged'
+        await caller.admin.operators.setPassword({ adminUserId: id, password: secret })
+
+        const [entry] = await h.admin<{
+          action: string
+          severity: string
+          actor_label: string
+          detail: unknown
+        }[]>`
+          SELECT action, severity, actor_label, detail FROM admin_audit_entries
+          WHERE action = 'operator.password_set' AND target_id = ${id}
+          ORDER BY seq DESC LIMIT 1`
+        assert.ok(entry, 'setting a password left no entry in the operator chain')
+        assert.equal(entry!.severity, 'critical')
+        assert.match(entry!.actor_label, /@/, 'the entry is not attributed to a person')
+        assert.equal(
+          JSON.stringify(entry!.detail).includes(secret),
+          false,
+          'the audit entry carried the password itself',
+        )
+        assert.ok(
+          JSON.stringify(entry!.detail).includes(email),
+          'the entry does not say whose password it was',
+        )
+      })
+
+      test('a suspended operator is told so rather than left to conclude the button is broken', async () => {
+        // Not refused. adminSignIn checks the suspension before the password,
+        // so this changes nothing about their access, and somebody who sets a
+        // password, watches the sign in fail and is told nothing concludes the
+        // route is broken.
+        const { caller } = await callerForWithId('owner')
+        const { id, email } = await invited(caller)
+        await caller.admin.operators.suspend({ adminUserId: id, reason: 'while we check' })
+        const result = await caller.admin.operators.setPassword({
+          adminUserId: id,
+          password: 'a-password-they-cannot-use-yet',
+        })
+        assert.match(result.effect, /suspended/)
+        await assert.rejects(
+          () => adminSignIn(h.pool, { email, password: 'a-password-they-cannot-use-yet' }, new Date()),
+          'a suspended operator signed in',
+        )
+      })
+
+      test('an id nobody holds is a refusal rather than a quiet success', async () => {
+        const { caller } = await callerForWithId('owner')
+        await assert.rejects(
+          () =>
+            caller.admin.operators.setPassword({
+              adminUserId: randomUUID(),
+              password: 'a-password-for-nobody-at-all',
+            }),
+          (err: Error) => /No operator with that id/.test(err.message),
+        )
+      })
+
+      test('a role without admin.operators.write cannot set anybody a password', async () => {
+        const { caller: owner } = await callerForWithId('owner')
+        const { id } = await invited(owner)
+        const { caller: support } = await callerForWithId('support')
+        await assert.rejects(
+          () => support.admin.operators.setPassword({ adminUserId: id, password: 'support-should-not-do-this' }),
+          (err: Error) => /admin\.operators\.write/.test(err.message),
+        )
+        assert.equal(await hashOf(id), null, 'a refused caller still provisioned the account')
+      })
     })
 
     test('support cannot administer operators at all', async () => {

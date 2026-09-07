@@ -45,6 +45,8 @@ import { securityRouter } from './security.ts'
 // check, so the audit chain routes come in on their own.
 import { auditChainRoutes } from './security.ts'
 import { adminProcedure, adminAudit, type AdminContext } from './trpc.ts'
+import { hashPassword } from './session.ts'
+import { MAX_PASSWORD_LENGTH, operatorPasswordMatches, passwordRefusal } from './password.ts'
 import {
   adminBillingRouter,
   adminEntitlementsRouter,
@@ -661,8 +663,217 @@ export const adminRouter = router({
           return {
             id: rows[0]!.id,
             provisioned: false,
+            // "Out of band" was the honest word for this when nothing in the
+            // portal could write a password, and it is the wrong word now that
+            // `setPassword` exists: it sent the reader out of the product to
+            // find a shell. What is unchanged, and is the part worth saying, is
+            // that this route mints nothing.
             effect:
-              'The account exists and cannot sign in. Set a password out of band before it is usable.',
+              'The account exists and cannot sign in. Nothing here minted a password for it, so it stays unusable until somebody gives it one.',
+          }
+        })
+      }),
+
+    /**
+     * Gives an operator a password, which is the half of `create` that was
+     * missing from every screen in this portal.
+     *
+     * WHAT WAS ACTUALLY BROKEN. `create` above writes the row with a NULL
+     * password_hash and returns the sentence "Set a password out of band before
+     * it is usable." The only out of band that has ever existed is the
+     * `set-operator-password` command in bootstrap.ts, which runs on a
+     * connection string row level security does not apply to. So inviting a
+     * colleague through the portal produced an account that could not sign in,
+     * and finishing the invitation needed a shell, the admin database URL, and
+     * somebody who knew both. The directory said `Not provisioned` and `Never`
+     * beside their name and offered nothing to do about it.
+     *
+     * THIS DOES NOT MINT A PASSWORD AND NEVER GENERATES ONE. The caller sends a
+     * password they chose, exactly as the command takes one on stdin. A route
+     * that invented a starting credential would put a value the server knows
+     * into a row, and `create`'s comment is right that it would be the single
+     * worst thing in the portal. The console offers to generate one in the
+     * BROWSER, which is a different thing: the server never sees a password it
+     * was not given.
+     *
+     * WHAT IT WILL DO THAT THE COMMAND REFUSES. It sets the ROOT operator's
+     * password. bootstrap.ts declines to take root over and says so, because a
+     * connection string is not a person; here the caller is a named operator
+     * holding admin.operators.write, the action is in the audit chain at
+     * critical severity under their address, and root is the account most
+     * likely to need a password set by somebody who is not holding a database
+     * credential at the time. The triggers in 0029 are untouched by this: root
+     * still cannot be deleted, demoted or suspended, and this route does not go
+     * near those columns.
+     *
+     * WHY SELF NEEDS THE CURRENT PASSWORD when nothing else on this router
+     * does. setRole and suspend refuse self outright, because their danger is
+     * an operator widening their own privilege. This one is the opposite shape:
+     * setting your own password is ordinary and useful, and the risk is that
+     * somebody ELSE is holding your session. An operator cookie lasts twelve
+     * hours; without this check a stolen one buys a permanent takeover, because
+     * the thief sets a password and the revoke below cuts every session the
+     * real owner had. Proving knowledge of the current password is what keeps a
+     * stolen session bounded by its own expiry.
+     *
+     * THE ORDER OF THE WRITES IS NOT A STYLE CHOICE. The audit entry goes first,
+     * exactly as it does in every route beside it, because appendAdminAudit
+     * takes `pg_advisory_xact_lock(hashtext(admin_audit))`, one global lock that
+     * every audited transaction serialises on. A route that took a row lock on
+     * admin_users and THEN asked for the audit lock would invert the ordering
+     * its neighbours use, which is a deadlock between two operators acting on
+     * one account. That is also why the entry cannot carry the number of
+     * sessions revoked: it is written before the statement that learns it. The
+     * caller is told, and the entry says the revocation is unconditional.
+     */
+    setPassword: adminProcedure('admin.operators.write')
+      .input(
+        z.object({
+          adminUserId: z.string().uuid(),
+          // No `.min()` here, deliberately. Zod would answer a short password
+          // with a schema error naming a number, and the useful answer is
+          // password.ts's sentence about why the number is that number.
+          password: z.string().max(MAX_PASSWORD_LENGTH),
+          /** Required when, and only when, the target is the caller. */
+          currentPassword: z.string().max(MAX_PASSWORD_LENGTH).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const c = ctx as AdminContext
+        const refusal = passwordRefusal(input.password)
+        if (refusal) throw new TRPCError({ code: 'BAD_REQUEST', message: refusal })
+
+        const isSelf = input.adminUserId === c.admin.adminUserId
+
+        // Existence only, and on its own transaction, so that an id nobody
+        // holds costs no scrypt. Every FACT about the account is read below
+        // instead, inside the transaction that writes: reading them here and
+        // using them there would describe the row as it was before a hash that
+        // takes about a tenth of a second, and an audit entry is worth more
+        // when it describes what was actually changed.
+        //
+        // Hashing outside a transaction rather than between two statements is
+        // the other half of the same point. `adminDb` is a transaction on the
+        // operator pool, scrypt at N = 2^15 costs that tenth of a second and
+        // 32MB, and doing it inside would hold a BYPASSRLS connection open for
+        // the length of it.
+        const exists = await c.adminDb(async (db) => {
+          const rows = await db.execute<{ id: string }>(
+            sql`SELECT id FROM admin_users WHERE id = ${input.adminUserId}::uuid`,
+          )
+          return rows.length > 0
+        })
+        if (!exists) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'No operator with that id.' })
+        }
+
+        if (isSelf) {
+          if (!input.currentPassword) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'Setting your own password needs your current one as well. Every other operator here is somebody else deciding; your own account is the one where a stolen session would otherwise be enough.',
+            })
+          }
+          // Named password.ts rather than read here, so that no query in this
+          // file names password_hash. See SAFE_COLUMNS.
+          const knows = await operatorPasswordMatches(
+            c.adminDb,
+            c.admin.adminUserId,
+            input.currentPassword,
+          )
+          if (!knows) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'That is not your current password, so nothing was changed.',
+            })
+          }
+        }
+
+        const { hash, salt } = await hashPassword(input.password)
+        const now = c.clock.now()
+
+        return c.adminDb(async (db) => {
+          // Every fact the entry and the sentence use, read here rather than
+          // above, so they describe one snapshot rather than two. No FOR
+          // UPDATE: see the note on the route about lock ordering. The row can
+          // still be gone, because the check above committed and released.
+          const fresh = await db.execute<{
+            email: string
+            is_root: boolean
+            suspended_at: Date | string | null
+            provisioned: boolean
+          }>(sql`
+            SELECT email, is_root, suspended_at, (password_hash IS NOT NULL) AS provisioned
+            FROM admin_users WHERE id = ${input.adminUserId}::uuid`)
+          const row = fresh[0]
+          if (!row) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'No operator with that id.' })
+          }
+          const suspended = row.suspended_at !== null
+
+          await adminAudit(db, c, {
+            action: 'operator.password_set',
+            targetType: 'admin_user',
+            targetId: input.adminUserId,
+            severity: 'critical',
+            // The password is not here and is not derivable from anything that
+            // is. What an investigator needs is whether a WORKING credential
+            // was replaced, which is the difference between finishing an
+            // invitation and taking an account over.
+            detail: {
+              email: row.email,
+              replacedAPassword: row.provisioned,
+              isRoot: row.is_root,
+              self: isSelf,
+              // "Every OTHER" when the target is the caller, because the
+              // session making the request is the one the revoke spares. A
+              // fixed sentence would have been wrong in exactly the case an
+              // investigator is most likely to be reading about.
+              sessions: isSelf
+                ? 'every other live session for this operator was revoked in this transaction'
+                : 'every live session for this operator was revoked in this transaction',
+            },
+          })
+
+          await db.execute(sql`
+            UPDATE admin_users
+            SET password_hash = ${hash}, password_salt = ${salt},
+                password_set_at = ${now.toISOString()}, updated_at = ${now.toISOString()}
+            WHERE id = ${input.adminUserId}::uuid`)
+
+          // Changing a password because it leaked, and leaving the sessions it
+          // opened alive, is a reset that resets nothing: an operator session
+          // lasts twelve hours and reads every tenant for all of them.
+          //
+          // The caller's own session is excluded unconditionally rather than
+          // only when the target is themselves. When the target is somebody
+          // else the clause matches nothing, because that session belongs to a
+          // different admin_user_id; when the target IS themselves it is the
+          // difference between changing your password and signing yourself out
+          // mid sentence. One statement, no branch to get wrong.
+          const revoked = await db.execute<{ id: string }>(sql`
+            UPDATE admin_sessions SET revoked_at = ${now.toISOString()}
+            WHERE admin_user_id = ${input.adminUserId}::uuid
+              AND revoked_at IS NULL
+              AND expires_at > ${now.toISOString()}
+              AND id <> ${c.admin.sessionId}::uuid
+            RETURNING id`)
+
+          return {
+            provisioned: true,
+            /** Whether a working credential was replaced, rather than an
+             *  invitation finished. The console says a different sentence for
+             *  each, because they are different events. */
+            replacedAPassword: row.provisioned,
+            sessionsRevoked: revoked.length,
+            effect: effectOfSettingAPassword({
+              email: row.email,
+              replaced: row.provisioned,
+              sessionsRevoked: revoked.length,
+              isSelf,
+              suspended,
+            }),
           }
         })
       }),
@@ -919,4 +1130,76 @@ function pageOf<Row, Out>(
 
 function iso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+}
+
+/**
+ * The sentence an operator reads after setting somebody's password.
+ *
+ * COMPOSED ON THE SERVER, for the same reason `create`'s effect string is: the
+ * route knows four things the console would have to re-derive, and a console
+ * that re-derived them would eventually say one of them wrongly. Finishing an
+ * invitation and replacing a working credential are different events and get
+ * different sentences; a suspended target and a self change each add the fact
+ * that changes what the reader should do next.
+ *
+ * It never contains the password. The value exists in the browser that produced
+ * it and in the hash, and nowhere else this system can read.
+ */
+function effectOfSettingAPassword(facts: {
+  email: string
+  replaced: boolean
+  sessionsRevoked: number
+  isSelf: boolean
+  suspended: boolean
+}): string {
+  const parts: string[] = []
+  if (facts.isSelf) {
+    parts.push('Your password is changed. The session you are reading this in is still valid.')
+  } else if (facts.replaced) {
+    parts.push(
+      `${facts.email} had a working password and now has this one. The old one no longer signs in.`,
+    )
+  } else {
+    parts.push(`${facts.email} can sign in now, for the first time.`)
+  }
+
+  if (facts.sessionsRevoked > 0) {
+    const n = facts.sessionsRevoked
+    const many = n === 1 ? 'session was' : 'sessions were'
+    // THE CLAUSE ABOUT AN OLD CREDENTIAL IS CONDITIONAL ON THERE HAVING BEEN
+    // ONE. Composing this sentence out of two independent facts produced
+    // "can sign in now, for the first time. 1 live session was revoked, so
+    // anybody holding the old credential is out", which is two true halves
+    // making a false whole. Reached by nulling a password_hash by hand and so
+    // not a state the product can enter, which is exactly why it would have
+    // survived: nothing would have said it out loud until somebody read it.
+    parts.push(
+      facts.isSelf
+        ? `Your ${n} other operator ${many} revoked.`
+        : facts.replaced
+          ? `${n} live operator ${many} revoked, so anybody holding the old credential is out on their next request.`
+          : `${n} live operator ${many} revoked.`,
+    )
+  }
+
+  if (facts.suspended) {
+    // Said rather than refused. adminSignIn checks the suspension before the
+    // password, so this changes nothing about their access, and somebody who
+    // sets a password, watches the sign in fail and is told nothing concludes
+    // the button is broken.
+    parts.push(
+      'They are suspended, so this password will not let them in until the account is restored.',
+    )
+  }
+
+  if (!facts.isSelf) {
+    // Only for somebody else's account, where the password still has to travel
+    // to a person. Telling an operator who just changed their OWN password to
+    // pass it on is the wrong instruction in the one case where it is nobody
+    // else's to have.
+    parts.push(
+      'It is not stored anywhere you can read it back, so pass it on before you close this.',
+    )
+  }
+  return parts.join(' ')
 }
