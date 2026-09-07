@@ -986,7 +986,9 @@ func (h *harness) cancellationLeavesNothingUntracked(ctx context.Context) {
 		// call's. What claims this environment is, and so is an unattributed
 		// branch, because every other package's branches carry their own
 		// environment identifier.
-		if r.EnvID != env && !(r.Kind == "branch" && r.EnvID == "") {
+		attributedHere := r.EnvID == env
+		attributedToNothing := r.Kind == "branch" && r.EnvID == ""
+		if !attributedHere && !attributedToNothing {
 			continue
 		}
 		h.t.Fatalf("a cancelled branch left %s (%s) behind and reported %q as the identifier "+
