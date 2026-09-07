@@ -223,7 +223,14 @@ var commandExamples = map[string]string{
 		"af up\n" +
 		"af up --rebuild --hud",
 	"af version": "af version\naf version --short",
-	"af webhook": "af webhook list",
+	"af volume":  "af volume show",
+	"af volume record": "" +
+		"# Reads pg_class and pg_stats over the connection database.source_url_env\n" +
+		"# names. No row is read, so a read only role on a replica is enough.\n" +
+		"af volume record\n" +
+		"af volume record --out .antifailure/volume.json",
+	"af volume show": "af volume show",
+	"af webhook":     "af webhook list",
 	"af webhook list": "" +
 		"af webhook list\n" +
 		"af webhook list stripe",

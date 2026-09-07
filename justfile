@@ -515,6 +515,15 @@ benchmark:
     AF_SCORE_BENCHMARK_OUT="$score" \
       go test ./internal/fidelity -run TestBenchmarkTheFidelityScoreBeforeAndAfter -count=1
     echo "wrote {{reports}}/benchmark-fidelity-score-${stamp}.md"
+    # The share of production the twin holds, per table. Its before half is the
+    # report the instrument at d02fc3de printed for the same observation, which
+    # called a twin holding 0.0028 percent of production a reproduction of it.
+    # It writes into benchmarks/ rather than into the gitignored reports, for
+    # the reason the provider and cross store halves do: a number a customer is
+    # quoted has to be readable without running anything.
+    AF_VOLUME_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-volume-share.md" \
+      go test ./internal/fidelity -run TestBenchmarkTheShareOfProductionInTheTwin -count=1
+    echo "wrote benchmarks/${stamp}-volume-share.md"
     # The database providers, which is a different question and a different
     # report: how long the first golden takes per gigabyte and how long a
     # branch takes, per provider. It is slow on purpose, because it creates

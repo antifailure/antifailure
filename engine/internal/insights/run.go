@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -141,6 +142,13 @@ type Options struct {
 	// Empty falls back to a general message, which is right when the caller
 	// simply had nothing to rehearse.
 	NoRehearsalReason string
+	// Volume is production's own row counts, from the committed profile, and
+	// VolumeReason says why there is none. Without it every lock timing the
+	// rehearsal reports is a lower bound with nothing saying so, which is
+	// what let a 500ms lock over two hundred rows read as a prediction about
+	// production.
+	Volume       *volume.Profile
+	VolumeReason string
 	// RehearsalDeclined says the caller chose not to rehearse, so a run
 	// without one is a decision rather than a blocked check. --no-rehearsal
 	// is the only thing that sets it. Without it, a rehearsal the manifest
@@ -283,6 +291,7 @@ func Run(ctx context.Context, opts Options) (Full, error) {
 			if err != nil {
 				return f, err
 			}
+			Extrapolate(&r, opts.Volume, opts.VolumeReason)
 			f.Rehearsal = &r
 			if r.Tool == ToolNone {
 				// The rehearsal ran and had nothing to rehearse, which is

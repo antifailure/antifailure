@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/personas"
+	"github.com/antifailure/antifailure/engine/internal/volume"
 )
 
 // What the branch is asked, against a real Postgres.
@@ -79,11 +80,12 @@ func TestBranchSize_CountsTheApplicationsTablesAndNotTheCatalogues(t *testing.T)
 	conn := fidelityConn(t)
 	ctx := context.Background()
 
-	tables, rows, atLeast, err := branchSize(ctx, conn)
+	size, err := branchSize(ctx, conn)
 	require.NoError(t, err)
-	require.Zero(t, tables, "an empty database holds no application tables")
-	require.Zero(t, rows)
-	require.False(t, atLeast)
+	require.Zero(t, size.tables, "an empty database holds no application tables")
+	require.Zero(t, size.rows)
+	require.False(t, size.atLeast)
+	require.Empty(t, size.perTable)
 
 	// Two tables called orders, in two schemas, holding different numbers of
 	// rows. An unqualified count of an unanalyzed table reads whichever the
@@ -103,20 +105,36 @@ INSERT INTO billing.orders SELECT g FROM generate_series(1, 11) g;
 	// Before ANALYZE the planner has never seen these tables and reports minus
 	// one, which would render as a negative row count in a report. They are
 	// counted instead, so the number is right rather than absurd.
-	tables, rows, atLeast, err = branchSize(ctx, conn)
+	size, err = branchSize(ctx, conn)
 	require.NoError(t, err)
-	require.Equal(t, 3, tables, "a table in another schema counts and a view does not")
-	require.EqualValues(t, 1011, rows,
+	require.Equal(t, 3, size.tables, "a table in another schema counts and a view does not")
+	require.EqualValues(t, 1011, size.rows,
 		"the count read one schema's orders twice, or missed the other's")
-	require.False(t, atLeast, "nothing here is near the ceiling")
+	require.False(t, size.atLeast, "nothing here is near the ceiling")
+	// The per table list is the volume comparison's own side, and it is
+	// qualified for the same reason the total is: two schemas hold a table
+	// called orders, and a list keyed on the bare name would carry one of them
+	// twice and drop the other, which is a comparison against the wrong
+	// production table rather than a missing one.
+	require.Equal(t, []volume.TableRows{
+		{Name: "billing.orders", Rows: 11},
+		{Name: "public.customers", Rows: 700},
+		{Name: "public.orders", Rows: 300},
+	}, size.perTable)
 
 	_, err = conn.Exec(ctx, "ANALYZE")
 	require.NoError(t, err)
-	tables, rows, atLeast, err = branchSize(ctx, conn)
+	size, err = branchSize(ctx, conn)
 	require.NoError(t, err)
-	require.Equal(t, 3, tables)
-	require.EqualValues(t, 1011, rows, "the estimate and the count disagree on a table this size")
-	require.False(t, atLeast)
+	require.Equal(t, 3, size.tables)
+	require.EqualValues(t, 1011, size.rows,
+		"the estimate and the count disagree on a table this size")
+	require.False(t, size.atLeast)
+	require.Equal(t, []volume.TableRows{
+		{Name: "billing.orders", Rows: 11},
+		{Name: "public.customers", Rows: 700},
+		{Name: "public.orders", Rows: 300},
+	}, size.perTable, "the estimate and the live count disagree per table")
 }
 
 // A live count that stopped at its ceiling is a floor, and the report has to
@@ -130,11 +148,11 @@ func TestBranchSize_SaysWhenACountStoppedAtTheCeiling(t *testing.T) {
 		countCeiling+50))
 	require.NoError(t, err)
 
-	tables, rows, atLeast, err := branchSize(ctx, conn)
+	size, err := branchSize(ctx, conn)
 	require.NoError(t, err)
-	require.Equal(t, 1, tables)
-	require.EqualValues(t, countCeiling, rows)
-	require.True(t, atLeast, "the count stopped at the ceiling and did not say so")
+	require.Equal(t, 1, size.tables)
+	require.EqualValues(t, countCeiling, size.rows)
+	require.True(t, size.atLeast, "the count stopped at the ceiling and did not say so")
 }
 
 func TestAccountExists_MatchesTheAddressTheAdapterWouldMatch(t *testing.T) {

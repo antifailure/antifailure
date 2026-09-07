@@ -2,13 +2,16 @@ package fidelity_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/fidelity"
+	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -46,6 +49,8 @@ func full() fidelity.Observation {
 		Attestation: "41 columns read back over 82000 rows sampled",
 		Tables:      12,
 		Rows:        184000,
+		Branch:      matchingBranch(),
+		Volume:      matchingVolume(),
 		Hosts: []fidelity.Host{
 			{Name: "api.stripe.com", Mode: schema.ModeMock, Pack: "stripe", Stateful: true},
 			{Name: "api.resend.com", Mode: schema.ModeCapture},
@@ -53,6 +58,40 @@ func full() fidelity.Observation {
 		Personas: []fidelity.Persona{
 			{Name: "buyer", Login: schema.LoginPassword, Present: true, Table: "public.users"},
 		},
+	}
+}
+
+// matchingSizes is the twelve tables the working observation holds, adding up
+// to the 184,000 rows it reports.
+//
+// Twelve rather than one, because a profile naming a single table beside an
+// observation reporting twelve is a fixture that contradicts itself inside the
+// one sentence the report prints.
+var matchingSizes = []int64{120000, 40000, 12000, 6200, 2400, 1900, 700, 420, 140, 95, 95, 50}
+
+func matchingBranch() []volume.TableRows {
+	out := make([]volume.TableRows, 0, len(matchingSizes))
+	for i, n := range matchingSizes {
+		out = append(out, volume.TableRows{Name: fmt.Sprintf("public.t%02d", i+1), Rows: n})
+	}
+	return out
+}
+
+// matchingVolume is production holding exactly what the branch holds, which is
+// what the working observation means by a faithful copy. Without it the data
+// component is an unknown rather than a reproduction, which is the whole point
+// of the volume comparison and is measured in volume_test.go.
+func matchingVolume() *volume.Profile {
+	tables := make([]volume.Table, 0, len(matchingSizes))
+	for i, n := range matchingSizes {
+		tables = append(tables, volume.Table{
+			Name: fmt.Sprintf("public.t%02d", i+1), Rows: n, Analyzed: true,
+		})
+	}
+	return &volume.Profile{
+		CollectedAt: time.Date(2026, 8, 30, 2, 0, 0, 0, time.UTC),
+		Source:      "the database named by PRODUCTION_DATABASE_URL",
+		Tables:      tables,
 	}
 }
 
@@ -249,7 +288,7 @@ func TestDatabase(t *testing.T) {
 		inv := fidelity.Build(full())
 		data := componentState(t, inv, schema.FidelityDatabase, "data")
 		require.Equal(t, fidelity.Reproduced, data.State)
-		require.Contains(t, data.Detail, "12 tables over 184000 rows")
+		require.Contains(t, data.Detail, "12 tables over 184,000 rows")
 		require.Equal(t, fidelity.Reproduced,
 			componentState(t, inv, schema.FidelityDatabase, "provenance").State)
 	})
@@ -261,7 +300,7 @@ func TestDatabase(t *testing.T) {
 		obs := full()
 		obs.RowsAreAFloor = true
 		c := componentState(t, fidelity.Build(obs), schema.FidelityDatabase, "data")
-		require.Contains(t, c.Detail, "at least 184000 rows")
+		require.Contains(t, c.Detail, "at least 184,000 rows")
 
 		exact := componentState(t, fidelity.Build(full()), schema.FidelityDatabase, "data")
 		require.NotContains(t, exact.Detail, "at least",

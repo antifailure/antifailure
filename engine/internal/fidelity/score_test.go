@@ -191,8 +191,18 @@ func TestBenchmarkTheFidelityScoreBeforeAndAfter(t *testing.T) {
 	// The after numbers. Written out rather than derived, because a benchmark
 	// that computes both sides with the same code proves only that the code
 	// agrees with itself.
-	require.Equal(t, scoreOf{reproduced: 9, counted: 10, percent: 90}, healthy)
-	require.Equal(t, scoreOf{reproduced: 7, counted: 10, percent: 70}, half)
+	//
+	// These were 9 of 10 and 7 of 10 when this file was written, and the
+	// denominator moved from 10 to 9 afterwards rather than the numerator.
+	// The volume lane turned the database dimension's data component from a
+	// reproduction into an unknown for an environment with no volume profile,
+	// on the grounds that nothing had ever compared this branch against
+	// production, and an unmeasured component is in neither half of the score.
+	// This manifest declares no database.volume, so it is exactly that
+	// environment. The number for the same twin WITH a profile is measured in
+	// volume_score_test.go and is lower again.
+	require.Equal(t, scoreOf{reproduced: 8, counted: 9, percent: 89}, healthy)
+	require.Equal(t, scoreOf{reproduced: 6, counted: 9, percent: 67}, half)
 
 	// The drop is the deliverable, so it is asserted rather than merely
 	// printed. A future change that makes either environment score its old
@@ -257,7 +267,13 @@ func renderScoreBenchmark(beforeOne string, one scoreOf, beforeTwo string, two s
 	b.WriteString("dimension counts instances against the count each service asked for.\n\n")
 	b.WriteString("What would move it back up, honestly: L4.2 filling the ClickHouse with a\n")
 	b.WriteString("masked, verified copy, which is the one component holding the first row\n")
-	b.WriteString("below 100.\n")
+	b.WriteString("below 100.\n\n")
+	b.WriteString("The denominator here is 9 rather than the 10 this report first carried.\n")
+	b.WriteString("The database dimension's data component became an unknown rather than a\n")
+	b.WriteString("reproduction for an environment with no volume profile, because nothing\n")
+	b.WriteString("had ever compared the branch against production, and an unmeasured\n")
+	b.WriteString("component is in neither half of the score. benchmark-volume-share is the\n")
+	b.WriteString("same twin with a profile, where the component is measured and fails.\n")
 	return b.String()
 }
 

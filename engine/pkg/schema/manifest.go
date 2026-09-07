@@ -159,6 +159,31 @@ type Database struct {
 	// migrate command is its own script rather than a tool the rehearsal
 	// recognises from the tree. Declared, nothing is inferred.
 	Migrations *Migrations `json:"migrations,omitempty" yaml:"migrations,omitempty"`
+	// Volume names the committed profile of what production holds, which is
+	// the denominator every row count in a report is measured against.
+	Volume *Volume `json:"volume,omitempty" yaml:"volume,omitempty"`
+}
+
+// Volume names the committed record of production's own size.
+//
+// Without one, a fidelity report says a branch holds twelve tables over a
+// hundred thousand rows and has nothing to compare that against, so a golden
+// built from a staging database with two hundred rows in it reports as
+// reproducing a production holding four billion. The profile is what turns
+// that sentence into a fraction.
+//
+// It is a path rather than a connection, deliberately. The profile is
+// collected once from a read only connection to production or a replica, and
+// committed; every machine that reads it afterwards, including a pull request
+// check that can reach nothing, reads a file.
+type Volume struct {
+	// Profile is the artifact, relative to the repository root. Written by
+	// af volume record and read by everything that needs a denominator.
+	Profile string `json:"profile" yaml:"profile"`
+	// MaxAge is how old the profile may be before it is refused. A stale
+	// profile is not a smaller number, it is an unknown one, so it is refused
+	// the way a stale golden is rather than quoted.
+	MaxAge string `json:"max_age,omitempty" yaml:"max_age,omitempty"`
 }
 
 // Migrations declares a project's own migration files.

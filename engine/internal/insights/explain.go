@@ -116,6 +116,26 @@ func (r Rehearsal) Explain() string {
 		b.WriteString("\nSampled every " + LockSampleInterval.String() +
 			", so each figure is a lower bound rather than a measurement.\n\n")
 	}
+
+	// What those figures would be at production's row counts, said as
+	// arithmetic rather than as a second measurement.
+	//
+	// It sits under the locks rather than beside them because the two are
+	// different kinds of number and the section heading is what keeps them
+	// apart. A lock timing is what happened; a line here is what would happen
+	// if the cost grows with the row count, which is a claim about the
+	// statement rather than an observation of it.
+	if len(r.Extrapolations) > 0 {
+		b.WriteString("At production's row counts, from the volume profile")
+		if !r.ProfileCollectedAt.IsZero() {
+			fmt.Fprintf(b, " collected on %s", r.ProfileCollectedAt.UTC().Format("2006-01-02"))
+		}
+		b.WriteString(":\n")
+		for _, e := range r.Extrapolations {
+			fmt.Fprintf(b, "  %s\n", e.Sentence)
+		}
+		b.WriteString("\n")
+	}
 	return sb.String()
 }
 

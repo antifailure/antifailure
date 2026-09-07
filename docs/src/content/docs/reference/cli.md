@@ -2212,6 +2212,90 @@ af version --short
 | --- | --- | --- |
 | `--short` | `false` | Print only the version number. |
 
+### `af volume`
+
+What production holds, and what fraction of it this twin has.
+
+A fidelity report can say a branch holds twelve tables over a hundred thousand
+rows. Without a volume profile it has nothing to compare that against, so a
+golden built from a staging database with two hundred rows in it reports as
+reproducing a production holding four billion, in the same words and with the
+same verdict as a full copy.
+
+A profile is row counts, table and index sizes, partition counts and skew, and
+the cardinality of every column anything joins on. It carries no data: every
+figure comes from a catalog the planner already maintains, and no row is read.
+That is what makes it safe to run against production itself and safe to commit
+beside the manifest, which is where the check running on a pull request has to
+read it from.
+
+Declare where it lives under database.volume.profile, and how old it may be
+under database.volume.max_age. A profile past that age is refused rather than
+quoted, the same way a stale golden is refused rather than branched.
+
+```
+af volume
+```
+
+```
+af volume show
+```
+
+Subcommands:
+
+- [`af volume record`](#af-volume-record) Read production's shape over a read only connection and write the profile.
+- [`af volume show`](#af-volume-show) Print the committed profile, or say why there is none to print.
+
+### `af volume record`
+
+Read production's shape over a read only connection and write the profile.
+
+Reads the database named by database.source_url_env and writes the profile to
+the path database.volume.profile names, which --out overrides.
+
+Nothing here reads a row. It is pg_class, pg_stats and the partition catalogs,
+which is why a read only role on a replica is enough and why the result is a
+file somebody can read before committing it.
+
+```
+af volume record [flags]
+```
+
+```
+# Reads pg_class and pg_stats over the connection database.source_url_env
+# names. No row is read, so a read only role on a replica is enough.
+af volume record
+af volume record --out .antifailure/volume.json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+| `--out` | - | Write the profile here instead of where the manifest says. |
+
+### `af volume show`
+
+Print the committed profile, or say why there is none to print.
+
+Reads the profile the manifest names and prints it, largest table first.
+
+A profile older than database.volume.max_age is REFUSED rather than printed
+with a warning beside it. A stale denominator is not a smaller number, it is an
+unknown one, and the one thing a number in a report must never be is a figure
+somebody quotes without knowing how old it is.
+
+```
+af volume show [flags]
+```
+
+```
+af volume show
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+
 ### `af webhook`
 
 Send the inbound events a flow is waiting on.

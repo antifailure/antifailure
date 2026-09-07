@@ -62,6 +62,17 @@ type Rehearsal struct {
 	Locks []LockHold `json:"locks,omitempty"`
 	// Lint is what the statements would do to a table this size.
 	Lint []LintFinding `json:"lint,omitempty"`
+	// BranchRows is what the branch held in each table before the migrations
+	// ran, keyed the way the lock sampler names a relation. It is the
+	// denominator every timing above was measured over, and it is recorded
+	// rather than recomputed because a timing without the size it was taken
+	// at is a number nobody can put anywhere.
+	BranchRows map[string]int64 `json:"branch_rows,omitempty"`
+	// Extrapolations state what each lock would cost at production's row
+	// counts, and ProfileCollectedAt dates the profile they came from. Empty
+	// when there is no profile, which Missing then says.
+	Extrapolations     []Extrapolation `json:"extrapolations,omitempty"`
+	ProfileCollectedAt time.Time       `json:"profile_collected_at,omitempty"`
 	// Failed and Error record a migration that did not apply. This is the
 	// AF-DB-030 case, and it is a finding rather than an error from the
 	// rehearsal itself: the rehearsal did its job.
@@ -125,6 +136,16 @@ func Rehearse(
 	schema, err := CaptureSchema(ctx, conn)
 	if err != nil {
 		return r, err
+	}
+	// Recorded before anything runs, for the same reason the schema is: this
+	// is the size the timings below were measured at, and a migration that
+	// adds rows would leave a count taken afterwards describing a table the
+	// statements never met.
+	if len(schema.Rows) > 0 {
+		r.BranchRows = make(map[string]int64, len(schema.Rows))
+		for name, n := range schema.Rows {
+			r.BranchRows[name] = n
+		}
 	}
 
 	var stmts []Statement

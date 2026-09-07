@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -53,6 +54,16 @@ type Observation struct {
 	Rows          int64
 	RowsAreAFloor bool
 	BranchReason  string
+	// Branch is what each table in the branch holds, which is the copy's side
+	// of the volume comparison. Volume is production's side, read from the
+	// committed profile, and VolumeReason says why there is none.
+	//
+	// A nil Volume with a reason is the case this exists for. The branch's own
+	// row count was always readable and was always reported as a
+	// reproduction; what was never available was the number to divide it by.
+	Branch       []volume.TableRows
+	Volume       *volume.Profile
+	VolumeReason string
 	// Subset reports whether the golden was built as a production shaped
 	// slice, and Empty whether it was built with no source database at all.
 	Subset bool
@@ -222,11 +233,33 @@ func database(obs Observation) Dimension {
 }
 
 // dataComponent answers whether the branch holds production's data.
+//
+// It used to answer that question without ever asking production. The default
+// arm said Reproduced and described the branch, so a golden built from a
+// staging database holding two hundred rows in events was reported as
+// reproducing a production holding four billion, in the same words and with
+// the same verdict as a full copy. Everything the arm printed was true and the
+// verdict was not, because there was no denominator anywhere in the engine.
+//
+// So the branch's own size is now measured against the committed volume
+// profile, and the three outcomes are kept separate on purpose:
+//
+//   - no profile, or one too old to quote, is UNMEASURED. Not a smaller pass.
+//     Nothing has been shown about whether this branch reproduces production,
+//     and the reason names how to find out.
+//   - a branch holding materially less than production is SUBSTITUTED, with
+//     the fraction, and with the sentence that stops somebody quoting a
+//     timing taken against it as a prediction.
+//   - a branch holding production's rows is REPRODUCED, and now says what it
+//     was measured against rather than asserting it.
 func dataComponent(obs Observation) Component {
 	c := Component{Name: "data"}
 	switch {
 	case obs.BranchReason != "":
+		// The branch could not be counted, so there is nothing to compare
+		// against the profile either. One unknown, reported once.
 		c.State, c.Detail = Unmeasured, obs.BranchReason
+		return c
 	case obs.Empty:
 		// A golden built with no source database has production's schema and
 		// none of its rows, which is worth saying rather than counting as a
@@ -244,6 +277,52 @@ func dataComponent(obs Observation) Component {
 		c.State = Reproduced
 		c.Detail = describeSize(obs) + ", branched from " + orUnknown(obs.Golden)
 	}
+	return againstProduction(c, obs)
+}
+
+// againstProduction folds the volume profile into the data component.
+//
+// It never improves a verdict. A subset measured against production is still a
+// subset and an empty golden is still empty; what the profile adds to those is
+// the fraction, which is the thing somebody actually wanted when they asked
+// how production shaped the slice was. The only verdict it changes is the
+// default arm's, which is the one that was never checked against anything.
+func againstProduction(c Component, obs Observation) Component {
+	if obs.Volume == nil {
+		reason := obs.VolumeReason
+		if reason == "" {
+			reason = "no volume profile says what production holds, so whether this branch " +
+				"reproduces it is unknown. Declare one under database.volume and record it " +
+				"with af volume record"
+		}
+		if c.State == Reproduced {
+			// The whole defect, in one line. A branch nothing was compared
+			// against has not been shown to reproduce anything, and calling
+			// that a reproduction is what let two hundred rows stand in for
+			// four billion.
+			c.State = Unmeasured
+		}
+		c.Detail += ", and " + reason
+		return c
+	}
+
+	cmp := volume.Compare(obs.Branch, *obs.Volume)
+	c.Detail += fmt.Sprintf(". Measured against the volume profile collected on %s, %s",
+		obs.Volume.CollectedAt.UTC().Format("2006-01-02"), cmp.Describe())
+	if _, ok := cmp.Share(); !ok {
+		// A profile that names nothing this branch also has answers no
+		// question about it, and it is not evidence either way.
+		if c.State == Reproduced {
+			c.State = Unmeasured
+		}
+		return c
+	}
+	if !cmp.Reproduces() {
+		if c.State == Reproduced {
+			c.State = Substituted
+		}
+		c.Detail += ". A timing measured against this branch is a lower bound and not a prediction"
+	}
 	return c
 }
 
@@ -251,8 +330,12 @@ func dataComponent(obs Observation) Component {
 //
 // "at least" when a live count stopped at its ceiling, because a floor
 // presented as a total is a number somebody would quote.
+//
+// Separated, because production's side of the same sentence is separated and
+// a line reading "184000 rows against production's 4,200,000,000 rows" makes
+// the reader do the digit counting the separators exist to save them.
 func describeSize(obs Observation) string {
-	count := plural(obs.Rows, "row", "rows")
+	count := volume.Rows(obs.Rows)
 	if obs.RowsAreAFloor {
 		count = "at least " + count
 	}

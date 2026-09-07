@@ -462,6 +462,23 @@ func (v *validator) database(m *schema.Manifest) {
 				"Add the container or bucket URL. Credentials come from the secrets subsystem, never from the URL.")
 		}
 	}
+	if d.Volume != nil {
+		if strings.TrimSpace(d.Volume.Profile) == "" {
+			v.add("database.volume.profile",
+				"The volume block names no profile.",
+				"Give the path to the committed profile, relative to the repository root, "+
+					"for example .antifailure/volume.json. Record one with af volume record.")
+		} else if c, ok := confine(d.Volume.Profile); !ok || c == "" {
+			v.add("database.volume.profile",
+				fmt.Sprintf("The volume profile %q is not a file inside the repository.", d.Volume.Profile),
+				"Use a path relative to the repository root, not the root itself and not a path outside it.")
+		}
+		if _, err := ParseDuration(d.Volume.MaxAge); err != nil {
+			v.add("database.volume.max_age",
+				fmt.Sprintf("The maximum age %q is not a duration.", d.Volume.MaxAge),
+				"Use a number of hours or days, for example 720h or 30d.")
+		}
+	}
 	if d.Migrations != nil {
 		mg := d.Migrations
 		if strings.TrimSpace(mg.Dir) == "" {

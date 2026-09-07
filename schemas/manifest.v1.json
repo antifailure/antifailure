@@ -382,6 +382,9 @@
         },
         "migrations": {
           "$ref": "#/$defs/migrations"
+        },
+        "volume": {
+          "$ref": "#/$defs/volume"
         }
       }
     },
@@ -468,6 +471,28 @@
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$",
           "maxLength": 128,
           "description": "The ledger table the project's runner records applied files in, so the rehearsal computes the pending set the way the runner would: a file is applied when its name, its stem or its leading number appears in the table's name, version, filename or migration column. Unset, schema_migrations and migrations are tried."
+        }
+      }
+    },
+    "volume": {
+      "title": "Volume",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ],
+      "description": "The committed record of what production holds, which is the denominator every row count in a report is measured against. Without one the fidelity report says a branch holds twelve tables over a hundred thousand rows and has nothing to compare that against, so a golden built from a staging database with two hundred rows in it reports as reproducing a production holding four billion.",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The profile file, relative to the repository root. Written by af volume record from a read only connection to production or a replica, and committed, because the machine that reads it on a pull request cannot reach production. It carries counts, sizes, partition shape and key cardinality, and no data."
+        },
+        "max_age": {
+          "type": "string",
+          "maxLength": 32,
+          "default": "720h",
+          "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data."
         }
       }
     },

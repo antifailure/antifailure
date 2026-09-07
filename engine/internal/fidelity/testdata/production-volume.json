@@ -1,0 +1,81 @@
+{
+  "collected_at": "2026-09-01T02:00:00Z",
+  "source": "the database named by PRODUCTION_DATABASE_URL",
+  "server_version": "PostgreSQL 17.2 on aarch64-unknown-linux-gnu",
+  "tables": [
+    {
+      "name": "public.events",
+      "rows": 4200000000,
+      "analyzed": true,
+      "table_bytes": 966367641600,
+      "index_bytes": 128849018880,
+      "partitions": 24,
+      "largest_partition_rows": 402000000,
+      "keys": [
+        {
+          "column": "id",
+          "distinct": 4200000000
+        },
+        {
+          "column": "org_id",
+          "distinct": 140000
+        }
+      ]
+    },
+    {
+      "name": "public.event_props",
+      "rows": 1800000000,
+      "analyzed": true
+    },
+    {
+      "name": "public.sessions",
+      "rows": 310000000,
+      "analyzed": true
+    },
+    {
+      "name": "public.users",
+      "rows": 8400000,
+      "analyzed": true
+    },
+    {
+      "name": "public.orgs",
+      "rows": 140000,
+      "analyzed": true
+    },
+    {
+      "name": "public.memberships",
+      "rows": 410000,
+      "analyzed": true
+    },
+    {
+      "name": "public.dashboards",
+      "rows": 92000,
+      "analyzed": true
+    },
+    {
+      "name": "public.insights",
+      "rows": 240000,
+      "analyzed": true
+    },
+    {
+      "name": "public.feature_flags",
+      "rows": 1200,
+      "analyzed": true
+    },
+    {
+      "name": "public.experiments",
+      "rows": 3400,
+      "analyzed": true
+    },
+    {
+      "name": "public.api_keys",
+      "rows": 38000,
+      "analyzed": true
+    },
+    {
+      "name": "public.audit_log",
+      "rows": 126000000,
+      "analyzed": true
+    }
+  ]
+}

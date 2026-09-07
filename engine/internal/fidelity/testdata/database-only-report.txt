@@ -3,7 +3,7 @@ services       reproduced (2 reproduced)
   worker       reproduced   worker, running
 
 database       reproduced (2 reproduced)
-  data         reproduced   12 tables over 184000 rows, branched from gv_20260830120000_abcd1234
+  data         reproduced   12 tables over 184,000 rows, branched from gv_20260830120000_abcd1234. Measured against the volume profile collected on 2026-08-30, 184,000 rows against production's 184,000 rows, which is 100 percent
   provenance   reproduced   golden gv_20260830120000_abcd1234, 41 columns read back over 82000 rows sampled
 
 third_party    substituted (2 substituted)
