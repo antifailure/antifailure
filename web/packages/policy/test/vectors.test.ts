@@ -14,7 +14,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PolicyEngine, ALL_MODES, requestString, type Egress, type Mode } from '../src/index.ts'
+import {
+  PolicyEngine, PolicyError, ALL_MODES, requestString,
+  type Egress, type Mode,
+} from '../src/index.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const vectorPath = path.join(here, '..', '..', '..', '..', 'schemas', 'policy-vectors.json')
@@ -124,7 +127,13 @@ describe('compilation refuses what the engine refuses', () => {
     it(`refuses ${JSON.stringify(host)}`, () => {
       assert.throws(
         () => new PolicyEngine({ rules: [{ host, mode: 'allow' }] }),
-        new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        // A predicate rather than a RegExp built by escaping the fragment.
+        // It checks the error type as well as the wording, and there is no
+        // pattern to get the escaping wrong in: a hostname compiled into a
+        // regular expression is how an unescaped dot ends up matching more
+        // hosts than its author wrote, which is a real bug in a policy and a
+        // false alarm here that nobody should have to re-read to dismiss.
+        (err: unknown) => err instanceof PolicyError && err.message.includes(fragment),
         // A rule that fails to compile and is skipped produces an engine that
         // enforces less than the manifest says while looking like it works.
         'a rule that cannot be compiled must be refused, never skipped',
