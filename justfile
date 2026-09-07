@@ -518,6 +518,15 @@ benchmark:
     # number a customer is quoted has to be readable without running anything,
     # and the datastore half writes into {{reports}}/, which is gitignored.
     AF_BENCHMARK=1 go test ./internal/db/pgurl -run TestBenchmark -v -count=1 -timeout 60m
+    # The cross store number, which is a third question again: of the
+    # identifiers that appear in more than one of an environment's stores, how
+    # many mask to the same value in all of them. It writes into benchmarks/
+    # for the same reason the provider half does, and it is the one figure here
+    # that is only quotable at 100 percent, because anything less is a broken
+    # join rather than a slower one. It needs a ClickHouse; without one, and
+    # without AF_TEST_CLICKHOUSE_URL, it starts and removes a container.
+    AF_BENCHMARK=1 go test ./internal/masking -run TestBenchmarkCrossStoreJoinKeys \
+      -v -count=1 -timeout 30m
 
 # The fast ones, for a tight loop.
 test-short:

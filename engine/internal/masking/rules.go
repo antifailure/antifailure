@@ -25,7 +25,15 @@ type Rule struct {
 	Table string `json:"table,omitempty" yaml:"table,omitempty"`
 	// Column matches the column name, with * as a wildcard.
 	Column string `json:"column,omitempty" yaml:"column,omitempty"`
-	// Type matches the Postgres type name. Empty matches every type.
+	// Type matches the type name, in the Postgres vocabulary, whichever store
+	// the column is in. Empty matches every type.
+	//
+	// One rule file covers every store because each engine's names are mapped
+	// onto the Postgres ones before a rule is matched, so `type: text` means
+	// Postgres text and ClickHouse String and nobody writes the rule twice.
+	// The alternative was a rules file per engine, which is a rules file that
+	// goes stale for one engine and not the other, and the failure mode of
+	// that is a column masked in one store and real in the next.
 	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 	// Transform is the name of the transform to apply.
 	Transform string `json:"transform" yaml:"transform"`
@@ -242,12 +250,38 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 
 	var out []Assignment
 	for _, t := range tables {
+		// The dialect is looked up once per table and its failure is carried
+		// onto every column of that table rather than reported once and
+		// forgotten. An engine nobody has a dialect for is refused: guessing
+		// Postgres would mean matching `type: text` against a vocabulary that
+		// does not have the word, so nothing would match, so every column
+		// would fall through to a branch that says nobody decided. A column
+		// that looks classified and was not is the failure this whole file is
+		// written against.
+		d, dialectErr := DialectFor(t.Engine)
+		unaddressable := ""
+		if dialectErr == nil {
+			unaddressable = d.Unaddressable(t)
+		}
+
 		for _, c := range t.Columns {
 			a := Assignment{Table: t, Column: c}
+			if dialectErr != nil {
+				a.Problem = dialectErr.Error()
+				out = append(out, a)
+				continue
+			}
+
+			// Matched and classified on the CANONICAL type, so that one
+			// masking.yaml covers both stores: a rule saying `type: text`
+			// means the same thing whether the column is Postgres text or
+			// ClickHouse String. Every message below still names the RAW type,
+			// because a person reading it is looking at their own schema.
+			cc := canonical(t, c)
 
 			best := -1
 			for _, r := range rs.rules {
-				score, ok := r.matches(t, c)
+				score, ok := r.matches(t, cc)
 				if !ok || score <= best {
 					continue
 				}
@@ -271,10 +305,10 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 			// Only the types that can hold a sentence. A bigint called quantity
 			// needs no rule and emptying it would break every environment for
 			// nothing, which is how a fail-closed default gets turned off.
-			if a.Transform == "" && !knownStructural(c) {
+			if a.Transform == "" && !knownStructural(cc) {
 				a.Unmatched = true
 				switch {
-				case !looksSensitive(c):
+				case !looksSensitive(cc):
 					// A THIRD ANSWER, and the reason it exists.
 					//
 					// looksSensitive is a known-yes list of six types and there
@@ -294,7 +328,7 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 						", so nothing decided what happens to this column and it is " +
 						"copied unchanged. The verification scan does not read this " +
 						"type either. Give it a transform, or a rule saying it is fine."
-				case isJSON(c):
+				case isJSON(cc):
 					// A JSON column is emptied whether or not it can hold
 					// null, because `empty_json` writes a value rather than
 					// removing one. That matters: `jsonb NOT NULL DEFAULT '{}'`
@@ -345,7 +379,16 @@ func (rs *RuleSet) Assign(tables []Table) []Assignment {
 			if a.Transform != "" && a.Link == "" {
 				a.Link = a.Transform
 			}
-			out = append(out, checkFeasible(a))
+			a = checkFeasible(a)
+			if a.Problem == "" && a.Masked() && unaddressable != "" {
+				// The engine cannot say which row a statement means, so the
+				// rewrite cannot be carried out. Refused here with every other
+				// infeasible assignment rather than discovered by the executor,
+				// for the reason above checkFeasible: a run that fails halfway
+				// leaves a table neither real nor safe.
+				a.Problem = unaddressable
+			}
+			out = append(out, a)
 		}
 	}
 	return out

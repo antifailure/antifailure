@@ -111,6 +111,14 @@ type Report struct {
 	// Scanner names what produced this, so an attestation can be read by
 	// something that did not produce it.
 	Scanner string `json:"scanner"`
+	// Engine names the datastore this report is about.
+	//
+	// An environment holds more than one store, each with its own golden and
+	// its own attestation, and two reports that do not say which store they
+	// read are two reports nobody can tell apart. Omitted when empty so that
+	// an attestation written before this field existed still verifies against
+	// its own signature, the same reason Provenance is.
+	Engine string `json:"engine,omitempty"`
 	// StartedAt and FinishedAt bound the scan.
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at"`
@@ -196,8 +204,62 @@ type Options struct {
 	Unruled []string
 }
 
-// Scan reads back a database and reports what still looks real.
+// Scan reads back a Postgres database and reports what still looks real.
+//
+// The engine's own callers all hold a pgx connection, so this is the shape
+// they keep. It is a thin wrapper over ScanSource, and going through the same
+// generic path the second engine uses is deliberate: a boundary that the
+// tested path routes around is a boundary that rots.
 func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
+	return ScanSource(ctx, PostgresSource(conn), opts)
+}
+
+// PostgresSource reads a Postgres through a pgx connection.
+func PostgresSource(conn *pgx.Conn) Source {
+	return NewSource(Postgres, func(ctx context.Context, sql string, yield func(Row) error) error {
+		rows, err := conn.Query(ctx, sql)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			values, valErr := rows.Values()
+			if valErr != nil {
+				return valErr
+			}
+			row := make(Row, 0, len(values))
+			for _, v := range values {
+				row = append(row, asBytes(v))
+			}
+			if err := yield(row); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	})
+}
+
+// asBytes renders one scanned value as the bytes the detectors read.
+//
+// A text cast arrives as a string and a bytea as bytes, which is the whole
+// distinction the scan makes. Anything else is rendered the way it prints,
+// rather than dropped: a value nobody anticipated is still worth showing the
+// detectors.
+func asBytes(v any) []byte {
+	switch value := v.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return value
+	case string:
+		return []byte(value)
+	default:
+		return []byte(fmt.Sprint(value))
+	}
+}
+
+// ScanSource reads back a datastore and reports what still looks real.
+func ScanSource(ctx context.Context, src Source, opts Options) (Report, error) {
 	if opts.SampleSize <= 0 {
 		opts.SampleSize = DefaultSampleSize
 	}
@@ -205,11 +267,12 @@ func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
 		opts.Now = time.Now
 	}
 	report := Report{
-		Scanner: "antifailure/verify/2", StartedAt: opts.Now().UTC(),
+		Scanner: "antifailure/verify/2", Engine: src.Engine(),
+		StartedAt:  opts.Now().UTC(),
 		SampleSize: opts.SampleSize,
 	}
 
-	columns, err := scannableColumns(ctx, conn)
+	columns, err := src.Columns(ctx)
 	if err != nil {
 		return report, err
 	}
@@ -222,25 +285,25 @@ func Scan(ctx context.Context, conn *pgx.Conn, opts Options) (Report, error) {
 
 	seenTables := map[string]bool{}
 	for _, c := range columns {
-		seenTables[c.schema+"."+c.table] = true
-		ruled := !unruled[c.schema+"."+c.table+"."+c.column]
+		seenTables[c.Schema+"."+c.Table] = true
+		ruled := !unruled[c.Schema+"."+c.Table+"."+c.Name]
 
 		if c.kind == kindUnread {
 			// Known from the type alone, before a row is read. Said in the
 			// report rather than passed over, and turned into a finding when
 			// the column is one that nothing masked and whose name says what
 			// it holds.
-			report.noteUnread(c, "not readable by the scanner: "+c.typ, ruled)
+			report.noteUnread(c, "not readable by the scanner: "+c.Type, ruled)
 			continue
 		}
 		report.Columns++
 
-		rows, sampled, opaque, scanErr := scanColumn(ctx, conn, c, opts.SampleSize)
+		rows, sampled, opaque, scanErr := scanColumn(ctx, src, c, opts.SampleSize)
 		if scanErr != nil {
 			// A column that could not be read is recorded rather than ignored.
 			// Ignoring it would let an unreadable column count as a clean one.
 			report.Skipped = append(report.Skipped,
-				fmt.Sprintf("%s.%s.%s: %v", c.schema, c.table, c.column, scanErr))
+				fmt.Sprintf("%s.%s.%s: %v", c.Schema, c.Table, c.Name, scanErr))
 			continue
 		}
 		report.RowsSampled += int64(sampled)
@@ -292,11 +355,6 @@ const (
 	// listed rather than passed over.
 	kindUnread
 )
-
-type columnRef struct {
-	schema, table, column, typ string
-	kind                       columnKind
-}
 
 // structuralTypes are the types whose text form cannot carry a sentence
 // somebody typed: numbers, times, booleans, and identifiers the database
@@ -355,44 +413,6 @@ func classify(dataType string) columnKind {
 	return kindUnread
 }
 
-// scannableColumns lists every column the scan has an opinion about.
-//
-// Everything that is not structural. This used to be six text types and
-// nothing else, and the cost of that was not the columns it skipped, it was
-// that the report did not say it had skipped them: a bytea holding a sealed
-// private key and an enum were equally invisible, and "clean" covered both.
-func scannableColumns(ctx context.Context, conn *pgx.Conn) ([]columnRef, error) {
-	const query = `
-SELECT c.table_schema, c.table_name, c.column_name, c.data_type
-FROM information_schema.columns c
-JOIN information_schema.tables t
-  ON t.table_schema = c.table_schema AND t.table_name = c.table_name
-WHERE t.table_type = 'BASE TABLE'
-  AND c.table_schema NOT IN ('pg_catalog', 'information_schema')
-  AND c.table_schema NOT LIKE 'pg_toast%'
-ORDER BY c.table_schema, c.table_name, c.ordinal_position`
-
-	rows, err := conn.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("verify: listing columns: %w", err)
-	}
-	defer rows.Close()
-
-	var out []columnRef
-	for rows.Next() {
-		var c columnRef
-		if err := rows.Scan(&c.schema, &c.table, &c.column, &c.typ); err != nil {
-			return nil, fmt.Errorf("verify: listing columns: %w", err)
-		}
-		if structuralTypes[strings.ToLower(c.typ)] {
-			continue
-		}
-		c.kind = classify(c.typ)
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
 // sensitiveNameWords are the words in a table or column name that say the
 // column holds something that grants access. The list is the one the built in
 // masking rules and the credential detector already act on, written down once
@@ -416,67 +436,50 @@ func SensitiveName(table, column string) bool {
 
 // noteUnread records a column the scan could not read, and raises a finding
 // when it is also unmasked and named like a secret.
-func (r *Report) noteUnread(c columnRef, reason string, ruled bool) {
+func (r *Report) noteUnread(c Column, reason string, ruled bool) {
 	r.Unread = append(r.Unread, UnreadColumn{
-		Schema: c.schema, Table: c.table, Column: c.column, Type: c.typ,
+		Schema: c.Schema, Table: c.Table, Column: c.Name, Type: c.Type,
 		Reason: reason, Ruled: ruled,
 	})
-	if ruled || !SensitiveName(c.table, c.column) {
+	if ruled || !SensitiveName(c.Table, c.Name) {
 		return
 	}
 	r.Findings = append(r.Findings, Finding{
-		Schema: c.schema, Table: c.table, Column: c.column,
-		Detector: DetectorUnreadSensitive, Example: c.typ,
+		Schema: c.Schema, Table: c.Table, Column: c.Name,
+		Detector: DetectorUnreadSensitive, Example: c.Type,
 	})
 }
 
 // scanColumn reads a sample of one column and runs the detectors over it.
 //
 // It returns the findings, how many rows it sampled, and how many of those it
-// could not turn into text, which is only ever non zero for bytea.
+// could not turn into text, which is only ever non zero for a column read as
+// bytes.
+//
+// The reading is here and the statement is in the dialect, which is the whole
+// division: what counts as a leak is the same question in every store, and
+// how to ask for the values is not.
 func scanColumn(
-	ctx context.Context, conn *pgx.Conn, c columnRef, limit int,
+	ctx context.Context, src Source, c Column, limit int,
 ) ([]Finding, int, int, error) {
-	expr := quoteIdent(c.column) + "::text"
-	if c.kind == kindBytea {
-		// Raw, not cast. A bytea cast to text is its hex form, "\x6162",
-		// which no detector matches, and which is how a secret in a bytea
-		// column would have passed a scan that read it.
-		expr = quoteIdent(c.column)
-	}
-	sql := fmt.Sprintf(
-		`SELECT %s FROM %s.%s WHERE %s IS NOT NULL LIMIT %d`,
-		expr, quoteIdent(c.schema), quoteIdent(c.table),
-		quoteIdent(c.column), limit)
-
-	rows, err := conn.Query(ctx, sql)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer rows.Close()
-
 	counts := map[string]int{}
 	examples := map[string]string{}
 	sampled, opaque := 0, 0
-	for rows.Next() {
+	err := src.Sample(ctx, c, limit, func(row Row) error {
+		if len(row) == 0 {
+			return nil
+		}
+		sampled++
 		var value string
 		if c.kind == kindBytea {
-			var raw []byte
-			if err := rows.Scan(&raw); err != nil {
-				return nil, sampled, opaque, err
-			}
-			sampled++
-			decoded, ok := decodeText(raw)
+			decoded, ok := decodeText(row[0])
 			if !ok {
 				opaque++
-				continue
+				return nil
 			}
 			value = decoded
 		} else {
-			if err := rows.Scan(&value); err != nil {
-				return nil, sampled, opaque, err
-			}
-			sampled++
+			value = string(row[0])
 		}
 		for _, d := range Detectors() {
 			if d.Match(value) {
@@ -486,15 +489,16 @@ func scanColumn(
 				}
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, sampled, opaque, err
 	}
 
 	var out []Finding
 	for name, n := range counts {
 		out = append(out, Finding{
-			Schema: c.schema, Table: c.table, Column: c.column,
+			Schema: c.Schema, Table: c.Table, Column: c.Name,
 			Detector: name, Example: examples[name], Rows: n,
 		})
 	}

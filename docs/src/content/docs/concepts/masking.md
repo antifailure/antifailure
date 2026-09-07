@@ -45,9 +45,11 @@ rules:
     why: "keeps foreign keys joinable after remapping"
 ```
 
-`table` and `column` accept `*`. `type` matches the Postgres type. `why` is one
-sentence, printed by `af mask plan` beside the column it applies to, so a
-decision made months ago is readable when somebody questions it.
+`table` and `column` accept `*`. `type` matches the type name, written in the
+Postgres vocabulary whichever store the column is in: see [more than one
+store](#more-than-one-store). `why` is one sentence, printed by `af mask plan`
+beside the column it applies to, so a decision made months ago is readable when
+somebody questions it.
 
 ### `link` is the one that catches people
 
@@ -68,6 +70,90 @@ returns nothing. `link` groups them:
 Without the link, `users.id` and `orders.user_id` get different new UUIDs, every
 order becomes an orphan, and the environment looks like a customer base with no
 orders. Nothing errors. That is why it is worth stating explicitly.
+
+## More than one store
+
+An environment can hold more than one datastore, and the same person is usually
+in several of them: a Postgres holding accounts and a ClickHouse holding the
+events about them, joined on an identifier that is in both.
+
+**One identity has to mask to one person across every store.** If it does not,
+a join across the two returns nothing or returns somebody else, every report
+built on it is plausible, and nothing anywhere says so. That is worse than a
+store nobody copied at all, because an empty store is visible within a minute of
+opening a chart.
+
+It is one `masking.yaml` for every store, and the `type` in a rule is written in
+the Postgres vocabulary whatever the store is. Each engine's own type names are
+mapped onto the Postgres ones before a rule is matched, so `type: text` means
+Postgres `text` and ClickHouse `String` and nobody writes the rule twice. A
+rules file per engine would be a rules file that goes stale for one engine and
+not the other, and the failure mode of that is a column masked in one store and
+real in the next.
+
+Two refusals follow from the same principle:
+
+- A store whose engine this build has no dialect for is refused when the plan is
+  made. Guessing at Postgres would mean matching a rule against a vocabulary the
+  store does not have, so nothing would match, so every column would fall
+  through to the branch that says nobody decided. A column that looks classified
+  and was not is the failure this whole page is about.
+- A ClickHouse table with no sorting key is refused for the same reason a half
+  masked table is never started. ClickHouse has no physical row identifier, so
+  there is no statement that means one row. Postgres always has `ctid`, so the
+  refusal is the engine's rather than a new rule about keys.
+
+The transforms themselves never needed a store. Every one is a pure function of
+the project key, the column identity, and the input value, computed on the
+machine running the refresh and never in the database, so what a value masks to
+has never depended on which store it came out of. What did depend on the store
+was the classifier deciding what to do with a column, and that is what the
+dialect settles.
+
+### The check that says the two stores agree
+
+The guarantee is checked rather than argued. The check takes two stores' plans,
+finds every identifier that appears in both, masks probe values through each
+side, and reports the share that come out identical:
+
+```
+join keys verified identical across primary and events: 4 of 4 (100.0%)
+```
+
+Anything below 100 percent is a bug, and there are three ways to get there:
+
+- one side is masked and the other is copied unchanged, which is a leak as well
+  as a broken join
+- the two sides are masked with different transforms
+- the two sides are masked under different links, so each derives its own subkey
+  and one input produces two different outputs
+
+There is deliberately no way to mark a pair exempt. Two columns with one name in
+two stores that genuinely mean different things is a real thing to look at, and
+the cost of looking at it is a rule; the cost of silencing it is a twin that is
+wrong in a way nobody can see. A report that found nothing to compare is not a
+pass either.
+
+The commonest thing it finds is a blob that is `jsonb` on one side and a
+`String` holding JSON on the other. Nothing leaks, and the two stores still hold
+different values for one field. A rule settles it:
+
+```yaml
+  - table: "*"
+    column: properties
+    type: text
+    transform: empty_json
+    why: "the analytics store keeps this JSON in a String"
+```
+
+### What is not built yet
+
+The dialect boundary is the classification, the statements and the verification
+scan. Nothing yet refreshes a golden for a second store, branches one, or opens
+a connection to one: there is no ClickHouse provider, and `datastores` entries
+other than `primary` are reported with their declared stance rather than
+measured. Said here rather than left to be discovered, because a boundary that
+looks complete from outside is how somebody ends up trusting one.
 
 ## Writing the rules from the schema
 

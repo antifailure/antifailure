@@ -178,34 +178,12 @@ type Statement struct {
 // that never goes near the database, so the database cannot compute them. And
 // a statement that interpolated values would be a statement where a masked
 // value containing a quote changes what the statement means.
-func (tp TablePlan) Compile() Statement {
-	names := make([]string, 0, len(tp.Columns))
-	sets := make([]string, 0, len(tp.Columns))
-	for i, c := range tp.Columns {
-		names = append(names, c.Column.Name)
-		sets = append(sets, fmt.Sprintf("%s = $%d", quoteIdent(c.Column.Name), i+2))
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "UPDATE %s SET %s WHERE %s::text = $1",
-		tp.Table.Qualified(), strings.Join(sets, ", "), tp.keyExpr())
-	return Statement{
-		SQL: b.String(), Table: tp.Table.String(), Columns: names,
-		Keyed: len(tp.OrderBy) > 0,
-	}
-}
-
-// keyExpr is what addresses one row.
 //
-// A primary key when there is one. Otherwise ctid, the physical row
-// identifier, which every table has and which is only meaningful inside the
-// transaction that read it. That is why a table with no key cannot be
-// resumed: nothing about a ctid survives the run that saw it.
-func (tp TablePlan) keyExpr() string {
-	if len(tp.OrderBy) > 0 {
-		return quoteIdent(tp.OrderBy[0])
-	}
-	return "ctid"
+// The text itself comes from the table's dialect, because the two engines
+// disagree about all three of quoting, casting and the shape of a rewrite,
+// and about nothing else here.
+func (tp TablePlan) Compile() Statement {
+	return tp.Table.dialect().Update(tp)
 }
 
 // Explain renders a plan for a person.
