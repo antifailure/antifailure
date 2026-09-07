@@ -551,16 +551,10 @@ func (o *Orchestrator) buildPreviousRelease(
 		if err != nil {
 			return nil, err
 		}
-		specs = append(specs, provider.ServiceSpec{
-			Name:       svc.Name,
-			Image:      image,
-			Kind:       string(orDefault(string(svc.Kind), "worker")),
-			Command:    svc.Command,
-			Port:       svc.Port,
-			HealthPath: svc.HealthPath,
-			DependsOn:  svc.DependsOn,
-			Env:        serviceEnv(svc),
-		})
+		// No Migrate. This runs the previous commit's services against a
+		// database the current commit has already migrated, so running the
+		// old migration again is the one thing it must not do.
+		specs = append(specs, serviceSpec(svc, image))
 	}
 	return specs, nil
 }

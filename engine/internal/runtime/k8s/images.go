@@ -3,7 +3,9 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -98,9 +100,14 @@ func (l *LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, er
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", aferrors.Coded(aferrors.AFRUN040,
-			"detail", fmt.Sprintf("copying %s into the %s cluster %q failed: %v: %s",
-				ref, l.Tool, l.Cluster, err, strings.TrimSpace(string(out))))
+		archived, archiveErr := l.viaSinglePlatformArchive(ctx, ref)
+		if archiveErr != nil {
+			return "", aferrors.Coded(aferrors.AFRUN040,
+				"detail", fmt.Sprintf("copying %s into the %s cluster %q failed: %v: %s\n"+
+					"The single platform archive fallback also failed: %v",
+					ref, l.Tool, l.Cluster, err, strings.TrimSpace(string(out)), archiveErr))
+		}
+		_ = archived
 	}
 	l.mu.Lock()
 	if l.done == nil {
@@ -108,6 +115,67 @@ func (l *LocalClusterLoader) Ensure(ctx context.Context, ref string) (string, er
 	}
 	l.done[ref] = true
 	l.mu.Unlock()
+	return ref, nil
+}
+
+// viaSinglePlatformArchive copies an image in as an archive holding one
+// platform, which is the form a cluster node can actually import.
+//
+// The failure it exists for, and it is total rather than occasional. A Docker
+// installation whose image store keeps OCI indexes, which is the default once
+// the containerd image store is on, holds every image pulled from a registry
+// as a MANIFEST LIST: one entry per platform, with the layers for the other
+// platforms absent because nothing ever needed them. `kind load docker-image`
+// exports that list and imports it with --all-platforms, and containerd then
+// refuses the whole import naming a content digest it cannot find, which is
+// the digest of a platform this machine was never going to run.
+//
+// It is not intermittent and it is not about one image. On such a machine
+// EVERY public image fails, so the Kubernetes runtime conformance suite could
+// not run one behaviour: it skipped nothing and reported a hard failure in its
+// setup, before the first environment. That reads as the runtime being broken
+// and is a property of the image store.
+//
+// `docker save --platform` writes a single manifest, which imports cleanly.
+// The platform asked for is this machine's, because a local cluster's nodes
+// are containers on this same machine and there is no other architecture they
+// could be running.
+func (l *LocalClusterLoader) viaSinglePlatformArchive(ctx context.Context, ref string) (string, error) {
+	f, err := os.CreateTemp("", "af-image-*.tar")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(path) }()
+
+	// linux, not runtime.GOOS. A container image is a Linux image and a
+	// cluster node is a Linux container, whatever the laptop hosting it runs.
+	// Asking for darwin/arm64 here is what the first version of this did, and
+	// the daemon answered exactly right: "image with reference busybox:1.36
+	// was found but does not provide the specified platform (darwin/arm64)".
+	// The architecture is the machine's, because the node is a container on
+	// it and there is no other architecture it could be running.
+	platform := "linux/" + runtime.GOARCH
+	save := exec.CommandContext(ctx, "docker", "save", "--platform", platform, "-o", path, ref)
+	if out, saveErr := save.CombinedOutput(); saveErr != nil {
+		return "", fmt.Errorf("docker save --platform %s %s: %w: %s",
+			platform, ref, saveErr, strings.TrimSpace(string(out)))
+	}
+
+	var load *exec.Cmd
+	switch l.Tool {
+	case "k3d":
+		load = exec.CommandContext(ctx, "k3d", "image", "import", "--cluster", l.Cluster, path)
+	case "kind":
+		load = exec.CommandContext(ctx, "kind", "load", "image-archive", "--name", l.Cluster, path)
+	default:
+		return "", fmt.Errorf("unknown local cluster tool %q", l.Tool)
+	}
+	if out, loadErr := load.CombinedOutput(); loadErr != nil {
+		return "", fmt.Errorf("loading the %s archive of %s: %w: %s",
+			platform, ref, loadErr, strings.TrimSpace(string(out)))
+	}
 	return ref, nil
 }
 

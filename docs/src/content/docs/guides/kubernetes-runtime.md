@@ -160,13 +160,23 @@ reach.
 
 Cron services are placed as ordinary Deployments rather than CronJobs.
 
-The manifest's `replicas` and `resources` are **refused at validation** rather
-than applied. Neither value reaches any runtime: they are dropped between the
-manifest and the runtime contract, so honouring them here alone would mean one
-runtime enforcing a cap the other ignores. Until both do, a manifest carrying
-either one is rejected by name, because a service that quietly ran as one
-instance under `replicas: 3` was the worse of the two answers: the run went
-green having proved nothing about the case its author was worried about.
+The manifest's `replicas` becomes the Deployment's replica count, so
+`replicas: 3` is three pods behind the Service every other service resolves,
+and kube-proxy spreads connections across them. Readiness waits for all three:
+a service reported ready is not one whose third pod is still being scheduled.
+The egress sidecar is always a single pod whatever any service asks for,
+because it is the environment's only resolver and its only route out, and a
+second one would split the record of what was refused across two decision logs.
+
+The manifest's `resources` is still **refused at validation** rather than
+applied. Neither `cpu` nor `memory` reaches any runtime: they are dropped
+between the manifest and the runtime contract, so honouring them here alone
+would mean one runtime enforcing a cap the other ignores. Until both do, a
+manifest carrying either one is rejected by name, because a service that
+quietly ran with no limit under `resources.memory: 512Mi` is the worse of the
+two answers: the run goes green having proved nothing about the case its author
+was worried about. That is the argument `replicas` used to be on the wrong side
+of.
 
 ## Teardown
 

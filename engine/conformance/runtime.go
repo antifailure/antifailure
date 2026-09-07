@@ -111,6 +111,9 @@ var runtimeBehaviors = []Behavior{
 	{"Up_JournalsResourcesTeardownCanFind", "Every name the runtime journals identifies a resource the inventory reports.", ""},
 	{"Up_JournalsBeforeCreating", "A resource is recorded before it exists, not after.", ""},
 
+	{"Up_RunsTheNumberOfInstancesAsked", "A service asking for three instances gets three, and one asking for none gets one.", ""},
+	{"Up_InstancesAreSeparateProcesses", "The instances of a service are distinct processes, not one process counted three times.", "logs"},
+
 	{"Status_ReportsRunningServices", "Status names what is running and reports it ready.", ""},
 	{"Status_ReportsAnExitCode", "A service that has finished carries the code it exited with.", ""},
 	{"Status_OfAnUnknownEnvironmentIsEmpty", "Asking about an environment that was never created is empty, not an error.", ""},
@@ -403,6 +406,11 @@ func runRuntimeBehavior(
 	case "Up_JournalsBeforeCreating":
 		h.upJournalsBeforeCreating(ctx)
 
+	case "Up_RunsTheNumberOfInstancesAsked":
+		h.upRunsTheNumberOfInstancesAsked(ctx)
+	case "Up_InstancesAreSeparateProcesses":
+		h.upInstancesAreSeparateProcesses(ctx)
+
 	case "Status_ReportsRunningServices":
 		h.statusReportsRunningServices(ctx)
 	case "Status_ReportsAnExitCode":
@@ -496,6 +504,27 @@ func (h *rtHarness) worker(name, command string) provider.ServiceSpec {
 		Name: name, Image: h.opts.ShellImage, Kind: "worker", Command: command,
 	}
 }
+
+// replicated is a worker that stays up, in the number of instances asked for.
+func (h *rtHarness) replicated(name, command string, replicas int) provider.ServiceSpec {
+	s := h.worker(name, command)
+	s.Replicas = replicas
+	return s
+}
+
+// instanceStamp is a command that prints an identity no other instance of the
+// same service shares, and then stays up.
+//
+// The hostname, because it is the one identity both a container runtime and a
+// cluster give a process without being asked: Docker sets it to the container
+// id and Kubernetes sets it to the pod name. Anything the suite generated
+// itself would be the same string in every instance, since every instance runs
+// the same command, and would prove nothing.
+const instanceStamp = "echo " + instanceMarker + "$(hostname); sleep 120"
+
+// instanceMarker prefixes the identity so that it can be found in a log that
+// also carries whatever else the image printed.
+const instanceMarker = "af-instance-"
 
 // up brings an environment up and reports the error rather than failing, so a
 // behavior can assert on it.
@@ -981,6 +1010,122 @@ func mentions(resources []provider.Resource, name string) bool {
 		}
 	}
 	return false
+}
+
+func (h *rtHarness) upRunsTheNumberOfInstancesAsked(ctx context.Context) {
+	id := h.envID("repl1")
+	const want = 3
+	env, err := h.up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Services: []provider.ServiceSpec{
+			h.replicated("many", "sleep 120", want),
+			// Declared alongside, and asking for nothing. Without it a
+			// runtime that started three of everything would pass, and
+			// "three instances" would mean nothing because it would not be a
+			// choice.
+			h.replicated("one", "sleep 120", 0),
+		},
+	})
+	if err != nil {
+		h.t.Fatalf("Up: %v", err)
+	}
+	h.instancesAre(env.Services, "many", want)
+	h.instancesAre(env.Services, "one", 1)
+
+	// Asked again through Status, because Up returns what the runtime
+	// intended and Status returns what it can still see. A runtime that
+	// creates three and keeps one is only visible from the second question.
+	h.waitForReady(ctx, id, "many")
+	after, err := h.r.Status(ctx, id)
+	if err != nil {
+		h.t.Fatalf("Status: %v", err)
+	}
+	h.instancesAre(after.Services, "many", want)
+	h.instancesAre(after.Services, "one", 1)
+}
+
+// instancesAre asserts a service is reported running the number of instances
+// it asked for.
+func (h *rtHarness) instancesAre(services []provider.RunningService, name string, want int) {
+	h.t.Helper()
+	for _, s := range services {
+		if s.Name != name {
+			continue
+		}
+		if s.Instances != want {
+			h.t.Errorf("service %q asked for %d instances and the runtime reports %d. "+
+				"A manifest asking for three and getting one is the failure this field "+
+				"exists to stop: the run goes green having proved nothing about the "+
+				"case its author was worried about",
+				name, want, s.Instances)
+		}
+		return
+	}
+	h.t.Errorf("service %q is not in the report at all, so nothing can be said about "+
+		"how many instances of it are running", name)
+}
+
+// upInstancesAreSeparateProcesses is the control on the behavior above.
+//
+// A count is a number a runtime writes down, and a runtime that writes three
+// while running one reports exactly what a correct one does. The only thing
+// that tells the two apart is an observation from inside: three processes have
+// three identities, and one process has one however many times it is counted.
+func (h *rtHarness) upInstancesAreSeparateProcesses(ctx context.Context) {
+	reader, ok := h.r.(provider.LogReader)
+	if !ok {
+		h.t.Fatal("the runtime declares Logs but does not implement provider.LogReader")
+	}
+	id := h.envID("repl2")
+	const want = 3
+	if _, err := h.up(ctx, provider.EnvSpec{
+		EnvID:    id,
+		Services: []provider.ServiceSpec{h.replicated("stamped", instanceStamp, want)},
+	}); err != nil {
+		h.t.Fatalf("Up: %v", err)
+	}
+
+	var seen map[string]bool
+	for {
+		lines, err := reader.Logs(ctx, id, "stamped", 200)
+		if err != nil {
+			h.t.Fatalf("Logs: %v", err)
+		}
+		seen = map[string]bool{}
+		for _, l := range lines {
+			_, after, found := strings.Cut(l.Text, instanceMarker)
+			if !found {
+				continue
+			}
+			if stamp := strings.TrimSpace(after); stamp != "" {
+				seen[stamp] = true
+			}
+		}
+		if len(seen) >= want {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.t.Errorf("three instances of the service printed %d distinct identities. "+
+				"Each instance prints its own hostname, so fewer than three means "+
+				"fewer than three processes are running whatever the instance count "+
+				"says, and every bug that only appears at more than one instance is "+
+				"still invisible. Identities seen: %v", len(seen), keysOf(seen))
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// keysOf is for a failure message, so the reader sees which identities did
+// arrive rather than only how many.
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // --- status --------------------------------------------------------------

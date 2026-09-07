@@ -485,35 +485,81 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 			}
 		}
 	}
+	// One entry per service with a count on it, not one per container. A
+	// service asking for three instances is one service in the manifest, and
+	// reporting it three times would make af status disagree with the file
+	// somebody wrote. The count is the only thing that distinguishes three
+	// asked for and three running from three asked for and one running, which
+	// is what this whole field exists to make visible.
+	//
+	// Ready is the AND across the instances, so a service with two of three
+	// answering is not reported ready. Anything else means a dependant starts
+	// against a service that is a third missing, which is the same bug as
+	// starting against one that never came up and is harder to see.
+	//
+	// The containers are put in name order first. Docker lists them in
+	// whatever order it likes, and the fields that describe one container,
+	// the id and the state and the exit code, would otherwise name a
+	// different instance on each call for no reason a reader could see. The
+	// instance that is NOT running wins those fields where there is one,
+	// because a service with one dead instance out of three is a report about
+	// the dead one.
+	sort.Slice(containers, func(i, j int) bool {
+		return dockerutil.FirstName(containers[i].Names) < dockerutil.FirstName(containers[j].Names)
+	})
+	byService := map[string]*provider.RunningService{}
+	// Which services already have an instance that is not running, so that
+	// the second dead one does not overwrite the first's report.
+	troubled := map[string]bool{}
+	var order []string
 	for _, c := range containers {
 		if c.Labels[dockerutil.LabelKind] != dockerutil.KindService {
 			continue
 		}
-		rs := provider.RunningService{
-			Name:        c.Labels[dockerutil.LabelService],
-			ContainerID: c.ID,
-			Kind:        c.Labels[dockerutil.LabelServiceKind],
-			State:       c.State,
-			Ready:       c.State == "running",
+		name := c.Labels[dockerutil.LabelService]
+		rs, seen := byService[name]
+		if !seen {
+			rs = &provider.RunningService{
+				Name:        name,
+				ContainerID: c.ID,
+				Kind:        c.Labels[dockerutil.LabelServiceKind],
+				State:       c.State,
+				Detail:      c.Status,
+				Ready:       true,
+			}
+			byService[name] = rs
+			order = append(order, name)
 		}
-		if c.Status != "" {
-			rs.Detail = c.Status
-		}
-		// The list reports the exit code only inside a human sentence, so the
-		// number comes from an inspect. Anything that wanted it before parsed
-		// "Exited (9) 3 seconds ago" with a regular expression, which is a
-		// format Docker has never promised to keep.
+		rs.Instances++
 		if c.State != "running" {
+			if !troubled[name] {
+				// The first instance that is not running takes the fields
+				// that describe one container, whether or not it was the
+				// first one seen.
+				troubled[name] = true
+				rs.ContainerID = c.ID
+				rs.State = c.State
+				rs.Detail = c.Status
+			}
+			rs.Ready = false
+			// The list reports the exit code only inside a human sentence, so
+			// the number comes from an inspect. Anything that wanted it
+			// before parsed "Exited (9) 3 seconds ago" with a regular
+			// expression, which is a format Docker has never promised to
+			// keep.
 			if insp, err := r.cli.ContainerInspect(ctx, c.ID); err == nil &&
 				insp.State != nil && !insp.State.Running && insp.State.FinishedAt != "" {
 				code := insp.State.ExitCode
 				rs.ExitCode = &code
 			}
 		}
-		if port, ok := published[rs.Name]; ok {
+	}
+	for _, name := range order {
+		rs := byService[name]
+		if port, ok := published[name]; ok {
 			rs.URL = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
-		env.Services = append(env.Services, rs)
+		env.Services = append(env.Services, *rs)
 	}
 	sort.Slice(env.Services, func(i, j int) bool { return env.Services[i].Name < env.Services[j].Name })
 

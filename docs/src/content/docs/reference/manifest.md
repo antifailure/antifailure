@@ -52,7 +52,7 @@ what it deliberately does not cover.
 | `health_timeout` | duration | Default `180s`. |
 | `migrate` | string | Runs to completion before the service starts, with an elevated connection. See below. |
 | `schedule` | cron | For `kind: cron`. |
-| `replicas` | int | Refused. Nothing reads it, so a service carrying it would still run one instance. |
+| `replicas` | int | How many instances to run, 1 to 10. Both runtimes start this many behind the one name other services resolve. See below. |
 | `depends_on` | list | Other services that must start first. |
 | `env` | list | Variables this service needs, by name. |
 | `resources` | block | `cpu` and `memory`, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
@@ -93,6 +93,48 @@ AF-RUN-041 The services depend on each other in a cycle: web -> worker -> web
 
 A cycle has no order that can start, so it is refused rather than resolved
 arbitrarily.
+
+### `replicas`
+
+```yaml
+services:
+  - name: roller
+    kind: worker
+    replicas: 3
+```
+
+Three containers, or three pods, behind the one name every other service
+resolves. Requests and lookups spread across them.
+
+This is not a scale knob. An environment is a copy of production on one
+machine, and nobody needs three copies of a worker for throughput there. What
+more than one instance buys is a class of bug that cannot be reproduced at one
+and is expensive in production:
+
+- a nightly job with no leader election, which sends its email once per
+  instance
+- a queue consumer that reads a row and then claims it, so two instances
+  process the same piece of work
+- a session, a cache or a rate limiter held in one process's memory, which the
+  next request does not reach
+- a migration that is safe against one writer and not against three
+
+Every one of those passes at one instance. That is the point: a service that
+runs one container whatever the manifest says reports a green run to somebody
+who wrote `replicas: 3` precisely because they suspected one of these, and the
+green run reads as the bug being absent.
+
+The migration runs once for the service, not once per instance. The ingress is
+one forwarder for the service, not one per instance. Readiness waits for every
+instance, so a service reported ready is not one that is two thirds up.
+
+`af status` names the count when it is more than one, and the fidelity report
+says how many instances are running against how many were asked for.
+
+The bound is 1 to 10, and a `cron` service may not ask for more than one: every
+instance runs the schedule, so three instances send the nightly email three
+times, which is a bug to reproduce inside a service rather than the meaning of
+a manifest key.
 
 ### `build`
 

@@ -470,3 +470,58 @@ func TestJournalledKindsAreTheOnesTheJournalKnows(t *testing.T) {
 	require.Equal(t, string(journal.KindDeployment), kindDeployment,
 		"the deployment kind this runtime writes is not the one the journal names")
 }
+
+func TestADeploymentRunsTheInstancesTheManifestAsksFor(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix}
+	spec := provider.EnvSpec{EnvID: "e1", Services: []provider.ServiceSpec{
+		{Name: "roller", Kind: "worker", Replicas: 3},
+	}}
+	d := r.deploymentFor(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
+
+	// The number this was hardcoded to one for. A manifest asking for three
+	// instances of a worker got a single pod, and the run went green having
+	// proved nothing about the case its author was worried about.
+	require.NotNil(t, d.Spec.Replicas)
+	require.Equal(t, int32(3), *d.Spec.Replicas)
+
+	// The Service in front of these pods selects on the labels the pod
+	// template carries, which is what puts all three behind the one name
+	// other services resolve. Without the match the extra pods run and
+	// nothing routes to them, which is three instances that behave like one.
+	svc := serviceObject(spec.EnvID, "af-env-e1", spec.Services[0])
+	for k, v := range svc.Spec.Selector {
+		require.Equal(t, v, d.Spec.Template.Labels[k],
+			"the service selects %s=%s and the pods do not carry it, so the "+
+				"instances would be unreachable by name", k, v)
+	}
+}
+
+func TestADeploymentThatAsksForNothingRunsOne(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix}
+	spec := provider.EnvSpec{EnvID: "e1", Services: []provider.ServiceSpec{{Name: "web", Port: 8080}}}
+	d := r.deploymentFor(spec, spec.Services[0], "af-env-e1", "10.43.0.9")
+
+	// Every manifest written before instance counts existed sends zero here,
+	// and zero pods is not what any of them meant.
+	require.NotNil(t, d.Spec.Replicas)
+	require.Equal(t, int32(1), *d.Spec.Replicas)
+}
+
+func TestTheSidecarIsAlwaysASingleton(t *testing.T) {
+	r := &Runtime{prefix: DefaultNamespacePrefix, proxyRef: "af-proxy:test"}
+	spec := provider.EnvSpec{EnvID: "e1", Services: []provider.ServiceSpec{
+		{Name: "roller", Kind: "worker", Replicas: 5},
+	}}
+	_, deployment, _, err := r.proxyObjects(context.Background(), "e1", "af-env-e1",
+		"10.42.0.0/16", "10.43.0.10", spec)
+	require.NoError(t, err)
+
+	// The sidecar is the environment's resolver and its only route out, and
+	// every service is pointed at one address for it. A second one would
+	// answer half the environment's DNS from a second decision log, so the
+	// run's record of what it refused would be split across two pods and
+	// neither would be the whole story. Nothing about a service asking for
+	// five instances may reach it.
+	require.NotNil(t, deployment.Spec.Replicas)
+	require.Equal(t, int32(1), *deployment.Spec.Replicas)
+}

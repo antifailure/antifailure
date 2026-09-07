@@ -2056,19 +2056,53 @@ func (o *Orchestrator) buildServices(
 		} else {
 			built++
 		}
-		specs = append(specs, provider.ServiceSpec{
-			Name:       svc.Name,
-			Image:      image,
-			Kind:       string(orDefault(string(svc.Kind), "worker")),
-			Command:    svc.Command,
-			Port:       svc.Port,
-			HealthPath: svc.HealthPath,
-			Migrate:    svc.Migrate,
-			DependsOn:  svc.DependsOn,
-			Env:        serviceEnv(svc),
-		})
+		spec := serviceSpec(svc, image)
+		spec.Migrate = svc.Migrate
+		specs = append(specs, spec)
 	}
 	return specs, built, cached, nil
+}
+
+// serviceSpec is the manifest service, as the runtime receives it.
+//
+// One function rather than the field list written out at each call site, and
+// that is the whole reason it exists. There were two of these, here and in
+// buildPreviousRelease, and they had drifted: every field a manifest can
+// declare has to be copied into BOTH or the one that was forgotten is silently
+// discarded at exactly this boundary. Nothing in the compiler notices a field
+// left out of a struct literal, and no manifest level check can see it either,
+// because the field IS read, several lines earlier, by validation.
+//
+// health_timeout was such a field. It was validated, defaulted, printed by
+// af explain and reported over MCP, and never once assigned into the spec, so
+// both runtimes fell back to their own default and a service given ten minutes
+// to start was killed after three. It is set here now.
+//
+// Migrate is deliberately NOT set here. buildPreviousRelease runs the previous
+// commit's services against a database the current commit has already
+// migrated, so running the old migration again is the one thing it must not
+// do. Its caller sets it; this one does not.
+func serviceSpec(svc schema.Service, image string) provider.ServiceSpec {
+	spec := provider.ServiceSpec{
+		Name:       svc.Name,
+		Image:      image,
+		Kind:       string(orDefault(string(svc.Kind), "worker")),
+		Command:    svc.Command,
+		Port:       svc.Port,
+		HealthPath: svc.HealthPath,
+		DependsOn:  svc.DependsOn,
+		Env:        serviceEnv(svc),
+		Replicas:   svc.Replicas,
+	}
+	// A timeout that will not parse is refused at validation, so an
+	// unparseable one here is a manifest that never reached this function.
+	// Falling back to the runtime's default rather than failing the run is
+	// still the right answer for it: the value is a bound on a wait, and no
+	// bound at all beats no environment.
+	if d, err := manifest.ParseDuration(svc.HealthTimeout); err == nil && d > 0 {
+		spec.HealthTimeout = d
+	}
+	return spec
 }
 
 func orDefault(s, fallback string) string {

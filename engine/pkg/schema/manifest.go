@@ -47,6 +47,16 @@ const (
 	ServiceCron ServiceKind = "cron"
 )
 
+// MaxReplicas bounds the instance count a service may ask for.
+//
+// Ten, matching schemas/manifest.v1.json. The bound exists because an
+// environment is a copy of production on one developer's machine rather than
+// production itself, and a manifest asking for forty instances of a worker
+// does not reproduce anything: it exhausts the machine and reports a runtime
+// failure that has nothing to do with the change under test. Three is enough
+// to find every bug in the class this field exists for.
+const MaxReplicas = 10
+
 // Service is one process the environment runs.
 type Service struct {
 	Name          string      `json:"name" yaml:"name"`

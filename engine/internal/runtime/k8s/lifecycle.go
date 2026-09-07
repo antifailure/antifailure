@@ -247,7 +247,7 @@ func (r *Runtime) startProxy(
 	// to exist before any of them are created.
 	if err := r.waitForPods(ctx, namespace, map[string]string{
 		LabelComponent: ComponentProxy,
-	}, r.readyWait, "the egress sidecar"); err != nil {
+	}, 1, r.readyWait, "the egress sidecar"); err != nil {
 		return "", err
 	}
 	if created.Spec.ClusterIP == "" || created.Spec.ClusterIP == corev1.ClusterIPNone {
@@ -320,10 +320,12 @@ func (r *Runtime) startService(
 	if timeout <= 0 {
 		timeout = r.readyWait
 	}
+	want := s.Instances()
+	running.Instances = want
 	if s.Port > 0 {
 		if err := r.waitForPods(ctx, namespace, map[string]string{
 			LabelService: s.Name,
-		}, timeout, s.Name); err != nil {
+		}, want, timeout, s.Name); err != nil {
 			return running, err
 		}
 		running.Ready = true
@@ -335,11 +337,66 @@ func (r *Runtime) startService(
 	// still checked is that it has not already exited, because a worker that
 	// died on startup must be reported rather than counted as up.
 	running.State = "running"
+	if want > 1 {
+		// With more than one instance there is a second question that a look
+		// at one moment cannot answer: are there N of them. The ReplicaSet
+		// may have created two of three when it is asked, and returning then
+		// reports a service as up whose third instance has not been
+		// scheduled. So the count is waited for, and the exit codes are read
+		// on every look rather than once at the end.
+		if err := r.waitForInstances(ctx, namespace, s, want, timeout); err != nil {
+			return running, err
+		}
+		running.Ready = true
+		return running, nil
+	}
 	if err := r.confirmStarted(ctx, namespace, s); err != nil {
 		return running, err
 	}
 	running.Ready = true
 	return running, nil
+}
+
+// waitForInstances blocks until a service with no port has the number of pods
+// it asked for, and none of them has already failed.
+//
+// Separate from waitForPods, and it has to be. waitForPods requires every pod
+// to be READY, which for a service with no readiness probe means running with
+// its container started. That is the right bar for a web service and the wrong
+// one for a worker that does its work and exits: the suite runs workers that
+// exit zero on purpose, and requiring readiness of those would wait out the
+// whole timeout on a service that did exactly what it was told.
+func (r *Runtime) waitForInstances(
+	ctx context.Context, namespace string, s provider.ServiceSpec, want int, timeout time.Duration,
+) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		pods, err := r.cli.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: LabelService + "=" + s.Name,
+		})
+		if err != nil {
+			return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
+		}
+		for _, pod := range pods.Items {
+			if code, ok := exitCodeOf(pod); ok && code != 0 {
+				return aferrors.Coded(aferrors.AFRUN005,
+					"service", s.Name, "code", strconv.Itoa(code))
+			}
+		}
+		if len(pods.Items) >= want {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return aferrors.Coded(aferrors.AFRUN004,
+				"service", s.Name, "timeout", timeout.Round(time.Second).String(),
+				"health", fmt.Sprintf("%d of %d instances were scheduled", len(pods.Items), want))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // runMigration runs the migration Job to completion and fails if it did not
@@ -429,11 +486,20 @@ func (r *Runtime) confirmStarted(ctx context.Context, namespace string, s provid
 	return nil
 }
 
-// waitForPods blocks until every pod matching the selector is ready.
+// waitForPods blocks until at least want pods matching the selector are ready.
+//
+// want, rather than "every pod there is". The count used to be whatever the
+// list happened to return, so a Deployment asking for three was reported ready
+// the moment the ReplicaSet had created one and that one had answered. Every
+// dependant then started against a service two thirds of which was still
+// coming up, and nothing said so.
 func (r *Runtime) waitForPods(
 	ctx context.Context, namespace string, selector map[string]string,
-	timeout time.Duration, what string,
+	want int, timeout time.Duration, what string,
 ) error {
+	if want < 1 {
+		want = 1
+	}
 	deadline := time.Now().Add(timeout)
 	var last string
 	for {
@@ -454,13 +520,16 @@ func (r *Runtime) waitForPods(
 				last = podTrouble(pod)
 			}
 		}
-		if total > 0 && ready == total {
+		if total >= want && ready >= want {
 			return nil
 		}
 		if time.Now().After(deadline) {
 			detail := last
 			if detail == "" {
 				detail = "no pod was scheduled"
+			}
+			if want > 1 {
+				detail = fmt.Sprintf("%d of %d instances were ready: %s", ready, want, detail)
 			}
 			return aferrors.Coded(aferrors.AFRUN004,
 				"service", what, "timeout", timeout.Round(time.Second).String(),
@@ -734,11 +803,26 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 		}
 	}
 
-	// One entry per service rather than per pod. A Deployment with two
-	// replicas is one service in the manifest and reporting it twice would
-	// make af status disagree with the file somebody wrote.
+	// One entry per service rather than per pod, with a count on it. A
+	// Deployment with two replicas is one service in the manifest and
+	// reporting it twice would make af status disagree with the file somebody
+	// wrote. The count is what distinguishes three asked for and three
+	// running from three asked for and one running, and without it those two
+	// environments read identically.
+	//
+	// Ready is the AND across the pods rather than the last one's answer.
+	// This loop used to overwrite State and Ready on every pod, so a service
+	// with two healthy instances and one in CrashLoopBackOff reported
+	// whichever pod the API server listed last, which is not a decision
+	// anybody made.
+	//
+	// The pods are put in name order first, for the same reason: which pod
+	// supplies the id and the trouble text must not depend on list order.
+	sorted := append([]corev1.Pod(nil), pods.Items...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 	byService := map[string]provider.RunningService{}
-	for _, pod := range pods.Items {
+	troubled := map[string]bool{}
+	for _, pod := range sorted {
 		name := pod.Labels[LabelService]
 		if name == "" || strings.HasSuffix(name, "-migrate") {
 			continue
@@ -747,17 +831,25 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 		if !seen {
 			rs = provider.RunningService{
 				Name: name, Kind: pod.Labels[LabelServiceKind], ContainerID: string(pod.UID),
+				State: string(pod.Status.Phase), Detail: podTrouble(pod), Ready: true,
+			}
+			if podReady(pod) {
+				rs.State = "running"
 			}
 		}
-		rs.State = string(pod.Status.Phase)
-		rs.Detail = podTrouble(pod)
-		if podReady(pod) {
-			rs.Ready = true
-			rs.State = "running"
-		}
-		if code, ok := exitCodeOf(pod); ok {
-			c := code
-			rs.ExitCode = &c
+		rs.Instances++
+		if !podReady(pod) {
+			rs.Ready = false
+			if !troubled[name] {
+				troubled[name] = true
+				rs.ContainerID = string(pod.UID)
+				rs.State = string(pod.Status.Phase)
+				rs.Detail = podTrouble(pod)
+			}
+			if code, ok := exitCodeOf(pod); ok {
+				c := code
+				rs.ExitCode = &c
+			}
 		}
 		if rs.Kind == "web" && r.domain != "" {
 			rs.URL = "http://" + r.hostFor(envID, name)
