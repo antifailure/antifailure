@@ -83,6 +83,13 @@ func TestTrafficShow_PrintsWhatProductionServesAndWhatTheRunSends(t *testing.T) 
 		"this run sends 2 routes of the 4 production served, carrying 0.031 percent of its requests")
 	require.Contains(t, prose(got.stdout), "The heaviest it never sends is POST /capture")
 
+	// The other half of what a run reproduces, which a coverage percentage
+	// hides completely. Scale is the manifest default of 0.05 against the
+	// smoke shape's five requests a second.
+	require.Contains(t, prose(got.stdout),
+		"How fast it sends: this run sends 0.25 requests a second against production's "+
+			"215 requests a second, which is 0.11 percent of it")
+
 	// And the lines somebody would paste, printed rather than written.
 	require.Contains(t, prose(got.stdout), "- POST /capture")
 	require.Contains(t, prose(got.stdout), "Read them before pasting them")

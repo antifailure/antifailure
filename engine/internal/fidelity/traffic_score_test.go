@@ -251,7 +251,7 @@ func TestBenchmarkTheShareOfProductionTheRunSends(t *testing.T) {
 	withProfile := measureScore(t, fidelity.Build(trafficTwinWithProfile(t)))
 
 	require.Equal(t, scoreOf{reproduced: 8, counted: 9, percent: 89}, withoutProfile)
-	require.Equal(t, scoreOf{reproduced: 8, counted: 11, percent: 72}, withProfile)
+	require.Equal(t, scoreOf{reproduced: 8, counted: 11, percent: 73}, withProfile)
 
 	// The components themselves, because a score that drops without saying
 	// which component dropped it is a worse report than the one it replaced.

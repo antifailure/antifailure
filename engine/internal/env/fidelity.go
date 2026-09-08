@@ -659,6 +659,12 @@ func (o *Orchestrator) observeTraffic(obs *fidelity.Observation) {
 	if l == nil || !l.Enabled {
 		return
 	}
+	// The profile first, and before any early return. A source that could not
+	// be read is a reason of its own, and reporting it as "no traffic profile
+	// is declared" beside a manifest that declares one is a report describing
+	// the wrong failure.
+	obs.TrafficProfile, obs.TrafficProfileReason = o.trafficProfile()
+
 	shape, err := o.trafficShape()
 	if err != nil {
 		obs.TrafficReason = oneLine(err)
@@ -688,7 +694,6 @@ func (o *Orchestrator) observeTraffic(obs *fidelity.Observation) {
 	}
 	_, scale := ResolveLoadRate(LoadOptions{}, l)
 	obs.SentRate = shape.RequestsPerSecond * scale
-	obs.TrafficProfile, obs.TrafficProfileReason = o.trafficProfile()
 }
 
 // describeTrafficSource names where the mix came from, in the manifest's own

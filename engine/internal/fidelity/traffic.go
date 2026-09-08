@@ -78,6 +78,13 @@ func endpointMixComponent(obs Observation) Component {
 // the profile adds to that is the size of what is being missed. The only
 // verdict it changes is the arm that was never checked against anything.
 func againstProductionTraffic(c Component, obs Observation) Component {
+	if obs.TrafficReason != "" {
+		// The source could not be read at all, so what this run would send is
+		// unknown rather than nothing. Comparing an empty set against the
+		// profile would report that the run covers zero percent of production,
+		// which is a measurement of a run nobody could describe.
+		return c
+	}
 	if obs.TrafficProfile == nil {
 		reason := obs.TrafficProfileReason
 		if reason == "" {
@@ -132,6 +139,12 @@ func againstProductionTraffic(c Component, obs Observation) Component {
 // that silently corrected itself would be the first thing here that guesses.
 func arrivalRateComponent(obs Observation) Component {
 	c := Component{Name: "arrival rate"}
+	if obs.TrafficReason != "" {
+		// The same reason the mix carries. A rate cannot be compared against
+		// production's when nothing could say what rate this run would send.
+		c.State, c.Detail = Unmeasured, obs.TrafficReason
+		return c
+	}
 	if obs.TrafficProfile == nil {
 		reason := obs.TrafficProfileReason
 		if reason == "" {

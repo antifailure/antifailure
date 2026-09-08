@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/traffic"
 )
 
@@ -241,6 +242,7 @@ unknown one.`),
 			}
 			env.Out.Println("")
 
+			sent := sentRoutes(cov)
 			rows := make([][]string, 0, len(profile.Routes))
 			for _, r := range profile.Routes {
 				share := ""
@@ -249,13 +251,14 @@ unknown one.`),
 				}
 				rows = append(rows, []string{
 					r.String(), trafficCount(r.Requests), share, p95Cell(r.P95Ms),
-					sentCell(cov, r),
+					sentCell(sent, r),
 				})
 			}
 			env.Out.Table([]Column{
 				Col("ROUTE"), Num("REQUESTS"), Num("SHARE"), Num("P95"), Col("THIS RUN"),
 			}, rows)
 			printTrafficCoverage(env, cov, reason)
+			printTrafficRate(env, o, *profile)
 			printTrafficMissing(env, *profile)
 			return nil
 		},
@@ -265,21 +268,32 @@ unknown one.`),
 	return cmd
 }
 
+// sentRoutes is the set of routes a run reaches, by the name a report renders.
+//
+// Built once rather than scanned per row. A profile of a busy production holds
+// hundreds of routes and the table prints every one of them, so a scan per
+// cell is quadratic in a place with no reason to be.
+func sentRoutes(cov *traffic.Coverage) map[string]bool {
+	if cov == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(cov.Routes))
+	for _, got := range cov.Routes {
+		out[got.Route.String()] = got.Sent
+	}
+	return out
+}
+
 // sentCell says whether a run reaches this route.
 //
 // "never sent" rather than a blank, because a blank under a heading reads as a
 // value somebody is not sure about, and this column is the finding.
-func sentCell(cov *traffic.Coverage, r traffic.Route) string {
-	if cov == nil {
+func sentCell(sent map[string]bool, r traffic.Route) string {
+	if sent == nil {
 		return "unknown"
 	}
-	for _, got := range cov.Routes {
-		if got.Route.String() == r.String() {
-			if got.Sent {
-				return "sent"
-			}
-			return "never sent"
-		}
+	if sent[r.String()] {
+		return "sent"
 	}
 	return "never sent"
 }
@@ -319,6 +333,32 @@ func printTrafficCoverage(env *Env, cov *traffic.Coverage, reason string) {
 		}
 		env.Out.Printf("    - %s\n", r.Route.String())
 	}
+}
+
+// printTrafficRate says how fast this run sends against how fast production
+// serves.
+//
+// The other half of what a run reproduces, and the half a coverage percentage
+// hides completely: a run that reaches every route production serves and sends
+// them at two percent of its rate has exercised the code and not the
+// contention. It states and does not adjust. Nothing here changes load.scale.
+func printTrafficRate(out *Env, o *env.Orchestrator, p traffic.Profile) {
+	production, ok := p.Rate()
+	if !ok {
+		return
+	}
+	run, err := o.TrafficRate()
+	if err != nil {
+		out.Out.Println("")
+		out.Out.Println(out.Out.Wrap(
+			"How fast this run sends could not be worked out: "+err.Error(), 0))
+		return
+	}
+	cmp := traffic.RateComparison{
+		Run: run, Production: production, PeakConcurrency: p.PeakConcurrency,
+	}
+	out.Out.Println("")
+	out.Out.Println(out.Out.Wrap("How fast it sends: "+cmp.Describe()+".", 0))
 }
 
 func printTrafficMissing(env *Env, p traffic.Profile) {
@@ -388,10 +428,11 @@ func trafficJSON(
 	if maxAge > 0 {
 		doc.MaxAgeHours = maxAge.Hours()
 	}
+	sent := sentRoutes(cov)
 	for _, r := range p.Routes {
 		row := TrafficRouteJSON{
 			Method: r.Method, Path: r.Path, Requests: r.Requests, P95Ms: r.P95Ms,
-			Sent: sentCell(cov, r) == "sent",
+			Sent: sent[r.String()],
 		}
 		if p.Requests > 0 {
 			row.Share = float64(r.Requests) / float64(p.Requests)
