@@ -80,6 +80,19 @@ type Emulator struct {
 	Project string
 	// ProjectURL is where the emulator itself lives.
 	ProjectURL string
+	// Official reports whether the CLOUD VENDOR ships this emulator.
+	//
+	// It is a separate field rather than something a reader infers from
+	// Project, because the inference is wrong exactly where it matters most.
+	// Google publishes emulators for five of its services and none for Cloud
+	// Storage, so the storage emulator in this build is a community project
+	// with no affiliation to Google, and a surface table that printed it
+	// beside the five official ones with nothing distinguishing them would be
+	// presenting somebody else's software as the vendor's. A user who finds
+	// that out from a failing test was misled by us rather than by the
+	// emulator. Recorded here so the guide and the notices file read it from
+	// the same declaration the engine starts the container from.
+	Official bool
 	// Image is the container image, PINNED BY DIGEST. The registry's
 	// validation refuses a tag, because an emulator is the thing answering
 	// for production's API and a tag that moves changes what an environment
