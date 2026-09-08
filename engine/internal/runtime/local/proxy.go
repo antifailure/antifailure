@@ -453,6 +453,17 @@ type Decision struct {
 	// can debug".
 	Pack    string `json:"pack"`
 	Fixture string `json:"fixture"`
+	// Emulator names which emulator answered, for a rule in emulate mode. An
+	// environment running LocalStack beside Azurite has two of them, and a
+	// decision that cannot say which one answered is a decision nobody can
+	// act on.
+	Emulator string `json:"emulator"`
+	// KeyID is the access key identifier the request was signed with, and
+	// never the secret. An emulator verifies no signature, so the only thing
+	// between a misconfigured application and a real cloud account is the
+	// live credential tripwire, and a refusal is auditable only if the
+	// requests that were ACCEPTED say which key they carried.
+	KeyID string `json:"key_id"`
 }
 
 // Decisions reads the sidecar's decision log for an environment.
