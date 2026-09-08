@@ -1,6 +1,7 @@
 package traffic_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -41,19 +42,10 @@ func route(method, path string, requests int64) traffic.Route {
 func sent(pairs ...string) []traffic.Endpoint {
 	out := make([]traffic.Endpoint, 0, len(pairs))
 	for _, p := range pairs {
-		method, path := p[:index(p, ' ')], p[index(p, ' ')+1:]
+		method, path, _ := strings.Cut(p, " ")
 		out = append(out, traffic.Endpoint{Method: method, Path: path})
 	}
 	return out
-}
-
-func index(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 func TestCompare_TheRouteThatReadsTheLockedTableIsNamed(t *testing.T) {
