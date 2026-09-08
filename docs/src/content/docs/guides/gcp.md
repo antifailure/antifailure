@@ -231,13 +231,42 @@ Silicon machine it runs under emulation. That is stated rather than hidden
 because it is the one entry here whose start time and memory will not resemble
 anything a reader measures on a Linux runner.
 
-The **memory and start time per running container are NOT measured**, and the
-reason is not that they were skipped. The Docker daemon on the machine this
-was written on stopped scheduling containers under memory pressure while
-another twenty three lanes were running, and publishing an estimate in a table
-of measurements is the thing this project refuses to do. The command that
-produces them is `just benchmark-emulators`, it needs a working daemon, and
-the number belongs here when somebody runs it.
+### Every one of these starts with no account
+
+Worth checking rather than assuming, because it is where an emulator surface
+fails silently. `localstack/localstack` now exits with code 55 on licence
+activation before it binds a port, with no environment set at all, so an image
+that pulls is not an image that starts, and a container that never binds looks
+exactly like a routing fault. Section 7 of the plan is not a preference here:
+no cloud account may be required to run the community suite, and a token is an
+account.
+
+All of these were started on real Docker with no token, no credential and no
+login.
+
+| Emulator | Ready after | Memory at first bind |
+| --- | --- | --- |
+| Cloud Storage, fake-gcs-server | 23.4 s | 20.0 MiB |
+| Spanner | 17.7 s | 37.2 MiB |
+| Pub/Sub | 45.4 s | 10.2 MiB |
+| Firestore | 27.2 s | 17.8 MiB |
+| Datastore | 48.6 s | 18.8 MiB |
+| Bigtable | 51.5 s | 29.5 MiB |
+
+Six containers, so a manifest asking for all six pays about **3.9 minutes of
+start time and 134 MiB** before its own application starts, on this machine
+under this load. The four `gcloud` emulators are the expensive half of both
+numbers and they are the four that share one image, so a manifest asking for
+Cloud Storage and Spanner alone pays 41 seconds and 57 MiB.
+
+**Read those numbers with their caveats or do not read them.** They were taken
+on a laptop at load average 30 with other work running, so the times are an
+upper bound rather than a typical figure. And the memory is read at the moment
+the port first accepted a connection, not at steady state, so for the four
+JVM backed emulators it is a lower bound: those numbers grow once the emulator
+is actually serving. The harness that produced them is
+`just benchmark-emulators` with `CONTAINERS=1`, and a number older than the
+code that produced it is withdrawn rather than rounded.
 
 ## Containment, checked against Google's documentation rather than assumed
 
