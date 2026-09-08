@@ -172,6 +172,48 @@ const (
 	copyOnWriteBallastRowBytes = 1024
 )
 
+// copyOnWriteAllowance is the boundary both sides of the assertion are
+// measured against: how much extra branch time is attributable to noise rather
+// than to the extra data. Three terms, and the largest wins.
+//
+// The OBSERVED SPREAD of the small arm is the one that matters most and it is
+// the one a fixed number cannot supply. It is this machine, during this run,
+// telling the measurement how much its own timings move when nothing about the
+// data has changed. On a quiet machine it collapses and the instrument gets
+// sharper; under load it widens and stops accusing an honest provider of
+// copying. Taken from the small arm rather than the large one because the
+// minimum already absorbs a slow large sample, and what inflates the growth is
+// an anomalously FAST small one.
+//
+// The ABSOLUTE FLOOR covers a provider whose branching is quick and whose
+// spread is therefore a few milliseconds, where any hiccup would clear it. A
+// quarter of a second is longer than a scheduling hiccup that survives taking
+// the minimum of several alternating samples, and it is a small fraction of
+// what moving a gibibyte costs on any storage that exists.
+//
+// The PROPORTIONAL term covers the case three samples are too few to reveal:
+// a spread that came out near zero by luck on a provider whose timings do in
+// fact move by seconds. Half is deliberately generous.
+//
+// The cost of that generosity is a real limit and is stated rather than
+// hidden. A provider whose branch takes eight seconds could copy up to four
+// seconds worth of data and still be called copy on write here. Sensitivity is
+// bounded by the provider's OWN fixed cost, so the instrument is sharp on a
+// fast provider and blunt on a slow one, and the remedy is a larger large
+// size rather than a smaller allowance. The failure messages say so, with the
+// size that would have been needed, computed from what was measured.
+func copyOnWriteAllowance(smallTimes []time.Duration) time.Duration {
+	best, worst := minDuration(smallTimes), maxDuration(smallTimes)
+	allowance := worst - best
+	if proportional := time.Duration(float64(best) * copyOnWriteJitterFraction); proportional > allowance {
+		allowance = proportional
+	}
+	if allowance < copyOnWriteNoiseFloor {
+		allowance = copyOnWriteNoiseFloor
+	}
+	return allowance
+}
+
 // ballastTable is the table the suite fills to make a golden large.
 //
 // Nothing else in the suite reads it. It exists to occupy storage, so its
@@ -192,11 +234,22 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	smallV, smallBytes := h.refreshWithBallast(ctx, small)
 	largeV, largeBytes := h.refreshWithBallast(ctx, large)
 
-	if largeBytes <= smallBytes {
-		h.t.Fatalf("the ballast did not grow the golden: the small one carries %s and the "+
-			"large one %s. Nothing about copy on write can be read from two goldens of the "+
-			"same size, and a verdict from them would be a coin toss printed as a check.",
-			bytesText(smallBytes), bytesText(largeBytes))
+	// What the goldens ACTUALLY carry, against what was asked for. The sizes
+	// are configured but they are not guaranteed: a Postgres that decided to
+	// compress the ballast, or a provider that dropped part of it, leaves two
+	// goldens closer together than the configuration intended, and every
+	// number below would then be computed from a delta that is real but too
+	// small to decide anything. Measured rather than assumed is the whole
+	// reason pg_total_relation_size is read at all, and reading it is only
+	// worth doing if the answer can refuse the run.
+	delta := largeBytes - smallBytes
+	if want := large - small; delta < want/2 {
+		h.t.Fatalf("the two goldens were asked to differ by %s and they differ by %s. The "+
+			"ballast did not reach the size this measurement needs, so the extra data may "+
+			"cost less to copy than the machine's own noise, and a verdict read off it would "+
+			"be a coin toss printed as a check. Either the store compressed the ballast or "+
+			"the provider did not carry all of it.",
+			bytesText(want), bytesText(delta))
 	}
 
 	smallTimes := make([]time.Duration, 0, samples)
@@ -210,8 +263,8 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 
 	ts, tl := minDuration(smallTimes), minDuration(largeTimes)
 	grown := tl - ts
-	allowance := copyOnWriteAllowance(ts)
-	deltaGiB := float64(largeBytes-smallBytes) / float64(1<<30)
+	allowance := copyOnWriteAllowance(smallTimes)
+	deltaGiB := float64(delta) / float64(1<<30)
 	marginal := grown.Seconds() / deltaGiB
 
 	// The measurement is logged whatever the verdict, because the number is
@@ -227,7 +280,7 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 		h.p.Name(), caps.CopyOnWrite,
 		bytesText(smallBytes), durationsText(smallTimes), ts.Round(time.Millisecond),
 		bytesText(largeBytes), durationsText(largeTimes), tl.Round(time.Millisecond),
-		bytesText(largeBytes-smallBytes),
+		bytesText(delta),
 		grown.Round(time.Millisecond), allowance.Round(time.Millisecond),
 		marginal)
 
@@ -240,7 +293,7 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 				"being made and charged to whoever waits for the environment. Either the "+
 				"provider copies and the declaration is wrong, or it shares storage and "+
 				"something else in Branch scales with size.",
-				bytesText(largeBytes-smallBytes), grown.Round(time.Millisecond),
+				bytesText(delta), grown.Round(time.Millisecond),
 				allowance.Round(time.Millisecond), marginal)
 		}
 		// The declared latency, checked at the LARGE size, which is where the
@@ -263,14 +316,20 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	if grown <= allowance {
 		h.t.Fatalf("this provider declares CopyOnWrite FALSE, and branching the golden with %s "+
 			"more data in it took only %s longer, inside the %s this machine's noise can "+
-			"account for. Branch time that does not grow with the data is what copy on write "+
-			"IS, so either the capability is understated or the branch is not carrying the "+
-			"golden's data. Understating it is not the safe direction: the wave publishes one "+
-			"table of branch time per provider, a buyer chooses from that table, and a "+
-			"provider that hides a flat branch time is as wrong in that table as one that "+
-			"invents it.",
-			bytesText(largeBytes-smallBytes), grown.Round(time.Millisecond),
-			allowance.Round(time.Millisecond))
+			"account for. "+
+			"Branch time that does not grow with the data is what copy on write IS, so either "+
+			"the capability is understated or the branch is not carrying the golden's data. "+
+			"Understating it is not the safe direction: the wave publishes one table of branch "+
+			"time per provider, a buyer chooses from that table, and a provider that hides a "+
+			"flat branch time is as wrong in that table as one that invents it. "+
+			"The other reading, and the suite cannot tell them apart from one measurement: this "+
+			"provider's branch already costs %s before any of the extra data, and a copy that "+
+			"is small beside its own fixed cost is invisible whatever it is. %s That is a "+
+			"property of the configuration rather than of the provider, and the fix is a larger "+
+			"golden rather than a looser threshold.",
+			bytesText(delta), grown.Round(time.Millisecond),
+			allowance.Round(time.Millisecond), ts.Round(time.Millisecond),
+			neededSizeAdvice(grown, allowance, delta))
 	}
 }
 
@@ -481,6 +540,25 @@ func copyOnWriteAllowance(small time.Duration) time.Duration {
 	return copyOnWriteNoiseFloor
 }
 
+// neededSizeAdvice turns the reading into the size that would have decided it.
+//
+// A failure that only says the growth was too small leaves the reader guessing
+// how much larger is large enough, and guessing there produces either another
+// failed run or a size chosen to make the red go away.
+func neededSizeAdvice(grown, allowance time.Duration, delta int64) string {
+	if grown <= 0 {
+		return "The extra data cost no measurable time at all, so no size derived from this " +
+			"reading would mean anything; if this provider does copy, raise the large size " +
+			"until the copy is visible and read the number again."
+	}
+	// Linear in the data, which is what the false declaration asserts. Doubled,
+	// so the answer clears the allowance rather than landing on it.
+	need := float64(delta) * (float64(allowance) / float64(grown)) * 2
+	return fmt.Sprintf("At the rate this run measured, the extra data would have to be about "+
+		"%s for the copy to clear the allowance, which is what Options.CopyOnWriteLargeBytes "+
+		"is for.", bytesText(int64(need)))
+}
+
 func minDuration(ds []time.Duration) time.Duration {
 	best := ds[0]
 	for _, d := range ds[1:] {
@@ -489,6 +567,16 @@ func minDuration(ds []time.Duration) time.Duration {
 		}
 	}
 	return best
+}
+
+func maxDuration(ds []time.Duration) time.Duration {
+	worst := ds[0]
+	for _, d := range ds[1:] {
+		if d > worst {
+			worst = d
+		}
+	}
+	return worst
 }
 
 func durationsText(ds []time.Duration) string {
