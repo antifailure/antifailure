@@ -14,7 +14,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "test": "ls test/*.test.ts > /dev/null && node --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "openapi": "node scripts/openapi.ts ../../../www/public/openapi.json",
     "openapi:check": "node scripts/openapi.ts ../../../www/public/openapi.json --check"

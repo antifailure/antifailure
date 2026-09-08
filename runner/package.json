@@ -8,7 +8,7 @@
   "engines": { "node": ">=22.6" },
   "bin": { "af-runner": "./src/main.ts" },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test": "ls test/*.test.ts > /dev/null && node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
