@@ -566,12 +566,12 @@ func RegistryHost(ref string) string {
 	const dockerHub = "registry-1.docker.io"
 	// A digest or a tag can carry a colon, so only the part before the first
 	// slash is considered.
-	first := ref
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		first = ref[:i]
-	} else {
+	i := strings.IndexByte(ref, '/')
+	if i < 0 {
+		// No registry and no organization, such as postgres:17.
 		return dockerHub
 	}
+	first := ref[:i]
 	if first == "localhost" || strings.ContainsAny(first, ".:") {
 		return first
 	}

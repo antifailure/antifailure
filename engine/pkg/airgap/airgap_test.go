@@ -154,8 +154,15 @@ func TestAClientBuiltHereRefusesThroughItsTransport(t *testing.T) {
 	// Not a unit test of Check. The whole design rests on the transport
 	// actually carrying the guard, and a client built with the right helper and
 	// the wrong transport would pass every test above.
-	_, err := airgap.Client(airgap.SiteReleaseCheck, 5*time.Second).
+	resp, err := airgap.Client(airgap.SiteReleaseCheck, 5*time.Second).
 		Get("https://api.github.com/repos/antifailure/antifailure/releases/latest")
+	if resp != nil {
+		// Unreachable while the guard works, and closed anyway. A refused dial
+		// returns a nil response, so this is here for the build where it does
+		// not: a test that leaked a body in the failure case would leak it
+		// exactly when somebody is already debugging.
+		_ = resp.Body.Close()
+	}
 	require.ErrorIs(t, err, airgap.ErrSealed)
 	require.Len(t, airgap.Refusals(), 1)
 }
