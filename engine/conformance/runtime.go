@@ -1299,10 +1299,10 @@ func (h *rtHarness) upTheSizeIsEnforcedInsideTheContainer(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
-			h.t.Errorf("the service never printed the memory cap its own process is "+
-				"subject to, so whether the cap was applied at all is unknown. That is "+
-				"reported as a failure rather than as a pass on purpose: a check that "+
-				"could not look has to say so, and the runtime under test is the most "+
+			h.t.Errorf("the service never printed the memory cap its own process is " +
+				"subject to, so whether the cap was applied at all is unknown. That is " +
+				"reported as a failure rather than as a pass on purpose: a check that " +
+				"could not look has to say so, and the runtime under test is the most " +
 				"likely reason a container never ran its command")
 			return
 		case <-time.After(500 * time.Millisecond):
@@ -1319,13 +1319,13 @@ func (h *rtHarness) upTheSizeIsEnforcedInsideTheContainer(ctx context.Context) {
 func (h *rtHarness) cgroupCapIs(got string, want int64) {
 	h.t.Helper()
 	const pageSlack = 64 * 1024
-	switch {
-	case got == "unreadable":
+	switch got {
+	case "unreadable":
 		h.t.Errorf("the container could not read its own cgroup, so whether the %d byte "+
 			"cap was applied is unknown. Reported as a failure rather than skipped, "+
 			"because a check that cannot say no is worse than no check", want)
 		return
-	case got == "max":
+	case "max":
 		h.t.Errorf("the service asked for %d bytes of memory and its own cgroup says "+
 			"max, which is no cap at all. The runtime reported a size it never applied, "+
 			"which is exactly what a runtime that applied one reports", want)
