@@ -264,6 +264,7 @@ func TestDecision_AllowedOnlyForRealNetworkModes(t *testing.T) {
 		schema.ModeBlock:   false,
 		schema.ModeCapture: false,
 		schema.ModeMock:    false,
+		schema.ModeEmulate: false,
 		schema.ModeSynth:   false,
 	}
 	for _, m := range schema.AllModes() {

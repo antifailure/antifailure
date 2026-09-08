@@ -40,6 +40,7 @@ interface VectorRequest {
     credential?: string
     fixtures?: string
     webhook_path?: string
+    emulator?: string
     matched: boolean
     allowed: boolean
     reason: string
@@ -90,6 +91,8 @@ describe('the policy engine reproduces the engine’s decisions', () => {
           assert.equal(decision.credential, vector.decision.credential ?? '')
           assert.equal(decision.fixtures, vector.decision.fixtures ?? '')
           assert.equal(decision.webhookPath, vector.decision.webhook_path ?? '')
+          assert.equal(decision.emulator, vector.decision.emulator ?? '',
+            'the two disagree about which emulator answers this host')
           assert.equal(decision.reason, vector.decision.reason, 'the reason reads differently')
 
           assert.deepEqual(
