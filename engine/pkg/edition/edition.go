@@ -88,10 +88,15 @@ const (
 // licence and a licence for another organization all arrive at the same no
 // without this package knowing the difference between them.
 //
-// Enabled is asked per call rather than once at startup for the reason the
-// policy hook already documents: a licence can lapse while the process runs,
-// and a feature that keeps working until a restart is a feature the customer
-// stopped paying for and cannot turn off.
+// WHAT THIS DOES NOT DO, said here because the enterprise policy hook's comment
+// next door reads as though it does. The status is evaluated once, in the
+// enterprise binary's main, and attached to a context that then lives as long
+// as the process. So a licence that lapses between one command and the next is
+// caught, and one that lapses during a long running process is not, by this or
+// by ee/engine/feature.Enabled: both read a set of features computed at
+// startup. Fixing that means re-evaluating the licence, which is a decision
+// about the licence and not about this check, and claiming it here would be a
+// guarantee nothing implements.
 func Permits(ctx context.Context, feature string) bool {
 	s, ok := From(ctx)
 	if !ok {
