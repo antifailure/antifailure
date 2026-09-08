@@ -454,12 +454,12 @@ func TestScan_TheEncodedPassAnswersOnlyForRealKeyMaterial(t *testing.T) {
 	// cleanly and none of them is a private key.
 	body := fake("", 64, base64s)
 	for name, text := range map[string]string{
-		"a certificate":        encoded(certHeader + "\n" + body + "\n" + certFooter),
-		"a public key":         encoded("-----BEGIN " + "PUBLIC KEY-----\n" + body + "\n-----END " + "PUBLIC KEY-----"),
-		"a redacted key":       encoded(pemHeader + "\nREDACTED\n" + pemFooter),
+		"a certificate":         encoded(certHeader + "\n" + body + "\n" + certFooter),
+		"a public key":          encoded("-----BEGIN " + "PUBLIC KEY-----\n" + body + "\n-----END " + "PUBLIC KEY-----"),
+		"a redacted key":        encoded(pemHeader + "\nREDACTED\n" + pemFooter),
 		"a header with no body": encoded(pemHeader),
-		"ordinary prose":       encoded("the file opens with " + pemHeader + " and we never log past it"),
-		"not base64 at all":    "LS0tLS1CRUdJ this is a sentence about the encoding",
+		"ordinary prose":        encoded("the file opens with " + pemHeader + " and we never log past it"),
+		"not base64 at all":     "LS0tLS1CRUdJ this is a sentence about the encoding",
 	} {
 		require.Empty(t, livekey.Scan(text, "the body"),
 			"%s decoded to something that is not a private key and was refused anyway", name)
