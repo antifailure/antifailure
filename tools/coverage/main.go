@@ -76,6 +76,16 @@ func main() {
 		fail("%s covers no packages, so there is nothing to check. "+
 			"Produce it with `just coverage-profile` rather than by hand.", *profile)
 	}
+	if missing := unmeasured(cfg, byPkg); len(missing) > 0 {
+		fail("the thresholds name %d %s that %s does not carry:\n  %s\n\n"+
+			"A threshold on a package the profile never measured is not a package at 100 "+
+			"percent, it is a package nobody looked at, and this tool used to report the "+
+			"two identically. Either the tests stopped running, or the package moved, or "+
+			"the entry is dead policy and belongs deleted. Rerun with "+
+			"`just coverage-profile` before deciding which.",
+			len(missing), plural(len(missing), "package", "packages"), *profile,
+			strings.Join(missing, "\n  "))
+	}
 
 	report(cfg, byPkg, *all)
 }
@@ -209,6 +219,53 @@ func thresholdFor(cfg config, pkg string) (float64, string) {
 		}
 	}
 	return best, name
+}
+
+// unmeasured returns every package the thresholds NAME and the profile does not
+// carry, tier first so the report reads as a policy line.
+//
+// WHY THIS IS NOT A DETAIL. report() builds its list from the profile, so a
+// package named in thresholds.yaml and absent from the coverage profile was
+// never iterated, never compared to its floor and never printed, not even
+// under -all. internal/masking sits in the strict tier at 100 percent because
+// "a missed line is a masking, isolation, or redaction failure"; if its tests
+// stopped building, it left the profile and this gate went on printing a
+// package count and exiting 0. That is a check reporting a verdict about
+// something it never examined, which is the one failure this repository keeps
+// finding in its own instruments.
+//
+// The matching rule is thresholdFor's, deliberately: a tier entry may name a
+// tree rather than a package, so an entry matches when a measured package is
+// it or sits under it.
+func unmeasured(cfg config, byPkg map[string]counts) []string {
+	var out []string
+	for _, named := range []struct {
+		name string
+		rule tier
+	}{{"strict", cfg.Strict}, {"high", cfg.High}} {
+		for _, want := range named.rule.Packages {
+			matched := false
+			for pkg := range byPkg {
+				if pkg == want || strings.HasPrefix(pkg, want+"/") {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				out = append(out, named.name+"  "+want)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// plural is the difference between "1 packages" and a sentence somebody reads.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func report(cfg config, byPkg map[string]counts, all bool) {

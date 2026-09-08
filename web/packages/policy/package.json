@@ -6,7 +6,7 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "node --test test/*.test.ts",
+    "test": "ls test/*.test.ts > /dev/null && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

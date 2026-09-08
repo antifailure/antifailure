@@ -4,7 +4,7 @@
   "private": true,
   "description": "The managed functions behind antifailure.dev.",
   "scripts": {
-    "test": "node --test"
+    "test": "ls test/*.test.js > /dev/null && node --test"
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.0"
