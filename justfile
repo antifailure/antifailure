@@ -1619,9 +1619,17 @@ lint-platforms:
     cd engine && GOOS=darwin golangci-lint run --timeout 15m
 
 # The community build does not contain or need the enterprise edition.
+#
+# editioncheck is the half CI ran and this recipe did not. `just edition` used
+# to grep and inspect the binary while the workflow also took ee away and ran
+# the whole community suite, so a green run here was never the green CI it
+# reads as. It moves ee aside rather than deleting it, and puts it back on any
+# exit including an interrupt, because unlike a runner your checkout is not
+# thrown away afterwards.
 edition:
     #!/usr/bin/env bash
     set -euo pipefail
+    go run ./tools/editioncheck .
     if grep -rn --include='*.go' 'antifailure/antifailure/ee' engine tools; then
       echo "an engine package imports ee, which the community build does not have"
       exit 1

@@ -1050,7 +1050,10 @@ jobs:
   edition-boundary:
     name: edition boundary
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A failing run costs more than a passing one here, because the packages
+    # that failed are run again with ee present to find out whether ee had
+    # anything to do with it. That second look is what the minutes buy.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1080,14 +1083,18 @@ jobs:
           test -x /usr/lib/postgresql/17/bin/pg_dump
 
       - name: The community build does not need ee
-        # The proof rather than the assertion. ee is deleted and everything
-        # still builds and passes, which is what the community binary is built
-        # from. A comment saying the boundary holds is not evidence.
-        run: |
-          rm -rf ee
-          cd engine
-          go build ./...
-          go test ./internal/... -short -count=1 -timeout 15m
+        # The proof rather than the assertion. ee is taken away and everything
+        # still has to build and pass, which is what the community binary is
+        # built from. A comment saying the boundary holds is not evidence.
+        #
+        # It used to be four lines of shell here, and the shell could not tell
+        # an edition violation from an engine test that was failing anyway. On
+        # 2026-09-08 that made this required context red on 13 of the 25 open
+        # pull requests, none of which were edition violations, and sent
+        # thirteen branches looking for an enterprise import that was not
+        # there. tools/editioncheck runs the packages it saw fail a second
+        # time with ee back, and reports which question it actually answered.
+        run: go run ./tools/editioncheck .
 
       - name: No engine package imports ee
         run: |
@@ -1102,7 +1109,6 @@ jobs:
         # compile error, and this checks the artifact anyway, because the thing
         # a customer runs is the binary and not the source tree.
         run: |
-          git checkout -- . 2>/dev/null || true
           cd engine
           CGO_ENABLED=0 go build -o /tmp/af-community ./cmd/af
           if strings /tmp/af-community | grep -E 'antifailure/(antifailure/)?ee/'; then

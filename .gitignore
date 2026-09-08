@@ -140,6 +140,7 @@ runner/artifacts/
 /docscheck
 /docsembed
 /dogfood
+/editioncheck
 /errcheck
 /errgen
 /eventcheck
