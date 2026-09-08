@@ -70,6 +70,23 @@ export interface EntitlementSpec {
    * is indistinguishable from a bug.
    */
   notEnforcedBecause?: string
+  /**
+   * Set for an entitlement whose capability is not in this build at all.
+   *
+   * A third state, and it exists because the two that were here could only
+   * describe this one as a lie. `enforcedAt` naming a symbol would be false,
+   * since no file in this build has anything to enforce; a bare `enforcedAt:
+   * null` would read as "nothing checks this", which is equally false, because
+   * the edition that HAS the capability carries the check right beside it.
+   *
+   * The site is deliberately not named here. This build must not contain the
+   * path of a file it cannot compile: the edition boundary is checked by a grep
+   * over this directory, and a comment naming the other edition's tree would
+   * fail it. So each end holds its own: this flag says the check lives in the
+   * edition that has the feature, and that edition's own catalogue test fails
+   * when the named site does not exist there.
+   */
+  enforcedInTheEditionThatHasIt?: true
 }
 
 const plans = Object.keys(PLAN_QUOTAS)
@@ -173,6 +190,89 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
       'The rate limiter reads ENDPOINT_LIMITS synchronously on the request path and has no ' +
       'database read to hang an override off. Wiring it needs a cache with an invalidation ' +
       'story, which is a separate piece of work rather than a line in this one.',
+  },
+  // -------------------------------------------------------------------------
+  // The licensed features.
+  //
+  // Added 2026-09-08, and the first boolean entries this catalogue has ever
+  // held. `kind: 'boolean'`, `coerce`'s boolean branch and `Entitlements.
+  // boolean()` were all written when the file was and had nothing to point at,
+  // which is the same shape as the thing they now gate: machinery that exists,
+  // compiles, reads as a working feature, and is reached by nothing.
+  //
+  // WHY THEY ARE HERE RATHER THAN IN THE LICENCE. There are two entitlement
+  // authorities in this product and they answer for different installations. A
+  // self hosted engine reads a signed licence key. A hosted organization is
+  // whatever its plan and its overrides say, which is this file. The features
+  // below are enforced in the control plane, so this is the authority that
+  // decides them, and the licence key is the authority for the ones enforced in
+  // the engine. Naming them identically in both places is what makes the two
+  // answers comparable instead of merely coexisting.
+  //
+  // WHY AN OVERRIDE MATTERS MORE HERE THAN ON A NUMBER. A quota override moves
+  // a limit. One of these turns a capability on or off for one organization,
+  // with a reason, a ticket, an expiry and the name of whoever granted it, all
+  // of which the overrides table already carries. That is the shape of the
+  // sales exception this file was written for, and it is also the shape of a
+  // customer withdrawing consent, which is what support_access below is.
+  sso: {
+    kind: 'boolean',
+    description: 'Sign in through a SAML or OIDC provider this organization runs.',
+    byPlan: { free: false, team: false, enterprise: true },
+    enforcedAt: null,
+    enforcedInTheEditionThatHasIt: true,
+    notEnforcedBecause:
+      'The community build has no single sign-on to enforce. The edition that carries the ' +
+      'SAML and OIDC routes checks this entitlement at the point every one of them resolves ' +
+      'an organization, and relaxes the requirement to use them at the same time, so an ' +
+      'organization whose entitlement is withdrawn falls back to signing in with GitHub ' +
+      'rather than being locked out of its own account.',
+  },
+  scim: {
+    kind: 'boolean',
+    description: 'Provision and deprovision members from a directory this organization runs.',
+    byPlan: { free: false, team: false, enterprise: true },
+    enforcedAt: null,
+    enforcedInTheEditionThatHasIt: true,
+    notEnforcedBecause:
+      'The community build has no SCIM endpoints to enforce. The edition that carries them ' +
+      'checks this entitlement in the one function every SCIM route is authenticated by, so ' +
+      'a route added later cannot be the one that forgot.',
+  },
+  rbac: {
+    kind: 'boolean',
+    description: 'Custom roles and per repository scopes, beyond the four built-in roles.',
+    byPlan: { free: false, team: false, enterprise: true },
+    enforcedAt: null,
+    enforcedInTheEditionThatHasIt: true,
+    notEnforcedBecause:
+      'The community build has four fixed roles and no resolver to enforce. The edition that ' +
+      'carries custom roles checks this entitlement inside the resolver itself, which answers ' +
+      '"no opinion" without it, so the built-in role table decides exactly as it does here.',
+  },
+  support_access: {
+    kind: 'boolean',
+    description: 'Whether an Antifailure operator may act as a member of this organization.',
+    // ON FOR EVERY PLAN, AND THAT IS THE DECISION IN THIS ENTRY.
+    //
+    // The impersonation this gates is fully built and was enforced by nothing
+    // but an operator permission: a reason of at least eight characters, an
+    // audit entry the schema makes unskippable, a copy in the customer's own
+    // log, and a session that expires in minutes. Absent says we did not build
+    // it. Ungated says we built it and do not charge for it, and until now the
+    // second was true and nothing said so.
+    //
+    // Selling it is the reading this does NOT take. Charging a customer for our
+    // ability to help them is backwards, and setting free and team to false
+    // would have broken support for every customer on them the day it shipped.
+    // What large customers actually buy here is the opposite: the ability to
+    // REFUSE, on the record, with an expiry. That is an override on this key,
+    // which is why nothing new had to be built to make it possible.
+    //
+    // So the plan values are uniform on purpose and the refusal comes from an
+    // override. Moving them is one line if the commercial answer changes.
+    byPlan: { free: true, team: true, enterprise: true },
+    enforcedAt: 'admin/customers.ts:supportAccessVerdict',
   },
   retentionDays: {
     kind: 'number',

@@ -62,12 +62,69 @@ describe('the entitlement catalogue', () => {
         )
         continue
       }
+      // The third state cannot also name a site here. An entitlement whose
+      // capability is absent from this build has nothing in this build to point
+      // at, so a symbol named alongside the flag would be a symbol that does
+      // something else, which is the exact failure the enforcedAt grep exists
+      // to catch and would be invisible because the grep would find it.
+      assert.equal(
+        spec.enforcedInTheEditionThatHasIt, undefined,
+        `${key} says its capability is in another edition and also names ${spec.enforcedAt} ` +
+          `in this one. One of those is wrong.`,
+      )
       const [file, symbol] = spec.enforcedAt.split(':')
       assert.ok(file && symbol, `${key} has an unreadable enforcedAt: ${spec.enforcedAt}`)
       const source = await readFile(path.join(srcDir, file), 'utf8')
       assert.ok(
         source.includes(symbol),
         `${key} claims to be enforced at ${spec.enforcedAt}, and ${file} never calls ${symbol}`,
+      )
+    }
+  })
+
+  it('an entitlement whose capability is in another edition says so and says why', () => {
+    // The flag is not decoration. Without it a licensed feature enforced in the
+    // enterprise edition is indistinguishable in this catalogue from one
+    // nothing checks anywhere, and those are the two states this whole file was
+    // written to keep apart.
+    let seen = 0
+    for (const [key, spec] of Object.entries(ENTITLEMENTS)) {
+      if (spec.enforcedInTheEditionThatHasIt !== true) continue
+      seen += 1
+      assert.equal(spec.kind, 'boolean', `${key} is a capability and should be a boolean`)
+      assert.equal(
+        spec.enforcedAt, null,
+        `${key} cannot be enforced in this build and in another one`,
+      )
+      assert.ok(
+        spec.notEnforcedBecause && spec.notEnforcedBecause.length > 20,
+        `${key} does not say what the other edition does with it`,
+      )
+    }
+    assert.ok(
+      seen >= 3,
+      `only ${seen} entitlements are marked as living in another edition, and single sign-on, ` +
+        `SCIM and custom roles are all three of them. A count that has dropped means one was ` +
+        `removed rather than enforced.`,
+    )
+  })
+
+  it('a capability entitlement is off for at least one plan, so the gate can refuse', () => {
+    // A boolean that is true for every plan can still be refused by an
+    // override, and support_access is deliberately that shape. What must never
+    // happen is a capability that is true everywhere AND has no site that could
+    // refuse it, because then nothing in the product can ever say no to it.
+    for (const [key, spec] of Object.entries(ENTITLEMENTS)) {
+      if (spec.kind !== 'boolean') continue
+      const values = Object.values(spec.byPlan)
+      const refusable =
+        values.some((v) => v === false) ||
+        spec.enforcedAt !== null ||
+        spec.enforcedInTheEditionThatHasIt === true
+      assert.ok(
+        refusable,
+        `${key} is true on every plan and nothing enforces it, so no input can make it ` +
+          `answer no. That is a catalogue entry rather than an entitlement.`,
       )
     }
   })
