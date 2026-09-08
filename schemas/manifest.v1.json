@@ -1620,6 +1620,23 @@
           "type": "string",
           "maxLength": 253,
           "description": "Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current."
+        },
+        "requires": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "maxProperties": 16,
+          "description": "What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file."
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/runtimeTarget"
+          },
+          "description": "The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed."
         }
       }
     },
@@ -1822,6 +1839,55 @@
           "type": "string",
           "maxLength": 32,
           "description": "Characters the application will not accept."
+        }
+      }
+    },
+    "runtimeTarget": {
+      "title": "Runtime target",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "One place an environment may be placed. A runtime plus the facts about where it is, and the second half is the part no runtime supplies for itself: a kubeconfig context is a name on somebody's laptop and it does not say which region the cluster is in.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
+          "maxLength": 40,
+          "description": "Unique within the manifest. It names the target in the placement decision and in the refusal when none will do."
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "local",
+            "kubernetes"
+          ],
+          "description": "The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts."
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "maxProperties": 16,
+          "description": "What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check."
+        },
+        "domain": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "Wildcard domain for environments placed here. Omitted inherits runtime.domain."
+        },
+        "namespace_prefix": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix."
+        },
+        "kubeconfig_context": {
+          "type": "string",
+          "maxLength": 253,
+          "description": "Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing."
         }
       }
     }

@@ -1123,15 +1123,28 @@ errors:
     docs: enterprise/policy
     retryable: false
     exit_code: 6
+  - code: AF-EE-011
+    area: EE
+    message: "This manifest declares {count} placement targets and {feature} is not licensed here."
+    next_step: "Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved."
+    docs: enterprise/runtimes
+    retryable: false
+    exit_code: 4
 
   # Scheduling
   - code: AF-SCH-001
-    planned: true
     area: SCH
     message: "No runtime satisfies the placement requirement {requirement}."
-    next_step: "Register a runtime that meets it, or relax the requirement in the placement rules."
+    next_step: "Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created."
     docs: enterprise/runtimes
     retryable: false
+    exit_code: 5
+  - code: AF-SCH-003
+    area: SCH
+    message: "No placement target could take this environment: {detail}"
+    next_step: "The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created."
+    docs: enterprise/runtimes
+    retryable: true
     exit_code: 5
   - code: AF-SCH-002
     planned: true

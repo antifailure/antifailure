@@ -65,3 +65,51 @@ func From(ctx context.Context) (Status, bool) {
 	s, ok := ctx.Value(contextKey{}).(Status)
 	return s, ok
 }
+
+// The feature names the engine itself gates on.
+//
+// Strings rather than an import of the licence's own type, for the reason this
+// package exists: the community build cannot resolve the enterprise module. The
+// enterprise module carries a test that these spellings match its own
+// constants, because a rename on one side and not the other would detach the
+// gate silently and the symptom would be a feature that became free.
+const (
+	// FeatureMultiRuntime is placing an environment across more than one
+	// runtime target, matched on tags.
+	FeatureMultiRuntime = "multi_runtime"
+)
+
+// Permits reports whether the licence on this context turns a feature on.
+//
+// This is the engine side of a licence check, and it is deliberately the only
+// shape one takes here. The enterprise binary decides what is permitted at
+// startup and attaches the answer; everything below reads it. A build that
+// attaches nothing permits nothing, so the community edition and an expired
+// licence and a licence for another organization all arrive at the same no
+// without this package knowing the difference between them.
+//
+// Enabled is asked per call rather than once at startup for the reason the
+// policy hook already documents: a licence can lapse while the process runs,
+// and a feature that keeps working until a restart is a feature the customer
+// stopped paying for and cannot turn off.
+func Permits(ctx context.Context, feature string) bool {
+	s, ok := From(ctx)
+	if !ok {
+		return false
+	}
+	return s.Permits(feature)
+}
+
+// Permits reports whether a status carries a feature.
+//
+// A method as well as the function, because the two callers are different: a
+// command that has already read the status asks the value, and code deep in a
+// lifecycle asks the context.
+func (s Status) Permits(feature string) bool {
+	for _, f := range s.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}

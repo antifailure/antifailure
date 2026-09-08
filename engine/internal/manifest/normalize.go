@@ -701,6 +701,30 @@ func normalizeRuntime(m *schema.Manifest) {
 	if r.NamespacePrefix == "" {
 		r.NamespacePrefix = DefaultNamespacePfx
 	}
+
+	// A target inherits everything it does not override, so a fleet of
+	// clusters is one provider line and a list of contexts rather than the
+	// same four settings repeated per target. Inheritance happens here rather
+	// than at placement so that everything downstream, including the validator
+	// and af check's explanation, reads one resolved target and cannot
+	// disagree with the runtime about what it inherited.
+	for i := range r.Targets {
+		t := &r.Targets[i]
+		t.Name = strings.ToLower(strings.TrimSpace(t.Name))
+		if t.Provider == "" {
+			t.Provider = r.Provider
+		}
+		if t.Domain == "" {
+			t.Domain = r.Domain
+		}
+		t.Domain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(t.Domain), "*."))
+		if t.NamespacePrefix == "" {
+			t.NamespacePrefix = DefaultNamespacePfx
+		}
+		if t.KubeconfigContext == "" {
+			t.KubeconfigContext = r.KubeconfigContext
+		}
+	}
 }
 
 func normalizeGitHub(m *schema.Manifest) {
