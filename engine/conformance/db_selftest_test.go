@@ -177,7 +177,11 @@ func runChild(t *testing.T, c child) (bool, string) {
 	if c.behavior != "" {
 		pattern += "/^" + c.behavior + "$"
 	}
-	cmd := exec.Command(os.Args[0], "-test.run", pattern, "-test.v", "-test.timeout", "20m")
+	// Forty minutes rather than twenty, because one behaviour is now allowed
+	// half an hour by itself. A binary timeout below the behaviour's own bound
+	// turns a slow provider into a panic in the child, and the parent reads a
+	// panic as the suite catching a fault it never caught.
+	cmd := exec.Command(os.Args[0], "-test.run", pattern, "-test.v", "-test.timeout", "40m")
 	cmd.Env = append(os.Environ(),
 		childEnv+"=1",
 		faultEnv+"="+string(c.fault),
