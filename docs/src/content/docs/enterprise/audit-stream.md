@@ -112,8 +112,10 @@ The dead letter file is required, and it is the reason the retry is allowed to
 be short. Three attempts, pausing 200ms and then 600ms between them, and the
 entry is appended to that file and flushed before the call returns, in the same
 JSON the receiver would have been given. The measured total, round trips
-included, is in the report `just benchmark` writes. A webhook that posts once and gives up loses an entry every time its
-receiver restarts, and loses it silently. A hole you can replay is not a hole.
+included, is in the report `just benchmark` writes.
+
+A webhook that posts once and gives up loses an entry every time its receiver
+restarts, and loses it silently. A hole you can replay is not a hole.
 
 ### Object store
 
@@ -134,11 +136,16 @@ antifailure/2026/09/07/112233.456789000-golden.published-9f2ca10b.json
 ```
 
 Not a batch and not an append. An object written once can be locked, which is
-what a retention obligation is usually satisfied by, and an appended file has to
-be read, extended and rewritten, which is a race between two teardowns and
-cannot be locked at all. The date is a path so a lifecycle rule and a
-partitioned query both work without anybody parsing a filename. An object is
-never replaced.
+what a retention obligation is usually satisfied by, and an appended file has
+to be read, extended and rewritten, which is a race between two environments
+being torn down and cannot be locked at all. The date is a path so a lifecycle
+rule and a partitioned query both work without anybody parsing a filename. An
+object is never replaced.
+
+Two entries in the same nanosecond are two objects, because the key carries
+eight random characters as well as the time. Without them the second would
+silently replace the first, and an audit log that loses the entries which
+arrived together loses exactly the ones somebody is investigating.
 
 ## What a sink cannot do
 
