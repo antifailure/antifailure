@@ -154,7 +154,7 @@ func main() {
 	// Every listener is started before anything is announced as ready, so a
 	// service that begins its first outbound call the instant it starts finds
 	// a decision rather than a closed port.
-	errs := make(chan error, 4)
+	errs := make(chan error, 4+len(schema.ByteStreamProtocols)+len(engine.Rules()))
 	udp, err := net.ListenPacket("udp", ":53")
 	if err != nil {
 		log.Fatalf("af-proxy: %v", err)
@@ -163,6 +163,17 @@ func main() {
 
 	go func() { errs <- p.listen(":80", p.serveTransparentHTTP) }()
 	go func() { errs <- p.listen(":443", p.serveTransparentTLS) }()
+
+	// The ports that do not carry HTTP. Before these existed a connection to
+	// a message broker or a managed database arrived at this sidecar, found
+	// nothing listening, and failed identically whether its host was allowed
+	// or blocked. See stream.go for what this path can and cannot know.
+	streams := schema.StreamPorts(engine.Rules())
+	for _, proto := range streams {
+		go func() {
+			errs <- p.listen(":"+strconv.Itoa(proto.Port), p.serveStream(proto))
+		}()
+	}
 
 	// The explicit proxy port stays, for clients that do read their proxy
 	// variables. It is the same policy either way; this one can see the full
@@ -187,6 +198,11 @@ func main() {
 		// arrived forwards whatever the application sent, and the only way to
 		// notice is a number that says zero.
 		Credentials: len(cfg.Credentials),
+		// The count of non-HTTP ports answered, so the first line of a
+		// decision log says whether this environment can carry a broker
+		// connection at all rather than leaving it to be discovered by a
+		// timeout.
+		Streams: len(streams),
 	})
 
 	log.Fatalf("af-proxy: %v", <-errs)
@@ -300,11 +316,20 @@ type record struct {
 	Limit string `json:"limit,omitempty"`
 	// Credentials counts the sandbox values loaded, on the ready line.
 	Credentials int `json:"credentials,omitempty"`
+	// Streams counts the non-HTTP ports answered, on the ready line.
+	Streams int `json:"streams,omitempty"`
 	// Pack and Fixture name what answered a mocked request. A mock that
 	// cannot say which fixture produced a response is a mock nobody can
 	// debug.
 	Pack    string `json:"pack,omitempty"`
 	Fixture string `json:"fixture,omitempty"`
+	// Stream marks a decision made on a connection that is not HTTP, where
+	// the host came from the TLS handshake and nothing inside the connection
+	// was read or could be. Recorded as its own field rather than left to be
+	// inferred from Via, because the question a reader asks after an incident
+	// is "how much of this environment's traffic did we never look inside",
+	// and that has to be countable rather than reconstructable from a string.
+	Stream bool `json:"stream,omitempty"`
 	// HostOnly marks a decision made without seeing the path or the method,
 	// which is every HTTPS request until the environment certificate lands.
 	// Recorded rather than assumed away, so a reader can tell the difference

@@ -125,6 +125,18 @@ type Containment struct {
 	// method, which is every HTTPS request until the environment certificate
 	// lands. A rule naming paths could only half apply to one of these.
 	HostOnly int
+	// Stream is how many connections were not HTTP at all, and StreamHosts
+	// names them.
+	//
+	// A separate count from HostOnly, which it is always a subset of, because
+	// the two answer different questions. A host_only HTTPS request was
+	// decided without the path and the sidecar could have read inside it if a
+	// rule had asked. A stream connection could not be read at all, in any
+	// configuration, and the modes that record or replace what travels
+	// through it are refused rather than applied. "We looked at the host" and
+	// "we could never look at anything else" are not the same admission.
+	Stream      int
+	StreamHosts []string
 	// RateLimited and WaitedMs are how many requests the policy held and for
 	// how long in total.
 	RateLimited int
@@ -154,6 +166,10 @@ func Observe(decisions []local.Decision) Containment {
 	c := Containment{Total: len(decisions)}
 	byHost := map[string]*Host{}
 	modes := map[string]map[string]bool{}
+	// A set, so one broker connected to forty times is named once. The
+	// question the list answers is which hosts nothing looked inside, and
+	// that is about hosts rather than about connections.
+	streamed := map[string]bool{}
 
 	for _, d := range decisions {
 		switch d.Mode {
@@ -165,6 +181,12 @@ func Observe(decisions []local.Decision) Containment {
 			c.Mocked++
 		default:
 			c.Refused++
+		}
+		if d.Stream {
+			c.Stream++
+			if d.Host != "" {
+				streamed[d.Host] = true
+			}
 		}
 		if d.HostOnly {
 			c.HostOnly++
@@ -212,6 +234,11 @@ func Observe(decisions []local.Decision) Containment {
 			modes[d.Host][d.Mode] = true
 		}
 	}
+
+	for host := range streamed {
+		c.StreamHosts = append(c.StreamHosts, host)
+	}
+	sort.Strings(c.StreamHosts)
 
 	for host, h := range byHost {
 		for m := range modes[host] {

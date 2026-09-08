@@ -111,6 +111,20 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 	// unreachable too.
 	httpPort := intstr.FromInt32(80)
 	httpsPort := intstr.FromInt32(443)
+	// The ports that do not carry HTTP: a message broker, a managed database,
+	// anything the sidecar decides on the server name in its handshake and
+	// forwards without reading inside. Leaving these out is not the same
+	// failure as leaving out 80 and 443, and it is a worse one to debug: a
+	// NetworkPolicy that does not permit a port DROPS the packet rather than
+	// rejecting it, so the application does not fail, it hangs until its own
+	// connect timeout. The list is the schema's, shared with the sidecar that
+	// listens on it, because two copies of it is how one of them ends up
+	// wrong.
+	streamPorts := make([]networkingv1.NetworkPolicyPort, 0, len(schema.ByteStreamProtocols))
+	for _, proto := range schema.StreamPorts(nil) {
+		port := intstr.FromInt32(int32(proto.Port)) //nolint:gosec // every port in the table is below 65536
+		streamPorts = append(streamPorts, networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &port})
+	}
 
 	meta := func(name string) metav1.ObjectMeta {
 		return metav1.ObjectMeta{
@@ -142,13 +156,13 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 				Egress: []networkingv1.NetworkPolicyEgressRule{{
 					To: []networkingv1.NetworkPolicyPeer{{PodSelector: &proxySelector}},
-					Ports: []networkingv1.NetworkPolicyPort{
+					Ports: append([]networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &proxyPort},
 						{Protocol: &tcp, Port: &httpPort},
 						{Protocol: &tcp, Port: &httpsPort},
 						{Protocol: &udp, Port: &dns},
 						{Protocol: &tcp, Port: &dns},
-					},
+					}, streamPorts...),
 				}},
 			},
 		},

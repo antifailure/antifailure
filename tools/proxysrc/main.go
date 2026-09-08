@@ -34,6 +34,7 @@ import (
 // break that loudly here rather than quietly at somebody's first af up.
 var sources = []string{
 	"pkg/schema/manifest.go",
+	"pkg/schema/stream.go",
 	"internal/policy/policy.go",
 	"cmd/af-proxy/main.go",
 	"cmd/af-proxy/destination.go",
@@ -42,6 +43,7 @@ var sources = []string{
 	"cmd/af-proxy/mitm.go",
 	"cmd/af-proxy/capture.go",
 	"cmd/af-proxy/sandbox.go",
+	"cmd/af-proxy/stream.go",
 	"cmd/af-proxy/limit.go",
 	"cmd/af-proxy/internal.go",
 	"cmd/af-proxy/synth.go",
