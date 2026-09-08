@@ -196,10 +196,23 @@ func privateKeyVectors() []liveVector {
 		{"private key, base64 wrapped", "Private key", encoded(pkcs8)},
 		{"private key, base64 wrapped in a manifest value", "Private key",
 			"      - name: AF_GITHUB_APP_PRIVATE_KEY\n        value: " + encoded(pkcs8) + "\n"},
-		{"private key, base64 wrapped mid blob", "Private key",
+		// The three byte alignments, named, because base64 packs three bytes
+		// into four characters and where the key starts inside that group
+		// decides how its header reads once encoded. The case above is the
+		// aligned one. These are the other two, a key one and two bytes into
+		// the blob that carries it, and a pass that only reads the aligned one
+		// answers for the least interesting third of the problem.
+		{"private key, base64 wrapped one byte in", "Private key",
+			base64.StdEncoding.EncodeToString([]byte("x" + pkcs8))},
+		{"private key, base64 wrapped two bytes in", "Private key",
 			base64.StdEncoding.EncodeToString([]byte("xy" + pkcs8))},
 		{"private key, base64 wrapped with a trailing value", "Private key",
 			encoded(pkcs8) + " " + fake("", 40, base64s)},
+		// No separator in front of it, which is what a run walked backwards
+		// from the marker cannot find the start of. The marker says where the
+		// encoding begins; the characters before it do not.
+		{"private key, base64 wrapped after other base64", "Private key",
+			fake("", 41, base64s) + encoded(pkcs8)},
 	}
 }
 
