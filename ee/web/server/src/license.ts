@@ -22,10 +22,21 @@
 //      field, so there is no negotiation to disagree about. Ed25519 over the
 //      raw payload bytes, and both languages have that primitive natively.
 //   2. ee/license-vectors.json is a corpus of tokens with the verdict each one
-//      must produce. test/license.test.ts here reads it and
-//      ee/engine/license/vectors_test.go reads the same file. A divergence
-//      fails one side or the other on the next run rather than in a customer's
+//      must produce. ee/engine/license/vectors_test.go emits it and
+//      test/vectors.test.ts here reads the same file. A divergence fails one
+//      side or the other on the next run rather than in a customer's
 //      installation.
+//
+//      THIS PARAGRAPH WAS FICTION WHEN IT WAS WRITTEN, and it is recorded
+//      rather than quietly corrected. The corpus did not exist, neither of the
+//      two files it named existed, and the string appeared nowhere in either
+//      suite. It said "reads it" in the present tense while nothing read
+//      anything, in the file whose whole purpose is to name this hazard
+//      honestly. ee/README.md records three claims of exactly this shape and
+//      the lesson written under them is the reason this note stays: a claim
+//      resting on an invented mechanism reads identically to a true one until
+//      somebody goes looking. Building it found a real divergence on the first
+//      run, which is what the paragraph had been promising to prevent.
 //   3. This file is deliberately smaller than the Go one. It does not issue,
 //      does not rotate, and does not persist. It answers one question.
 //
@@ -56,7 +67,12 @@ export type Feature =
   | 'compliance_packs'
   | 'air_gapped'
 
-/** Every feature a licence can carry, sorted, matching license.AllFeatures. */
+/** Every feature a licence can carry, sorted, matching license.AllFeatures.
+ *
+ *  "Matching" is checked rather than asserted: ee/license-vectors.json carries
+ *  the Go side's list and test/vectors.test.ts compares this one against it. It
+ *  used to be a sentence, and a sentence is what the two lists had between them
+ *  for as long as both existed. */
 export const ALL_FEATURES: readonly Feature[] = [
   'air_gapped',
   'audit_stream',
@@ -71,6 +87,24 @@ export const ALL_FEATURES: readonly Feature[] = [
   'sso',
   'support_access',
 ]
+
+/** Features no build enforces anywhere, so a licence naming one permits
+ *  nothing.
+ *
+ *  THE DIVERGENCE THIS EXISTS TO END. The Go reader has always filtered these,
+ *  in Evaluate, by asking license.Shipped. This one did not: it permitted every
+ *  feature a licence named. So the same key made the engine say billing is not
+ *  permitted and the control plane print that it is, in one deployment, to one
+ *  customer, with neither binary aware of the other. It is not reachable through
+ *  the two gates the entry point mounts today, and it IS reachable through the
+ *  startup line that reports what the licence permits right now, which is the
+ *  line an operator reads to check what they bought.
+ *
+ *  The definition is ee/engine/license's notShipped map, which carries the
+ *  reason each one is refused; licensegen prints those and this list does not
+ *  need them. The names are held together by ee/license-vectors.json, which
+ *  carries the Go side's list and a case whose licence names one. */
+export const NOT_SHIPPED: readonly string[] = ['billing', 'enterprise_dashboard']
 
 export interface Claims {
   id: string
@@ -366,12 +400,26 @@ export function evaluate(claims: Claims, ev: Evaluation): Status {
 
   const expired = claims.expiresAt.toUTCString()
   if (ev.now.getTime() >= graceEnds.getTime()) {
-    return statusOf('expired', claims, empty, -daysBetween(graceEnds, ev.now),
+    // Negated through a variable, and zero returned as itself.
+    //
+    // At the exact instant the grace period ends, daysBetween is 0 and `-0` in
+    // JavaScript is a value distinct from `0`: Object.is separates them and so
+    // does a strict comparison in a test. The Go side is an int and has no such
+    // value, so the two implementations answered differently at a boundary that
+    // is reached once per licence. Found by the shared corpus on its first run,
+    // which is what the corpus is for.
+    const behind = daysBetween(graceEnds, ev.now)
+    return statusOf('expired', claims, empty, behind === 0 ? 0 : -behind,
       `This license expired on ${expired} and its grace period has ended. Enterprise features ` +
         `are off and every enterprise setting is preserved; renewing turns them back on unchanged.`)
   }
 
-  const permitted = new Set<string>(claims.features)
+  // Filtered, not copied. A feature this build enforces nowhere is carried in
+  // the claims and never permitted, which is also how an unknown name from a
+  // later release is treated: the licence names something no binary can act on,
+  // and answering true would tell every caller a capability is available when
+  // asking for it does nothing.
+  const permitted = new Set<string>(claims.features.filter((f) => !NOT_SHIPPED.includes(f)))
   let state: State
   let daysLeft: number
   let warning: string
