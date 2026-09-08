@@ -211,14 +211,14 @@ unknown one.`),
 			// What the run sends, and the reason it could not be worked out.
 			// A profile printed beside no comparison is a table of numbers,
 			// and the comparison is the whole point of having recorded it.
-			sent, sendErr := o.SendableRoutes()
+			sendable, sendErr := o.SendableRoutes()
 			reason := ""
 			if sendErr != nil {
 				reason = sendErr.Error()
 			}
 			var cov *traffic.Coverage
 			if sendErr == nil {
-				c := traffic.Compare(sent, *profile)
+				c := traffic.Compare(sendable, *profile)
 				cov = &c
 			}
 
