@@ -474,7 +474,15 @@ func Dial(site Site, network, address string, timeout time.Duration) (net.Conn, 
 // Everything else wants Client, because a transport is where the connection
 // pool lives and a transport per request is a pool of one used once.
 func Transport(site Site) *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	// Asserted rather than type asserted outright. http.DefaultTransport is a
+	// package variable and test code in this repository and outside it does
+	// replace it, and a panic in the one function every outbound client in the
+	// product goes through is a poor way to find that out.
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	t := base.Clone()
 	t.DialContext = DialContext(site)
 	return t
 }
