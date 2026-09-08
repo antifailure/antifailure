@@ -1782,7 +1782,7 @@ func (v *validator) placement(r *schema.Runtime) {
 		var offered []string
 		satisfied := false
 		for _, t := range r.Targets {
-			if got, ok := t.Tags[key]; ok {
+			if got, ok := t.TargetTags[key]; ok {
 				if got == want {
 					satisfied = true
 					break

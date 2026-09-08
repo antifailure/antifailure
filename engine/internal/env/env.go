@@ -904,7 +904,7 @@ func (o *Orchestrator) placement(ctx context.Context) (schema.RuntimeTarget, err
 	runtimes := make([]scheduler.Runtime, 0, len(cfg.Targets))
 	for _, t := range cfg.Targets {
 		runtimes = append(runtimes, scheduler.Runtime{
-			Name: t.Name, Tags: t.Tags,
+			Name: t.Name, Tags: t.TargetTags,
 			// One environment's worth, and healthy, because those are the two
 			// facts this caller has: it is placing one environment and it has
 			// nothing that reports otherwise. They are constants rather than
@@ -1028,7 +1028,7 @@ func unmetRequirement(cfg *schema.Runtime) (string, bool) {
 	for _, k := range keys {
 		satisfied := false
 		for _, t := range cfg.Targets {
-			if t.Tags[k] == cfg.Requires[k] {
+			if t.TargetTags[k] == cfg.Requires[k] {
 				satisfied = true
 				break
 			}
@@ -1585,7 +1585,7 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 	// succeeded.
 	if m.Runtime != nil && len(m.Runtime.Targets) > 0 {
 		if target, err := o.placement(ctx); err == nil {
-			req.Region = target.Tags[schema.RegionTag]
+			req.Region = target.TargetTags[schema.RegionTag]
 		}
 	}
 	if m.Database != nil && m.Database.Provider != "" {

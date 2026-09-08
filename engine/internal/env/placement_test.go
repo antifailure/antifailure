@@ -48,7 +48,7 @@ func licensed() context.Context {
 func target(name, region string, provider schema.RuntimeProvider) schema.RuntimeTarget {
 	return schema.RuntimeTarget{
 		Name: name, Provider: provider,
-		Tags: map[string]string{schema.RegionTag: region},
+		TargetTags: map[string]string{schema.RegionTag: region},
 	}
 }
 
@@ -170,12 +170,12 @@ func TestNewRuntime_BuildsTheRuntimeTheChosenTargetNames(t *testing.T) {
 				Name: "cluster", Provider: schema.RuntimeKubernetes,
 				Domain: "eu.example.com", NamespacePrefix: "af",
 				KubeconfigContext: "no-such-context-in-any-kubeconfig",
-				Tags:              map[string]string{schema.RegionTag: "us-east-1"},
+				TargetTags:        map[string]string{schema.RegionTag: "us-east-1"},
 			},
 			{
 				Name: "laptop", Provider: schema.RuntimeLocal,
 				Domain: "localhost", NamespacePrefix: "af",
-				Tags: map[string]string{schema.RegionTag: "eu-west-1"},
+				TargetTags: map[string]string{schema.RegionTag: "eu-west-1"},
 			},
 		},
 	})

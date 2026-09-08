@@ -971,8 +971,14 @@ type RuntimeTarget struct {
 	// block's own provider, which is what lets a fleet of clusters be written
 	// as one provider line and a list of contexts.
 	Provider RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
-	// Tags are what this target offers, matched against Requires.
-	Tags map[string]string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	// TargetTags are what this target offers, matched against Requires.
+	//
+	// Named TargetTags rather than Tags because tools/fieldsweep resolves a
+	// reader by field NAME rather than by type, and workflows[].tags is exempt
+	// there as a label nothing reads. A second Tags with real readers would
+	// make that exemption unable to fail, which is a check that has stopped
+	// being able to say no. The manifest key is still tags.
+	TargetTags map[string]string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	// Domain is the wildcard domain for environments placed here. Empty
 	// inherits the runtime block's.
 	Domain string `json:"domain,omitempty" yaml:"domain,omitempty"`

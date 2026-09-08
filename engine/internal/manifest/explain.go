@@ -298,7 +298,7 @@ func Explain(m *schema.Manifest, width int) string {
 				chosen = "  <- placed here"
 			}
 			fmt.Fprintf(&b, "  target       %s\n", value(fmt.Sprintf("%s, %s%s%s",
-				t.Name, t.Provider, describeTags(t.Tags), chosen), 15, width))
+				t.Name, t.Provider, describeTags(t.TargetTags), chosen), 15, width))
 		}
 	}
 	b.WriteString("\n")
@@ -586,7 +586,7 @@ func chosenTarget(r *schema.Runtime) string {
 	for _, t := range r.Targets {
 		satisfied := true
 		for k, want := range r.Requires {
-			if t.Tags[k] != want {
+			if t.TargetTags[k] != want {
 				satisfied = false
 				break
 			}

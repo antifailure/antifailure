@@ -225,7 +225,7 @@ runtime:
       tags:
         region: eu-west-1
 `)
-	require.Equal(t, "eu-west-1", m.Runtime.Targets[0].Tags[schema.RegionTag])
+	require.Equal(t, "eu-west-1", m.Runtime.Targets[0].TargetTags[schema.RegionTag])
 }
 
 func TestParse_AcceptsAManifestWithNoPlacementAtAll(t *testing.T) {
