@@ -3266,11 +3266,7 @@ func scanEncoded(text, where string) []Finding {
 			at := i + idx
 			i = at + len(marker)
 
-			lo, hi := base64Run(text, at)
-			if hi-lo > maxEncoded {
-				continue
-			}
-			decoded, ok := decodeRun(text[lo:hi])
+			decoded, ok := decodeFrom(text, at)
 			if !ok {
 				continue
 			}
@@ -3286,54 +3282,70 @@ func scanEncoded(text, where string) []Finding {
 	return out
 }
 
-// base64Run returns the bounds of the base64 run containing at.
-func base64Run(text string, at int) (int, int) {
-	lo := at
-	for lo > 0 && base64Rune(rune(text[lo-1])) {
-		lo--
-	}
+// base64End returns where the base64 run containing at stops.
+func base64End(text string, at int) int {
 	hi := at
 	for hi < len(text) && base64Rune(rune(text[hi])) {
 		hi++
 	}
-	return lo, hi
+	return hi
 }
 
-// decodeRun decodes a base64 run whose start may not be the start of the
-// encoding.
+// decodeFrom decodes the encoding the marker at at belongs to.
 //
-// Four attempts, because the run found by walking backwards over base64
-// characters can begin up to three characters inside a group: a marker for one
-// of the two offset alignments sits behind bytes that are themselves base64
-// characters. Whichever attempt yields a PEM private key is the right one, and
-// nothing else is accepted, so a blob that decodes to arbitrary bytes is not a
-// finding.
-func decodeRun(run string) (string, bool) {
-	for k := 0; k < 4 && k < len(run); k++ {
-		body := run[k:]
+// The start is derived from the marker rather than found by walking backwards
+// over base64 characters, and that is the difference between working and
+// nearly working. base64 encodes three bytes into four characters, so a marker
+// for the two offset alignments begins exactly four characters into the
+// encoding and a marker for the aligned case begins at its start. Two
+// candidates cover all three, and neither depends on what sits in front: a key
+// pasted straight after other base64, with no separator, has no run boundary to
+// walk back to and the walk would begin decoding from the wrong byte.
+//
+// Only a decode that yields a PEM private key is accepted, and that is what
+// picks between the candidates rather than a nicety on top. The first candidate
+// decodes cleanly for an offset key too, into bytes shifted by three, which
+// look like base64 and are not the key. Taking the first thing that decodes
+// would return those.
+//
+// Nothing checks what sits in front of the second candidate, and that is
+// deliberate. A guard was written here to require those four characters to be
+// base64, and breaking it changed no answer: a character base64 has no meaning
+// for makes the decode itself fail, and a decode that fails is already a
+// candidate skipped. A check that cannot say no is worse than no check,
+// because it reads as protection.
+func decodeFrom(text string, at int) (string, bool) {
+	hi := base64End(text, at)
+	for _, start := range []int{at, at - 4} {
+		if start < 0 || hi-start > maxEncoded {
+			continue
+		}
+		body := text[start:hi]
 		body = body[:len(body)-len(body)%4]
 		if len(body) < 4 {
 			continue
 		}
 		decoded, err := base64.StdEncoding.DecodeString(body)
 		if err != nil {
-			// A run that carries padding in the middle, which happens when two
+			// A run carrying padding in the middle, which happens when two
 			// values sit side by side, decodes up to that point. Everything
 			// before the padding is still worth reading.
-			if cut := strings.IndexByte(body, '='); cut > 0 {
-				body = body[:cut-cut%4]
-				if len(body) < 4 {
-					continue
-				}
-				decoded, err = base64.StdEncoding.DecodeString(body)
+			cut := strings.IndexByte(body, '=')
+			if cut <= 0 {
+				continue
 			}
+			body = body[:cut-cut%4]
+			if len(body) < 4 {
+				continue
+			}
+			decoded, err = base64.StdEncoding.DecodeString(body)
 			if err != nil {
 				continue
 			}
 		}
-		text := string(decoded)
-		if strings.Contains(text, "-----BEGIN") && strings.Contains(text, "PRIVATE KEY") {
-			return text, true
+		out := string(decoded)
+		if strings.Contains(out, "-----BEGIN") && strings.Contains(out, "PRIVATE KEY") {
+			return out, true
 		}
 	}
 	return "", false
