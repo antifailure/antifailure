@@ -129,6 +129,10 @@ naming every rule.
 | `sandbox` | **refused**, it substitutes a test credential and still forwards to the real host |
 | `synth` | **refused**, it asks a model provider to invent the response |
 
+The same applies to `egress.default`, which is the mode every host no rule names
+gets. A manifest with `default: allow` and no rules at all reaches the whole
+internet, and it is refused for exactly that.
+
 `sandbox` is the one people are surprised by. Substituting a test credential
 does not stop the connection being made or the request leaving; it changes what
 the request carries.

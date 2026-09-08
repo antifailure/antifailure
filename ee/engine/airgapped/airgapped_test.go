@@ -147,6 +147,33 @@ func TestTheHookRefusesEveryEgressModeThatWouldLeaveTheNetwork(t *testing.T) {
 	}
 }
 
+func TestTheHookRefusesAManifestWithNoRulesAndAnOpenDefault(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	// The shape that would have got past a hook reading only the rules. It is
+	// a valid manifest, the validator only warns about it, and it reaches the
+	// whole internet.
+	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped), extension.EnvironmentRequest{
+		EgressDefault: "allow",
+	})
+	require.Error(t, err, "egress default allow with no rules reaches everything")
+	require.Contains(t, err.Error(), "every host no rule names")
+	require.Contains(t, err.Error(), "1 egress rule ")
+}
+
+func TestTheHookLeavesADefaultThatReachesNothing(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	for _, mode := range []string{"", "block", "capture", "mock"} {
+		require.NoErrorf(t, airgapped.Hook{}.Check(
+			licensed(license.FeatureAirGapped),
+			extension.EnvironmentRequest{EgressDefault: mode}),
+			"default %q is answered inside the environment", mode)
+	}
+}
+
 func TestTheHookLeavesTheModesThatReachNothing(t *testing.T) {
 	clean(t)
 	airgap.Seal("a test")

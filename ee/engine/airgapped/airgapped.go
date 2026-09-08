@@ -111,6 +111,15 @@ func (Hook) Check(ctx context.Context, req extension.EnvironmentRequest) error {
 
 	type offence struct{ host, mode, why string }
 	var offences []offence
+	// The default first. A manifest with `egress: {default: allow}` and no
+	// rules at all reaches the whole internet, EgressModes is empty for it, and
+	// a hook that only walked the rules would have called that environment
+	// contained. The manifest validator only warns about this shape, so it is
+	// not a theoretical one.
+	if why, reaching := reachingModes[strings.ToLower(req.EgressDefault)]; reaching {
+		offences = append(offences, offence{
+			host: "every host no rule names", mode: req.EgressDefault, why: why})
+	}
 	for host, mode := range req.EgressModes {
 		if why, reaching := reachingModes[strings.ToLower(mode)]; reaching {
 			offences = append(offences, offence{host: host, mode: mode, why: why})

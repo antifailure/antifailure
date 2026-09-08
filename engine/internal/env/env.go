@@ -1601,6 +1601,9 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 		req.Provider = string(m.Database.Provider)
 	}
 	if m.Egress != nil {
+		// The default first, because a manifest with no rules at all still has
+		// one and it decides every host nothing names.
+		req.EgressDefault = string(m.Egress.Default)
 		req.EgressModes = make(map[string]string, len(m.Egress.Rules))
 		for _, rule := range m.Egress.Rules {
 			req.EgressHosts = append(req.EgressHosts, rule.Host)
