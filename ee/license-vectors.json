@@ -1,0 +1,347 @@
+{
+  "note": "The licence corpus, shared by the Go reader in ee/engine/license and the TypeScript reader in ee/web/server/src/license.ts. Both must produce these verdicts. Emitted by ee/engine/license/vectors_test.go and read by ee/web/server/test/vectors.test.ts. Regenerate with 'GOWORK=off go test ./license -run TestVectors -update-vectors' from ee/engine. The tokens are fixtures: regenerating recomputes the verdicts and leaves them alone, so a semantic change shows as a diff of verdicts. To change what a case's licence says, delete that case's token and regenerate. There is no signing key in this repository; 'keys' is the public half, in the form AF_LICENSE_PUBLIC_KEYS takes.",
+  "keys": "corpus-1=1RWy8EBJzsEWSZcJI+EYo0u3Rxs5yKIwVSan9uw4WfI=",
+  "all_features": [
+    "air_gapped",
+    "audit_stream",
+    "billing",
+    "compliance_packs",
+    "enterprise_dashboard",
+    "enterprise_secrets",
+    "multi_runtime",
+    "policy_enforcement",
+    "rbac",
+    "scim",
+    "sso",
+    "support_access"
+  ],
+  "not_shipped": [
+    "billing",
+    "enterprise_dashboard"
+  ],
+  "cases": [
+    {
+      "name": "current license, two features, inside the term",
+      "why": "The ordinary case. If the two sides disagree here nothing else in the corpus matters.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ],
+      "seats": [
+        {
+          "current": 0,
+          "exceeded": false
+        },
+        {
+          "current": 24,
+          "exceeded": false
+        },
+        {
+          "current": 25,
+          "exceeded": true
+        },
+        {
+          "current": 26,
+          "exceeded": true
+        }
+      ]
+    },
+    {
+      "name": "the organization is compared without case or surrounding space",
+      "why": "An operator pastes a slug with a trailing space or a capital. Refusing that is a support ticket, and one side trimming while the other did not would refuse a licence that is fine.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiIgIEFDTUUgIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.-e2p1mWkBrZW7GL6LiBaxHXfi2S-n14el-ps826bYrz4_hKpZMH2ixo5WhvkhHZ-zJ0EWxwBHuwJuurd_TfIBA",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "a license issued to somebody else",
+      "why": "This is what stops a key being passed around, so both binaries have to refuse it and neither may permit a feature while doing so.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "globex",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "wrong_org",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "the instant of expiry is not still active",
+      "why": "An off by one at the boundary is the most likely place two implementations differ, and it is invisible for a year.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2027-06-01T00:00:00Z",
+      "refusal": "",
+      "state": "grace",
+      "days_left": 14,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "expired, inside the grace period",
+      "why": "Expiry is an ordinary commercial event and the software keeps working. A side that fell straight to expired would switch a paying customer off two weeks early.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2027-06-04T00:00:00Z",
+      "refusal": "",
+      "state": "grace",
+      "days_left": 11,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "the instant the grace period ends is expired",
+      "why": "The other boundary, for the same reason as the first.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2027-06-15T00:00:00Z",
+      "refusal": "",
+      "state": "expired",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "expired, past the grace period, permits nothing",
+      "why": "The state a lapsed customer is actually in. Settings are preserved and features are off, and a side that still permitted them would be giving the product away.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2027-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "expired",
+      "days_left": -16,
+      "honoured": false,
+      "enabled": [],
+      "seats": [
+        {
+          "current": 0,
+          "exceeded": false
+        },
+        {
+          "current": 26,
+          "exceeded": false
+        }
+      ]
+    },
+    {
+      "name": "a license that carries its own grace period",
+      "why": "grace_days is optional and zero means the default. A side reading zero as no grace would cut a customer off on the day.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJncmFjZV9kYXlzIjo0NSwia2lkIjoiY29ycHVzLTEifQ.dCeu7fTEB3ZV1iJ2S4loutV8r7uS7-nISagvmkCReT9No8fYD5MpEqfqQ7YDi0pmvLFQYhptWrdFo9WfOuMPCQ",
+      "org": "acme",
+      "now": "2027-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "grace",
+      "days_left": 15,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "revoked",
+      "why": "Revocation is consulted from a list the operator supplies and there is no fetch. It has to beat everything else, including a licence that is otherwise current.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "revoked": [
+        "lic-corpus"
+      ],
+      "refusal": "",
+      "state": "revoked",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "the clock was rolled back past the tolerance",
+      "why": "A rolled back clock makes an expired licence look current, which is exactly what moving it is for. The check has to come before expiry on both sides.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "last_seen": "2026-08-01T00:00:00Z",
+      "refusal": "",
+      "state": "clock_rollback",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "a clock inside the hour of tolerance is not a rollback",
+      "why": "Ordinary time synchronisation moves a clock by seconds and a resumed virtual machine by more. A side with no tolerance would switch enterprise features off on an ntp step.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "last_seen": "2026-07-01T00:30:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "a license naming a feature this build does not ship",
+      "why": "THE DIVERGENCE THIS CORPUS WAS WRITTEN AFTER FINDING. The engine filters a feature it enforces nowhere and the control plane did not, so one binary said billing was permitted and the other said it was not, for the same key, in the same deployment.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIiwiYmlsbGluZyJdLCJzZWF0cyI6MjUsImlzc3VlZF9hdCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwiZXhwaXJlc19hdCI6IjIwMjctMDYtMDFUMDA6MDA6MDBaIiwia2lkIjoiY29ycHVzLTEifQ.4h0XX1VJMSanSRAjoRMKmFv1-7bbDWpPGzsqT5n3sYrHnq-lV0Ffy_siwbeBTg518SgRJTv2knBh8CzBt0Q-Bw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "a license naming a feature from a later release",
+      "why": "The feature set is closed at issue time, not at read time. Refusing the whole licence over one unknown name would turn every ordering of upgrade and renewal into an outage for the features the customer did buy.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIiwidGVsZXBvcnRhdGlvbiJdLCJzZWF0cyI6MjUsImlzc3VlZF9hdCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwiZXhwaXJlc19hdCI6IjIwMjctMDYtMDFUMDA6MDA6MDBaIiwia2lkIjoiY29ycHVzLTEifQ.x9U-rHwgdblg38quvVQvutT-bYm7oDF7j1FWC6ICEkYr3WBk7y8CwcnxPu3SPggOEZwHM3byF-QXBSTBxm6qBQ",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "unlimited seats is zero, not nobody",
+      "why": "Zero reading as a limit of none would lock every customer on an unmetered licence out of their own directory.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjowLCJpc3N1ZWRfYXQiOiIyMDI2LTA2LTAxVDAwOjAwOjAwWiIsImV4cGlyZXNfYXQiOiIyMDI3LTA2LTAxVDAwOjAwOjAwWiIsImtpZCI6ImNvcnB1cy0xIn0.FQgQxlltKDvVgo8cAtMqWvhBb1jyz2qImqW-Ud5OsyVFhUzbOeMMUoNYmbNxlpVagpXB_fBGCALAo9AQH9-hDA",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ],
+      "seats": [
+        {
+          "current": 0,
+          "exceeded": false
+        },
+        {
+          "current": 1000,
+          "exceeded": false
+        }
+      ]
+    },
+    {
+      "name": "a trial license is still a license",
+      "why": "The trial flag changes what an operator is told and must not change what is permitted.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJ0cmlhbCI6dHJ1ZSwia2lkIjoiY29ycHVzLTEifQ.s0efurfgcqddtis4P7HVxhpiVeGg3CwJXFMTEvrxAhgXG4EJgYsIc1t1iM5ZmRABSpDLozKU2GBCZ9-n6BY4AQ",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    },
+    {
+      "name": "signed by a key this installation does not trust",
+      "why": "Distinct from tampered, because the two send an operator to two different places: one to ask for a licence signed by a current key, the other to suspect the file.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iXSwic2VhdHMiOjAsImlzc3VlZF9hdCI6IjIwMjYtMDYtMDFUMDA6MDA6MDBaIiwiZXhwaXJlc19hdCI6IjIwMjctMDYtMDFUMDA6MDA6MDBaIiwia2lkIjoibm90LXRydXN0ZWQifQ.oV8PEmTtmv_8MivJ2wzQtnStLn6itoVJyiqBtTmXqwG9_o69sYMWzxboKHcw-ByZ8rjSoIaPH9K1oM8JJEHiAQ",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "unknown_key",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "the payload was edited after signing",
+      "why": "The one property the wire format exists to have.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21mIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "tampered",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "not a license at all",
+      "why": "Somebody pastes the wrong thing into a deployment. Both sides refuse as malformed rather than as tampered, because tampered sends a reader looking for an attacker.",
+      "token": "not-a-license",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "malformed",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "the prefix is right and the rest is not base64url",
+      "why": "A truncated or re-encoded paste. Node's base64url decoder discards rubbish rather than refusing it, so this is the case where a round trip check on one side and none on the other would produce two different verdicts.",
+      "token": "aflic_not!base64.also!not",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "malformed",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "one part, no dot",
+      "why": "The shape of a licence cut at a line break in an email.",
+      "token": "aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMDowMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "malformed",
+      "days_left": 0,
+      "honoured": false,
+      "enabled": []
+    },
+    {
+      "name": "whitespace and newlines survive the paste",
+      "why": "A licence copied out of an email arrives wrapped. Refusing that is a support ticket rather than a security property, and both sides have to be equally forgiving.",
+      "token": "  aflic_eyJpZCI6ImxpYy1jb3JwdXMiLCJvcmciOiJhY21lIiwicGxhbiI6ImVudGVycHJpc2UiLCJmZWF0dXJlcyI6WyJzc28iLCJzY2ltIl0sInNlYXRzIjoyNSwiaXNzdWVkX2F0IjoiMjAyNi0wNi0wMVQwMDowMD\n  owMFoiLCJleHBpcmVzX2F0IjoiMjAyNy0wNi0wMVQwMDowMDowMFoiLCJraWQiOiJjb3JwdXMtMSJ9.xj4Z8HqKtnZMlH4tQ7QaURsQQgnjWycTpQ0hiBD5wsE2aXlR4Ph5J2vGNF_SyWSmjxuCOgBbRMZNxG8H-PjvBw\n",
+      "org": "acme",
+      "now": "2026-07-01T00:00:00Z",
+      "refusal": "",
+      "state": "active",
+      "days_left": 335,
+      "honoured": true,
+      "enabled": [
+        "scim",
+        "sso"
+      ]
+    }
+  ]
+}
