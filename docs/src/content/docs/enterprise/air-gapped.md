@@ -87,7 +87,7 @@ recorded with the site that made it.
 | the service readiness probe | the environment, over loopback |
 | the webhook delivery | a service in the environment |
 | the doctor reachability check | whatever it was asked about |
-| the enterprise secret store | AWS, GCP, Azure or Vault |
+| the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
 | the container image pull | the registry the image reference names |
 | the container image build | Docker Hub, for the sidecar's base image |

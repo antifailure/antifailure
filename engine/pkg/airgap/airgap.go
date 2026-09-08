@@ -87,7 +87,7 @@ const (
 	SiteServiceProbe    Site = "the service readiness probe"
 	SiteWebhookDelivery Site = "the webhook delivery"
 	SiteDoctor          Site = "the doctor reachability check"
-	SiteSecretStore     Site = "the enterprise secret store"
+	SiteCloudAuth       Site = "the cloud credential path"
 	SiteConformance     Site = "the runtime conformance suite"
 	SiteImagePull       Site = "the container image pull"
 	SiteImageBuild      Site = "the container image build"

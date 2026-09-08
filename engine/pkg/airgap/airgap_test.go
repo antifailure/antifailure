@@ -98,7 +98,7 @@ func TestSealedWhatTheOperatorNamedIsReachable(t *testing.T) {
 
 	require.NoError(t, airgap.Check(airgap.SiteImagePull, "tcp", "registry.internal:5000"))
 	require.NoError(t, airgap.Check(airgap.SiteImagePull, "tcp", "10.4.0.9:5000"))
-	require.NoError(t, airgap.Check(airgap.SiteSecretStore, "tcp", "vault.internal:8200"),
+	require.NoError(t, airgap.Check(airgap.SiteCloudAuth, "tcp", "vault.internal:8200"),
 		"a bare hostname permits every port on it")
 	require.Empty(t, airgap.Refusals())
 
