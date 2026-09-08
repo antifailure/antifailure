@@ -109,9 +109,10 @@ entries on an open endpoint accepts audit entries from anybody, and a forged
 entry in an audit log is worse than a missing one.
 
 The dead letter file is required, and it is the reason the retry is allowed to
-be short. Three attempts over about a second and a half, then the entry is
-appended to that file and flushed, in the same JSON the receiver would have
-been given. A webhook that posts once and gives up loses an entry every time its
+be short. Three attempts, pausing 200ms and then 600ms between them, and the
+entry is appended to that file and flushed before the call returns, in the same
+JSON the receiver would have been given. The measured total, round trips
+included, is in the report `just benchmark` writes. A webhook that posts once and gives up loses an entry every time its
 receiver restarts, and loses it silently. A hole you can replay is not a hole.
 
 ### Object store
