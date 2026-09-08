@@ -394,6 +394,25 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 		for _, svc := range parseCompose(body) {
 			name := sanitizeServiceName(svc.name)
 
+			// A cloud emulator in compose is not a service to build either,
+			// and it is the clearest statement a repository makes about which
+			// cloud it talks to. Checked before infraKind, because
+			// fake-gcs-server and MinIO are both object stores and only one of
+			// them is an emulator standing in for a named cloud service.
+			if cloud, product := emulatorCloud(svc.image); cloud != "" {
+				out = append(out, Finding{
+					Kind: KindEmulator, Subject: cloud, Value: svc.image,
+					Confidence: High, Evidence: p,
+					Detail: fmt.Sprintf("%s runs %s, which answers for %s.", p, product, cloudDisplayName(cloud)),
+					Extra: map[string]string{
+						"product":  product,
+						"service":  svc.name,
+						"services": svc.envValues["SERVICES"],
+					},
+				})
+				continue
+			}
+
 			// A database or queue in compose is infrastructure the environment
 			// provides, not a service to build. Recognising it is how the
 			// database provider gets chosen without asking.
@@ -403,6 +422,21 @@ func (a *ComposeAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, error)
 					Confidence: High, Evidence: p,
 					Detail: fmt.Sprintf("%s runs %s as the %s.", p, svc.image, kind),
 				})
+				// A store beside the primary needs a stance, and until this
+				// finding existed every classification other than postgres,
+				// mysql and mongodb was made and then discarded by
+				// mergeDatabase. The compose service's own name travels with
+				// it, because that is what the developer calls the store and
+				// renaming it to the engine would make the manifest describe
+				// a store they do not recognise.
+				if engine := datastoreEngineOf(kind); engine != "" {
+					out = append(out, Finding{
+						Kind: KindDatastore, Subject: engine, Value: svc.image,
+						Confidence: High, Evidence: p,
+						Detail: fmt.Sprintf("%s runs %s as %s.", p, svc.image, svc.name),
+						Extra:  map[string]string{"service": svc.name},
+					})
+				}
 				continue
 			}
 
@@ -455,6 +489,29 @@ type composeService struct {
 	command      string
 	dependsOn    []string
 	envNames     []string
+	// envValues holds the values as well as the names, for the handful of
+	// variables whose value is the finding. LocalStack's SERVICES is the
+	// case this exists for: it names the AWS services the application uses,
+	// declared by the developer, and it is better evidence than a dependency
+	// list because it is what they configured rather than what they installed.
+	envValues map[string]string
+}
+
+// setEnv records one compose environment entry, name and value.
+func (c *composeService) setEnv(name, value string) {
+	if name == "" {
+		return
+	}
+	c.envNames = append(c.envNames, name)
+	if value == "" {
+		return
+	}
+	if c.envValues == nil {
+		c.envValues = map[string]string{}
+	}
+	if _, exists := c.envValues[name]; !exists {
+		c.envValues[name] = value
+	}
 }
 
 // parseCompose reads the fields detection needs with an indentation aware
@@ -538,14 +595,12 @@ func parseCompose(body string) []composeService {
 			case "depends_on":
 				cur.dependsOn = append(cur.dependsOn, strings.TrimSuffix(item, ":"))
 			case "environment":
-				if n := envNameOf(item); n != "" {
-					cur.envNames = append(cur.envNames, n)
-				}
+				cur.setEnv(envPair(item))
 			}
 		case section == "depends_on" && strings.HasSuffix(trimmed, ":"):
 			cur.dependsOn = append(cur.dependsOn, strings.TrimSuffix(trimmed, ":"))
 		case section == "environment" && key != "":
-			cur.envNames = append(cur.envNames, key)
+			cur.setEnv(key, strings.Trim(value, `"'`))
 		default:
 			if key != "" {
 				section = ""
@@ -584,13 +639,21 @@ func containerPort(spec string) int {
 }
 
 func envNameOf(item string) string {
+	name, _ := envPair(item)
+	return name
+}
+
+// envPair splits a compose environment list entry into its name and value.
+// An entry with no equals sign passes the variable through from the host, so
+// the name is known and the value is not.
+func envPair(item string) (name, value string) {
 	if i := strings.IndexByte(item, '='); i > 0 {
-		return item[:i]
+		return item[:i], strings.Trim(item[i+1:], `"'`)
 	}
 	if item != "" && !strings.ContainsAny(item, " \t:") {
-		return item
+		return item, ""
 	}
-	return ""
+	return "", ""
 }
 
 // infraKind recognises an image as infrastructure rather than application code.
@@ -600,12 +663,7 @@ func infraKind(image string) string {
 		return ""
 	}
 	// Strip a registry prefix and a tag so that ghcr.io/x/postgres:16 matches.
-	base := l
-	if i := strings.LastIndexByte(base, '/'); i >= 0 {
-		base = base[i+1:]
-	}
-	base = strings.SplitN(base, ":", 2)[0]
-	base = strings.SplitN(base, "@", 2)[0]
+	base := imageBase(l)
 
 	switch {
 	case strings.Contains(base, "postgres"), strings.Contains(base, "pgvector"),
@@ -620,19 +678,72 @@ func infraKind(image string) string {
 	case strings.Contains(base, "rabbitmq"):
 		return "rabbitmq"
 	case strings.Contains(base, "elasticsearch"), strings.Contains(base, "opensearch"):
-		return "search"
+		return "elasticsearch"
 	case strings.Contains(base, "minio"):
 		return "objectstore"
 	case strings.Contains(base, "clickhouse"):
 		return "clickhouse"
+	// Kafka was not recognised at all, which is why a compose file running one
+	// produced no finding of any kind rather than a classification that was
+	// then dropped. cp-kafka is Confluent's image and redpanda is the
+	// protocol compatible one, so both answer to the same stance.
+	case strings.Contains(base, "kafka"), strings.Contains(base, "redpanda"):
+		return "kafka"
 	}
 	return ""
+}
+
+// emulatorCloud recognises an image as a cloud emulator and names the cloud it
+// answers for.
+//
+// A compose file running LocalStack is the strongest evidence there is that
+// the application talks to AWS, stronger than a dependency name: somebody has
+// already gone to the trouble of standing one up and pointing the application
+// at it. It is also the thing this product exists to remove, because reaching
+// an emulator that way costs an endpoint override, and the override means the
+// code under test is not the code that ships.
+//
+// Recognising the image does two things. The emulator is not a service to
+// build, which it was in danger of becoming as soon as it carried a port or a
+// command; and the cloud it answers for gets its rules named rather than left
+// to a refusal that says no rule matches.
+func emulatorCloud(image string) (cloud, product string) {
+	base := imageBase(image)
+	switch {
+	case strings.Contains(base, "localstack"):
+		return "aws", "LocalStack"
+	case strings.Contains(base, "moto"):
+		return "aws", "moto"
+	case strings.Contains(base, "elasticmq"):
+		return "aws", "ElasticMQ"
+	case strings.Contains(base, "azurite"):
+		return "azure", "Azurite"
+	case strings.Contains(base, "fake-gcs-server"):
+		return "gcp", "fake-gcs-server"
+	case strings.Contains(base, "pubsub-emulator"), strings.Contains(base, "gcloud-pubsub"):
+		return "gcp", "the Pub/Sub emulator"
+	}
+	return "", ""
+}
+
+// imageBase strips a registry prefix, a tag and a digest so that
+// ghcr.io/x/localstack:3.4 and localstack/localstack@sha256:... both match.
+func imageBase(image string) string {
+	base := strings.ToLower(image)
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.SplitN(base, ":", 2)[0]
+	base = strings.SplitN(base, "@", 2)[0]
+	return base
 }
 
 func isInfraName(name string) bool {
 	switch strings.ToLower(name) {
 	case "db", "database", "postgres", "postgresql", "pg", "redis", "cache",
-		"mysql", "mongo", "mongodb", "rabbitmq", "queue", "elasticsearch", "minio":
+		"mysql", "mongo", "mongodb", "rabbitmq", "queue", "elasticsearch", "minio",
+		"clickhouse", "kafka", "redpanda", "opensearch", "valkey",
+		"localstack", "azurite", "elasticmq", "moto", "pubsub", "fake-gcs-server":
 		return true
 	}
 	return false

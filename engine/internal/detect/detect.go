@@ -70,11 +70,22 @@ func (c Confidence) String() string {
 type Kind string
 
 const (
-	KindService    Kind = "service"
-	KindPort       Kind = "port"
-	KindCommand    Kind = "command"
-	KindBuild      Kind = "build"
-	KindDatabase   Kind = "database"
+	KindService  Kind = "service"
+	KindPort     Kind = "port"
+	KindCommand  Kind = "command"
+	KindBuild    Kind = "build"
+	KindDatabase Kind = "database"
+	// KindDatastore is a store beside the primary database: ClickHouse,
+	// Redis, Kafka, Elasticsearch or Mongo. It is separate from KindDatabase
+	// because the two are merged by different rules and used to be merged by
+	// one: mergeDatabase read postgres, asked about mysql and mongodb, and
+	// silently dropped every other classification the image reader made.
+	KindDatastore Kind = "datastore"
+	// KindEmulator is a cloud emulator the repository already runs, such as
+	// LocalStack or Azurite. It is evidence about the cloud rather than a
+	// service to build, and it is the strongest evidence there is: somebody
+	// stood one up and pointed the application at it.
+	KindEmulator   Kind = "emulator"
 	KindMigration  Kind = "migration"
 	KindEnvVar     Kind = "env"
 	KindThirdParty Kind = "third_party"
@@ -304,6 +315,18 @@ type Result struct {
 	// Questions are the things af init has to ask, because a finding was below
 	// the confidence threshold or two analyzers disagreed.
 	Questions []Question
+	// Datastores are the stores found beside the primary database and the
+	// stance detection proposes for each. Every one detection found is here,
+	// including the ones this build cannot bring up and therefore did not
+	// write into the draft, because a store nobody mentioned is worse than a
+	// store nobody declared.
+	Datastores []ProposedDatastore
+	// Emulators are the cloud emulators the repository runs in its own
+	// compose file, and the egress rules each one produced. An emulator is
+	// the strongest statement a repository makes about which cloud it talks
+	// to, and it is the thing this product replaces, so it is reported rather
+	// than quietly consumed.
+	Emulators []DetectedEmulator
 	// UnassignedImages names Dockerfiles whose runtime was not established by
 	// a command, port, framework or Compose declaration. Their base image may
 	// inherit a process, so omission must be visible rather than called unused.
@@ -431,7 +454,9 @@ func Run(ctx context.Context, fsys fs.FS, root string, opts Options) (*Result, e
 	}
 
 	sortFindings(res.Findings)
-	res.Draft, res.Questions = Merge(res.Findings, root)
+	var proposals Proposals
+	res.Draft, res.Questions, proposals = Merge(res.Findings, root)
+	res.Datastores, res.Emulators = proposals.Datastores, proposals.Emulators
 	assigned := map[string]bool{}
 	for _, svc := range res.Draft.Services {
 		if svc.Build != nil {

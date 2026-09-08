@@ -108,6 +108,19 @@ type InitReport struct {
 	Findings         int               `json:"findings"`
 	Partial          bool              `json:"partial"`
 	UnassignedImages []string          `json:"unassigned_images,omitempty"`
+	// Datastores are the stores found beside the primary database. Every one
+	// detection found is here, and Declared says which of them reached the
+	// manifest, because a store this build has no provider for is one af up
+	// would refuse and is therefore reported rather than written.
+	Datastores []InitDatastore `json:"datastores,omitempty"`
+	// Emulators are the cloud emulators the repository runs in its own
+	// compose file, and the rules each one produced.
+	Emulators []detect.DetectedEmulator `json:"emulators,omitempty"`
+	// CloudGaps are the cloud services this application uses that the catalog
+	// has no host for. Each one is a request that will be refused in an
+	// environment with "no rule matches" rather than by name, and naming it
+	// here is the only moment it is cheap to fix.
+	CloudGaps []string `json:"cloud_gaps,omitempty"`
 	// Written is every file the command wrote, the manifest first.
 	Written []string `json:"written"`
 	// Workflow says what happened to .github/workflows/antifailure.yml:
@@ -120,6 +133,54 @@ type InitReport struct {
 	// NoTerminal reports that questions took their defaults because there
 	// was no terminal to ask them on and --non-interactive was not passed.
 	NoTerminal bool `json:"no_terminal,omitempty"`
+}
+
+// InitDatastore is one store detection found beside the primary database.
+type InitDatastore struct {
+	Name   string `json:"name"`
+	Engine string `json:"engine"`
+	Stance string `json:"stance"`
+	// From names the store a derived one is rebuilt from, and is empty for
+	// every other stance.
+	From string `json:"from,omitempty"`
+	// Declared says the store reached the manifest. False means this build
+	// has no provider for its engine, so declaring it would have produced a
+	// manifest af up refuses.
+	Declared bool   `json:"declared"`
+	Evidence string `json:"evidence,omitempty"`
+}
+
+// initDatastores turns the proposals into the report's rows.
+func initDatastores(proposed []detect.ProposedDatastore) []InitDatastore {
+	if len(proposed) == 0 {
+		return nil
+	}
+	out := make([]InitDatastore, 0, len(proposed))
+	for _, p := range proposed {
+		out = append(out, InitDatastore{
+			Name: p.Name, Engine: p.Engine, Stance: string(p.Stance),
+			From: p.From, Declared: p.Provisionable, Evidence: p.Evidence,
+		})
+	}
+	return out
+}
+
+// cloudGaps collects the cloud services a dependency names that no catalog
+// entry claims.
+//
+// The finding exists because a missing egress rule is invisible by
+// construction: the manifest lists what was recognised and says nothing at all
+// about what was not, so the gap only surfaces as a refusal nobody can read,
+// in an environment, at the moment the call is made. This is the one place it
+// can be read before then.
+func cloudGaps(findings []detect.Finding) []string {
+	var out []string
+	for _, f := range detect.OfKind(findings, detect.KindNote) {
+		if strings.HasPrefix(f.Subject, "cloud-service.") {
+			out = append(out, f.Detail)
+		}
+	}
+	return out
 }
 
 func runInit(ctx context.Context, env *Env, opts initOptions) error {
@@ -225,6 +286,9 @@ func runInit(ctx context.Context, env *Env, opts initOptions) error {
 		ManifestPath: manifestPath, Created: true, Services: names,
 		EgressRules: len(res.Draft.Egress.Rules), Questions: res.Questions,
 		UnassignedImages: res.UnassignedImages,
+		Datastores:       initDatastores(res.Datastores),
+		Emulators:        res.Emulators,
+		CloudGaps:        cloudGaps(res.Findings),
 		Assumed:          assumed, Findings: len(res.Findings), Partial: res.Partial,
 		Written: []string{manifestPath}, Workflow: "none", NoTerminal: noTerminal,
 	}
@@ -578,6 +642,53 @@ func renderInitSummary(env *Env, res *detect.Result, assumed map[string]string, 
 		env.Out.Table([]Column{Col("HOST"), Col("MODE"), Flex("WHY")}, ruleRows)
 		env.Out.Note(StyleDim,
 			"Everything not listed is blocked. Nothing reaches the internet by accident.")
+	}
+
+	if len(res.Datastores) > 0 {
+		env.Out.Section("Datastores")
+		dsRows := make([][]string, 0, len(res.Datastores))
+		for _, d := range res.Datastores {
+			stance := string(d.Stance)
+			if d.From != "" {
+				stance += " from " + d.From
+			}
+			where := "manifest"
+			if !d.Provisionable {
+				where = "not declared"
+			}
+			dsRows = append(dsRows, []string{d.Name, d.Engine, stance, where, d.Because})
+		}
+		env.Out.Table([]Column{
+			Col("STORE"), Col("ENGINE"), Col("STANCE"), Col("WHERE"), Flex("WHY"),
+		}, dsRows)
+		// The unprovisionable ones get a sentence each rather than a shared
+		// one. A store this build has no provider for is running in the
+		// developer's compose file and works there, so the missing piece is
+		// this engine's ability to hold a copy of it, and saying that badly
+		// reads as "your store is unsupported".
+		for _, d := range res.Datastores {
+			if !d.Provisionable {
+				env.Out.Note(StyleWarn, d.UnprovisionableNote())
+			}
+		}
+	}
+
+	if len(res.Emulators) > 0 {
+		env.Out.Section("Cloud emulators")
+		for _, e := range res.Emulators {
+			env.Out.Note(StyleDim, e.Note())
+		}
+		env.Out.Note(StyleDim,
+			"Environments reach these clouds through the rules above rather than through an "+
+				"emulator, so no endpoint override is needed and the code under test is the "+
+				"code that ships.")
+	}
+
+	if gaps := cloudGaps(res.Findings); len(gaps) > 0 {
+		env.Out.Section("Cloud services with no rule")
+		for _, gap := range gaps {
+			env.Out.Note(StyleWarn, gap)
+		}
 	}
 
 	if len(assumed) > 0 {
