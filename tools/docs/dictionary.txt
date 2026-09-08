@@ -23,6 +23,7 @@ dbname
 dedupe
 depguard
 DMARC
+dualstack
 eastus
 Firestore
 Fulcio
@@ -36,6 +37,7 @@ govulncheck
 hardlinks
 kubeconfig
 kubelet
+livekey
 llms
 lockfile
 lockfiles

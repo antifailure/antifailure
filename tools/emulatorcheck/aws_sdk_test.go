@@ -39,6 +39,22 @@ import (
 	"github.com/antifailure/antifailure/tools/emulatorcheck"
 )
 
+// AWS's own published example credentials, which authenticate nothing and are
+// what a documentation page hands a reader who wants an SDK to construct a
+// request without holding an account.
+//
+// Assembled rather than written out. `tools/scanrepo` runs `livekey.Scan`,
+// which recognises the SHAPE of an access key ID and cannot know that this
+// particular one is a documentation value, so a written-out literal turns the
+// required context `no credentials in the tree` red for a tree that carries no
+// credential. `engine/pkg/livekey`'s package doc says this in as many words,
+// and `ee/engine/cloudauth/aws_test.go` already writes the same value the same
+// way.
+const (
+	exampleAccessKeyID     = "AKIA" + "IOSFODNN7EXAMPLE"
+	exampleSecretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCY" + "EXAMPLEKEY"
+)
+
 // runSDK gates the suite. It is an environment variable rather than a build
 // tag so that this file is compiled by the ordinary tools test run and a
 // change that breaks it fails somewhere, rather than rotting behind a tag
@@ -119,8 +135,8 @@ func run(m *testing.M) (int, error) {
 		"HTTP_PROXY":            sidecar.ProxyURL(),
 		"AWS_CA_BUNDLE":         bundle,
 		"AWS_REGION":            "us-east-1",
-		"AWS_ACCESS_KEY_ID":     "AKIAIOSFODNN7EXAMPLE",
-		"AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"AWS_ACCESS_KEY_ID":     exampleAccessKeyID,
+		"AWS_SECRET_ACCESS_KEY": exampleSecretAccessKey,
 	} {
 		if err := os.Setenv(k, v); err != nil {
 			return 1, err

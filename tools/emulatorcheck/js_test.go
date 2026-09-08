@@ -101,8 +101,8 @@ func TestJavaScriptSDK_ReachesTheEmulatorThroughDNSWithNoEndpointOverride(t *tes
 		"-v", certPath + ":/ca.pem:ro",
 		"-e", "NODE_EXTRA_CA_CERTS=/ca.pem",
 		"-e", "AWS_REGION=us-east-1",
-		"-e", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
-		"-e", "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"-e", "AWS_ACCESS_KEY_ID=" + exampleAccessKeyID,
+		"-e", "AWS_SECRET_ACCESS_KEY=" + exampleSecretAccessKey,
 	}
 	for _, n := range names {
 		args = append(args, "--add-host", n+":"+routerIP)

@@ -62,7 +62,7 @@ S3.
 | --- | --- |
 | Lambda, ECS, EKS, Batch, Step Functions | LocalStack runs these by starting further containers through the Docker socket. An environment does not hand a container the Docker socket, so this is refused rather than half answered. |
 | RDS, Aurora, ElastiCache, OpenSearch | A datastore is not emulated. Postgres is branched from a golden, and a second store is declared in the manifest with a stance. An emulator with an empty schema in it is a worse answer than either. |
-| SES and SESv2 | Mail is captured into the environment's [inbox](/guides/inbox/), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
+| SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox/), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
 | API Gateway, CloudFormation, IAM, CloudWatch, and the rest of AWS | Outside the surface, and refused by the egress policy rather than answered. |
 | S3 dualstack, transfer acceleration and S3 Express One Zone | Further spellings of the S3 endpoint that resolve under different names. They reach nothing, and the refusal says no rule matches rather than naming S3. |
 
@@ -123,7 +123,7 @@ The credential cannot escape regardless of what the header holds, and that is a
 property of the network rather than a promise: the emulator is attached to the
 environment's inner network only, which Docker creates with `internal` set, so
 it has no route out. The sidecar refuses a request signed with a key that
-[livekey](/concepts/egress/) recognises as a live one, so a real `AKIA` key does
+[livekey](/docs/concepts/egress/) recognises as a live one, so a real `AKIA` key does
 not reach the emulator either.
 
 ## The LocalStack image, and a fact worth reading before you plan around it
