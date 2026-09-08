@@ -26,6 +26,33 @@ services:
         - proxy.golang.org
         - sum.golang.org
         - dl-cdn.alpinelinux.org
+    # The size one instance is given, and each value is BOTH the request and
+    # the limit. On Kubernetes that is the Guaranteed quality of service class,
+    # so the scheduler reserves exactly this and the kubelet caps the container
+    # at the same figure; on the local runtime it is the Docker daemon's own
+    # cpu and memory constraint.
+    #
+    # A request under a larger limit is the shape most people know and it is
+    # deliberately not this one. The gap between the two is where a node gets
+    # oversubscribed: every container is placed against its request and then
+    # grows into its limit, so a machine that fits ten environments on paper
+    # runs eleven and the eleventh takes memory from the others. The symptom is
+    # a workflow that reads as flaky, and a twin whose failures belong to the
+    # machine rather than to the change under test is worth less than no twin.
+    #
+    # It is also what makes environments per node a division rather than a
+    # guess. `just capacityplan 8 7837Mi examples/go-api/antifailure.yaml`
+    # answers it for a node of that size, and refuses to answer at all for a
+    # manifest where any service named no size.
+    #
+    # Half a core and half a gigabyte for a Go service answering JSON: an
+    # illustration rather than a measurement of this program, and the number to
+    # replace with your own service's. Omitting either key leaves that
+    # dimension uncapped, which is what every service had before this key was
+    # honoured.
+    resources:
+      cpu: 500m
+      memory: 512Mi
     env:
       # DATABASE_URL is not declared here on purpose. The database block below
       # injects it, and declaring it as well makes the secret resolver demand
