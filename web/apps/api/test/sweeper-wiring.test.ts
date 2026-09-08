@@ -19,11 +19,11 @@
 //
 // A test of the sweep itself cannot catch this. auth.test.ts calls
 // sweepOAuthStates directly and would stay green for ever after somebody
-// deleted the line in main.ts that calls it in production. So this asks the
+// deleted the line in boot.ts that calls it in production. So this asks the
 // other half of the question, which is the half nobody was asking.
 //
 // WHAT IT DELIBERATELY DOES NOT CLAIM. It reads text. It proves that the call
-// is written inside one of the two intervals main.ts starts, not that either
+// is written inside one of the two intervals boot.ts starts, not that either
 // interval fires, not that the pool it is handed is the live one, and not that
 // the DELETE reaches a row. The first is unobservable in under five minutes
 // and the third is what auth.test.ts, device.test.ts, emailsignin.test.ts and
@@ -38,12 +38,20 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcDir = path.join(here, '..', 'src')
-const mainPath = path.join(here, '..', 'src', 'main.ts')
+// boot.ts, which is where the two intervals now live.
+//
+// It was main.ts until the entry point was split so that a second edition could
+// register its routes without a second copy of the configuration. The intervals
+// moved with the body and nothing about them changed, and this path moved with
+// them. Naming boot.ts rather than main.ts is the point of the split: main.ts
+// is now three lines and one call, and a gate pointed at it would read a file
+// that starts no timers and report every sweeper in the tree as uncalled.
+const bootPath = path.join(here, '..', 'src', 'boot.ts')
 
 /**
- * The two intervals main.ts starts, by the literals that bound each one.
+ * The two intervals boot.ts starts, by the literals that bound each one.
  *
- * Two rather than one because they are not the same kind of work and main.ts
+ * Two rather than one because they are not the same kind of work and boot.ts
  * says so at length: the housekeeping pass is about table size and runs every
  * five minutes, and the pull request lifecycle pass is about a check that never
  * concludes and runs every minute. A sweeper called inside either is called;
@@ -117,14 +125,14 @@ async function filesEnteringTheSweeperRole(): Promise<string[]> {
 
 /** The text of each interval body, and everything that is in neither. */
 async function split(): Promise<{ inside: string; outside: string }> {
-  const main = await readFile(mainPath, 'utf8')
+  const boot = await readFile(bootPath, 'utf8')
   let inside = ''
-  let outside = main
+  let outside = boot
   for (const { opens, closes } of INTERVALS) {
     const open = outside.indexOf(opens)
-    assert.notEqual(open, -1, `src/main.ts no longer contains ${JSON.stringify(opens)}`)
+    assert.notEqual(open, -1, `src/boot.ts no longer contains ${JSON.stringify(opens)}`)
     const close = outside.indexOf(closes, open)
-    assert.ok(close > open, `src/main.ts no longer contains ${JSON.stringify(closes)} after it`)
+    assert.ok(close > open, `src/boot.ts no longer contains ${JSON.stringify(closes)} after it`)
     inside += outside.slice(open, close)
     outside = outside.slice(0, open) + outside.slice(close)
   }
@@ -167,7 +175,7 @@ describe('the housekeeping interval', () => {
     // any boundary is renamed, everything below would silently look at an
     // empty string and agree with itself. split() asserts each one.
     const { inside } = await split()
-    assert.ok(inside.length > 0, 'neither interval body could be read out of src/main.ts')
+    assert.ok(inside.length > 0, 'neither interval body could be read out of src/boot.ts')
   })
 
   it('calls every sweeper declared under src', async () => {
@@ -176,7 +184,7 @@ describe('the housekeeping interval', () => {
     assert.deepEqual(
       uncalled.map((s) => `${s.name} (src/${s.file})`),
       [],
-      `these are exported as sweepers and neither interval in main.ts calls them.\n` +
+      `these are exported as sweepers and neither interval in boot.ts calls them.\n` +
         `A sweeper with no caller is not a small bug: the table it names grows for the life of ` +
         `the process and the code reads as though it does not.`,
     )
@@ -205,7 +213,7 @@ describe('the housekeeping interval', () => {
 
   it('does not count a call written outside the intervals', async () => {
     // The negative control for the assertion above, and the reason it slices
-    // main.ts rather than searching the whole file. A call somewhere else in
+    // boot.ts rather than searching the whole file. A call somewhere else in
     // the module runs once at startup at best and never at worst, and a check
     // that accepted one would pass on exactly the arrangement it exists to
     // refuse.

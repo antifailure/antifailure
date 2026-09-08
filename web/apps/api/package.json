@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/server.ts"
+    ".": "./src/server.ts",
+    "./boot": "./src/boot.ts"
   },
   "bin": {
     "af-control-plane": "./src/main.ts",

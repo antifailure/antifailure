@@ -11,7 +11,8 @@
     "rbac",
     "audit",
     "sso",
-    "scim"
+    "scim",
+    "server"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
