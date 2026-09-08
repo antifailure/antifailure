@@ -331,7 +331,20 @@ func Refusals() []Attempt {
 	return out
 }
 
-// Reset clears the ledger and the seal. For tests.
+// Reset clears the ledger and the seal, FOR TESTS ONLY.
+//
+// It is exported because the tests that need it are in three packages and two
+// modules, and Go has no way to share an unexported hook across a module
+// boundary. That makes it the one function in this package that can undo the
+// air gap, so it is not left to a comment: the walk in guarded_test.go treats a
+// call to it from any file that is not a _test.go as a finding, in the same
+// pass and with the same wording as an unguarded client.
+//
+// This is not a trust boundary and the comment should not pretend it is.
+// Anything that can call Reset is compiled into the binary and could equally
+// have declined to call Seal. What the check stops is the accident: a helper
+// that resets state between operations, written by somebody who had not
+// thought about what state this package holds.
 func Reset() {
 	state.mu.Lock()
 	defer state.mu.Unlock()

@@ -4,6 +4,10 @@ package airgapped_test
 
 import (
 	"context"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,10 +170,10 @@ func TestTheHookNamesEveryOffendingRuleRatherThanTheFirst(t *testing.T) {
 
 	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped), extension.EnvironmentRequest{
 		EgressModes: map[string]string{
-			"api.stripe.com": "allow",
-			"api.openai.com": "synth",
+			"api.stripe.com":   "allow",
+			"api.openai.com":   "synth",
 			"s3.amazonaws.com": "sandbox",
-			"logs.internal":  "capture",
+			"logs.internal":    "capture",
 		},
 	})
 	require.Error(t, err)
@@ -222,4 +226,42 @@ func TestTheHookIsRegisteredSoTheEngineActuallyConsultsIt(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "air gapped")
+}
+
+func TestTheLicenceItselfCannotPhoneHome(t *testing.T) {
+	t.Parallel()
+	// The package comment on ee/engine/license says verification is offline:
+	// no network call, nothing that can fail at three in the morning because a
+	// licensing service is down. That is the single most load bearing sentence
+	// in an air gapped installation, and until now the only thing holding it
+	// was the sentence.
+	//
+	// Checked as an import, because that is the level at which the claim is
+	// absolute. A package that cannot name net/http, net or crypto/tls cannot
+	// open a connection, whatever any future function in it does, and no
+	// reviewer has to notice.
+	forbidden := map[string]bool{"net": true, "net/http": true, "crypto/tls": true}
+
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, "../license", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, parser.ImportsOnly)
+	require.NoError(t, err)
+	require.NotEmpty(t, pkgs, "the licence package was not parsed, so NOTHING was checked")
+
+	var found []string
+	files := 0
+	for _, pkg := range pkgs {
+		for name, file := range pkg.Files {
+			files++
+			for _, imp := range file.Imports {
+				p := strings.Trim(imp.Path.Value, `"`)
+				if forbidden[p] {
+					found = append(found, filepath.Base(name)+" imports "+p)
+				}
+			}
+		}
+	}
+	require.Positive(t, files, "no files were read, so NOTHING was checked")
+	require.Emptyf(t, found, "licence verification is offline and %d of its files can dial", len(found))
 }

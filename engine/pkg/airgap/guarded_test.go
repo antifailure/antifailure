@@ -120,6 +120,12 @@ func c() { _, _ = net.Dial("tcp", "example.com:443") }
 func d() { _, _ = http.Get("https://example.com") }
 func e() { _, _ = net.LookupHost("example.com") }
 `), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "undo.go"), []byte(`package p
+
+import "github.com/antifailure/antifailure/engine/pkg/airgap"
+
+func f() { airgap.Reset() }
+`), 0o600))
 
 	var findings []finding
 	walk(t, dir, dir, &findings)
@@ -130,7 +136,8 @@ func e() { _, _ = net.LookupHost("example.com") }
 	}
 	sort.Strings(got)
 	require.Equal(t, []string{
-		"http.Client", "http.DefaultClient", "http.Get", "net.Dial", "net.LookupHost",
+		"airgap.Reset", "http.Client", "http.DefaultClient", "http.Get",
+		"net.Dial", "net.LookupHost",
 	}, got, "the walk missed a construction that opens a connection outside the guard")
 }
 
@@ -211,6 +218,11 @@ var banned = map[string]map[string]bool{
 		"LookupHost": true, "LookupIP": true, "LookupAddr": true,
 	},
 	"tls": {"Dial": true, "DialWithDialer": true},
+	// Not an outbound client. Reset is the one function here that can undo the
+	// air gap, and it exists only because the tests that need it are in three
+	// packages and two modules. A call to it from production code is the same
+	// class of defect as an unguarded client and is reported in the same pass.
+	"airgap": {"Reset": true},
 }
 
 func inspect(t *testing.T, path, rel string) []finding {
@@ -233,6 +245,8 @@ func inspect(t *testing.T, path, rel string) []finding {
 			pkg = "net"
 		case "crypto/tls":
 			pkg = "tls"
+		case "github.com/antifailure/antifailure/engine/pkg/airgap":
+			pkg = "airgap"
 		default:
 			continue
 		}
