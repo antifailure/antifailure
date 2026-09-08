@@ -566,6 +566,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 		}
 
 		v.datastoreStance(p, d)
+		v.datastoreSource(p, d)
 
 		if d.Name == schema.PrimaryDatastore {
 			v.primaryDatastore(p, d, m)
@@ -630,6 +631,40 @@ func (v *validator) datastoreStance(p string, d schema.Datastore) {
 	}
 }
 
+// datastoreSource refuses a source_url_env that is not the name of an
+// environment variable.
+//
+// A variable NAME, and the refusal says which of the two it was given, because
+// the mistake this catches is somebody pasting the connection string itself.
+// That mistake writes a production credential into a file that is committed,
+// and a message saying only that the value is invalid would leave them looking
+// for a typo in a URL that should not be there at all.
+func (v *validator) datastoreSource(p string, d schema.Datastore) {
+	if d.SourceURLEnv == "" {
+		return
+	}
+	if validEnvName.MatchString(d.SourceURLEnv) {
+		return
+	}
+	v.add(p+".source_url_env",
+		fmt.Sprintf("The datastore %q gives %q as source_url_env, which is not the name of an environment variable.", orUnnamed(d.Name), redactURLish(d.SourceURLEnv)),
+		"This field takes the NAME of a variable, such as CLICKHOUSE_URL, and never the connection string itself. The value is read on the machine that already holds it and is never written into the manifest. If a connection string was pasted here, treat it as exposed.")
+}
+
+// redactURLish keeps a refusal from printing back a credential somebody pasted.
+//
+// The message names the field and has to say something about the value, and
+// the one value this check exists to catch is a connection string with a
+// password in it. So a value carrying a scheme separator is reported as its
+// shape rather than its content. A plain typo is short and harmless and is
+// printed, because a message that hides the actual typo helps nobody.
+func redactURLish(value string) string {
+	if strings.Contains(value, "://") || strings.Contains(value, "@") {
+		return "a connection string"
+	}
+	return value
+}
+
 // primaryDatastore keeps the entry database: normalizes into in agreement with
 // database: itself.
 //
@@ -646,6 +681,12 @@ func (v *validator) primaryDatastore(p string, d schema.Datastore, m *schema.Man
 		v.add(p+".stance",
 			fmt.Sprintf("The datastore named %s declares the stance %s, and the database: block is a golden.", schema.PrimaryDatastore, d.Stance),
 			"The primary database is masked, verified and branched. That is what database: has always meant, and it is not something this entry can change.")
+	}
+	if m.Database != nil && d.SourceURLEnv != "" && m.Database.SourceURLEnv != "" &&
+		d.SourceURLEnv != m.Database.SourceURLEnv {
+		v.add(p+".source_url_env",
+			fmt.Sprintf("The datastore named %s reads %s and database.source_url_env names %s.", schema.PrimaryDatastore, d.SourceURLEnv, m.Database.SourceURLEnv),
+			"They are the same store, so they cannot have two different sources. Set one of them, or set both to the same variable.")
 	}
 	if m.Database != nil && d.Provider != "" && d.Provider != string(m.Database.Provider) {
 		v.add(p+".provider",
@@ -2014,3 +2055,8 @@ var validName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
 // validEngine allows an underscore where validName does not, because engine
 // names are written rather than resolved and a few of them carry one.
 var validEngine = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]{0,38}[a-z0-9])?$`)
+
+// validEnvName is the name of an environment variable, which is what every
+// field in this manifest that reaches a credential holds instead of the
+// credential.
+var validEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)

@@ -1162,6 +1162,30 @@ Verification could not read {table}.{column} ({type}), no masking rule covers it
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification) |
 
+### AF-MSK-014
+
+The same identifier does not mask to the same value in every store: {detail}
+
+**What to do.** Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.
+
+| | |
+| --- | --- |
+| Exit code | `7` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
+### AF-MSK-015
+
+The cross store check did not compare every store it was given: {detail}
+
+**What to do.** Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
 ## Egress
 
 ### AF-NET-001

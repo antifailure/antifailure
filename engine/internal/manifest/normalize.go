@@ -272,6 +272,7 @@ func normalizeDatastores(m *schema.Manifest) {
 		d.Stance = schema.DatastoreStance(strings.ToLower(strings.TrimSpace(string(d.Stance))))
 		d.Because = strings.TrimSpace(d.Because)
 		d.From = strings.TrimSpace(d.From)
+		d.SourceURLEnv = strings.TrimSpace(d.SourceURLEnv)
 	}
 
 	primary := -1
@@ -295,6 +296,14 @@ func normalizeDatastores(m *schema.Manifest) {
 	}
 	if d.Provider == "" && m.Database != nil {
 		d.Provider = string(m.Database.Provider)
+	}
+	// The primary's source is the one database: already names, carried onto
+	// the entry rather than left for every reader to remember that one store
+	// keeps its connection somewhere else. Without this the cross store check
+	// would compare a declared ClickHouse against nothing, report that it had
+	// no second store to compare, and be correct and useless.
+	if d.SourceURLEnv == "" && m.Database != nil {
+		d.SourceURLEnv = m.Database.SourceURLEnv
 	}
 }
 

@@ -296,7 +296,7 @@ datastores:
 | `stance` | Required. See below. |
 | `because` | Why that stance was chosen, carried into the fidelity report as written. Required for `empty`. |
 | `from` | The store a `derived` one is rebuilt from. Required for `derived` and refused for the rest. |
-| `source_url_env` | The variable holding this store's production connection string, which a `golden` is copied from. Omitted, the golden holds no rows and every refresh says so. |
+| `source_url_env` | The NAME of the variable holding this store's production connection string, which a `golden` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
 
 The `database` block above is not replaced and does not move. It normalizes
 into the entry named `primary`, so a manifest that declares only `database:`
@@ -343,6 +343,34 @@ validator refuses a store with no stance and the
 [component inventory](/docs/concepts/inventory) names each one, and nothing here
 starts an `empty` store, runs a `derived` rebuild or creates a topic. A store
 whose engine this build cannot mask is REFUSED rather than published unmasked.
+
+### Checking that one person is one person in both stores
+
+The paragraph above says one customer masks to one fake customer in both
+stores. `af mask crossstore` is what checks it rather than asserting it:
+
+```
+af mask crossstore
+```
+
+It reads each declared store's catalog through the variable its
+`source_url_env` names, assigns the one `masking.yaml` to all of them, finds
+every identifier that appears in more than one store, masks probe values
+through each side, and reports the share that come out identical.
+
+**It reads catalogs and no rows**, which is why it is safe to point at
+production: the probe values are its own, so what it needs from a store is the
+schema. `rows_read` is a field of the report rather than a promise on this
+page, and a live test reads the ClickHouse server's own `system.query_log` back
+and fails if any statement the check sent selected from a data table. See
+[masking](/docs/concepts/masking) for what it finds.
+
+Every store it could not read is named with the reason, a store that names no
+`source_url_env` is named as never read at all, and a run that reached one store
+says it proved nothing rather than reporting a hundred percent of one. A pair
+that disagreed and a store that was never opened carry different exit codes,
+because one is a statement about your data and the other is a statement about
+what could be reached.
 
 **The fidelity report reads the branch**, not the declaration. A store declared
 `golden` that this environment branched is reported the way the primary

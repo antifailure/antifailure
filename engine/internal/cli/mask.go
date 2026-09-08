@@ -215,6 +215,7 @@ column called customer_notes, means the notes ship.`),
 	cmd.AddCommand(newMaskApplyCommand(env))
 	cmd.AddCommand(newMaskVerifyCommand(env))
 	cmd.AddCommand(newMaskPreviewCommand(env))
+	cmd.AddCommand(newMaskCrossStoreCommand(env))
 	return cmd
 }
 

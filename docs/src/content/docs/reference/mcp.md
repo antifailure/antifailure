@@ -576,7 +576,7 @@ torn down, and there is no argument that leaves it running.
 
 ### `inspect_data_masking`
 
-What masking does to this environment's data, without changing any of it. Three
+What masking does to this environment's data, without changing any of it. Four
 questions, chosen with `question`.
 
 `plan` says what masking WOULD do, column by column, compiled from the live
@@ -586,7 +586,17 @@ which is the list somebody has to answer: left alone, a column called
 to show whether the rules actually fire. `verify` reads the data back and runs
 the same detectors that would find the data if it leaked.
 
-**No value is ever returned by any of the three.** Masking is a privacy boundary,
+`cross_store` asks whether one person masks to the SAME person in every declared
+store, which is the question a twin holding a Postgres and a ClickHouse has and a
+twin holding one store does not. One identity masked into two people is a twin
+that is confidently wrong: every join across the two stores returns somebody
+else, and every report built on it is plausible. It reads catalogs and NO ROWS,
+so it is safe to point at production, and `rows_read` is a field of the answer
+rather than a promise in this page. It returns `INCONCLUSIVE` rather than `PASS`
+when fewer than two stores could be read or when the two share no identifier,
+because a percentage over zero comparisons is not a pass.
+
+**No value is ever returned by any of the four.** Masking is a privacy boundary,
 and a preview that showed the values it is deciding about would leak exactly the
 data being removed, to a model, into a transcript. What comes back is the shape
 of the change: the column, the transform, whether the value changed at all, its

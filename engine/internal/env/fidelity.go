@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/antifailure/antifailure/engine/internal/crossstore"
 	"github.com/antifailure/antifailure/engine/internal/fidelity"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/personas"
@@ -52,7 +53,70 @@ func (o *Orchestrator) Fidelity(ctx context.Context) (fidelity.Inventory, error)
 	o.observeDatastores(ctx, s, &obs)
 	o.observeHosts(&obs)
 	o.observeTraffic(&obs)
+	o.observeCrossStore(ctx, s, &obs)
 	return fidelity.Build(obs), nil
+}
+
+// observeCrossStore asks whether one identity masks to one person across every
+// store, which is the question a twin with two stores has and a twin with one
+// does not.
+//
+// Attempted only when a second datastore names a source_url_env, because
+// reading a schema means opening a connection and a report must not start
+// dialling anything a manifest did not point it at. When none does, the reason
+// says so and the component is unmeasured, which keeps it out of the score in
+// both directions: nothing here has shown the stores agree and nothing here
+// has shown they do not.
+//
+// Its failure is not fatal, in keeping with every other observation in this
+// file. A report that refuses to say anything because one store was
+// unreachable tells the reader less than one that reports the rest and names
+// what it could not ask.
+func (o *Orchestrator) observeCrossStore(ctx context.Context, s *session, obs *fidelity.Observation) {
+	if o.opts.Manifest == nil {
+		obs.CrossStoreReason = "there is no manifest, so nothing here knows which stores to compare"
+		return
+	}
+	withSource := 0
+	for _, ds := range o.opts.Manifest.Datastores {
+		if ds.SourceURLEnv != "" {
+			withSource++
+		}
+	}
+	if withSource < 2 {
+		obs.CrossStoreReason = "fewer than two datastores name a source_url_env, so nothing " +
+			"here could read a second schema; give each store the name of the variable " +
+			"holding its connection string and check it with af mask crossstore"
+		return
+	}
+
+	res, err := o.crossStoreCheck(ctx, s)
+	if err != nil {
+		obs.CrossStoreReason = "the cross store check could not run: " + oneLine(err)
+		return
+	}
+	if len(res.Report.Read) < 2 {
+		// One store read is not a comparison. Reported as the reason rather
+		// than as a report with a zero in it, because a percentage over one
+		// store is a number about nothing.
+		obs.CrossStoreReason = strings.TrimSpace(strings.ReplaceAll(res.Report.Summary(), "\n", " "))
+		return
+	}
+	obs.CrossStore = &fidelity.CrossStore{
+		Stores:    res.Report.Read,
+		Checked:   res.Report.Cross.Checked,
+		Identical: res.Report.Cross.Identical,
+		Detail:    crossStoreDetail(res.Report),
+	}
+}
+
+// crossStoreDetail names the first pair that disagreed, and is empty when none
+// did.
+func crossStoreDetail(r crossstore.Report) string {
+	for _, p := range r.Cross.Mismatches() {
+		return p.A.String() + " and " + p.B.String() + ": " + p.Reason
+	}
+	return ""
 }
 
 // observeRuntime asks the runtime what is running.

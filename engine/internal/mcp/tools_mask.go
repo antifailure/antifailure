@@ -44,6 +44,9 @@ type maskingReaders struct {
 	Sample func(ctx context.Context, table string, rows int) ([][]env.PreviewRow, error)
 	// Verify reads the data back and reports anything that still looks real.
 	Verify func(ctx context.Context) (verify.Report, error)
+	// CrossStore compares what every declared store's rules do to the same
+	// identifier. It reads catalogs and no rows.
+	CrossStore func(ctx context.Context) (*env.CrossStoreResult, error)
 }
 
 // maskingApplier rewrites the environment's data. There is one of these and it
@@ -70,7 +73,7 @@ func newInspectMaskingTool(p *Project, readers maskingReaders) *Tool {
 		// sample back. None of the three writes anything.
 		ReadOnly: true,
 		Description: "Ask what masking does to this environment's data, without changing " +
-			"any of it. Three questions, chosen with the question argument. " +
+			"any of it. Four questions, chosen with the question argument. " +
 			"plan says what masking WOULD do, column by column, compiled from the live " +
 			"schema rather than from a checked in list, and names every column no rule " +
 			"covers, which is the list somebody has to answer: left alone, a column " +
@@ -80,7 +83,15 @@ func newInspectMaskingTool(p *Project, readers maskingReaders) *Tool {
 			"verify reads the data back and runs the same detectors that would find the " +
 			"data if it leaked, which catches a rule that missed a column, a transform " +
 			"that failed on a null, and a table added last week. " +
-			"NO VALUE IS EVER RETURNED BY ANY OF THE THREE. Masking is a privacy " +
+			"cross_store asks whether one person masks to the SAME person in every " +
+			"declared store, which is the question a twin holding a Postgres and a " +
+			"ClickHouse has and a twin holding one store does not: one identity masked " +
+			"into two people is a twin that is confidently wrong, because every join " +
+			"across the two stores then returns somebody else and every report built on " +
+			"it is plausible. It reads catalogs and NO ROWS, so it is safe to point at " +
+			"production, and it answers INCONCLUSIVE rather than PASS when fewer than " +
+			"two stores could be read or the two share no identifier. " +
+			"NO VALUE IS EVER RETURNED BY ANY OF THE FOUR. Masking is a privacy " +
 			"boundary, and a preview that showed the values it is deciding about would " +
 			"leak exactly the data being removed. What comes back is the shape of the " +
 			"change: the column, the transform, whether the value changed at all, its " +
@@ -96,14 +107,17 @@ func newInspectMaskingTool(p *Project, readers maskingReaders) *Tool {
 				"project_id": projectIDSchema(),
 				"question": {
 					Type: "string", MaxLength: 10, MinLength: 4,
-					Enum: []string{"plan", "sample", "verify"},
+					Enum: []string{"plan", "sample", "verify", "cross_store"},
 					Description: "Required. plan is what masking would do to every column, " +
 						"and it works before any environment exists because it can read the " +
 						"schema from the configured source. sample shows whether the rules " +
 						"fire on real rows, reported as shape only, and needs a running " +
 						"environment. verify reads the data back and reports anything that " +
-						"still looks real, which is the only one of the three that can tell " +
-						"you masking did not work.",
+						"still looks real, which is the only one of the four that can tell " +
+						"you masking did not work. cross_store asks whether one person masks to " +
+						"the SAME person in every declared store, which is the question a twin " +
+						"with a Postgres and a ClickHouse has and a twin with one store does " +
+						"not; it reads catalogs and no rows.",
 				},
 				"table": {
 					Type: "string", MaxLength: 128, MinLength: 1,
@@ -132,13 +146,15 @@ func newInspectMaskingTool(p *Project, readers maskingReaders) *Tool {
 				return maskingSample(ctx, readers, args)
 			case "verify":
 				return maskingVerification(ctx, readers)
+			case "cross_store":
+				return maskingCrossStore(ctx, readers)
 			default:
 				// Unreachable: the enum refuses anything else before a handler
 				// runs. Stated rather than left as a silent nil, because a
 				// handler that can return nothing is a handler that will one
 				// day return nothing.
 				return nil, fieldFault(FaultInvalidArgument, "question",
-					"This field must be one of: plan, sample, verify.")
+					"This field must be one of: plan, sample, verify, cross_store.")
 			}
 		},
 	}
@@ -920,6 +936,13 @@ func (f *orchestratorFactory) maskingReaders() maskingReaders {
 			}
 			return o.MaskVerify(ctx)
 		},
+		CrossStore: func(ctx context.Context) (*env.CrossStoreResult, error) {
+			o, err := f.build()
+			if err != nil {
+				return nil, err
+			}
+			return o.CrossStoreCheck(ctx)
+		},
 	}
 }
 
@@ -933,4 +956,131 @@ func (f *orchestratorFactory) maskApply(ctx context.Context) (masking.Result, er
 		return masking.Result{}, err
 	}
 	return o.MaskApply(ctx)
+}
+
+// -----------------------------------------------------------------------
+// the cross store check
+// -----------------------------------------------------------------------
+
+// maxCrossStoreMismatches bounds the list of pairs that disagreed. A schema
+// with one bad link usually has one bad link in many tables, and the first
+// several name the fix.
+const maxCrossStoreMismatches = 25
+
+type maskingCrossStoreDoc struct {
+	Kind    string  `json:"kind"`
+	Verdict Verdict `json:"verdict"`
+	Summary string  `json:"summary"`
+
+	// Stores are the stores whose catalogs were read, and Unread are the ones
+	// that were declared and could not be. NoSource are the ones that name no
+	// source_url_env, so nothing could read them at all.
+	Stores   []string `json:"stores_read"`
+	Unread   []string `json:"stores_unread,omitempty"`
+	NoSource []string `json:"stores_without_source_url_env,omitempty"`
+
+	// Checked and Identical are the denominator and the numerator, and
+	// Percent is absent rather than zero when nothing was compared: zero
+	// percent and no comparison are different facts.
+	Checked   int      `json:"join_keys_checked"`
+	Identical int      `json:"join_keys_identical"`
+	Percent   *float64 `json:"percent"`
+
+	// Mismatches name the pairs that did not agree, with the reason for each.
+	Mismatches      []crossStoreMismatchDoc `json:"mismatches,omitempty"`
+	MismatchesTotal int                     `json:"mismatches_total"`
+
+	// RowsRead is always zero, and it is a field rather than a sentence so
+	// that a caller deciding whether this is safe to run against production
+	// can read the answer rather than trust the description.
+	RowsRead int `json:"rows_read"`
+	// Tables and Columns are how much schema was read, and SkippedTables
+	// names the tables a reader deliberately did not return. A number over
+	// the tables a reader felt like returning is a true answer to a smaller
+	// question.
+	Tables        int      `json:"tables_read"`
+	Columns       int      `json:"columns_read"`
+	SkippedTables []string `json:"tables_not_compared,omitempty"`
+}
+
+type crossStoreMismatchDoc struct {
+	Key    string `json:"key"`
+	A      string `json:"a"`
+	B      string `json:"b"`
+	Reason string `json:"reason"`
+}
+
+// maskingCrossStore answers whether one identity masks to one person in every
+// store.
+//
+// The verdict has three values and the middle one is why this tool is worth
+// having. PASS is every candidate join key verified identical. FAIL is a pair
+// that disagreed, which means one identity became two people and every join
+// across the two stores now returns the wrong one. INCONCLUSIVE is fewer than
+// two stores read, or two stores that share no identifier: nothing was
+// compared, and reporting that as a pass is the exact defect this whole
+// surface was added to remove.
+func maskingCrossStore(ctx context.Context, readers maskingReaders) (any, *Fault) {
+	if readers.CrossStore == nil {
+		return nil, &Fault{
+			Code: FaultSafetyUnavailable,
+			Detail: "This server was built without the cross store check, so nothing " +
+				"compared the stores. That is not the same as the stores agreeing.",
+		}
+	}
+	res, err := readers.CrossStore(ctx)
+	if err != nil {
+		return nil, &Fault{
+			Code: FaultSafetyUnavailable,
+			Detail: "The stores could not be compared, so this says nothing about whether " +
+				"one identity masks to one person across them. The check reads each " +
+				"store's catalog through the variable its source_url_env names.",
+			Retryable: true,
+			wrapped:   err,
+		}
+	}
+
+	r := res.Report
+	out := &maskingCrossStoreDoc{
+		Kind: "masking_cross_store", Summary: strings.TrimSpace(oneLineOf(r.Summary())),
+		Stores: r.Read, NoSource: res.WithoutSource,
+		Checked: r.Cross.Checked, Identical: r.Cross.Identical,
+		RowsRead: 0, Tables: r.Tables, Columns: r.Columns,
+		SkippedTables: r.SkippedTables,
+	}
+	for _, u := range r.Unread {
+		out.Unread = append(out.Unread, u.Store+" ("+u.Engine+"): "+u.Why)
+	}
+	mismatches := r.Cross.Mismatches()
+	out.MismatchesTotal = len(mismatches)
+	for i, p := range mismatches {
+		if i >= maxCrossStoreMismatches {
+			break
+		}
+		out.Mismatches = append(out.Mismatches, crossStoreMismatchDoc{
+			Key: p.Key, A: p.A.String(), B: p.B.String(), Reason: p.Reason,
+		})
+	}
+
+	switch {
+	case len(r.Read) < 2 || r.Cross.Checked == 0:
+		out.Verdict = VerdictInconclusive
+	case r.Cross.Identical == r.Cross.Checked:
+		out.Verdict = VerdictPass
+		pct := r.Cross.Percent()
+		out.Percent = &pct
+	default:
+		out.Verdict = VerdictFail
+		pct := r.Cross.Percent()
+		out.Percent = &pct
+	}
+	return out, nil
+}
+
+// oneLineOf takes the verdict line out of a multi line summary.
+func oneLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
