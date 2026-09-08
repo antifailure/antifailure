@@ -696,6 +696,84 @@ func TestEveryPinnedActionSaysWhichVersionItIs(t *testing.T) {
 	}
 }
 
+func TestEveryToolIsFetchedAtAPinnedVersion(t *testing.T) {
+	// A GATE FOR THE CLASS, WRITTEN THE DAY THE CLASS COST A REQUIRED CONTEXT.
+	//
+	// On 2026-09-08 the `www` job died with "No matching version found for
+	// cspell-gitignore@10.3.0". The step was `npx --yes cspell`, floating on
+	// the dist tag, and it had resolved a version whose own sibling package was
+	// not published yet. Twenty minutes later the same command passed on
+	// another pull request. Nothing was checked in between and nothing said so.
+	//
+	// That is the worst shaped false red this repository has: it is
+	// indistinguishable from a real spelling failure in the summary view, and
+	// then it HEALS ITSELF, so the next person re-runs the red job, sees green,
+	// and learns that re-running a red job is how you fix one. Every other rule
+	// here exists to teach the opposite.
+	//
+	// TestEveryActionIsPinnedToACommit above makes the same argument about
+	// actions and has held for months. Container images are the third such
+	// surface and are covered separately, by the tests that walk every file
+	// able to start a container rather than only the workflows, because this
+	// repository names an image in four spellings and only one of them is an
+	// `image:` key in a `services:` block.
+	//
+	// THE JUSTFILE AS WELL AS THE WORKFLOW, because `gatecheck` exists to stop
+	// those two disagreeing and an unpinned recipe beside a pinned CI step is
+	// exactly that disagreement, one where the developer's run and the gate's
+	// run resolve different software.
+	//
+	// WHAT THIS CANNOT SEE, said rather than implied. `apt-get install`
+	// resolves against Ubuntu's archive on every run and is not practically
+	// pinnable, so `postgresql-client-17`, `zsh` and `libsecret-tools` are
+	// outside this and always will be. `npx <tool>` WITHOUT `--yes` is not here
+	// either, and does not need to be: it resolves from the workspace's own
+	// node_modules, which a lockfile pins, which is why `npx playwright` and
+	// `npx tsc` are safe where `npx --yes` was not. And a pin answers WHICH
+	// thing, never whether it arrived: `lycheeverse/lychee-action` was pinned to
+	// a commit and to v0.24.2 and still failed on 2026-09-08 with exit 22
+	// fetching its own tarball. That is a different failure with a different
+	// remedy and this cannot help with it.
+	npxYes := regexp.MustCompile(`npx\s+(?:--yes|-y)\s+(\S+)`)
+
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	files = append(files, filepath.Join("..", "..", "justfile"))
+
+	checked := 0
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range npxYes.FindAllStringSubmatch(string(body), -1) {
+			spec := m[1]
+			checked++
+			// A version is an `@` that is not the scope marker at the front,
+			// so `@scope/pkg` alone is unpinned and `@scope/pkg@1.2.3` is not.
+			if at := strings.LastIndex(spec, "@"); at <= 0 {
+				t.Errorf("%s: `npx --yes %s` resolves a version at run time.\n"+
+					"    Write it as %s@<version>. A gate that cannot be installed reports "+
+					"a verdict about a change it never read, and then heals itself, which "+
+					"teaches the next person that re-running a red job is how you fix one.",
+					filepath.Base(file), spec, spec)
+			}
+		}
+	}
+
+	// The floor is low because the tree is: there is one such command and it is
+	// written twice, once in the workflow and once in the recipe gatecheck
+	// holds equal to it. Zero would mean the pattern has stopped matching,
+	// which is this check reporting clean because it could not look.
+	if checked < 2 {
+		t.Fatalf("only %d `npx --yes` invocations were found, and there are two. "+
+			"The pattern has stopped matching, so this check proved nothing", checked)
+	}
+	t.Logf("%d run time package fetches checked, all pinned", checked)
+}
+
 func TestNoWorkflowGrantsWriteToEveryJob(t *testing.T) {
 	// A workflow level `contents: write` gives it to every job in the file,
 	// including the ones that only compile something. The release workflow had
