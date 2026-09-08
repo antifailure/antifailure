@@ -530,6 +530,123 @@ func makeGCSBucket(endpoint, bucket string) error {
 	return fmt.Errorf("creating the bucket: %s: %s", resp.Status, raw)
 }
 
+// TestS3StoreAddressesEveryServiceThatSpeaksTheAPI is the claim "R2, MinIO,
+// B2, Spaces and Wasabi already work through s3", turned into something that
+// can say no.
+//
+// The claim was in the plan as a sentence and sentences about compatibility
+// are the ones that turn out to be wrong. What a machine with no accounts can
+// prove is the half this repository wrote, and it is the half that breaks:
+// each vendor publishes an endpoint and a region, the store has to address it
+// PATH STYLE rather than virtual hosted because a bucket prefixed onto
+// s3.us-west-004.backblazeb2.com is a hostname that does not resolve, and the
+// credential scope has to name the vendor's region rather than us-east-1
+// because SigV4 pins the region into the signature and a signature scoped to
+// the wrong one is refused identically to a wrong secret key.
+//
+// What it does NOT prove is that each vendor accepts the request, which needs
+// an account with each and which section 10 of the plan forbids. MinIO is the
+// one of the five proved end to end, by TestS3Store above, against a real
+// server that rejects a wrong signature exactly as S3 does. The other four are
+// proved to be addressed correctly and are not proved to answer. That split is
+// the honest version of the claim and it is written down here rather than
+// implied by a green test.
+func TestS3StoreAddressesEveryServiceThatSpeaksTheAPI(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		service string
+		// url is the storage_url a person would write, in the form the
+		// vendor's own documentation gives for its S3 compatible endpoint.
+		url string
+		// region is what that vendor calls its region. R2 has one region and
+		// calls it auto; the rest name a real one.
+		region string
+		host   string
+		path   string
+		// pathStyle records the addressing this vendor needs. AWS is the only
+		// one of the six addressed virtual hosted here.
+		pathStyle bool
+	}{
+		{
+			service: "Amazon S3, the control",
+			url:     "s3://afgoldens/goldens", region: "eu-west-1",
+			host: "afgoldens.s3.eu-west-1.amazonaws.com",
+			path: "/goldens/gv_1/dump.pgcustom", pathStyle: false,
+		},
+		{
+			service: "Cloudflare R2",
+			url:     "https://1a2b3c.r2.cloudflarestorage.com/afgoldens/goldens", region: "auto",
+			host: "1a2b3c.r2.cloudflarestorage.com",
+			path: "/afgoldens/goldens/gv_1/dump.pgcustom", pathStyle: true,
+		},
+		{
+			service: "MinIO",
+			url:     "http://minio.internal:9000/afgoldens/goldens", region: "us-east-1",
+			host: "minio.internal:9000",
+			path: "/afgoldens/goldens/gv_1/dump.pgcustom", pathStyle: true,
+		},
+		{
+			service: "Backblaze B2",
+			url:     "https://s3.us-west-004.backblazeb2.com/afgoldens/goldens", region: "us-west-004",
+			host: "s3.us-west-004.backblazeb2.com",
+			path: "/afgoldens/goldens/gv_1/dump.pgcustom", pathStyle: true,
+		},
+		{
+			service: "DigitalOcean Spaces",
+			url:     "https://nyc3.digitaloceanspaces.com/afgoldens/goldens", region: "nyc3",
+			host: "nyc3.digitaloceanspaces.com",
+			path: "/afgoldens/goldens/gv_1/dump.pgcustom", pathStyle: true,
+		},
+		{
+			service: "Wasabi",
+			url:     "https://s3.us-east-2.wasabisys.com/afgoldens/goldens", region: "us-east-2",
+			host: "s3.us-east-2.wasabisys.com",
+			path: "/afgoldens/goldens/gv_1/dump.pgcustom", pathStyle: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.service, func(t *testing.T) {
+			env := func(name string) string {
+				switch name {
+				case "AWS_ACCESS_KEY_ID":
+					return "AKIAEXAMPLEEXAMPLE00"
+				case "AWS_SECRET_ACCESS_KEY":
+					return "not-a-real-secret-and-never-sent-anywhere"
+				case "AWS_REGION":
+					return c.region
+				}
+				return ""
+			}
+			s, err := golden.OpenStore(golden.KindS3, c.url, env, nil)
+			require.NoError(t, err, "%s could not even be opened", c.service)
+
+			req, err := golden.SignedRequestForTest(s, http.MethodGet, "gv_1/dump.pgcustom")
+			require.NoError(t, err)
+
+			require.Equal(t, c.host, req.URL.Host, "%s is addressed at the wrong host", c.service)
+			require.Equal(t, c.path, req.URL.Path, "%s is addressed at the wrong path", c.service)
+			require.Equal(t, c.pathStyle, !strings.HasPrefix(req.URL.Host, "afgoldens."),
+				"%s needs %v for path style addressing", c.service, c.pathStyle)
+
+			// SigV4 pins the region into the credential scope, so a store that
+			// defaulted to us-east-1 for every vendor would sign something the
+			// vendor refuses with a 403 that reads like a permissions problem.
+			auth := req.Header.Get("Authorization")
+			require.Contains(t, auth, "AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEEXAMPLE00/")
+			require.Contains(t, auth, "/"+c.region+"/s3/aws4_request",
+				"%s was signed for the wrong region", c.service)
+			require.Contains(t, auth, "SignedHeaders=host;x-amz-content-sha256;x-amz-date")
+
+			// The Host the signature covers is the one the request carries.
+			// SigV4 signs Host, so these disagreeing is a signature that
+			// disagrees with its own request.
+			require.Equal(t, c.host, req.Host)
+		})
+	}
+}
+
 func envOr(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
