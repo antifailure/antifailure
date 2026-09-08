@@ -420,15 +420,26 @@ func (f *fakeGoldenStore) Open(extension.ObjectStoreConfig) (extension.ObjectSto
 }
 
 type fakeEmulator struct {
-	name  string
-	hosts []string
-	image string
+	name       string
+	hosts      []string
+	image      string
+	maintainer extension.EmulatorMaintainer
+	companions []extension.EmulatorContainer
 }
 
 func (f *fakeEmulator) Name() string    { return f.name }
 func (f *fakeEmulator) Hosts() []string { return f.hosts }
 func (f *fakeEmulator) Container() extension.EmulatorContainer {
-	return extension.EmulatorContainer{Image: f.image, Port: 4566}
+	// A declared maintainer unless the test is about leaving it out, so that
+	// the tests about the digest and the host list fail for the reason they
+	// name rather than for a field they never mentioned.
+	m := f.maintainer
+	if m == "" {
+		m = extension.MaintainerCommercial
+	}
+	return extension.EmulatorContainer{
+		Image: f.image, Port: 4566, Maintainer: m, Companions: f.companions,
+	}
 }
 
 const pinnedImage = "localstack/localstack@sha256:" +
@@ -643,4 +654,112 @@ func TestConcurrentProviderRegistrationAndUseIsSafe(t *testing.T) {
 		_ = r.Validate(nil)
 	}
 	<-done
+}
+
+const pinnedCompanion = "mcr.microsoft.com/mssql/server@sha256:" +
+	"1111111111111111111111111111111111111111111111111111111111111111"
+
+func TestAnEmulatorWithNoDeclaredMaintainerIsRefused(t *testing.T) {
+	t.Parallel()
+	// Declared, never inferred from the registry the image sits in. A
+	// registry path is a fact about hosting and this is a fact about support,
+	// and the two disagree exactly where it matters: the de facto GCS
+	// emulator is community maintained and Google ships none at all.
+	r := extension.NewRegistry()
+	r.AddEmulator(&fakeEmulator{
+		name: "s3", hosts: []string{"s3.amazonaws.com"}, image: pinnedImage,
+		maintainer: "microsoft",
+	})
+
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maintainer")
+	require.Contains(t, err.Error(), "vendor, commercial, community",
+		"the refusal does not say what the values are, so the author has to go read the "+
+			"source of the thing that just refused them")
+}
+
+func TestACompanionIsHeldToTheSameRulesAsTheEmulator(t *testing.T) {
+	t.Parallel()
+	// The Azure Service Bus emulator refuses to start without an MSSQL
+	// container beside it. That container runs next to a copy of production
+	// data on exactly the emulator's terms, and "it came with the emulator"
+	// is not a provenance.
+	tagged := extension.NewRegistry()
+	tagged.AddEmulator(&fakeEmulator{
+		name: "servicebus", hosts: []string{"sb.servicebus.windows.net"}, image: pinnedImage,
+		maintainer: extension.MaintainerVendor,
+		companions: []extension.EmulatorContainer{{
+			Image:      "mcr.microsoft.com/mssql/server:2022-latest",
+			Maintainer: extension.MaintainerVendor,
+		}},
+	})
+	err := tagged.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "digest")
+	require.Contains(t, err.Error(), "mssql",
+		"the refusal names only the emulator, so the reader has to guess which of the two "+
+			"images is the one that is not pinned")
+
+	unowned := extension.NewRegistry()
+	unowned.AddEmulator(&fakeEmulator{
+		name: "servicebus", hosts: []string{"sb.servicebus.windows.net"}, image: pinnedImage,
+		maintainer: extension.MaintainerVendor,
+		companions: []extension.EmulatorContainer{{Image: pinnedCompanion}},
+	})
+	err = unowned.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "maintainer")
+
+	ok := extension.NewRegistry()
+	ok.AddEmulator(&fakeEmulator{
+		name: "servicebus", hosts: []string{"sb.servicebus.windows.net"}, image: pinnedImage,
+		maintainer: extension.MaintainerVendor,
+		companions: []extension.EmulatorContainer{{
+			Image: pinnedCompanion, Maintainer: extension.MaintainerVendor,
+		}},
+	})
+	require.NoError(t, ok.Validate(nil))
+}
+
+func TestACompanionOfACompanionIsRefused(t *testing.T) {
+	t.Parallel()
+	// One level is what the known cases need. A graph here would be a
+	// dependency resolver nobody asked for, and the failure mode of a
+	// half-written one is a container that never starts.
+	r := extension.NewRegistry()
+	r.AddEmulator(&fakeEmulator{
+		name: "servicebus", hosts: []string{"sb.servicebus.windows.net"}, image: pinnedImage,
+		maintainer: extension.MaintainerVendor,
+		companions: []extension.EmulatorContainer{{
+			Image: pinnedCompanion, Maintainer: extension.MaintainerVendor,
+			Companions: []extension.EmulatorContainer{{
+				Image: pinnedCompanion, Maintainer: extension.MaintainerVendor,
+			}},
+		}},
+	})
+	err := r.Validate(nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "companions of its own")
+}
+
+func TestEveryMaintainerIsListedByAllEmulatorMaintainers(t *testing.T) {
+	t.Parallel()
+	// The guard the refusal message depends on. A value added to the type and
+	// not to the list is a maintainer the validator refuses, which is the
+	// opposite of what adding it meant.
+	all := extension.AllEmulatorMaintainers()
+	require.NotEmpty(t, all)
+	seen := map[extension.EmulatorMaintainer]bool{}
+	for _, m := range all {
+		require.NotEmpty(t, string(m))
+		require.False(t, seen[m], "%q is listed twice", m)
+		seen[m] = true
+	}
+	for _, m := range []extension.EmulatorMaintainer{
+		extension.MaintainerVendor, extension.MaintainerCommercial,
+		extension.MaintainerCommunity, extension.MaintainerFirstParty,
+	} {
+		require.True(t, seen[m], "%q is a declared maintainer and the list does not carry it", m)
+	}
 }

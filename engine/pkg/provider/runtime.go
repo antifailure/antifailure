@@ -282,7 +282,44 @@ type EmulatorSpec struct {
 	// Env is what the container is started with.
 	Env map[string]string
 	// Command overrides the image's own command. Empty uses the image's.
+	//
+	// For Google there is no other way to say which emulator is meant: the
+	// Cloud CLI image ships four of them behind one entrypoint.
 	Command []string
+	// Maintainer records who stands behind the image, as the registration
+	// declared it. Carried so a runtime can report it, never so a runtime can
+	// decide with it.
+	Maintainer string
+	// Companions are containers this emulator does not work without, such as
+	// the MSSQL instance the Azure Service Bus emulator refuses to start
+	// without.
+	//
+	// They join the environment's inner network on exactly the same terms as
+	// the emulator, so they have no route out either. A runtime that starts
+	// the emulator and not its companions produces an emulator that never
+	// becomes ready, reported as a slow start.
+	Companions []EmulatorCompanion
+}
+
+// EmulatorCompanion is a container an emulator does not work without.
+//
+// It carries no Port, because nothing outside the environment addresses it:
+// the emulator reaches it by name on the environment's own network and the
+// sidecar never forwards to it. That is the difference between a companion
+// and a second emulator, and it is why this is a separate type rather than
+// another EmulatorSpec.
+type EmulatorCompanion struct {
+	// Name is what it answers to on the network, within the emulator's own
+	// namespace, so two emulators may each have a companion called "db".
+	Name string
+	// Image is the container image, pinned by digest.
+	Image string
+	// Env is what the container is started with.
+	Env map[string]string
+	// Command overrides the image's own command.
+	Command []string
+	// Maintainer records who stands behind the image.
+	Maintainer string
 }
 
 // ServiceSpec is one container to run.

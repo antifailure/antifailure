@@ -38,3 +38,13 @@ emulator, none of which is about whether the emulator implements S3 correctly.
 It ships with a broken emulator and a self test that requires each break to turn
 exactly one behaviour red, including the one that matters most: an emulator that
 refuses everything passes every other check and is useless.
+
+The container a registration declares carries three fields that LocalStack did
+not need and the other two clouds do. `Command` decides which emulator you get,
+because Google ships four of them inside one Cloud CLI image whose entrypoint is
+the CLI. `Companions` are the containers an emulator does not work without, such
+as the MSSQL instance Azure's Service Bus emulator refuses to start without, and
+they join the inner network on exactly the emulator's terms so they have no route
+out either. `Maintainer` records who stands behind an image, declared rather than
+inferred from the registry it sits in, because the de facto GCS emulator is
+community maintained and Google ships none at all.

@@ -60,9 +60,25 @@ func emulatorsFor(
 				"detail", unregisteredEmulator(r, registry.EmulatorNames()))
 		}
 		c := e.Container()
-		out = append(out, provider.EmulatorSpec{
-			Name: e.Name(), Image: c.Image, Port: c.Port, Env: c.Env, Command: c.Command,
-		})
+		spec := provider.EmulatorSpec{
+			Name: e.Name(), Image: c.Image, Port: c.Port, Env: c.Env,
+			Command: c.Command, Maintainer: string(c.Maintainer),
+		}
+		// Named by position within the emulator's own namespace, so two
+		// emulators may each declare a companion and neither collides. The
+		// registration does not name them, because a name is an address on
+		// the environment's network and an address is the engine's to choose:
+		// a registration free to pick one could pick a service's.
+		for i, companion := range c.Companions {
+			spec.Companions = append(spec.Companions, provider.EmulatorCompanion{
+				Name:       fmt.Sprintf("%s-%d", e.Name(), i+1),
+				Image:      companion.Image,
+				Env:        companion.Env,
+				Command:    companion.Command,
+				Maintainer: string(companion.Maintainer),
+			})
+		}
+		out = append(out, spec)
 	}
 	return out, nil
 }
