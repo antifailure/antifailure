@@ -258,7 +258,16 @@ func mutations() []mutation {
 			apply: func(p *ecs.Plan) {
 				p.Network.Endpoints = append(p.Network.Endpoints, ecs.VPCEndpoint{
 					Service: "com.amazonaws.us-east-1.ssmmessages", Type: "Interface",
-					SecurityGroupID: "sg-af-example-endpoints", PolicyDocument: "{}",
+					SecurityGroupID: "sg-af-example-endpoints",
+					// Scoped as tightly as any endpoint in the plan, on
+					// purpose. An endpoint the image pull does not need is a
+					// service the task can open a connection to however good
+					// its policy is, and a mutation whose endpoint carried an
+					// empty policy would have been caught by the policy check
+					// instead and proved nothing about that.
+					PolicyDocument: `{"Statement":[{"Effect":"Allow","Principal":"*",` +
+						`"Action":["ssmmessages:CreateControlChannel"],` +
+						`"Resource":"arn:aws:ssmmessages:*:*:af-example"}]}`,
 				})
 			},
 			// It opens the interface endpoint path too, and that is not a
@@ -342,6 +351,25 @@ func mutations() []mutation {
 				p.Network.DNSFirewall.Rules = append([]ecs.DNSFirewallRule{
 					{Priority: 5, Action: "ALERT", Domains: []string{"*"}},
 				}, p.Network.DNSFirewall.Rules...)
+			},
+		},
+		{
+			path: "the-amazon-provided-resolver",
+			what: "two rules sharing a priority, with the terminal rule still last",
+			apply: func(p *ecs.Plan) {
+				// The isolated version of the row below. That one shares the
+				// LAST priority, so the terminal rule check catches it too and
+				// it proves nothing about whether the uniqueness rule works.
+				// This one leaves BLOCK on * alone at the highest priority and
+				// duplicates an earlier one, so the only thing that can refuse
+				// it is the uniqueness rule, and AWS refuses to create such a
+				// group at all: a plan that cannot be applied is not a
+				// containment either.
+				rules := p.Network.DNSFirewall.Rules
+				p.Network.DNSFirewall.Rules = append([]ecs.DNSFirewallRule{
+					{Priority: rules[0].Priority, Action: "ALLOW",
+						Domains: []string{"example.internal"}},
+				}, rules...)
 			},
 		},
 		{
@@ -565,6 +593,13 @@ func TestEveryPathIsDescribed(t *testing.T) {
 // every number this package produces.
 func TestTheReportCarriesItsCaveat(t *testing.T) {
 	out := ecs.Evaluate(referencePlan()).String()
+
+	// Logged rather than only asserted on, because the report IS the
+	// deliverable of this package and a number quoted in a message somewhere is
+	// worth less than the same number printed by the run that produced it. With
+	// -v this is the evidence, in continuous integration as well as here.
+	t.Log("\n" + out)
+
 	require.Contains(t, out, "10 of 13 egress paths")
 	require.Contains(t, out, "10 are closed by the generated configuration and 0 by an attempt")
 	require.Contains(t, out, ecs.Caveat)
