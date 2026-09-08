@@ -19,7 +19,7 @@ import {
   parseLicense,
   trustedKeys,
 } from '../src/license.ts'
-import { registerEnterprise } from '../src/register.ts'
+import { registerEnterprise, seatsFrom } from '../src/register.ts'
 
 function key(): { kid: string; publicKeys: string; token: (claims: object) => string; other: string } {
   const kid = `k-${randomUUID().slice(0, 8)}`
@@ -239,6 +239,33 @@ describe('what a license is doing right now', () => {
 })
 
 describe('registering the enterprise edition', () => {
+  it('supplies the seat limit the license names, which nothing ever did', () => {
+    // AF-EE-004 sells "the license covers N seats", and
+    // ee/web/sso/src/provision.ts has always taken that number from "the host",
+    // saying the licence is parsed by the engine module and the control plane
+    // is handed the result. There was no host. Nothing was handed anything, so
+    // the limit has never refused a single member on any installation.
+    //
+    // This proves the number, not the refusal: provision.ts's own suite already
+    // proves what happens at the limit once a limit exists, and the missing
+    // half was that one exists at all.
+    const k = key()
+    const licensed = parseLicense(
+      k.token({ org: 'acme', features: ['sso'], seats: 25, expires_at: future }),
+      trustedKeys(k.publicKeys),
+    )
+    assert.equal(seatsFrom(licensed), 25)
+
+    // Zero is unlimited, not a limit of nobody. The other reading locks every
+    // customer on an unmetered licence out of their own directory.
+    const unmetered = parseLicense(
+      k.token({ org: 'acme', features: ['sso'], seats: 0, expires_at: future }),
+      trustedKeys(k.publicKeys),
+    )
+    assert.equal(seatsFrom(unmetered), null)
+    assert.equal(seatsFrom(null), null)
+  })
+
   it('installs both sign-on extension points, never one', () => {
     // ee/web/sso/src/index.ts says why at length: an organization that has
     // REQUIRED single sign-on still has GitHub sign-in open unless the policy

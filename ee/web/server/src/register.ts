@@ -95,6 +95,23 @@ export function readLicense(env: NodeJS.ProcessEnv, now: Date, log: (line: strin
 }
 
 /**
+ * How many members the licence covers, or null for no limit.
+ *
+ * Exported so it can be tested as a number rather than only through a
+ * provisioning flow. provision.ts already proves what happens when the host
+ * supplies a limit; what was never proved is that a host supplies one, because
+ * there was no host.
+ *
+ * Zero seats is unlimited, not a limit of nobody, which is the Go side's rule
+ * and the only reading that does not lock every customer on an unmetered
+ * licence out of their own directory.
+ */
+export function seatsFrom(claims: Claims | null): number | null {
+  if (!claims || claims.seats <= 0) return null
+  return claims.seats
+}
+
+/**
  * Registers single sign-on and provisioning, gated.
  *
  * BOTH SIGN-ON EXTENSION POINTS, always. ee/web/sso/src/index.ts explains why
@@ -135,11 +152,7 @@ export function registerEnterprise(options: RegisterOptions): Registered {
       // the number. There was no host, so nothing was ever handed anything, so
       // AF-EE-004's seat limit has never refused a single member. It does now,
       // and it is the licence's own number rather than a second one.
-      seats: async () => {
-        const c = gate.claims
-        if (!c || c.seats <= 0) return null
-        return c.seats
-      },
+      seats: async () => seatsFrom(gate.claims),
       log: options.log,
     }),
     'sso',

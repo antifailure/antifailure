@@ -106,6 +106,21 @@ export function licenseFor(
   })
 }
 
+// Every process this harness starts, so none can be left behind.
+//
+// A leak here is not untidiness. The first run of the mutation matrix hung for
+// fifteen minutes on one cell, because a case that expects a start-up refusal
+// got a process that started, and the test failed WITHOUT stopping it: node's
+// test runner will not exit while a child's stdio pipes are open. A harness
+// whose cleanup depends on the test taking the happy path is a harness that
+// stops working exactly when a test fails, which is the only time it matters.
+const started: Running[] = []
+
+/** Stops everything, whatever happened to the test that started it. */
+export async function stopAll(): Promise<void> {
+  await Promise.all(started.splice(0).map((r) => r.stop()))
+}
+
 export interface Running {
   port: number
   /** Everything the process printed, which is where the startup lines about
@@ -174,7 +189,7 @@ export async function startEntryPoint(
     })
   })
 
-  return {
+  const running: Running = {
     port,
     output: () => output,
     get: (pathname, init) =>
@@ -199,6 +214,8 @@ export async function startEntryPoint(
         child.kill('SIGKILL')
       }),
   }
+  started.push(running)
+  return running
 }
 
 export interface Seeded {

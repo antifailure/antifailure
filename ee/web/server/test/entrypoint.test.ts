@@ -30,6 +30,7 @@ import {
   seed,
   signingKey,
   startEntryPoint,
+  stopAll,
   type Running,
   type Seeded,
 } from './harness.ts'
@@ -68,9 +69,10 @@ describe('the enterprise entry point', { skip: hasDatabase ? false : 'no Postgre
   })
 
   after(async () => {
-    await licensed?.stop()
-    await unlicensed?.stop()
-    await community?.stop()
+    // Everything the harness started, not the three named here. A case that
+    // starts a process and then fails an assertion never reaches its own
+    // cleanup, and a child with open pipes stops the runner from exiting.
+    await stopAll()
     if (admin) {
       await admin`DELETE FROM organizations WHERE id = ${org.orgId}`
       await admin.end({ timeout: 5 })
