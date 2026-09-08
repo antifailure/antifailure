@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -46,6 +47,10 @@ import (
 type Sidecar struct {
 	// Emulator is where a covered request is sent, as host:port.
 	Emulator string
+	// Log, when set, receives one line per decision. The router that runs
+	// inside a container writes to standard output, which is the only channel
+	// out of it a test can read.
+	Log io.Writer
 
 	ca     tls.Certificate
 	caPEM  []byte
@@ -80,6 +85,73 @@ type Observation struct {
 	Emulated bool
 	// Service is the covered service that claimed the host, when one did.
 	Service string
+}
+
+// LoadSidecar builds one around a certificate authority that already exists,
+// which is what the standalone router does: the test mints the authority once,
+// mounts it into the container that routes and into the container that calls,
+// and both sides then agree about who signed the certificate.
+func LoadSidecar(emulatorAddress string, certPEM, keyPEM []byte) (*Sidecar, error) {
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, err
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, err
+	}
+	pair.Leaf = leaf
+	return &Sidecar{
+		Emulator: emulatorAddress,
+		ca:       pair,
+		caPEM:    certPEM,
+		leaf:     map[string]*tls.Certificate{},
+	}, nil
+}
+
+// CA returns the authority in PEM, which is what a caller trusts.
+func (s *Sidecar) CA() []byte { return s.caPEM }
+
+// CAKeyPEM returns the authority's private key in PEM.
+//
+// It exists so that a test can hand the same authority to a router running in
+// a container. The key lives for the length of one test run and signs nothing
+// outside it.
+func (s *Sidecar) CAKeyPEM() ([]byte, error) {
+	key, ok := s.ca.PrivateKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("the authority is not an RSA key")
+	}
+	return pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}), nil
+}
+
+// ServeTLS answers HTTPS directly on a listener, which is the shape the
+// sidecar takes inside an environment.
+//
+// The proxy variables are one of two ways a service reaches the sidecar and
+// the weaker one, because a library is free to ignore them. The other is DNS:
+// every external name resolves to the sidecar's own address, so a client that
+// ignores every variable still arrives here. This is that path, and it is what
+// the JavaScript suite drives, because the AWS SDK for JavaScript reads no
+// proxy variable at all. A Docker network alias per hostname stands in for the
+// environment's resolver.
+func (s *Sidecar) ServeTLS(ln net.Listener) error {
+	server := &http.Server{
+		ReadHeaderTimeout: 30 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s.forward(w, r, r.Host)
+		}),
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return s.certificateFor(hello.ServerName)
+			},
+		},
+	}
+	s.server = server
+	return server.ServeTLS(ln, "", "")
 }
 
 // NewSidecar builds the stand in and its certificate authority.
@@ -151,7 +223,19 @@ func (s *Sidecar) record(o Observation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seen = append(s.seen, o)
+	if s.Log == nil {
+		return
+	}
+	line, err := json.Marshal(o)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(s.Log, "%s%s\n", ObservationPrefix, line)
 }
+
+// ObservationPrefix marks a decision in the router's output, so a test reading
+// a container's log can tell one from whatever else was written there.
+const ObservationPrefix = "emulatorcheck-decision "
 
 func (s *Sidecar) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodConnect {
