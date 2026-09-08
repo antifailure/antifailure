@@ -961,15 +961,55 @@ jobs:
         # site actually serves it at that path, which is a different claim and
         # the one users experience. A rename that keeps the file but moves the
         # route would pass errcheck and 404 in production.
+        #
+        # THE COUNT IS NOT DECORATION. A grep that stops matching returns
+        # nothing, `for path in $(...)` over nothing runs its body zero times,
+        # and the step exits 0 having checked no page at all. The step directly
+        # above already guards exactly this, with a count and a comment saying
+        # why, and this one did not. Rename catalog.yaml, move the `docs:` key,
+        # or change its indentation, and every documented error page stopped
+        # being checked while this stayed green.
+        #
+        # A floor rather than the exact number the step above uses, and the
+        # difference is the subject rather than laziness: that one reads a
+        # hand curated navigation of twenty four entries, where an exact count
+        # is a decision somebody makes on purpose. This reads an error catalog
+        # that grows whenever a new code is added, so an exact count would be a
+        # number every unrelated change had to edit, and a number people edit
+        # by reflex stops being a check.
         run: |
+          set -euo pipefail
+          catalog=engine/internal/errors/catalog.yaml
+          test -f "$catalog" || {
+            echo "::error::$catalog is not there, so this check is looking in the wrong place"
+            exit 1
+          }
+          # `|| true` so that the COUNT is what refuses, with its message,
+          # rather than pipefail killing the step at this assignment with no
+          # explanation. A grep matching nothing must reach the guard below.
+          paths=$(grep -oE '^[[:space:]]*docs:[[:space:]]*[a-z0-9/_-]+' "$catalog" \
+              | awk '{print $2}' | sort -u || true)
+          count=$(printf '%s\n' "$paths" | grep -c . || true)
+          # Twenty, against 46 measured on this commit. The first draft of
+          # this guard said fifty because it had counted MATCHING LINES rather
+          # than unique paths after `sort -u`, and it would have refused the
+          # intact tree. The number is stated with where it came from for that
+          # reason: a floor nobody can source is a floor somebody lowers.
+          if [ "$count" -lt 20 ]; then
+            echo "::error::read $count documentation paths out of $catalog, against 46 when this"
+            echo "::error::guard was written. The file or the key has moved, and a loop over"
+            echo "::error::nothing passes every time."
+            exit 1
+          fi
           missing=0
-          for path in $(grep -oE '^[[:space:]]*docs:[[:space:]]*[a-z0-9/_-]+' \
-              engine/internal/errors/catalog.yaml | awk '{print $2}' | sort -u); do
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
             if [ ! -f "docs/dist/$path/index.html" ]; then
               echo "::error::no page built for https://antifailure.dev/docs/$path"
               missing=1
             fi
-          done
+          done <<< "$paths"
+          echo "checked $count documented error paths"
           exit $missing
 
       - name: The built documentation carries its head and resolves its entity graph
@@ -1101,17 +1141,70 @@ jobs:
           done
         working-directory: web
 
-      - name: The suites did not skip
+      - name: The database the suites skip themselves without
         # Every suite here skips itself when there is no database, which is
         # right locally and wrong in CI: a green run that proved nothing is
         # worse than a red one. This fails if the database is not reachable,
         # before any test gets the chance to quietly skip.
+        #
+        # RENAMED, because the old name was "The suites did not skip" and this
+        # opens a TCP socket. It examines one reason a suite might skip and
+        # calls itself the whole question, and the name is the only thing the
+        # checks list and the jobs API return, so it sent a reader to the wrong
+        # file. The step below is the one that answers the name.
         run: |
           node -e "
             const c = require('net').connect(5432, '127.0.0.1');
             c.on('connect', () => { console.log('postgres is up'); process.exit(0) });
             c.on('error', (e) => { console.error('no postgres:', e.message); process.exit(1) });
           "
+
+      - name: Every workspace declares the tests this job is about to run
+        # THE SKIP THE SOCKET CHECK CANNOT SEE. The next step is `npm test
+        # --workspaces --if-present`, and `--if-present` is the actual skip
+        # mechanism: a workspace whose `test` script is renamed or deleted runs
+        # nothing, exits 0, and prints one line nobody reads. Postgres is up
+        # either way, so the step above stays green while a third of this
+        # required context stops existing.
+        #
+        # This is the same failure the enterprise job's own comment describes,
+        # where naming packages by hand left two of them untested. Fanning out
+        # over the workspaces list fixed WHICH packages are reached and left
+        # `--if-present` free to drop one silently.
+        #
+        # Zero workspaces is refused rather than passed, for the reason the
+        # rest of this repository already gives: a check that resolved nothing
+        # is looking in the wrong place, not looking at a clean tree.
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const globs = require("./package.json").workspaces || [];
+            const dirs = [];
+            for (const g of globs) {
+              const base = g.replace(/\/\*$/, "");
+              if (!fs.existsSync(base)) continue;
+              for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+                if (!e.isDirectory()) continue;
+                const d = path.join(base, e.name);
+                if (fs.existsSync(path.join(d, "package.json"))) dirs.push(d);
+              }
+            }
+            if (dirs.length === 0) {
+              console.error("resolved no workspace out of " + JSON.stringify(globs) +
+                ", so this check is looking in the wrong place rather than at a tree with nothing to test");
+              process.exit(1);
+            }
+            const missing = dirs.filter(d =>
+              !((JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8")).scripts || {}).test));
+            console.log(dirs.length + " workspaces, " + (dirs.length - missing.length) + " with a test script");
+            if (missing.length) {
+              console.error("these workspaces have no test script, so `npm test --workspaces " +
+                "--if-present` runs nothing for them and this job goes green having skipped them:\n  " +
+                missing.join("\n  "));
+              process.exit(1);
+            }
+          '
+        working-directory: web
 
       - name: Test
         run: npm test --workspaces --if-present
@@ -1197,11 +1290,43 @@ jobs:
         run: go run ./tools/editioncheck .
 
       - name: No engine package imports ee
+        # `if grep ...; then` READS AN ERROR AS A CLEAN RESULT. grep exits 0 on
+        # a match, 1 on no match, and 2 when it could not search: a missing
+        # directory, an unreadable one, a bad pattern. Two is not zero, so the
+        # `if` was false and the step passed. Rename `engine` and this printed
+        # nothing and went green forever, which is a required context reporting
+        # a verdict about a tree it never opened.
+        #
+        # So the search roots are asserted first and the three exits are told
+        # apart by name. A search that failed is not a search that found
+        # nothing.
         run: |
-          if grep -rn --include='*.go' 'antifailure/antifailure/ee' engine tools; then
-            echo "an engine package imports ee, which the community build does not have"
-            exit 1
-          fi
+          set -uo pipefail
+          for d in engine tools; do
+            [ -d "$d" ] || {
+              echo "::error::$d is not a directory, so this check is looking in the wrong place"
+              exit 1
+            }
+          done
+          # `|| status=$?` rather than `status=$?` on its own line. This
+          # workflow's steps run under `bash -e`, so grep exiting 1 for NO
+          # MATCH aborts the step before the status is ever read. The first
+          # version of this did exactly that and died at exit 1 with none of
+          # the branches below printing anything, which is a check that
+          # refuses without saying what it found.
+          status=0
+          grep -rn --include='*.go' 'antifailure/antifailure/ee' engine tools || status=$?
+          case "$status" in
+            0)
+              echo "an engine package imports ee, which the community build does not have"
+              exit 1 ;;
+            1)
+              echo "no engine package under engine or tools imports ee" ;;
+            *)
+              echo "::error::grep exited $status, so it did not search engine and tools."
+              echo "::error::A search that could not run is not a search that found nothing."
+              exit 1 ;;
+          esac
 
       - name: The community binary carries no enterprise symbols
         # The proof that ships, rather than the proof that compiles. The
@@ -1290,12 +1415,39 @@ jobs:
           npm --prefix ee/web test
 
       - name: Nothing in the community web depends on the enterprise one
+        # The same defect as `No engine package imports ee` in the edition
+        # boundary job, and the same repair. grep exits 2 when it cannot
+        # search, `if grep ...; then` reads that as no match, and the step
+        # passes. Rename `web/packages` and this boundary check is green
+        # forever while nothing is looking at anything.
         run: |
-          if grep -rn --include='*.ts' --include='*.json' \
-              -e 'antifailure-ee' -e 'ee/web' web/apps web/packages; then
-            echo "the community web references enterprise code"
-            exit 1
-          fi
+          set -uo pipefail
+          for d in web/apps web/packages; do
+            [ -d "$d" ] || {
+              echo "::error::$d is not a directory, so this check is looking in the wrong place"
+              exit 1
+            }
+          done
+          # `|| status=$?` rather than `status=$?` on its own line. This
+          # workflow's steps run under `bash -e`, so grep exiting 1 for NO
+          # MATCH aborts the step before the status is ever read. The first
+          # version of this did exactly that and died at exit 1 with none of
+          # the branches below printing anything, which is a check that
+          # refuses without saying what it found.
+          status=0
+          grep -rn --include='*.ts' --include='*.json' \
+            -e 'antifailure-ee' -e 'ee/web' web/apps web/packages || status=$?
+          case "$status" in
+            0)
+              echo "the community web references enterprise code"
+              exit 1 ;;
+            1)
+              echo "nothing under web/apps or web/packages references the enterprise web" ;;
+            *)
+              echo "::error::grep exited $status, so it did not search web/apps and web/packages."
+              echo "::error::A search that could not run is not a search that found nothing."
+              exit 1 ;;
+          esac
 
       - name: The license parser survives arbitrary input
         # It reads a value a customer pastes in, so the only property that
