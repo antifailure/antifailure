@@ -37,6 +37,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/antifailure/antifailure/tools/internal/generated"
 )
 
 // documents are checked for path claims. These are the pages a person reads
@@ -302,6 +304,21 @@ func checkDocsURLs(root string, tracked map[string]bool, out io.Writer) error {
 		if perr != nil {
 			// A file that does not parse is somebody else's problem; the
 			// compiler will say so more clearly than this would.
+			return nil
+		}
+		// Generated Go is skipped, because its literals were authored
+		// somewhere else and are checked where they were authored.
+		//
+		// This is not tidiness. engine/internal/docs/pages.gen.go carries the
+		// documentation site itself, page by page, as string literals, so
+		// EVERY address any page mentions arrives here looking like an
+		// address the engine hands a user. The first one did:
+		// /docs/llms-full.txt, which docs/src/pages/llms-full.txt.ts serves
+		// and which is not a page under src/content/docs, so the resolver
+		// below cannot see it and called a live address dead. The claim is
+		// real prose in index.md, `just links` is what checks it, and this
+		// check has no business judging it a second time through a copy.
+		if generated.Is(path) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, path)

@@ -558,6 +558,14 @@ benchmark:
     # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
     AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
       -v -count=1 -timeout 60m
+    # What one documentation answer costs an agent, against what the whole
+    # documentation set would cost it. It is the one benchmark here that needs
+    # no database, no daemon and no network: the corpus is compiled into the
+    # binary, so a customer runs it in a second. It writes into benchmarks/
+    # for the same reason the provider and cross store halves do.
+    AF_DOCS_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-documentation-context.md" \
+      go test ./internal/docs -run TestBenchmarkTheContextOneAnswerCosts -count=1
+    echo "wrote benchmarks/${stamp}-documentation-context.md"
 
 # The fast ones, for a tight loop.
 test-short:
@@ -1446,6 +1454,7 @@ _generated:
     go run ./tools/errgen
     go run ./tools/lintgen
     go run ./tools/proxysrc
+    go run ./tools/docsembed
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     (cd engine && go test ./internal/policy -update-vectors)
@@ -1473,6 +1482,7 @@ _generated:
       engine/internal/insights/findings.register.json \
       docs/src/content/docs/reference/lint-findings.md \
       engine/internal/proxyimage/sources.gen.go \
+      engine/internal/docs/pages.gen.go \
       schemas/policy-vectors.json \
       schemas/mockpack-vectors.json \
       schemas/webhook-vectors.json \
@@ -1516,6 +1526,7 @@ generate:
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
+    go run ./tools/docsembed
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     cd engine && go test ./internal/policy -update-vectors

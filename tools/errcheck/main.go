@@ -28,6 +28,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/antifailure/antifailure/tools/internal/generated"
 )
 
 func main() {
@@ -436,7 +438,6 @@ func wireFor(constant string) string {
 // where it appears as an identifier outside the file that defines it.
 func usedCodes(root string) (map[string]bool, error) {
 	used := map[string]bool{}
-	generated := filepath.Join("errors", "codes.gen.go")
 
 	for _, dir := range []string{"engine", "tools", "ee"} {
 		base := filepath.Join(root, dir)
@@ -458,7 +459,22 @@ func usedCodes(root string) (map[string]bool, error) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, generated) {
+			if !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+			// Generated Go is skipped, and the rule is one sentence rather
+			// than a list of names: a generated file's literals were authored
+			// somewhere else and are counted where they were authored.
+			//
+			// errors/codes.gen.go was the first, excluded here by name because
+			// it DEFINES every code and would otherwise mark all of them used.
+			// engine/internal/docs/pages.gen.go is the second, and it is why
+			// the name became a rule: it carries the documentation site page
+			// by page, so the error reference listing AF-CPL-003 as reserved
+			// arrived here as evidence that something returns it. It was
+			// reported as a planned code that ships, which is a real defect
+			// class and was not this.
+			if generated.Is(path) {
 				return nil
 			}
 			// Tests count. A code that only a test returns is still reachable,

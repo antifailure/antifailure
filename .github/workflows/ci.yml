@@ -139,6 +139,7 @@ jobs:
           go run ./tools/errgen
           go run ./tools/lintgen
           go run ./tools/proxysrc
+          go run ./tools/docsembed
           go run ./tools/schemadoc .
           go run ./tools/notices -out THIRD_PARTY_NOTICES.md
           (cd engine && go test ./internal/policy -update-vectors)
