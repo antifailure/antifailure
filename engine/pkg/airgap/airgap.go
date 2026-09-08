@@ -48,6 +48,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -221,15 +222,25 @@ func parseRule(entry string) (rule, error) {
 	if _, cidr, err := net.ParseCIDR(entry); err == nil {
 		return rule{raw: entry, net: cidr}, nil
 	}
+	// Checked on the WHOLE entry and before the split, which is not fussiness.
+	// net.SplitHostPort splits on the last colon and does not validate either
+	// half, so "https://registry.internal/v2/" comes back as the host "https"
+	// on the port "//registry.internal/v2/" with no error, and a check applied
+	// to the host afterwards sees a clean word and admits it. The rule would
+	// then match nothing for ever and the operator would never be told.
+	if strings.ContainsAny(entry, "/ \t") {
+		return rule{}, fmt.Errorf("air gapped: %q is not a host, a host and port, or a CIDR. "+
+			"A scheme and a path are not part of an address here", entry)
+	}
 	host, port := entry, ""
 	if h, p, err := net.SplitHostPort(entry); err == nil {
+		if _, convErr := strconv.Atoi(p); convErr != nil {
+			return rule{}, fmt.Errorf("air gapped: %q ends in %q, which is not a port number", entry, p)
+		}
 		host, port = h, p
 	}
 	if host == "" {
 		return rule{}, fmt.Errorf("air gapped: %q names no host", entry)
-	}
-	if strings.ContainsAny(host, "/ \t") {
-		return rule{}, fmt.Errorf("air gapped: %q is not a host, a host and port, or a CIDR", entry)
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		bits := 32

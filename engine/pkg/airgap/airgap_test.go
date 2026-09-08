@@ -115,11 +115,25 @@ func TestAnAllowEntryThatIsNotAnAddressIsRefusedRatherThanIgnored(t *testing.T) 
 	airgap.Reset()
 	t.Cleanup(airgap.Reset)
 
-	err := airgap.Allow("https://registry.internal/v2/")
-	require.Error(t, err,
-		"an allow list with a typo is one that is quietly narrower than the operator "+
-			"believes, and they find out at three in the morning")
+	// net.SplitHostPort splits on the last colon and validates neither half, so
+	// each of these comes back as a plausible looking host and port with no
+	// error and would sit in the allow list matching nothing for ever.
+	for _, entry := range []string{
+		"https://registry.internal/v2/",
+		"registry.internal:5000/v2",
+		"registry.internal:https",
+		"registry internal",
+	} {
+		require.Errorf(t, airgap.Allow(entry),
+			"%q was accepted, and an allow list with a typo is one that is quietly "+
+				"narrower than the operator believes", entry)
+	}
 	require.Empty(t, airgap.Allowed())
+
+	// And the shapes that are addresses are still accepted, or the check above
+	// would pass by refusing everything.
+	require.NoError(t, airgap.Allow("registry.internal:5000", "10.4.0.0/16", "vault.internal", "::1"))
+	require.Len(t, airgap.Allowed(), 4)
 }
 
 func TestRefuseStopsAPathThatHasNoAddressToPermit(t *testing.T) {
