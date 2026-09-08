@@ -1581,11 +1581,9 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
-            "local",
-            "kubernetes"
-          ],
-          "default": "local"
+          "maxLength": 64,
+          "default": "local",
+          "description": "Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would."
         },
         "ttl": {
           "type": "string",

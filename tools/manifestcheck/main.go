@@ -386,6 +386,20 @@ func walk(value any, node, root map[string]any, path string, report func(string)
 // comparing a YAML integer to a JSON number invites a false positive over
 // nothing. And it stays quiet unless EVERY branch that has an enum refuses the
 // value, so a value permitted by one arm of a oneOf is permitted.
+//
+// WHAT THE MESSAGE MAY CLAIM, and why it no longer claims what it used to. It
+// said "the engine refuses it with AF-MAN-002. It has to be one of: ...", and
+// that is a statement about a program this gate has never read. It was false
+// where it mattered most. runtime.provider carried the enum local, kubernetes,
+// so a page showing runtime.provider: ecs was refused with a remediation
+// telling the reader the engine would refuse it too, while a build that has
+// registered an ecs runtime accepts it and runs the environment: nothing
+// validates a manifest against this schema at parse time, and the switch in
+// newRuntime consults the registry before it refuses. A gate that says no
+// about the right field for a reason that is not true is worse than one that
+// says nothing, because the reader believes it. So the message now reports
+// what was actually read, which is the schema, and names the shape a key takes
+// when a registration can answer it.
 func checkEnum(value string, node, root map[string]any, path string, report func(string)) {
 	var allowed []string
 	for _, alt := range branches(node, root) {
@@ -410,8 +424,11 @@ func checkEnum(value string, node, root map[string]any, path string, report func
 		return
 	}
 	sort.Strings(allowed)
-	report(fmt.Sprintf("%s is %q, which is not one the manifest accepts. The engine refuses it "+
-		"with AF-MAN-002. It has to be one of: %s", path, value, strings.Join(allowed, ", ")))
+	report(fmt.Sprintf("%s is %q, which schemas/manifest.v1.json does not list for that key. "+
+		"It lists: %s. This gate reads the schema and not the engine, so it reports what the "+
+		"manifest declares and not what a build will run: a key a provider registration can "+
+		"answer carries no list at all, the way datastore.engine and runtime.provider do.",
+		path, value, strings.Join(allowed, ", ")))
 }
 
 // propertyFor finds the schema for a key across a node's branches, and reports
