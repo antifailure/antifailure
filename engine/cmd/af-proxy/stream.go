@@ -73,7 +73,11 @@ import (
 // SMTP and the MongoDB handshake in some drivers, will send nothing here ever,
 // and the honest answer to that is a refusal the developer reads in seconds
 // rather than a connection that hangs for the length of their own timeout.
-const streamPeekTimeout = 10 * time.Second
+//
+// A var rather than a const so the measurement suite can shorten it. The
+// rows that send nothing are the ones that take the whole timeout, and they
+// are exactly the rows worth measuring.
+var streamPeekTimeout = 10 * time.Second
 
 // serveStream decides one connection on a port that does not carry HTTP.
 func (p *proxy) serveStream(proto schema.StreamProtocol) func(net.Conn) {

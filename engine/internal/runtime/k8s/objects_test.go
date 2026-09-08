@@ -20,6 +20,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // These test the decisions that are made before anything talks to a cluster.
@@ -345,6 +346,23 @@ func TestAClientThatIgnoresProxyVariablesCanStillReachTheSidecar(t *testing.T) {
 	// contained and a host the policy ALLOWS is unreachable too.
 	for _, want := range []int32{ProxyPort, 80, 443, dnsPort} {
 		require.True(t, ports[want], "egress to the sidecar must permit port %d", want)
+	}
+
+	// And every port the byte stream path listens on, compared against the
+	// shared table rather than against a literal.
+	//
+	// This is the drift gate. The sidecar opens a listener per entry in
+	// schema.ByteStreamProtocols and this NetworkPolicy decides whether a
+	// packet ever reaches one. A port present in the table and absent here
+	// does not fail loudly: a NetworkPolicy that does not permit a port DROPS
+	// the packet, so the application hangs until its own connect timeout and
+	// the sidecar's decision log stays empty, which reads as an application
+	// fault rather than as a policy one. Asserting against a copied list here
+	// would make the two lists two lists again.
+	for _, proto := range schema.StreamPorts(nil) {
+		require.True(t, ports[int32(proto.Port)], //nolint:gosec // every port in the table is below 65536
+			"egress to the sidecar must permit port %d, which it listens on for %s",
+			proto.Port, proto.Name)
 	}
 }
 
