@@ -169,16 +169,30 @@ services:
 
       # The GitHub App is configured for the same reason, so /webhooks/github
       # exists and an installation can be rehearsed. Nothing here can reach
-      # GitHub: api.github.com is blocked below, and the App id and key were
-      # never registered with GitHub. The key is a throwaway generated for
-      # this file with `openssl genpkey`, committed on purpose and useless
-      # anywhere else; it is base64 rather than PEM because the api accepts
-      # either and the validator refuses a literal beginning with BEGIN, again
-      # correctly. The webhook secret is a rename of the engine's, as above.
+      # GitHub: api.github.com is blocked below, and the App id was never
+      # registered with GitHub.
+      #
+      # The key is supplied rather than written down, and it used to be written
+      # down. This file carried a real 2048 bit RSA private key as a literal,
+      # 2272 characters of it, base64 encoded rather than PEM because the
+      # validator refuses a literal beginning with BEGIN and base64 walked past
+      # it. The comment beside it said the key was a throwaway and that was
+      # true; it was still a private key committed to a public repository, in
+      # the one file this product holds up as an ordinary manifest. The
+      # published schema says what a manifest is in as many words: it declares
+      # the name and where the value comes from, and never the value itself,
+      # which is why the file is safe to commit.
+      #
+      # So the engine makes one. A manifest declaring a webhook path for GitHub
+      # is rehearsing a GitHub App, and GITHUB_APP_PRIVATE_KEY is generated for
+      # the life of the environment and offered under the same condition as the
+      # signing secret below. Nothing is configured outside this file, nothing
+      # is committed, and af up on a laptop needs no setup it did not need
+      # before.
       - name: AF_GITHUB_APP_ID
         value: "1"
       - name: AF_GITHUB_APP_PRIVATE_KEY
-        value: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2UUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktjd2dnU2pBZ0VBQW9JQkFRRFpWNE1yTEpBN2YvUU8KSENBWHREeUNCc01wMzdiWlkzM2dlSnYvZjZ1aitMQWx1cTBGN2MwTDA5bW1OMDhpNVpMK29XWklJbEFZSFg2TwpvSmE2dDFHUnpZZUZudVRIcURLamdHZjh6YmJsZDVhdUZ5cENwZ0NJUlFRODIxbXFKYTZtbVJNQW5oZS9JbDZ2CmZOak5ONTlXd1JiQVM1eWFLZkJMWW05SG9nZ01hRVg4dkhxSWNWZUVnZWNaWlZQY2hrRFdMQXlxWnNEaEl5L1YKeFJET1dJVy80TUs0NzlMZkNxSjgrZU9aNHMxY0R4RU43L0dsL0JaRGdzMElhL3E5ZEtyV3N4TzZCUUlaNU5JbQoweVp5M0c3czF3WThzNDlIcVhnbW5wczVJRHpQUnBteDh4cnl3Q0NFV0JiOXhSbWk1dldNV0xGakpwUHc3Vk9VCjhXS0FBbGVMQWdNQkFBRUNnZ0VBSUZjWkhGc0dDVHgvRWRIQWtCWmwxelB2WlhNMXI1VDgzWTBhS3E0U0x4VFUKWW9EV1pIdjFRZzNLSktWZjZxdytMNzBrelpZQmYxMGdLdjZkVkhlWkNuamY4aE9VZ2xzTHAwV2c4NVAwRGsxawpYVStkYzdaazBqZHhnU2E0bEdJRllpS0Q3OWhydXlsVTdUTHhjRjZXOWZTY1plSmxFVHd0Vm96MVRGNUJhVldkCkRYVVppNHFYMHJvaHhEMkpTQnlHOTh0V3ZqcnZsZmxLUmJJMndEdHp0Z1BKQTJXM2RBQzJ0dXdIbEtjOUZDdjMKVTZqMG4vekhUN1ZHWFo4MHFlMkRvVVFLRkw0ZGg4VjhqQnNSMkFYRmdTOW9idnM2NkgzTzJkWDZLM1pIT29yagp0K2JWNjRYUko2dXIyN014WGZPRURjbnFMMFJ6L3VaTGtIWVBaQk9LWVFLQmdRRDlSSVp5cXQzTHk5c0xiaGszCkZ3Z3c0T2hZN1FPUnhUMlNCdldsbWdnWjQ3M1ZxTkpDS3JTRUhRd05iMk5DM1ZYaTgrSWRCbG9lS2ZmNy9mNDQKSDhvaWcySmJqcGtPdll5aXJDZ2Zwc041dkFSVUtqWnpHWldNV2FvbThEZ09pWm8rMzhuRDd4TktOSjZqL3FTUApDN0NSdkxEcVE4MFJvN0d3WWRPbTMzeGFhd0tCZ1FEYnI4Um4wTG9jM2JUNUNPWFNyRHdhZWZtZzB1UTE0VDNFClRUYy94Yy9lamJBNVRqbU5vYkttUHBIMDA4bzZwaTJhL0RZNVhwV0Z3TW5DNDdnVmNjeTB2Nnd0MzdMU2k0TjQKWEE1SHcwcWR1TkVUK0tQTWhMbFFXNE4vbFZGTysxa05UMmtFZk9GM2VWTU4rSjZxTVpRZHc2Ukx1enROM0FkcQpYeUw0TjF0L1lRS0JnQ0JQb3J0MFV4R1I4Mk1VNjhDY2ZwNEZ3MzY4MWl5OXRpb3dHeHpDZHZBZW52Um9NbExnCnNlRDg5N0dyR1VYSmlSQ0lQcnVuT000S1dxbmFjSmxtYk5wVVdyTUZrVDlSTFdUL2c2cnVFcGd3UlhrYlhaRDMKbloyblBzN3k3S1BtS0RpSFFtMXR6Yzgwd1Z4NHV6UElzUUVXeXBkSWlSd0wvenBhY0s4a2FlLzdBb0dBV3BqaQo0M2xWdDEvTEtVUjlHdU9DcWR5UmtMeEg5dHhiejUrVVlFMWdpMFJkWDFTZU1ZVjBtbENGZXJUNDJqVDc2OFdGClN5Vnhma1ppTG1nZzIxOGg3NHg0SWpiMWxSU0o5RkhxWmJmcEJxQllRT2N5RGI3U2VZd3o3NktSZElQOVZwcmcKRVVTNjZyMXkvZmtBM2VreVR4QUdxbUNkZFY5L0EyUVdsTXluaENFQ2dZRUF6cktDdjVXRWp2bHRBQ0tDRXBoQQp2bWMwNFUxZWFKSUQwQlBYeStGNnRDSlhmbXVTNjZKTlQxTDRFRWtmZkpKRytxc3drbjRIRHpSRUlkWDFlME5rCkkzMHY2WEdhdURKL1ZNbE1uQ3lOR2xyT3B1Ti9qK1d1b2RpUnc5VmNqYVNncEJ2OU94a1hodUtWSzlvSm4wM3MKdGVMUk8yZnhXWW1Eajc4VGI5M3R6M1k9Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+        from: GITHUB_APP_PRIVATE_KEY
       - name: AF_GITHUB_APP_WEBHOOK_SECRET
         from: GITHUB_WEBHOOK_SECRET
 

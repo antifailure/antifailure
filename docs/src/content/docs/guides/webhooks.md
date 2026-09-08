@@ -48,6 +48,42 @@ signing secrets. A value typed into the manifest instead would be the first
 thing to drift from the one the sender uses, and every event would then be
 refused as unsigned by the very verification this exists to exercise.
 
+## The GitHub App's own key
+
+A GitHub App is three credentials, and the webhook secret is only one of them.
+The other two are the numeric App id and the private key the App signs its JWT
+with, and an application that reads all three usually refuses to start with
+some of them: a webhook secret with no private key is an endpoint that verifies
+deliveries and can do nothing with them.
+
+So a manifest that declares a webhook path for GitHub is offered a private key
+as well, under `GITHUB_APP_PRIVATE_KEY`, generated for the life of the
+environment:
+
+```yaml
+services:
+  - name: api
+    env:
+      - name: AF_GITHUB_APP_ID
+        value: "1"
+      - name: AF_GITHUB_APP_PRIVATE_KEY
+        from: GITHUB_APP_PRIVATE_KEY
+      - name: AF_GITHUB_APP_WEBHOOK_SECRET
+        from: GITHUB_WEBHOOK_SECRET
+```
+
+It is a real RSA key in PKCS#8, because the applications that read one reject a
+placeholder, and it is a different key in every environment. It authenticates
+nothing: GitHub has never seen it, and `api.github.com` is reachable only if
+your own egress rules allow it.
+
+Exporting `GITHUB_APP_PRIVATE_KEY` yourself wins over the generated one, for
+the case where you are rehearsing against an App you really registered.
+
+Writing the key into the manifest instead is the thing this replaces. A
+manifest is committed, so a key written there is a key in the repository for as
+long as the file is there, and the engine refuses a value that carries one.
+
 ## Delivery failed
 
 ```

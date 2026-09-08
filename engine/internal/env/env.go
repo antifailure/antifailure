@@ -535,7 +535,7 @@ func (o *Orchestrator) openReading(ctx context.Context) (*session, error) {
 // store is last because it is the long-lived default.
 func (o *Orchestrator) secretChain() *secrets.Chain {
 	if o.opts.Secrets != nil {
-		return o.withWebhookSecrets(o.opts.Secrets)
+		return o.withEnvironmentSources(o.opts.Secrets)
 	}
 	getenv := o.opts.Getenv
 	if getenv == nil {
@@ -546,12 +546,12 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 	// One constructor, shared with af explain and with model key resolution, so
 	// that a command whose job is to say where a value will come from cannot
 	// describe a different chain than the one that resolves it.
-	return o.withWebhookSecrets(
+	return o.withEnvironmentSources(
 		secrets.LocalChain(o.opts.Root, getenv, registry, secrets.NewSystemKeyring()))
 }
 
-// withWebhookSecrets puts the signing secrets this environment derives in
-// front of a chain, under the names the sender uses.
+// withEnvironmentSources puts the values this environment makes for itself in
+// front of a chain, under the names the manifest refers to them by.
 //
 // So that a service can declare `from: STRIPE_WEBHOOK_SECRET` on whatever
 // variable its application actually reads and receive the value the engine
@@ -560,12 +560,24 @@ func (o *Orchestrator) secretChain() *secrets.Chain {
 // that could not hold a value computed at af up, and the api in this
 // repository's own twin, which reads AF_STRIPE_WEBHOOK_SECRET, started with
 // billing off while every simulated event was refused before it was sent.
-func (o *Orchestrator) withWebhookSecrets(chain *secrets.Chain) *secrets.Chain {
-	provided := o.WebhookSecrets()
-	if len(provided) == 0 {
+//
+// The GitHub App identity joined it for the same reason read the other way
+// round. There was nowhere for a manifest to get one, so this repository's own
+// twin carried a real 2048 bit RSA key as a literal in a file committed to a
+// public repository, because a literal was the only thing that worked.
+func (o *Orchestrator) withEnvironmentSources(chain *secrets.Chain) *secrets.Chain {
+	if o.opts.Manifest == nil || o.opts.Manifest.Egress == nil {
 		return chain
 	}
-	return chain.Prepended(secrets.NewProvidedSource(webhook.SecretsSourceName, provided))
+	getenv := o.opts.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	sources := EnvironmentSources(o.opts.Manifest.Egress.Rules, o.envID, getenv)
+	if len(sources) == 0 {
+		return chain
+	}
+	return chain.Prepended(sources...)
 }
 
 // resolveSecrets looks up everything the manifest declares.

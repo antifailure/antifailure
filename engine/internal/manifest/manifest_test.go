@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -328,6 +329,30 @@ func TestParse_RejectsACredentialShapedLiteralValue(t *testing.T) {
 	body := "version: 1\nname: s\nservices:\n  - name: web\n    port: 3000\n    env:\n      - name: URL\n        value: " +
 		"postgres://user:supersecretpassword@db:5432/app\n"
 	require.Contains(t, messages(problems(t, mustFail(t, body))), "shaped like a credential")
+}
+
+// The evasion that got a real private key into this repository's own manifest.
+//
+// The prefix list reads the first characters of the value, so a literal
+// beginning with BEGIN is refused and the same key base64 encoded is not. That
+// is not a hypothesis about what somebody might do: antifailure.yaml carried a
+// 2048 bit RSA key encoded exactly that way, and the comment beside it named
+// the encoding as the way past this check.
+func TestParse_RejectsAPrivateKeyThatWasEncodedToGetPastTheCheck(t *testing.T) {
+	t.Parallel()
+	pem := "-----BEGIN " + "PRIVATE KEY-----\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj", 4) +
+		"\n-----END " + "PRIVATE KEY-----\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(pem))
+	body := "version: 1\nname: s\nservices:\n  - name: web\n    port: 3000\n    env:\n" +
+		"      - name: AF_GITHUB_APP_PRIVATE_KEY\n        value: " + encoded + "\n"
+	require.Contains(t, messages(problems(t, mustFail(t, body))), "shaped like a credential")
+
+	// And the same key written plainly, which the prefix list already caught
+	// and which must keep being caught.
+	plain := "version: 1\nname: s\nservices:\n  - name: web\n    port: 3000\n    env:\n" +
+		"      - name: AF_GITHUB_APP_PRIVATE_KEY\n        value: |\n" +
+		"          " + strings.ReplaceAll(strings.TrimSuffix(pem, "\n"), "\n", "\n          ") + "\n"
+	require.Contains(t, messages(problems(t, mustFail(t, plain))), "shaped like a credential")
 }
 
 func TestParse_RejectsBothValueAndFrom(t *testing.T) {
