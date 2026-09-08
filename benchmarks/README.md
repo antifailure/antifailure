@@ -33,15 +33,35 @@ that is real for nothing.
 | Provider | Copy on write | First golden, per GB | Branch, 8 MB | Branch, 1.43 GB | Runs |
 | --- | --- | --- | --- | --- | --- |
 | `pgurl` | no | 55 s to 169 s | 0.2 s | 25 s to 110 s | `2026-09-07-0941`, `2026-09-07-1002` |
-| `aurora` | yes | not measured yet, L2.2 | | | |
-| `rds` | no | not measured yet, L2.3 | | | |
-| `cloudsql` | yes | not measured yet, L2.4 | | | |
-| `azure-pg` | no | not measured yet, L2.5 | | | |
-| `alloydb` | yes | not measured yet, L2.6 | | | |
+| `aurora` | unproven | not measured yet, L2.2 | | | |
+| `rds` | unproven | not measured yet, L2.3 | | | |
+| `cloudsql` | unproven | not measured yet, L2.4 | | | |
+| `azure-pg` | unproven | not measured yet, L2.5 | | | |
+| `alloydb` | unproven | not measured yet, L2.6 | | | |
 
 A row with no number is a row that has not been measured. It is left visible on
 purpose: a table that only listed the providers somebody had got around to
 timing would read as a claim about the ones it omitted.
+
+**`unproven` in the copy on write column is a third answer, and it is neither a
+yes nor a no.** Five of these six cells used to carry a verdict beside the words
+"not measured yet", which is the whole defect this column exists against: a
+capability declared and published with nothing able to refuse it. Three said
+`yes` and two said `no`, and the two were the same mistake in the direction that
+happens to cost the vendor rather than the buyer. The suite's own reasoning is
+that the false side matters as much as the true side, because a provider that
+understates a flat branch time puts the wrong row in the table somebody chooses
+from, so both now say `unproven`.
+
+The column says what the ledger in `engine/conformance/ledger.go` recorded, and
+a test checks every cell against it in both directions: no cell may claim more
+than the ledger, and no cell may claim less. Unproven means the conformance
+suite ran the measurement in full and the harness underneath it could not
+exhibit the behaviour either way. A fake cloud control plane over one local
+Postgres can only hand back a branch with `CREATE DATABASE ... TEMPLATE`, which
+copies files, so the stopwatch reads the harness rather than the provider.
+Settling one of these needs the real service with an account. Only `pgurl` has a
+recorded verdict, and it has one because the numbers beside it were measured.
 
 **A range rather than a figure, because that is what was measured.** The two
 `pgurl` runs are the same commit against the same server twenty one minutes

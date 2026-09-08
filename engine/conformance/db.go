@@ -40,6 +40,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -78,6 +79,16 @@ type Options struct {
 	// CopyOnWriteSamples is how many branches are timed per size. Zero uses
 	// the default.
 	CopyOnWriteSamples int
+	// HarnessCopiesEveryBranch is how a TEST FIXTURE declares that the storage
+	// it built copies the golden's bytes on every branch, whatever the
+	// provider would do against the real service. It is the only thing in the
+	// suite that can raise the third verdict, and cow.go carries the reasoning
+	// for why it sits here and not on provider.Caps.
+	//
+	// The value is the mechanism, in prose, and it is printed in the run's
+	// report. Empty means the fixture makes no such claim, which is the
+	// default and the state every existing run is in.
+	HarnessCopiesEveryBranch string
 	// CopyOnWriteTimeout bounds CopyOnWrite_BranchTimeMatchesTheDeclaration
 	// alone. Zero uses DefaultCopyOnWriteTimeout.
 	//
@@ -189,6 +200,7 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 	// would make the check something people learn to ignore.
 	before := inventorySnapshot(t, factory)
 	created := newCreatedSet()
+	found := newFindings()
 
 	for _, b := range databaseBehaviors {
 		b := b
@@ -211,9 +223,19 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), limit)
 			defer cancel()
-			runBehavior(ctx, t, b.Name, factory, opts, created)
+			runBehavior(ctx, t, b.Name, factory, opts, created, found)
 		})
 	}
+
+	// What the run did NOT settle, printed before anything else it might say
+	// about leaks, and printed whether the run passed or failed.
+	//
+	// To os.Stderr rather than through t, because t.Logf on a subtest that did
+	// not fail is invisible without -v, and a third verdict nobody sees is a
+	// skip. Written from RunDatabase rather than from the behaviour so that it
+	// appears once, at the end, where a reader looking at the last few lines of
+	// a green run finds it.
+	found.reportUnproven(os.Stderr)
 
 	// A conformance suite for a product whose whole promise is that nothing
 	// outlives its environment must not itself leak. This has caught a
@@ -308,6 +330,11 @@ type harness struct {
 	// at the end can tell the suite's own leftovers from anything another test
 	// package happened to create while it was running.
 	created *createdSet
+	// found records the answers this run reached, so that RunDatabase can say
+	// at the end which behaviours it did not settle. A behaviour that reaches
+	// the third verdict writes here and the run prints it; nothing else in the
+	// suite reads it, because pass and fail are already carried by t.
+	found *findings
 	// masked and verified record what the refresh callbacks were asked to do,
 	// which is how the suite proves a provider actually called them rather
 	// than publishing a version it never checked.
@@ -359,8 +386,8 @@ func (c *createdSet) matches(inventoryID string) bool {
 	return false
 }
 
-func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory, opts Options, created *createdSet) {
-	h := &harness{t: t, p: factory(t), opts: opts, created: created}
+func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory, opts Options, created *createdSet, found *findings) {
+	h := &harness{t: t, p: factory(t), opts: opts, created: created, found: found}
 	t.Cleanup(func() { _ = h.p.Close() })
 
 	switch name {
