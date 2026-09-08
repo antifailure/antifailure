@@ -142,9 +142,6 @@ func (h *Hook) Check(ctx context.Context, req extension.EnvironmentRequest) erro
 	if violation := h.checkSynth(req); violation != nil {
 		return violation
 	}
-	if violation := h.checkMasking(req); violation != nil {
-		return violation
-	}
 	if violation := h.checkPlacement(req); violation != nil {
 		return violation
 	}
@@ -220,28 +217,134 @@ func (h *Hook) checkSynth(req extension.EnvironmentRequest) error {
 	}
 }
 
-func (h *Hook) checkMasking(req extension.EnvironmentRequest) error {
+// CheckMasking refuses a masking plan that leaves a required column readable.
+//
+// A separate entry point from Check, and the separation is the point rather
+// than a tidying. Check is asked before an environment is created, from a
+// manifest, and a manifest names no columns: the required_masked_columns rule
+// used to be evaluated there against a field the engine never filled, so it
+// read every repository's plan as masking nothing, and the only reason it did
+// not refuse everything is that a policy naming no columns returns early.
+//
+// This is asked during a golden refresh, from a catalogue the engine has read
+// and a plan assigned against it, before the first row is rewritten. A refusal
+// here means the golden is never published and never branched.
+func (h *Hook) CheckMasking(ctx context.Context, req extension.MaskingRequest) error {
+	// The same licence gate as Check, for the same reason: a licence that
+	// lapses mid-process must stop the enforcement it paid for, and a second
+	// entry point that skipped the check would be a way to keep the feature
+	// after the licence went.
+	if !feature.Enabled(ctx, license.FeaturePolicy) {
+		return nil
+	}
 	if len(h.policy.RequiredMaskedColumns) == 0 {
 		return nil
 	}
-	masked := make(map[string]bool, len(req.MaskedColumns))
-	for _, column := range req.MaskedColumns {
-		masked[strings.ToLower(strings.TrimSpace(column))] = true
-	}
+
+	masked := normalizeColumns(req.MaskedColumns)
+	catalog := normalizeColumns(req.CatalogColumns)
 
 	for _, pattern := range h.policy.RequiredMaskedColumns {
-		if coveredBy(pattern, masked) {
+		normalized := strings.ToLower(strings.TrimSpace(pattern))
+		matches := matching(normalized, catalog)
+		if len(matches) == 0 {
+			return &Refusal{
+				Policy: "required masking",
+				Detail: fmt.Sprintf(
+					"this organization requires %s to be masked and this database has no column it names. "+
+						"A policy that quietly passes when the thing it protects is absent stops protecting "+
+						"the moment somebody renames a table, so this is refused rather than skipped. "+
+						"Ask an administrator to narrow the rule, or add the column back.",
+					pattern),
+			}
+		}
+		unmasked := notIn(matches, masked)
+		if len(unmasked) == 0 {
 			continue
 		}
 		return &Refusal{
 			Policy: "required masking",
 			Detail: fmt.Sprintf(
-				"this organization requires %s to be masked and no rule in this repository covers it. "+
-					"Add a masking rule and commit it, then start the environment again.",
-				pattern),
+				"this organization requires %s to be masked and no rule in this repository covers %s. "+
+					"Add a masking rule and commit it, then refresh the golden.",
+				pattern, strings.Join(unmasked, ", ")),
 		}
 	}
 	return nil
+}
+
+// normalizeColumns lowercases and trims a column list, dropping empties.
+//
+// Sorted on the way out, so that a plan violating the policy for two columns
+// names them in the same order every time rather than in whichever order the
+// catalogue was read.
+func normalizeColumns(columns []string) []string {
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		normalized := strings.ToLower(strings.TrimSpace(column))
+		if normalized == "" {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// matching returns every column a required pattern names.
+//
+// A pattern is matched against the schema qualified name and against the name
+// without its schema, which is the same rule masking.Rule already uses for its
+// table patterns. An administrator writes users.email and means the users
+// table wherever it lives; one who writes public.users.email means that one.
+// Accepting only the long form would refuse every policy anybody has written,
+// and accepting only the short form would make a policy unable to distinguish
+// two schemas.
+func matching(pattern string, catalog []string) []string {
+	var out []string
+	for _, column := range catalog {
+		if matchesColumn(pattern, column) {
+			out = append(out, column)
+		}
+	}
+	return out
+}
+
+func matchesColumn(pattern, column string) bool {
+	if pattern == column {
+		return true
+	}
+	if ok, err := path.Match(pattern, column); err == nil && ok {
+		return true
+	}
+	// The unqualified form. Cutting at the FIRST dot is what strips the
+	// schema: a column is schema.table.column, so what follows the first dot
+	// is table.column. Cutting at the last would leave the column name alone
+	// and make every pattern with a table in it fail.
+	if _, rest, found := strings.Cut(column, "."); found {
+		if pattern == rest {
+			return true
+		}
+		if ok, err := path.Match(pattern, rest); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// notIn returns the columns of want that are absent from have.
+func notIn(want, have []string) []string {
+	present := make(map[string]bool, len(have))
+	for _, column := range have {
+		present[column] = true
+	}
+	var out []string
+	for _, column := range want {
+		if !present[column] {
+			out = append(out, column)
+		}
+	}
+	return out
 }
 
 func (h *Hook) checkPlacement(req extension.EnvironmentRequest) error {
@@ -264,32 +367,6 @@ func (h *Hook) checkPlacement(req extension.EnvironmentRequest) error {
 		}
 	}
 	return nil
-}
-
-// coveredBy reports whether a required pattern is satisfied by some masked
-// column.
-//
-// A pattern with a wildcard is satisfied by at least one match, not by all of
-// them. "*.email must be masked" means every email column, and the catalog the
-// engine builds lists the columns that exist, so a required pattern matching
-// nothing at all is a policy about a column this database does not have. That
-// is treated as unsatisfied deliberately: a policy that quietly passes when the
-// thing it protects is absent is a policy that stops protecting the moment
-// somebody renames a table.
-func coveredBy(pattern string, masked map[string]bool) bool {
-	normalized := strings.ToLower(strings.TrimSpace(pattern))
-	if masked[normalized] {
-		return true
-	}
-	if !strings.Contains(normalized, "*") {
-		return false
-	}
-	for column := range masked {
-		if ok, err := path.Match(normalized, column); err == nil && ok {
-			return true
-		}
-	}
-	return false
 }
 
 // matchesAny reports whether a host matches a deny entry, treating a wildcard

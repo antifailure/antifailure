@@ -44,9 +44,6 @@ type EnvironmentRequest struct {
 	EgressHosts []string
 	// EgressModes is the mode each host is permitted in, keyed by host.
 	EgressModes map[string]string
-	// MaskedColumns is table.column for every column the plan will mask, so a
-	// hook can require that a column pattern is covered.
-	MaskedColumns []string
 	// Provider is the database provider the environment will use.
 	Provider string
 	// Region is where it will run, when the runtime reports one.
@@ -65,6 +62,62 @@ type PolicyHook interface {
 	// Check returns an error to refuse. The error reaches the user, so it says
 	// which policy refused and what would satisfy it.
 	Check(ctx context.Context, req EnvironmentRequest) error
+}
+
+// MaskingRequest is what a masking hook is asked about, at the one moment the
+// answer is a fact rather than a guess.
+//
+// It carries columns and EnvironmentRequest deliberately does not, and the
+// difference is the whole reason this second request exists. A policy hook is
+// asked before anything is created, so that a refusal leaves nothing behind,
+// and at that point the engine has read a manifest and has not read a
+// database. A manifest does not enumerate columns. Filling a column list there
+// would mean expanding the repository's masking rules against the tables the
+// manifest happens to name, which is a different set from the tables that
+// exist, and a required pattern that matched nothing in that set would refuse a
+// repository whose schema satisfies it perfectly.
+//
+// So the column list is asked for here instead, during a golden refresh, after
+// masking.ReadCatalog has read the real schema and after the rules have been
+// assigned to it, and before one row has been rewritten. A refusal at this
+// point stops the golden being published, and an unpublished golden cannot be
+// branched, so no environment can ever hold data that this refused. That is
+// later than the policy hook and it is still before the data exists.
+type MaskingRequest struct {
+	Repository string
+	Branch     string
+	EnvID      string
+	// RulesHash identifies the masking configuration that produced this plan,
+	// so a hook can record which rule set it approved.
+	RulesHash string
+	// MaskedColumns is schema.table.column for every column the plan will
+	// rewrite. Read off the plan, so it is the columns that are about to be
+	// masked rather than the columns somebody hoped a rule would reach.
+	MaskedColumns []string
+	// CatalogColumns is schema.table.column for every column the catalogue
+	// holds, masked or not.
+	//
+	// A hook needs both lists and neither on its own is enough. MaskedColumns
+	// alone cannot tell "this database has no email column" from "this
+	// database has three and none of them is masked", and those deserve
+	// opposite answers. With the catalogue a rule about a column that does not
+	// exist is answerable as such, and a rule about three columns is not
+	// satisfied by masking one of them.
+	CatalogColumns []string
+}
+
+// MaskingHook may refuse a masking plan before it runs.
+//
+// It can only refuse, for the same reason PolicyHook can only refuse: there is
+// no return value that masks something the rules did not, because a hook that
+// could add a transform would be a way to change what a golden contains
+// without changing the repository.
+type MaskingHook interface {
+	// Name identifies the hook in the refusal.
+	Name() string
+	// CheckMasking returns an error to refuse the plan. The error reaches the
+	// user, so it says which policy refused and what would satisfy it.
+	CheckMasking(ctx context.Context, req MaskingRequest) error
 }
 
 // LifecycleEvent is something that happened to an environment, for hooks that
@@ -460,6 +513,7 @@ type Emulator interface {
 type Registry struct {
 	mu        sync.RWMutex
 	policy    []PolicyHook
+	masking   []MaskingHook
 	lifecycle []LifecycleHook
 	audit     []AuditSink
 	secrets   []SecretSource
@@ -482,6 +536,13 @@ func (r *Registry) AddPolicy(h PolicyHook) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.policy = append(r.policy, h)
+}
+
+// AddMasking registers a hook that may refuse a masking plan.
+func (r *Registry) AddMasking(h MaskingHook) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.masking = append(r.masking, h)
 }
 
 // AddLifecycle registers a hook that observes environments.
@@ -538,6 +599,23 @@ func (r *Registry) CheckPolicy(ctx context.Context, req EnvironmentRequest) erro
 
 	for _, h := range hooks {
 		if err := h.Check(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CheckMasking runs every masking hook and returns the first refusal.
+//
+// Registration order and first refusal wins, the same as CheckPolicy, and with
+// nothing registered it returns nil after one pass over an empty slice.
+func (r *Registry) CheckMasking(ctx context.Context, req MaskingRequest) error {
+	r.mu.RLock()
+	hooks := append([]MaskingHook(nil), r.masking...)
+	r.mu.RUnlock()
+
+	for _, h := range hooks {
+		if err := h.CheckMasking(ctx, req); err != nil {
 			return err
 		}
 	}
@@ -856,6 +934,9 @@ func (r *Registry) Registered() []string {
 	for _, h := range r.policy {
 		out = append(out, "policy:"+h.Name())
 	}
+	for _, h := range r.masking {
+		out = append(out, "masking:"+h.Name())
+	}
 	for _, h := range r.lifecycle {
 		out = append(out, "lifecycle:"+h.Name())
 	}
@@ -888,7 +969,7 @@ func (r *Registry) Registered() []string {
 func (r *Registry) Empty() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.policy) == 0 && len(r.lifecycle) == 0 &&
+	return len(r.policy) == 0 && len(r.masking) == 0 && len(r.lifecycle) == 0 &&
 		len(r.audit) == 0 && len(r.secrets) == 0 &&
 		len(r.databases) == 0 && len(r.datastores) == 0 &&
 		len(r.runtimes) == 0 && len(r.stores) == 0 && len(r.emulators) == 0

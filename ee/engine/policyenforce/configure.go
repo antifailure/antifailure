@@ -147,11 +147,20 @@ func Rules(h *Hook) []string {
 // print which rules are in force, and so that a binary that forgot to print
 // them still cannot forget to register them: there is no way to get the hook
 // out of here without it already being in the registry.
+//
+// BOTH sockets, from one call, and that is not a convenience. The hook answers
+// two questions at two moments: whether an environment may be created, from a
+// manifest, and whether a masking plan may run, from a catalogue. An
+// administrator who wrote required_masked_columns configured one policy and
+// would have no way to tell that half of it had not been plugged in, because
+// the half that was missing is the half that never refuses. Registering both
+// here is what stops that being possible to forget.
 func RegisterFromEnvironment(reg *extension.Registry, getenv func(string) string) (*Hook, error) {
 	hook, err := FromEnvironment(getenv)
 	if err != nil || hook == nil {
 		return nil, err
 	}
 	reg.AddPolicy(hook)
+	reg.AddMasking(hook)
 	return hook, nil
 }

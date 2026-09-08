@@ -80,7 +80,12 @@ func TestTheRegisteredHookIsNamedInTheRegistry(t *testing.T) {
 	_, err := policyenforce.RegisterFromEnvironment(registry, write(t, "denied_hosts: [evil.example]\n"))
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"policy:organization-policy"}, registry.Registered())
+	// Both sockets. One entry would mean half the policy was plugged in, and
+	// the half that goes missing is the half that never refuses.
+	require.Equal(t, []string{
+		"masking:organization-policy",
+		"policy:organization-policy",
+	}, registry.Registered())
 }
 
 // ---------------------------------------------------------------------------
@@ -162,12 +167,17 @@ func TestEveryParsedRuleIsAskedOfAnEnvironment(t *testing.T) {
 		name     string
 		document string
 		expect   string
+		// masking says the rule is decided during a golden refresh rather than
+		// before creation, so the registry call that carries it is
+		// CheckMasking. Asking CheckPolicy for it is how the rule came to be
+		// evaluated against a field nothing filled.
+		masking bool
 	}{
-		{"required masking", "required_masked_columns: [\"*.card_number\"]", "required masking"},
-		{"egress deny list", "denied_hosts: [api.stripe.com]", "egress deny list"},
-		{"allowed egress modes", "allowed_modes: [block]", "allowed egress modes"},
-		{"allowed providers", "allowed_providers: [neon]", "allowed database providers"},
-		{"data residency", "allowed_regions: [westeurope]", "data residency"},
+		{"required masking", "required_masked_columns: [\"*.card_number\"]", "required masking", true},
+		{"egress deny list", "denied_hosts: [api.stripe.com]", "egress deny list", false},
+		{"allowed egress modes", "allowed_modes: [block]", "allowed egress modes", false},
+		{"allowed providers", "allowed_providers: [neon]", "allowed database providers", false},
+		{"data residency", "allowed_regions: [westeurope]", "data residency", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -175,13 +185,38 @@ func TestEveryParsedRuleIsAskedOfAnEnvironment(t *testing.T) {
 			_, err := policyenforce.RegisterFromEnvironment(registry, write(t, tc.document+"\n"))
 			require.NoError(t, err)
 
-			req := request()
-			req.Region = "eastus"
-			err = registry.CheckPolicy(ctx, req)
+			if tc.masking {
+				plan := maskingRequest()
+				plan.CatalogColumns = append(plan.CatalogColumns, "public.orders.card_number")
+				err = registry.CheckMasking(ctx, plan)
+			} else {
+				req := request()
+				req.Region = "eastus"
+				err = registry.CheckPolicy(ctx, req)
+			}
 			require.Error(t, err, "%s parsed and refused nothing", tc.name)
 			require.ErrorContains(t, err, tc.expect)
 		})
 	}
+}
+
+// The negative control for the masking half of the registration.
+//
+// RegisterFromEnvironment adds the hook to two sockets and forgetting either
+// one is silent: the rule still parses, Rules still prints it, and nothing
+// refuses. Dropping the AddMasking call leaves the whole rest of this file
+// green.
+func TestAnUnregisteredMaskingPolicyRefusesNothing(t *testing.T) {
+	t.Parallel()
+	registry := extension.NewRegistry()
+	require.NoError(t, registry.CheckMasking(licensed(t), maskingRequest()),
+		"an empty registry refused a masking plan")
+
+	_, err := policyenforce.RegisterFromEnvironment(registry,
+		write(t, "required_masked_columns: [\"*.ssn\"]\n"))
+	require.NoError(t, err)
+	require.ErrorContains(t, registry.CheckMasking(licensed(t), maskingRequest()),
+		"AF-EE-010", "the masking policy was read and plugged into nothing")
 }
 
 func TestSynthRequiresApprovalReachesTheHook(t *testing.T) {

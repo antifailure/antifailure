@@ -36,8 +36,24 @@ func request() extension.EnvironmentRequest {
 			"api.stripe.com": "sandbox",
 			"api.resend.com": "capture",
 		},
-		MaskedColumns: []string{"users.email", "users.name"},
-		Provider:      "docker",
+		Provider: "docker",
+	}
+}
+
+// maskingRequest is what the engine hands a masking hook during a golden
+// refresh: the columns a plan will rewrite, and the whole catalogue it read
+// them from.
+//
+// Both lists are schema qualified, because that is what the engine sends. A
+// test that used bare names would pass while the engine's own format failed.
+func maskingRequest() extension.MaskingRequest {
+	return extension.MaskingRequest{
+		Repository: "acme/app", Branch: "main", EnvID: "af-1", RulesHash: "h1",
+		MaskedColumns: []string{"public.users.email", "public.users.name"},
+		CatalogColumns: []string{
+			"public.orders.id", "public.orders.total",
+			"public.users.email", "public.users.id", "public.users.name",
+		},
 	}
 }
 
@@ -211,49 +227,136 @@ func TestANilApprovalLookupApprovesNothing(t *testing.T) {
 // Masking
 // ---------------------------------------------------------------------------
 
-func TestARequiredColumnMustBeCovered(t *testing.T) {
+func TestAColumnTheDatabaseHasAndTheRulesMissIsRefused(t *testing.T) {
 	t.Parallel()
+	req := maskingRequest()
+	req.CatalogColumns = append(req.CatalogColumns, "public.users.ssn")
+
 	hook := policyenforce.NewHook(policyenforce.Policy{
 		RequiredMaskedColumns: []string{"users.ssn"},
 	}, nil)
 
-	err := hook.Check(licensed(t), request())
+	err := hook.CheckMasking(licensed(t), req)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "users.ssn")
 	// It says what to do, and where: the rule lives in the repository.
 	require.Contains(t, err.Error(), "commit it")
 }
 
-func TestAWildcardRequirementIsSatisfiedByAMatch(t *testing.T) {
+func TestAWildcardRequirementIsSatisfiedWhenEveryColumnItNamesIsMasked(t *testing.T) {
 	t.Parallel()
 	hook := policyenforce.NewHook(policyenforce.Policy{
 		RequiredMaskedColumns: []string{"*.email"},
 	}, nil)
-	require.NoError(t, hook.Check(licensed(t), request()))
+	require.NoError(t, hook.CheckMasking(licensed(t), maskingRequest()))
 }
 
-func TestARequirementMatchingNothingIsTreatedAsUnsatisfied(t *testing.T) {
+func TestAWildcardRequirementIsNotSatisfiedByMaskingOneOfTheColumnsItNames(t *testing.T) {
+	t.Parallel()
+	// The reason the catalogue is worth sending. "*.email must be masked"
+	// means every email column, and a check that stopped at the first match
+	// passed a database that masked one of two. Reading the catalogue is what
+	// makes the difference between those two visible at all.
+	req := maskingRequest()
+	req.CatalogColumns = append(req.CatalogColumns, "public.contacts.email")
+
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		RequiredMaskedColumns: []string{"*.email"},
+	}, nil)
+
+	err := hook.CheckMasking(licensed(t), req)
+	require.Error(t, err, "a plan masking one of two email columns satisfied *.email")
+	require.Contains(t, err.Error(), "public.contacts.email")
+}
+
+func TestARequirementNamingAColumnThisDatabaseDoesNotHaveIsRefused(t *testing.T) {
 	t.Parallel()
 	// A policy that quietly passes when the thing it protects is absent stops
 	// protecting the moment somebody renames a table.
-	req := request()
-	req.MaskedColumns = []string{"orders.total"}
-
 	hook := policyenforce.NewHook(policyenforce.Policy{
 		RequiredMaskedColumns: []string{"*.ssn"},
 	}, nil)
-	require.Error(t, hook.Check(licensed(t), req))
+
+	err := hook.CheckMasking(licensed(t), maskingRequest())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no column it names")
+}
+
+func TestAnUnqualifiedPatternNamesTheTableInWhicheverSchemaHoldsIt(t *testing.T) {
+	t.Parallel()
+	// An administrator writes users.email. The engine sends
+	// public.users.email, because a catalogue is schema qualified. Refusing
+	// that would refuse every policy anybody has actually written.
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		RequiredMaskedColumns: []string{"users.email"},
+	}, nil)
+	require.NoError(t, hook.CheckMasking(licensed(t), maskingRequest()))
+}
+
+func TestASchemaQualifiedPatternDoesNotReachAnotherSchema(t *testing.T) {
+	t.Parallel()
+	// The other half of the rule above. An administrator who writes the schema
+	// meant that schema, and a policy that cannot tell public.users.email from
+	// staging.users.email is a policy about whichever one came first.
+	req := maskingRequest()
+	req.CatalogColumns = append(req.CatalogColumns, "staging.users.email")
+	req.MaskedColumns = []string{"staging.users.email"}
+
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		RequiredMaskedColumns: []string{"public.users.email"},
+	}, nil)
+
+	err := hook.CheckMasking(licensed(t), req)
+	require.Error(t, err, "masking staging.users.email satisfied a rule about public")
+	require.Contains(t, err.Error(), "public.users.email")
 }
 
 func TestMaskingComparisonIgnoresCase(t *testing.T) {
 	t.Parallel()
-	req := request()
-	req.MaskedColumns = []string{"Users.Email"}
+	req := maskingRequest()
+	req.MaskedColumns = []string{"Public.Users.Email"}
+	req.CatalogColumns = []string{"Public.Users.Email"}
 
 	hook := policyenforce.NewHook(policyenforce.Policy{
 		RequiredMaskedColumns: []string{"users.email"},
 	}, nil)
-	require.NoError(t, hook.Check(licensed(t), req))
+	require.NoError(t, hook.CheckMasking(licensed(t), req))
+}
+
+// The false refusal this check exists to avoid, and the reason it is asked
+// during a refresh rather than before creation.
+//
+// A manifest enumerates services, not tables. Expanding a required pattern
+// against the tables a manifest happens to name would refuse this repository:
+// nothing in its manifest mentions contacts, its masking rules reach the table
+// anyway, and the column is masked. The catalogue is read from the database,
+// so a table the manifest never names is an ordinary table here.
+func TestATableNoManifestNamesIsStillCovered(t *testing.T) {
+	t.Parallel()
+	req := extension.MaskingRequest{
+		Repository: "acme/app", EnvID: "af-1", RulesHash: "h1",
+		MaskedColumns: []string{"public.contacts.email", "public.users.email"},
+		CatalogColumns: []string{
+			"public.contacts.email", "public.contacts.id",
+			"public.users.email", "public.users.id",
+		},
+	}
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		RequiredMaskedColumns: []string{"*.email"},
+	}, nil)
+	require.NoError(t, hook.CheckMasking(licensed(t), req),
+		"a table the manifest does not enumerate was refused for that reason alone")
+}
+
+func TestWithoutTheLicenceNoMaskingPlanIsRefused(t *testing.T) {
+	t.Parallel()
+	// The same lapse rule as Check. A second entry point that skipped the gate
+	// would be a way to keep enforcing after the licence went.
+	hook := policyenforce.NewHook(policyenforce.Policy{
+		RequiredMaskedColumns: []string{"*.ssn"},
+	}, nil)
+	require.NoError(t, hook.CheckMasking(context.Background(), maskingRequest()),
+		"a masking plan was refused with no licence in the context")
 }
 
 // ---------------------------------------------------------------------------
@@ -320,9 +423,17 @@ func TestAStricterPolicyNeverPermitsMore(t *testing.T) {
 			req.EgressHosts = append(req.EgressHosts, host)
 			req.EgressModes[host] = modes[rng.IntN(len(modes))]
 		}
+		// The masking plan the same random draw would produce. Every column
+		// exists; a random subset of them is masked. Both entry points are
+		// exercised below, because the masking rule is no longer decided from
+		// the environment request and a property test that only asked Check
+		// would leave case 1 proving nothing.
+		plan := extension.MaskingRequest{
+			Repository: "acme/app", EnvID: "af-1", CatalogColumns: columns,
+		}
 		for _, column := range columns {
 			if rng.IntN(2) == 0 {
-				req.MaskedColumns = append(req.MaskedColumns, column)
+				plan.MaskedColumns = append(plan.MaskedColumns, column)
 			}
 		}
 
@@ -347,13 +458,15 @@ func TestAStricterPolicyNeverPermitsMore(t *testing.T) {
 
 		require.True(t, policyenforce.Stricter(base, stricter))
 
-		basePermits := policyenforce.NewHook(base, nil).Check(ctx, req) == nil
-		stricterPermits := policyenforce.NewHook(stricter, nil).Check(ctx, req) == nil
+		permits := func(p policyenforce.Policy) bool {
+			hook := policyenforce.NewHook(p, nil)
+			return hook.Check(ctx, req) == nil && hook.CheckMasking(ctx, plan) == nil
+		}
 
-		if stricterPermits {
-			require.Truef(t, basePermits,
-				"a stricter policy permitted an environment the looser one refused\nrequest: %+v\nbase: %+v\nstricter: %+v",
-				req, base, stricter)
+		if permits(stricter) {
+			require.Truef(t, permits(base),
+				"a stricter policy permitted an environment the looser one refused\nrequest: %+v\nplan: %+v\nbase: %+v\nstricter: %+v",
+				req, plan, base, stricter)
 		}
 	}
 }
@@ -371,6 +484,8 @@ func TestAnEmptyPolicyRefusesNothing(t *testing.T) {
 		req.EgressModes["api.stripe.com"] = mode
 		require.NoErrorf(t, hook.Check(ctx, req), "an empty policy refused %s mode", mode)
 	}
+	require.NoError(t, hook.CheckMasking(ctx, maskingRequest()),
+		"an empty policy refused a masking plan")
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +512,28 @@ func TestItPlugsIntoTheCommunityExtensionPoint(t *testing.T) {
 	require.Contains(t, err.Error(), "AF-EE-010")
 }
 
+func TestItPlugsIntoTheMaskingExtensionPoint(t *testing.T) {
+	t.Parallel()
+	// The same proof for the second socket. The masking rule is decided in a
+	// different call at a different moment, so a hook that satisfies
+	// PolicyHook and not MaskingHook enforces everything except the one rule
+	// that needed a database to answer.
+	var hook extension.MaskingHook = policyenforce.NewHook(
+		policyenforce.Policy{RequiredMaskedColumns: []string{"*.ssn"}}, nil)
+
+	registry := extension.NewRegistry()
+	registry.AddMasking(hook)
+	require.False(t, registry.Empty())
+	require.Equal(t, []string{"masking:organization-policy"}, registry.Registered())
+
+	err := registry.CheckMasking(licensed(t), maskingRequest())
+	require.Error(t, err)
+
+	var refusal *policyenforce.Refusal
+	require.True(t, errors.As(err, &refusal), "the refusal did not survive the registry")
+	require.Contains(t, err.Error(), "AF-EE-010")
+}
+
 func TestTheRefusalCarriesTheDocumentedErrorCode(t *testing.T) {
 	t.Parallel()
 	// AF-EE-010 is in the error catalog with a cause and a next step, so the
@@ -404,7 +541,7 @@ func TestTheRefusalCarriesTheDocumentedErrorCode(t *testing.T) {
 	hook := policyenforce.NewHook(policyenforce.Policy{
 		RequiredMaskedColumns: []string{"users.ssn"},
 	}, nil)
-	err := hook.Check(licensed(t), request())
+	err := hook.CheckMasking(licensed(t), maskingRequest())
 	require.ErrorContains(t, err, "AF-EE-010")
 }
 
