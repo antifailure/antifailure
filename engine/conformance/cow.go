@@ -515,12 +515,23 @@ func (h *harness) copyOnWriteSettings() (small, large int64, samples int) {
 		h.t.Fatalf("copy on write is configured for %d timing per size and needs at least %d; "+
 			"one reading on a loaded machine is a reading of the machine", samples, MinCopyOnWriteSamples)
 	}
-	if small != h.opts.CopyOnWriteSmallBytes || large != h.opts.CopyOnWriteLargeBytes ||
-		samples != h.opts.CopyOnWriteSamples {
-		// Said out loud, always. A measurement taken at other than the sizes
-		// the suite ships is a different measurement, and a reader comparing
-		// two runs has to be able to see that without going to look for an
-		// environment variable somebody set once.
+	// Compared against the DEFAULTS rather than against the options that were
+	// passed in, which is a one word difference and was wrong.
+	//
+	// A zero option means "use the default", so comparing the resolved value
+	// against the option said "this run was tuned" on every run that tuned
+	// nothing, including the self test's, which prints it beside the shipped
+	// numbers it is running at. A notice that announces a departure that did
+	// not happen is worse than no notice: it is the reader's only signal that
+	// a measurement is not comparable, and one that fires always carries no
+	// information at all. The question is whether the run departed from what
+	// the suite SHIPS, so that is what it asks.
+	if small != DefaultCopyOnWriteSmallBytes || large != DefaultCopyOnWriteLargeBytes ||
+		samples != DefaultCopyOnWriteSamples {
+		// Said out loud whenever it is true. A measurement taken at other than
+		// the sizes the suite ships is a different measurement, and a reader
+		// comparing two runs has to be able to see that without going to look
+		// for an environment variable somebody set once.
 		h.t.Logf("copy on write is running at %s against %s with %d samples per size, "+
 			"where the suite's own defaults are %s against %s with %d. The refusable rate "+
 			"printed with the verdict is what this configuration was actually able to see.",
