@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -224,6 +225,24 @@ type EmulatorSpec struct {
 // sidecar never forwards to it. That is the difference between a companion
 // and a second emulator, and it is why this is a separate type rather than
 // another EmulatorSpec.
+// CompanionHost is the hostname a companion answers to on the environment's
+// network, given the emulator that declares it and its ONE BASED position in
+// that emulator's Companions.
+//
+// A function rather than a convention somebody writes out, because a
+// registration has to put this string into the PRINCIPAL's environment at
+// declaration time: Azure's Service Bus emulator dials SQL by name and its own
+// default is the literal sql_container_alias, so the emulator has to be told
+// where its companion is before either container exists. A name derived from
+// anything only known at runtime could not be written there at all.
+//
+// The position rather than a name the registration chooses, because a name is
+// an address on the environment's network and the addresses are the engine's
+// to hand out. A registration free to pick one could pick a service's.
+func CompanionHost(emulator string, index int) string {
+	return fmt.Sprintf("af-emu-companion-%s-%d", emulator, index)
+}
+
 type EmulatorCompanion struct {
 	// Name is what it answers to on the network, within the emulator's own
 	// namespace, so two emulators may each have a companion called "db".
