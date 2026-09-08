@@ -76,6 +76,7 @@ import {
 import { clearedCookie, hashToken, sessionCookie } from '../auth/session.ts'
 import type { Clock } from '../clock.ts'
 import { clientAddress } from '../clientaddress.ts'
+import { resolveEntitlements } from '../entitlements.ts'
 
 /** Long enough that an operator has to say something. The same bound routers.ts
  *  puts on every money action, for the same reason: "asked" is not a reason. */
@@ -86,6 +87,84 @@ const reason = z.string().trim().min(8).max(500)
  *  constraint refuses is a 500 at the end of a form somebody just filled in. */
 const SUBJECT_TYPES = ['user', 'organization', 'repository'] as const
 type SubjectType = (typeof SUBJECT_TYPES)[number]
+
+/**
+ * Whether an operator may act as a member of one organization.
+ *
+ * THE ONE ENTITLEMENT THAT IS ABOUT SOMEBODY ELSE'S ACCESS RATHER THAN THE
+ * CUSTOMER'S OWN, which is why it reads the way it does.
+ *
+ * Impersonation was fully built and gated by nothing but an operator
+ * permission. A reason of at least eight characters, an audit entry the schema
+ * makes structurally unskippable, a copy in the customer's own log, and a
+ * session measured in minutes: every accountability property this action needs,
+ * and no answer at all to the question a large customer asks first, which is
+ * whether they can say no. Absent means we did not build it. Ungated means we
+ * built it and the customer has no say, and until this existed the second was
+ * true and nothing in the product said so.
+ *
+ * The switch is an entitlement rather than a new column because the overrides
+ * table already carries exactly the fields a withdrawal of consent needs: a
+ * reason, a ticket, an expiry, the name of whoever granted it, and a revocation
+ * that keeps the history. A boolean column would have carried none of them and
+ * would have had to grow each one back.
+ *
+ * DEFAULT ON, ON EVERY PLAN, and that is deliberate. Refusing by default would
+ * have broken support for every existing customer on the day it shipped, and
+ * charging somebody for our ability to help them is backwards. What is sold
+ * here is the refusal, not the access.
+ *
+ * Nothing to refuse when the impersonation names no organization: an operator
+ * acting as an account with no organization sees that account's own settings
+ * and nobody else's data, so there is no tenant whose consent could be asked.
+ * The caller does not reach this in that case, and the shape of the argument
+ * says so by requiring an organization.
+ */
+export interface SupportAccessVerdict {
+  allowed: boolean
+  /** What the operator reads. Empty when allowed. */
+  reason: string
+}
+
+export async function supportAccessVerdict(
+  db: Db,
+  now: Date,
+  org: { orgId: string; plan: string; slug: string },
+): Promise<SupportAccessVerdict> {
+  const entitlements = await resolveEntitlements(db, now, { orgId: org.orgId, plan: org.plan })
+  const resolved = entitlements.get(SUPPORT_ACCESS_ENTITLEMENT)
+  if (!resolved) {
+    // The catalogue entry is gone. Allowing is the direction that fails safely
+    // for the customer in front of the operator: a deploy that dropped the key
+    // must not silently end support for everybody, and its absence is visible
+    // on the admin screen that lists the catalogue.
+    return { allowed: true, reason: '' }
+  }
+  if (resolved.value === true) return { allowed: true, reason: '' }
+
+  const until = resolved.override?.expiresAt
+    ? `, until ${resolved.override.expiresAt.toISOString().slice(0, 10)}`
+    : ''
+  const source = resolved.override
+    ? `a ${resolved.override.scope} override${until}, granted by ${resolved.override.grantedBy}: ` +
+      `${resolved.override.reason}`
+    : `the ${entitlements.plan} plan`
+  return {
+    allowed: false,
+    // Names the reason and who set it, because the operator reading this is
+    // usually mid conversation with the customer who set it and needs to be
+    // able to say what they are looking at. A bare "not permitted" turns that
+    // into a support ticket about the support tooling.
+    reason:
+      `${org.slug} has withdrawn operator access to this organization. That is ${source}. ` +
+      `Ask an owner to restore it, or work from what they can send you. Nothing was recorded ` +
+      `and no session was created.`,
+  }
+}
+
+/** The catalogue key. A named constant rather than a literal, so the catalogue
+ *  entry and the check that reads it move together. */
+export const SUPPORT_ACCESS_ENTITLEMENT = 'support_access'
 
 /**
  * How long an impersonation may last.
@@ -556,8 +635,8 @@ export function registerImpersonationRoutes(
           let orgId: string | null = null
           let orgLabel: string | null = null
           if (input.orgId) {
-            const org = await db.execute<{ slug: string; member: boolean }>(sql`
-              SELECT o.slug,
+            const org = await db.execute<{ slug: string; plan: string; member: boolean }>(sql`
+              SELECT o.slug, o.plan,
                      EXISTS (SELECT 1 FROM members m
                               WHERE m.org_id = o.id AND m.user_id = ${input.userId}::uuid)
                        AS member
@@ -575,6 +654,20 @@ export function registerImpersonationRoutes(
                   'would show nothing the account can actually see.',
               )
             }
+            // The entitlement, and it is checked BEFORE the audit entry
+            // deliberately. Everything below this line is the impersonation
+            // happening: the record is written first precisely so that no
+            // session can exist without one, which means a refusal that came
+            // after it would leave a permanent entry claiming an access that
+            // was refused. A customer reading their own audit log cannot tell
+            // those apart, and the one that reads worse is the one that did not
+            // happen.
+            const verdict = await supportAccessVerdict(db, now, {
+              orgId: input.orgId,
+              plan: row.plan,
+              slug: row.slug,
+            })
+            if (!verdict.allowed) throw new Refused(403, verdict.reason)
             orgId = input.orgId
             orgLabel = row.slug
           }

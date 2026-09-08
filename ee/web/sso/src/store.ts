@@ -19,6 +19,7 @@
 
 import { sql } from '@antifailure/db'
 import type { Db, Pool } from '@antifailure/db'
+import { Unlicensed, declare, licensed, refusal } from '@antifailure-ee/features'
 
 export type Role = 'owner' | 'admin' | 'member' | 'viewer'
 
@@ -100,15 +101,50 @@ function parseArrayLiteral(literal: string): string[] {
  * exactly what it is doing. Reaches no secret: those are in a second table this
  * cannot see.
  */
-export async function connectionByHandle(pool: Pool, handle: string): Promise<Connection | null> {
+export async function connectionByHandle(
+  pool: Pool,
+  handle: string,
+  now: Date,
+): Promise<Connection | null> {
   if (!handle) return null
   const rows = await pool.withoutTenant(
     async (db) =>
       db.execute<Record<string, unknown>>(sql`SELECT ${CONNECTION_COLUMNS} FROM sso_connections`),
     { ssoHandle: handle },
   )
-  return rows[0] ? toConnection(rows[0]) : null
+  if (!rows[0]) return null
+  const connection = toConnection(rows[0])
+  // THE LICENCE GATE, and it is here rather than in each of the five handlers
+  // that call this.
+  //
+  // Every route in this package that acts on a named connection resolves it
+  // through this function, so a handler added later inherits the check instead
+  // of being the one that forgot. The moment is a parameter for exactly that
+  // reason: an entitlement has an expiry, so it cannot be evaluated without
+  // one, and requiring the caller to supply it makes "look the connection up
+  // and check the licence" a single act rather than two that can drift apart.
+  //
+  // It throws rather than returning null. A refusal that looks like "no such
+  // connection" is a refusal an administrator cannot act on: the handle is in
+  // the metadata URL they gave their identity provider, so they already know it
+  // exists, and telling them it does not sends them hunting a configuration
+  // error that is not there. reported() turns this into a 403 that names the
+  // feature and says what to do about it.
+  if (!(await licensed(pool, connection.orgId, 'sso', now))) {
+    throw new Unlicensed('sso', refusal('sso'))
+  }
+  return connection
 }
+
+// Declared at module scope, so importing this package is what records the site
+// and a package nothing imports records nothing.
+//
+// Two sites, because single sign-on is two halves and gating one of them would
+// be worse than gating neither: refusing the provider routes while leaving
+// enforcement switched on would lock an organization out of its own account
+// with no way back in. isEnforced in enforce.ts is the other half, and the
+// same entitlement relaxes it.
+declare('sso', 'ee/web/sso/src/store.ts:connectionByHandle')
 
 /** The connection whose issuer matches, for a provider-initiated assertion. */
 export async function connectionByEntityId(
@@ -138,7 +174,11 @@ export interface DomainRoute {
  * discloses nothing about any other domain, and nothing an organization has not
  * verified.
  */
-export async function routeForDomain(pool: Pool, domain: string): Promise<DomainRoute | null> {
+export async function routeForDomain(
+  pool: Pool,
+  domain: string,
+  now: Date,
+): Promise<DomainRoute | null> {
   const lowered = domain.trim().toLowerCase()
   if (!lowered || !/^[a-z0-9.-]+$/.test(lowered)) return null
   const rows = await pool.withoutTenant(
@@ -148,7 +188,19 @@ export async function routeForDomain(pool: Pool, domain: string): Promise<Domain
       ),
     { ssoDomain: lowered },
   )
-  return rows[0] ? { orgId: rows[0].org_id, connectionId: rows[0].connection_id } : null
+  const row = rows[0]
+  if (!row) return null
+  // NULL RATHER THAN A REFUSAL, which is the opposite decision to the one above
+  // and it is deliberate.
+  //
+  // This is the discovery endpoint. It is unauthenticated, it takes an email
+  // address, and it already answers the same 404 for a domain it has never
+  // heard of and for one that is registered and unverified, so that it cannot
+  // be used to ask which companies have configured single sign-on here. A
+  // distinct answer for "registered and not entitled" would be that same
+  // question with one more bit in it.
+  if (!(await licensed(pool, row.org_id, 'sso', now))) return null
+  return { orgId: row.org_id, connectionId: row.connection_id }
 }
 
 export interface LoginState {

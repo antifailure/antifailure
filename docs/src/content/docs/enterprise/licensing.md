@@ -116,6 +116,32 @@ license leaves you with it rather than with nothing.
 
 Each is named in the license, so a license permits exactly what was bought.
 
+### Two of those cannot be sold
+
+`billing` and `enterprise_dashboard` are names in the catalogue and nothing
+else. There is no implementation of either, so there is nothing a license could
+switch on, and both are refused twice: `tools/licensegen` will not sign a
+request naming one, and the verifier carries the name through and never permits
+it.
+
+That is deliberate rather than an oversight waiting to be tidied. The
+alternative, a license check placed in front of a capability that does not
+exist, is a declared enforcement site that can never run, which reads as a
+working feature from every direction and is harder to find than the gap it
+covers. A feature nobody can buy and nobody can be granted cannot be mistaken
+for one that ships.
+
+`rbac` is a third case and a different one. The custom roles library is complete
+and tested, and nothing stores a role model, so an organization has no way to
+have one. It is reported and not enforced, and it is written down here rather
+than gated for the same reason: a check on a path nothing reaches is worse than
+no check.
+
+Both lists are held to the code by a test rather than by a habit. `notShipped`
+in `ee/engine/license/license.go` is the single place either statement lives,
+and this page, the generator and the enterprise feature registry are all checked
+against it in both directions.
+
 ## Contributing
 
 Contributions are under the DCO, not a CLA. You keep your copyright. See

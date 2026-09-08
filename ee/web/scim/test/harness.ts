@@ -105,10 +105,23 @@ export async function start(): Promise<Harness> {
   }
 }
 
-export async function seedTenant(h: Harness, label: string): Promise<Tenant> {
+/**
+ * Seeds a tenant with a SCIM token.
+ *
+ * The plan decides whether the tenant is ENTITLED to directory provisioning at
+ * all, and enterprise is the default because every suite in this package was
+ * written before guard() checked one. A tenant on the free plan now has its
+ * SCIM requests refused with a 403, which is what gate.test.ts seeds
+ * deliberately and what everything else here would hit by accident.
+ */
+export async function seedTenant(
+  h: Harness,
+  label: string,
+  plan = 'enterprise',
+): Promise<Tenant> {
   const slug = `${label}-${randomUUID().slice(0, 8)}`
   const [org] = await h.admin<{ id: string }[]>`
-    INSERT INTO organizations (slug, name) VALUES (${slug}, ${label}) RETURNING id`
+    INSERT INTO organizations (slug, name, plan) VALUES (${slug}, ${label}, ${plan}) RETURNING id`
   const orgId = org!.id
 
   // Assembled at run time. There is no token in the repository.

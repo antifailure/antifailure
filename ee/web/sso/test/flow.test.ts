@@ -401,7 +401,7 @@ describe('enforcement and break-glass', { skip: hasDatabase ? false : 'no databa
     assert.equal(codes.length, 10)
     for (const code of codes) assert.match(code, /^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}$/)
     assert.equal(new Set(codes).size, 10)
-    assert.ok(await isEnforced(h.pool, org.orgId))
+    assert.ok(await isEnforced(h.pool, org.orgId, h.clock.now()))
   })
 
   it('stores only hashes, so a leaked backup is not a set of keys', async () => {

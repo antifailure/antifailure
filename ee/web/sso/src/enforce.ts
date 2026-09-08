@@ -27,6 +27,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { Pool } from '@antifailure/db'
+import { declare, licensed } from '@antifailure-ee/features'
 import { appendAudit, sql } from '@antifailure/db'
 import type { SignInAttempt, SignInDecision } from '@antifailure/api'
 
@@ -149,7 +150,21 @@ export async function relax(input: EnforcementInput): Promise<void> {
 }
 
 /** Whether an organization requires single sign-on right now. */
-export async function isEnforced(pool: Pool, orgId: string): Promise<boolean> {
+export async function isEnforced(pool: Pool, orgId: string, now: Date): Promise<boolean> {
+  // THE ENTITLEMENT RELAXES ENFORCEMENT, AND THAT IS THE SAFE DIRECTION.
+  //
+  // This is the half of single sign-on that turns GitHub away, so it is the
+  // half that can lock somebody out. An organization that stops being entitled
+  // to single sign-on loses the provider routes; if it kept enforcement it
+  // would have no way in at all, and the licence documentation's own promise is
+  // that features degrade to the community behaviour rather than failing.
+  //
+  // Checked FIRST, before the row is read, so the answer does not depend on the
+  // state of a connection an unentitled organization cannot use anyway. The
+  // enforced flag stays on the row untouched, which is the other half of that
+  // promise: nothing is deleted and restoring the entitlement restores the
+  // requirement exactly.
+  if (!(await licensed(pool, orgId, 'sso', now))) return false
   const rows = await pool.withTenant({ orgId }, async (db) =>
     db.execute<{ n: string }>(sql`
       SELECT count(*) AS n FROM sso_connections
@@ -157,6 +172,8 @@ export async function isEnforced(pool: Pool, orgId: string): Promise<boolean> {
   )
   return Number(rows[0]?.n ?? 0) > 0
 }
+
+declare('sso', 'ee/web/sso/src/enforce.ts:isEnforced')
 
 /**
  * The policy the community sign-in path consults.
@@ -167,10 +184,13 @@ export async function isEnforced(pool: Pool, orgId: string): Promise<boolean> {
  * answer: GitHub proved who they are, and this organization does not accept
  * that as a way in.
  */
-export function signInPolicy(pool: Pool): (attempt: SignInAttempt) => Promise<SignInDecision> {
+export function signInPolicy(
+  pool: Pool,
+  now: () => Date = () => new Date(),
+): (attempt: SignInAttempt) => Promise<SignInDecision> {
   return async (attempt) => {
     if (!attempt.orgId) return { orgId: null }
-    if (!(await isEnforced(pool, attempt.orgId))) return { orgId: attempt.orgId }
+    if (!(await isEnforced(pool, attempt.orgId, now()))) return { orgId: attempt.orgId }
     return { orgId: null, note: 'sso_required' }
   }
 }

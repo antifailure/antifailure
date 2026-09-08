@@ -130,7 +130,8 @@ describe('a real identity provider', { skip }, () => {
     // 3. The organization and a SAML connection, filled in from the provider's
     //    own metadata rather than from anything written here.
     const org = await h.admin<{ id: string }[]>`
-      INSERT INTO organizations (slug, name) VALUES (${realm}, 'Keycloak') RETURNING id`
+      INSERT INTO organizations (slug, name, plan)
+      VALUES (${realm}, 'Keycloak', 'enterprise') RETURNING id`
     orgId = org[0]!.id
     handle = Buffer.from(randomUUID() + randomUUID()).toString('base64url').slice(0, 43)
 

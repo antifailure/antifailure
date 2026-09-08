@@ -666,17 +666,17 @@ function Entitlements({ entitlements, plan }: { entitlements: Entitlement[]; pla
   const granted = entitlements.filter((e) => e.override !== null).length;
   return (
     <Card
-      title="Limits"
+      title="Limits and capabilities"
       note={
         granted === 0
-          ? `Every limit below is the ${plan} plan's own.`
+          ? `Everything below is the ${plan} plan's own.`
           : granted === 1
-            ? "One of these limits was set for this organization rather than by the plan."
-            : `${granted} of these limits were set for this organization rather than by the plan.`
+            ? "One of these was set for this organization rather than by the plan."
+            : `${granted} of these were set for this organization rather than by the plan.`
       }
     >
       {entitlements.length === 0 ? (
-        <Empty title="No limits to show">
+        <Empty title="Nothing to show">
           The control plane did not report any. Reload, and if it stays empty the plan it is
           reading may be one it does not have limits for.
         </Empty>
@@ -685,7 +685,7 @@ function Entitlements({ entitlements, plan }: { entitlements: Entitlement[]; pla
           <Table>
             <thead>
               <tr>
-                <Th>Limit</Th>
+                <Th>Limit or capability</Th>
                 <Th numeric>Applies</Th>
                 <Th numeric>On the {plan} plan</Th>
                 <Th>Why</Th>
@@ -766,6 +766,13 @@ function label(key: string): string {
     seats: "Seats",
     apiRateMultiplier: "API rate",
     retentionDays: "History kept",
+    // The capabilities, which are entitlements the same way a limit is and
+    // read as raw keys without these. A table of named limits with "sso" in
+    // it is the row a reader assumes is a rendering fault.
+    sso: "Single sign-on",
+    scim: "Directory provisioning",
+    rbac: "Custom roles",
+    support_access: "Operator support access",
   };
   return names[key] ?? key;
 }

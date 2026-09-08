@@ -787,6 +787,167 @@ describe('support notes and impersonation', { skip: hasDb ? false : 'no database
     assert.match(await res.text(), /x-antifailure-admin-csrf/)
   })
 
+  /* -----------------------------------------------------------------------
+   * The entitlement, which is the one refusal a CUSTOMER can cause
+   * -------------------------------------------------------------------- */
+
+  /**
+   * Withdraws operator access from one organization, and hands back the undo.
+   *
+   * The undo is returned rather than left to an `after` hook because the live
+   * index is unique per (scope, scope_id, feature) over unrevoked rows, so a
+   * test that fails before cleaning up makes every later test in the file fail
+   * on an insert that has nothing to do with what it is asserting. That is what
+   * happened the first time this was written, and the three cascading failures
+   * looked like three broken gates rather than one uncleaned row.
+   */
+  async function withdrawSupportAccess(
+    orgId: string,
+    reason: string,
+    by = 'owner@acme.test',
+  ): Promise<() => Promise<void>> {
+    const [row] = await h.admin<{ id: string }[]>`
+      INSERT INTO entitlement_overrides
+        (scope, scope_id, org_id, feature, value, reason, created_by_label)
+      VALUES ('organization', ${orgId}, ${orgId}, 'support_access', ${'false'}::jsonb,
+              ${reason}, ${by})
+      RETURNING id`
+    // Three fields or none: the CHECK on the table refuses a revocation that
+    // does not say who and why, which is the same rule the grant itself is
+    // under one step later.
+    return async () => {
+      await h.admin`
+        UPDATE entitlement_overrides
+           SET revoked_at = now(), revoked_by_label = 'test@example.test',
+               revoked_reason = 'The test that withdrew it is finished.'
+         WHERE id = ${row!.id}`
+    }
+  }
+
+  /**
+   * The status and the body, read once.
+   *
+   * `assert.equal(res.status, 403, await res.text())` evaluates its message
+   * eagerly, so it consumes the body on the path where the assertion PASSES and
+   * the next read throws "Body is unusable". The SCIM suite in the enterprise
+   * tree carries the same helper for the same reason.
+   */
+  async function answer(res: Response): Promise<{ status: number; text: string }> {
+    return { status: res.status, text: await res.text() }
+  }
+
+  test('an organization that has withdrawn operator access refuses the start', async () => {
+    // Green then red then green, on the same request, so the assertion cannot
+    // pass by the impersonation having been impossible all along. The middle
+    // state is the only one that proves a gate exists: a test that only ever
+    // saw the refusal would be satisfied by a route that refuses everybody.
+    const who = await operator('support')
+    const person = await seedPerson(acme)
+
+    const first = await answer(await start(who, {
+      userId: person.id,
+      orgId: acme.orgId,
+      reason: 'Proving the door opens before proving it closes.',
+    }))
+    assert.equal(first.status, 200, first.text)
+    await end(who)
+
+    const before = await auditCount()
+    const beforeTenant = await tenantAuditCount(acme.orgId)
+
+    const restore = await withdrawSupportAccess(
+      acme.orgId, 'The customer asked us to stay out of their account.')
+    try {
+      const res = await start(who, {
+        userId: person.id,
+        orgId: acme.orgId,
+        reason: 'The same request, with consent withdrawn between the two.',
+      })
+      const refused = await answer(res)
+      assert.equal(refused.status, 403, refused.text)
+      assert.match(refused.text, /withdrawn operator access/)
+      // Who withdrew it and why. An operator reading a bare refusal mid call
+      // with the customer cannot say what they are looking at.
+      assert.match(refused.text, /owner@acme.test/)
+      assert.match(refused.text, /stay out of their account/)
+
+      // NOTHING WAS RECORDED, and this is the assertion the ordering was chosen
+      // for. The audit entry is written first, structurally, so that no session
+      // can exist without one; a refusal placed after it would leave a
+      // permanent entry in the CUSTOMER's own log claiming an access that never
+      // happened, and they cannot tell those apart.
+      assert.equal(await auditCount(), before, 'a refused impersonation wrote an operator entry')
+      assert.equal(
+        await tenantAuditCount(acme.orgId), beforeTenant,
+        'a refused impersonation told the customer they had been entered',
+      )
+      // And no session was minted for the account either.
+      assert.equal(sessionTokenFrom(res), null, 'a refused start handed back a customer cookie')
+    } finally {
+      await restore()
+    }
+
+    // Restored, and the same request works again, which proves the refusal was
+    // the override and not something else that happened to change.
+    const after = await answer(await start(who, {
+      userId: person.id,
+      orgId: acme.orgId,
+      reason: 'Consent restored, and the same request again.',
+    }))
+    assert.equal(after.status, 200, after.text)
+    await end(who)
+  })
+
+  test('withdrawing access in one organization does not close the door on another', async () => {
+    // The scope. An override is per organization, and a gate that read the
+    // global answer would take support away from every customer the first time
+    // one of them asked to be left alone.
+    const who = await operator('support')
+    const inAcme = await seedPerson(acme)
+    const inOther = await seedPerson(other)
+
+    const restore = await withdrawSupportAccess(acme.orgId, 'Withdrawn here and nowhere else.')
+    try {
+      const refused = await answer(await start(who, {
+        userId: inAcme.id,
+        orgId: acme.orgId,
+        reason: 'The organization that withdrew it.',
+      }))
+      assert.equal(refused.status, 403, refused.text)
+
+      const allowed = await answer(await start(who, {
+        userId: inOther.id,
+        orgId: other.orgId,
+        reason: 'The organization that did not.',
+      }))
+      assert.equal(allowed.status, 200, allowed.text)
+      await end(who)
+    } finally {
+      await restore()
+    }
+  })
+
+  test('an impersonation that names no organization is not refused by an organization', async () => {
+    // There is no tenant whose consent could be asked. An account with no
+    // organization has its own settings and nobody else's data, so a refusal
+    // here would be a gate keyed on something that is not in the request.
+    const who = await operator('support')
+    const alone = await seedPerson(null)
+
+    const restore = await withdrawSupportAccess(
+      acme.orgId, 'Withdrawn by an organization this person is not in.')
+    try {
+      const res = await answer(await start(who, {
+        userId: alone.id,
+        reason: 'No organization named at all.',
+      }))
+      assert.equal(res.status, 200, res.text)
+      await end(who)
+    } finally {
+      await restore()
+    }
+  })
+
   test('an operator with no live impersonation is not listed, so the list is not vacuous', async () => {
     // The reads above would all pass against a route that returned everything
     // it ever saw. This is the negative: the live list is filtered, so a

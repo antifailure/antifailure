@@ -3770,6 +3770,27 @@ export {
 
 export { safeRedirect } from './auth/signin.ts'
 
+// The entitlement resolver, re-exported for the reason stated above the
+// permission model: an edition built on top of this asks the same question
+// about the same organization and must get the same answer.
+//
+// A licensed feature enforced in the control plane is enforced by reading this
+// catalogue, not by parsing a licence key. There are two entitlement
+// authorities in this product, one per installation shape, and the enterprise
+// edition importing the hosted one from here is what stops it growing a third.
+export {
+  ENTITLEMENTS,
+  Entitlements,
+  resolveEntitlements,
+  applyOverrides,
+  type EntitlementSpec,
+  type EntitlementValue,
+  type Resolved,
+  type Subject,
+} from './entitlements.ts'
+
+export { DEFAULT_PLAN } from './limits.ts'
+
 export { type Clock, systemClock, FakeClock } from './clock.ts'
 
 // The router's request context, re-exported for the same reason the database

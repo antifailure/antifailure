@@ -256,19 +256,66 @@ func TestEvaluate_TheEntitlementMatrix(t *testing.T) {
 	t.Parallel()
 	// Every feature, granted and not granted, so that a feature added to the
 	// list without being handled fails here.
+	//
+	// Three valued rather than two since 2026-09-08. A feature the product
+	// enforces nowhere is refused even when the license names it, so the cell
+	// on the diagonal is true for a feature that ships and false for one that
+	// does not. Written as a lookup rather than a hardcoded pair of names, so
+	// that building one of them moves this test by deleting a map entry in
+	// license.go and nothing else.
 	for _, granted := range license.AllFeatures() {
 		claims := validClaims()
 		claims.Features = []license.Feature{granted}
 		status := evaluate(t, claims, license.Evaluation{Org: "acme", Now: epoch.AddDate(0, 1, 0)})
 
 		for _, f := range license.AllFeatures() {
-			if f == granted {
+			if f == granted && license.Shipped(f) {
 				require.Truef(t, status.Enabled(f), "a license naming %s does not grant it", f)
+				continue
+			}
+			if f == granted {
+				require.Falsef(t, status.Enabled(f),
+					"a license naming %s granted it, and nothing in this product enforces it: %s",
+					f, license.NotShippedBecause(f))
 				continue
 			}
 			require.Falsef(t, status.Enabled(f), "a license naming only %s also granted %s", granted, f)
 		}
 	}
+}
+
+// TestEvaluate_AFeatureNothingEnforcesIsNeverPermitted is the refusal on its
+// own, because the matrix above proves it as one cell among a hundred and forty
+// four and a reader looking for this behaviour would not find it there.
+//
+// Measured on 2026-09-08: of twelve licensed features, six had no enforcement
+// site anywhere. Two of those, billing and the enterprise dashboard, are not
+// half built or built and ungated; there is no implementation to gate. A gate
+// in front of nothing would be a declared enforcement site that never runs,
+// which is a worse defect than the one it was meant to fix, so the answer is
+// that the license cannot grant them at all.
+func TestEvaluate_AFeatureNothingEnforcesIsNeverPermitted(t *testing.T) {
+	t.Parallel()
+	refused := license.NotShippedFeatures()
+	require.NotEmpty(t, refused, "nothing is marked unshipped, so this test proves nothing")
+
+	claims := validClaims()
+	claims.Features = append([]license.Feature{license.FeatureSSO}, refused...)
+	status := evaluate(t, claims, license.Evaluation{Org: "acme", Now: epoch.AddDate(0, 1, 0)})
+
+	require.Equal(t, license.StateActive, status.State)
+	require.True(t, status.Enabled(license.FeatureSSO),
+		"a feature that does ship is still granted, so the refusal is narrow")
+	for _, f := range refused {
+		require.Falsef(t, status.Enabled(f), "%s was permitted and nothing enforces it", f)
+		require.NotEmptyf(t, license.NotShippedBecause(f),
+			"%s is refused and does not say why, which is indistinguishable from an oversight", f)
+		require.Falsef(t, license.Shipped(f), "Shipped disagrees with NotShippedFeatures about %s", f)
+	}
+	// The claims still CARRY the name. Refusing to permit it is not the same as
+	// editing somebody's signed license, and a renewal that adds the capability
+	// must not need a new token.
+	require.Contains(t, status.Claims.Features, refused[0])
 }
 
 func TestEvaluate_ALicenseForAnotherOrganizationIsRefused(t *testing.T) {

@@ -1359,7 +1359,7 @@ typecheck:
     # A reason that has stopped being true. Without this the excuses rot: a
     # project gets deleted or renamed and its entry sits here claiming another
     # gate covers something that no longer exists.
-    for named in console docs ee/web/audit ee/web/rbac ee/web/scim ee/web/sso examples/next-app; do
+    for named in console docs ee/web/audit ee/web/features ee/web/rbac ee/web/scim ee/web/sso examples/next-app; do
       [ -f "$named/tsconfig.json" ] || { echo "  $named is named as checked elsewhere and has no tsconfig.json; remove it"; exit 1; }
     done
 
