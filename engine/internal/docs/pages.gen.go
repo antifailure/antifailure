@@ -4432,6 +4432,43 @@ provider's own hostname with a certificate the environment already trusts. The
 application needs no endpoint override, which is the one thing every other way
 of using an emulator costs you.
 
+Three fields on the container exist because one reference implementation is not
+a contract, and LocalStack is the reason none of them showed up first: it is a
+single image whose entrypoint is the emulator, so it needs none of them.
+
+` + "`" + `Command` + "`" + ` decides which emulator you get. Google ships Pub/Sub, Firestore,
+Datastore and Bigtable inside ONE Cloud CLI image whose entrypoint is the CLI,
+so ` + "`" + `Image` + "`" + `, ` + "`" + `Port` + "`" + ` and ` + "`" + `Env` + "`" + ` alone describe four identical containers that run
+nothing. Azurite needs it too, for a smaller reason with the same shape: it
+binds to loopback unless told otherwise, and an emulator listening on 127.0.0.1
+answers nothing from the sidecar while looking perfectly healthy in its own logs.
+
+` + "`" + `Companions` + "`" + ` are containers your emulator does not work without. Azure's Service
+Bus emulator refuses to start without an MSSQL instance beside it. Companions
+join the environment's inner network on exactly the terms the emulator does, so
+they have no route out either and ` + "`" + `Reach` + "`" + ` covers them without knowing they
+exist. Each carries its own digest and its own ` + "`" + `Maintainer` + "`" + `, because a companion
+runs beside a copy of production data on the emulator's terms and "it came with
+the emulator" is not a provenance. A companion's own companions are refused: one
+level is what the known cases need, and a graph here would be a dependency
+resolver nobody asked for.
+
+` + "`" + `Maintainer` + "`" + ` is declared and never inferred from the registry the image sits in.
+A registry path is a fact about hosting and this is a fact about support, and the
+two disagree exactly where it matters: ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto
+GCS emulator and Google does not publish it, because Google ships no GCS emulator
+at all. Somebody deciding whether to trust an environment's answers about object
+storage should read that rather than infer it from a hostname.
+
+**An image that pulls is not an image that starts, and no emulator may require a
+cloud account.** ` + "`" + `localstack/localstack` + "`" + ` exits 55 on licence activation before it
+binds a port, which is a container that pulled, started, and answers nothing.
+Google's six start with no account, no token and no credential. The suite catches
+this without a rule of its own: a container that never binds fails
+` + "`" + `Covered_IsAnswered` + "`" + `, because the probe goes to your own declared hostname and
+there is nothing on the other end. Check it before you pin a digest, because the
+failure arrives as a routing problem and is not one.
+
 ` + "`" + "`" + "`" + `go
 func TestMyEmulator(t *testing.T) {
     conformance.RunEmulator(t, factory, conformance.EmulatorOptions{})
