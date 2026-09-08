@@ -29,7 +29,7 @@ import (
 // Said here rather than left to be found, because a check whose limits are not
 // written down is one somebody will read as a guarantee.
 func (r *Runtime) checkCapacity(ctx context.Context, spec provider.EnvSpec) error {
-	asks := asksFor(spec.Services)
+	asks := capacity.AsksFor(spec.Services)
 	if len(asks) == 0 {
 		return nil
 	}
@@ -59,25 +59,6 @@ func daemonName(name string) string {
 		return "this Docker daemon"
 	}
 	return name
-}
-
-// asksFor is the sizes an environment declared, one entry per service that
-// named one. A service that named neither is left out rather than entered as a
-// zero, so it cannot appear in a shortfall message it has nothing to do with.
-func asksFor(services []provider.ServiceSpec) []capacity.Ask {
-	var out []capacity.Ask
-	for _, s := range services {
-		if s.CPUMillis <= 0 && s.MemoryBytes <= 0 {
-			continue
-		}
-		out = append(out, capacity.Ask{
-			Service:     s.Name,
-			Instances:   s.Instances(),
-			MilliCPU:    s.CPUMillis,
-			MemoryBytes: s.MemoryBytes,
-		})
-	}
-	return out
 }
 
 // appliedResources is the size the daemon is actually holding a container to.

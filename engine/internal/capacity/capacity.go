@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -215,4 +216,34 @@ func plural(n int, one, many string) string {
 		return fmt.Sprintf("%d %s", n, one)
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// AsksFor is the sizes an environment declared, one entry per service that
+// named one.
+//
+// One function rather than one per runtime, and that is the whole reason it
+// exists here. There were two of these, identical, in the local and the
+// Kubernetes packages, which is the shape serviceSpec had when health_timeout
+// went missing from one of the two copies: every field a size ever gains has
+// to be added to BOTH or the runtime that was forgotten quietly checks less
+// than the other one, and nothing in the compiler notices.
+//
+// A service that named neither is left out rather than entered as a zero. A
+// zero row would make the environment look like it asked for something and got
+// nothing, and it would put a service with no request into a shortfall message
+// that has nothing to say about it.
+func AsksFor(services []provider.ServiceSpec) []Ask {
+	var out []Ask
+	for _, s := range services {
+		if s.CPUMillis <= 0 && s.MemoryBytes <= 0 {
+			continue
+		}
+		out = append(out, Ask{
+			Service:     s.Name,
+			Instances:   s.Instances(),
+			MilliCPU:    s.CPUMillis,
+			MemoryBytes: s.MemoryBytes,
+		})
+	}
+	return out
 }

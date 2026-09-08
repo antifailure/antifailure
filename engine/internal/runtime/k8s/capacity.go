@@ -44,7 +44,7 @@ import (
 func (r *Runtime) checkCapacity(
 	ctx context.Context, spec provider.EnvSpec, progress func(string),
 ) error {
-	asks := asksFor(spec.Services)
+	asks := capacity.AsksFor(spec.Services)
 	if len(asks) == 0 {
 		return nil
 	}
@@ -60,29 +60,6 @@ func (r *Runtime) checkCapacity(
 		return aferrors.Coded(aferrors.AFRUN047, "detail", err.Error())
 	}
 	return nil
-}
-
-// asksFor is the sizes an environment declared, one entry per service that
-// named one.
-//
-// A service that named neither is left out rather than entered as a zero. A
-// zero row would make the environment look like it asked for something and got
-// nothing, and it would put a service with no request into a shortfall message
-// that has nothing to say about it.
-func asksFor(services []provider.ServiceSpec) []capacity.Ask {
-	var out []capacity.Ask
-	for _, s := range services {
-		if s.CPUMillis <= 0 && s.MemoryBytes <= 0 {
-			continue
-		}
-		out = append(out, capacity.Ask{
-			Service:     s.Name,
-			Instances:   s.Instances(),
-			MilliCPU:    s.CPUMillis,
-			MemoryBytes: s.MemoryBytes,
-		})
-	}
-	return out
 }
 
 // freeCapacity is what each schedulable node has left.
