@@ -194,6 +194,31 @@ jobs:
       # opposite one: the community image quietly gaining ee/ in its context.
       # So the community leg asserts that its own image carries no enterprise
       # tree, which is the direction that has no other alarm on it.
+      # TWO CHECKS, BECAUSE THE README MAKES TWO CLAIMS AND ONE OF THEM WAS
+      # ASSERTED BY NOTHING AT ALL.
+      #
+      # ee/README.md's fourth mechanism is "the job builds cmd/af and fails if
+      # strings finds any enterprise package path in the binary", which ci.yml
+      # does, AND ".dockerignore excludes ee from the image build context, so
+      # the published control plane image is built from a context that does not
+      # contain it", which nothing did. Grepping the tree for the second: the
+      # only readers of that filename are changecheck's changelog classifier and
+      # the engine's own handling of a USER's ignore file. editioncheck does not
+      # look at it, the grep for enterprise imports does not, and the strings
+      # check reads the Go binary and never the image. So the boundary held
+      # because the line was there and for no other reason, and deleting the
+      # line would have been a silent, permanent regression.
+      #
+      # The behavioural one comes first because it is the property that matters:
+      # no enterprise file reached the artifact. The structural one is paired
+      # with it because it is the only thing that can catch the edit itself. A
+      # deleted `ee` line puts the tree back in the CONTEXT while the image, which
+      # copies named paths, stays clean, so the behavioural check alone would
+      # stay green while the README's sentence quietly became false.
+      #
+      # Both are reachable for exactly the edits that could break them: this
+      # workflow's paths filter carries `.dockerignore` and `deploy/**`, and a
+      # push to main or a tag runs it with no filter at all.
       - name: The community image carries no enterprise tree
         if: matrix.edition == 'community'
         run: |
@@ -205,6 +230,27 @@ jobs:
             exit 1
           fi
           echo "no enterprise tree in the community image"
+
+      - name: The community build context still excludes the enterprise tree
+        if: matrix.edition == 'community'
+        run: |
+          set -euo pipefail
+          # A bare `ee` line, not commented and not negated. `grep -c` exits 1
+          # when it counts nothing, and under pipefail that would end the step
+          # before the sentence below could say what was wrong, so the count is
+          # taken with a fallback and then asserted. A red step with no message
+          # is how somebody concludes a check is flaky.
+          found=$(grep -cxF 'ee' .dockerignore) || found=0
+          if [ "$found" -ne 1 ]; then
+            echo "FAIL: the repository root .dockerignore no longer excludes ee/ on a line of its own."
+            echo "FAIL: ee/README.md names that exclusion as the fourth of four mechanisms holding"
+            echo "FAIL: the edition boundary, and the community image is what it protects. The"
+            echo "FAIL: enterprise image does NOT need this line removed: it carries its own ignore"
+            echo "FAIL: file at deploy/docker/control-plane-enterprise.Dockerfile.dockerignore,"
+            echo "FAIL: which BuildKit reads in place of this one for that Dockerfile alone."
+            exit 1
+          fi
+          echo "the root .dockerignore still excludes ee/ from the community context"
 
       - name: The enterprise image carries the entry point and its links
         if: matrix.edition == 'enterprise'
