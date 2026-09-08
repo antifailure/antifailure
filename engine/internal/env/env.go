@@ -1545,7 +1545,8 @@ func reservedProviderNames() map[string][]string {
 			string(schema.RuntimeLocal), string(schema.RuntimeKubernetes),
 		},
 		extension.SocketGoldenStore: {
-			string(golden.KindLocal), string(golden.KindAzureBlob), string(golden.KindS3),
+			string(golden.KindLocal), string(golden.KindAzureBlob),
+			string(golden.KindS3), string(golden.KindGCS),
 		},
 	}
 }
