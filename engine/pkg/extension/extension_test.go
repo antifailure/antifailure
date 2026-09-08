@@ -26,6 +26,15 @@ func TestAnEmptyRegistryRefusesNothing(t *testing.T) {
 	}))
 }
 
+func TestAnEmptyRegistryRefusesNoMaskingPlan(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	require.True(t, r.Empty())
+	require.NoError(t, r.CheckMasking(context.Background(), extension.MaskingRequest{
+		Repository: "acme/app", MaskedColumns: []string{"public.users.email"},
+	}))
+}
+
 func TestAnEmptyRegistryObservesNothingAndReportsNoProblems(t *testing.T) {
 	t.Parallel()
 	r := extension.NewRegistry()
@@ -93,13 +102,78 @@ func TestAPolicyHookSeesWhatItNeedsToDecide(t *testing.T) {
 
 	req := extension.EnvironmentRequest{
 		Org: "acme", Repository: "acme/app", Branch: "feature/x", EnvID: "af-1",
-		EgressHosts:   []string{"api.stripe.com"},
-		EgressModes:   map[string]string{"api.stripe.com": "sandbox"},
-		MaskedColumns: []string{"users.email"},
-		Provider:      "neon", Region: "weu",
+		EgressHosts: []string{"api.stripe.com"},
+		EgressModes: map[string]string{"api.stripe.com": "sandbox"},
+		Provider:    "neon", Region: "weu",
 	}
 	require.NoError(t, r.CheckPolicy(context.Background(), req))
 	require.Equal(t, req, *spy.seen)
+}
+
+// ---------------------------------------------------------------------------
+
+type refusingMasking struct {
+	name string
+	err  error
+	seen *extension.MaskingRequest
+}
+
+func (r *refusingMasking) Name() string { return r.name }
+func (r *refusingMasking) CheckMasking(_ context.Context, req extension.MaskingRequest) error {
+	copied := req
+	r.seen = &copied
+	return r.err
+}
+
+func TestAMaskingHookCanRefuseAndTheRefusalReachesTheCaller(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	refusal := errors.New("organization policy requires users.email to be masked")
+	r.AddMasking(&refusingMasking{name: "masking", err: refusal})
+
+	err := r.CheckMasking(context.Background(), extension.MaskingRequest{Repository: "acme/app"})
+	require.ErrorIs(t, err, refusal)
+}
+
+func TestTheFirstMaskingRefusalWinsAndLaterHooksDoNotRun(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	first := &refusingMasking{name: "first", err: errors.New("no")}
+	second := &refusingMasking{name: "second", err: errors.New("also no")}
+	r.AddMasking(first)
+	r.AddMasking(second)
+
+	err := r.CheckMasking(context.Background(), extension.MaskingRequest{Repository: "acme/app"})
+	require.ErrorIs(t, err, first.err)
+	require.Nil(t, second.seen, "a later hook ran after an earlier one refused")
+}
+
+func TestAMaskingHookSeesTheColumnsAndTheCatalogue(t *testing.T) {
+	t.Parallel()
+	// Both lists, because neither answers the question on its own. Masked
+	// columns alone cannot tell a database with no email column from one with
+	// three unmasked ones, and those deserve opposite answers.
+	r := extension.NewRegistry()
+	spy := &refusingMasking{name: "spy"}
+	r.AddMasking(spy)
+
+	req := extension.MaskingRequest{
+		Repository: "acme/app", Branch: "feature/x", EnvID: "af-1", RulesHash: "h1",
+		MaskedColumns:  []string{"public.users.email"},
+		CatalogColumns: []string{"public.users.email", "public.users.id"},
+	}
+	require.NoError(t, r.CheckMasking(context.Background(), req))
+	require.Equal(t, req, *spy.seen)
+}
+
+func TestAMaskingHookIsNamedInTheRegistrations(t *testing.T) {
+	t.Parallel()
+	// af doctor prints this. A hook that refuses environments and appears in
+	// no listing is one nobody debugging a refusal can find.
+	r := extension.NewRegistry()
+	r.AddMasking(&refusingMasking{name: "organization-policy"})
+	require.Equal(t, []string{"masking:organization-policy"}, r.Registered())
+	require.False(t, r.Empty())
 }
 
 // ---------------------------------------------------------------------------

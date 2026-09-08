@@ -26,6 +26,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/subset"
 	"github.com/antifailure/antifailure/engine/internal/verify"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -601,6 +602,78 @@ func (o *Orchestrator) sourceURL(ctx context.Context) (secrets.Value, error) {
 	return value, nil
 }
 
+// checkMasking asks the registered hooks whether this plan may run.
+//
+// The community build registers nothing, so this returns nil after one pass
+// over an empty slice, and the community suite runs byte for byte as it did
+// before the call existed. The socket is here rather than in the enterprise
+// edition for the same reason the policy socket is: a hook that only exists in
+// a build nobody runs is a hook nobody has tested.
+func (o *Orchestrator) checkMasking(
+	ctx context.Context, tables []masking.Table, plan masking.Plan,
+) error {
+	registry := o.opts.Extensions
+	if registry == nil {
+		registry = extension.Default
+	}
+	if registry.Empty() {
+		return nil
+	}
+	return registry.CheckMasking(ctx, o.maskingRequest(tables, plan))
+}
+
+// maskingRequest describes a plan in the two lists a hook needs.
+//
+// Split out and pure so that the mapping is testable without a database, and
+// because getting it wrong is silent: a request whose MaskedColumns were built
+// from the rules rather than from the plan would name columns no executor is
+// going to touch, and a hook reading it would approve a database that still
+// holds them.
+//
+// Every column carries its schema. The alternative, a bare table.column, is
+// ambiguous the moment two schemas hold a table of the same name, and a policy
+// that cannot tell public.users.email from staging.users.email is a policy
+// about whichever one the map iterated first.
+func (o *Orchestrator) maskingRequest(
+	tables []masking.Table, plan masking.Plan,
+) extension.MaskingRequest {
+	req := extension.MaskingRequest{
+		Branch:    o.opts.Branch,
+		EnvID:     o.envID,
+		RulesHash: plan.RulesHash,
+	}
+	if o.opts.Manifest != nil {
+		req.Repository = o.opts.Manifest.Name
+	}
+	// The plan is what will run, so this is the list of columns that are about
+	// to be rewritten and not a wider one. A table the plan skipped
+	// contributes nothing here even though its columns were assigned, which is
+	// correct: a skipped table is a table whose data survives.
+	for _, tp := range plan.Tables {
+		if tp.Skipped != "" {
+			continue
+		}
+		for _, col := range tp.Columns {
+			req.MaskedColumns = append(req.MaskedColumns,
+				tp.Table.String()+"."+col.Column.Name)
+		}
+	}
+	sort.Strings(req.MaskedColumns)
+
+	// The whole catalogue, from the catalogue rather than from the plan. The
+	// plan holds only the tables it will rewrite, so a database whose email
+	// column matched no rule contributes that column to neither list if this
+	// is read off the plan, and a hook cannot then tell an absent column from
+	// an unmasked one.
+	for _, t := range tables {
+		for _, col := range t.Columns {
+			req.CatalogColumns = append(req.CatalogColumns, t.String()+"."+col.Name)
+		}
+	}
+	sort.Strings(req.CatalogColumns)
+	return req
+}
+
 // maskDatabase applies the rules to a database.
 //
 // It takes the session because masking is the longest and least visible part of
@@ -644,6 +717,20 @@ func (o *Orchestrator) maskDatabase(
 		o.progress(fmt.Sprintf(
 			"%d columns matched no rule and may hold something: %s",
 			len(plan.Unclassified), masking.DescribeColumns(plan.Unclassified, 6)))
+	}
+
+	// Asked here and nowhere else, because here is the only place the answer
+	// is a fact. The policy hook runs before anything is created and is given
+	// a manifest, which names no columns; this is given a catalogue that was
+	// read from the database eleven lines up and a plan assigned against it.
+	//
+	// Before the executor rather than after it, so a refusal costs the rows
+	// nothing: the candidate is not masked, not verified and never published,
+	// and provider.Branch refuses a version that was not published. A hook
+	// that answered after Apply would be reviewing a database it could no
+	// longer stop anybody from branching.
+	if err := o.checkMasking(ctx, tables, plan); err != nil {
+		return 0, 0, err
 	}
 	if copied := plan.CopiedUnchanged(); len(copied) > 0 {
 		// The half of that list the default could not empty. These hold
