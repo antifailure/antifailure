@@ -251,3 +251,24 @@ export async function seed(admin: postgres.Sql): Promise<Seeded> {
       ${`https://idp.test/${slug}/metadata`}, 'https://idp.test/sso', ${admin.array([] as string[])})`
   return { orgId, slug, handle }
 }
+
+// ---------------------------------------------------------------------------
+// Why package.json runs the two files as two processes
+//
+// `node --test test/*.test.ts`, which is what every other package here uses and
+// what this one used first, hangs. Each file passes on its own, in seconds, and
+// together they reach the runner's four minute wall and report
+// "Promise resolution is still pending but the event loop has already
+// resolved", with two cancelled files and nothing that says why.
+//
+// This file starts real processes and holds their stdio pipes, and license.ts's
+// suite drives the same module-level extension registry that the entry point
+// registers into. Sharing one runner between those two is not something either
+// suite needs, and the cost of finding out exactly which of them is holding the
+// loop open is not worth paying to keep one command.
+//
+// So the script runs them separately, which is isolation the suites should have
+// had anyway: a suite that mutates a process-wide registry and a suite that
+// spawns servers are not neighbours. Recorded here rather than left as an odd
+// looking script, because the next person to tidy it back into one invocation
+// will get a four minute red with no explanation in it.
