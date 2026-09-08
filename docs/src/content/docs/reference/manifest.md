@@ -55,7 +55,7 @@ what it deliberately does not cover.
 | `replicas` | int | How many instances to run, 1 to 10. Both runtimes start this many behind the one name other services resolve. See below. |
 | `depends_on` | list | Other services that must start first. |
 | `env` | list | Variables this service needs, by name. |
-| `resources` | block | `cpu` and `memory`, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
+| `resources` | block | `cpu` and `memory`, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
 | `build` | block | See below. |
 
 ### What a service is given
@@ -135,6 +135,61 @@ The bound is 1 to 10, and a `cron` service may not ask for more than one: every
 instance runs the schedule, so three instances send the nightly email three
 times, which is a bug to reproduce inside a service rather than the meaning of
 a manifest key.
+
+### `resources`
+
+```yaml
+services:
+  - name: clickhouse
+    kind: worker
+    resources:
+      cpu: "2"
+      memory: 4Gi
+```
+
+The size ONE instance is given. A service asking for `replicas: 3` and `2` of
+CPU asks the machine for six cores, not two.
+
+`cpu` is a number of cores, or thousandths with an `m`: `2`, `0.5`, `500m`.
+`memory` needs a unit: `512Mi`, `2Gi`. `Mi` and `Gi` are powers of two, `M` and
+`G` powers of ten, which is what those suffixes mean in a Deployment and what
+somebody copying a value out of one expects. A bare `memory: 512` is refused,
+because Kubernetes reads it as 512 bytes and nobody who writes it means that.
+
+**Each value is the request AND the limit**, not a request with a larger limit
+behind it. On Kubernetes that is the Guaranteed quality of service class. The
+familiar shape, a small request under a large limit, is where a node gets
+oversubscribed: every container is placed against its request and then grows
+into its limit, so a machine that fits ten environments on paper runs eleven
+and the eleventh takes memory from the others. The symptom is a workflow that
+reads as flaky, and a twin whose failures belong to the machine rather than to
+the change under test is worth less than no twin. One number also means
+environments per node is a division rather than a guess.
+
+On the local runtime there is no scheduler to reserve anything, so the value is
+the daemon's own cpu and memory constraint: the container gets that share under
+contention and no more, and one over its memory cap is killed rather than
+allowed to take the machine down with it.
+
+Omitting a key leaves that dimension uncapped, which is what every service had
+before the key was honoured, so an existing manifest produces the identical
+container and the identical Deployment it did before. The two keys are
+independent: a service may cap CPU alone, memory alone, or neither.
+
+**A size the runtime cannot place is refused before anything is created**, with
+**AF-RUN-047** naming the shortfall. Without that, a request larger than any
+node is accepted by the API server, the pod sits `Pending` with an event nobody
+is watching, and `af up` waits out its readiness timeout and reports a service
+that did not start, which reads as a slow cluster. On a cluster the check is
+against allocatable minus what the pods already there requested, so a full
+cluster refuses rather than accepts. It is a necessary condition and not a
+sufficient one: it refuses the sets for which no placement exists, and leaves
+bin packing to the scheduler.
+
+`af status` reports the size the runtime ACTUALLY applied, read back off the
+running pod or the daemon's record of the container rather than echoed from
+the manifest. A runtime that accepts a cap and emits none would otherwise
+report exactly what a correct one reports.
 
 ### `build`
 

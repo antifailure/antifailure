@@ -168,15 +168,47 @@ The egress sidecar is always a single pod whatever any service asks for,
 because it is the environment's only resolver and its only route out, and a
 second one would split the record of what was refused across two decision logs.
 
-The manifest's `resources` is still **refused at validation** rather than
-applied. Neither `cpu` nor `memory` reaches any runtime: they are dropped
-between the manifest and the runtime contract, so honouring them here alone
-would mean one runtime enforcing a cap the other ignores. Until both do, a
-manifest carrying either one is rejected by name, because a service that
-quietly ran with no limit under `resources.memory: 512Mi` is the worse of the
-two answers: the run goes green having proved nothing about the case its author
-was worried about. That is the argument `replicas` used to be on the wrong side
-of.
+The manifest's `resources` becomes the container's `ResourceRequirements`, and
+the request and the limit are the SAME figure, which puts the pod in the
+Guaranteed quality of service class. A dimension the manifest did not name is
+left out of both maps rather than set to zero: a zero request is a request for
+nothing and a zero limit is a limit of nothing, so a service that named no size
+produces the identical Deployment it produced before the key was honoured.
+
+The gap between a small request and a larger limit is where a node is
+oversubscribed. Every pod is placed against its request and may then grow into
+its limit, so a node that fits ten environments on paper runs eleven and the
+eleventh takes memory from the others. The symptom is a workflow that reads as
+flaky, and a twin whose failures belong to the machine rather than to the
+change under test is worth less than no twin.
+
+`af up` checks the sizes against the cluster BEFORE it creates anything, and
+refuses with **AF-RUN-047** naming the shortfall. Without that check a request
+larger than any node is accepted by the API server and the pod sits `Pending`
+with an event nobody is watching, so `af up` waits out the readiness timeout
+and reports a service that did not start. The free figure is each schedulable
+node's allocatable minus the requests of the pods already on it, which is the
+quantity the scheduler itself places against; allocatable alone would accept an
+environment onto a full cluster. Cordoned and not ready nodes are left out,
+because a node that still reports its allocatable and can hold nothing makes
+the cluster look larger than it is.
+
+Two necessary conditions, neither sufficient: every instance has to fit on some
+single node, and the total has to fit in what is free across all of them. A set
+that passes both can still fail to pack, and the scheduler remains the
+authority on that. What is refused here is only the cases where no packing
+exists at all, which are the ones a person cannot diagnose from a `Pending`
+pod.
+
+A cluster that will not let `af` list its nodes or its pods is one this cannot
+check. It says so on the progress channel and lets the environment through,
+rather than reporting nothing and passing: refusing to start because a
+permission is narrow would break every cluster where `af` has namespace scoped
+access and nothing more.
+
+`af status` reports the applied size off the pod the cluster is running rather
+than off the spec that was sent, because a runtime that echoed the request back
+would agree with the manifest whether or not anything was applied.
 
 ## Teardown
 
