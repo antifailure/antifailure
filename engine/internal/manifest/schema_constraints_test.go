@@ -848,7 +848,25 @@ const (
 	// statusElsewhere is a refusal that names a path other than the one that
 	// was mutated. It is not evidence the constraint is kept.
 	statusElsewhere = "REFUSED-ELSEWHERE"
+	// statusExcepted is a constraint schemabounds.go deliberately does not
+	// enforce, with a reason recorded beside it in the one shared list.
+	statusExcepted = "EXCEPTED"
 )
+
+// exceptedConstraint reads the pass's own exception list rather than a second
+// copy of it.
+func exceptedConstraint(c constraint) (string, bool) {
+	key := c.Keyword
+	if c.Detail != "" {
+		key += "=" + c.Detail
+	}
+	for _, e := range manifest.BoundsExceptionsForTest() {
+		if indexed.ReplaceAllString(e[0], "") == indexed.ReplaceAllString(c.Path, "") && e[1] == key {
+			return e[2], true
+		}
+	}
+	return "", false
+}
 
 func measure(t *testing.T) ([]verdict, []builtBase) {
 	t.Helper()
@@ -868,6 +886,12 @@ func measure(t *testing.T) ([]verdict, []builtBase) {
 	var out []verdict
 	for _, c := range enumerate(root) {
 		v := verdict{c: c}
+		if why, ok := exceptedConstraint(c); ok {
+			v.status = statusExcepted
+			v.reason = why
+			out = append(out, v)
+			continue
+		}
 		if why, ok := refusedField(tn.RefusedFields, c.Path); ok {
 			v.status = statusRefused
 			v.reason = why

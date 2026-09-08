@@ -149,16 +149,56 @@ func (n *bounds) resolve(root *bounds) *bounds {
 	return n
 }
 
-// requiredExceptions are the schema's required fields the engine deliberately
-// does not require, with the reason. There is exactly one, and it is a
-// disagreement between two documents rather than a gap: the schema lists
-// version as required, and Parse deliberately assumes version 1 when it is
-// absent because refusing would be pedantic for a field that has only ever had
-// one value. Enforcing it here would refuse manifests this engine has always
-// accepted. The honest resolution is to drop it from the schema's required
-// list, which changes a published reference page, so it is named here rather
-// than done quietly.
-var requiredExceptions = map[string]bool{"version": true}
+// boundsExceptions are the constraints this pass deliberately does not
+// enforce, each with the reason. There are six and every one of them is a
+// place the PUBLISHED SCHEMA IS WRONG rather than a place the engine falls
+// short, which is why enforcing them would refuse manifests this engine has
+// always accepted and always should.
+//
+// They are listed here rather than dropped from the schema because deleting or
+// widening a constraint removes or rewrites a row on a published reference
+// page, and that is a decision about a document rather than a lint fix. Each
+// entry is a proposal with its evidence attached. An empty list is the goal.
+//
+// TestEverySchemaConstraintIsEnforced reads this same list through
+// export_test.go, so there is one list rather than two that agree until
+// somebody edits one.
+var boundsExceptions = []struct{ Path, Keyword, Why string }{
+	{"", "required=version",
+		"Parse deliberately assumes version 1 when the key is absent, and says so: refusing " +
+			"would be pedantic for a field that has only ever had one value. 37 of the 51 whole " +
+			"manifests in the published documentation omit it, so the documentation and the engine " +
+			"agree with each other and disagree with the schema."},
+
+	{"database.provider", "enum",
+		"Providers are a registry, not a closed set. A provider registered from outside the " +
+			"engine module is resolvable and runnable, and this enum is a snapshot of the ones that " +
+			"shipped, so enforcing it would make the documented extension point unusable from a " +
+			"manifest. internal/env's registered provider test names acmedb and is right to."},
+	{"runtime.provider", "enum",
+		"The same, for runtimes. internal/env's registered provider test names acmert."},
+
+	{"runtime.ttl", "pattern",
+		"The schema says hours or days. ParseDuration accepts ms, s, m, h and d, and its own " +
+			"error message advertises all five, so a thirty minute lifetime is legal, useful and " +
+			"refused by the published pattern alone."},
+	{"runtime.max_ttl", "pattern", "The same duration, the same parser, the same narrow pattern."},
+	{"runtime.idle_sleep", "pattern", "The same duration, the same parser, the same narrow pattern."},
+}
+
+// subscript erases array indices so that services[0].env[2].name and the
+// exception written as services[].env[].name are the same place.
+var subscript = regexp.MustCompile(`\[[0-9]*\]`)
+
+func excepted(path, keyword string) bool {
+	path = subscript.ReplaceAllString(path, "")
+	for _, e := range boundsExceptions {
+		if subscript.ReplaceAllString(e.Path, "") == path && e.Keyword == keyword {
+			return true
+		}
+	}
+	return false
+}
 
 // boundsPass walks the document against the schema and reports every declared
 // constraint it breaks.
@@ -225,7 +265,7 @@ func (v *validator) boundsMapping(root, n *bounds, node *yaml.Node, path string,
 		keys[node.Content[i].Value] = true
 	}
 	for _, want := range n.Required {
-		if keys[want] || (path == "" && requiredExceptions[want]) {
+		if keys[want] || excepted(path, "required="+want) {
 			continue
 		}
 		v.boundsAdd(spoken, node, join(path, want),
@@ -286,13 +326,13 @@ func (v *validator) boundsScalar(n *bounds, node *yaml.Node, path string, spoken
 		return
 	}
 	value := node.Value
-	if len(n.Enum) > 0 && !inEnum(n.Enum, value) {
+	if len(n.Enum) > 0 && !inEnum(n.Enum, value) && !excepted(path, "enum") {
 		v.boundsAdd(spoken, node, path,
 			fmt.Sprintf("%q is not one of %s.", value, enumList(n.Enum)), boundsHint)
 		return
 	}
 	if node.Tag == "!!str" {
-		if n.re != nil && !n.re.MatchString(value) {
+		if n.re != nil && !n.re.MatchString(value) && !excepted(path, "pattern") {
 			v.boundsAdd(spoken, node, path,
 				fmt.Sprintf("%q is not in the form this field takes, %s.", value, n.Pattern), boundsHint)
 			return
