@@ -133,7 +133,7 @@ engine starts the containers from.
   Atlassian Pty Ltd
   - Answers for AWS as `aws`
   - `localstack/localstack` pinned at
-  sha256:4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572
+  sha256:6b6172cfceb04b4fbc35097a55f717c365a35fafa572be49f7341771cf9023ed
   - https://github.com/localstack/localstack/blob/main/LICENSE.txt
 - Azurite, MIT License
   Copyright (c) Microsoft Corporation
