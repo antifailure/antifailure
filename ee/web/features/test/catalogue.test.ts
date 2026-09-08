@@ -169,7 +169,12 @@ describe('every declared enforcement site names something that can refuse', () =
     // the licence key lives and where this registry cannot see them; asserting
     // twelve here would be asserting something false about a different process.
     // What is asserted is that the features enforced HERE say so.
-    assert.deepEqual(declared(), ['scim', 'sso'] as Feature[])
+    assert.deepEqual(
+      declared(), ['scim', 'sso'] as Feature[],
+      'the set of features enforced in the control plane changed. If one was added, import ' +
+        'its package at the top of this file so the registry can see it and add it here. If ' +
+        'one disappeared, a declare() call was removed and a feature is silently free again.',
+    )
   })
 
   it('the named symbol is in the named file', async () => {
