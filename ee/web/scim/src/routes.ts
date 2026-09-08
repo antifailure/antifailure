@@ -21,6 +21,7 @@
 import type { Pool } from '@antifailure/db'
 import type { Clock, Context, Extension, ExtensionRoute } from '@antifailure/api'
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { declare, licensed, refusal } from '@antifailure-ee/features'
 import { FilterRefused, parseFilter, type Filter } from './filter.ts'
 import { PatchRefused, asBoolean, asString, normalisePatch, type Change } from './patch.ts'
 import {
@@ -55,6 +56,13 @@ import {
   updateUser,
   type Caller,
 } from './store.ts'
+
+// Declared at module scope, so importing this package is what records the site.
+// The symbol named is the function that returns the refusal, not the extension
+// that mounts the routes: a site that names something unable to answer the
+// question is the same lie one level down, and the engine's own registry has
+// already shipped one of those.
+declare('scim', 'ee/web/scim/src/routes.ts:guard')
 
 export interface ScimOptions {
   pool: Pool
@@ -171,6 +179,24 @@ async function guard(c: Context, options: ScimOptions, handler: Handler): Promis
     // existed. Telling them apart tells somebody probing which of their
     // guesses was once real.
     return json(c, 401, errorBody(401, 'This token is not valid.'), challenge)
+  }
+
+  // THE LICENCE GATE, in the one function every route is authenticated by.
+  //
+  // Fourteen handlers, and this is the function that stops one of them being
+  // the one that forgot to authenticate. The entitlement belongs in exactly the
+  // same place and for exactly the same reason: a route added later inherits
+  // it, and a route that somehow did not would be a directory able to write
+  // members into an organization that is not entitled to directory
+  // provisioning.
+  //
+  // 403 and not 401, and never a 500. The caller is a provisioning robot on its
+  // own retry schedule: a 401 makes it prompt for a new token, which is not the
+  // problem and produces a support conversation about credentials; a 500 makes
+  // Okta and Entra retry the same request forever. A 403 with a scimType stops
+  // the sync and shows the person who configured it what is actually wrong.
+  if (!(await licensed(options.pool, caller.orgId, 'scim', options.clock.now()))) {
+    return json(c, 403, errorBody(403, refusal('scim'), 'invalidValue'))
   }
 
   try {

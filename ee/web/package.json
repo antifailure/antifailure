@@ -7,6 +7,7 @@
     "node": ">=24"
   },
   "workspaces": [
+    "features",
     "rbac",
     "audit",
     "sso",

@@ -86,7 +86,7 @@ registerExtension(
 registerExtension(
   scimExtension({ pool, clock: systemClock, baseUrl: publicBaseUrl, defaultRole: 'member' }),
 )
-setSignInPolicy(signInPolicy(pool))
+setSignInPolicy(signInPolicy(pool, () => systemClock.now()))
 
 const { app } = createServer({
   pool,
@@ -101,7 +101,8 @@ const { app } = createServer({
 // the provider's own metadata rather than from anything written here.
 const slug = `live-${randomUUID().slice(0, 8)}`
 const [org] = await admin<{ id: string }[]>`
-  INSERT INTO organizations (slug, name) VALUES (${slug}, 'Conformance') RETURNING id`
+  INSERT INTO organizations (slug, name, plan)
+  VALUES (${slug}, 'Conformance', 'enterprise') RETURNING id`
 const orgId = org!.id
 
 const handle = randomBytes(32).toString('base64url')

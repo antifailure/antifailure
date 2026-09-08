@@ -50,6 +50,7 @@ import { buildAuthnRequest, samlUrls, serviceProviderMetadata } from './saml/req
 import { decodeBase64, parseXml, MalformedXml, one, text } from './saml/xml.ts'
 import { authorizationUrl, beginLogin, completeLogin } from './oidc/flow.ts'
 import { TokenRefused } from './oidc/jwt.ts'
+import { Unlicensed } from '@antifailure-ee/features'
 import {
   connectionByHandle,
   consumeLoginState,
@@ -149,6 +150,15 @@ function reported(
     try {
       return await handler(c)
     } catch (err) {
+      // The entitlement, before the catch-all. An organization that is not on a
+      // plan carrying single sign-on is not an unexpected failure and must not
+      // be reported as one: a 500 tells the person signing in that something is
+      // broken and tells the operator to go looking for a stack trace, when
+      // what has actually happened is that this organization has not bought
+      // this. 403 with the feature named is what somebody can act on.
+      if (err instanceof Unlicensed) {
+        return c.json({ error: err.message }, 403)
+      }
       options.log?.(`sso: ${name} failed: ${describe(err)}`)
       return c.json({ error: 'The sign-in could not be completed. Try again.' }, 500)
     }
@@ -225,7 +235,7 @@ async function start(c: Context, options: SsoOptions): Promise<Response> {
     return c.json({ error: 'Give an email address to find the right identity provider.' }, 400)
   }
 
-  const route = await routeForDomain(options.pool, email.slice(at + 1))
+  const route = await routeForDomain(options.pool, email.slice(at + 1), options.clock.now())
   if (!route) {
     // 404 with no detail about which part failed. A different answer for
     // "unverified" and "unknown" would turn this into a way to ask which
@@ -249,7 +259,7 @@ async function start(c: Context, options: SsoOptions): Promise<Response> {
 // ---------------------------------------------------------------------------
 
 async function metadata(c: Context, options: SsoOptions): Promise<Response> {
-  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '')
+  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '', options.clock.now())
   if (!connection || connection.kind !== 'saml') {
     return c.json({ error: 'No such connection.' }, 404)
   }
@@ -267,7 +277,7 @@ async function metadata(c: Context, options: SsoOptions): Promise<Response> {
 }
 
 async function samlLogin(c: Context, options: SsoOptions): Promise<Response> {
-  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '')
+  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '', options.clock.now())
   if (!connection || connection.kind !== 'saml' || !connection.enabled) {
     return c.json({ error: 'No such connection.' }, 404)
   }
@@ -275,7 +285,7 @@ async function samlLogin(c: Context, options: SsoOptions): Promise<Response> {
 }
 
 async function samlAcs(c: Context, options: SsoOptions): Promise<Response> {
-  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '')
+  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '', options.clock.now())
   if (!connection || connection.kind !== 'saml' || !connection.enabled) {
     return c.json({ error: 'No such connection.' }, 404)
   }
@@ -403,7 +413,7 @@ function reportedFailure(xml: string): string | null {
 // ---------------------------------------------------------------------------
 
 async function oidcLogin(c: Context, options: SsoOptions): Promise<Response> {
-  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '')
+  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '', options.clock.now())
   if (!connection || connection.kind !== 'oidc' || !connection.enabled) {
     return c.json({ error: 'No such connection.' }, 404)
   }
@@ -411,7 +421,7 @@ async function oidcLogin(c: Context, options: SsoOptions): Promise<Response> {
 }
 
 async function oidcCallback(c: Context, options: SsoOptions): Promise<Response> {
-  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '')
+  const connection = await connectionByHandle(options.pool, c.req.param('handle') ?? '', options.clock.now())
   if (!connection || connection.kind !== 'oidc' || !connection.enabled) {
     return c.json({ error: 'No such connection.' }, 404)
   }

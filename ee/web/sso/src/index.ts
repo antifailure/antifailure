@@ -23,7 +23,12 @@ export function install(options: SsoOptions): void {
   const encryptionKey = options.encryptionKey ?? keyFromEnv()
 
   registerExtension(ssoExtension({ ...options, encryptionKey }))
-  setSignInPolicy(signInPolicy(options.pool))
+  // The clock is handed to the policy rather than left to default, for the
+  // same reason every other date in this package comes from it: the
+  // entitlement the policy now reads has an expiry, and an expiry compared
+  // against a different clock from the one the rest of the request uses is a
+  // grant that lapses at a moment nothing else in the system agrees on.
+  setSignInPolicy(signInPolicy(options.pool, () => options.clock.now()))
 }
 
 export { ssoExtension, type SsoOptions, LOGIN_TTL_MS } from './routes.ts'

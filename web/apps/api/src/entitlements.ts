@@ -243,12 +243,28 @@ export const ENTITLEMENTS: Record<string, EntitlementSpec> = {
     kind: 'boolean',
     description: 'Custom roles and per repository scopes, beyond the four built-in roles.',
     byPlan: { free: false, team: false, enterprise: true },
+    // REPORTED AND NOT ENFORCED, IN EITHER EDITION, and the sentence below is
+    // the finding rather than an apology for one.
+    //
+    // Measured on 2026-09-08. The enterprise edition carries a complete and
+    // tested library for custom roles: validation, scope resolution, the
+    // approval policy, and a reviewable YAML form of the whole model. It has no
+    // table, no route, no loader and no caller. There is no way for an
+    // organization to have a custom role model in this product, so there is
+    // nothing for a check to refuse, in this build or in that one.
+    //
+    // A licence check was deliberately NOT added in front of it. A gate on a
+    // path nothing reaches is a declared enforcement site that never runs,
+    // which reads as a working feature from every direction and is harder to
+    // find than the gap it covers. The entry stays, because the plan values are
+    // real and the capability is one persistence layer from existing, and this
+    // sentence is what stops the next person believing the gate is there.
     enforcedAt: null,
-    enforcedInTheEditionThatHasIt: true,
     notEnforcedBecause:
-      'The community build has four fixed roles and no resolver to enforce. The edition that ' +
-      'carries custom roles checks this entitlement inside the resolver itself, which answers ' +
-      '"no opinion" without it, so the built-in role table decides exactly as it does here.',
+      'Custom roles exist as a library and not as a feature. Nothing stores a role model, no ' +
+      'route defines one, and the resolver that would apply one has no caller outside its own ' +
+      'tests, so there is no request a check could refuse. Gating it would declare an ' +
+      'enforcement site that never runs.',
   },
   support_access: {
     kind: 'boolean',

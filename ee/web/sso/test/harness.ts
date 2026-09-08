@@ -181,7 +181,7 @@ export async function start(options: StartOptions = {}): Promise<Harness> {
       scimExtension({ pool, clock, baseUrl: BASE_URL, defaultRole: 'member' }),
     )
   }
-  setSignInPolicy(signInPolicy(pool))
+  setSignInPolicy(signInPolicy(pool, () => clock.now()))
 
   const { app } = createServer({
     pool,
@@ -215,14 +215,45 @@ export async function start(options: StartOptions = {}): Promise<Harness> {
 export async function seedOrg(
   h: Harness,
   label: string,
-  overrides: { kind?: 'saml' | 'oidc'; enabled?: boolean; verified?: boolean } = {},
+  overrides: {
+    kind?: 'saml' | 'oidc'
+    enabled?: boolean
+    verified?: boolean
+    /**
+     * The plan, which decides whether this organization is ENTITLED to single
+     * sign-on at all.
+     *
+     * Enterprise by default, and the default is the interesting half. Every
+     * suite in this package was written before the routes checked an
+     * entitlement, and every one of them seeded an organization on the free
+     * plan, so turning the check on made fourteen of them fail at once. That is
+     * the check working: it is the proof the gate is on the path these tests
+     * actually take rather than beside it.
+     *
+     * The parameter exists so a test can seed the other case deliberately, and
+     * gate.test.ts is the suite that does.
+     */
+    plan?: string
+    /**
+     * The identity provider's entity id.
+     *
+     * Overridable because it is UNIQUE across the whole table, deliberately:
+     * a provider-initiated assertion arrives with an issuer and no handle, so
+     * the entity id has to resolve one organization on its own. Every suite
+     * here seeded exactly one SAML organization until the gate suite needed a
+     * pair, and the second insert failed on that index rather than on anything
+     * to do with what it was testing.
+     */
+    entityId?: string
+  } = {},
 ): Promise<Org> {
   const slug = `${label}-${randomUUID().slice(0, 8)}`
   const domain = `${slug}.test`
   const kind = overrides.kind ?? 'saml'
 
   const [org] = await h.admin<{ id: string }[]>`
-    INSERT INTO organizations (slug, name) VALUES (${slug}, ${label}) RETURNING id`
+    INSERT INTO organizations (slug, name, plan)
+    VALUES (${slug}, ${label}, ${overrides.plan ?? 'enterprise'}) RETURNING id`
   const orgId = org!.id
 
   const [owner] = await h.admin<{ id: string }[]>`
@@ -240,7 +271,7 @@ export async function seedOrg(
       oidc_issuer, oidc_client_id, oidc_authorization_endpoint, oidc_token_endpoint, oidc_jwks_uri)
     VALUES (
       ${orgId}, ${handle}, ${kind}, ${`${label} directory`}, ${overrides.enabled ?? true}, 'member',
-      ${kind === 'saml' ? 'https://idp.test/metadata' : null},
+      ${kind === 'saml' ? (overrides.entityId ?? 'https://idp.test/metadata') : null},
       ${kind === 'saml' ? 'https://idp.test/sso' : null},
       ${kind === 'saml' ? h.admin.array([h.idp.certificate]) : h.admin.array([] as string[])},
       ${kind === 'oidc' ? 'https://oidc.test' : null},

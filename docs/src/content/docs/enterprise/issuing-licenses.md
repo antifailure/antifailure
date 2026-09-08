@@ -108,6 +108,24 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, `"features": ["ssoo"]` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
+## Features that cannot be issued
+
+`billing` and `enterprise_dashboard` are in the set above, and a request naming
+either of them is refused. Nothing in this product enforces them, so a license
+carrying one would verify, report itself active, print the feature in
+`af license status`, and change nothing about what the software does.
+
+That is a worse failure than an unknown name, because everything about it reads
+as a supported feature: it is in the documentation, in the price list, and in
+the generator's own set. The only two people positioned to discover it are the
+customer who paid and the person who sold it.
+
+Both refusals are in the product rather than in a checklist. The generator will
+not sign one, and the verifier carries the name and never permits it, exactly as
+it treats a feature from a release the binary predates. When either capability
+is built, one entry is removed from `notShipped` in
+`ee/engine/license/license.go` and both refusals lift together.
+
 ## Step three: sign it
 
 The private key arrives in the environment from the vault, for the length of

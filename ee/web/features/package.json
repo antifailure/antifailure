@@ -1,5 +1,5 @@
 {
-  "name": "@antifailure-ee/rbac",
+  "name": "@antifailure-ee/features",
   "version": "1.3.4",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE.md",
@@ -8,15 +8,18 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts",
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@antifailure/api": "file:../../../web/apps/api",
-    "yaml": "^2.7.0"
+    "@antifailure/db": "file:../../../web/packages/db"
   },
   "devDependencies": {
+    "@antifailure-ee/scim": "*",
+    "@antifailure-ee/sso": "*",
     "@types/node": "^24.0.0",
+    "postgres": "^3.4.9",
     "typescript": "^5.9.0"
   }
 }
