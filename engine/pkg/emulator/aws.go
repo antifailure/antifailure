@@ -7,15 +7,30 @@ const AWSName = "aws"
 
 // awsImage is LocalStack, pinned by digest.
 //
-// The digest is the multi architecture index for the 2026.08.1 release, which
-// is also tagged stable and latest, so an arm64 machine and an amd64 runner
-// resolve the same declaration to their own image and neither is pinned to the
-// other's architecture. A tag is refused by the registry's validation and that
-// refusal is the point: an emulator answering for production's API behind a
-// tag that moves changes what an environment was tested against without
-// anything in this repository changing.
+// It is the COMMUNITY ARCHIVE, and that is a decision rather than an accident.
+// LocalStack archived its community edition in March 2026 and moved to a single
+// "LocalStack for AWS" image which refuses to start without an auth token: the
+// current image exits with code 55 and "License activation failed" before it
+// binds a port, with no environment variables set at all. That was measured on
+// 2026-09-07 against the image tagged stable, latest and 2026.08.1. A build
+// whose emulator needs somebody's account contradicts the rule that no cloud
+// account may be required to run the community suite, so this pins the final
+// community build, which starts offline and answers for the nine services
+// below. LocalStack 4.14.1 is what it reports as its version.
+//
+// An organization with a LocalStack licence points an environment at the
+// supported image by registering an emulator named aws of their own through
+// extension.AddEmulator. The registry refuses two emulators under one name, so
+// that is a replacement and never a shadow.
+//
+// The digest is the multi architecture index, so an arm64 laptop and an amd64
+// runner resolve the same declaration to their own image and neither is pinned
+// to the other's architecture. A tag is refused by the registry's validation
+// and that refusal is the point: an emulator answering for production's API
+// behind a tag that moves changes what an environment was tested against
+// without anything in this repository changing.
 const awsImage = "localstack/localstack@sha256:" +
-	"4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572"
+	"6b6172cfceb04b4fbc35097a55f717c365a35fafa572be49f7341771cf9023ed"
 
 // AWSPort is LocalStack's single gateway port. Every service is answered on
 // it, which is why one container answers for nine services and the sidecar

@@ -717,6 +717,21 @@ jobs:
           # fail rather than skip.
           AF_REQUIRE_RUNNER: '1'
 
+      - name: The vendor's own SDK reaches the emulator with no endpoint override
+        # The whole claim of the emulator work, driven rather than described.
+        # The AWS SDK is built from its default configuration chain, told
+        # nothing about where to send a request, and it reaches LocalStack.
+        # A separate step because it starts a container and pulls an image,
+        # which does not belong inside the tools suite's five minute budget.
+        run: cd tools && AF_EMULATOR_SDK=1 go test ./emulatorcheck/ -count=1 -timeout 40m
+        env:
+          GOTOOLCHAIN: local
+          # An absent daemon fails here rather than skipping, for the same
+          # reason it does in the engine suite above: a run that reports ok
+          # having tested nothing is the defect this repository keeps finding
+          # in its own instruments.
+          AF_REQUIRE_DOCKER: '1'
+
       - name: Nothing was left behind
         # The suites assert this themselves, and this catches the case where a
         # suite crashed before its own assertion ran.

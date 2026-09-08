@@ -1,6 +1,8 @@
 package emulator_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -201,4 +203,41 @@ func mustAWS(t *testing.T) *emulator.Emulator {
 	e, ok := emulator.Named(emulator.AWSName)
 	require.True(t, ok)
 	return e
+}
+
+// The guide is where a person reads what the emulator answers for before they
+// depend on it, and a table that drifts from the code is worse than no table:
+// it is a wrong answer somebody trusts. So the guide's surface table is
+// checked against the declaration rather than maintained beside it.
+func TestAWS_TheGuideRecordsTheSurfaceTheCodeAnswersFor(t *testing.T) {
+	t.Parallel()
+	guide := readGuide(t)
+	e := mustAWS(t)
+
+	for _, s := range e.Services {
+		require.Contains(t, guide, s.Name,
+			"%s is answered by the emulator and the guide does not name it", s.Name)
+		for _, h := range s.Hosts {
+			require.Contains(t, guide, "`"+h+"`",
+				"%s is routed to the emulator and the guide does not name it", h)
+		}
+		require.Contains(t, guide, s.Proves,
+			"the guide does not carry what proves %s", s.Name)
+	}
+	for _, s := range e.Outside {
+		require.Contains(t, guide, strings.SplitN(s.Name, ",", 2)[0],
+			"%s is refused and the guide does not say so", s.Name)
+	}
+	require.Contains(t, guide, e.Container().Image,
+		"the guide names an image other than the one the engine starts")
+}
+
+func readGuide(t *testing.T) string {
+	t.Helper()
+	// From engine/pkg/emulator to the repository root.
+	path := filepath.Join("..", "..", "..",
+		"docs", "src", "content", "docs", "guides", "aws.md")
+	body, err := os.ReadFile(path)
+	require.NoError(t, err, "the AWS guide is where the surface is published")
+	return string(body)
 }

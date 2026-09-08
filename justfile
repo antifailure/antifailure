@@ -116,6 +116,7 @@ gate: _reports
     run "lint"                           just lint
     run "the gates lint too"             just lint-tools
     run "the gates themselves"           just test-tools
+    run "the SDK reaches the emulator"   just test-emulator
     run "coverage"                       just coverage
     run "engine"                         just test-engine
     run "this platform's keyring"        just keyring
@@ -428,6 +429,16 @@ coverage:
 # protecting the installer went green without running.
 test-tools:
     cd tools && go test ./... -count=1 -timeout 5m
+
+# The vendor's own SDK, against the emulator, with no endpoint override.
+#
+# Its own recipe rather than part of test-tools for two reasons that are both
+# about honesty. It starts a container and pulls half a gigabyte the first
+# time, so it cannot live inside a five minute timeout; and it is gated on
+# AF_EMULATOR_SDK so that a run without a Docker daemon says it did not run
+# rather than reporting ok having skipped itself.
+test-emulator:
+    cd tools && AF_EMULATOR_SDK=1 go test ./emulatorcheck/ -count=1 -timeout 40m
 
 test-web:
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
