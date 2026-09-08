@@ -232,7 +232,7 @@ func (r *Runtime) runStanceJob(
 		}
 		if got.Status.Failed > 0 {
 			return aferrors.Coded(aferrors.AFRUN005, "service", role,
-				"code", strconv.Itoa(r.migrationExitCode(ctx, namespace, obj.Name)))
+				"code", strconv.Itoa(r.jobExitCode(ctx, namespace, obj.Name)))
 		}
 		if time.Now().After(deadline) {
 			return aferrors.Coded(aferrors.AFRUN004, "service", role,
@@ -552,7 +552,7 @@ func (r *Runtime) runMigration(
 			return nil
 		}
 		if got.Status.Failed > 0 {
-			code := r.migrationExitCode(ctx, namespace, job.Name)
+			code := r.jobExitCode(ctx, namespace, job.Name)
 			return aferrors.Coded(aferrors.AFRUN005,
 				"service", s.Name, "code", strconv.Itoa(code))
 		}
@@ -569,8 +569,13 @@ func (r *Runtime) runMigration(
 	}
 }
 
-// migrationExitCode reads what the migration container exited with.
-func (r *Runtime) migrationExitCode(ctx context.Context, namespace, job string) int {
+// jobExitCode reads what a one shot Job's container exited with.
+//
+// Named for the Job rather than for the migration since a migration stopped
+// being the only one. Nothing in it was ever migration specific: it finds the
+// pod by the label Kubernetes puts on every Job's pods and reads the
+// terminated state.
+func (r *Runtime) jobExitCode(ctx context.Context, namespace, job string) int {
 	pods, err := r.cli.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "job-name=" + job,
 	})
