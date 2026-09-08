@@ -3996,6 +3996,57 @@ Those two are complementary, so one of the two possible declarations is refused
 on every run. There is no reading of the stopwatch that lets both pass, which is
 the property a check needs before a green one means anything.
 
+### The third answer, for a harness that cannot exhibit the behaviour
+
+The stopwatch is only as good as the storage underneath the run, and there is a
+harness on which a truthful ` + "`" + `CopyOnWrite: true` + "`" + ` cannot pass. A fake cloud
+control plane over one local Postgres can only hand back a branch carrying the
+golden's data with ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + `, which copies files. The large
+arm is then slower by seconds per gibibyte whatever the provider would do
+against the real service, so the stopwatch is reading the harness.
+
+Declaring ` + "`" + `false` + "`" + ` to get a green is a lie about the product. Skipping the
+behaviour turns off the one instrument that can refuse this category's central
+commercial claim. Loosening the allowance leaves it running, printing a verdict,
+and unable to refuse anything.
+
+So the behaviour has a third answer, **unproven**, and it is not a pass.
+
+` + "`" + "`" + "`" + `
+NOT PROVED BY THIS RUN. This is not a pass.
+  UNPROVEN  aurora  CopyOnWrite_BranchTimeMatchesTheDeclaration
+` + "`" + "`" + "`" + `
+
+` + "`" + `Options.HarnessCopiesEveryBranch` + "`" + ` is the only thing that reaches it. It is a
+sentence your TEST FIXTURE writes about the storage it built, naming the
+mechanism, and it is nothing a provider can reach: ` + "`" + `Capabilities()` + "`" + ` is the thing
+under examination, and a subject that could excuse itself from a check is the
+unfalsifiable declaration this whole behaviour exists to refuse.
+
+Four things make it a verdict rather than a way out.
+
+- **The measurement still runs, in full.** Both goldens are built, both arms are
+  timed, the ballast is weighed in the branch, and every number is printed.
+  Unproven changes what the readings are turned into, never whether they were
+  taken.
+- **It is refused unless you declare ` + "`" + `CopyOnWrite: true` + "`" + `.** On the false side a
+  copying harness exhibits exactly what is being asserted, so there is nothing
+  it cannot reach.
+- **It is checked against your own readings.** A fixture that declares its
+  storage copies and then branches in constant time is failed for the
+  declaration. Setting the field on a harness that turns out to share storage
+  turns a pass into a failure, so it cannot be set defensively by somebody who
+  has not looked.
+- **It buys nothing you can publish.** ` + "`" + `conformance.CopyOnWriteClaim` + "`" + ` renders the
+  declaration as the word ` + "`" + `unproven` + "`" + ` wherever a customer would read it, the
+  ledger in ` + "`" + `engine/conformance/ledger.go` + "`" + ` records the verdict per provider, and
+  a test refuses a comparison table cell that says otherwise.
+
+What remains, and it is stated rather than papered over: a copying harness
+cannot tell an honest provider from a dishonest one, because the two produce the
+same readings on it. That is a property of the harness. Settling it needs the
+real service with an account, and nothing short of that does.
+
 The suite makes a golden large by writing ballast into it from inside the ` + "`" + `Mask` + "`" + `
 callback, so a provider needs no extra method: hand ` + "`" + `Mask` + "`" + ` a connection string
 that works, which every other behaviour needs anyway, and the sizing takes care
