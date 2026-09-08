@@ -156,13 +156,18 @@ func RunScenarios(ctx context.Context, opts ScenarioOptions) ([]ScenarioResult, 
 	}
 
 	// A finished run does not keep its sockets. Both transports here are
-	// private to the run and set no IdleConnTimeout, so every keep alive
-	// connection the run opened stays open after the last request, with its
-	// readLoop and writeLoop goroutines still parked on it. In production that
-	// is a run holding file descriptors it no longer uses. In the tests it is
-	// why this package goes red at random: `goleak.VerifyTestMain` in
-	// goleak_test.go sees those two goroutines per connection and cannot know
-	// they are idle.
+	// private to the run, so every keep alive connection the run opened stays
+	// open after the last request, with its readLoop and writeLoop goroutines
+	// still parked on it. In production that is a run holding file descriptors
+	// it no longer uses. In the tests it is why this package goes red at
+	// random: `goleak.VerifyTestMain` in goleak_test.go sees those two
+	// goroutines per connection and cannot know they are idle.
+	//
+	// The transport now comes from airgap.Transport, which clones the standard
+	// library's default and therefore does carry a 90 second IdleConnTimeout
+	// where the hand built transport this replaced carried none. That shortens
+	// the window rather than closing it, and 90 seconds is long after a run has
+	// returned, so the explicit close below stays.
 	//
 	// WHAT IS PROVEN AND WHAT IS NOT. Proven: the CI failure is
 	// nondeterministic rather than caused by the commit it appeared on. The

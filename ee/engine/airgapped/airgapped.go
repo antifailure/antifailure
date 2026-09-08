@@ -108,11 +108,6 @@ func (Hook) Check(ctx context.Context, req extension.EnvironmentRequest) error {
 	if !airgap.Sealed() {
 		return nil
 	}
-	// Asked so that the enforcement is visible to the entitlement test, and so
-	// that a status with the feature would refuse here too if this hook were
-	// ever registered without the startup check. It cannot re-permit anything:
-	// the seal above has already decided.
-	_ = feature.Enabled(ctx, license.FeatureAirGapped)
 
 	type offence struct{ host, mode, why string }
 	var offences []offence

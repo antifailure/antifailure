@@ -131,6 +131,7 @@ var state struct {
 	reason   string
 	allowed  []rule
 	attempts []Attempt
+	dropped  int
 }
 
 // rule is one entry in the operator's allow list.
@@ -272,11 +273,38 @@ func isLoopback(host string) bool {
 	return false
 }
 
+// maxLedger bounds the ledger.
+//
+// The guard sits on every dial in the process, and a readiness probe polls
+// until a service answers, so a slow service on a long af up produces hundreds
+// of entries by itself. Unbounded is fine for a command that runs and exits and
+// is a leak in anything that embeds the engine and stays up. Ten thousand is
+// far more than any lifecycle produces and small enough to be free.
+const maxLedger = 10000
+
 // record adds an attempt to the ledger.
+//
+// Past the cap the entries are counted rather than kept, and the count is
+// reported, because a ledger that silently stopped recording would answer
+// "no refusals" for the one reason that is indistinguishable from success.
 func record(a Attempt) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	if len(state.attempts) >= maxLedger {
+		state.dropped++
+		return
+	}
 	state.attempts = append(state.attempts, a)
+}
+
+// Dropped is how many attempts were counted rather than kept.
+//
+// Non-zero means Attempts is a sample and not the whole run, which a report has
+// to say rather than imply.
+func Dropped() int {
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.dropped
 }
 
 // Attempts returns every connection this process tried to make since the last
@@ -311,6 +339,7 @@ func Reset() {
 	state.reason = ""
 	state.allowed = nil
 	state.attempts = nil
+	state.dropped = 0
 }
 
 // Check reports whether this site may reach this address, and records the

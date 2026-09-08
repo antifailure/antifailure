@@ -90,7 +90,7 @@ func TestAirGapped_AFullLifecycleMakesNoConnectionOutsideTheOperatorsNetwork(t *
 				"the readiness probe reaches a container on loopback and must never be refused: %s", a)
 		}
 	}
-	require.Positivef(t, probes,
+	require.Greaterf(t, probes, 0,
 		"the ledger recorded no readiness probe, so the guard was not on the lifecycle's path "+
 			"and the zero above is zero observations rather than zero escapes")
 }

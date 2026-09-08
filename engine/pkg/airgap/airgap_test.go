@@ -179,11 +179,12 @@ func TestLookupHostRefusesTheQueryThatWouldHaveLeakedTheName(t *testing.T) {
 	_, err := airgap.LookupHost(airgap.SiteDoctor, "api.github.com")
 	require.ErrorIs(t, err, airgap.ErrSealed)
 
+	// The permitted half is asserted through Check rather than through
+	// LookupHost, because asserting it through LookupHost would put a real DNS
+	// query on the wire from a unit test, which is the exact behaviour this
+	// package exists to stop.
 	require.NoError(t, airgap.Allow("api.github.com"))
-	// Still refused for the port, because the allow list was consulted for a
-	// DNS query and the entry names no port, so it permits every port.
-	_, err = airgap.LookupHost(airgap.SiteDoctor, "api.github.com")
-	require.NotErrorIs(t, err, airgap.ErrSealed,
+	require.NoError(t, airgap.Check(airgap.SiteDoctor, "dns", "api.github.com:53"),
 		"a name the operator permitted must resolve, or the allow list would be unusable")
 }
 
@@ -243,13 +244,16 @@ func TestASealedProcessStaysSealed(t *testing.T) {
 	sealed(t)
 	require.True(t, airgap.Sealed())
 	require.Equal(t, "this is a test", airgap.Reason())
-	// There is deliberately no Unseal. The expensive direction of a mistake
-	// here is not "the air gap stopped working", it is "the machine in the
-	// secure facility started talking to the internet".
-	var opener interface{ Unseal() }
-	_, ok := any(struct{}{}).(interface{ Unseal() })
-	require.False(t, ok)
-	require.Nil(t, opener)
+	// There is deliberately no Unseal, and Reset is a test helper rather than
+	// a way out: the expensive direction of a mistake here is not "the air gap
+	// stopped working", it is "the machine in the secure facility started
+	// talking to the internet". Sealing twice with a different reason keeps the
+	// installation sealed rather than replacing a stricter state with a looser
+	// one.
+	airgap.Seal("a second reason")
+	require.True(t, airgap.Sealed())
+	require.ErrorIs(t, airgap.Check(airgap.SiteTelemetry, "tcp", "example.com:443"),
+		airgap.ErrSealed)
 }
 
 func TestARefusalIsDistinguishableFromANetworkThatIsDown(t *testing.T) {

@@ -139,9 +139,14 @@ func e() { _, _ = net.LookupHost("example.com") }
 func TestAGuardedClientIsNotAFinding(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+	// The file imports net/http and uses it, because a fixture that imported
+	// nothing interesting would make the walk return before it looked at
+	// anything and the test would pass without exercising the decision.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "good.go"), []byte(`package p
 
 import (
+	"context"
+	"net/http"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
@@ -149,6 +154,10 @@ import (
 
 var a = airgap.Client(airgap.SiteTelemetry, time.Second)
 var b = airgap.Transport(airgap.SiteTelemetry)
+
+func c(ctx context.Context) (*http.Request, error) {
+	return http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
+}
 `), 0o600))
 
 	var findings []finding

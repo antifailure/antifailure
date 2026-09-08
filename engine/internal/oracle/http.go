@@ -80,6 +80,15 @@ type Driver struct {
 	MaxBody int64
 }
 
+// defaultClient is what a Driver with no client of its own uses.
+//
+// One shared client, the way http.DefaultClient was before the guard, rather
+// than one built per Send. Send is called once per probe and a run makes
+// hundreds, and a client built per call carries its own connection pool that
+// is thrown away immediately, so every probe would open a fresh connection to
+// both sides.
+var defaultClient = airgap.Client(airgap.SiteOracle, 0)
+
 // DefaultMaxBody is how much of a response body is read.
 //
 // Eight megabytes. Large enough for any JSON document an API returns and small
@@ -96,7 +105,7 @@ const DefaultMaxBody = 8 << 20
 func (d *Driver) Send(ctx context.Context, baseURL string, p Probe) Response {
 	client := d.Client
 	if client == nil {
-		client = airgap.Client(airgap.SiteOracle, 0)
+		client = defaultClient
 	}
 	limit := d.MaxBody
 	if limit <= 0 {

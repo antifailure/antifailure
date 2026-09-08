@@ -1797,6 +1797,12 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 func shortLivedClient(timeout time.Duration) *http.Client {
 	t := airgap.Transport(airgap.SiteConformance)
 	t.DisableKeepAlives = true
+	// And HTTP/2 off with it. airgap.Transport clones the standard library's
+	// default, which attempts h2 over TLS, and an h2 connection keeps its own
+	// goroutines regardless of DisableKeepAlives. That is the exact leak the
+	// paragraph above is about, so the clone's one inherited difference from
+	// the transport this replaced is undone here rather than discovered later.
+	t.ForceAttemptHTTP2 = false
 	return &http.Client{Timeout: timeout, Transport: t}
 }
 
