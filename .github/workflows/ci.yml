@@ -503,10 +503,72 @@ jobs:
         # extension can be created and records nothing, so the query
         # regression checks read a permanently empty table. It is the same
         # container `just db` starts, deliberately, so local and CI agree.
+        #
+        # PINNED BY DIGEST, AND THIS IS THE COMMENT THE OTHER ELEVEN SITES
+        # POINT AT. `postgres:17-alpine` is a tag, and a tag moves. It resolves
+        # to Postgres 17.11 today and it will resolve to 17.12 without a commit
+        # here, so the server these suites were read against and the server
+        # they run against are the same only by the publisher's schedule.
+        # engine/pkg/emulator/aws.go already makes this argument about
+        # LocalStack: a tag that moves changes what an environment was tested
+        # against without anything in this repository changing. The database is
+        # the harder case rather than the softer one, because every policy,
+        # grant and masking rule these suites assert is enforced by the server
+        # and not by us.
+        #
+        # THE DIGEST IS THE MULTI ARCHITECTURE INDEX, not one architecture's
+        # manifest, for the reason the LocalStack pin gives. The registry
+        # answers this tag with an `application/vnd.oci.image.index.v1+json`
+        # carrying sixteen entries, linux/amd64 for the runner and
+        # linux/arm64/v8 for a developer's Mac among them, so one declaration
+        # resolves to each machine's own image and neither is pinned to the
+        # other's architecture. The tag is kept in front of the digest because
+        # docker resolves by the digest and ignores the tag, so it costs
+        # nothing and it is the only half a person can read.
+        #
+        # NOTHING UPDATES THIS, and that is the cost, stated rather than left
+        # for the next person to assume away. `.github/dependabot.yml` declares
+        # the docker ecosystem, but Dependabot's docker file fetcher accepts a
+        # file only when its NAME matches /dockerfile|containerfile/i, or it is
+        # a `values*.yaml` Helm file, or its first YAML document is a mapping
+        # carrying both `apiVersion` and `kind`. A workflow carries `on` and
+        # `jobs`, so it is refused before anything looks for an image in it,
+        # and the github-actions ecosystem reads `uses:` declarations only and
+        # skips `docker://` with a TODO in the parser. dependabot-core issue
+        # 5819 has asked for this since 2022 and is still open. Adding
+        # `/.github/workflows` to the docker `directories` list does not fix it
+        # and makes it worse: the fetcher would find no acceptable file there
+        # and raise DependencyFileNotFound on every scheduled run.
+        #
+        # SO A PERSON REFRESHES IT, and no daemon is needed to do it. Get a
+        # pull token from
+        # https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/postgres:pull
+        # then read the digest the tag points at now:
+        #
+        #     curl -sI -H "Authorization: Bearer $TOKEN" \
+        #       -H "Accept: application/vnd.oci.image.index.v1+json" \
+        #       https://registry-1.docker.io/v2/library/postgres/manifests/17-alpine
+        #
+        # and take the `docker-content-digest` header. A `content-type` of
+        # `...image.index.v1+json` on that response is the proof it is the
+        # index rather than one architecture. Change it in every place at once:
+        # TestEveryPinnedImageAgreesOnOneDigest in tools/gatecheck refuses a
+        # tree where two sites name the same image at different digests, which
+        # is what a half finished bump looks like.
+        #
+        # WHAT IS DELIBERATELY LEFT UNPINNED, so it is a decision rather than
+        # an oversight. `postgresql-client-17` above, and `zsh` and
+        # `libsecret-tools` installed by apt elsewhere in these workflows, name
+        # no version. Distribution point releases are withdrawn and replaced
+        # far more often than container digests are, so a pinned apt version
+        # fails the build on the day the mirror drops it, and the version that
+        # gets dropped is as often as not the one carrying the fix. The
+        # container is the surface where pinning is cheap and the apt package
+        # is the surface where it is not.
         run: |
           set -euo pipefail
           docker run -d --name af-cp-test -p 55432:5432 \
-            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 \
             -c shared_preload_libraries=pg_stat_statements \
             -c pg_stat_statements.track=all
           # A real query against the target database, not pg_isready. During
@@ -542,11 +604,14 @@ jobs:
       # exactly that path. The proof needs a target that has never heard of
       # the source's roles, which is a separate server, and this is it. Also
       # what `just db` starts, so local and CI agree.
+      # Pinned by digest, because the tag moves and nothing updates it. The
+      # reasoning and the refresh procedure are in this file, above the
+      # af-cp-test container.
       - name: Start a second Postgres, for the copy tests
         run: |
           set -euo pipefail
           docker run -d --name af-cp-target -p 55433:5432 \
-            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
           ready=0
           for _ in $(seq 1 90); do
             if docker exec af-cp-target psql -U postgres -d antifailure -tAc 'select 1' \
@@ -987,9 +1052,12 @@ jobs:
     # Row-level security cannot be tested against a fake: the whole property is
     # that the database refuses what the application asks for, and a fake would
     # only prove the application asks nicely.
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in this file, above the
+    # af-cp-test container.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: antifailure
@@ -1154,9 +1222,12 @@ jobs:
     # and provisioning through the real server against the real row-level
     # security policies, and there is no version of that against a fake: the
     # property under test is what Postgres refuses.
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in this file, above the
+    # af-cp-test container.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: antifailure
