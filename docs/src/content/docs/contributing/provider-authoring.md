@@ -201,9 +201,10 @@ convenient.
 not grow with the database. It is the claim a customer is really buying, so the
 suite does not take your word for it.
 
-`CopyOnWrite_BranchTimeMatchesTheDeclaration` builds two goldens, one of them a
-gibibyte larger than the other, branches each of them several times alternately,
-and takes the fastest of each. Then it asks one question in two directions:
+`CopyOnWrite_BranchTimeMatchesTheDeclaration` builds two goldens, one of them
+half a gibibyte larger than the other, branches each of them several times
+alternately, and takes the fastest of each. Then it asks one question in two
+directions:
 
 - Declared `true`, and the larger golden branched measurably slower: **fail**.
   You are copying, and whoever waits for an environment is paying for it.
@@ -218,11 +219,36 @@ the property a check needs before a green one means anything.
 The suite makes a golden large by writing ballast into it from inside the `Mask`
 callback, so a provider needs no extra method: hand `Mask` a connection string
 that works, which every other behaviour needs anyway, and the sizing takes care
-of itself. `Options.CopyOnWriteSmallBytes`, `CopyOnWriteLargeBytes` and
-`CopyOnWriteSamples` tune it for a provider that bills by the gibibyte. They
-have floors, and the floors are the point: below them, copying the extra data
-costs less than the measurement gives to noise, and the behaviour would pass
-every declaration rather than refuse one.
+of itself. It also weighs the last branch it makes, because a branch that is
+fast because it is EMPTY would otherwise read as one that is fast because it
+shares storage.
+
+### What the check can and cannot see, printed every time
+
+The allowance the growth is measured against is not a constant. It is twice the
+spread the small golden's own branch times showed during this run, floored at a
+quarter of a second: the machine saying how far its readings travel while the
+data is held still. On a quiet machine that collapses and the check sharpens;
+under load it widens rather than accusing an honest provider of copying.
+
+So the power of the check varies, and every run prints it:
+
+```
+  this run could refuse    a copy slower than 0.49 seconds per GiB, and nothing faster
+```
+
+Read that line before believing a pass. It is the bound on what the run was
+able to see, and a provider whose branch times are erratic gets a weaker bound
+than one whose are steady. Raise `Options.CopyOnWriteLargeBytes` if you want a
+stronger statement than the one your run printed.
+
+`CopyOnWriteSmallBytes`, `CopyOnWriteLargeBytes` and `CopyOnWriteSamples` tune
+the cost for a provider that bills by the gibibyte, and
+`AF_CONFORMANCE_COW_LARGE_BYTES` and its two siblings do the same from the
+environment for a machine that cannot afford the default. Both have floors, and
+both make the run say it was tuned. There is deliberately no way to skip the
+behaviour: a run that shrank says how far it shrank and what it could still
+refuse, and that can be read, where a run that skipped cannot.
 
 `ExpectedBranchLatency` is checked the same way.
 `Branch_IsWithinTheDeclaredLatency` times the fastest of three branches of the
