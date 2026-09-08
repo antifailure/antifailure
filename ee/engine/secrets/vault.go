@@ -30,6 +30,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // VaultConfig is what a Vault source needs.
@@ -153,27 +155,27 @@ func (v *VaultBackend) Describe() string {
 // first lookup and handled by the refresh rule, and checking it here would cost
 // a second round trip to learn something the lookup learns for free.
 func (v *VaultBackend) Reach(ctx context.Context) error {
-	resp, err := do(ctx, request{
-		method:  "GET",
-		url:     v.cfg.Address + "/v1/sys/health",
-		headers: v.headers(""),
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method:  "GET",
+		URL:     v.cfg.Address + "/v1/sys/health",
+		Headers: v.headers(""),
 		// standbyok and performancestandbyok stop a standby node answering 429,
 		// which is a healthy node that can still serve reads.
-		query: map[string]string{"standbyok": "true", "perfstandbyok": "true"},
+		Query: map[string]string{"standbyok": "true", "perfstandbyok": "true"},
 	})
 	if err != nil {
 		return fmt.Errorf("cannot be reached: %s", err)
 	}
 
 	// Vault encodes its state in the status code rather than only in the body.
-	switch resp.status {
+	switch resp.Status {
 	case 200, 429, 472, 473:
 	case 501:
 		return fmt.Errorf("is not initialised")
 	case 503:
 		return fmt.Errorf("is sealed")
 	default:
-		return fmt.Errorf("answered %d to a health check", resp.status)
+		return fmt.Errorf("answered %d to a health check", resp.Status)
 	}
 	return v.checkMountVersion(ctx)
 }
@@ -205,12 +207,12 @@ func (v *VaultBackend) checkMountVersion(ctx context.Context) error {
 		return nil
 	}
 
-	resp, err := do(ctx, request{
-		method:  "GET",
-		url:     v.cfg.Address + "/v1/sys/internal/ui/mounts/" + v.cfg.Mount,
-		headers: v.headers(token),
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method:  "GET",
+		URL:     v.cfg.Address + "/v1/sys/internal/ui/mounts/" + v.cfg.Mount,
+		Headers: v.headers(token),
 	})
-	if err != nil || resp.status != 200 {
+	if err != nil || resp.Status != 200 {
 		return nil
 	}
 	var payload struct {
@@ -219,7 +221,7 @@ func (v *VaultBackend) checkMountVersion(ctx context.Context) error {
 			Options map[string]string `json:"options"`
 		} `json:"data"`
 	}
-	if resp.decode(&payload) != nil || payload.Data.Type != "kv" {
+	if resp.Decode(&payload) != nil || payload.Data.Type != "kv" {
 		return nil
 	}
 
@@ -321,13 +323,13 @@ func (v *VaultBackend) read(ctx context.Context, path string) (map[string]string
 		full = v.cfg.Address + "/v1/" + v.cfg.Mount + "/data/" + path
 	}
 
-	resp, err := do(ctx, request{method: "GET", url: full, headers: v.headers(token)})
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{Method: "GET", URL: full, Headers: v.headers(token)})
 	if err != nil {
 		return nil, fmt.Errorf("cannot be reached: %s", err)
 	}
 
 	switch {
-	case resp.status == 404:
+	case resp.Status == 404:
 		// A 404 is a miss, and it is also what reading a mount as the wrong KV
 		// version looks like, because the path with the data/ segment does not
 		// exist on a version 1 mount and the path without it does not exist on
@@ -338,16 +340,16 @@ func (v *VaultBackend) read(ctx context.Context, path string) (map[string]string
 			return nil, err
 		}
 		return nil, nil
-	case resp.rejected():
-		return nil, wrap(ErrRejected, "Vault answered %d: %s", resp.status, vaultErrors(resp.body))
-	case resp.status != 200:
-		return nil, fmt.Errorf("Vault answered %d: %s", resp.status, vaultErrors(resp.body))
+	case resp.Rejected():
+		return nil, wrap(ErrRejected, "Vault answered %d: %s", resp.Status, vaultErrors(resp.Body))
+	case resp.Status != 200:
+		return nil, fmt.Errorf("Vault answered %d: %s", resp.Status, vaultErrors(resp.Body))
 	}
 
 	var payload struct {
 		Data json.RawMessage `json:"data"`
 	}
-	if err := resp.decode(&payload); err != nil {
+	if err := resp.Decode(&payload); err != nil {
 		return nil, err
 	}
 	raw := payload.Data
@@ -425,8 +427,8 @@ func (v *VaultBackend) versionMixUp(ctx context.Context, path, token string) err
 			other = v.cfg.Address + "/v1/" + v.cfg.Mount + "/data/" + path
 			configured, actual = "1", "2"
 		}
-		resp, err := do(ctx, request{method: "GET", url: other, headers: v.headers(token)})
-		if err != nil || resp.status != 200 {
+		resp, err := cloudauth.Do(ctx, cloudauth.Request{Method: "GET", URL: other, Headers: v.headers(token)})
+		if err != nil || resp.Status != 200 {
 			return
 		}
 		v.mixUp = fmt.Errorf(
@@ -454,18 +456,18 @@ func (v *VaultBackend) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := do(ctx, request{
-		method:  "POST",
-		url:     v.cfg.Address + "/v1/auth/" + v.cfg.AppRolePath + "/login",
-		headers: v.headers(""),
-		body:    body,
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method:  "POST",
+		URL:     v.cfg.Address + "/v1/auth/" + v.cfg.AppRolePath + "/login",
+		Headers: v.headers(""),
+		Body:    body,
 	})
 	if err != nil {
 		return fmt.Errorf("cannot be reached: %s", err)
 	}
-	if resp.status != 200 {
+	if resp.Status != 200 {
 		return wrap(ErrRejected, "the AppRole login answered %d: %s",
-			resp.status, vaultErrors(resp.body))
+			resp.Status, vaultErrors(resp.Body))
 	}
 
 	var payload struct {
@@ -473,7 +475,7 @@ func (v *VaultBackend) Refresh(ctx context.Context) error {
 			ClientToken string `json:"client_token"`
 		} `json:"auth"`
 	}
-	if err := resp.decode(&payload); err != nil {
+	if err := resp.Decode(&payload); err != nil {
 		return err
 	}
 	if payload.Auth.ClientToken == "" {

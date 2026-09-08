@@ -42,10 +42,10 @@ package secrets
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
@@ -109,12 +109,17 @@ type Refresher interface {
 // The distinction is the whole point. A 404 is a miss, a 500 is a store having
 // a bad day, and a 401 is the one case where trying again with the same
 // credential is pointless and trying again with a new one might work.
-var ErrRejected = errors.New("the store rejected the credential")
+// The value itself is ee/engine/cloudauth's, so that an error raised inside a
+// credential exchange and an error raised by a store answering 403 both satisfy
+// errors.Is against this one sentinel. Two sentinels with the same words would
+// pass every reading of the code and silently switch the one-refresh rule off
+// for whichever half did not own the value.
+var ErrRejected = cloudauth.ErrRejected
 
 // ErrNotConfigured reports a backend that was asked for but never given what it
 // needs. Carried separately so that Available can say "no address is set"
 // rather than reporting a connection failure to an empty host.
-var ErrNotConfigured = errors.New("not configured")
+var ErrNotConfigured = cloudauth.ErrNotConfigured
 
 // Source is a Backend seen as something the engine can plug in.
 //
@@ -300,5 +305,5 @@ func Register(reg *extension.Registry, sources ...*Source) {
 // distinction between a rejected credential and an unreachable store is made in
 // one place rather than four.
 func wrap(kind error, format string, args ...any) error {
-	return fmt.Errorf("%w: %s", kind, fmt.Sprintf(format, args...))
+	return cloudauth.Wrap(kind, format, args...)
 }
