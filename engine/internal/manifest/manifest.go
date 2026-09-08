@@ -510,6 +510,11 @@ var knownKeys = []string{
 	"provider", "source_url_env", "url_env", "masking_rules", "golden", "subset", "seed",
 	"max_age", "retain", "storage", "storage_url", "volume", "profile",
 	"engine", "stance", "because",
+	// The declarations a stance the engine ACTS on has to carry. A typo in
+	// any of them is a key the parser refuses, and without a suggestion the
+	// message is that the key is unknown rather than that it is one letter
+	// out.
+	"topics", "partitions", "consumer_groups", "rebuild", "service",
 	"enabled", "seed_table", "seed_where", "max_rows", "follow_dependents",
 	"virtual_relationships", "default", "allow_ipv6", "rules",
 	"host", "mode", "paths", "methods", "rate_limit", "credential", "fixtures",

@@ -46,15 +46,37 @@ var censusOut = flag.String("census-out", "",
 
 const censusBefore = "stance-census-before-bfa35d94.txt"
 
+// storeNames is every store the manifest declares beside the primary.
+//
+// The count below is keyed off THIS rather than off the length of the
+// dimension's component list, and the difference is not pedantry. A dimension
+// is free to carry a component that is not a store: L8.2 adds one for the
+// agreement between two stores, and a store counter reading len(Components)
+// would have quietly answered four for a stack with three stores. A number
+// about stores is counted from the stores.
+func storeNames(obs fidelity.Observation) map[string]bool {
+	out := map[string]bool{}
+	for _, ds := range obs.Manifest.Datastores {
+		if ds.Name != schema.PrimaryDatastore {
+			out[ds.Name] = true
+		}
+	}
+	return out
+}
+
 // census is what the report says about every declared store beside the
 // primary, in one line each and in a stable order.
-func census(inv fidelity.Inventory) string {
+func census(obs fidelity.Observation, inv fidelity.Inventory) string {
 	d, ok := inv.Dimension(schema.FidelityDatastores)
 	if !ok {
 		return "no datastores dimension\n"
 	}
+	stores := storeNames(obs)
 	lines := make([]string, 0, len(d.Components))
 	for _, c := range d.Components {
+		if !stores[c.Name] {
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("%s\t%s\t%s", c.Name, c.State, c.Detail))
 	}
 	sort.Strings(lines)
@@ -66,12 +88,16 @@ func census(inv fidelity.Inventory) string {
 // Measured() is the same predicate the score uses for its denominator, so this
 // is literally how many of the three stores are in the number rather than a
 // count that resembles it.
-func scored(inv fidelity.Inventory) (in, total int) {
+func scored(obs fidelity.Observation, inv fidelity.Inventory) (in, total int) {
 	d, ok := inv.Dimension(schema.FidelityDatastores)
 	if !ok {
 		return 0, 0
 	}
+	stores := storeNames(obs)
 	for _, c := range d.Components {
+		if !stores[c.Name] {
+			continue
+		}
 		total++
 		if c.State.Measured() {
 			in++
@@ -85,7 +111,8 @@ func TestRecordTheStanceCensus(t *testing.T) {
 	// Run against an OLDER checkout with -census-out, which is how the before
 	// file was made. Here it renders and writes nothing, so a run with no flag
 	// is still a check rather than a no op.
-	text := census(fidelity.Build(analyticsStack(t)))
+	obs := analyticsStack(t)
+	text := census(obs, fidelity.Build(obs))
 	t.Log("\n" + text)
 	require.NotEmpty(t, text)
 	if *censusOut != "" {
@@ -128,16 +155,26 @@ func TestTheStanceCensusBeforeAndAfter(t *testing.T) {
 	require.Equal(t, 2, strings.Count(before, "\tunmeasured\t"))
 	require.Equal(t, 0, strings.Count(before, "\tsubstituted\t"))
 
-	after := fidelity.Build(analyticsStack(t))
-	in, total := scored(after)
+	obs := analyticsStack(t)
+	after := fidelity.Build(obs)
+	in, total := scored(obs, after)
 	require.Equal(t, 3, total)
+
+	// The count is keyed off the manifest's stores, so a dimension that gains
+	// a component which is not one does not change it. L8.2 adds exactly such
+	// a component, for the agreement between two stores, and a counter reading
+	// the length of the component list would answer four here.
+	d, ok := after.Dimension(schema.FidelityDatastores)
+	require.True(t, ok)
+	require.GreaterOrEqual(t, len(d.Components), total,
+		"the dimension carries fewer components than there are stores")
 	// All three, and the two that were invisible are now positions the report
 	// takes: substituted, in the denominator, with the declared reason beside
 	// them. The golden is still absent, which is the same verdict it had and
 	// is correct.
 	require.Equal(t, 3, in)
 
-	text := census(after)
+	text := census(obs, after)
 	require.Equal(t, 1, strings.Count(text, "\tabsent\t"))
 	require.Equal(t, 2, strings.Count(text, "\tsubstituted\t"))
 	require.Equal(t, 0, strings.Count(text, "\tunmeasured\t"))

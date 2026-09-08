@@ -489,6 +489,25 @@ func orUnknownRun(reason string) string {
 	return "nothing here says whether this environment's own run did what the stance asks"
 }
 
+// article is "a " or "an " for an engine name.
+//
+// A report that says "a elasticsearch" is a report somebody stops reading, and
+// the engine is free text so the list of names this can meet is open. The
+// first letter is the whole rule: it is wrong for a name beginning with a
+// silent consonant or a consonant sounding vowel, and no datastore engine is
+// named either of those.
+func article(engine string) string {
+	if engine == "" {
+		return "a "
+	}
+	switch engine[0] {
+	case 'a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U':
+		return "an "
+	default:
+		return "a "
+	}
+}
+
 // goldenGap is what a store declared golden and never branched is missing.
 //
 // The four facts named one by one rather than summarised. The database
@@ -510,7 +529,7 @@ const goldenGap = "nothing here built one: no golden, no attestation, no tables 
 // tells a reviewer which one they are looking at.
 func declaredReason(ds schema.Datastore, did string) string {
 	var b strings.Builder
-	b.WriteString("a ")
+	b.WriteString(article(ds.Engine))
 	b.WriteString(ds.Engine)
 	b.WriteString(" declared ")
 	b.WriteString(string(ds.Stance))
