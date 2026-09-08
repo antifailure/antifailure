@@ -64,6 +64,64 @@ emulator has no route out in any case: it attaches to the environment's inner
 network, which is created `internal`, so having nowhere to send a credential is
 a property of the network rather than a promise.
 
+## What it costs per environment
+
+Measured on 2026-09-08 on an Apple Silicon machine, 8 core, with Docker
+Desktop holding 7.654 GiB, **at load averages between 24 and 28**, because the
+machine was running other work at the same time. The load is published with the
+numbers rather than left out: the memory figures are stable under it and the
+start times are not, and saying which is which is worth more than a best case.
+
+Image sizes are compressed download bytes for the `linux/arm64` member, read
+from the registry.
+
+| Container | Image | Resident | Started |
+| --- | --- | --- | --- |
+| `azure-blob` | 108.9 MiB | 69.9 MiB | bound all three ports |
+| `azure-queue` | the same image, nothing more on disk | 66.7 MiB | bound all three ports |
+| `azure-table` | the same image, nothing more on disk | 67.1 MiB | bound all three ports |
+| **all three** | **108.9 MiB once** | **203.8 MiB** | |
+
+One Azurite measured alone was 83.5 MiB, so the marginal cost of the second and
+third is about 67 MiB each. An environment that names only blob pays 69.9 MiB
+and one image.
+
+That is the whole cost of Azure Blob, Queue and Table in an environment: **one
+image and about 200 MiB of memory**, or a third of that for one service.
+
+### What Service Bus would have cost, which is why it is not here
+
+| Container | Image | Result |
+| --- | --- | --- |
+| `servicebus-emulator` | 81.7 MiB | halted: `SQL Health Check failed` |
+| `mssql/server` companion | 595.9 MiB, AMD64 only | **killed after 707 seconds, never ready** |
+
+**677.6 MiB of image before either process answers anything**, against 108.9 MiB
+for all of Azurite. The SQL Server companion was given a 3 GB allocation of its
+own and was killed by the memory limit after 707 seconds, having reached TLS
+initialisation and no further; it never printed `SQL Server is now ready for
+client connections`, and the Service Bus emulator beside it then failed its SQL
+health check and halted. Under emulated AMD64 on ARM64 this is what the pair
+does on a developer laptop.
+
+The load average was 25 to 26 throughout, on a shared machine, so this does not
+prove SQL Server cannot start here. It does mean the pair is in a different
+class of weight from Azurite by roughly an order of magnitude in image bytes and
+more than that in memory, and that a developer with an Apple Silicon machine
+who names Service Bus in a manifest would be waiting on an emulated SQL Server
+rather than testing their application. Opt in is the right answer even before
+the EULA below.
+
+### Cosmos DB
+
+`cosmosdb/linux/azure-cosmos-emulator:vnext-preview` has a real ARM64 build and
+needs no companion. It is **645.6 MiB of image**, six times Azurite, and held
+**89.9 MiB resident**. Its readiness was NOT measured: the predicate used to
+watch for it matched the word `ready` inside its own retry line
+`readiness check still waiting for Postgres startup`, so the 97 seconds it
+reported is not a start time and is not published as one. Its own health line
+still read `PostgreSQL=FAIL, Gateway=FAIL, Explorer=FAIL` at that point.
+
 ## Not answered, and why
 
 Naming a service and not building it is worse than leaving it out, so these
@@ -87,14 +145,16 @@ better reason for it to be opt in than any number on this page.
 **Its companion has no ARM64 build.** `mcr.microsoft.com/mssql/server:2022-latest`
 is a single AMD64 manifest with no ARM64 member, so on an Apple Silicon machine
 Service Bus drags an emulated AMD64 SQL Server into every environment that
-names it. The measured cost is below.
+names it. Measured above: 677.6 MiB of image, and the SQL Server never became
+ready in 707 seconds with 3 GB of its own.
 
 ### Azure Cosmos DB
 
 The Linux emulator is a single image with a real ARM64 build and no EULA gate,
-and its cost is below. It is not registered here yet because nothing in the
-conformance suite proves it, and a service in the surface that nothing proves
-is a claim rather than a capability.
+and its cost is above. It is not registered here because nothing in the
+conformance suite proves it, and a service in the surface that nothing proves is
+a claim rather than a capability. At 645.6 MiB it is also six times Azurite, so
+if it lands it lands opt in.
 
 ### Everything else Azure runs
 
