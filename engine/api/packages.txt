@@ -40,4 +40,5 @@ unstable github.com/antifailure/antifailure/ee/engine/compliance     Enterprise.
 unstable github.com/antifailure/antifailure/ee/engine/feature        Enterprise. Feature gating for the licensed build, which moves with the licence terms rather than with semantic versioning.
 unstable github.com/antifailure/antifailure/ee/engine/license        Enterprise. Licence parsing and verification, which changes whenever the licence format does.
 unstable github.com/antifailure/antifailure/ee/engine/policyenforce  Enterprise. Policy enforcement for the licensed build, tied to rules that are added and sharpened in minor releases.
+unstable github.com/antifailure/antifailure/ee/engine/runtime/ecs    Enterprise. The AWS ECS on Fargate containment predicate, which is an enumeration of egress paths and a check over the configuration one would be given. It changes whenever AWS changes what a task definition, a security group or a DNS Firewall rule group can say, which is not on this repository's release schedule.
 unstable github.com/antifailure/antifailure/ee/engine/secrets        Enterprise. The licensed secret backends, which follow whatever each vendor's API does.

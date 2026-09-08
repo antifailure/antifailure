@@ -861,6 +861,7 @@ func (o *Orchestrator) newRuntime(ctx context.Context) (provider.Runtime, error)
 			rt, err := p.Open(ctx, extension.RuntimeConfig{
 				Root:              o.opts.Root,
 				Runtime:           runtimeConfigOf(cfg),
+				Egress:            egressConfigOf(o.opts.Manifest),
 				TTL:               o.ttl(),
 				StateDir:          filepath.Join(o.opts.Root, StateDir),
 				Now:               o.opts.Clock.Now,
@@ -908,6 +909,18 @@ func runtimeConfigOf(cfg *schema.Runtime) schema.Runtime {
 		return schema.Runtime{}
 	}
 	return *cfg
+}
+
+// egressConfigOf copies the manifest's egress catalogue for a registration.
+//
+// A copy rather than the pointer, for the reason runtimeConfigOf gives: a
+// registration must not be able to edit the manifest the engine goes on
+// reading after it has been built.
+func egressConfigOf(m *schema.Manifest) schema.Egress {
+	if m == nil || m.Egress == nil {
+		return schema.Egress{}
+	}
+	return *m.Egress
 }
 
 // listNames renders a list of names for a sentence a person reads.

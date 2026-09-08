@@ -538,6 +538,43 @@ func TestTwoProvidersUnderOneNameAreRefused(t *testing.T) {
 	require.Contains(t, err.Error(), "aurora")
 }
 
+// TestTwoRuntimesUnderOneNameAreRefused covers the RUNTIME socket specifically,
+// and it is not a duplicate of the database test above.
+//
+// Validate loops over five sockets and the loop body is shared, so the database
+// test proves the body refuses a repeat. It proves nothing about which sockets
+// are IN the list. Dropping the runtime entry from that list leaves the
+// database test green and leaves a second registration of a runtime name
+// unrefused, and the two assertions after Validate are what that costs: the
+// first registration answers every lookup, so the second is dead code that
+// looks registered, and the name appears twice in the list a refusal prints.
+// That list reading "local, kubernetes, ecs, ecs" is the same defect the ecs
+// runtime exists to fix, arriving from the other direction.
+//
+// Two pull requests each adding the same registration is not hypothetical. It
+// is what merging both of them in sequence would have produced.
+func TestTwoRuntimesUnderOneNameAreRefused(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	first := &fakeRuntimeProvider{name: "ecs"}
+	second := &fakeRuntimeProvider{name: "ecs"}
+	r.AddRuntimeProvider(first)
+	r.AddRuntimeProvider(second)
+
+	err := r.Validate(nil)
+	require.Error(t, err, "a repeated runtime name must be refused")
+	require.Contains(t, err.Error(), "ecs")
+	require.Contains(t, err.Error(), "whichever was registered first")
+
+	// What the refusal is protecting against, asserted rather than described.
+	got, ok := r.RuntimeProviderNamed("ecs")
+	require.True(t, ok)
+	require.Same(t, first, got,
+		"the first registration answers, so a second one is silently dead")
+	require.Equal(t, []string{"ecs", "ecs"}, r.RuntimeProviderNames(),
+		"a refusal built from this list would name the runtime twice")
+}
+
 func TestAProviderWithNoNameIsRefused(t *testing.T) {
 	t.Parallel()
 	// Nothing in a manifest could ask for it, so it is a registration that can
