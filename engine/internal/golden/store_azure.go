@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // azureStore keeps goldens in an Azure Blob container.
@@ -62,7 +64,7 @@ func newAzureStore(raw string) (Store, error) {
 	return &azureStore{
 		base:   u,
 		query:  q,
-		client: &http.Client{Timeout: 30 * time.Minute},
+		client: airgap.Client(airgap.SiteGoldenAzure, 30*time.Minute),
 		label:  redactURL(raw),
 	}, nil
 }

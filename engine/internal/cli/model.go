@@ -30,7 +30,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -40,6 +39,7 @@ import (
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -426,7 +426,7 @@ says nothing about the new one.`),
 			e.Out.Section("Model")
 			e.Out.Printf("  Asking %s for one token as %s...\n", cfg.BaseURL, cfg.Model)
 
-			result := model.Probe(ctx, &http.Client{Timeout: timeout}, *cfg, e.Clock.Now)
+			result := model.Probe(ctx, airgap.Client(airgap.SiteModelProbe, timeout), *cfg, e.Clock.Now)
 
 			verified := ""
 			if result.OK() {

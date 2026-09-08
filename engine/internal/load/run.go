@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // Options configure a run.
@@ -137,16 +138,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	rate := opts.Shape.RequestsPerSecond * opts.Scale
 
+	transport := airgap.Transport(airgap.SiteLoadTest)
+	transport.MaxIdleConnsPerHost = opts.Concurrency
+	// Compression off, so the numbers measure the application rather than the
+	// transport's ability to compress its output.
+	transport.DisableCompression = true
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// A response cannot authorize traffic outside the selected safe route.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: opts.Concurrency,
-			// Compression off, so the numbers measure the application rather
-			// than the transport's ability to compress its output.
-			DisableCompression: true,
-		},
+		Transport:     transport,
 	}
 
 	// A finished run does not keep its sockets. Both transports here are

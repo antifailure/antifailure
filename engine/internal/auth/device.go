@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // The RFC 8628 error codes this client acts on. The first two mean keep going;
@@ -77,7 +79,7 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		BaseURL: strings.TrimSuffix(baseURL, "/"),
-		HTTP:    &http.Client{Timeout: 20 * time.Second},
+		HTTP:    airgap.Client(airgap.SiteDeviceAuth, 20*time.Second),
 	}
 }
 

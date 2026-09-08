@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // DefaultBaseURL is where a Database Lab Engine listens when it was started
@@ -470,7 +471,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return airgap.Client(airgap.SiteDBLab, 60*time.Second)
 }
 
 func (c *Client) sleep(ctx context.Context, d time.Duration) error {

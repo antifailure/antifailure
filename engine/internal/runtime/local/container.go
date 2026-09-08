@@ -19,6 +19,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/envcert"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -752,7 +753,7 @@ func (r *Runtime) waitReady(
 	}
 
 	deadline := r.clock.Now().Add(timeout)
-	hc := &http.Client{Timeout: 5 * time.Second}
+	hc := airgap.Client(airgap.SiteServiceProbe, 5*time.Second)
 	attempt := 0
 	for {
 		if err := r.confirmStillRunning(ctx, s, id); err != nil {
@@ -806,7 +807,7 @@ func (r *Runtime) probe(ctx context.Context, hc *http.Client, s provider.Service
 		// A service that speaks something other than HTTP still counts as
 		// ready once it accepts a connection, so the port is tried directly
 		// before giving up on this round.
-		conn, dialErr := net.DialTimeout("tcp",
+		conn, dialErr := airgap.Dial(airgap.SiteServiceProbe, "tcp",
 			net.JoinHostPort("127.0.0.1", strconv.Itoa(hostPort)), 2*time.Second)
 		if dialErr != nil {
 			return false

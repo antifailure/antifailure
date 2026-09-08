@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // Probe is one request sent to both sides.
@@ -95,7 +96,7 @@ const DefaultMaxBody = 8 << 20
 func (d *Driver) Send(ctx context.Context, baseURL string, p Probe) Response {
 	client := d.Client
 	if client == nil {
-		client = http.DefaultClient
+		client = airgap.Client(airgap.SiteOracle, 0)
 	}
 	limit := d.MaxBody
 	if limit <= 0 {

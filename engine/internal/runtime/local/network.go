@@ -16,6 +16,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // An environment gets two networks, and the reason is the whole containment
@@ -134,6 +135,10 @@ func (r *Runtime) ensureOneNetwork(
 func (r *Runtime) ensureIngressImage(ctx context.Context) error {
 	if _, err := r.cli.ImageInspect(ctx, ingressImage); err == nil {
 		return nil
+	}
+	if err := airgap.Refuse(airgap.SiteImageBuild,
+		"building the ingress forwarder image "+ingressImage+", whose base image is pulled"); err != nil {
+		return aferrors.Wrap(err, aferrors.AFRUN040, "detail", err.Error())
 	}
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)

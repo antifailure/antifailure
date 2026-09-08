@@ -13,6 +13,7 @@ import (
 	"time"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -1794,10 +1795,9 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 // behaviour passed and the package still failed, which is a confusing way to
 // learn that a test helper left a socket open.
 func shortLivedClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: &http.Transport{DisableKeepAlives: true},
-	}
+	t := airgap.Transport(airgap.SiteConformance)
+	t.DisableKeepAlives = true
+	return &http.Client{Timeout: timeout, Transport: t}
 }
 
 // requireInternet skips when this machine cannot reach what an egress behavior

@@ -30,6 +30,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // DefaultBaseURL is the hosted instance.
@@ -138,7 +139,7 @@ func New(opts Options) (*Client, error) {
 	}
 	httpClient := opts.HTTP
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = airgap.Client(airgap.SiteControlPlane, 30*time.Second)
 	}
 	return &Client{
 		baseURL:  base,

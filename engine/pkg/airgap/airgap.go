@@ -68,31 +68,28 @@ type Site string
 // product can reach is one list somebody can read, and so that the test that
 // walks the source for unguarded clients has something to compare against.
 const (
-	SiteReleaseCheck   Site = "the release check"
-	SiteSelfUpdate     Site = "the self update download"
-	SiteTelemetry      Site = "the telemetry exporter"
-	SiteModelProbe     Site = "the model key probe"
-	SiteOracle         Site = "the workflow oracle"
-	SitePersonas       Site = "the identity provider seeding"
-	SiteControlPlane   Site = "the control plane client"
-	SiteControlPlaneID Site = "the control plane identity discovery"
-	SiteDeviceAuth     Site = "the device authorization flow"
-	SiteLoadTest       Site = "the load generator"
-	SiteGoldenS3       Site = "the s3 golden store"
-	SiteGoldenAzure    Site = "the azure blob golden store"
-	SiteNeon           Site = "the neon control API"
-	SiteSupabase       Site = "the supabase management API"
-	SiteDBLab          Site = "the database lab API"
-	SiteClickHouse     Site = "the clickhouse HTTP interface"
-	SiteServiceProbe   Site = "the service readiness probe"
-	SiteSidecarAdmin   Site = "the sidecar admin API"
-	SiteDoctor         Site = "the doctor reachability check"
-	SiteSecretStore    Site = "the enterprise secret store"
-	SiteConformance    Site = "the runtime conformance suite"
-	SiteImagePull      Site = "the container image pull"
-	SiteImageBuild     Site = "the container image build"
-	SiteLicenceCheck   Site = "the licence revocation check"
-	SiteMockPack       Site = "the mock pack download"
+	SiteReleaseCheck    Site = "the release check"
+	SiteTelemetry       Site = "the telemetry exporter"
+	SiteModelProbe      Site = "the model key probe"
+	SiteOracle          Site = "the workflow oracle"
+	SitePersonas        Site = "the identity provider seeding"
+	SiteControlPlane    Site = "the control plane client"
+	SiteControlPlaneID  Site = "the control plane identity discovery"
+	SiteDeviceAuth      Site = "the device authorization login"
+	SiteLoadTest        Site = "the load generator"
+	SiteGoldenS3        Site = "the s3 golden store"
+	SiteGoldenAzure     Site = "the azure blob golden store"
+	SiteNeon            Site = "the neon control API"
+	SiteSupabase        Site = "the supabase management API"
+	SiteDBLab           Site = "the database lab API"
+	SiteClickHouse      Site = "the clickhouse HTTP interface"
+	SiteServiceProbe    Site = "the service readiness probe"
+	SiteWebhookDelivery Site = "the webhook delivery"
+	SiteDoctor          Site = "the doctor reachability check"
+	SiteSecretStore     Site = "the enterprise secret store"
+	SiteConformance     Site = "the runtime conformance suite"
+	SiteImagePull       Site = "the container image pull"
+	SiteImageBuild      Site = "the container image build"
 )
 
 // Attempt is one connection this product tried to make.
@@ -426,4 +423,60 @@ func Transport(site Site) *http.Transport {
 // Client returns an http.Client whose every connection passes the guard.
 func Client(site Site, timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout, Transport: Transport(site)}
+}
+
+// CheckImage reports whether this installation may fetch a container image.
+//
+// The pull happens in the Docker daemon, in another process, over a connection
+// this package's dialer never sees, so the guard cannot refuse it at the
+// socket. What it can do is refuse it before it is asked for, against the
+// registry the reference names, which is the same answer arrived at one step
+// earlier.
+//
+// Both callers inspect the local daemon for the image first and only reach here
+// when it is absent, so an air gapped installation that has loaded its images
+// from a tarball or an internal registry runs untouched. What is refused is the
+// silent reach for Docker Hub, which is the one that happens on a machine
+// somebody believed had no route out.
+func CheckImage(site Site, ref string) error {
+	return Check(site, "tcp", RegistryHost(ref)+":443")
+}
+
+// RegistryHost is the registry a Docker image reference names.
+//
+// Docker's own rule and it is worth stating because it surprises people: the
+// registry is the first path component ONLY when it looks like a host, meaning
+// it contains a dot or a colon or is exactly localhost. So
+// clickhouse/clickhouse-server is Docker Hub under an organization called
+// clickhouse, and registry.internal/clickhouse-server is an internal registry.
+// A reference with no registry at all, like postgres:17, is Docker Hub too.
+func RegistryHost(ref string) string {
+	const dockerHub = "registry-1.docker.io"
+	// A digest or a tag can carry a colon, so only the part before the first
+	// slash is considered.
+	first := ref
+	if i := strings.IndexByte(ref, '/'); i >= 0 {
+		first = ref[:i]
+	} else {
+		return dockerHub
+	}
+	if first == "localhost" || strings.ContainsAny(first, ".:") {
+		return first
+	}
+	return dockerHub
+}
+
+// LookupHost resolves a name, refusing when sealed.
+//
+// A resolver call is an outbound packet in its own right and it is the one
+// people forget, because it does not look like a connection: nothing in the
+// code says http or dial, and the name being looked up is exactly the
+// information an air gapped installation was not supposed to disclose. The
+// dialer here refuses a hostname before resolving it for the same reason, so
+// this covers the callers that resolve without dialing.
+func LookupHost(site Site, host string) ([]string, error) {
+	if err := Check(site, "dns", net.JoinHostPort(host, "53")); err != nil {
+		return nil, err
+	}
+	return net.LookupHost(host)
 }

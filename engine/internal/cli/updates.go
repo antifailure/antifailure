@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/manifest"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 const latestReleaseURL = "https://api.github.com/repos/antifailure/antifailure/releases/latest"
@@ -28,15 +29,16 @@ const latestReleaseURL = "https://api.github.com/repos/antifailure/antifailure/r
 // against. Replacing the policy also drops net/http's own ten hop limit, so
 // this states it rather than losing it.
 func releaseHTTPClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" {
-			return errors.New("a release source redirected away from HTTPS")
-		}
-		if len(via) >= 10 {
-			return errors.New("too many release redirects")
-		}
-		return nil
-	}}
+	return &http.Client{Timeout: timeout, Transport: airgap.Transport(airgap.SiteReleaseCheck),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return errors.New("a release source redirected away from HTTPS")
+			}
+			if len(via) >= 10 {
+				return errors.New("too many release redirects")
+			}
+			return nil
+		}}
 }
 
 func checkCLIRelease(ctx context.Context, _ *Env, _ Prober) CheckResult {
