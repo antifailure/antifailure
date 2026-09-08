@@ -33,6 +33,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
+	"github.com/antifailure/antifailure/ee/engine/runtime/cloudrun"
 	"github.com/antifailure/antifailure/ee/engine/runtime/ecs"
 	"github.com/antifailure/antifailure/ee/engine/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/afcli"
@@ -130,6 +131,19 @@ func main() {
 	// not closed named individually. The second is the deliverable. See
 	// ee/engine/runtime/ecs/runtime.go for why there is no runtime behind it.
 	extension.Default.AddRuntimeProvider(ecs.NewProvider())
+
+	// The Cloud Run runtime, registered so that a manifest naming it is
+	// answered by the package that knows why it cannot have one, rather than
+	// by the engine's generic "this build has local and kubernetes" message.
+	//
+	// Registered even though it refuses every Open, and the refusal is the
+	// point. A person who writes runtime.provider: cloudrun has a question,
+	// and the two possible answers are a list of the runtimes that exist,
+	// which tells them nothing, or ten enumerated egress paths with the four
+	// that are not closed named individually. The second is the deliverable.
+	// See ee/engine/runtime/cloudrun/runtime.go for why there is no runtime
+	// behind it.
+	extension.Default.AddRuntimeProvider(cloudrun.NewProvider())
 
 	// The audit sinks, into the same registry and refused at startup for the
 	// same reason. This registration is the whole of what the audit_stream
