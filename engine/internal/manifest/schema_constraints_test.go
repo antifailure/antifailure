@@ -1086,6 +1086,11 @@ func TestSchemaConstraintReport(t *testing.T) {
 // gate that only noticed additions would be half an instrument.
 const wantConstraints = 570
 
+// wantExceptions is how many constraints schemabounds.go deliberately does not
+// enforce. Every one is a published row that is wrong rather than a gap, and
+// the goal is zero.
+const wantExceptions = 6
+
 // TestEverySchemaConstraintIsEnforced is the gate.
 //
 // For every constraint the published schema declares, it generates a manifest
@@ -1103,6 +1108,16 @@ func TestEverySchemaConstraintIsEnforced(t *testing.T) {
 		require.Emptyf(t, b.err, "the generated base manifest %q is itself refused, so every cell measured against it says nothing:\n%s", b.spec.Name, b.err)
 		require.Emptyf(t, b.unfilled, "no value could be generated for %v, so those fields carry no constraint anywhere in the corpus", b.unfilled)
 	}
+
+	// The exception list is the one escape hatch in this gate, so its size is
+	// pinned too. Without this, quietly adding an entry would turn a broken
+	// promise into a passing build, which is the shape of every check in this
+	// repository that could not say no.
+	require.Lenf(t, manifest.BoundsExceptionsForTest(), wantExceptions,
+		"schemabounds.go now excuses %d constraints and this test was written against %d. "+
+			"Adding one means the engine publishes a promise it will not keep, so argue for it "+
+			"in the commit and change this number deliberately.",
+		len(manifest.BoundsExceptionsForTest()), wantExceptions)
 
 	require.Lenf(t, verdicts, wantConstraints,
 		"schemas/manifest.v1.json declares %d constraints and this test was written against %d. "+
