@@ -746,9 +746,11 @@ classcheck:
 motioncheck:
     go run ./tools/motioncheck .
 
-# Spelling, with the project dictionary in tools/docs/dictionary.txt.
+# Spelling, with the project dictionary in tools/docs/dictionary.txt. Pinned,
+# because floating on the tag once resolved a version whose sibling package was
+# not published yet and the gate failed having checked nothing.
 spell:
-    npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+    npx --yes cspell@10.3.0 --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
 
 # Prose style: the Google developer documentation style, plus the rule about
 # em dashes. `vale sync` fetches the style package named in .vale.ini.
