@@ -25,6 +25,12 @@ type LoadJSON struct {
 	Errors     map[string]int     `json:"errors,omitempty"`
 	Refused    []string           `json:"refused_as_unsafe,omitempty"`
 	Breaches   []load.Breach      `json:"breaches,omitempty"`
+	// Baselines says where the per route p95 comparisons came from when they
+	// did not come from the traffic source itself, and says so when there are
+	// none. A run whose every route arrives without a baseline prints no
+	// breach, which reads exactly like a run that compared and found nothing
+	// wrong.
+	Baselines string `json:"baselines,omitempty"`
 	// InertP95 says a p95_increase threshold was in force and no route
 	// carried a baseline for it to be measured against, so it was listed and
 	// evaluated nothing. A consumer that reported breaches as the whole
@@ -112,7 +118,7 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 					Duration:  res.Duration.Round(time.Millisecond).String(),
 					ErrorRate: res.ErrorRate, Overall: res.Overall,
 					Routes: res.Routes, Errors: res.Errors, Breaches: breaches,
-					InertP95: inert,
+					InertP95: inert, Baselines: res.Baselines,
 				}
 				for _, r := range refused {
 					doc.Refused = append(doc.Refused, r.String())
@@ -133,6 +139,12 @@ func newLoadRunCommand(e *Env, smoke bool) *cobra.Command {
 				// invites a default shape to be read as production's.
 				e.Out.Printf("  Shape from %s, %.1f requests a second asked for.\n",
 					res.Source, res.TargetRate)
+			}
+			if res.Baselines != "" {
+				// Where the p95 comparison came from, or that there is none.
+				// A threshold with nothing behind it prints no breach and
+				// reads exactly like one that found no regression.
+				e.Out.Printf("  %s.\n", e.Out.Wrap(res.Baselines, 2))
 			}
 			e.Out.Printf("  %d requests in %s at %.0f a second, %.1f percent failed.\n",
 				res.Sent, res.Duration.Round(time.Second), res.Rate, res.ErrorRate*100)

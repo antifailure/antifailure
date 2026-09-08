@@ -154,8 +154,12 @@ func routesWithoutBaseline(routes []Route) []string {
 func skippedReasons(skipped map[string]int) []string {
 	var out []string
 	for reason, n := range skipped {
-		out = append(out, fmt.Sprintf("%s were %s and were not counted",
-			plural(int64(n), "span", "spans"), reason))
+		was := "were"
+		if n == 1 {
+			was = "was"
+		}
+		out = append(out, fmt.Sprintf("%s %s %s and %s not counted",
+			plural(int64(n), "span", "spans"), was, reason, was))
 	}
 	sort.Strings(out)
 	return out

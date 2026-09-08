@@ -1,0 +1,96 @@
+{
+  "collected_at": "2026-09-01T02:00:00Z",
+  "source": "otel export telemetry/traces-2026-08-25-to-2026-09-01.json",
+  "from": "2026-08-25T02:00:00Z",
+  "to": "2026-09-01T02:00:00Z",
+  "requests": 145152200,
+  "peak_concurrency": 90,
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/capture",
+      "requests": 92000000,
+      "p95_ms": 12.4
+    },
+    {
+      "method": "GET",
+      "path": "/decide",
+      "requests": 38000000,
+      "p95_ms": 8.1
+    },
+    {
+      "method": "POST",
+      "path": "/batch",
+      "requests": 7400000,
+      "p95_ms": 41.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{id}/events",
+      "requests": 3100000,
+      "p95_ms": 318.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{id}/insights",
+      "requests": 2400000,
+      "p95_ms": 612.0
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{id}/query",
+      "requests": 980000,
+      "p95_ms": 941.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{id}/session_recordings",
+      "requests": 640000,
+      "p95_ms": 274.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{id}/dashboards",
+      "requests": 410000,
+      "p95_ms": 190.0
+    },
+    {
+      "method": "GET",
+      "path": "/shared_dashboard/{id}",
+      "requests": 88000,
+      "p95_ms": 233.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/organizations/{id}/members",
+      "requests": 62000,
+      "p95_ms": 44.0
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "requests": 41000,
+      "p95_ms": 2.0
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{id}/experiments",
+      "requests": 21000,
+      "p95_ms": 88.0
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{id}/feature_flags",
+      "requests": 9800,
+      "p95_ms": 26.0
+    },
+    {
+      "method": "GET",
+      "path": "/_/static/{id}",
+      "requests": 400
+    }
+  ],
+  "missing": [
+    "1 route carried too few requests in this window for a p95, so no threshold can compare against it: GET /_/static/{id}"
+  ]
+}

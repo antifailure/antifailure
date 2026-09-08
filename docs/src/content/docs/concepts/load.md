@@ -20,6 +20,9 @@ load:
   duration: 5m
   safe_routes: ["GET /**", "POST /api/search"]
   unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -104,6 +107,63 @@ Everything else works: the mix, the relative weights and the arrival rate,
 which is counted from the timestamps rather than assumed. When no line carries
 a readable timestamp the report says the arrival rate was assumed rather than
 presenting a guess as production's number.
+
+## What production actually serves
+
+```yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+```
+
+A route list written by hand cannot know which routes touch which tables.
+Measured on the Antifailure repository on 2026-09-06: a migration held an
+`ACCESS EXCLUSIVE` lock on nine relations for thirty seconds, `pg_locks`
+confirmed it from a second connection, and `af load smoke` ran through the
+whole window reporting 0.0 percent failed with p95 improving from 41ms to 17ms.
+None of its four `safe_routes` reads the locked table. It was not a weak
+result. It was a green one.
+
+`af traffic record` counts what production served, from an OpenTelemetry trace
+export or a combined format access log that a collector or a reverse proxy
+already wrote, and writes a profile you commit beside the manifest:
+
+| It records | From a trace export | From an access log |
+| --- | --- | --- |
+| The endpoint mix, per route | yes | yes |
+| The arrival rate, over the window it saw | yes | yes |
+| Production's p95, per route | yes | no, a log line carries no duration |
+| Peak concurrency | yes | no |
+
+It carries no request body, no header, no query string and no identifier: a
+path with an identifier in it collapses to `/users/{id}` before it is counted,
+so what lands in the file is a route and a number. Nothing here opens a socket,
+there is no agent, and no application code changes. The file is one you already
+have.
+
+```
+af traffic record --from telemetry/traces.json
+af traffic show
+```
+
+`af traffic show` prints what production serves, busiest route first, with a
+mark against every route your run reaches, and prints the `safe_routes` lines
+that would cover the ones it does not. It prints them. It does not write them:
+this measures and states, and the manifest confirms it. A route being served in
+production is not a promise that sending it a thousand times is safe.
+
+With a profile, three things change. The fidelity report's traffic dimension
+states the fraction of production's requests your run actually sends and names
+the heaviest route it never touches, instead of reporting any shape at all as
+a reproduction. The arrival rate is stated beside production's own. And
+`p95_increase` becomes able to fire under `access_log` and `none`, because the
+profile carries the baseline the source could not.
+
+A profile older than `max_age` is refused rather than quoted, the way a stale
+golden is refused rather than branched. Fourteen days by default, where the
+volume profile's is thirty: an endpoint mix moves at the rate a team ships, and
+a volume profile at the rate a business grows.
 
 ## Safe and unsafe routes
 
@@ -244,11 +304,17 @@ source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
 
-Which means the threshold needs a source that carries durations, and only
-`otel` does. Setting it under `access_log` or `none` is refused by the
-manifest, and the default is not applied there either: a threshold the report
-lists and no route can be measured against is a check everybody believes is
-running.
+Which means the threshold needs durations from somewhere, and the traffic
+source carries them only under `otel`. Setting it under `access_log` or `none`
+with nothing else to compare against is refused by the manifest, and the
+default is not applied there either: a threshold the report lists and no route
+can be measured against is a check everybody believes is running.
+
+The second place a baseline can come from is a recorded traffic profile, which
+carries production's own p95 per route. Declare `load.traffic.profile` and the
+threshold is allowed under any source, because the comparison now has something
+on the other side of it. The run says which routes took their baseline from the
+profile, and says so when none could.
 
 ```
 AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of

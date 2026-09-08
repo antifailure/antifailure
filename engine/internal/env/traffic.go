@@ -259,6 +259,33 @@ func withProfileBaselines(shape load.Shape, p *traffic.Profile) (load.Shape, int
 	return shape, filled
 }
 
+// baselineNote says where a run's p95 comparisons came from, or that it has
+// none.
+//
+// The silence is what this replaces. A run whose every route has no baseline
+// evaluates p95_increase against nothing and prints no breach, which reads
+// exactly like a run that compared and found no regression. This repository's
+// own manifest documents that state in a comment beside the threshold it
+// removed, and a comment in one manifest is not an instrument.
+func baselineNote(shape load.Shape, p *traffic.Profile, filled int, why string) string {
+	switch {
+	case filled > 0:
+		return fmt.Sprintf(
+			"%d of %d routes take their p95 baseline from the traffic profile collected on %s",
+			filled, len(shape.Routes), p.CollectedAt.UTC().Format("2006-01-02"))
+	case shapeHasBaseline(shape):
+		// The shape carried its own, which is the case an otel source has
+		// always had. Nothing to say that the source line does not already.
+		return ""
+	case p != nil:
+		return "no route has a p95 baseline: the traffic profile collected on " +
+			p.CollectedAt.UTC().Format("2006-01-02") +
+			" names none of the routes this run sends, so p95_increase cannot fire"
+	default:
+		return "no route has a p95 baseline, so p95_increase cannot fire: " + why
+	}
+}
+
 // shapeHasBaseline reports whether any route in a shape carries a p95.
 //
 // Any, rather than all. A shape where one route has a baseline can still fire

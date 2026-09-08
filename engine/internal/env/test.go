@@ -732,17 +732,7 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 	// never once been able to fire."
 	profile, profileWhy := o.trafficProfile()
 	shape, filled := withProfileBaselines(shape, profile)
-	baselines := ""
-	switch {
-	case filled > 0:
-		baselines = fmt.Sprintf("%d of %d routes take their p95 baseline from the traffic profile collected on %s",
-			filled, len(shape.Routes), profile.CollectedAt.UTC().Format("2006-01-02"))
-	case profile == nil && !shapeHasBaseline(shape):
-		// Said rather than left silent. A run whose every route has no
-		// baseline evaluates p95_increase against nothing and prints no
-		// breach, which reads exactly like a run that found no regression.
-		baselines = "no route has a p95 baseline, so p95_increase cannot fire: " + profileWhy
-	}
+	baselines := baselineNote(shape, profile, filled, profileWhy)
 	sendable, refused := shape.Safe(safe, unsafe)
 	if len(sendable.Routes) == 0 {
 		return nil, refused, aferrors.Coded(aferrors.AFLOD010,

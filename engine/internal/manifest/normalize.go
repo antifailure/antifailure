@@ -25,7 +25,14 @@ const (
 	// teach somebody to set it to a year, which is the failure the setting
 	// exists to prevent. It mirrors volume.DefaultMaxAge and a test asserts
 	// the two agree.
-	DefaultVolumeMaxAge  = "720h"
+	DefaultVolumeMaxAge = "720h"
+	// DefaultTrafficMaxAge is fourteen days, where the volume profile's is
+	// thirty. A volume profile is the shape of the data, which moves at the
+	// rate a business grows; an endpoint mix moves at the rate a team ships,
+	// because one release adds a route and a flag turned on for everybody
+	// moves a route from the tail to the top of the list in an afternoon. It
+	// mirrors traffic.DefaultMaxAge and a test asserts the two agree.
+	DefaultTrafficMaxAge = "336h"
 	DefaultGoldenRetain  = 5
 	DefaultSubsetMaxRows = 1000000
 	DefaultTTL           = "24h"
@@ -586,6 +593,14 @@ func normalizeLoad(m *schema.Manifest) {
 	}
 	for i, r := range l.UnsafeRoutes {
 		l.UnsafeRoutes[i] = normalizeRoute(r)
+	}
+	if t := l.Traffic; t != nil {
+		if c, ok := confine(t.Profile); ok && c != "" {
+			t.Profile = c
+		}
+		if t.MaxAge == "" {
+			t.MaxAge = DefaultTrafficMaxAge
+		}
 	}
 }
 
