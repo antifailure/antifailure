@@ -128,31 +128,34 @@ it, and an image whose licence is recorded by hand goes stale the
 first time a digest is bumped. These come from the declarations the
 engine starts the containers from.
 
-- LocalStack, Apache License 2.0
-  Copyright (c) 2017+ LocalStack contributors, Copyright (c) 2016
-  Atlassian Pty Ltd
+- LocalStack, Apache License 2.0. Copyright (c) 2017+ LocalStack contributors, Copyright (c) 2016 Atlassian Pty Ltd
   - Answers for AWS as `aws`
-  - `localstack/localstack` pinned at
-  sha256:4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572
+  - `localstack/localstack@sha256:4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572`
   - https://github.com/localstack/localstack/blob/main/LICENSE.txt
-- Azurite, MIT License
-  Copyright (c) Microsoft Corporation
-  - Answers for Azure as `azure-blob`
-  - `mcr.microsoft.com/azure-storage/azurite` pinned at
-  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
-  - https://github.com/Azure/Azurite/blob/main/LICENSE
-- Azurite, MIT License
-  Copyright (c) Microsoft Corporation
-  - Answers for Azure as `azure-queue`
-  - `mcr.microsoft.com/azure-storage/azurite` pinned at
-  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
-  - https://github.com/Azure/Azurite/blob/main/LICENSE
-- Azurite, MIT License
-  Copyright (c) Microsoft Corporation
-  - Answers for Azure as `azure-table`
-  - `mcr.microsoft.com/azure-storage/azurite` pinned at
-  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
-  - https://github.com/Azure/Azurite/blob/main/LICENSE
+- Google Cloud CLI emulators, Apache License 2.0. Copyright Google LLC. /google-cloud-sdk/LICENSE inside the image is the grant, and it adds that use against a Google Cloud product is additionally governed by that product's own terms.
+  - Answers for Google Cloud as `bigtable`
+  - `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:07e4b8c3075ca793552fcfaf4808f104ef155d7805d87ade8e01b440463be262`
+  - https://www.apache.org/licenses/LICENSE-2.0
+- Google Cloud CLI emulators, Apache License 2.0. Copyright Google LLC. /google-cloud-sdk/LICENSE inside the image is the grant, and it adds that use against a Google Cloud product is additionally governed by that product's own terms.
+  - Answers for Google Cloud as `datastore`
+  - `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:07e4b8c3075ca793552fcfaf4808f104ef155d7805d87ade8e01b440463be262`
+  - https://www.apache.org/licenses/LICENSE-2.0
+- Google Cloud CLI emulators, Apache License 2.0. Copyright Google LLC. /google-cloud-sdk/LICENSE inside the image is the grant, and it adds that use against a Google Cloud product is additionally governed by that product's own terms.
+  - Answers for Google Cloud as `firestore`
+  - `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:07e4b8c3075ca793552fcfaf4808f104ef155d7805d87ade8e01b440463be262`
+  - https://www.apache.org/licenses/LICENSE-2.0
+- fake-gcs-server, BSD 2-Clause License. Copyright (c) Francisco Souza. Not affiliated with Google.
+  - Answers for Google Cloud as `gcs`
+  - `fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef`
+  - https://github.com/fsouza/fake-gcs-server/blob/main/LICENSE
+- Google Cloud CLI emulators, Apache License 2.0. Copyright Google LLC. /google-cloud-sdk/LICENSE inside the image is the grant, and it adds that use against a Google Cloud product is additionally governed by that product's own terms.
+  - Answers for Google Cloud as `pubsub`
+  - `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:07e4b8c3075ca793552fcfaf4808f104ef155d7805d87ade8e01b440463be262`
+  - https://www.apache.org/licenses/LICENSE-2.0
+- Cloud Spanner Emulator, Apache License 2.0. Copyright Google LLC
+  - Answers for Google Cloud as `spanner`
+  - `gcr.io/cloud-spanner-emulator/emulator@sha256:4987860c9f8ecf1fffbbcdac115cb88cb9d1a42bd966c235a9ab843aea34fbd1`
+  - https://github.com/GoogleCloudPlatform/cloud-spanner-emulator/blob/master/LICENSE
 
 ## Node packages
 
