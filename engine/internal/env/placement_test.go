@@ -212,3 +212,37 @@ func TestPlacement_RefusesWhenThereIsNoTargetAtAllRatherThanPlacingAnywhere(t *t
 	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSCH001))
 	require.Contains(t, err.Error(), "region=eu-west-1")
 }
+
+func TestRuntimeIdentity_IsTheTargetNameSoTheRegistryCanTellTwoClustersApart(t *testing.T) {
+	t.Parallel()
+	// What the control plane writes into the environments row, and what its
+	// runtime registry compares against the runtimes an organization agreed to.
+	// It was the literal "local" for every environment ever created, so a
+	// Kubernetes environment reported that it came up on the local runtime and
+	// the registry's whole reason for existing, seeing an environment running
+	// somewhere nobody agreed to, could not see one.
+	//
+	// The target name rather than the kind, because "kubernetes" is the same
+	// word for every cluster a fleet has and the registry's question is which
+	// one.
+	o := placed(t, &schema.Runtime{
+		Requires: map[string]string{schema.RegionTag: "eu-central-1"},
+		Targets: []schema.RuntimeTarget{
+			target("virginia", "us-east-1", schema.RuntimeLocal),
+			target("frankfurt", "eu-central-1", schema.RuntimeLocal),
+		},
+	})
+	require.Equal(t, "frankfurt", o.runtimeIdentity(licensed(), nil))
+}
+
+func TestRuntimeIdentity_FallsBackToTheRuntimeItActuallyBuilt(t *testing.T) {
+	t.Parallel()
+	// An unplaced manifest, which is every manifest that existed before this.
+	// The runtime's own name is at least true, and it is what the registry has
+	// always been given for a local environment.
+	o := placed(t, &schema.Runtime{Provider: schema.RuntimeLocal})
+	rt, err := o.newRuntime(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close() })
+	require.Equal(t, "local", o.runtimeIdentity(context.Background(), &session{runtime: rt}))
+}

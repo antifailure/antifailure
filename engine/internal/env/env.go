@@ -954,6 +954,49 @@ func (o *Orchestrator) placement(ctx context.Context) (schema.RuntimeTarget, err
 			dispatched[0].Runtime))
 }
 
+// runtimeIdentity is where this environment came up, as the control plane
+// records it.
+//
+// It was the literal "local", which readyFields' own comment says was going to
+// stop being true, and it had already stopped: a Kubernetes environment
+// reported that it came up on the local runtime, and the control plane's
+// runtime registry writes this string into the environments row. That registry
+// exists to answer the registry AGAINST REALITY, listing the runtimes
+// environments are actually running on that nobody registered, and a constant
+// makes the second half of that answer a constant too. An environment running
+// somewhere the organization never agreed to is exactly what it is for, and it
+// could not see one.
+//
+// The target's name when the manifest declares placement, because that is the
+// question the registry is asking: not what KIND of runtime, which is the same
+// word for every cluster a fleet has, but WHICH ONE. The name shape validation
+// enforces is the same one the registry accepts, so a target called frankfurt
+// matches a runtime registered as frankfurt without anything translating
+// between them.
+//
+// The runtime's own name otherwise, which is what an unplaced manifest has and
+// is at least true.
+func (o *Orchestrator) runtimeIdentity(ctx context.Context, s *session) string {
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil && len(m.Runtime.Targets) > 0 {
+		// Placement has already run and succeeded to reach here, and it is a
+		// pure function of the manifest, so asking it again is asking the same
+		// question and getting the same answer rather than a second opinion.
+		//
+		// The run's own context, not a background one. The licence gate lives
+		// inside placement, and a context with no edition attached would refuse
+		// a fleet that had just been placed successfully, so the identity would
+		// quietly fall back to the runtime kind on exactly the installations
+		// that paid for the distinction.
+		if target, err := o.placement(ctx); err == nil {
+			return target.Name
+		}
+	}
+	if s != nil && s.runtime != nil {
+		return s.runtime.Name()
+	}
+	return string(schema.RuntimeLocal)
+}
+
 // unmetRequirement names the first requirement no target satisfies.
 //
 // Validation refuses this manifest before it reaches placement, so this is the
@@ -1617,7 +1660,8 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
 			append(append(o.identity(), startedField(started)),
-				readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)...)
+				readyFields(result, o.runtimeIdentity(ctx, s),
+					o.opts.Clock.Since(started).Seconds())...)...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking
