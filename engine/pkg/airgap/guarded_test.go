@@ -61,6 +61,17 @@ var exempt = map[string]string{
 	"engine/cmd/af-proxy/capture.go":     "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/sandbox.go":     "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/internal.go":    "the sidecar cannot import engine/pkg",
+
+	// The application's own image. What a docker build fetches is a base image
+	// and whatever the repository's package manager resolves, all of it inside
+	// the daemon and BuildKit where nothing here can see it, and refusing it
+	// would make an air gapped installation unable to build an ordinary
+	// repository at all. Governing it is the daemon's job: an internal registry
+	// mirror and an internal package mirror, or build.strategy image with a
+	// prebuilt image, which an air gapped installation usually already does.
+	// The enterprise documentation says this in the section naming what the
+	// mode does not cover, which is where a buyer needs it.
+	"engine/internal/build/docker.go": "the application's own image build, governed by the daemon rather than by this process",
 }
 
 // finding is one unguarded construction.
@@ -132,6 +143,21 @@ import "github.com/antifailure/antifailure/engine/pkg/airgap"
 
 func f() { airgap.Reset() }
 `), 0o600))
+	// A pull, in a file that imports nothing this walk would otherwise look at.
+	// That is the real shape: a file that fetches a container image has no
+	// reason to import net/http.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pull.go"), []byte(`package p
+
+import "context"
+
+func h(ctx context.Context, cli client, ref string) error {
+	if _, err := cli.ImageInspect(ctx, ref); err == nil {
+		return nil
+	}
+	_, err := cli.ImagePull(ctx, ref)
+	return err
+}
+`), 0o600))
 
 	var findings []finding
 	walk(t, dir, dir, &findings)
@@ -142,8 +168,8 @@ func f() { airgap.Reset() }
 	}
 	sort.Strings(got)
 	require.Equal(t, []string{
-		"airgap.Reset", "http.Client", "http.DefaultClient", "http.Get",
-		"net.Dial", "net.LookupHost",
+		"airgap.Reset", "an unguarded ImagePull", "http.Client", "http.DefaultClient",
+		"http.Get", "net.Dial", "net.LookupHost",
 	}, got, "the walk missed a construction that opens a connection outside the guard")
 }
 
@@ -177,6 +203,14 @@ func g() *http.Client {
 
 func c(ctx context.Context) (*http.Request, error) {
 	return http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
+}
+
+func h(ctx context.Context, cli client, ref string) error {
+	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
+		return err
+	}
+	_, err := cli.ImagePull(ctx, ref)
+	return err
 }
 `), 0o600))
 
@@ -283,10 +317,11 @@ func inspect(t *testing.T, path, rel string) []finding {
 		}
 		names[local] = pkg
 	}
-	if len(names) == 0 {
-		return nil
-	}
-
+	// NOT an early return when names is empty, and that was very nearly a hole.
+	// A file that pulls a container image need not import net/http, net or
+	// crypto/tls at all: L1.1's emulator support imports a Docker client and
+	// nothing else, so an early return here would have skipped the exact file
+	// this rule was written for.
 	var found []finding
 	note := func(pos token.Pos, local, sel string, set map[string]map[string]bool) {
 		pkg, ok := names[local]
@@ -334,7 +369,66 @@ func inspect(t *testing.T, path, rel string) []finding {
 		}
 		return true
 	})
+	found = append(found, imageFetches(file, fset, rel, names)...)
 	return found
+}
+
+// imageFetches finds a container image pull or build that its own function does
+// not check with the guard first.
+//
+// A different rule from the others because it is a different mechanism. Those
+// happen in this process and a dialer can refuse them. A pull happens in the
+// Docker daemon, over a socket the guard never sees, so what the call site has
+// to do is ASK before it hands the work over, and the only thing a source walk
+// can check is that it asked.
+//
+// The rule is that the enclosing function mentions the guard somewhere. That is
+// coarse on purpose: proving that the check dominates the call would need
+// control flow analysis, and a walk that tried would be wrong in ways nobody
+// could predict. Coarse is enough for what this catches, which is a function
+// that pulls an image and has never heard of the air gap.
+//
+// It was written for a pull that had not landed yet. L1.1's emulator support
+// adds a third ImagePull, for LocalStack and Azurite, with the same inspect
+// first shape as the two this branch guarded. Without this rule it would merge
+// into an air gapped installation that silently reaches a registry, and the
+// only thing that would have noticed is somebody remembering.
+func imageFetches(file *ast.File, fset *token.FileSet, rel string, names map[string]string) []finding {
+	var out []finding
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		var fetches []*ast.SelectorExpr
+		guarded := false
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "ImagePull", "ImageBuild":
+				fetches = append(fetches, sel)
+			}
+			if id, ok := sel.X.(*ast.Ident); ok {
+				if names[id.Name] == "airgap" || id.Name == "airgap" {
+					guarded = true
+				}
+			}
+			return true
+		})
+		if guarded {
+			continue
+		}
+		for _, sel := range fetches {
+			out = append(out, finding{
+				path: rel, line: fset.Position(sel.Pos()).Line,
+				what: "an unguarded " + sel.Sel.Name,
+			})
+		}
+	}
+	return out
 }
 
 // guardedTransport reports whether a composite literal sets Transport from the
