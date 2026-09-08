@@ -148,6 +148,7 @@ runner/artifacts/
 /fieldsweep
 /figurecheck
 /gatecheck
+/gendrift
 /installcheck
 /installsh
 /keycheck

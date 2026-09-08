@@ -113,7 +113,7 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: runner
 
-      - name: Generated files are current
+      - name: The generators run, and so do the tests of the packages they live in
         # The error catalog and the sidecar's packaged source are generated and
         # checked in. A drift between the generator and what is committed is
         # invisible until somebody wonders why their change did nothing.
@@ -135,6 +135,16 @@ jobs:
         # A release published a fresh file while this repository carried a stale
         # one, and the stale one is what a legal review opens. No release job
         # can see that half of it, because it never reads the committed copy.
+        #
+        # Named for what it does rather than for what the next step checks.
+        # Four of these are `go test <pkg> -update-something`, which runs the
+        # WHOLE package, so a test in engine/internal/cli that has nothing to
+        # do with the committed reference fails here. Under the old name this
+        # step said "Generated files are current", and on 2026-09-08 it said
+        # that about three pull requests whose generated files were fine and
+        # whose cli tests were red. Three lanes went to look at the wrong
+        # thing, which is what a step name that asserts more than the step
+        # checked costs.
         run: |
           go run ./tools/errgen
           go run ./tools/lintgen
@@ -148,7 +158,24 @@ jobs:
           go run ./tools/eventcheck -freeze .
           (cd engine && go test ./internal/masking -update-transforms)
           (cd engine && go test ./internal/hud -update-frames)
-          git diff --exit-code
+
+      - name: Generated files are current
+        # Now this step fails for one reason and says which generator to run.
+        #
+        # It used to be `git diff --exit-code` on the end of the block above,
+        # which printed a diff and stopped. A diff names the file that moved.
+        # It does not name which of the thirteen generators owns it, and the
+        # only remedy a reader could infer was `just generate`, the entire set,
+        # several minutes of npm and Docker. Eight of the eleven pull requests
+        # that failed this on 2026-09-08 needed exactly one generator, and for
+        # six of them it was `go run ./tools/docsembed`, which takes a second.
+        #
+        # -strict because this is a clean checkout: anything at all that
+        # changed here was written by a generator, so a changed path the ledger
+        # does not claim means something writes an artifact that nothing
+        # compares. `just gate` runs the same tool without it, because a
+        # developer is always in the middle of an edit.
+        run: go run ./tools/gendrift -strict .
 
       - name: The engine's parsers survive arbitrary input
         # The manifest is a file from the repository under test, and the
