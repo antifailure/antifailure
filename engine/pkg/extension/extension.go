@@ -741,6 +741,32 @@ func (r *Registry) databaseNames() []string {
 	return out
 }
 
+func (r *Registry) ReplaceDatabaseProvider(p DatabaseProvider) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.databases {
+		if existing.Name() == p.Name() {
+			r.databases[i] = p
+			return true
+		}
+	}
+	return false
+}
+
+// ReplaceDatabaseProvider substitutes the provider registered under a name,
+// and reports whether there was one.
+//
+// It exists for one purpose and this comment names it rather than leaving a
+// general mutator on a registry: the enterprise edition puts a licence gate in
+// front of every registered cloud provider, and a decorator has to take the
+// registration's PLACE rather than sit beside it. Two providers under one name
+// are refused by Validate, and if they were not, the engine would use whichever
+// was registered first, which is the ungated one.
+//
+// A name that is not already registered is NOT added, and false says so. Adding
+// it would turn a typo inside a decorator into a provider a manifest can name
+// and nobody wrote, which is the opposite of what a decorator is for.
+
 // AddDatastoreProvider registers a provider for a store other than the
 // environment's primary Postgres.
 func (r *Registry) AddDatastoreProvider(p DatastoreProvider) {
@@ -808,6 +834,21 @@ func (r *Registry) runtimeNames() []string {
 		out = append(out, p.Name())
 	}
 	return out
+}
+
+// ReplaceRuntimeProvider substitutes the runtime registered under a name, and
+// reports whether there was one. See ReplaceDatabaseProvider for why this
+// exists and why a name that is not registered is not added.
+func (r *Registry) ReplaceRuntimeProvider(p RuntimeProvider) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.runtimes {
+		if existing.Name() == p.Name() {
+			r.runtimes[i] = p
+			return true
+		}
+	}
+	return false
 }
 
 // AddGoldenStore registers somewhere else a published golden can live.

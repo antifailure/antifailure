@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
+	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
@@ -174,6 +175,25 @@ func main() {
 		// facts and only one of them is visible from the receiving end.
 		fmt.Fprintf(os.Stderr, "af: audit sink: configured, and audit_stream is not licensed "+
 			"on this installation, so nothing is forwarded\n")
+	// The licence gate on the managed cloud providers, and it goes LAST,
+	// after every registration above, because it wraps what is registered at
+	// the moment it runs and cannot see a registration made after it. Every
+	// MIT provider is built into the engine and reached by the engine's own
+	// switch, which never consults the registry, so a database or runtime
+	// provider that arrives through the registry is by the editions rule one
+	// that needed an organization: that is what makes "registered" the
+	// definition of "cloud" here rather than a list of vendor names somebody
+	// has to keep in step.
+	//
+	// Unconditional rather than under a licence, for the reason the policy
+	// hook above gives: the gate asks the licence per call, so a licence that
+	// lapses mid process stops enforcement without a restart, and gating the
+	// installation instead would mean a process that started before a renewal
+	// never enforces again.
+	if wrapped := cloudgate.Wrap(extension.Default); wrapped > 0 {
+		fmt.Fprintf(os.Stderr,
+			"af: %d cloud providers are behind the cloud_database and cloud_runtime "+
+				"features\n", wrapped)
 	}
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)
