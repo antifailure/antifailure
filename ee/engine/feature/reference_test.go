@@ -48,6 +48,8 @@ const (
 	entitlementsEnd   = "<!-- entitlements:end -->"
 	countStart        = "<!-- entitlement-count:start -->"
 	countEnd          = "<!-- entitlement-count:end -->"
+	namesStart        = "<!-- entitlement-names:start -->"
+	namesEnd          = "<!-- entitlement-names:end -->"
 )
 
 // effect is the column that decides whether the page is worth reading: what a
@@ -89,6 +91,36 @@ func entitlementTable() string {
 	return b.String()
 }
 
+// namesSentence is the list of names itself, in the sentence a reader meets
+// before the table.
+//
+// Generated for the reason countSentence gives, and for one more that is
+// particular to this sentence. The control plane's catalogue test compares the
+// page against the licence by reading a bounded window under this heading,
+// because reading the whole page would pick up every name mentioned in prose
+// anywhere on it and would pass a page that had stopped listing the catalogue
+// at all. The table does not fit in that window and cannot be made to: twelve
+// rows are two thousand characters. So the window needs a list, and a list
+// typed by hand under a generated table is a fourth copy of the twelve names,
+// sitting inside the one document whose subject is what happens when the copies
+// disagree.
+
+func namesSentence() string {
+	all := license.AllFeatures()
+	if len(all) == 0 {
+		return "A license carries no features.\n"
+	}
+	names := make([]string, 0, len(all))
+	for _, f := range all {
+		names = append(names, "`"+string(f)+"`")
+	}
+	list := names[0]
+	if len(names) > 1 {
+		list = strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
+	return "The features a license can name are " + list + ".\n"
+}
+
 // countSentence is the number, on the page, in the words a customer would use.
 //
 // Generated rather than typed, for the reason the masking reference gives about
@@ -121,7 +153,9 @@ func TestTheLicensingPageIsCurrentWithTheCatalogue(t *testing.T) {
 	raw, err := os.ReadFile(licensingPath)
 	require.NoError(t, err)
 
-	want, err := splice(string(raw), countStart, countEnd, countSentence())
+	want, err := splice(string(raw), namesStart, namesEnd, namesSentence())
+	require.NoError(t, err)
+	want, err = splice(want, countStart, countEnd, countSentence())
 	require.NoError(t, err)
 	want, err = splice(want, entitlementsStart, entitlementsEnd, entitlementTable())
 	require.NoError(t, err)

@@ -110,6 +110,10 @@ license leaves you with it rather than with nothing.
 
 ## What is in `ee/`
 
+<!-- entitlement-names:start -->
+The features a license can name are `air_gapped`, `audit_stream`, `billing`, `compliance_packs`, `enterprise_dashboard`, `enterprise_secrets`, `multi_runtime`, `policy_enforcement`, `rbac`, `scim`, `sso` and `support_access`.
+<!-- entitlement-names:end -->
+
 <!-- entitlement-count:start -->
 Of the 12 features a license can carry, **3 are refused when the license does not name them**. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
