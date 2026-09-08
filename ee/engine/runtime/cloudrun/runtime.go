@@ -1,3 +1,5 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 package cloudrun
 
 import (
@@ -128,7 +130,11 @@ func (p *Provider) Open(_ context.Context, cfg extension.RuntimeConfig) (provide
 		"start, so an environment here starts under a deny all egress rule. It is harder in the " +
 		"place that lane closed: a Fargate task may carry no task role, and Cloud Run has no way " +
 		"to run a service with no identity, so the metadata server vends a token whatever else " +
-		"this plan says. Two open paths have no field that closes them and one is undecided by " +
+		"this plan says. That endpoint cannot be closed here even in principle, because closing " +
+		"it would break the documented way one Cloud Run service calls another, which is to " +
+		"fetch an ID token from it with the target's URL as the audience. It is a property of " +
+		"the platform rather than a setting somebody left wrong. Two open paths have no field " +
+		"that closes them and one is undecided by " +
 		"Google's own documentation. Use runtime.provider kubernetes against GKE, where a " +
 		"NetworkPolicy closes the resolver along with everything else and the probe that proves " +
 		"it runs before any application image.\n")

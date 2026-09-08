@@ -2,6 +2,9 @@
 // beside it, it is a proof about containment rather than a placer of
 // containers.
 //
+// Not MIT. This directory is covered by the Antifailure Enterprise License;
+// see ee/LICENSE.md.
+//
 // It was written after the ECS lane and it deliberately does NOT inherit that
 // lane's verdicts. Two clouds that both have a link local metadata address do
 // not have the same containment problem, and the differences found here are
