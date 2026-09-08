@@ -20,13 +20,20 @@ of the whole cloud database wave, the sentence the product is sold on is a
 sentence about seconds, and the number a buyer is given comes from it.
 
 `CopyOnWrite_BranchTimeMatchesTheDeclaration` measures it, in the units the
-claim is made in. Two goldens are built, one with a gibibyte of ballast the
-suite writes through the mask callback every provider already calls, and both
-are branched several times alternately, taking the fastest of each. A provider
-declaring copy on write must not have grown; a provider declaring it false
-must have. Those two requirements are complementary, so one of the two possible
-declarations is refused on every run whatever the stopwatch says, and there is
-no reading under which both pass.
+claim is made in. Two goldens are built, one carrying half a gibibyte of
+ballast the suite writes through the mask callback every provider already
+calls, and both are branched several times alternately, taking the fastest of
+each. A provider declaring copy on write must not have grown; a provider
+declaring it false must have. Those two requirements are complementary, so one
+of the two possible declarations is refused on every run whatever the stopwatch
+says, and there is no reading under which both pass.
+
+The boundary is measured rather than fixed: twice the spread the small golden's
+own branch times showed during that run, floored at a quarter of a second. So
+the check is sharper on a quiet machine and refuses to accuse an honest
+provider on a loaded one, and every run prints the copy rate it was actually
+able to refuse, because a pass whose bound is invisible is a pass nobody can
+weigh.
 
 The false side is enforced as hard as the true side. A provider that understates
 its own branching is wrong in the same published table as one that invents it,
