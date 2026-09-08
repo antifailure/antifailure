@@ -11,7 +11,8 @@ import (
 //
 // The rule this follows is the one L0.1 exists to enforce: every new interface
 // ships with a broken fake and a self test in the same commit. The database
-// conformance suite in this repository declared twenty four behaviours and had
+// conformance suite in this repository declared twenty four behaviours at the
+// time this was written and had
 // never been shown to fail a single one, and a behaviour that has never gone
 // red is a function call, not a check.
 //

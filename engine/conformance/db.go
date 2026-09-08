@@ -22,7 +22,7 @@
 // That second rule is met by both suites. The runtime suite is proved by
 // fakeruntime_test.go and runtime_selftest_test.go; the database suite by
 // db_selftest_test.go, against the two fakes in internal/testutil/fakes. Every
-// one of the twenty four behaviours below has a fault that turns it red, and
+// one of the twenty six behaviours below has a fault that turns it red, and
 // the self test fails if one of them stops going red, if a behaviour passes by
 // skipping, or if a recorded gap quietly closes without the record being
 // removed.
@@ -69,6 +69,27 @@ type Options struct {
 	// SkipSlow omits the behaviors that create several branches, for a run
 	// against a provider that bills per branch.
 	SkipSlow bool
+	// CopyOnWriteSmallBytes and CopyOnWriteLargeBytes are how much ballast the
+	// two goldens of CopyOnWrite_BranchTimeMatchesTheDeclaration carry. Zero
+	// uses the defaults in cow.go, which explains how they were chosen and why
+	// the ratio between them has a floor a run cannot go under.
+	CopyOnWriteSmallBytes int64
+	CopyOnWriteLargeBytes int64
+	// CopyOnWriteSamples is how many branches are timed per size. Zero uses
+	// the default.
+	CopyOnWriteSamples int
+	// CopyOnWriteTimeout bounds CopyOnWrite_BranchTimeMatchesTheDeclaration
+	// alone. Zero uses DefaultCopyOnWriteTimeout.
+	//
+	// A separate number rather than the shared one, because that behaviour is
+	// structurally more expensive than every other in the suite by a wide
+	// margin: it builds two goldens, one of them half a gibibyte, and branches
+	// each of them several times, where the rest build one small golden and
+	// branch it once or twice. A single timeout tuned for the others is too short for
+	// this one, and one tuned for this one stops a hung call anywhere else
+	// failing the behaviour rather than the job, which is what the timeout is
+	// for.
+	CopyOnWriteTimeout time.Duration
 }
 
 // DefaultSeedSQL is the schema every conformance run works against.
@@ -142,6 +163,8 @@ var databaseBehaviors = []Behavior{
 	{"Cancellation_LeavesNoUntrackedResource", "A cancelled branch leaves either nothing or something the inventory reports.", ""},
 	{"GoldenGC_RefusesAReferencedVersion", "Destroying a golden that a branch came from is refused.", ""},
 	{"Refresh_DoesNotDisturbExistingBranches", "A new golden version leaves branches of an older one untouched.", ""},
+	{"Branch_IsWithinTheDeclaredLatency", "Branching the conformance dataset finishes inside the latency the provider declares.", ""},
+	{"CopyOnWrite_BranchTimeMatchesTheDeclaration", "Branch time grows with the data if and only if the provider declares CopyOnWrite false.", ""},
 }
 
 // RunDatabase runs the whole suite against a provider.
@@ -176,7 +199,17 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 				// make.
 				t.Skipf("skipped: %s does not declare %s", nameOf(probe), reason)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+			limit := opts.Timeout
+			if b.Name == "CopyOnWrite_BranchTimeMatchesTheDeclaration" {
+				limit = opts.CopyOnWriteTimeout
+				if limit <= 0 {
+					limit = DefaultCopyOnWriteTimeout
+				}
+				if limit < opts.Timeout {
+					limit = opts.Timeout
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), limit)
 			defer cancel()
 			runBehavior(ctx, t, b.Name, factory, opts, created)
 		})
@@ -379,6 +412,10 @@ func runBehavior(ctx context.Context, t *testing.T, name string, factory Factory
 		h.goldenGCRefusesAReferencedVersion(ctx)
 	case "Refresh_DoesNotDisturbExistingBranches":
 		h.refreshDoesNotDisturbBranches(ctx)
+	case "Branch_IsWithinTheDeclaredLatency":
+		h.branchIsWithinTheDeclaredLatency(ctx)
+	case "CopyOnWrite_BranchTimeMatchesTheDeclaration":
+		h.copyOnWriteMatchesTheDeclaration(ctx)
 	default:
 		t.Fatalf("conformance: no implementation for behavior %q", name)
 	}
@@ -544,6 +581,27 @@ func (h *harness) capabilitiesAreSelfConsistent() {
 	if h.p.Name() == "" {
 		h.t.Fatal("a provider must have a name, which is what a manifest refers to")
 	}
+	// CopyOnWrite is deliberately not checked HERE, and the two suites reading
+	// the same field differently is worth explaining rather than leaving to
+	// look like an oversight.
+	//
+	// The datastore suite's two copy on write rules are self consistency
+	// rules: it refuses copy on write declared without branching, and copy on
+	// write declared without a golden. Neither has a subject on this side. A
+	// database provider that does not declare Branching has already been
+	// refused at the top of this function, because the interface says a
+	// provider without it is not a database provider; and Caps has no Golden
+	// field, because RefreshGolden is a method every database provider
+	// implements, so there is no configuration in which a database provider
+	// has no golden to share storage with. Restating either rule here would be a branch no
+	// input can reach, and an unreachable check is indistinguishable from a
+	// check that works right up until somebody relies on it.
+	//
+	// What the field needed was not another self consistency rule but a way to
+	// be FALSIFIED, which is CopyOnWrite_BranchTimeMatchesTheDeclaration in
+	// cow.go. Self consistency asks whether a declaration contradicts its
+	// neighbours. It cannot ask whether the declaration is true, and copy on
+	// write is a claim about the world rather than about the struct.
 }
 
 func (h *harness) refreshProducesAVerifiedGolden(ctx context.Context) {

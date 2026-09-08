@@ -101,7 +101,16 @@ func (d *InMemoryDatabase) Capabilities() provider.Caps {
 		Branching:             true,
 		PooledEndpoints:       true,
 		MaxConcurrentBranches: inMemoryBranchLimit,
-		ExpectedBranchLatency: time.Millisecond,
+		// A second, for a provider whose branch is a map insert.
+		//
+		// It was a millisecond, which was true and is no longer wise. Nothing
+		// checked the field then; Branch_IsWithinTheDeclaredLatency checks it
+		// now, and this fake runs in a subprocess on a machine with fifteen
+		// other lanes on it, where a map insert that is descheduled crosses a
+		// millisecond without anything being wrong. A declaration is a promise
+		// the provider has to keep on a bad day, not a boast about a good one,
+		// and the first thing the new assertion did was make this one honest.
+		ExpectedBranchLatency: time.Second,
 		SupportedVersions:     []int{17},
 	}
 }
