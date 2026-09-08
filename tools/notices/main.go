@@ -38,6 +38,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/antifailure/antifailure/engine/pkg/emulator"
 )
 
 type module struct {
@@ -277,6 +279,20 @@ func render(targets []target, mods []module) string {
 	for _, m := range mods {
 		fmt.Fprintf(&b, "- `%s` %s\n", m.Path, m.Version)
 	}
+	b.WriteString("\n## Container images\n\n")
+	b.WriteString("An environment starts an emulator when a manifest asks for one, and an\n")
+	b.WriteString("emulator is somebody else's software running beside the application.\n")
+	b.WriteString("It is not linked into the binary, so the module list above cannot see\n")
+	b.WriteString("it, and an image whose licence is recorded by hand goes stale the\n")
+	b.WriteString("first time a digest is bumped. These come from the declarations the\n")
+	b.WriteString("engine starts the containers from.\n\n")
+	for _, e := range emulator.Builtin() {
+		fmt.Fprintf(&b, "- %s, %s. %s\n", e.Project, e.Licence.Name, e.Licence.Holder)
+		fmt.Fprintf(&b, "  - Answers for %s as `%s`\n", e.Vendor, e.Name())
+		fmt.Fprintf(&b, "  - `%s`\n", e.Image)
+		fmt.Fprintf(&b, "  - %s\n", e.Licence.URL)
+	}
+
 	b.WriteString("\n## Node packages\n\n")
 	b.WriteString("The agent runner depends on Playwright, which is Apache 2.0 licensed,\n")
 	b.WriteString("and on its own transitive dependencies. Run `npm ls --all` inside\n")
