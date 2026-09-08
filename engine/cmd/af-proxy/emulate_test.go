@@ -173,7 +173,14 @@ func TestEmulate_TheAuthorizationHeaderIsForwardedUntouched(t *testing.T) {
 	// Sandbox mode replaces a credential because the request leaves the
 	// environment. This one does not leave, so replacing it would break a
 	// SigV4 signature for no benefit at all.
-	const signed = "AWS4-HMAC-SHA256 Credential=AKIATESTTESTTESTTEST/20260907/us-east-1/s3/" +
+	// AKIDEXAMPLE, which is the key id AWS publishes in its own SigV4 test
+	// vectors, and NOT an AKIA one. livekey recognises AKIA followed by at
+	// least sixteen characters, so a plausible looking AKIATEST... vector
+	// trips the wire, the request is refused before it is routed, and the
+	// emulator sees nothing. The test then fails claiming the Authorization
+	// header was rewritten, which is the opposite of what happened. That is
+	// how this test failed the first time it ran.
+	const signed = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260907/us-east-1/s3/" +
 		"aws4_request, SignedHeaders=host;x-amz-date, Signature=abc123"
 	fake := newFakeEmulatorServer(t)
 	s, _ := emulatingSidecar(t, "s3.amazonaws.com", hostPortOf(t, fake.URL), "localstack")
@@ -193,8 +200,12 @@ func TestEmulate_TheDecisionRecordsTheKeyIDAndNeverTheSecret(t *testing.T) {
 	// misconfigured application and a real cloud account is the tripwire, and
 	// a refusal is auditable only if the ACCEPTED requests say which key they
 	// carried.
-	const keyID = "AKIATESTTESTTESTTEST"
-	const secret = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"
+	const keyID = "AKIDEXAMPLE"
+	// A distinctive string rather than a credential shaped one. What this
+	// test asserts is that the value does not reach the log, and any value
+	// nothing else writes proves that; a literal shaped like an AWS secret
+	// would be refused by the repository scanner for looking like one.
+	const secret = "af-conformance-this-must-not-reach-the-log"
 	fake := newFakeEmulatorServer(t)
 	s, _ := emulatingSidecar(t, "s3.amazonaws.com", hostPortOf(t, fake.URL), "localstack")
 
@@ -272,7 +283,7 @@ func TestEmulate_ALiveCredentialIsRefusedBeforeTheEmulatorSeesIt(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodGet, "https://s3.amazonaws.com/mybucket", nil)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE"+
+	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIA"+strings.Repeat("A", 16)+
 		"/20260907/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=deadbeef")
 	got := sendEmulated(t, s, req)
 
@@ -319,9 +330,9 @@ func TestAccessKeyID_ReadsTheIdentifierAndNeverTheSecret(t *testing.T) {
 	cases := []struct {
 		name, header, want string
 	}{
-		{"sigv4", "AWS4-HMAC-SHA256 Credential=AKIATESTTESTTESTTEST/20260907/us-east-1/" +
-			"s3/aws4_request, SignedHeaders=host, Signature=abc", "AKIATESTTESTTESTTEST"},
-		{"sigv4 with no scope", "AWS4-HMAC-SHA256 Credential=AKIATESTTESTTESTTEST", "AKIATESTTESTTESTTEST"},
+		{"sigv4", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260907/us-east-1/" +
+			"s3/aws4_request, SignedHeaders=host, Signature=abc", "AKIDEXAMPLE"},
+		{"sigv4 with no scope", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE", "AKIDEXAMPLE"},
 		{"azure shared key", "SharedKey devstoreaccount1:ZmFrZXNpZ25hdHVyZQ==", "devstoreaccount1"},
 		{"azure shared key lite", "SharedKeyLite myaccount:ZmFrZQ==", "myaccount"},
 		// A bearer token is a secret in its entirety, so there is no

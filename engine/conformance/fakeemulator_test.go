@@ -65,17 +65,19 @@ const (
 	emuFlawHasARouteOut            = "has-a-route-out"
 )
 
-// awsExampleKey is the access key AWS publishes for documentation.
+// awsExampleKey is a key shaped like a live one and belonging to nobody.
 //
-// It is shaped like a live key on purpose, which is the whole point of a
-// tripwire vector, and it belongs to nobody. livekey recognises AKIA followed
-// by sixteen characters, so this is detected by the real detector rather than
-// by an exception for it.
-const awsExampleKey = "AKIAIOSFODNN7EXAMPLE"
+// Assembled at run time rather than written down, which is the convention
+// engine/pkg/livekey's own tests follow and it is not decoration: a literal
+// that looks like a credential is a literal the repository scanner refuses,
+// and a vector carved out with an exception is a vector the real detector is
+// no longer being asked about. livekey recognises AKIA followed by at least
+// sixteen characters, so this is detected by the shipping detector.
+var awsExampleKey = "AKIA" + strings.Repeat("A", 16)
 
-const awsExampleAuthorization = "AWS4-HMAC-SHA256 Credential=" + awsExampleKey +
+var awsExampleAuthorization = "AWS4-HMAC-SHA256 Credential=" + awsExampleKey +
 	"/20260907/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=" +
-	"0000000000000000000000000000000000000000000000000000000000000000"
+	strings.Repeat("0", 64)
 
 // fakeEmulator is one emulator handle. The store is shared across the handles
 // one run creates, because RunEmulator builds a fresh handle per behaviour and

@@ -434,6 +434,14 @@ type DecisionJSON struct {
 	// Pack and Fixture name what answered a mocked request.
 	Pack    string `json:"pack,omitempty"`
 	Fixture string `json:"fixture,omitempty"`
+	// Emulator names which emulator answered, and KeyID is the access key
+	// identifier the request was signed with, never the secret.
+	//
+	// The pair is what makes an emulated call auditable. An emulator verifies
+	// no signature, so a script asking "did anything reach the events store
+	// carrying a key nobody meant to use" has nothing else to read.
+	Emulator string `json:"emulator,omitempty"`
+	KeyID    string `json:"key_id,omitempty"`
 	// Duration is how long the request took, WaitedMs how much of that the
 	// policy itself held it for, and Limit that rate in words. Without the
 	// last two, a request the policy deliberately slowed reads as an
@@ -544,6 +552,7 @@ func decisionDoc(d local.Decision) DecisionJSON {
 		Bytes: d.Bytes, Reason: d.Reason, Error: d.Error,
 		Substituted: d.Substituted, Synthesized: d.Synthesized,
 		Pack: d.Pack, Fixture: d.Fixture,
+		Emulator: d.Emulator, KeyID: d.KeyID,
 		Duration: d.Duration, WaitedMs: d.WaitedMs, Limit: d.Limit,
 		Via: d.Via, HostOnly: d.HostOnly, Seq: d.Seq,
 	}
