@@ -58,6 +58,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -191,36 +192,53 @@ const (
 // measured against: how much extra branch time is attributable to noise rather
 // than to the extra data.
 //
-// It is the OBSERVED SPREAD of the small arm, doubled, with an absolute floor.
-// The spread is this machine, during this run, saying how far its own readings
-// travel while the data is held constant, which is the exact quantity the
-// allowance is meant to be. Taken from the small arm rather than the large one
-// because the minimum already absorbs a slow large sample, and what inflates
-// the growth is an anomalously FAST small one. Doubled because three readings
-// underestimate a range, and heavily so on a machine whose load is drifting.
+// It is twice the gap between the small arm's BEST and SECOND BEST readings,
+// with an absolute floor. That is a narrower quantity than the range of all
+// the samples, and the difference between the two is the whole of this
+// function's reasoning.
+//
+// The verdict compares MINIMA, so the allowance has to describe how far a
+// minimum can move, and the direct evidence for that is the second best
+// reading. The full range describes how far the WORST reading can move, which
+// the minimum has already thrown away.
+//
+// It matters because branching warms up, and warm up is not noise. Measured on
+// a native Postgres 17 at load thirty: three copies of an eight mebibyte
+// golden took 1.199s, 0.292s and 0.174s, and three copies of a golden five
+// hundred and twelve mebibytes larger took 7.440s, 5.296s and 3.608s. Both
+// arms fall monotonically, because the first copy pays for a cold cache and
+// for the checkpoint that building the golden just dirtied. The range of the
+// small arm is 1.025s and it is almost entirely that warm up; the gap between
+// its two best readings is 0.118s and that is the noise. Feeding the range in
+// made the allowance 2.05s against a growth of 3.43s, a margin of 1.7 which is
+// close enough to flake. The gap makes it the 250ms floor, and the margin 13.7.
+//
+// Both arms warm up together, so taking the minimum of each already cancels
+// it, and charging the allowance for it as well would be paying for the same
+// effect twice out of the instrument's ability to see a copy.
 //
 // The ABSOLUTE FLOOR covers a provider whose branching is quick enough that
-// the spread is a few milliseconds and any hiccup would clear it. A quarter of
-// a second survives taking the minimum of several alternating samples, and it
-// is a small fraction of what moving half a gibibyte costs on any storage that
+// the gap is a few milliseconds and any hiccup would clear it. A quarter of a
+// second survives taking the minimum of several alternating samples, and it is
+// a small fraction of what moving half a gibibyte costs on any storage that
 // exists.
 //
-// It USED to carry a third term, half the small arm's own minimum, as a proxy
-// for the noise on a provider whose timings move by seconds. Measuring the
-// thing it was a proxy for is what removed it. On the shared cluster at load
-// twenty six, the small arm read 30.4s and 26.8s: a spread of 3.6s, where half
-// the minimum was 13.4s. The proxy was four times the noise it stood in for,
-// and every second of that came out of the instrument's ability to see a copy.
-// When the quantity can be measured, a proxy for it is a threshold nobody has
-// checked, which is the same defect as the capability this file exists to
-// falsify.
+// This function has now been wrong twice in the same direction, and both times
+// the correction came from a measurement rather than an argument. It was half
+// the small arm's own minimum, a proxy for noise that measured four times the
+// noise it stood in for. Then it was the range, which measured warm up. A
+// threshold nobody has pointed at real readings is exactly the sort of
+// unchecked declaration this file exists to falsify, and this one is in the
+// falsifier.
 //
 // A real limit remains and the failure messages state it: sensitivity is
 // bounded by how still the provider's own timings are, so the instrument is
 // sharp on a steady provider and blunt on an erratic one, and the remedy is a
 // larger large size rather than a smaller allowance.
 func copyOnWriteAllowance(smallTimes []time.Duration) time.Duration {
-	allowance := (maxDuration(smallTimes) - minDuration(smallTimes)) * copyOnWriteSpreadFactor
+	sorted := append([]time.Duration(nil), smallTimes...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	allowance := (sorted[1] - sorted[0]) * copyOnWriteSpreadFactor
 	if allowance < copyOnWriteNoiseFloor {
 		allowance = copyOnWriteNoiseFloor
 	}
@@ -724,16 +742,6 @@ func minDuration(ds []time.Duration) time.Duration {
 		}
 	}
 	return best
-}
-
-func maxDuration(ds []time.Duration) time.Duration {
-	worst := ds[0]
-	for _, d := range ds[1:] {
-		if d > worst {
-			worst = d
-		}
-	}
-	return worst
 }
 
 func durationsText(ds []time.Duration) string {
