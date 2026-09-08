@@ -101,7 +101,7 @@ func (o *Orchestrator) RecordTraffic(from string) (traffic.Profile, error) {
 	// The path relative to the repository, never an absolute one. The profile
 	// is committed, and an absolute path in it names somebody's home directory
 	// to everyone who reads the file afterwards.
-	source := string(format) + " export " + o.relative(path)
+	source := describeFormat(format) + " " + o.relative(path)
 	switch format {
 	case traffic.FormatOTel:
 		p, err := traffic.FromOTLP(body, source, o.opts.Clock.Now())
@@ -163,6 +163,15 @@ func (o *Orchestrator) trafficSource(from string) (path string, format traffic.F
 				"OpenTelemetry export or an access log, and reading one as the other finds no "+
 				"traffic at all. Name it .json for an OTLP export or .log for an access log")
 	}
+}
+
+// describeFormat names a source in the words somebody uses for it, because the
+// profile's source line is read by whoever reviews the committed file.
+func describeFormat(f traffic.Format) string {
+	if f == traffic.FormatOTel {
+		return "otel export"
+	}
+	return "access log"
 }
 
 // relative renders a path inside the repository as a repository path.

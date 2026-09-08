@@ -497,6 +497,44 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## `load`
+
+The whole block is in [Load](/docs/concepts/load). One key is here because it
+is the counterpart of `database.volume` above.
+
+### `traffic`
+
+```yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+```
+
+The committed record of what production actually serves. Without it
+`safe_routes` is a list written from memory and nothing says how much of
+production it misses. Measured on this repository on 2026-09-06: a migration
+held an exclusive lock on nine relations for thirty seconds and the run over
+four hand written routes reported 0.0 percent failed, because none of the four
+reads the locked table.
+
+`af traffic record` writes the profile from an OpenTelemetry trace export or a
+combined format access log, both files a collector or a reverse proxy already
+wrote. It carries the endpoint mix, the arrival rate, production's p95 per
+route and the peak concurrency, and no request body, header, query string or
+identifier. Nothing in it opens a socket and no application code changes, which
+is why the result is safe to commit, which it has to be: the check running on a
+pull request cannot reach production.
+
+With a profile, the traffic dimension states what fraction of production's
+requests the run actually sends and names the heaviest route it never touches,
+the arrival rate is stated beside production's own, and `p95_increase` becomes
+able to fire under a source that carries no durations of its own.
+
+A profile past `max_age` is refused rather than quoted. Fourteen days by
+default, where the volume profile's is thirty: an endpoint mix moves at the rate
+a team ships, and a volume profile at the rate a business grows.
+
 ## `fidelity`
 
 | Key | Notes |
