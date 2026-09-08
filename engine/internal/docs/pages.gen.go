@@ -1740,7 +1740,7 @@ anybody.
 | ` + "`" + `third_party` + "`" + ` | The hosts the egress policy names, the mode each is in, and which mock pack answers for the ones in mock mode. |
 | ` + "`" + `auth` + "`" + ` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | ` + "`" + `runtime` + "`" + ` | Where the environment runs. |
-| ` + "`" + `traffic` + "`" + ` | Where the endpoint mix comes from, through the same code the load run uses. |
+| ` + "`" + `traffic` + "`" + ` | Which routes a load run would actually send, measured against the committed traffic profile of what production served, and how fast it sends against production's own rate. With no profile both are ` + "`" + `unmeasured` + "`" + ` and say so: four routes somebody wrote by hand used to report as a reproduction of production's traffic. |
 | ` + "`" + `datastores` + "`" + ` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares ` + "`" + `golden` + "`" + ` and this environment branched reports what the branch holds and which golden it came from, the way ` + "`" + `database` + "`" + ` does. One declared ` + "`" + `golden` + "`" + ` that nothing branched is ` + "`" + `absent` + "`" + `. The others are ` + "`" + `unmeasured` + "`" + ` by name. |
 | ` + "`" + `topology` + "`" + ` | How many instances of each service are running, against how many the manifest asked for. |
 
@@ -2092,6 +2092,9 @@ load:
   duration: 5m
   safe_routes: ["GET /**", "POST /api/search"]
   unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -2176,6 +2179,63 @@ Everything else works: the mix, the relative weights and the arrival rate,
 which is counted from the timestamps rather than assumed. When no line carries
 a readable timestamp the report says the arrival rate was assumed rather than
 presenting a guess as production's number.
+
+## What production actually serves
+
+` + "`" + "`" + "`" + `yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+` + "`" + "`" + "`" + `
+
+A route list written by hand cannot know which routes touch which tables.
+Measured on the Antifailure repository on 2026-09-06: a migration held an
+` + "`" + `ACCESS EXCLUSIVE` + "`" + ` lock on nine relations for thirty seconds, ` + "`" + `pg_locks` + "`" + `
+confirmed it from a second connection, and ` + "`" + `af load smoke` + "`" + ` ran through the
+whole window reporting 0.0 percent failed with p95 improving from 41ms to 17ms.
+None of its four ` + "`" + `safe_routes` + "`" + ` reads the locked table. It was not a weak
+result. It was a green one.
+
+` + "`" + `af traffic record` + "`" + ` counts what production served, from an OpenTelemetry trace
+export or a combined format access log that a collector or a reverse proxy
+already wrote, and writes a profile you commit beside the manifest:
+
+| It records | From a trace export | From an access log |
+| --- | --- | --- |
+| The endpoint mix, per route | yes | yes |
+| The arrival rate, over the window it saw | yes | yes |
+| Production's p95, per route | yes | no, a log line carries no duration |
+| Peak concurrency | yes | no |
+
+It carries no request body, no header, no query string and no identifier: a
+path with an identifier in it collapses to ` + "`" + `/users/{id}` + "`" + ` before it is counted,
+so what lands in the file is a route and a number. Nothing here opens a socket,
+there is no agent, and no application code changes. The file is one you already
+have.
+
+` + "`" + "`" + "`" + `
+af traffic record --from telemetry/traces.json
+af traffic show
+` + "`" + "`" + "`" + `
+
+` + "`" + `af traffic show` + "`" + ` prints what production serves, busiest route first, with a
+mark against every route your run reaches, and prints the ` + "`" + `safe_routes` + "`" + ` lines
+that would cover the ones it does not. It prints them. It does not write them:
+this measures and states, and the manifest confirms it. A route being served in
+production is not a promise that sending it a thousand times is safe.
+
+With a profile, three things change. The fidelity report's traffic dimension
+states the fraction of production's requests your run actually sends and names
+the heaviest route it never touches, instead of reporting any shape at all as
+a reproduction. The arrival rate is stated beside production's own. And
+` + "`" + `p95_increase` + "`" + ` becomes able to fire under ` + "`" + `access_log` + "`" + ` and ` + "`" + `none` + "`" + `, because the
+profile carries the baseline the source could not.
+
+A profile older than ` + "`" + `max_age` + "`" + ` is refused rather than quoted, the way a stale
+golden is refused rather than branched. Fourteen days by default, where the
+volume profile's is thirty: an endpoint mix moves at the rate a team ships, and
+a volume profile at the rate a business grows.
 
 ## Safe and unsafe routes
 
@@ -2316,11 +2376,17 @@ source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
 
-Which means the threshold needs a source that carries durations, and only
-` + "`" + `otel` + "`" + ` does. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + ` is refused by the
-manifest, and the default is not applied there either: a threshold the report
-lists and no route can be measured against is a check everybody believes is
-running.
+Which means the threshold needs durations from somewhere, and the traffic
+source carries them only under ` + "`" + `otel` + "`" + `. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + `
+with nothing else to compare against is refused by the manifest, and the
+default is not applied there either: a threshold the report lists and no route
+can be measured against is a check everybody believes is running.
+
+The second place a baseline can come from is a recorded traffic profile, which
+carries production's own p95 per route. Declare ` + "`" + `load.traffic.profile` + "`" + ` and the
+threshold is allowed under any source, because the comparison now has something
+on the other side of it. The run says which routes took their baseline from the
+profile, and says so when none could.
 
 ` + "`" + "`" + "`" + `
 AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of
@@ -14546,6 +14612,106 @@ af token rm afe_1a2b3c4d
 | --- | --- | --- |
 | ` + "`" + `--control-plane` + "`" + ` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
+### ` + "`" + `af traffic` + "`" + `
+
+What production serves, and how much of it a load run actually sends.
+
+A load run sends the routes safe_routes names. Without a traffic profile
+nothing says how much of production that is, so four routes written by hand
+report in the same words and with the same verdict as a mix read from a week of
+production telemetry.
+
+That is not a cosmetic gap. Measured on this repository on 2026-09-06: a
+migration held an exclusive lock on nine relations for thirty seconds and the
+load run over four hand written routes reported 0.0 percent failed, because
+none of the four reads the locked table. A hand written route list cannot know
+which routes touch which tables.
+
+A profile is the endpoint mix, the arrival rate, the peak concurrency and the
+per route p95, counted from telemetry a team already has. It carries no request
+body, no header, no query string and no identifier. It is a count per route,
+which is what makes it safe to commit beside the manifest, and committing it is
+the point: the check running on a pull request cannot reach production.
+
+Declare where it lives under load.traffic.profile, and how old it may be under
+load.traffic.max_age. A profile past that age is refused rather than quoted.
+
+` + "`" + "`" + "`" + `
+af traffic
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af traffic show
+` + "`" + "`" + "`" + `
+
+Subcommands:
+
+- [` + "`" + `af traffic record` + "`" + `](#af-traffic-record) Count what production served from a trace export or an access log.
+- [` + "`" + `af traffic show` + "`" + `](#af-traffic-show) Print what production serves and which of it this run sends.
+
+### ` + "`" + `af traffic record` + "`" + `
+
+Count what production served from a trace export or an access log.
+
+Reads the file load.source_config.path names, which --from overrides, and
+writes the profile to the path load.traffic.profile names, which --out
+overrides.
+
+Two sources, both of them a file. An OpenTelemetry trace export in OTLP/JSON
+answers every question the profile asks, because a span carries a start and an
+end: the mix, the rate, the per route p95 a threshold compares against, and the
+peak concurrency. A combined format access log answers the mix and the rate,
+and says in the profile that it could answer neither of the others.
+
+Nothing here opens a socket, and there is no agent to install. The file is one
+a collector or a reverse proxy already wrote.
+
+` + "`" + "`" + "`" + `
+af traffic record [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Counts an OpenTelemetry export or an access log a collector already
+# wrote. Nothing here opens a socket and there is no agent to install.
+af traffic record
+af traffic record --from telemetry/traces.json --out .antifailure/traffic.json
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
+| ` + "`" + `--from` + "`" + ` | - | Read this file instead of the one load.source_config.path names. |
+| ` + "`" + `--out` + "`" + ` | - | Write the profile here instead of where the manifest says. |
+
+### ` + "`" + `af traffic show` + "`" + `
+
+Print what production serves and which of it this run sends.
+
+Reads the profile the manifest names and prints it, busiest route first, with a
+mark against every route a load run would actually send.
+
+The routes with no mark are the finding. They are what production serves and
+this run never touches, so they are what a green run says nothing about, and
+the safe_routes lines that would cover them are printed at the end for somebody
+to read and paste. Nothing is written for you: this measures and states, and
+the manifest confirms it.
+
+A profile older than load.traffic.max_age is REFUSED rather than printed with a
+warning beside it. A stale denominator is not a smaller number, it is an
+unknown one.
+
+` + "`" + "`" + "`" + `
+af traffic show [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+af traffic show
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
+
 ### ` + "`" + `af up` + "`" + `
 
 Create an environment for the current branch.
@@ -18006,6 +18172,44 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
+## ` + "`" + `load` + "`" + `
+
+The whole block is in [Load](/docs/concepts/load). One key is here because it
+is the counterpart of ` + "`" + `database.volume` + "`" + ` above.
+
+### ` + "`" + `traffic` + "`" + `
+
+` + "`" + "`" + "`" + `yaml
+load:
+  traffic:
+    profile: .antifailure/traffic.json
+    max_age: 336h
+` + "`" + "`" + "`" + `
+
+The committed record of what production actually serves. Without it
+` + "`" + `safe_routes` + "`" + ` is a list written from memory and nothing says how much of
+production it misses. Measured on this repository on 2026-09-06: a migration
+held an exclusive lock on nine relations for thirty seconds and the run over
+four hand written routes reported 0.0 percent failed, because none of the four
+reads the locked table.
+
+` + "`" + `af traffic record` + "`" + ` writes the profile from an OpenTelemetry trace export or a
+combined format access log, both files a collector or a reverse proxy already
+wrote. It carries the endpoint mix, the arrival rate, production's p95 per
+route and the peak concurrency, and no request body, header, query string or
+identifier. Nothing in it opens a socket and no application code changes, which
+is why the result is safe to commit, which it has to be: the check running on a
+pull request cannot reach production.
+
+With a profile, the traffic dimension states what fraction of production's
+requests the run actually sends and names the heaviest route it never touches,
+the arrival rate is stated beside production's own, and ` + "`" + `p95_increase` + "`" + ` becomes
+able to fire under a source that carries no durations of its own.
+
+A profile past ` + "`" + `max_age` + "`" + ` is refused rather than quoted. Fourteen days by
+default, where the volume profile's is thirty: an endpoint mix moves at the rate
+a team ships, and a volume profile at the rate a business grows.
+
 ## ` + "`" + `fidelity` + "`" + `
 
 | Key | Notes |
@@ -19457,6 +19661,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | ` + "`" + `source` + "`" + ` | ` + "`" + `none` + "`" + `, ` + "`" + `otel` + "`" + `, ` + "`" + `access_log` + "`" + ` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to ` + "`" + `none` + "`" + `. |
 | ` + "`" + `source_config` + "`" + ` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | ` + "`" + `thresholds` + "`" + ` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
+| ` + "`" + `traffic` + "`" + ` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | ` + "`" + `unsafe_routes` + "`" + ` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
 ## Load scenario
@@ -19651,6 +19856,15 @@ Take a production shaped slice rather than the whole database. The closure is co
 | ` + "`" + `seed_table` + "`" + ` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | ` + "`" + `seed_where` + "`" + ` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | ` + "`" + `virtual_relationships` + "`" + ` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
+
+## Traffic
+
+The committed record of what production actually serves, which is the denominator every route in a load run is measured against. Without one safe_routes is a list written from memory and nothing says how much of production it misses. Measured on this repository on 2026-09-06: a migration held an exclusive lock on nine relations for thirty seconds and the run over four hand written routes reported 0.0 percent failed, because none of the four reads the locked table.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `max_age` + "`" + ` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to ` + "`" + `336h` + "`" + `. Max length 32. |
+| ` + "`" + `profile` + "`" + ` | string | **yes** | The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier. Max length 512. |
 
 ## Volume
 
