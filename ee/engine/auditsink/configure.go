@@ -52,6 +52,21 @@ const (
 	ObjectStoreURLEnv = "AF_AUDIT_OBJECT_STORE_URL"
 )
 
+// The AWS credential variables the object store sink signs with.
+//
+// Not prefixed with AF_, deliberately, and named here rather than written
+// inline for the same reason as the ones above. A machine that is already set
+// up for the AWS CLI needs nothing else, and inventing AF_AUDIT_AWS_KEY would
+// mean an operator holding a working credential has to copy it under a second
+// name to use it here.
+const (
+	AWSAccessKeyIDEnv     = "AWS_ACCESS_KEY_ID"
+	AWSSecretAccessKeyEnv = "AWS_SECRET_ACCESS_KEY"
+	AWSSessionTokenEnv    = "AWS_SESSION_TOKEN"
+	AWSRegionEnv          = "AWS_REGION"
+	AWSDefaultRegionEnv   = "AWS_DEFAULT_REGION"
+)
+
 // Known are the sinks this build can write to, for the message that lists them
 // when somebody names one that does not exist.
 func Known() []string {

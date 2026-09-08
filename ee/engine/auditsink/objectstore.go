@@ -138,7 +138,7 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 		s.kind = "s3"
 		s.bucket = u.Host
 		s.prefix = strings.Trim(u.Path, "/")
-		s.region = firstNonEmpty(getenv("AWS_REGION"), getenv("AWS_DEFAULT_REGION"), "us-east-1")
+		s.region = firstNonEmpty(getenv(AWSRegionEnv), getenv(AWSDefaultRegionEnv), "us-east-1")
 		s.endpoint = &url.URL{Scheme: "https", Host: "s3." + s.region + ".amazonaws.com"}
 	case isAzureBlob(u):
 		s.kind = "azure_blob"
@@ -170,7 +170,7 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 		if len(parts) > 1 {
 			s.prefix = strings.Trim(parts[1], "/")
 		}
-		s.region = firstNonEmpty(getenv("AWS_REGION"), getenv("AWS_DEFAULT_REGION"), "us-east-1")
+		s.region = firstNonEmpty(getenv(AWSRegionEnv), getenv(AWSDefaultRegionEnv), "us-east-1")
 		s.endpoint = &url.URL{Scheme: u.Scheme, Host: u.Host}
 		s.pathStyle = true
 	default:
@@ -182,16 +182,29 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 	if s.bucket == "" {
 		return nil, fmt.Errorf("%s names no bucket", redact(raw))
 	}
-	s.accessKey = getenv("AWS_ACCESS_KEY_ID")
-	s.secretKey = getenv("AWS_SECRET_ACCESS_KEY")
-	s.session = getenv("AWS_SESSION_TOKEN")
+	s.accessKey = getenv(AWSAccessKeyIDEnv)
+	s.secretKey = getenv(AWSSecretAccessKeyEnv)
+	s.session = getenv(AWSSessionTokenEnv)
 	if s.accessKey == "" || s.secretKey == "" {
 		return nil, fmt.Errorf(
 			"an s3 audit sink signs its requests with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, " +
 				"and one of them is not set on this machine. They are read from the environment " +
 				"rather than from configuration, because configuration is committed")
 	}
-	s.label = "s3://" + s.bucket + "/" + s.prefix
+	// The endpoint is in the label for a store that is not AWS, because the
+	// bucket name alone does not say which server, and two self hosted stores
+	// in one fleet are frequently the same bucket name on different hosts. No
+	// credential can reach this string: the endpoint here is a scheme and a
+	// host, and a query was never part of it.
+	name := s.bucket
+	if s.prefix != "" {
+		name += "/" + s.prefix
+	}
+	if s.pathStyle {
+		s.label = s.endpoint.String() + "/" + name
+	} else {
+		s.label = "s3://" + name
+	}
 	return s, nil
 }
 
