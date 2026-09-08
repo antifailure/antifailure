@@ -120,7 +120,11 @@ func Paths() []Path {
 				"either direction, so the closure named below is nothing rather than a rule " +
 				"somebody forgot to write. The same address also serves DHCP, NTP and DNS, which " +
 				"is why the time service is part of this path rather than beside it.",
-			ClosedBy: "nothing. This is the sharpest difference from the ECS plan beside it, and it " +
+			ClosedBy: "nothing, and it is a dependency rather than only a leak: the documented way " +
+				"for one Cloud Run service to call another is to fetch an ID token from this " +
+				"same endpoint with the target's URL as the audience, so an environment of more " +
+				"than one service needs it answering. This is the sharpest difference from the " +
+				"ECS plan beside it, and it " +
 				"runs the other way: a Fargate task definition may carry no task role, so " +
 				"169.254.170.2 vends nothing, while Cloud Run has no way to run a service with no " +
 				"identity at all. The narrowing available is a dedicated service account holding " +
