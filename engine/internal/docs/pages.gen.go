@@ -4339,6 +4339,24 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
+## Features that cannot be issued
+
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are in the set above, and a request naming
+either of them is refused. Nothing in this product enforces them, so a license
+carrying one would verify, report itself active, print the feature in
+` + "`" + `af license status` + "`" + `, and change nothing about what the software does.
+
+That is a worse failure than an unknown name, because everything about it reads
+as a supported feature: it is in the documentation, in the price list, and in
+the generator's own set. The only two people positioned to discover it are the
+customer who paid and the person who sold it.
+
+Both refusals are in the product rather than in a checklist. The generator will
+not sign one, and the verifier carries the name and never permits it, exactly as
+it treats a feature from a release the binary predates. When either capability
+is built, one entry is removed from ` + "`" + `notShipped` + "`" + ` in
+` + "`" + `ee/engine/license/license.go` + "`" + ` and both refusals lift together.
+
 ## Step three: sign it
 
 The private key arrives in the environment from the vault, for the length of
@@ -4570,6 +4588,32 @@ license leaves you with it rather than with nothing.
 ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `air_gapped` + "`" + `.
 
 Each is named in the license, so a license permits exactly what was bought.
+
+### Two of those cannot be sold
+
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are names in the catalogue and nothing
+else. There is no implementation of either, so there is nothing a license could
+switch on, and both are refused twice: ` + "`" + `tools/licensegen` + "`" + ` will not sign a
+request naming one, and the verifier carries the name through and never permits
+it.
+
+That is deliberate rather than an oversight waiting to be tidied. The
+alternative, a license check placed in front of a capability that does not
+exist, is a declared enforcement site that can never run, which reads as a
+working feature from every direction and is harder to find than the gap it
+covers. A feature nobody can buy and nobody can be granted cannot be mistaken
+for one that ships.
+
+` + "`" + `rbac` + "`" + ` is a third case and a different one. The custom roles library is complete
+and tested, and nothing stores a role model, so an organization has no way to
+have one. It is reported and not enforced, and it is written down here rather
+than gated for the same reason: a check on a path nothing reaches is worse than
+no check.
+
+Both lists are held to the code by a test rather than by a habit. ` + "`" + `notShipped` + "`" + `
+in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place either statement lives,
+and this page, the generator and the enterprise feature registry are all checked
+against it in both directions.
 
 ## Contributing
 
