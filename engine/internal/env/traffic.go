@@ -1,13 +1,13 @@
 package env
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/traffic"
@@ -96,7 +96,8 @@ func (o *Orchestrator) RecordTraffic(from string) (traffic.Profile, error) {
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return traffic.Profile{}, aferrors.Wrap(err, aferrors.AFLOD010, "detail", err.Error())
+		return traffic.Profile{}, fmt.Errorf(
+			"the traffic at %s could not be read: %w", o.relative(path), err)
 	}
 	// The path relative to the repository, never an absolute one. The profile
 	// is committed, and an absolute path in it names somebody's home directory
@@ -106,16 +107,14 @@ func (o *Orchestrator) RecordTraffic(from string) (traffic.Profile, error) {
 	case traffic.FormatOTel:
 		p, err := traffic.FromOTLP(body, source, o.opts.Clock.Now())
 		if err != nil {
-			return traffic.Profile{}, aferrors.Coded(aferrors.AFLOD010,
-				"detail", err.Error()+" in "+o.relative(path))
+			return traffic.Profile{}, fmt.Errorf("%w in %s", err, o.relative(path))
 		}
 		return p, nil
 	default:
 		p, err := traffic.FromAccessLog(
 			strings.Split(string(body), "\n"), source, o.opts.Clock.Now())
 		if err != nil {
-			return traffic.Profile{}, aferrors.Coded(aferrors.AFLOD010,
-				"detail", err.Error()+" in "+o.relative(path))
+			return traffic.Profile{}, fmt.Errorf("%w in %s", err, o.relative(path))
 		}
 		return p, nil
 	}
@@ -133,9 +132,9 @@ func (o *Orchestrator) trafficSource(from string) (path string, format traffic.F
 	if strings.TrimSpace(from) == "" {
 		switch {
 		case cfg == nil || cfg.SourceConfig["path"] == "":
-			return "", "", aferrors.Coded(aferrors.AFLOD010,
-				"detail", "no file was given and the manifest names none, so there is no "+
-					"traffic to record. Pass --from, or set load.source and load.source_config.path")
+			return "", "", errors.New(
+				"no file was given and the manifest names none, so there is no traffic to " +
+					"record. Pass --from, or set load.source and load.source_config.path")
 		case cfg.Source == schema.LoadOTel:
 			return filepath.Join(o.opts.Root, filepath.FromSlash(cfg.SourceConfig["path"])),
 				traffic.FormatOTel, nil
@@ -143,10 +142,9 @@ func (o *Orchestrator) trafficSource(from string) (path string, format traffic.F
 			return filepath.Join(o.opts.Root, filepath.FromSlash(cfg.SourceConfig["path"])),
 				traffic.FormatAccessLog, nil
 		default:
-			return "", "", aferrors.Coded(aferrors.AFLOD010,
-				"detail", fmt.Sprintf("the load source is %q, which reads no traffic, so there "+
-					"is nothing to record from. Pass --from, or set load.source to otel or access_log",
-					cfg.Source))
+			return "", "", fmt.Errorf(
+				"the load source is %q, which reads no traffic, so there is nothing to record "+
+					"from. Pass --from, or set load.source to otel or access_log", cfg.Source)
 		}
 	}
 	if !filepath.IsAbs(from) {
@@ -158,9 +156,9 @@ func (o *Orchestrator) trafficSource(from string) (path string, format traffic.F
 	case ".log", ".txt":
 		return from, traffic.FormatAccessLog, nil
 	default:
-		return "", "", aferrors.Coded(aferrors.AFLOD010,
-			"detail", "nothing in the name of "+filepath.Base(from)+" says whether it is an "+
-				"OpenTelemetry export or an access log, and reading one as the other finds no "+
+		return "", "", errors.New(
+			"nothing in the name of " + filepath.Base(from) + " says whether it is an " +
+				"OpenTelemetry export or an access log, and reading one as the other finds no " +
 				"traffic at all. Name it .json for an OTLP export or .log for an access log")
 	}
 }
