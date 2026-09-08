@@ -47,6 +47,12 @@ type collector struct {
 	peers []net.Conn
 	// refuseDial makes the dial itself fail, which is a receiver that is down.
 	refuseDial bool
+	// onMessage is called the instant a message has been de-framed, which is
+	// the only point at which a receiver could really have parsed the entry.
+	// The benchmark stops its clock here rather than when Write returns,
+	// because a write that returns with bytes still in a kernel buffer has not
+	// put anything in anybody's SIEM.
+	onMessage func()
 }
 
 func recordingSyslog(t *testing.T) *collector {
@@ -121,7 +127,11 @@ func (c *collector) read(conn net.Conn) {
 		}
 		c.mu.Lock()
 		c.messages = append(c.messages, string(body))
+		notify := c.onMessage
 		c.mu.Unlock()
+		if notify != nil {
+			notify()
+		}
 	}
 }
 
