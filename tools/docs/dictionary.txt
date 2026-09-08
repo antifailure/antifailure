@@ -32,6 +32,7 @@ goleak
 gosec
 govulncheck
 kubeconfig
+kubelet
 llms
 lockfile
 lockfiles
