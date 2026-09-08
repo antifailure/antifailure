@@ -17,6 +17,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/verify"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -116,6 +117,23 @@ func (o *Orchestrator) publishGolden(
 		return aferrors.Coded(aferrors.AFDB011, "detail", err.Error())
 	}
 	o.progress(fmt.Sprintf("published %s (%d MiB)", gv.ID, buf.Len()/(1<<20)))
+
+	// Only after both objects have landed, because until the attestation lands
+	// the version is invisible to anything that lists the store and an entry
+	// saying it was published would be a claim about a golden nothing can pull.
+	// This is the entry that matters most in the stream: a golden is a masked
+	// copy of production leaving this machine for a store other people can read
+	// from, so the store's own name travels with it.
+	detail := o.auditDetail()
+	detail["version"] = gv.ID
+	detail["store"] = store.Name()
+	detail["bytes"] = buf.Len()
+	o.audit(ctx, extension.AuditEntry{
+		Action:     "golden.published",
+		TargetType: "golden",
+		TargetID:   gv.ID,
+		Detail:     detail,
+	})
 	return nil
 }
 
@@ -275,6 +293,23 @@ func (o *Orchestrator) pullWithin(ctx context.Context, s *session, version strin
 	if err := o.recordRefresh(ctx, s); err != nil {
 		return result, err
 	}
+
+	// The other direction, and it is a separate action rather than the same one
+	// read backwards. A publish says masked production left this machine; a
+	// pull says a copy of somebody's masked production arrived on it, under a
+	// new local identifier, which is what the two version fields are for.
+	detail := o.auditDetail()
+	detail["version"] = result.Version
+	detail["from"] = result.From
+	detail["store"] = store.Name()
+	detail["bytes"] = result.Bytes
+	detail["verified"] = result.Verified
+	o.audit(ctx, extension.AuditEntry{
+		Action:     "golden.pulled",
+		TargetType: "golden",
+		TargetID:   result.Version,
+		Detail:     detail,
+	})
 	return result, nil
 }
 

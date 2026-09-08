@@ -18,13 +18,15 @@
 //
 // THE SECOND PROMISE is to the person registering it, who expects the engine
 // to ask. This is the one that was already broken when this tool was written.
-// extension.AuditSink has an interface, a registry, an AddAuditSink and a
-// Registry.Audit that forwards to every sink, and NOTHING IN THE ENGINE HAS
-// EVER CALLED Registry.Audit. So audit_stream, a licensed feature, forwards
-// nothing, and it would still forward nothing after somebody wrote the sinks,
-// because there is no call site to hand them an entry. A hook nothing consults
-// is the same shippable gap as a block button that hides nothing: every piece
-// is there and the behaviour is absent.
+// extension.AuditSink had an interface, a registry, an AddAuditSink and a
+// Registry.Audit that forwards to every sink, and NOTHING IN THE ENGINE HAD
+// EVER CALLED Registry.Audit. So audit_stream, a licensed feature, forwarded
+// nothing, and it would still have forwarded nothing after somebody wrote the
+// sinks, because there was no call site to hand them an entry. A hook nothing
+// consults is the same shippable gap as a block button that hides nothing:
+// every piece is there and the behaviour is absent. That one is closed now,
+// which is why AuditSink is not in the list below, and this gate is what
+// stops it reopening quietly.
 //
 // So the rule is: every socket is either CONSULTED by the engine, or listed
 // below as one that is not, with the reason. Both directions fail. A socket
@@ -78,11 +80,21 @@ func main() {
 // An entry is a declaration that the gap is known, not permission for it to
 // stay. Each says what would close it, because "not implemented" without that
 // is how a list like this stops being read.
-var notConsulted = map[string]string{
-	"AuditSink": "Registry.Audit has no caller anywhere in the engine, so a registered " +
-		"sink receives nothing. Closing it means emitting the entries the audit log " +
-		"already writes through the registry as well.",
-}
+// AuditSink was the first entry here and it is deliberately gone rather than
+// commented out: the engine now calls Registry.Audit from
+// engine/internal/env/audit.go and this gate fails an entry that outlives its
+// gap, which is what stops the list becoming a set of exemptions nobody
+// rereads. Deleting it is the half of the fix a compiler cannot ask for.
+//
+// It leaves the list EMPTY, and that is a real state rather than an oversight.
+// Emulator was removed on main by the lane that gave it a caller, AuditSink is
+// removed here, and the two happening within hours of each other is why this
+// resolution deserves reading twice: a rebase that kept either entry would
+// have reinstated a gap that no longer exists and reported a socket as
+// unplugged while the engine consulted it. Nine of nine sockets are consulted
+// now. An entry added back has to name a socket the engine really does ignore,
+// because the gate fails in both directions.
+var notConsulted = map[string]string{}
 
 // inventoryMethods are the registry methods that walk every socket at once.
 //

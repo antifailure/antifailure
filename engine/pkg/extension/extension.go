@@ -153,6 +153,17 @@ type AuditEntry struct {
 	TargetID   string
 	Origin     string
 	Detail     map[string]any
+	// OccurredAt is when the action happened, which is not when a sink saw it.
+	//
+	// A sink forwards over a network that retries, so the instant it stamps is
+	// the instant forwarding succeeded and can be minutes later. A security
+	// team correlating this entry against anything else needs the first of
+	// those, and a stream carrying only the second silently reorders itself
+	// whenever one destination is slow. The zero value means the producer did
+	// not say, and a sink records that as unknown rather than substituting its
+	// own clock, because a guessed timestamp in an audit log is evidence that
+	// is wrong rather than evidence that is missing.
+	OccurredAt time.Time
 }
 
 // AuditSink receives audit entries for forwarding.
