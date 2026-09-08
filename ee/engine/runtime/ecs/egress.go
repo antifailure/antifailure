@@ -669,8 +669,8 @@ func checkInstanceMetadata(p Plan) (Verdict, string) {
 	base := "the launch type is FARGATE, so no EC2 instance profile exists for the endpoint to " +
 		"vend, but AWS does not document whether 169.254.169.254 answers inside a Fargate task " +
 		"and a link local address is not filtered by the security group. Settling this needs " +
-		"one request from one running task, and no probe result has been recorded for this " +
-		"environment. "
+		"one request from one running task, which needs an account, and no probe result has " +
+		"been recorded for this environment. "
 	for _, c := range p.TaskDefinition.Containers {
 		if c.Name == "af-containment-probe" {
 			return Unproven, base + fmt.Sprintf("The task definition carries the probe container "+
