@@ -1,3 +1,6 @@
+// Not MIT. This directory is covered by the Antifailure Enterprise License; see
+// ee/LICENSE.md.
+
 package ecs_test
 
 import (
@@ -34,13 +37,13 @@ func referencePlan() ecs.Plan { return ecs.Generate(reference(), "af-example") }
 // table is to be a thing a person disagrees with. A test that asserted "the
 // report matches Evaluate" would pass for any predicate at all.
 var expected = map[string]ecs.Verdict{
-	"public-ipv4-through-a-gateway":              ecs.Closed,
-	"public-ipv6-through-an-egress-only-gateway": ecs.Closed,
-	"public-resolver-over-udp":                   ecs.Closed,
-	"the-amazon-provided-resolver":               ecs.Closed,
-	"the-ec2-instance-metadata-service":          ecs.Unproven,
-	"the-task-role-credentials-endpoint":         ecs.Closed,
-	"the-task-metadata-endpoint":                 ecs.Open,
+	"public-ipv4-through-a-gateway":                ecs.Closed,
+	"public-ipv6-through-an-egress-only-gateway":   ecs.Closed,
+	"public-resolver-over-udp":                     ecs.Closed,
+	"the-amazon-provided-resolver":                 ecs.Closed,
+	"the-ec2-instance-metadata-service":            ecs.Unproven,
+	"the-task-role-credentials-endpoint":           ecs.Closed,
+	"the-task-metadata-endpoint":                   ecs.Open,
 	"the-interface-endpoints-the-image-pull-needs": ecs.Open,
 	"the-s3-gateway-endpoint-the-layers-come-from": ecs.Open,
 	"the-ecs-exec-channel":                         ecs.Closed,
@@ -132,8 +135,8 @@ func mutations() []mutation {
 			alsoOpens: []string{"a-neighbouring-environment"},
 		},
 		{
-			path: "public-ipv6-through-an-egress-only-gateway",
-			what: "an IPv6 range on the VPC",
+			path:  "public-ipv6-through-an-egress-only-gateway",
+			what:  "an IPv6 range on the VPC",
 			apply: func(p *ecs.Plan) { p.Network.VPC.IPv6CIDR = "2600:1f18::/56" },
 		},
 		{
@@ -313,9 +316,21 @@ func TestEveryPathIsDescribed(t *testing.T) {
 
 // TestTheReportCarriesItsCaveat is the one assertion that guards the honesty of
 // every number this package produces.
+//
+// The second assertion is the load bearing one. A reader must not be able to
+// see "8 closed" without also seeing "2 unproven" in the same breath, because
+// the unproven pair is what stops the eight from reading as a containment
+// guarantee, and a summary that quotes the numerator alone is how a figure
+// stops being true while every word in it stays accurate.
 func TestTheReportCarriesItsCaveat(t *testing.T) {
 	out := ecs.Evaluate(referencePlan()).String()
-	require.Contains(t, out, "8 of 13 egress paths")
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	require.Contains(t, first, "8 of 13 egress paths",
+		"the headline must carry the ratio")
+	require.Contains(t, first, "2 unproven",
+		"the headline must carry the unproven count beside the closed count, so that "+
+			"neither can be quoted without the other")
+	require.Contains(t, first, "3 open")
 	require.Contains(t, out, ecs.Caveat)
 	require.Contains(t, out, "not that AWS was seen enforcing it")
 }

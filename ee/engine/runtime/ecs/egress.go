@@ -1,3 +1,6 @@
+// Not MIT. This directory is covered by the Antifailure Enterprise License; see
+// ee/LICENSE.md.
+
 package ecs
 
 import (
@@ -85,7 +88,7 @@ func Paths() []Path {
 				"outbound IPv6.",
 			ClosedBy: "no IPv6 range on the VPC or its subnets, no egress only gateway route, " +
 				"and no IPv6 egress rule",
-			Check:    checkPublicIPv6,
+			Check: checkPublicIPv6,
 		},
 		{
 			ID:   "public-resolver-over-udp",

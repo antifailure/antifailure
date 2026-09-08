@@ -1,6 +1,9 @@
 // Package ecs is the AWS ECS on Fargate runtime, and it is mostly a proof
 // about containment rather than a placer of containers.
 //
+// Not MIT. This directory is covered by the Antifailure Enterprise License; see
+// ee/LICENSE.md.
+//
 // The Kubernetes runtime earns its existence by creating NetworkPolicy objects
 // and then running a pod that tries to escape four ways before any application
 // image starts, refusing the environment with AF-RUN-043 when any attempt
