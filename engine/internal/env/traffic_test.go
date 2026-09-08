@@ -1,7 +1,10 @@
 package env
 
 import (
+	"context"
 	"flag"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -265,4 +268,70 @@ func trafficOrchestrator(
 	})
 	require.NoError(t, err)
 	return o
+}
+
+// The claim this lane makes about p95_increase, proved by making it fire.
+//
+// The threshold divides a measured p95 by a per route baseline and skips every
+// route that has none, so a run whose routes all arrive without one evaluates
+// nothing and reports no breach, which reads exactly like a run that compared
+// and found nothing wrong. This repository's own manifest documents that state
+// in a comment beside the threshold it removed: "It was set to 0.5 here and had
+// never once been able to fire."
+//
+// Both directions are here, because a check that cannot say no is worse than
+// no check. Without the profile the run is inert and says so; with it the same
+// run against the same server breaches.
+func TestAProfileMakesP95IncreaseAbleToFire(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	// An access log's shape, which is the case the threshold could never fire
+	// under: a combined format line carries no duration, so every route
+	// arrives with no baseline.
+	shape := load.Shape{
+		Source: "access_log", RequestsPerSecond: 40,
+		Routes: []load.Route{{Method: "GET", Path: "/", Weight: 1}},
+	}
+	profile := &traffic.Profile{
+		CollectedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		Requests:    1000,
+		Routes:      []traffic.Route{{Method: "GET", Path: "/", Requests: 1000, P95Ms: 2}},
+	}
+
+	run := func(withProfile bool) *load.Result {
+		t.Helper()
+		s := load.Shape{Source: shape.Source, RequestsPerSecond: shape.RequestsPerSecond}
+		s.Routes = append(s.Routes, shape.Routes...)
+		var p *traffic.Profile
+		if withProfile {
+			p = profile
+		}
+		s, filled := withProfileBaselines(s, p)
+		res, err := load.Run(context.Background(), load.Options{
+			BaseURL: server.URL, Shape: s, Scale: 1,
+			Duration: 400 * time.Millisecond, Concurrency: 4, Seed: 3,
+			Clock: clock.New(), Baselines: baselineNote(s, p, filled, "no profile is declared"),
+		})
+		require.NoError(t, err)
+		return res
+	}
+
+	without := run(false)
+	require.Empty(t, without.Breaches(0.25, 1),
+		"a route with no baseline was compared against something")
+	require.True(t, without.InertP95(0.25),
+		"a threshold in force that measured nothing did not say so")
+	require.Contains(t, without.Baselines, "p95_increase cannot fire")
+
+	with := run(true)
+	require.NotEmpty(t, with.Breaches(0.25, 1),
+		"the profile supplied production's 2ms p95 for a route this server serves in 20ms, "+
+			"and the threshold still did not fire")
+	require.False(t, with.InertP95(0.25))
+	require.Contains(t, with.Baselines, "take their p95 baseline from the traffic profile")
 }
