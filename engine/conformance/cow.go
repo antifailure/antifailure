@@ -74,19 +74,24 @@ import (
 // fast copy "shared storage".
 //
 // A local NVMe file copy runs at roughly two gigabytes a second at the very
-// best. One gibibyte of ballast therefore costs an honest copier at least half
-// a second even on the best hardware this suite will ever meet, and on the
-// machine this was written on, at load twenty six with a hundred foreign
-// containers, Postgres CREATE DATABASE moved it far slower than that. Against
-// an allowance whose absolute floor is a quarter of a second, that is the
-// margin: the fastest plausible honest copy is still twice the allowance, and
-// the realistic one is an order of magnitude past it.
+// best. Half a gibibyte of ballast therefore costs an honest copier a quarter
+// of a second even on the best hardware this suite will ever meet, and a
+// quarter of a second is the allowance's absolute floor. So the default is the
+// smallest size at which a copy running at the speed of the fastest storage
+// that exists is still refused. Larger buys margin nobody needs and costs
+// every run that ever happens; smaller lets a real copy pass as shared storage
+// on a fast disk.
+//
+// None of that asks to be believed. Every run PRINTS the copy rate it was able
+// to refuse, computed from the allowance and the delta it actually measured,
+// so the power of the check is published beside its verdict rather than argued
+// for in a comment somebody would have to find.
 //
 // The small size is not zero. A golden with no ballast at all measures the
 // provider's fixed cost plus whatever a bare Postgres cluster costs to
 // duplicate, and the difference between the two arms would then include the
 // base cluster as well as the ballast. Eight mebibytes is small enough to
-// vanish against a gibibyte and large enough that the small arm is a real
+// vanish against half a gibibyte and large enough that the small arm is a real
 // branch of a real golden rather than a special case.
 //
 // Both are overridable, because a provider that bills per gibibyte or per
@@ -98,16 +103,16 @@ const (
 	// DefaultCopyOnWriteSmallBytes is the ballast in the small golden.
 	DefaultCopyOnWriteSmallBytes int64 = 8 << 20
 	// DefaultCopyOnWriteLargeBytes is the ballast in the large golden.
-	DefaultCopyOnWriteLargeBytes int64 = 1 << 30
+	DefaultCopyOnWriteLargeBytes int64 = 512 << 20
 	// DefaultCopyOnWriteSamples is how many branches are timed per size.
 	DefaultCopyOnWriteSamples = 3
 	// DefaultCopyOnWriteTimeout bounds this behaviour alone.
 	//
 	// Half an hour, which is long by the standards of every other behaviour in
 	// the suite and is what the work actually is on the slowest provider that
-	// runs it. The docker provider's golden is a committed IMAGE, so a
-	// gibibyte of ballast is a gibibyte written into a container and then
-	// tarred into a layer, twice, before any branch is timed at all. A
+	// runs it. The docker provider's golden is a committed IMAGE, so the
+	// ballast is written into a container and then tarred into a layer, twice,
+	// before any branch is timed at all. A
 	// behaviour bounded at the suite's usual few minutes would report that
 	// provider as hung rather than as slow, and the difference matters: one is
 	// a defect and the other is the cost of the measurement.
@@ -128,21 +133,28 @@ const (
 	// MinCopyOnWriteLargeBytes is the least ballast the large golden may
 	// carry, and it is a derived number rather than a taste.
 	//
-	// The ratio floor above stops a run making the two goldens the same size,
-	// but it does not stop a run making them BOTH small, and small is the
-	// direction that grants a free pass to the declaration this behaviour
-	// exists to refuse. A provider claiming copy on write passes trivially
-	// when the extra data costs less to copy than the allowance, so the large
-	// size has to be big enough that copying it costs more than the
-	// allowance's absolute floor even on the fastest storage anybody will run
-	// this on. A quarter of a second at two gigabytes a second is five hundred
-	// and twelve megabytes, so that is the floor, and the default is twice it.
+	// The ratio floor above stops a run making the two goldens the same size.
+	// This one stops a run making them BOTH so small that the arms differ only
+	// in name: below about sixty four mebibytes the ballast is comparable to
+	// what a bare Postgres cluster occupies before anything is put in it, and
+	// two goldens are then two goldens of one size wearing different labels.
 	//
-	// Shrinking the sizes toward this floor is not a way to pass: it makes the
-	// FALSE side stricter, because an honest copier then has less to copy and
-	// has to clear the same allowance. The floor is the only direction that
-	// needed defending.
-	MinCopyOnWriteLargeBytes int64 = 512 << 20
+	// It sits far below the default rather than at it, and that is a decision
+	// with a cost rather than a rounding. Small is the direction that grants a
+	// free pass, because a provider claiming copy on write passes trivially
+	// once the extra data costs less to copy than the allowance. What stops a
+	// run buying a cheap pass that way is not this number, which cannot be
+	// both affordable on every provider and strong on every provider. It is
+	// that the run PUBLISHES the copy rate it was able to refuse, on every run,
+	// pass or fail. A configuration too weak to refuse anything says so in its
+	// own output, where a floor set high enough to make that impossible would
+	// instead have made the behaviour too expensive to run, and the first
+	// thing anybody reached for would be the way to turn it off.
+	//
+	// Shrinking the sizes is not a way to pass the FALSE side either: an
+	// honest copier then has less to copy and has to clear the same allowance,
+	// so it fails, and the failure names the size that would have decided it.
+	MinCopyOnWriteLargeBytes int64 = 64 << 20
 )
 
 // The allowance, which is the single boundary both sides of the assertion are
@@ -267,6 +279,16 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	deltaGiB := float64(delta) / float64(1<<30)
 	marginal := grown.Seconds() / deltaGiB
 
+	// The POWER of the check, published on every run beside its verdict.
+	//
+	// It is the sentence a configured threshold cannot say for itself: a copy
+	// slower than this was refused, and a faster one was not distinguishable
+	// from shared storage at the size and on the machine this run used. A
+	// reader should not have to reconstruct the instrument's blind spot from
+	// three constants and a comment, and a green run that cannot state what it
+	// could have refused is the shape of check this whole file exists against.
+	refusable := allowance.Seconds() / deltaGiB
+
 	// The measurement is logged whatever the verdict, because the number is
 	// the deliverable as much as the pass is, and because a failure nobody can
 	// see the readings behind is a failure nobody can act on.
@@ -276,13 +298,14 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 		"  large golden ballast     %s, branch times %s, min %s\n"+
 		"  extra data               %s\n"+
 		"  extra branch time        %s, allowance %s\n"+
-		"  marginal cost            %.2f seconds per GiB\n",
+		"  marginal cost            %.2f seconds per GiB\n"+
+		"  this run could refuse    a copy slower than %.2f seconds per GiB, and nothing faster\n",
 		h.p.Name(), caps.CopyOnWrite,
 		bytesText(smallBytes), durationsText(smallTimes), ts.Round(time.Millisecond),
 		bytesText(largeBytes), durationsText(largeTimes), tl.Round(time.Millisecond),
 		bytesText(delta),
 		grown.Round(time.Millisecond), allowance.Round(time.Millisecond),
-		marginal)
+		marginal, refusable)
 
 	if caps.CopyOnWrite {
 		if grown > allowance {
@@ -296,6 +319,14 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 				bytesText(delta), grown.Round(time.Millisecond),
 				allowance.Round(time.Millisecond), marginal)
 		}
+		// A pass here is a bounded claim and it says so. The bound is the
+		// number printed above: this run refused every copy slower than
+		// `refusable` seconds per GiB and could not have refused a faster one,
+		// so a green is "not copying at any rate this configuration can see"
+		// rather than "not copying". The remedy for a reader who wants a
+		// stronger statement is a larger Options.CopyOnWriteLargeBytes, and
+		// naming it here is the difference between a limit and a blind spot.
+
 		// The declared latency, checked at the LARGE size, which is where the
 		// claim is actually worth something. A provider whose branch time does
 		// not grow with the data has no reason to exceed at a gibibyte what it
