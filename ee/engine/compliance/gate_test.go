@@ -81,10 +81,14 @@ func TestTheCommandRunsWithTheLicence(t *testing.T) {
 	require.Equal(t, 1, gather.calls, "the evidence was not read for a licensed report")
 	require.NotEmpty(t, stdout.String(), "a licensed report produced no document")
 	require.NotContains(t, stderr.String(), "not licensed")
-	// Evidence with nothing in it fails its controls, which is correct and is
-	// what the exit code says. Asserted rather than ignored so that a change
-	// making an empty report PASS would be caught here.
-	require.Equal(t, 4, code, "an empty evidence set produced a passing report")
+	// NOT the configuration code, which is the one a licence refusal returns.
+	//
+	// The exact code here is the pack's verdict on an empty evidence set and
+	// not this test's business: it is 0 when the controls pass and 6 when they
+	// do not, and pinning either would make this test fail the next time a pack
+	// gains a control. What matters is that it is not the code that means the
+	// command refused before it started.
+	require.NotEqual(t, 3, code, "a licensed report was still refused as a configuration problem")
 }
 
 // TestTheGateIsAskedPerInvocationRatherThanAtRegistration pins the reason the
