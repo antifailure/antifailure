@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -113,6 +114,9 @@ var runtimeBehaviors = []Behavior{
 
 	{"Up_RunsTheNumberOfInstancesAsked", "A service asking for three instances gets three, and one asking for none gets one.", ""},
 	{"Up_InstancesAreSeparateProcesses", "The instances of a service are distinct processes, not one process counted three times.", "logs"},
+
+	{"Up_AppliesTheSizeAsked", "A service asking for a CPU and a memory size is reported running at that size, and one asking for nothing is not given that size.", ""},
+	{"Up_TheSizeIsEnforcedInsideTheContainer", "The memory cap is the one the service's own process is subject to, not a number the runtime wrote down.", "logs"},
 
 	{"Status_ReportsRunningServices", "Status names what is running and reports it ready.", ""},
 	{"Status_ReportsAnExitCode", "A service that has finished carries the code it exited with.", ""},
@@ -411,6 +415,11 @@ func runRuntimeBehavior(
 	case "Up_InstancesAreSeparateProcesses":
 		h.upInstancesAreSeparateProcesses(ctx)
 
+	case "Up_AppliesTheSizeAsked":
+		h.upAppliesTheSizeAsked(ctx)
+	case "Up_TheSizeIsEnforcedInsideTheContainer":
+		h.upTheSizeIsEnforcedInsideTheContainer(ctx)
+
 	case "Status_ReportsRunningServices":
 		h.statusReportsRunningServices(ctx)
 	case "Status_ReportsAnExitCode":
@@ -511,6 +520,48 @@ func (h *rtHarness) replicated(name, command string, replicas int) provider.Serv
 	s.Replicas = replicas
 	return s
 }
+
+// sized is a worker that stays up and asks for a specific size.
+func (h *rtHarness) sized(name, command string, milliCPU, memoryBytes int64) provider.ServiceSpec {
+	s := h.worker(name, command)
+	s.CPUMillis = milliCPU
+	s.MemoryBytes = memoryBytes
+	return s
+}
+
+// The size the two size behaviors ask for.
+//
+// Small enough to be placed on any machine that can run this suite at all, and
+// well over the Docker daemon's own six megabyte floor, so that a failure here
+// means "the size was not applied" rather than "the machine was full". A
+// quarter of a core is also enough for busybox to keep answering, which
+// matters because the readiness wait runs under the cap this sets.
+const (
+	behaviorMilliCPU    = 250
+	behaviorMemoryBytes = 64 * 1024 * 1024
+)
+
+// cgroupStamp prints the memory cap the service's OWN process is subject to,
+// and then stays up.
+//
+// This is the observation that cannot be faked from the outside. A runtime
+// that accepts resources.memory and emits no requirement reports exactly what
+// a correct one reports, and the count behaviors' argument applies here word
+// for word: the only thing that tells the two apart is asking from inside.
+//
+// Both cgroup layouts are read. v2 keeps the cap in memory.max and v1 in
+// memory/memory.limit_in_bytes, and a check that knew only one would report
+// "not applied" on a machine whose kernel uses the other, which is a false
+// failure and the worst kind of one. When neither is readable it prints a word
+// rather than nothing, so that "could not look" arrives as its own answer
+// instead of as an empty log the behavior would wait out.
+const cgroupStamp = "echo " + cgroupMarker +
+	"$(cat /sys/fs/cgroup/memory.max 2>/dev/null || " +
+	"cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo unreadable); sleep 120"
+
+// cgroupMarker prefixes the cap so it can be found in a log that also carries
+// whatever else the image printed.
+const cgroupMarker = "af-memory-max-"
 
 // instanceStamp is a command that prints an identity no other instance of the
 // same service shares, and then stays up.
@@ -1126,6 +1177,172 @@ func keysOf(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (h *rtHarness) upAppliesTheSizeAsked(ctx context.Context) {
+	id := h.envID("size1")
+	env, err := h.up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Services: []provider.ServiceSpec{
+			h.sized("sized", "sleep 120", behaviorMilliCPU, behaviorMemoryBytes),
+			// Declared alongside, and asking for nothing. Without it a
+			// runtime that put the same size on everything would pass, and
+			// "the size asked for" would mean nothing because it would not be
+			// a choice.
+			h.worker("unsized", "sleep 120"),
+		},
+	})
+	if err != nil {
+		h.t.Fatalf("Up: %v", err)
+	}
+	h.sizeIs(env.Services, "sized", behaviorMilliCPU, behaviorMemoryBytes)
+	h.sizeIsNotTheOther(env.Services, "unsized")
+
+	// Asked again through Status, because Up returns what the runtime intended
+	// and Status returns what it can still see. A runtime that sends a
+	// requirement and creates an object without one is only visible from the
+	// second question.
+	h.waitForReady(ctx, id, "sized")
+	after, err := h.r.Status(ctx, id)
+	if err != nil {
+		h.t.Fatalf("Status: %v", err)
+	}
+	h.sizeIs(after.Services, "sized", behaviorMilliCPU, behaviorMemoryBytes)
+	h.sizeIsNotTheOther(after.Services, "unsized")
+}
+
+// sizeIs asserts a service is reported running at the size it asked for.
+func (h *rtHarness) sizeIs(
+	services []provider.RunningService, name string, milliCPU, memoryBytes int64,
+) {
+	h.t.Helper()
+	for _, s := range services {
+		if s.Name != name {
+			continue
+		}
+		if s.CPUMillis != milliCPU || s.MemoryBytes != memoryBytes {
+			h.t.Errorf("service %q asked for %dm of CPU and %d bytes of memory and the "+
+				"runtime reports %dm and %d. A size accepted and applied nowhere is the "+
+				"failure this field exists to stop: the service runs uncapped, one "+
+				"environment starves another, and the symptom is a workflow that reads "+
+				"as flaky",
+				name, milliCPU, memoryBytes, s.CPUMillis, s.MemoryBytes)
+		}
+		return
+	}
+	h.t.Errorf("service %q is not in the report at all, so nothing can be said about "+
+		"the size it is running at", name)
+}
+
+// sizeIsNotTheOther asserts a service that asked for nothing did not get the
+// size the service beside it asked for.
+//
+// NOT that it reports zero, deliberately. A cluster with a LimitRange gives an
+// unsized pod a default request, and reporting that is correct rather than
+// wrong: it is the size the pod is actually running at, which is what this
+// field means. What would be wrong is the runtime handing every service the
+// one size some other service named, because then the size is not a choice and
+// the behavior above proves nothing.
+func (h *rtHarness) sizeIsNotTheOther(services []provider.RunningService, name string) {
+	h.t.Helper()
+	for _, s := range services {
+		if s.Name != name {
+			continue
+		}
+		if s.CPUMillis == behaviorMilliCPU && s.MemoryBytes == behaviorMemoryBytes {
+			h.t.Errorf("service %q asked for no size at all and the runtime reports it "+
+				"running at exactly the size the service beside it asked for, %dm and "+
+				"%d bytes. The size is then not something a manifest chooses",
+				name, behaviorMilliCPU, behaviorMemoryBytes)
+		}
+		return
+	}
+	h.t.Errorf("service %q is not in the report at all", name)
+}
+
+// upTheSizeIsEnforcedInsideTheContainer is the control on the behavior above.
+//
+// A reported size is a number the runtime writes down, and a runtime that
+// writes 64Mi while emitting no requirement reports exactly what a correct one
+// does. The only thing that tells the two apart is an observation from inside:
+// a capped process sees its cap in its own cgroup, and an uncapped one sees
+// max. This is the same argument pod-never-governed makes for the containment
+// behaviors, and the same one Up_InstancesAreSeparateProcesses makes for the
+// count.
+func (h *rtHarness) upTheSizeIsEnforcedInsideTheContainer(ctx context.Context) {
+	reader, ok := h.r.(provider.LogReader)
+	if !ok {
+		h.t.Fatal("the runtime declares Logs but does not implement provider.LogReader")
+	}
+	id := h.envID("size2")
+	if _, err := h.up(ctx, provider.EnvSpec{
+		EnvID: id,
+		Services: []provider.ServiceSpec{
+			h.sized("capped", cgroupStamp, behaviorMilliCPU, behaviorMemoryBytes),
+		},
+	}); err != nil {
+		h.t.Fatalf("Up: %v", err)
+	}
+
+	for {
+		lines, err := reader.Logs(ctx, id, "capped", 200)
+		if err != nil {
+			h.t.Fatalf("Logs: %v", err)
+		}
+		for _, l := range lines {
+			_, after, found := strings.Cut(l.Text, cgroupMarker)
+			if !found {
+				continue
+			}
+			h.cgroupCapIs(strings.TrimSpace(after), behaviorMemoryBytes)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.t.Errorf("the service never printed the memory cap its own process is "+
+				"subject to, so whether the cap was applied at all is unknown. That is "+
+				"reported as a failure rather than as a pass on purpose: a check that "+
+				"could not look has to say so, and the runtime under test is the most "+
+				"likely reason a container never ran its command")
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// cgroupCapIs reads what the container said its own cap was.
+//
+// Rounding down to a page boundary is allowed, because a kernel may store a
+// cap it can enforce rather than the byte the manifest named. Anything LARGER
+// is refused without tolerance, since that is the direction "not applied"
+// lies in and the whole point of asking.
+func (h *rtHarness) cgroupCapIs(got string, want int64) {
+	h.t.Helper()
+	const pageSlack = 64 * 1024
+	switch {
+	case got == "unreadable":
+		h.t.Errorf("the container could not read its own cgroup, so whether the %d byte "+
+			"cap was applied is unknown. Reported as a failure rather than skipped, "+
+			"because a check that cannot say no is worse than no check", want)
+		return
+	case got == "max":
+		h.t.Errorf("the service asked for %d bytes of memory and its own cgroup says "+
+			"max, which is no cap at all. The runtime reported a size it never applied, "+
+			"which is exactly what a runtime that applied one reports", want)
+		return
+	}
+	n, err := strconv.ParseInt(got, 10, 64)
+	if err != nil {
+		h.t.Errorf("the container reported its memory cap as %q, which is not a number "+
+			"of bytes and not the word max, so nothing can be concluded about the cap", got)
+		return
+	}
+	if n > want || n < want-pageSlack {
+		h.t.Errorf("the service asked for %d bytes of memory and its own cgroup says %d. "+
+			"A cgroup larger than the request is a cap that was reported and not applied; "+
+			"a much smaller one is a cap that is not the one the manifest asked for",
+			want, n)
+	}
 }
 
 // --- status --------------------------------------------------------------

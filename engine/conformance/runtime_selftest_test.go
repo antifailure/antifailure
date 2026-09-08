@@ -54,6 +54,8 @@ const (
 	flawPodNeverGoverned            = "pod-never-governed"
 	flawIgnoresReplicas             = "ignores-replicas"
 	flawOneInstancePretendsToBeMany = "one-instance-pretends-to-be-many"
+	flawIgnoresResources            = "ignores-resources"
+	flawSizeNeverApplied            = "size-never-applied"
 )
 
 // negativeControls pairs each flaw with the behavior that has to notice it.
@@ -110,6 +112,17 @@ var negativeControls = []struct {
 	// against itself. This is the same argument as flawPodNeverGoverned: the
 	// observation has to come from inside.
 	{flawOneInstancePretendsToBeMany, "--- FAIL: TestRuntimeSuiteChild/Up_InstancesAreSeparateProcesses"},
+	{flawIgnoresResources, "--- FAIL: TestRuntimeSuiteChild/Up_AppliesTheSizeAsked"},
+	// The pair that makes the reported size mean anything, and it is the same
+	// argument again.
+	//
+	// A size is a number the runtime writes down, and a runtime that writes
+	// 64Mi while emitting no requirement reports exactly what a correct one
+	// reports. The behavior above cannot tell them apart. Without this row the
+	// applied size would be a claim the suite checks against itself, which is
+	// what it was for the whole time both runtimes accepted resources.memory
+	// and neither applied it.
+	{flawSizeNeverApplied, "--- FAIL: TestRuntimeSuiteChild/Up_TheSizeIsEnforcedInsideTheContainer"},
 	// Not a behavior. The leak check runs after every behavior has passed, and
 	// it is the one assertion a green suite can still fail.
 	{flawLeaksOnTeardown, "the suite left"},
