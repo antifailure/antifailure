@@ -57,18 +57,18 @@ func TestJavaScriptSDK_ReachesTheEmulatorThroughDNSWithNoEndpointOverride(t *tes
 	// An INTERNAL network, which is what an environment's inner network is.
 	// The application has nowhere to send a packet the router does not carry,
 	// and the probe proves that rather than assuming it.
-	run(t, "docker", "network", "rm", jsNetwork)
+	tryRun(t, "docker", "network", "rm", jsNetwork)
 	mustRun(t, "docker", "network", "create", "--internal", jsNetwork)
-	t.Cleanup(func() { run(t, "docker", "network", "rm", jsNetwork) })
+	t.Cleanup(func() { tryRun(t, "docker", "network", "rm", jsNetwork) })
 
 	// The emulator the Go suite already started, reached by name on this
 	// network. One emulator rather than two, because a second copy of a half
 	// gigabyte container proves nothing the first does not.
 	mustRun(t, "docker", "network", "connect", jsNetwork, live.container.Name)
-	t.Cleanup(func() { run(t, "docker", "network", "disconnect", jsNetwork, live.container.Name) })
+	t.Cleanup(func() { tryRun(t, "docker", "network", "disconnect", jsNetwork, live.container.Name) })
 
 	image := emulatorImage(t)
-	run(t, "docker", "rm", "-f", jsRouter)
+	tryRun(t, "docker", "rm", "-f", jsRouter)
 	mustRun(t, "docker", "run", "-d", "--name", jsRouter,
 		"--network", jsNetwork,
 		"-v", binary+":/emuroute:ro",
@@ -79,7 +79,7 @@ func TestJavaScriptSDK_ReachesTheEmulatorThroughDNSWithNoEndpointOverride(t *tes
 		"-listen", ":443",
 		"-emulator", live.container.Name+":"+fmt.Sprint(emulator.AWSPort),
 		"-ca-cert", "/ca.pem", "-ca-key", "/ca.key")
-	t.Cleanup(func() { run(t, "docker", "rm", "-f", jsRouter) })
+	t.Cleanup(func() { tryRun(t, "docker", "rm", "-f", jsRouter) })
 	routerIP := waitForRouter(t)
 
 	// The environment's resolver, in the smallest form this test can build.
@@ -261,7 +261,11 @@ func mustRun(t *testing.T, name string, args ...string) string {
 	return string(out)
 }
 
-func run(t *testing.T, name string, args ...string) {
+// tryRun runs a command and discards its failure, for the docker teardown that
+// has to survive there being nothing to tear down. It is not named run because
+// aws_sdk_test.go declares a run of its own in this same external test package,
+// and two files that each read fine alone do not compile together.
+func tryRun(t *testing.T, name string, args ...string) {
 	t.Helper()
 	_ = exec.Command(name, args...).Run()
 }
