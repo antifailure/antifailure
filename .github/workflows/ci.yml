@@ -890,7 +890,16 @@ jobs:
         # cspell owns spelling, with the project dictionary in
         # tools/docs/dictionary.txt. Adding a word is a one line diff a
         # reviewer can read.
-        run: npx --yes cspell --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
+        #
+        # Pinned, like vale below and like every action in this file. Floating
+        # on the tag resolved a version whose own sibling package was not
+        # published yet: on 2026-09-08 this step died with "No matching version
+        # found for cspell-gitignore@10.3.0" on one pull request, and passed on
+        # the next twenty minutes later, having checked nothing in between. A
+        # required context that reports failure because a registry was mid
+        # publish is a check nobody can read, and it is the same class of red
+        # this repository keeps mistaking for a test failure.
+        run: npx --yes cspell@10.3.0 --no-progress "docs/src/content/docs/**/*.md" "examples/**/*.md" README.md CONTRIBUTING.md SECURITY.md
 
       - name: Prose style
         # The Google developer documentation style at error level, plus the
