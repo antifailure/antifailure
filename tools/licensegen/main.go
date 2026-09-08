@@ -152,6 +152,27 @@ var knownFeatures = []string{
 	"support_access",
 }
 
+// notShipped is the subset of knownFeatures that nothing in the product
+// enforces, and it is a second COPY for the same reason knownFeatures is one:
+// this tool is MIT and ee/engine/license is not. Held to the original by
+// TestNotShippedMatchesTheVerifier, which parses the map out of license.go.
+//
+// Signing one of these is the failure that made the list exist. A request
+// naming enterprise_dashboard produced a valid license for a capability that
+// has never been built: it verified, reported active, printed in af license
+// status, and changed nothing, and the only people who could have discovered
+// that were the customer who paid for it and the salesperson who promised it.
+// Refusing at issue time is the only place the set can be closed, because the
+// verifier has to stay permissive about names it does not know.
+//
+// The refusal is not a warning and there is no flag to override it. An override
+// would be used at exactly the moment it should not be, which is the moment
+// somebody has already told a customer the feature exists.
+var notShipped = []string{
+	"billing",
+	"enterprise_dashboard",
+}
+
 func issue(args []string) error {
 	fs := flag.NewFlagSet("issue", flag.ContinueOnError)
 	file := fs.String("request", "", "path to the issuance request, or - for standard input")
@@ -288,6 +309,30 @@ func checkFeatures(features []string) error {
 			"the request names %s, which the engine does not carry, so a license "+
 				"carrying it would verify and permit nothing. The set is: %s",
 			strings.Join(unknown, ", "), strings.Join(knownFeatures, ", "))
+	}
+
+	// The second refusal, and it is a different question from the first. The
+	// names above are ones no build has ever heard of; these are names every
+	// build knows and no build acts on. Both produce a license that permits
+	// nothing, and the second one is the dangerous one because the name is in
+	// the documentation, in the price list and in this tool's own set, so
+	// everything about it reads as a supported feature right up to the point
+	// where a customer tries to use it.
+	var absent []string
+	for _, f := range features {
+		for _, n := range notShipped {
+			if f == n {
+				absent = append(absent, f)
+			}
+		}
+	}
+	if len(absent) > 0 {
+		return fmt.Errorf(
+			"the request names %s, which nothing in this product enforces, so the license "+
+				"would verify, report active, and do nothing. Remove it from the request. "+
+				"If it has been sold, that is a conversation to have before a key is issued "+
+				"rather than after",
+			strings.Join(absent, ", "))
 	}
 	return nil
 }

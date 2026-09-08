@@ -71,6 +71,72 @@ const (
 	FeatureAirGapped     Feature = "air_gapped"
 )
 
+// notShipped names every feature that nothing in this product enforces, and
+// says so where the catalogue is rather than in a document beside it.
+//
+// The failure this closes was measured on 2026-09-08. Twelve features were
+// sellable and six of them had no enforcement site at all, so a license could
+// be signed for a capability that does not exist, verify cleanly, report
+// active, and grant a customer nothing. Read from the outside that is
+// indistinguishable from a working feature: the invoice names it, the license
+// carries it, af license status prints it, and the product does nothing
+// differently because there is nothing to do.
+//
+// A gate in front of an absent capability would have been worse, because a
+// declared enforcement site that can never run is the same lie one level
+// deeper. So the answer is a refusal in two places and no gate at all:
+// tools/licensegen will not sign a request naming one of these, and Evaluate
+// below will not permit one even if a license somehow carries it. A feature
+// nobody can buy and nobody can be granted cannot be mistaken for one that
+// ships.
+//
+// The reason is stored beside the name because "not shipped" alone is
+// indistinguishable from an oversight, and because the sentence has to be
+// deletable: building the capability means removing the entry, and the entry
+// says what building it would mean.
+//
+// The map is the ONLY thing that has to change when one of these is built.
+// Nothing else in this file, in licensegen, or in the docs check reads a second
+// copy of it.
+var notShipped = map[Feature]string{
+	FeatureBilling: "Nothing in the engine or the control plane meters, rates or " +
+		"charges anything on a customer's behalf. The billing code in this repository " +
+		"bills the customer FOR Antifailure, which is not a capability a license grants " +
+		"them. There is no billing hook in engine/pkg/extension either, so there is " +
+		"nothing an enterprise implementation could plug into.",
+	FeatureDashboard: "There is no enterprise dashboard. The name appears in this " +
+		"catalogue, in tools/licensegen's copy of it, and in the documentation, and " +
+		"nowhere else in the repository. The operator analytics dashboard is the " +
+		"vendor's own funnel and is not sold to anybody.",
+}
+
+// Shipped reports whether this build enforces a feature anywhere.
+//
+// False means the product has no implementation of it, not that this particular
+// installation has it switched off. The distinction matters commercially:
+// absent says we did not build it, and ungated says we built it and do not
+// charge for it. Those are different sentences to a buyer and only one of them
+// is a reason not to sell.
+func Shipped(f Feature) bool {
+	_, missing := notShipped[f]
+	return !missing
+}
+
+// NotShippedBecause is why a feature is refused, or the empty string when it
+// ships. Written into the message licensegen prints, so whoever tries to sell
+// it reads the reason rather than a bare refusal.
+func NotShippedBecause(f Feature) string { return notShipped[f] }
+
+// NotShippedFeatures is every feature this build refuses to permit, sorted.
+func NotShippedFeatures() []Feature {
+	out := make([]Feature, 0, len(notShipped))
+	for f := range notShipped {
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 // AllFeatures is every feature a license can carry, sorted, for the comparison
 // page and for the entitlement matrix test.
 func AllFeatures() []Feature {
@@ -359,6 +425,15 @@ func (v *Verifier) Evaluate(claims Claims, ev Evaluation) Status {
 	}
 
 	for _, f := range claims.Features {
+		// A feature this build enforces nowhere is carried in the claims and
+		// never permitted, which is exactly how an unknown name from a later
+		// release is treated a few lines of reasoning above. The two cases are
+		// the same case: the license names something this binary cannot act
+		// on, and answering true would tell every caller a capability is
+		// available when asking for it does nothing.
+		if !Shipped(f) {
+			continue
+		}
 		status.features[f] = true
 	}
 	return status
