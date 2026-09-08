@@ -4,7 +4,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
+
+// otherModes is every mode except the one named.
+func otherModes(except schema.Mode) []schema.Mode {
+	out := make([]schema.Mode, 0, len(schema.AllModes()))
+	for _, m := range schema.AllModes() {
+		if m != except {
+			out = append(out, m)
+		}
+	}
+	return out
+}
 
 // The emulate mode, at the point a manifest is read.
 //
@@ -50,8 +63,12 @@ func TestParse_RefusesAnEmulatorOnEveryOtherMode(t *testing.T) {
 	// The same shape as the existing refusals for a credential outside
 	// sandbox and fixtures outside mock. A key that does nothing is a key
 	// whose author believes it does something.
-	for _, mode := range []string{"block", "allow", "capture", "mock", "sandbox", "synth"} {
-		mode := mode
+	// Derived from AllModes rather than written out, so that adding a mode
+	// forces a decision here instead of quietly leaving it unchecked. A
+	// hardcoded list is how this lane's own defects happened: a seventh mode
+	// went into the schema and three other lists did not know about it.
+	for _, mode := range otherModes(schema.ModeEmulate) {
+		mode := string(mode)
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			body := emulateBase + "    - host: s3.amazonaws.com\n      mode: " + mode +
