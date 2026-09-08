@@ -258,7 +258,7 @@ func TestBenchmarkTheShareOfProductionTheRunSends(t *testing.T) {
 	inv := fidelity.Build(trafficTwinWithProfile(t))
 	mix := componentState(t, inv, schema.FidelityTraffic, "endpoint mix")
 	require.Equal(t, fidelity.Substituted, mix.State)
-	require.Contains(t, mix.Detail, "this run sends 4 routes of the 14 production served")
+	require.Contains(t, mix.Detail, "this run sends 4 of the 14 routes production served")
 	require.Contains(t, mix.Detail, "carrying 0.41 percent of its requests")
 	require.Contains(t, mix.Detail, "The heaviest it never sends is POST /capture")
 	require.Contains(t, mix.Detail, "A run cannot fail on a route it never sends")

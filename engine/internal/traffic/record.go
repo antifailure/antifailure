@@ -103,7 +103,7 @@ func FromAccessLog(lines []string, source string, now time.Time) (Profile, error
 			"requests production had in flight at once")
 	if read.Unreadable > 0 {
 		p.Missing = append(p.Missing, fmt.Sprintf(
-			"%s could not be read as a request line and were not counted",
+			"%s not counted: could not be read as a request line",
 			plural(int64(read.Unreadable), "line", "lines")))
 	}
 	if read.First.IsZero() {
@@ -151,15 +151,16 @@ func routesWithoutBaseline(routes []Route) []string {
 }
 
 // skippedReasons turns the reader's skip counts into lines of a profile.
+//
+// The count and then the reason, rather than a sentence built around the
+// reason, because the reasons come from the reader and are phrases of
+// different shapes: "not a server span" and "no HTTP method or path on the
+// span" cannot both be dropped into one template and read as English.
 func skippedReasons(skipped map[string]int) []string {
 	var out []string
 	for reason, n := range skipped {
-		was := "were"
-		if n == 1 {
-			was = "was"
-		}
-		out = append(out, fmt.Sprintf("%s %s %s and %s not counted",
-			plural(int64(n), "span", "spans"), was, reason, was))
+		out = append(out, fmt.Sprintf("%s not counted: %s",
+			plural(int64(n), "span", "spans"), reason))
 	}
 	sort.Strings(out)
 	return out

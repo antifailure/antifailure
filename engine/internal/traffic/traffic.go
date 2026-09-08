@@ -232,13 +232,20 @@ func Compare(sent []Endpoint, p Profile) Coverage {
 		}
 		c.Routes = append(c.Routes, share)
 	}
+	// Deduplicated on the canonical form, because two concrete paths a
+	// manifest names, /runs/1 and /runs/2, are one route and listing it twice
+	// would read as two endpoints production is missing rather than one.
+	invented := map[string]bool{}
 	for _, e := range sent {
-		if !served[canonical(e.Method, e.Path)] {
-			c.Invented = append(c.Invented, Endpoint{
-				Method: strings.ToUpper(strings.TrimSpace(e.Method)),
-				Path:   load.NormalisePath(strings.TrimSpace(e.Path)),
-			})
+		key := canonical(e.Method, e.Path)
+		if served[key] || invented[key] {
+			continue
 		}
+		invented[key] = true
+		c.Invented = append(c.Invented, Endpoint{
+			Method: strings.ToUpper(strings.TrimSpace(e.Method)),
+			Path:   load.NormalisePath(strings.TrimSpace(e.Path)),
+		})
 	}
 	sort.SliceStable(c.Routes, func(i, j int) bool {
 		if c.Routes[i].Route.Requests != c.Routes[j].Route.Requests {
@@ -318,7 +325,7 @@ func (c Coverage) Describe() string {
 		return "the traffic profile counted no request, so there is nothing to compare against"
 	}
 	out := fmt.Sprintf("this run sends %s of the %s production served, carrying %s of its requests",
-		plural(int64(len(c.Routes)-len(c.Uncovered())), "route", "routes"),
+		Count(int64(len(c.Routes)-len(c.Uncovered()))),
 		plural(int64(len(c.Routes)), "route", "routes"), Percent(share))
 	if missed := c.Uncovered(); len(missed) > 0 {
 		heaviest := missed[0]

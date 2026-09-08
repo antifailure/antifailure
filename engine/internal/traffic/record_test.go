@@ -96,7 +96,7 @@ func TestFromOTLP_WhatItDidNotCountIsNamed(t *testing.T) {
 	p, err := traffic.FromOTLP(exportBody(t), "otel export telemetry/traces.json", recordedAt())
 	require.NoError(t, err)
 	missing := strings.Join(p.Missing, "\n")
-	require.Contains(t, missing, "1 span was not a server span and was not counted",
+	require.Contains(t, missing, "1 span not counted: not a server span",
 		"a client span is an outbound call this service made, and replaying it as inbound "+
 			"traffic would send the environment's own dependency calls at itself")
 	require.Contains(t, missing, "no HTTP method or path on the span")
@@ -135,7 +135,7 @@ func TestFromAccessLog_CountsTheMixAndRefusesToInventTheRest(t *testing.T) {
 	require.Contains(t, missing, "carries no request duration, so this profile has no p95",
 		"an access log with no durations reported a p95, which a threshold would compare against")
 	require.Contains(t, missing, "carries no concurrency")
-	require.Contains(t, missing, "1 line could not be read as a request line")
+	require.Contains(t, missing, "1 line not counted: could not be read as a request line")
 	require.Zero(t, p.PeakConcurrency)
 }
 

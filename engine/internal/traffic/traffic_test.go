@@ -82,6 +82,7 @@ func TestCompare_TheRouteThatReadsTheLockedTableIsNamed(t *testing.T) {
 	require.Len(t, missed, 2)
 	require.Equal(t, "GET /events", missed[0].Route.String(),
 		"the heaviest route the run never sends has to be the one named first")
+	require.Contains(t, c.Describe(), "this run sends 4 of the 6 routes production served")
 	require.Contains(t, c.Describe(), "The heaviest it never sends is GET /events")
 	require.Contains(t, c.Describe(), "carrying 1.1 percent of its requests")
 }
@@ -135,6 +136,16 @@ func TestCompare_ARouteAtTheFloorDoesDecideTheVerdict(t *testing.T) {
 
 	require.False(t, c.Covers(),
 		"a route carrying exactly one request in a thousand was treated as noise")
+}
+
+// Two concrete paths a manifest names are one route, so a route production
+// does not have is named once rather than once per identifier somebody typed.
+func TestCompare_AnInventedRouteIsNamedOnceHoweverManyPathsReachIt(t *testing.T) {
+	t.Parallel()
+	c := traffic.Compare(
+		sent("GET /invented/1", "GET /invented/2", "GET /invented/3"),
+		profile(route("GET", "/events", 1_000)))
+	require.Equal(t, []traffic.Endpoint{{Method: "GET", Path: "/invented/{id}"}}, c.Invented)
 }
 
 func TestCompare_ARouteTheRunSendsAndProductionNeverServedIsNamed(t *testing.T) {

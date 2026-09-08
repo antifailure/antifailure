@@ -80,7 +80,7 @@ func TestTrafficShow_PrintsWhatProductionServesAndWhatTheRunSends(t *testing.T) 
 	// The finding: the two routes the run reaches carry a fraction of a
 	// percent, and the one it never sends carries two thirds.
 	require.Contains(t, prose(got.stdout),
-		"this run sends 2 routes of the 4 production served, carrying 0.031 percent of its requests")
+		"this run sends 2 of the 4 routes production served, carrying 0.031 percent of its requests")
 	require.Contains(t, prose(got.stdout), "The heaviest it never sends is POST /capture")
 
 	// The other half of what a run reproduces, which a coverage percentage
@@ -217,7 +217,7 @@ func TestTrafficRecord_WritesTheProfileFromAFileOnDisk(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(dir, ".antifailure", "traffic.json"))
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"path": "/capture"`)
-	require.Contains(t, string(body), `"source": "access log export access.log"`,
+	require.Contains(t, string(body), `"source": "access log access.log"`,
 		"the recorded source names an absolute path, which would put somebody's home "+
 			"directory in a committed file")
 }

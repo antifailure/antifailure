@@ -38,7 +38,7 @@ func full() traffic.Profile {
 			{Method: "POST", Path: "/capture", Requests: 92_000_000, P95Ms: 12.4},
 			{Method: "GET", Path: "/health", Requests: 41_000, P95Ms: 2},
 		},
-		Missing: []string{"1 span was not a server span and was not counted"},
+		Missing: []string{"1 span not counted: not a server span"},
 	}
 }
 

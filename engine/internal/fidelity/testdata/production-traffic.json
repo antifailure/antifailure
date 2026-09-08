@@ -22,67 +22,67 @@
       "method": "POST",
       "path": "/batch",
       "requests": 7400000,
-      "p95_ms": 41.0
+      "p95_ms": 41
     },
     {
       "method": "GET",
       "path": "/api/projects/{id}/events",
       "requests": 3100000,
-      "p95_ms": 318.0
+      "p95_ms": 318
     },
     {
       "method": "GET",
       "path": "/api/projects/{id}/insights",
       "requests": 2400000,
-      "p95_ms": 612.0
+      "p95_ms": 612
     },
     {
       "method": "POST",
       "path": "/api/projects/{id}/query",
       "requests": 980000,
-      "p95_ms": 941.0
+      "p95_ms": 941
     },
     {
       "method": "GET",
       "path": "/api/projects/{id}/session_recordings",
       "requests": 640000,
-      "p95_ms": 274.0
+      "p95_ms": 274
     },
     {
       "method": "GET",
       "path": "/api/projects/{id}/dashboards",
       "requests": 410000,
-      "p95_ms": 190.0
+      "p95_ms": 190
     },
     {
       "method": "GET",
       "path": "/shared_dashboard/{id}",
       "requests": 88000,
-      "p95_ms": 233.0
+      "p95_ms": 233
     },
     {
       "method": "GET",
       "path": "/api/organizations/{id}/members",
       "requests": 62000,
-      "p95_ms": 44.0
+      "p95_ms": 44
     },
     {
       "method": "GET",
       "path": "/health",
       "requests": 41000,
-      "p95_ms": 2.0
+      "p95_ms": 2
     },
     {
       "method": "POST",
       "path": "/api/projects/{id}/experiments",
       "requests": 21000,
-      "p95_ms": 88.0
+      "p95_ms": 88
     },
     {
       "method": "GET",
       "path": "/api/projects/{id}/feature_flags",
       "requests": 9800,
-      "p95_ms": 26.0
+      "p95_ms": 26
     },
     {
       "method": "GET",
