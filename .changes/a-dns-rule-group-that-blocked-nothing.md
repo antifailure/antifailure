@@ -20,13 +20,14 @@ holding it has not decided whether a query the firewall cannot evaluate is
 permitted, and a bool rounded that to whichever answer the zero value gave. It
 is the AWS value now, and that case reports unproven rather than either answer.
 
-The ECS runtime's egress report went from eight of thirteen paths closed to ten.
-The two that moved were open because a Fargate task must reach the registry to
-start, which answers the weaker half of the question: reaching ECR cannot be
-closed and reaching any repository, any log group and any bucket in the region
-can, by a VPC endpoint policy, and only the second is an exfiltration path. The
-generated ECR policy would also have denied the login, because
-ecr:GetAuthorizationToken takes no resource and was named against a repository.
+Two paths the first draft of the enumeration counted as open are closed, which is
+why the report says ten of thirteen and not eight. Both were called open because
+a Fargate task must reach the registry to start, and that answers the weaker half
+of the question: reaching ECR cannot be closed and reaching any repository, any
+log group and any bucket in the region can, by a VPC endpoint policy, and only
+the second is an exfiltration path. The generated ECR policy would also have
+denied the login, because ecr:GetAuthorizationToken takes no resource and was
+named against a repository.
 
 The generated firewall would have broken the environment it protects. Its allow
 list held four hardcoded AWS names, so a manifest declaring a host the sidecar
