@@ -256,7 +256,7 @@ func benignVectors() []struct{ name, text string } {
 		// sample env file, or a terraform variable description.
 		{"redacted, angle bracket placeholder", "AccountKey=<your-storage-account-key>;EndpointSuffix=core.windows.net"},
 		{"redacted, the word redacted", "AccountKey=REDACTED;AccountName=afexample"},
-		{"redacted, ellipsis", "SharedAccessKey=..." },
+		{"redacted, ellipsis", "SharedAccessKey=..."},
 		{"redacted, env sample", "AZURE_CLIENT_SECRET=\nAZURE_TENANT_ID=\n"},
 		{"redacted, google key placeholder", "key=AIza<YOUR_KEY_HERE>"},
 		// The reason only LEADING characters are skipped. Left to run, the gap
