@@ -16,17 +16,19 @@ package secrets
 // The credential is a bearer token that expires, usually in an hour. That is
 // the case the one-refresh rule exists for, and it is why the token is fetched
 // with an expiry and renewed a minute early rather than on rejection alone.
+// Obtaining it, from a service principal or from the host's managed identity,
+// lives in ee/engine/cloudauth, because an Azure Database for PostgreSQL
+// provider authenticates through the identical exchange against a different
+// resource.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
-	"sync"
-	"time"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // AzureConfig is what a Key Vault source needs.
@@ -57,12 +59,21 @@ type AzureConfig struct {
 // AzureBackend reads from Key Vault.
 type AzureBackend struct {
 	cfg AzureConfig
+	// tokens holds the bearer token and knows whether it came from a service
+	// principal or from the host's managed identity, which is what the refusal
+	// message names.
+	tokens *cloudauth.AzureTokenSource
+}
 
-	mu      sync.Mutex
-	token   string
-	expires time.Time
-	// how names where the token came from, for the refusal message.
-	how string
+// newAzureBackend wires a config to a token source for the vault resource.
+func newAzureBackend(cfg AzureConfig) *AzureBackend {
+	return &AzureBackend{cfg: cfg, tokens: &cloudauth.AzureTokenSource{
+		TenantID:     cfg.TenantID,
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		Authority:    cfg.Authority,
+		Resource:     cloudauth.AzureKeyVaultResource,
+	}}
 }
 
 // NewAzureKeyVault builds a Key Vault source, or reports what it is missing.
@@ -102,20 +113,11 @@ func NewAzureKeyVault(cfg AzureConfig) (*Source, error) {
 		cfg.Authority = cfg.Getenv("AZURE_AUTHORITY_HOST")
 	}
 	if cfg.Authority == "" {
-		cfg.Authority = "https://login.microsoftonline.com"
+		cfg.Authority = cloudauth.PublicAzureAuthority
 	}
 	cfg.Authority = strings.TrimRight(cfg.Authority, "/")
 	cfg.VaultURL = strings.TrimRight(cfg.VaultURL, "/")
-	return New(&AzureBackend{cfg: cfg}), nil
-}
-
-// authority is the token host, defaulted here as well as in the constructor so
-// that a backend built directly in a test is not pointed at nothing.
-func (c AzureConfig) authority() string {
-	if c.Authority == "" {
-		return "https://login.microsoftonline.com"
-	}
-	return strings.TrimRight(c.Authority, "/")
+	return New(newAzureBackend(cfg)), nil
 }
 
 func (a *AzureBackend) Describe() string {
@@ -147,139 +149,23 @@ func (a *AzureBackend) Describe() string {
 // refused is Fetch's question and it is answered per variable, because a
 // principal may hold one secret and not another.
 func (a *AzureBackend) Reach(ctx context.Context) error {
-	if _, err := a.bearer(ctx); err != nil {
+	if _, err := a.tokens.Token(ctx); err != nil {
 		return err
 	}
-	if _, err := do(ctx, request{
-		method: "GET",
-		url:    a.cfg.VaultURL + "/secrets",
-		query:  map[string]string{"api-version": a.cfg.APIVersion, "maxresults": "1"},
+	if _, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method: "GET",
+		URL:    a.cfg.VaultURL + "/secrets",
+		Query:  map[string]string{"api-version": a.cfg.APIVersion, "maxresults": "1"},
 	}); err != nil {
 		return fmt.Errorf("cannot be reached: %s", err)
 	}
 	return nil
 }
 
-func (a *AzureBackend) bearer(ctx context.Context) (string, error) {
-	a.mu.Lock()
-	token, expires := a.token, a.expires
-	a.mu.Unlock()
-	// A minute early, so a token that expires between being read and being used
-	// does not produce a rejection a renewal would have avoided.
-	if token != "" && time.Now().Add(time.Minute).Before(expires) {
-		return token, nil
-	}
-
-	got, lifetime, how, err := a.acquire(ctx)
-	if err != nil {
-		return "", err
-	}
-	a.mu.Lock()
-	a.token, a.expires, a.how = got, time.Now().Add(lifetime), how
-	a.mu.Unlock()
-	return got, nil
-}
-
-const azureScope = "https://vault.azure.net/.default"
-
-func (a *AzureBackend) acquire(ctx context.Context) (token string, lifetime time.Duration, how string, err error) {
-	if a.cfg.ClientSecret != "" {
-		return a.fromServicePrincipal(ctx)
-	}
-	return a.fromManagedIdentity(ctx)
-}
-
-func (a *AzureBackend) fromServicePrincipal(ctx context.Context) (string, time.Duration, string, error) {
-	form := url.Values{
-		"grant_type":    {"client_credentials"},
-		"client_id":     {a.cfg.ClientID},
-		"client_secret": {a.cfg.ClientSecret},
-		"scope":         {azureScope},
-	}
-	resp, err := do(ctx, request{
-		method: "POST",
-		url:    a.cfg.authority() + "/" + a.cfg.TenantID + "/oauth2/v2.0/token",
-		body:   []byte(form.Encode()),
-		headers: map[string]string{
-			"Content-Type": "application/x-www-form-urlencoded",
-			"Accept":       "application/json",
-		},
-	})
-	if err != nil {
-		return "", 0, "", fmt.Errorf("Microsoft Entra could not be reached: %s", err)
-	}
-	if resp.status != 200 {
-		// A wrong client secret and a wrong tenant both land here, and Entra's
-		// own error code is the part that tells them apart, so it is passed
-		// through. The description is not: it embeds the request and can run to
-		// several lines.
-		return "", 0, "", wrap(ErrRejected,
-			"Microsoft Entra refused the service principal with %d %s",
-			resp.status, azureErrorCode(resp.body))
-	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := resp.decode(&payload); err != nil {
-		return "", 0, "", err
-	}
-	if payload.AccessToken == "" {
-		return "", 0, "", fmt.Errorf("Microsoft Entra answered 200 and returned no token")
-	}
-	return payload.AccessToken, time.Duration(payload.ExpiresIn) * time.Second,
-		"the service principal " + a.cfg.ClientID, nil
-}
-
-func (a *AzureBackend) fromManagedIdentity(ctx context.Context) (string, time.Duration, string, error) {
-	query := map[string]string{"api-version": "2018-02-01", "resource": "https://vault.azure.net"}
-	if a.cfg.ClientID != "" {
-		// A user-assigned identity has to be named, because a host may carry
-		// several and the service will not guess between them.
-		query["client_id"] = a.cfg.ClientID
-	}
-	resp, err := do(ctx, request{
-		method: "GET", url: "http://169.254.169.254/metadata/identity/oauth2/token",
-		query: query, headers: map[string]string{"Metadata": "true"},
-		// The same second the AWS instance metadata gets, for the same reason:
-		// this is a link-local address that answers immediately on a host that
-		// has one and hangs on a laptop that does not.
-		timeout: time.Second,
-	})
-	if err != nil {
-		return "", 0, "", wrap(ErrNotConfigured,
-			"no Azure credentials: AZURE_CLIENT_SECRET is unset and no managed identity "+
-				"answered on this host. Set AZURE_TENANT_ID, AZURE_CLIENT_ID and "+
-				"AZURE_CLIENT_SECRET, or run somewhere with an identity assigned")
-	}
-	if resp.status != 200 {
-		return "", 0, "", fmt.Errorf(
-			"the managed identity endpoint answered %d; this host may have no identity assigned",
-			resp.status)
-	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-		// Returned as a string of seconds by this endpoint, unlike Entra's,
-		// which returns a number. Two shapes for one field on two endpoints of
-		// one product, so it is decoded as text and converted.
-		ExpiresIn string `json:"expires_in"`
-	}
-	if err := resp.decode(&payload); err != nil {
-		return "", 0, "", err
-	}
-	seconds, _ := strconv.Atoi(payload.ExpiresIn)
-	if seconds <= 0 {
-		seconds = 3600
-	}
-	return payload.AccessToken, time.Duration(seconds) * time.Second, "this host's managed identity", nil
-}
-
 // Refresh discards the token so the next lookup acquires a new one.
 func (a *AzureBackend) Refresh(ctx context.Context) error {
-	a.mu.Lock()
-	a.token, a.expires = "", time.Time{}
-	a.mu.Unlock()
-	_, err := a.bearer(ctx)
+	a.tokens.Reset()
+	_, err := a.tokens.Token(ctx)
 	return err
 }
 
@@ -295,40 +181,38 @@ func (a *AzureBackend) Fetch(ctx context.Context, name string) (string, bool, er
 				"digits and hyphens", name)
 	}
 
-	token, err := a.bearer(ctx)
+	token, err := a.tokens.Token(ctx)
 	if err != nil {
 		return "", false, err
 	}
-	resp, err := do(ctx, request{
-		method:  "GET",
-		url:     a.cfg.VaultURL + "/secrets/" + secretName,
-		query:   map[string]string{"api-version": a.cfg.APIVersion},
-		headers: map[string]string{"Authorization": "Bearer " + token, "Accept": "application/json"},
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method:  "GET",
+		URL:     a.cfg.VaultURL + "/secrets/" + secretName,
+		Query:   map[string]string{"api-version": a.cfg.APIVersion},
+		Headers: map[string]string{"Authorization": "Bearer " + token, "Accept": "application/json"},
 	})
 	if err != nil {
 		return "", false, fmt.Errorf("cannot be reached: %s", err)
 	}
 
-	a.mu.Lock()
-	how := a.how
-	a.mu.Unlock()
+	how := a.tokens.How()
 
 	switch {
-	case resp.status == 200:
-	case resp.status == 404:
+	case resp.Status == 200:
+	case resp.Status == 404:
 		return "", false, nil
-	case resp.rejected():
+	case resp.Rejected():
 		return "", false, wrap(ErrRejected, "Key Vault answered %d %s, using %s",
-			resp.status, azureErrorCode(resp.body), how)
+			resp.Status, cloudauth.AzureErrorCode(resp.Body), how)
 	default:
 		return "", false, fmt.Errorf("Key Vault answered %d %s",
-			resp.status, azureErrorCode(resp.body))
+			resp.Status, cloudauth.AzureErrorCode(resp.Body))
 	}
 
 	var payload struct {
 		Value string `json:"value"`
 	}
-	if err := resp.decode(&payload); err != nil {
+	if err := resp.Decode(&payload); err != nil {
 		return "", false, err
 	}
 	return payload.Value, true, nil
@@ -360,20 +244,4 @@ func AzureSecretName(name string) string {
 		return ""
 	}
 	return out
-}
-
-// azureErrorCode reads the code out of an Azure error document.
-//
-// The code and never the message. Azure's message embeds the request, and the
-// request names the secret and the vault.
-func azureErrorCode(body []byte) string {
-	var payload struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &payload) != nil || payload.Error.Code == "" {
-		return "with no error code"
-	}
-	return payload.Error.Code
 }

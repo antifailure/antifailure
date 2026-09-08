@@ -44,6 +44,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ func TestAzureMapsAVariableNameOntoANameKeyVaultAccepts(t *testing.T) {
 func TestAzureSaysSoRatherThanLookingUpANameItCannotHold(t *testing.T) {
 	// A 400 treated as a miss would make the variable invisible while the
 	// operator looks at a vault that plainly contains something like it.
-	backend := &AzureBackend{cfg: AzureConfig{VaultURL: "https://v.vault.azure.net"}}
+	backend := newAzureBackend(AzureConfig{VaultURL: "https://v.vault.azure.net"})
 	_, found, err := backend.Fetch(t.Context(), "HAS SPACE")
 	require.False(t, found)
 	require.Error(t, err)
@@ -109,8 +111,12 @@ func TestAzureUsesTheAuthorityItIsGiven(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	// Read off the token source rather than off the config, because the token
+	// source is what builds the URL the request goes to. A config field that
+	// held the right host while the exchange used a compiled in one would pass
+	// the weaker assertion.
 	require.Equal(t, "https://login.microsoftonline.us",
-		source.backend.(*AzureBackend).cfg.authority())
+		source.backend.(*AzureBackend).tokens.Authority)
 }
 
 func TestAzureRefusesToBeBuiltWithoutWhatItNeeds(t *testing.T) {
@@ -134,21 +140,21 @@ func TestAzureConformanceAgainstTheDocumentedWireFormat(t *testing.T) {
 	// adapter treats each documented response the way the contract requires.
 	server := fakeKeyVault(t)
 
-	working := &AzureBackend{cfg: AzureConfig{
+	working := newAzureBackend(AzureConfig{
 		VaultURL: server.URL + "/ok", Authority: server.URL, TenantID: "t", ClientID: "c",
 		ClientSecret: "assembled-at-run-time", APIVersion: "7.4",
-	}}
-	rejecting := &countingAzure{AzureBackend: &AzureBackend{cfg: AzureConfig{
+	})
+	rejecting := &countingAzure{AzureBackend: newAzureBackend(AzureConfig{
 		VaultURL: server.URL + "/denied", Authority: server.URL, TenantID: "t", ClientID: "c",
 		ClientSecret: "assembled-at-run-time", APIVersion: "7.4",
-	}}}
+	})}
 	// No client secret, so this one takes the managed identity path, and there
 	// is no managed identity on the machine running the tests. That is the
 	// realistic shape of an unreachable Azure source: not a vault that refuses
 	// a connection, but a host that cannot obtain a token at all.
-	unreachable := &AzureBackend{cfg: AzureConfig{
+	unreachable := newAzureBackend(AzureConfig{
 		VaultURL: "http://127.0.0.1:1", APIVersion: "7.4",
-	}}
+	})
 
 	result := Run(t.Context(), t, Harness{
 		Name:         "Azure Key Vault (documented wire format, not a live vault)",
@@ -228,9 +234,10 @@ func TestGCPSignsAnAssertionThatVerifies(t *testing.T) {
 	})
 	require.NoError(t, err)
 	backend := source.backend.(*GCPBackend)
-	require.NotNil(t, backend.account, "the key was not parsed")
+	account := backend.tokens.Account()
+	require.NotNil(t, account, "the key was not parsed")
 
-	assertion, err := backend.signAssertion(time.Now())
+	assertion, err := account.SignAssertion(time.Now(), cloudauth.ScopeGoogleCloudPlatform)
 	require.NoError(t, err)
 
 	parts := strings.Split(assertion, ".")
@@ -263,7 +270,7 @@ func TestGCPSignsAnAssertionThatVerifies(t *testing.T) {
 	// The audience is the token endpoint, which is what stops an assertion
 	// minted for one service being replayed against another.
 	require.Equal(t, "https://oauth2.googleapis.com/token", claims.Aud)
-	require.Equal(t, gcpScope, claims.Scope)
+	require.Equal(t, cloudauth.ScopeGoogleCloudPlatform, claims.Scope)
 	require.Equal(t, int64(3600), claims.Exp-claims.Iat)
 }
 
@@ -275,7 +282,7 @@ func TestGCPDropsThePrivateKeyPEMOnceItIsParsed(t *testing.T) {
 		Project: "af-test", CredentialsJSON: keyJSON, Getenv: func(string) string { return "" },
 	})
 	require.NoError(t, err)
-	require.Empty(t, source.backend.(*GCPBackend).account.PrivateKey)
+	require.Empty(t, source.backend.(*GCPBackend).tokens.Account().PrivateKey)
 }
 
 func TestGCPRefusesAKeyItCannotUse(t *testing.T) {
@@ -311,15 +318,15 @@ func TestGCPConformanceAgainstTheDocumentedWireFormat(t *testing.T) {
 	// plausible and authenticates against nothing.
 	server := fakeSecretManager(t)
 
-	working := &GCPBackend{
-		cfg:     GCPConfig{Project: "ok", Version: "latest", Endpoint: server.URL},
-		account: tokenEndpoint(t, server.URL)}
-	rejecting := &countingGCP{GCPBackend: &GCPBackend{
-		cfg:     GCPConfig{Project: "denied", Version: "latest", Endpoint: server.URL},
-		account: tokenEndpoint(t, server.URL)}}
-	unreachable := &GCPBackend{
-		cfg:     GCPConfig{Project: "ok", Version: "latest", Endpoint: "http://127.0.0.1:1"},
-		account: tokenEndpoint(t, "http://127.0.0.1:1")}
+	working := newGCPBackend(
+		GCPConfig{Project: "ok", Version: "latest", Endpoint: server.URL},
+		tokenEndpoint(t, server.URL))
+	rejecting := &countingGCP{GCPBackend: newGCPBackend(
+		GCPConfig{Project: "denied", Version: "latest", Endpoint: server.URL},
+		tokenEndpoint(t, server.URL))}
+	unreachable := newGCPBackend(
+		GCPConfig{Project: "ok", Version: "latest", Endpoint: "http://127.0.0.1:1"},
+		tokenEndpoint(t, "http://127.0.0.1:1"))
 
 	result := Run(t.Context(), t, Harness{
 		Name:         "Google Secret Manager (documented wire format, not a live project)",
@@ -378,10 +385,10 @@ func serviceAccountKey(t *testing.T) (*rsa.PrivateKey, []byte) {
 // tokenEndpoint builds an account whose token endpoint is the local server, so
 // the adapter takes the service account path rather than trying to reach
 // Google's metadata server, which does not answer here and should not be asked.
-func tokenEndpoint(t *testing.T, base string) *gcpServiceAccount {
+func tokenEndpoint(t *testing.T, base string) *cloudauth.GCPServiceAccount {
 	t.Helper()
 	_, keyJSON := serviceAccountKey(t)
-	account, err := parseServiceAccount(keyJSON)
+	account, err := cloudauth.ParseGCPServiceAccount(keyJSON)
 	require.NoError(t, err)
 	account.TokenURI = base + "/token"
 	return account

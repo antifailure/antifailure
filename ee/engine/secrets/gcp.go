@@ -10,29 +10,22 @@ package secrets
 // application a base64 string that looks plausible, connects to nothing, and
 // produces an authentication failure at the far end rather than an error here.
 //
-// Two ways to get a token, matching where this actually runs. The metadata
-// server, which is what a Cloud Run service, a GKE workload and a Compute
-// Engine instance all have and which needs no key material at all. And a
-// service account key, signed here into a JWT assertion and exchanged, which is
-// what a CI runner outside Google has. The second is a key on disk and is worth
-// avoiding where the first is available; the message says so when it is used.
+// Getting the token is not this file's job any more. The metadata server and
+// the service account assertion both live in ee/engine/cloudauth, because a
+// Cloud SQL provider needs the identical exchange and a second copy of a JWT
+// signer is a second thing to get subtly wrong. What is chosen here is which
+// of the two applies: a key on disk is worth avoiding where the metadata server
+// exists, and the refusal message says which one was used.
 
 import (
 	"context"
-	"crypto"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net/url"
 	"os"
 	"strings"
-	"sync"
-	"time"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // GCPConfig is what a Secret Manager source needs.
@@ -60,24 +53,18 @@ type GCPConfig struct {
 // GCPBackend reads from Secret Manager.
 type GCPBackend struct {
 	cfg GCPConfig
-	// account is the parsed service account key, nil when the metadata server
-	// is used.
-	account *gcpServiceAccount
-
-	mu      sync.Mutex
-	token   string
-	expires time.Time
-	how     string
+	// tokens holds the access token and knows which of the two ways it was
+	// obtained, which is what the refusal message names.
+	tokens *cloudauth.GCPTokenSource
 }
 
-type gcpServiceAccount struct {
-	Type        string `json:"type"`
-	ProjectID   string `json:"project_id"`
-	PrivateKey  string `json:"private_key"`
-	ClientEmail string `json:"client_email"`
-	TokenURI    string `json:"token_uri"`
-
-	key *rsa.PrivateKey
+// newGCPBackend wires a config and an optional service account key to a token
+// source. A nil account takes the metadata server path.
+func newGCPBackend(cfg GCPConfig, account *cloudauth.GCPServiceAccount) *GCPBackend {
+	return &GCPBackend{
+		cfg:    cfg,
+		tokens: cloudauth.NewGCPTokenSource(account, cloudauth.ScopeGoogleCloudPlatform),
+	}
 }
 
 // NewGCPSecretManager builds a Secret Manager source, or reports what it is
@@ -101,7 +88,7 @@ func NewGCPSecretManager(cfg GCPConfig) (*Source, error) {
 	}
 	cfg.Endpoint = strings.TrimRight(cfg.Endpoint, "/")
 
-	backend := &GCPBackend{cfg: cfg}
+	var account *cloudauth.GCPServiceAccount
 	raw := cfg.CredentialsJSON
 	if len(raw) == 0 {
 		// The conventional variable, holding a path rather than the document.
@@ -117,47 +104,13 @@ func NewGCPSecretManager(cfg GCPConfig) (*Source, error) {
 		}
 	}
 	if len(raw) > 0 {
-		account, err := parseServiceAccount(raw)
+		parsed, err := cloudauth.ParseGCPServiceAccount(raw)
 		if err != nil {
 			return nil, wrap(ErrNotConfigured, "the service account key is not usable: %s", err)
 		}
-		backend.account = account
+		account = parsed
 	}
-	return New(backend), nil
-}
-
-func parseServiceAccount(raw []byte) (*gcpServiceAccount, error) {
-	var account gcpServiceAccount
-	if err := json.Unmarshal(raw, &account); err != nil {
-		return nil, fmt.Errorf("it is not JSON")
-	}
-	if account.Type != "service_account" {
-		return nil, fmt.Errorf("it is a %q key and only a service_account key is read here", account.Type)
-	}
-	if account.ClientEmail == "" || account.PrivateKey == "" {
-		return nil, fmt.Errorf("it has no client_email or no private_key")
-	}
-	if account.TokenURI == "" {
-		account.TokenURI = "https://oauth2.googleapis.com/token"
-	}
-
-	block, _ := pem.Decode([]byte(account.PrivateKey))
-	if block == nil {
-		return nil, fmt.Errorf("its private_key is not PEM")
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("its private_key is not a PKCS#8 key")
-	}
-	key, ok := parsed.(*rsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("its private_key is not RSA")
-	}
-	account.key = key
-	// The PEM is dropped now that the key is parsed, so the plaintext of a
-	// private key is not held in a struct for the life of the process.
-	account.PrivateKey = ""
-	return &account, nil
+	return New(newGCPBackend(cfg, account)), nil
 }
 
 func (g *GCPBackend) Describe() string {
@@ -170,182 +123,47 @@ func (g *GCPBackend) Describe() string {
 
 // Reach acquires a token, which is the thing that actually fails.
 func (g *GCPBackend) Reach(ctx context.Context) error {
-	_, err := g.bearer(ctx)
+	_, err := g.tokens.Token(ctx)
 	return err
-}
-
-const gcpScope = "https://www.googleapis.com/auth/cloud-platform"
-
-func (g *GCPBackend) bearer(ctx context.Context) (string, error) {
-	g.mu.Lock()
-	token, expires := g.token, g.expires
-	g.mu.Unlock()
-	if token != "" && time.Now().Add(time.Minute).Before(expires) {
-		return token, nil
-	}
-
-	var (
-		got      string
-		lifetime time.Duration
-		how      string
-		err      error
-	)
-	if g.account != nil {
-		got, lifetime, how, err = g.fromServiceAccount(ctx)
-	} else {
-		got, lifetime, how, err = g.fromMetadataServer(ctx)
-	}
-	if err != nil {
-		return "", err
-	}
-
-	g.mu.Lock()
-	g.token, g.expires, g.how = got, time.Now().Add(lifetime), how
-	g.mu.Unlock()
-	return got, nil
-}
-
-// fromServiceAccount signs a JWT and exchanges it for an access token.
-func (g *GCPBackend) fromServiceAccount(ctx context.Context) (string, time.Duration, string, error) {
-	assertion, err := g.signAssertion(time.Now())
-	if err != nil {
-		return "", 0, "", err
-	}
-	form := url.Values{
-		"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
-		"assertion":  {assertion},
-	}
-	resp, err := do(ctx, request{
-		method: "POST", url: g.account.TokenURI, body: []byte(form.Encode()),
-		headers: map[string]string{
-			"Content-Type": "application/x-www-form-urlencoded",
-			"Accept":       "application/json",
-		},
-	})
-	if err != nil {
-		return "", 0, "", fmt.Errorf("Google's token endpoint could not be reached: %s", err)
-	}
-	if resp.status != 200 {
-		return "", 0, "", wrap(ErrRejected,
-			"Google refused the service account assertion with %d %s",
-			resp.status, gcpErrorStatus(resp.body))
-	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := resp.decode(&payload); err != nil {
-		return "", 0, "", err
-	}
-	if payload.AccessToken == "" {
-		return "", 0, "", fmt.Errorf("Google answered 200 and returned no token")
-	}
-	return payload.AccessToken, time.Duration(payload.ExpiresIn) * time.Second,
-		"the service account " + g.account.ClientEmail, nil
-}
-
-// signAssertion builds the JWT a service account exchanges for a token.
-//
-// RS256 over a fixed header and a claim set with a one hour life. The audience
-// is the token endpoint itself, which is what stops an assertion minted for one
-// service being replayed against another.
-func (g *GCPBackend) signAssertion(now time.Time) (string, error) {
-	header := base64url([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	claims, err := json.Marshal(map[string]any{
-		"iss":   g.account.ClientEmail,
-		"scope": gcpScope,
-		"aud":   g.account.TokenURI,
-		"iat":   now.Unix(),
-		"exp":   now.Add(time.Hour).Unix(),
-	})
-	if err != nil {
-		return "", err
-	}
-	signing := header + "." + base64url(claims)
-	digest := sha256.Sum256([]byte(signing))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, g.account.key, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", err
-	}
-	return signing + "." + base64url(signature), nil
-}
-
-// fromMetadataServer reads the token the platform already holds.
-func (g *GCPBackend) fromMetadataServer(ctx context.Context) (string, time.Duration, string, error) {
-	resp, err := do(ctx, request{
-		method: "GET",
-		url:    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-		// Required, and its absence is the whole anti-forgery mechanism: the
-		// metadata server refuses any request without it, so a browser or a
-		// naive server-side fetch cannot reach it.
-		headers: map[string]string{"Metadata-Flavor": "Google"},
-		// A second, like the other two link-local metadata services. Off
-		// Google this name does not resolve, and waiting the shared ten seconds
-		// to learn that would be ten seconds on every af up.
-		timeout: time.Second,
-	})
-	if err != nil {
-		return "", 0, "", wrap(ErrNotConfigured,
-			"no Google credentials: GOOGLE_APPLICATION_CREDENTIALS is unset and the "+
-				"metadata server did not answer, so this is not running on Google Cloud. "+
-				"Point GOOGLE_APPLICATION_CREDENTIALS at a service account key, or run "+
-				"somewhere with a service account attached")
-	}
-	if resp.status != 200 {
-		return "", 0, "", fmt.Errorf("the metadata server answered %d", resp.status)
-	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := resp.decode(&payload); err != nil {
-		return "", 0, "", err
-	}
-	return payload.AccessToken, time.Duration(payload.ExpiresIn) * time.Second,
-		"this host's attached service account", nil
 }
 
 // Refresh discards the token so the next lookup acquires a new one.
 func (g *GCPBackend) Refresh(ctx context.Context) error {
-	g.mu.Lock()
-	g.token, g.expires = "", time.Time{}
-	g.mu.Unlock()
-	_, err := g.bearer(ctx)
+	g.tokens.Reset()
+	_, err := g.tokens.Token(ctx)
 	return err
 }
 
 // Fetch reads a variable.
 func (g *GCPBackend) Fetch(ctx context.Context, name string) (string, bool, error) {
-	token, err := g.bearer(ctx)
+	token, err := g.tokens.Token(ctx)
 	if err != nil {
 		return "", false, err
 	}
 
 	secret := g.cfg.Prefix + name
-	resp, err := do(ctx, request{
-		method: "GET",
-		url: g.cfg.Endpoint + "/v1/projects/" + g.cfg.Project +
+	resp, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method: "GET",
+		URL: g.cfg.Endpoint + "/v1/projects/" + g.cfg.Project +
 			"/secrets/" + url.PathEscape(secret) + "/versions/" + g.cfg.Version + ":access",
-		headers: map[string]string{"Authorization": "Bearer " + token, "Accept": "application/json"},
+		Headers: map[string]string{"Authorization": "Bearer " + token, "Accept": "application/json"},
 	})
 	if err != nil {
 		return "", false, fmt.Errorf("cannot be reached: %s", err)
 	}
 
-	g.mu.Lock()
-	how := g.how
-	g.mu.Unlock()
+	how := g.tokens.How()
 
 	switch {
-	case resp.status == 200:
-	case resp.status == 404:
+	case resp.Status == 200:
+	case resp.Status == 404:
 		return "", false, nil
-	case resp.rejected():
+	case resp.Rejected():
 		return "", false, wrap(ErrRejected, "Secret Manager answered %d %s, using %s",
-			resp.status, gcpErrorStatus(resp.body), how)
+			resp.Status, cloudauth.GCPErrorStatus(resp.Body), how)
 	default:
 		return "", false, fmt.Errorf("Secret Manager answered %d %s",
-			resp.status, gcpErrorStatus(resp.body))
+			resp.Status, cloudauth.GCPErrorStatus(resp.Body))
 	}
 
 	var payload struct {
@@ -353,7 +171,7 @@ func (g *GCPBackend) Fetch(ctx context.Context, name string) (string, bool, erro
 			Data string `json:"data"`
 		} `json:"payload"`
 	}
-	if err := resp.decode(&payload); err != nil {
+	if err := resp.Decode(&payload); err != nil {
 		return "", false, err
 	}
 	// Base64, always. Secret Manager holds bytes rather than text, and handing
@@ -364,22 +182,4 @@ func (g *GCPBackend) Fetch(ctx context.Context, name string) (string, bool, erro
 		return "", false, fmt.Errorf("the payload of %s is not the base64 the API documents", secret)
 	}
 	return string(decoded), true, nil
-}
-
-func base64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
-
-// gcpErrorStatus reads the status out of a Google error document.
-//
-// The status and never the message. Google's message quotes the resource name,
-// and the resource name is the secret.
-func gcpErrorStatus(body []byte) string {
-	var payload struct {
-		Error struct {
-			Status string `json:"status"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &payload) != nil || payload.Error.Status == "" {
-		return "with no status"
-	}
-	return payload.Error.Status
 }
