@@ -286,8 +286,19 @@ export interface Seeded {
  *  row. */
 export async function seed(admin: postgres.Sql): Promise<Seeded> {
   const slug = `ee-${randomUUID().slice(0, 8)}`
+  // On the enterprise plan, because that is now a second question from the
+  // licence and both have to be answered before a route runs.
+  //
+  // ee/web/sso resolves a connection through an entitlement check whose
+  // authority is the control plane's own catalogue rather than the licence key,
+  // and its default is no. An organization seeded with no plan is refused 403,
+  // which is not what any case here is about and which would have turned the
+  // two 402 cases into passes for the wrong reason: a licence gate that never
+  // ran because an entitlement gate refused first is a gate nobody tested.
+  // ee/web/scim/test/harness.ts seeds `plan` for the same reason.
   const [org] = await admin<{ id: string }[]>`
-    INSERT INTO organizations (slug, name) VALUES (${slug}, 'Enterprise') RETURNING id`
+    INSERT INTO organizations (slug, name, plan) VALUES (${slug}, 'Enterprise', 'enterprise')
+    RETURNING id`
   const orgId = org!.id
   const handle = randomBytes(32).toString('base64url')
   // The entity id is unique per seed, not a constant.
