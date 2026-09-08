@@ -9,6 +9,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Name is the value runtime.provider takes in a manifest to reach this
@@ -41,6 +42,10 @@ const (
 	EnvVPCCIDR    = "AF_ECS_VPC_CIDR"
 	EnvSubnets    = "AF_ECS_SUBNET_IDS"
 	EnvSubnetCIDR = "AF_ECS_SUBNET_CIDRS"
+	// EnvProbeImage is optional, unlike every other variable here. It names
+	// the image the containment probe container runs. With it unset the plan
+	// carries no probe container and the instance metadata path says so.
+	EnvProbeImage = "AF_ECS_PROBE_IMAGE"
 )
 
 // NewProvider builds the provider with the process environment.
@@ -92,11 +97,33 @@ func (p *Provider) Open(_ context.Context, cfg extension.RuntimeConfig) (provide
 			"kubernetes against EKS, which is proved contained by a probe that runs before "+
 			"any application image", strings.Join(missing, ", "))
 	}
-	report := Evaluate(Generate(in, environmentID(cfg)))
+	envID := environmentID(cfg)
+	in.ResolvableHosts, in.UnexpressibleHosts = ResolvableHosts(cfg.Egress)
+
+	// Evidence recorded by a probe inside a task in this installation's own
+	// account, if any has ever been recorded. A read failure is reported rather
+	// than swallowed: a file that exists and cannot be read is a malfunction,
+	// and treating it as "no evidence" would answer unproven for a reason that
+	// is not the reason unproven means.
+	observed, err := Load(cfg.StateDir)
+	if err != nil {
+		return nil, fmt.Errorf("the ecs runtime could not read the containment evidence "+
+			"recorded for this installation, and an unreadable record is not the same as no "+
+			"record: %w", err)
+	}
+	report := EvaluateWith(Generate(in, envID), observed.ForEnvironment(envID))
 
 	var b strings.Builder
 	b.WriteString("the ecs runtime refuses to start an environment, on purpose.\n\n")
 	b.WriteString(report.String())
+	if len(in.UnexpressibleHosts) > 0 {
+		fmt.Fprintf(&b, "\nThe DNS firewall in this plan does NOT resolve %s, which the manifest "+
+			"declares the environment may reach. A DNS Firewall domain specification may only "+
+			"start with a star, so a host with one in the middle cannot be written as a rule. "+
+			"They are named here rather than dropped, because a firewall that silently breaks "+
+			"the environment it protects is a firewall somebody removes.\n",
+			strings.Join(in.UnexpressibleHosts, ", "))
+	}
 	b.WriteString("\nThe Kubernetes runtime is allowed to exist because it creates its own " +
 		"NetworkPolicy objects and then runs a pod under them that tries to escape before any " +
 		"application image starts. On Fargate the image pull runs over the task ENI under the " +
@@ -119,6 +146,7 @@ func (p *Provider) inputs() (Inputs, []string) {
 		VPCCIDR:     strings.TrimSpace(get(EnvVPCCIDR)),
 		SubnetIDs:   splitList(get(EnvSubnets)),
 		SubnetCIDRs: splitList(get(EnvSubnetCIDR)),
+		ProbeImage:  strings.TrimSpace(get(EnvProbeImage)),
 	}
 	var missing []string
 	for _, pair := range []struct {
@@ -171,6 +199,78 @@ type Inputs struct {
 	VPCCIDR     string
 	SubnetIDs   []string
 	SubnetCIDRs []string
+	// ResolvableHosts are the manifest's own hosts that something in this
+	// environment has to look up, already reduced from the egress catalogue.
+	//
+	// It is here rather than being derived inside Generate because Generate is
+	// a pure function of its inputs and reading a manifest is not, and because
+	// the reduction is the interesting part and belongs where it can be tested
+	// on its own.
+	ResolvableHosts []string
+	// ProbeImage is the image the containment probe container runs, and it is
+	// optional. With none, no probe container is emitted and the instance
+	// metadata path stays unproven with the absence named.
+	ProbeImage string
+	// UnexpressibleHosts are declared hosts that need to resolve and cannot be
+	// written as a DNS Firewall domain specification.
+	//
+	// They are carried so that the refusal can NAME them. A generator that
+	// quietly dropped them would produce a firewall that breaks the very
+	// environment it is protecting, which is how a containment control gets
+	// switched off; one that quietly widened them to a bare star would produce
+	// a firewall that protects nothing. Naming them is the only third option.
+	UnexpressibleHosts []string
+}
+
+// ResolvableHosts reduces a manifest's egress catalogue to the names something
+// in the environment actually has to look up.
+//
+// Everything in an Antifailure environment leaves through the sidecar, so the
+// application never resolves anything and the sidecar resolves only what it is
+// going to connect to. A host declared block, mock, capture or synth is
+// answered by the sidecar out of a fixture, an inbox or a model, and letting it
+// resolve publicly would hand the application a way around the very decision
+// the manifest made about it. A host declared allow or sandbox is one the
+// sidecar forwards to for real, so it has to resolve or the environment does
+// not work.
+//
+// That is why this composes with the egress catalogue rather than duplicating
+// it: the manifest already says what may be reached, and this reads that answer
+// instead of inventing a second list that could disagree with it.
+func ResolvableHosts(e schema.Egress) (allowed, unexpressible []string) {
+	for _, rule := range e.Rules {
+		switch rule.Mode {
+		case schema.ModeAllow, schema.ModeSandbox:
+		default:
+			continue
+		}
+		host := strings.TrimSpace(rule.Host)
+		if host == "" {
+			continue
+		}
+		if !expressibleDomain(host) {
+			unexpressible = append(unexpressible, host)
+			continue
+		}
+		allowed = append(allowed, host)
+	}
+	sort.Strings(allowed)
+	sort.Strings(unexpressible)
+	return dedupe(allowed), dedupe(unexpressible)
+}
+
+// dedupe removes repeats from a sorted list.
+func dedupe(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := in[:1]
+	for _, v := range in[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Generate builds the configuration one environment would be given.
@@ -245,6 +345,7 @@ func Generate(in Inputs, envID string) Plan {
 			TaskRoleARN:          "",
 			ExecutionRoleARN:     fmt.Sprintf("arn:aws:iam::*:role/%s-execution", envID),
 			EnableExecuteCommand: false,
+			Containers:           probeContainer(in.ProbeImage, envID),
 		},
 		Network: NetworkPlan{
 			VPC: VPC{
@@ -271,13 +372,19 @@ func Generate(in Inputs, envID string) Plan {
 			DNSFirewall: &DNSFirewall{
 				RuleGroupID:     "rslvr-frg-" + envID,
 				AssociatedVPCID: in.VPCID,
-				FailOpen:        false,
+				// DISABLED rather than the zero value of a bool, because the
+				// AWS field is three valued and the third value defers the
+				// failure mode to a setting this plan does not carry. Written
+				// out so that the plan says what it means rather than
+				// inheriting it.
+				FailOpen: FailClosed,
 				Rules: []DNSFirewallRule{
 					// The allow rules come first by priority and name only what
 					// the environment is obliged to resolve. The block rule is
 					// last, so a name that matched nothing above is refused
 					// rather than resolved.
-					{Priority: 10, Action: "ALLOW", Domains: allowedDomains(in.Region)},
+					{Priority: 10, Action: "ALLOW",
+						Domains: allowedDomains(in.Region, in.ResolvableHosts)},
 					{Priority: 1000, Action: "BLOCK", Domains: []string{"*"}},
 				},
 			},
@@ -285,7 +392,45 @@ func Generate(in Inputs, envID string) Plan {
 	}
 }
 
-// interfaceEndpoint builds one interface endpoint with a policy.
+// ProbeContainerName is the container that attempts the link local address this
+// package cannot decide from a document.
+const ProbeContainerName = "af-containment-probe"
+
+// probeContainer is how the runtime probe is expressed in a task definition,
+// and it is emitted only when the installation has said what image to run it
+// with.
+//
+// The Kubernetes runtime earns its existence by running a pod that tries to
+// escape before any application image starts. ECS has no field for "run this
+// first and stop if it fails", so it is a container whose command is the
+// attempt and which everything else depends on with the SUCCESS condition, the
+// only condition that means the waited on container exited zero.
+//
+// It is conditional on an image because the alternative was worse. An earlier
+// draft of this function emitted the container unconditionally with a command
+// naming an af subcommand that does not exist, which is a plan that cannot be
+// applied wearing the shape of a control: exactly the thing the DNS firewall
+// check in this package was just taught to refuse. With no image named, no
+// container is emitted, and the report says the probe is absent, which is a
+// true statement about a plan somebody can then fix.
+//
+// What none of this claims is that the probe has ever run. This runtime refuses
+// to start an environment, so there is no task to run it in, and the evidence
+// reader in Open is wired to a writer whose live call site is a task this
+// repository does not create. That is written here rather than left to be found.
+func probeContainer(image, envID string) []Container {
+	if strings.TrimSpace(image) == "" {
+		return nil
+	}
+	return []Container{{
+		Name:      ProbeContainerName,
+		Image:     image,
+		Essential: true,
+		Command:   []string{"/bin/sh", "-c", ProbeScript(envID)},
+	}}
+}
+
+// interfaceEndpoint builds one interface endpoint with a policy.// interfaceEndpoint builds one interface endpoint with a policy.
 func interfaceEndpoint(region, service, sg, envID string) VPCEndpoint {
 	return VPCEndpoint{
 		Service:           fmt.Sprintf("com.amazonaws.%s.%s", region, service),
@@ -307,8 +452,17 @@ func interfaceEndpoint(region, service, sg, envID string) VPCEndpoint {
 func endpointPolicy(service, envID string) string {
 	switch service {
 	case "ecr.api", "ecr.dkr":
-		return fmt.Sprintf(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":`+
-			`["ecr:GetAuthorizationToken","ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"],`+
+		// Two statements rather than one, because ecr:GetAuthorizationToken
+		// takes no resource. Named against a repository ARN it denies the
+		// login, and a plan whose endpoint policy stops the image pull is not
+		// a narrower plan, it is a broken one. Every action that DOES take a
+		// resource is in the second statement, against this environment's own
+		// repository.
+		return fmt.Sprintf(`{"Statement":[`+
+			`{"Effect":"Allow","Principal":"*","Action":["ecr:GetAuthorizationToken"],`+
+			`"Resource":"*"},`+
+			`{"Effect":"Allow","Principal":"*","Action":`+
+			`["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"],`+
 			`"Resource":"arn:aws:ecr:*:*:repository/%s*"}]}`, envID)
 	case "logs":
 		return fmt.Sprintf(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":`+
@@ -326,15 +480,23 @@ func s3EndpointPolicy(region string) string {
 		`["s3:GetObject"],"Resource":"arn:aws:s3:::prod-%s-starport-layer-bucket/*"}]}`, region)
 }
 
-// allowedDomains is what the DNS firewall lets through, which is only what the
-// image pull and the log push have to resolve.
-func allowedDomains(region string) []string {
+// allowedDomains is what the DNS firewall lets through: what the image pull and
+// the log push have to resolve, plus what the manifest declared.
+//
+// Both halves are needed and neither is optional. Without the first the task
+// never starts. Without the second the sidecar cannot resolve a host the
+// manifest said the environment may reach, so the environment is broken in a
+// way whose obvious fix is to remove the firewall, and a control people remove
+// is not a control. Nothing else is in the list, and the terminal rule refuses
+// the rest.
+func allowedDomains(region string, declared []string) []string {
 	out := []string{
 		fmt.Sprintf("api.ecr.%s.amazonaws.com", region),
 		fmt.Sprintf("dkr.ecr.%s.amazonaws.com", region),
 		fmt.Sprintf("logs.%s.amazonaws.com", region),
 		fmt.Sprintf("prod-%s-starport-layer-bucket.s3.%s.amazonaws.com", region, region),
 	}
+	out = append(out, declared...)
 	sort.Strings(out)
-	return out
+	return dedupe(out)
 }

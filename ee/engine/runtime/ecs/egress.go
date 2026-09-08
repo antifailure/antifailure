@@ -1,6 +1,7 @@
 package ecs
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -31,6 +32,34 @@ const (
 	Unproven Verdict = "unproven"
 )
 
+// Grade is what KIND of evidence produced a verdict, and it is in the type
+// rather than only in the caveat on purpose.
+//
+// Report.Caveat says in prose that a closed verdict is a statement about a JSON
+// document. That was true of every verdict this package could produce when the
+// caveat was written, and it stopped being true the moment a probe inside a
+// running task could record what it saw. Two closed verdicts of different
+// grades are different claims, and a sentence at the bottom of a report is the
+// wrong place to keep a distinction that a caller might want to act on: a
+// person deciding whether to trust an environment should be able to ask which
+// of the closures were observed, not read for it.
+type Grade string
+
+const (
+	// FromDocument means a predicate read the generated configuration. It is a
+	// statement about a JSON document and nothing has applied it to an account.
+	FromDocument Grade = "document"
+	// FromObservation means a probe inside a running task in the customer's own
+	// account made the attempt and this is what it saw. It is a statement about
+	// a packet.
+	FromObservation Grade = "observation"
+	// NotEstablished is the grade of every unproven verdict. Nothing looked, so
+	// there is no evidence of either kind, and it is a value rather than an
+	// empty string so that a report cannot carry a verdict whose grade nobody
+	// filled in.
+	NotEstablished Grade = "none"
+)
+
 // Path is one distinct way out of an ECS task on Fargate.
 //
 // Distinct means a different route, not a different phrasing of one route. Two
@@ -48,6 +77,20 @@ type Path struct {
 	Why string
 	// ClosedBy names the mechanism, or says plainly that nothing closes it.
 	ClosedBy string
+	// Observe interprets a recorded probe result for this path, and it is nil
+	// for every path the configuration decides.
+	//
+	// It is nil for those on purpose rather than for want of writing: a path a
+	// route table already answers does not need a second instrument, and a
+	// second instrument that could disagree with the first about the same fact
+	// is a way to be confidently wrong rather than a way to be more sure. Only
+	// the two link local addresses have one, because they are the two the
+	// configuration cannot decide at all.
+	//
+	// It is consulted ONLY when an observation for this path exists. With none,
+	// Check decides, and Check returns Unproven for both of them, which is the
+	// absence rule: no probe result means unproven, forever.
+	Observe func(Observation) (Verdict, string)
 	// Check evaluates the path against a plan and returns the verdict with the
 	// detail that justifies it. The detail is never empty, because a verdict
 	// with no reason is a verdict nobody can check.
@@ -85,7 +128,7 @@ func Paths() []Path {
 				"outbound IPv6.",
 			ClosedBy: "no IPv6 range on the VPC or its subnets, no egress only gateway route, " +
 				"and no IPv6 egress rule",
-			Check:    checkPublicIPv6,
+			Check: checkPublicIPv6,
 		},
 		{
 			ID:   "public-resolver-over-udp",
@@ -122,8 +165,11 @@ func Paths() []Path {
 			ClosedBy: "nothing a task definition can say. The Fargate launch type removes the " +
 				"documented credential source, because EC2 instance profiles are not " +
 				"available to containers in Fargate tasks, but AWS does not document " +
-				"whether the address answers, so the configuration does not settle it",
-			Check: checkInstanceMetadata,
+				"whether the address answers, so the configuration does not settle it. " +
+				"One attempt from one running task does, and the generated task definition " +
+				"carries the probe container that makes it",
+			Check:   checkInstanceMetadata,
+			Observe: observeLinkLocal,
 		},
 		{
 			ID:   "the-task-role-credentials-endpoint",
@@ -148,26 +194,32 @@ func Paths() []Path {
 		},
 		{
 			ID:   "the-interface-endpoints-the-image-pull-needs",
-			Name: "the ECR and CloudWatch Logs interface endpoints, which the task must reach in order to start",
+			Name: "any ECR repository or log group in the region, through the endpoints the image pull must reach",
 			Why: "On Fargate platform version 1.4.0 the ECR login, the image pull and the log " +
 				"push all flow over the TASK ENI, under this security group, and the " +
 				"documentation says plainly that a Fargate task must have a route to the " +
 				"registry to pull an image. There is no equivalent of a kubelet pulling the " +
 				"image outside the pod's policy, so a task whose security group denies " +
 				"everything never starts.",
-			ClosedBy: "nothing, without giving up the ability to run an environment at all. " +
-				"It is narrowed by an endpoint policy per endpoint and by egress rules " +
-				"naming the endpoints' own security group rather than an address range",
+			ClosedBy: "a VPC endpoint policy per endpoint, naming this environment's own " +
+				"repository and log group and no wildcard resource or action, plus egress " +
+				"rules naming the endpoints' own security group rather than an address " +
+				"range. The connection to the endpoint cannot be closed without giving up " +
+				"the ability to start an environment, and the route to any other " +
+				"repository, log group or service through it can be, which is the half " +
+				"that is an exfiltration path",
 			Check: checkInterfaceEndpoints,
 		},
 		{
 			ID:   "the-s3-gateway-endpoint-the-layers-come-from",
-			Name: "the S3 gateway endpoint, reached through a route table prefix list rather than an ENI",
+			Name: "any S3 bucket in the region, through the gateway endpoint the image layers come from",
 			Why: "ECR stores image layers in S3, so the pull needs S3 as well as ECR. A " +
 				"gateway endpoint is a route, and an unrestricted one is a path to every " +
 				"bucket in the region, including the ones that accept anonymous writes.",
-			ClosedBy: "nothing, for the same reason as the interface endpoints. It is narrowed " +
-				"by an endpoint policy",
+			ClosedBy: "a gateway endpoint policy naming the layer bucket with a read only " +
+				"action. The route itself stays, for the same reason as the interface " +
+				"endpoints, and an endpoint policy is the only narrowing a gateway " +
+				"endpoint has",
 			Check: checkS3Gateway,
 		},
 		{
@@ -210,10 +262,13 @@ func Paths() []Path {
 				"requests and Amazon Time Service NTP requests against one 1024 packet per " +
 				"second link local budget, which is documentary evidence that a link local " +
 				"NTP service is reachable from inside the network.",
-			ClosedBy: "not established. The EC2 page for the local Amazon Time Sync Service " +
-				"does not state the link local address and does not say whether security " +
-				"groups filter it, so this lane could not settle the path and does not " +
-				"assert either answer",
+			ClosedBy: "not established by any configuration. The EC2 page for the local " +
+				"Amazon Time Sync Service gives the IPv4 endpoint as 169.254.169.123 and " +
+				"says a link local address restricts the traffic to within the VPC, and it " +
+				"nowhere says whether a security group filters it. So the address is known " +
+				"and the filtering is not. An attempt would settle it and this lane " +
+				"could not build one: the attempt is NTP over UDP and no tool in a " +
+				"minimal container image makes it",
 			Check: checkTimeSync,
 		},
 	}
@@ -223,7 +278,11 @@ func Paths() []Path {
 type PathVerdict struct {
 	Path    Path
 	Verdict Verdict
-	Detail  string
+	// Grade says what kind of evidence produced Verdict. Unproven is always
+	// NotEstablished and NotEstablished is always Unproven, which is asserted
+	// rather than assumed.
+	Grade  Grade
+	Detail string
 }
 
 // Report is the whole predicate applied to one plan.
@@ -237,6 +296,17 @@ type Report struct {
 	Closed   int
 	Open     int
 	Unproven int
+	// ClosedByDocument and ClosedByObservation split Closed by grade, and they
+	// sum to it.
+	//
+	// They are published separately because the two are not the same claim and
+	// a single Closed count invites them to be read as though they were. One
+	// says the configuration this runtime generates removes the path. The other
+	// says a task in an account tried it and got nowhere. The second is the
+	// stronger evidence and the harder to get, and a report that hid which was
+	// which would let the easy one borrow the credibility of the hard one.
+	ClosedByDocument    int
+	ClosedByObservation int
 	// Total is len(Verdicts).
 	Total int
 }
@@ -249,21 +319,58 @@ type Report struct {
 // Closed verdict is a statement about a JSON document. Whether AWS enforces
 // that document is a statement about an account, and nothing in this repository
 // has ever observed it.
-const Caveat = "Every verdict here is computed from the configuration this runtime would " +
-	"generate. None of it has been applied to an AWS account and no packet has been " +
-	"observed failing to leave a task. A closed verdict means the generated " +
-	"configuration removes the path, not that AWS was seen enforcing it."
+const Caveat = "A verdict marked [document] is computed from the configuration this runtime " +
+	"would generate. It says the generated configuration removes the path, not that AWS was " +
+	"seen enforcing it, and nothing here has been applied to an AWS account. A verdict marked " +
+	"[observation] is a recorded attempt from a task inside the account that ran the " +
+	"environment, which is a statement about a packet rather than about a JSON document. Those " +
+	"are different grades of evidence and this report counts them separately. A path with " +
+	"neither stays unproven: no absence of evidence closes anything here."
 
-// Evaluate applies every path's check to a plan.
-func Evaluate(plan Plan) Report {
+// Evaluate applies every path's check to a plan, with no observed evidence.
+//
+// It is EvaluateWith against an empty set rather than a separate code path, so
+// that the no evidence case cannot drift away from the case the tests exercise.
+func Evaluate(plan Plan) Report { return EvaluateWith(plan, nil) }
+
+// EvaluateWith applies every path's check to a plan and lets recorded
+// observations answer the paths the plan cannot.
+//
+// The order is deliberate and it is the whole safety property. Check runs
+// FIRST and always, so the configuration's own answer is the floor. An
+// observation can only speak for a path that declared an Observe, and only when
+// one was actually recorded for it. There is no branch in which a missing
+// observation improves a verdict, which is what makes "it must never flip to
+// closed on absence of evidence" a property of the shape rather than a rule
+// somebody has to remember.
+func EvaluateWith(plan Plan, observed Observations) Report {
 	paths := Paths()
 	report := Report{Verdicts: make([]PathVerdict, 0, len(paths)), Total: len(paths)}
 	for _, path := range paths {
 		verdict, detail := path.Check(plan)
-		report.Verdicts = append(report.Verdicts, PathVerdict{Path: path, Verdict: verdict, Detail: detail})
+		grade := FromDocument
+		if verdict == Unproven {
+			grade = NotEstablished
+		}
+		if path.Observe != nil {
+			if obs, ok := observed.For(path.ID); ok {
+				verdict, detail = path.Observe(obs)
+				grade = FromObservation
+				if verdict == Unproven {
+					grade = NotEstablished
+				}
+			}
+		}
+		report.Verdicts = append(report.Verdicts,
+			PathVerdict{Path: path, Verdict: verdict, Grade: grade, Detail: detail})
 		switch verdict {
 		case Closed:
 			report.Closed++
+			if grade == FromObservation {
+				report.ClosedByObservation++
+			} else {
+				report.ClosedByDocument++
+			}
 		case Open:
 			report.Open++
 		default:
@@ -296,10 +403,14 @@ func (r Report) NotClosed() []PathVerdict {
 // String renders the report the way the refusal prints it.
 func (r Report) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d of %d egress paths out of an ECS task on Fargate are closed by the "+
-		"generated configuration (%d open, %d unproven).\n", r.Closed, r.Total, r.Open, r.Unproven)
+	fmt.Fprintf(&b, "%d of %d egress paths out of an ECS task on Fargate are closed "+
+		"(%d open, %d unproven).\n", r.Closed, r.Total, r.Open, r.Unproven)
+	fmt.Fprintf(&b, "Of those %d, %d are closed by the generated configuration and %d by an "+
+		"attempt observed from a running task.\n",
+		r.Closed, r.ClosedByDocument, r.ClosedByObservation)
 	for _, v := range r.Verdicts {
-		fmt.Fprintf(&b, "  %-9s %s\n             %s\n", v.Verdict, v.Path.ID, v.Detail)
+		fmt.Fprintf(&b, "  %-9s %-12s %s\n                            %s\n",
+			v.Verdict, "["+string(v.Grade)+"]", v.Path.ID, v.Detail)
 	}
 	b.WriteString("\n" + Caveat + "\n")
 	return b.String()
@@ -403,6 +514,17 @@ func checkPublicResolver(p Plan) (Verdict, string) {
 
 // checkAmazonResolver is the one check where the security group is irrelevant,
 // and saying so is the useful part.
+//
+// It is also the check this lane found could not say no to the two shapes that
+// matter most. A rule group is evaluated in priority order starting from the
+// lowest, so "the last rule blocks everything" is necessary and nowhere near
+// sufficient: an ALLOW or ALERT rule matching every domain at a lower priority
+// answers every query before the terminal rule is ever reached, and the old
+// predicate called that group closed. AWS defines ALLOW as "permit the request
+// to go through" and ALERT as "permit the request and send metrics and logs to
+// Cloud Watch", so both of them let the query out and only BLOCK disallows it.
+// A rule group with ALLOW on * at priority 5 and BLOCK on * at priority 1000
+// blocks nothing at all, and it reads as configured in a console screenshot.
 func checkAmazonResolver(p Plan) (Verdict, string) {
 	const irrelevant = "security groups and network ACLs cannot filter this path, so nothing in " +
 		"the security group above is evidence about it: "
@@ -422,21 +544,103 @@ func checkAmazonResolver(p Plan) (Verdict, string) {
 		missing = append(missing, fmt.Sprintf("the rule group is associated with %q and this "+
 			"plan's VPC is %q", fw.AssociatedVPCID, p.Network.VPC.ID))
 	}
-	if fw.FailOpen {
-		missing = append(missing, "the association fails open, so a rule the firewall cannot "+
-			"reach permits the query")
+	deferred := false
+	switch fw.FailOpen {
+	case FailClosed:
+	case FailOpenEnabled:
+		missing = append(missing, "FirewallFailOpen is ENABLED, so a query DNS Firewall cannot "+
+			"evaluate is permitted rather than refused and the containment is best effort")
+	case FailOpenDeferred:
+		deferred = true
+	default:
+		missing = append(missing, fmt.Sprintf("FirewallFailOpen is %q, which is not one of the "+
+			"three values AWS accepts, so the failure mode of this association is not described "+
+			"by this plan", fw.FailOpen))
 	}
-	if last, ok := lastRule(fw.Rules); !ok {
-		missing = append(missing, "the rule group has no rules")
-	} else if !isBlockEverything(last) {
-		missing = append(missing, fmt.Sprintf("the last rule by priority is %s on %s and must "+
-			"be BLOCK on *", last.Action, strings.Join(last.Domains, ", ")))
-	}
+	missing = append(missing, ruleGroupFaults(fw.Rules)...)
+
+	// A definite fault outranks an undecided failure mode. Knowing the path is
+	// open is a stronger statement than not knowing what happens when the
+	// firewall breaks, and reporting unproven here would hide a fault behind an
+	// uncertainty.
 	if len(missing) > 0 {
 		return Open, irrelevant + strings.Join(missing, "; ")
 	}
+	if deferred {
+		return Unproven, irrelevant + "the rule group's rules are correct, and its " +
+			"FirewallFailOpen is USE_LOCAL_RESOURCE_SETTING, which takes the failure mode from a " +
+			"setting this plan does not carry. So whether a query DNS Firewall cannot evaluate is " +
+			"permitted is not decided here, and a two valued reading of that field would round " +
+			"the unknown case to whichever answer suited"
+	}
 	return Closed, irrelevant + "a DNS Firewall rule group associated with this VPC blocks every " +
-		"domain in its last rule and does not fail open"
+		"domain in its last rule by priority, no earlier rule permits every domain, every " +
+		"priority is unique, and FirewallFailOpen is DISABLED"
+}
+
+// ruleGroupFaults lists everything wrong with a rule group's rules.
+//
+// It returns every fault rather than the first, because the report is read by
+// somebody fixing the group and a check that stops at the first problem makes
+// them run it once per problem.
+func ruleGroupFaults(rules []DNSFirewallRule) []string {
+	if len(rules) == 0 {
+		return []string{"the rule group has no rules"}
+	}
+	var faults []string
+
+	// Unique priorities, because AWS requires them and because two rules
+	// sharing one leave the order the group is evaluated in undefined by
+	// anything in this plan. A rule group AWS refuses to create is not a
+	// containment either.
+	counts := map[int]int{}
+	for _, r := range rules {
+		counts[r.Priority]++
+	}
+	var dups []int
+	for priority, n := range counts {
+		if n > 1 {
+			dups = append(dups, priority)
+		}
+	}
+	sort.Ints(dups)
+	for _, priority := range dups {
+		faults = append(faults, fmt.Sprintf("%d rules share priority %d, and AWS requires a "+
+			"unique priority for each rule in a rule group", counts[priority], priority))
+	}
+
+	ordered := append([]DNSFirewallRule(nil), rules...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Priority < ordered[j].Priority })
+
+	for _, r := range ordered {
+		switch strings.ToUpper(strings.TrimSpace(r.Action)) {
+		case "ALLOW", "BLOCK", "ALERT":
+		default:
+			faults = append(faults, fmt.Sprintf("the rule at priority %d has action %q, which is "+
+				"not one of ALLOW, BLOCK or ALERT", r.Priority, r.Action))
+		}
+		for _, d := range r.Domains {
+			if !expressibleDomain(d) {
+				faults = append(faults, fmt.Sprintf("the rule at priority %d matches %q, and a "+
+					"DNS Firewall domain specification may only start with a star, so this rule "+
+					"group cannot be created", r.Priority, d))
+			}
+		}
+	}
+
+	last := ordered[len(ordered)-1]
+	if !isBlockEverything(last) {
+		faults = append(faults, fmt.Sprintf("the last rule by priority is %s on %s and must be "+
+			"BLOCK on *", last.Action, strings.Join(last.Domains, ", ")))
+	}
+	for _, r := range ordered[:len(ordered)-1] {
+		if matchesEveryDomain(r) && permitsTheQuery(r) {
+			faults = append(faults, fmt.Sprintf("the rule at priority %d is %s on * and is "+
+				"evaluated before the terminal rule, so every query is permitted and the "+
+				"terminal BLOCK is never reached", r.Priority, strings.ToUpper(r.Action)))
+		}
+	}
+	return faults
 }
 
 // checkInstanceMetadata is the path the lane was warned about by name, and the
@@ -459,10 +663,21 @@ func checkInstanceMetadata(p Plan) (Verdict, string) {
 			"the instance and which no task definition can set, so this plan cannot close it",
 			p.LaunchType)
 	}
-	return Unproven, "the launch type is FARGATE, so no EC2 instance profile exists for the " +
-		"endpoint to vend, but AWS does not document whether 169.254.169.254 answers inside a " +
-		"Fargate task and a link local address is not filtered by the security group. Settling " +
-		"this needs one request from one running task, which needs an account"
+	base := "the launch type is FARGATE, so no EC2 instance profile exists for the endpoint to " +
+		"vend, but AWS does not document whether 169.254.169.254 answers inside a Fargate task " +
+		"and a link local address is not filtered by the security group. Settling this needs " +
+		"one request from one running task, and no probe result has been recorded for this " +
+		"environment. "
+	for _, c := range p.TaskDefinition.Containers {
+		if c.Name == "af-containment-probe" {
+			return Unproven, base + fmt.Sprintf("The task definition carries the probe container "+
+				"%q on image %q, which makes the request on the first run in an account and "+
+				"records what it saw", c.Name, c.Image)
+		}
+	}
+	return Unproven, base + "The task definition carries no probe container either, because this " +
+		"installation named no probe image, so as generated this plan has no way to answer the " +
+		"question even once it runs"
 }
 
 // checkTaskRoleCredentials is closed by an absence, which is the cheapest and
@@ -491,54 +706,246 @@ func checkTaskMetadata(p Plan) (Verdict, string) {
 		"statistics. With no task role it vends no credentials", p.PlatformVersion)
 }
 
-// checkInterfaceEndpoints reports the endpoints the design is obliged to open,
-// and reports how narrow they are, which is the only thing that can change.
+// checkInterfaceEndpoints answers the question the path is actually about,
+// which is not the one the first version of it answered.
+//
+// "The task can reach ECR" and "the task can reach ANY ECR repository and ANY
+// log group in the region" are very different claims, and only the second is an
+// exfiltration path. The first cannot be closed: on Fargate 1.4.0 the ECR
+// login, the image pull and the log push all run over the task ENI under this
+// security group, and AWS states that a Fargate task must have a route to the
+// registry to pull an image, so a plan that closes the connectivity closes the
+// product. The second can be closed, by an endpoint policy, and calling the
+// whole path open because the first half cannot be shut was reporting the
+// weaker fact and hiding the stronger one.
+//
+// So this returns Closed when the reachable set is exactly the endpoints the
+// pull and the log push need and every one of them carries a policy naming
+// concrete resources, and Open otherwise, naming which endpoint and why.
 func checkInterfaceEndpoints(p Plan) (Verdict, string) {
-	var reachable, unrestricted []string
+	needed := map[string]bool{
+		fmt.Sprintf("com.amazonaws.%s.ecr.api", p.Region): true,
+		fmt.Sprintf("com.amazonaws.%s.ecr.dkr", p.Region): true,
+		fmt.Sprintf("com.amazonaws.%s.logs", p.Region):    true,
+	}
+	var reachable, faults []string
 	for _, e := range p.Network.Endpoints {
 		if !strings.EqualFold(e.Type, "Interface") {
 			continue
 		}
 		reachable = append(reachable, e.Service)
-		if strings.TrimSpace(e.PolicyDocument) == "" {
-			unrestricted = append(unrestricted, e.Service)
+		if !needed[e.Service] {
+			faults = append(faults, fmt.Sprintf("%s is an interface endpoint the image pull and "+
+				"the log push do not need, and every endpoint in the VPC is a service the task "+
+				"can open a connection to", e.Service))
+			continue
+		}
+		if why, ok := policyNamesConcreteResources(e.PolicyDocument, p.TaskDefinition.Family); !ok {
+			faults = append(faults, fmt.Sprintf("%s: %s", e.Service, why))
 		}
 	}
 	if len(reachable) == 0 {
 		return Closed, "the plan holds no interface endpoints. Note that a Fargate task in a " +
 			"subnet with no route out and no ECR endpoint cannot pull an image, so a plan that " +
-			"closes this path cannot start an environment"
+			"closes this path this way cannot start an environment"
 	}
 	sort.Strings(reachable)
-	detail := fmt.Sprintf("the task can reach %s, because on Fargate 1.4.0 the image pull runs "+
-		"over the task ENI under this security group", strings.Join(reachable, ", "))
-	if len(unrestricted) > 0 {
-		sort.Strings(unrestricted)
-		return Open, detail + fmt.Sprintf("; and %s carry no endpoint policy, so the "+
-			"narrowing is absent as well", strings.Join(unrestricted, ", "))
+	if len(faults) > 0 {
+		sort.Strings(faults)
+		return Open, fmt.Sprintf("the task can reach %s, and %s", strings.Join(reachable, ", "),
+			strings.Join(faults, "; "))
 	}
-	return Open, detail + "; each carries an endpoint policy and is reached through an egress " +
-		"rule naming the endpoints' security group rather than an address range"
+	return Closed, fmt.Sprintf("the task can open TCP 443 to %s and to nothing else, because on "+
+		"Fargate 1.4.0 the image pull runs over the task ENI and that connectivity is the price "+
+		"of an environment starting at all. Each endpoint carries a policy naming this "+
+		"environment's own repository and log group, so no other repository, log group or "+
+		"service in the region is reachable through them, and the egress rule names the "+
+		"endpoints' security group rather than an address range. What is closed is the route to "+
+		"an arbitrary destination, not the connection itself", strings.Join(reachable, ", "))
+}
+
+// policyNamesConcreteResources reports whether a VPC endpoint policy narrows the
+// endpoint to named resources rather than to everything the service holds.
+//
+// An endpoint with no policy permits every action in that service that the
+// caller has credentials for. A policy naming Resource "*" is the same thing
+// written down. The bar here is that every Allow statement names at least one
+// resource with a literal prefix belonging to this environment, and no
+// statement grants every action, because an endpoint scoped to one repository
+// with ecr:* on it is still a place to push a layer.
+//
+// It fails towards open, the way reachesPublicIPv4 does. A policy this function
+// cannot parse is reported as unnarrowed, because the alternative is that a
+// malformed document silently counts as containment.
+func policyNamesConcreteResources(document, envName string) (string, bool) {
+	body := strings.TrimSpace(document)
+	if body == "" {
+		return "it carries no endpoint policy, so it permits every action in that service that " +
+			"the caller has credentials for", false
+	}
+	var doc iamPolicy
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		return fmt.Sprintf("its endpoint policy could not be read as a policy document (%v), and "+
+			"a document nobody could parse is not a narrowing", err), false
+	}
+	if len(doc.Statement) == 0 {
+		return "its endpoint policy holds no statements, which permits nothing and narrows " +
+			"nothing", false
+	}
+	for _, st := range doc.Statement {
+		if !strings.EqualFold(strings.TrimSpace(st.Effect), "Allow") {
+			continue
+		}
+		if len(st.Resource) == 0 {
+			return "its endpoint policy allows an action with no Resource at all", false
+		}
+		for _, action := range st.Action {
+			a := strings.TrimSpace(action)
+			if a == "*" || strings.HasSuffix(a, ":*") {
+				return fmt.Sprintf("its endpoint policy allows %q, which is every action in the "+
+					"service on whatever it names", action), false
+			}
+		}
+		if onlyResourcelessActions(st.Action) {
+			// The one carve out, and it is narrow on purpose. A handful of AWS
+			// actions take no resource at all, so IAM requires Resource "*" for
+			// them and a policy that named a repository instead would deny the
+			// call. ecr:GetAuthorizationToken is the one this plan needs, and
+			// without it the login fails and no image is pulled. It is not a
+			// destination: it returns a token scoped to the caller's own
+			// account rather than reaching anything. So a statement whose
+			// actions are ALL in that set may name a wildcard resource, and one
+			// that slips any other action into the same statement may not.
+			continue
+		}
+		named := false
+		for _, resource := range st.Resource {
+			section, ok := arnResourceSection(resource)
+			if !ok || section == "*" || strings.HasPrefix(section, "*") {
+				return fmt.Sprintf("its endpoint policy allows %q, which reaches every resource "+
+					"the service holds", resource), false
+			}
+			if envName != "" && strings.Contains(resource, envName) {
+				named = true
+			}
+		}
+		if envName != "" && !named {
+			return fmt.Sprintf("its endpoint policy names %s, and none of them belongs to %s, so "+
+				"it narrows the endpoint to somebody else's resources rather than to this "+
+				"environment's", strings.Join(st.Resource, ", "), envName), false
+		}
+	}
+	return "", true
+}
+
+// resourcelessActions are the actions that take no resource, so that a policy
+// naming them has to name a wildcard resource and naming one is not a widening.
+//
+// It is a fixed set rather than a pattern, and it holds exactly what this
+// runtime's own plan needs. A pattern here would be a way for the next action
+// somebody adds to inherit the exception without anybody deciding it should.
+var resourcelessActions = map[string]bool{
+	"ecr:GetAuthorizationToken": true,
+}
+
+// onlyResourcelessActions reports whether every action in a statement is one.
+//
+// Empty is false: a statement with no actions at all has not earned the
+// exception, it has just failed to say anything.
+func onlyResourcelessActions(actions []string) bool {
+	if len(actions) == 0 {
+		return false
+	}
+	for _, a := range actions {
+		if !resourcelessActions[strings.TrimSpace(a)] {
+			return false
+		}
+	}
+	return true
+}
+
+// arnResourceSection returns the part of an ARN after the account field, which
+// is the part that says WHICH repository, bucket or log group.
+//
+// An ARN is arn:partition:service:region:account:resource and the resource
+// section is everything after the fifth colon, so a bare "*" is not an ARN at
+// all and is reported as such rather than treated as a resource name that
+// happens to be a star.
+func arnResourceSection(arn string) (string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(arn), ":", 6)
+	if len(parts) < 6 || parts[0] != "arn" {
+		return "", false
+	}
+	return parts[5], true
+}
+
+// iamPolicy is the part of a policy document this predicate reads.
+type iamPolicy struct {
+	Statement []iamStatement `json:"Statement"`
+}
+
+// iamStatement is one statement.
+type iamStatement struct {
+	Effect   string     `json:"Effect"`
+	Action   stringList `json:"Action"`
+	Resource stringList `json:"Resource"`
+}
+
+// stringList decodes an IAM field that is a string OR an array of strings.
+//
+// It exists because getting that cardinality wrong is a whole class of bug in
+// this repository's history: a to one field decoded as a list throws, and a
+// throw while decoding a list discards the entire list. Here the consequence
+// would be quieter and worse, because a policy that failed to parse is reported
+// as unnarrowed, so a decoder that could not read AWS's own single string form
+// would report every correctly scoped endpoint as open and nobody would look
+// twice at a containment check being pessimistic.
+type stringList []string
+
+// UnmarshalJSON accepts both shapes.
+func (l *stringList) UnmarshalJSON(raw []byte) error {
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		*l = stringList{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return err
+	}
+	*l = many
+	return nil
 }
 
 // checkS3Gateway is separate from the interface endpoints because a gateway
 // endpoint is a route table entry rather than an ENI, so it is not governed by
 // the same rules and is not found by the same audit.
+//
+// It closes on the same argument: ECR serves image layers from S3 and the pull
+// needs both, so the connectivity stays, and what an endpoint policy can remove
+// is the route to every OTHER bucket in the region, including the ones that
+// accept anonymous writes. That removal is the difference between a read of one
+// AWS owned layer bucket and an upload target.
 func checkS3Gateway(p Plan) (Verdict, string) {
 	for _, e := range p.Network.Endpoints {
 		if !strings.EqualFold(e.Type, "Gateway") {
 			continue
 		}
-		if strings.TrimSpace(e.PolicyDocument) == "" {
-			return Open, fmt.Sprintf("%s is a gateway endpoint with no endpoint policy, which "+
-				"is a route to every bucket in the region", e.Service)
+		// The layer bucket is AWS's own and carries no environment name, so
+		// the concrete resource check runs with no name to require. What it
+		// still refuses is a wildcard bucket and a wildcard action, which are
+		// the two ways this endpoint becomes a route to every bucket.
+		if why, ok := policyNamesConcreteResources(e.PolicyDocument, ""); !ok {
+			return Open, fmt.Sprintf("%s is a gateway endpoint and %s", e.Service, why)
 		}
-		return Open, fmt.Sprintf("%s is reachable, because ECR stores image layers in S3 and "+
-			"the pull needs both. It carries an endpoint policy, which is the only narrowing "+
-			"available to a gateway endpoint", e.Service)
+		return Closed, fmt.Sprintf("%s is reachable, because ECR serves image layers from S3 and "+
+			"the pull needs both, and its endpoint policy names a concrete bucket with a read "+
+			"only action, so the route does not reach any other bucket in the region. An "+
+			"endpoint policy is the only narrowing available to a gateway endpoint and this one "+
+			"carries it", e.Service)
 	}
 	return Closed, "the plan holds no gateway endpoint. An ECR pull needs one, so a plan that " +
-		"closes this path cannot start an environment"
+		"closes this path this way cannot start an environment"
 }
 
 // checkExecuteCommand looks at the task definition and at the endpoints,
@@ -623,16 +1030,65 @@ func checkNeighbouringEnvironment(p Plan) (Verdict, string) {
 //
 // The VPC DNS quota page counts NTP requests against the same link local packet
 // budget as the resolver and instance metadata, which is documentary evidence
-// that a link local NTP service exists inside the network. The EC2 page for the
-// local Amazon Time Sync Service does not give the address and says nothing
-// about filtering. One page implies the path and no page decides it, so the
-// verdict says so and the path stays in the denominator.
+// that a link local NTP service exists inside the network, and the EC2 page for
+// the local Amazon Time Sync Service gives that service's IPv4 endpoint as
+// 169.254.169.123. What no page says is whether a security group filters it,
+// and a security group does not filter the resolver at all, so the one nearby
+// answer does not transfer.
+//
+// This lane corrected the earlier text on one point. The address IS documented,
+// on the page the time page links to rather than on the time page itself, and
+// the correction matters because an unproven path with no address can never be
+// answered at all.
+//
+// It still has no probe, and that is the honest end of it rather than an
+// unfinished one. The attempt is an NTP exchange over UDP and nothing in a
+// minimal container image makes one, so a probe target here could only ever
+// record that it could not try. This path went from unanswerable to answerable
+// in principle and no further, and it is reported that way rather than counted
+// as progress.
 func checkTimeSync(Plan) (Verdict, string) {
 	return Unproven, "the VPC DNS quota page counts Amazon Time Service NTP requests against " +
 		"the same 1024 packet per second link local budget as the resolver and instance " +
-		"metadata, so a link local NTP service is reachable from inside the VPC. No AWS page " +
-		"this lane read states whether a security group filters it, and this lane does not " +
-		"assert an answer it could not source"
+		"metadata, and the EC2 page gives the IPv4 endpoint as 169.254.169.123. No AWS page " +
+		"this lane read states whether a security group filters it, and no plan field decides " +
+		"it. A probe from one running task settles it and none has been recorded for this " +
+		"environment"
+}
+
+// observeLinkLocal turns one recorded attempt into a verdict.
+//
+// It is the only function in this package that can produce a Closed verdict
+// about a packet rather than about a document, and every branch of it is
+// written so that the absence of information stays absent.
+//
+// Reachable is the only outcome that is positive evidence, and it opens the
+// path. Refused and TimedOut close it, because a link local address with
+// nothing behind it is the shape of both. Errored does NOT close it: a probe
+// that could not run has not looked, and reading a broken instrument as a pass
+// is the single failure this repository keeps finding in its own checks.
+func observeLinkLocal(obs Observation) (Verdict, string) {
+	where := fmt.Sprintf("a probe inside a running task in environment %q dialled %s over %s",
+		obs.EnvironmentID, obs.Address, obs.Network)
+	if obs.ProbeVersion != ProbeVersion {
+		return Unproven, fmt.Sprintf("%s, and recorded the result as %q, which this build does "+
+			"not know how to read. A result from a probe whose behaviour is not this one is not "+
+			"evidence about this one", where, obs.ProbeVersion)
+	}
+	when := obs.ObservedAt.UTC().Format("2006-01-02T15:04:05Z")
+	switch obs.Outcome {
+	case Reachable:
+		return Open, fmt.Sprintf("%s at %s and something answered. This is an observed packet "+
+			"rather than a reading of a document: %s", where, when, obs.Detail)
+	case NoAnswer:
+		return Closed, fmt.Sprintf("%s at %s and nothing answered within %s. This is an "+
+			"observed packet rather than a reading of a document, and it is the only verdict "+
+			"in this report that is about one: %s", where, when, obs.Timeout, obs.Detail)
+	default:
+		return Unproven, fmt.Sprintf("%s at %s and could not make the attempt at all (%s). A "+
+			"probe that did not run says nothing about the path, and this is deliberately not "+
+			"read as a refusal", where, when, obs.Detail)
+	}
 }
 
 // gatewayKind names an AWS target by its id prefix, because in AWS the prefix
@@ -738,31 +1194,63 @@ func describePorts(rule Rule) string {
 	return fmt.Sprintf("%s/%d to %d", rule.Protocol, rule.FromPort, rule.ToPort)
 }
 
-// lastRule returns the rule with the highest priority number, which is the one
-// DNS Firewall evaluates last and therefore the one that decides a query no
-// earlier rule matched.
-func lastRule(rules []DNSFirewallRule) (DNSFirewallRule, bool) {
-	if len(rules) == 0 {
-		return DNSFirewallRule{}, false
-	}
-	last := rules[0]
-	for _, r := range rules[1:] {
-		if r.Priority > last.Priority {
-			last = r
-		}
-	}
-	return last, true
-}
-
-// isBlockEverything reports whether a rule blocks every domain.
-func isBlockEverything(rule DNSFirewallRule) bool {
-	if !strings.EqualFold(rule.Action, "BLOCK") {
-		return false
-	}
+// matchesEveryDomain reports whether a rule matches every query.
+func matchesEveryDomain(rule DNSFirewallRule) bool {
 	for _, d := range rule.Domains {
 		if strings.TrimSpace(d) == "*" {
 			return true
 		}
 	}
 	return false
+}
+
+// permitsTheQuery reports whether a rule's action lets the query out.
+//
+// ALERT is in here with ALLOW rather than with BLOCK, and that is the point of
+// the function existing at all. AWS defines ALERT as "permit the request and
+// send metrics and logs to Cloud Watch". It is the value somebody sets while
+// tuning a rule group and leaves, and read as a block it turns an open resolver
+// into a closed verdict with a graph to look at.
+func permitsTheQuery(rule DNSFirewallRule) bool {
+	switch strings.ToUpper(strings.TrimSpace(rule.Action)) {
+	case "ALLOW", "ALERT":
+		return true
+	default:
+		return false
+	}
+}
+
+// isBlockEverything reports whether a rule blocks every domain.
+func isBlockEverything(rule DNSFirewallRule) bool {
+	if !strings.EqualFold(strings.TrimSpace(rule.Action), "BLOCK") {
+		return false
+	}
+	return matchesEveryDomain(rule)
+}
+
+// expressibleDomain reports whether AWS would accept a domain specification.
+//
+// A specification "can optionally start with * (asterisk)" and may otherwise
+// hold only letters, digits, hyphens and the period that separates labels. So a
+// star in the middle, which the manifest's own host syntax allows and uses, is
+// not a pattern a DNS Firewall domain list can hold. The predicate refuses such
+// a rule group rather than assuming AWS would take it, because the alternative
+// is a plan that reads as containment and cannot be created.
+func expressibleDomain(domain string) bool {
+	d := strings.TrimSpace(domain)
+	if d == "" || len(d) > 255 {
+		return false
+	}
+	if d == "*" {
+		return true
+	}
+	d = strings.TrimPrefix(d, "*")
+	for _, r := range d {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

@@ -100,6 +100,25 @@ type Container struct {
 	Image string
 	// Essential marks a container whose exit stops the task.
 	Essential bool
+	// Command is the entrypoint override, which is how the containment probe
+	// is expressed in a task definition: ECS has no field for "run this first
+	// and stop if it fails", so the probe is a container whose command is the
+	// attempt and whose dependency ordering makes everything else wait.
+	Command []string
+	// DependsOn orders this container after others. It is what makes the
+	// probe run BEFORE any application image rather than beside it, which is
+	// the whole difference between a check and a bystander.
+	DependsOn []ContainerDependency
+}
+
+// ContainerDependency is one entry of a container's dependsOn list.
+type ContainerDependency struct {
+	// ContainerName is the container waited on.
+	ContainerName string
+	// Condition is START, COMPLETE, SUCCESS or HEALTHY. SUCCESS is the only
+	// one that means the waited on container exited zero, so it is the only
+	// one under which a failing probe stops the thing it was probing for.
+	Condition string
 }
 
 // NetworkPlan is the VPC, the subnets, the security group, the route table,
@@ -256,22 +275,69 @@ type DNSFirewall struct {
 	// associated with a different VPC filters nothing here, and it is exactly
 	// the sort of thing that reads as configured in a console screenshot.
 	AssociatedVPCID string
-	// FailOpen is the association's failure mode. True means that when DNS
-	// Firewall cannot reach a rule, the query is allowed through, which turns
-	// the containment into a best effort.
-	FailOpen bool
+	// FailOpen is the VPC's DNS Firewall failure mode, and it is a string
+	// rather than a bool because AWS's own field is three valued and a bool
+	// cannot say the third thing.
+	//
+	// FirewallConfig.FirewallFailOpen takes ENABLED, DISABLED or
+	// USE_LOCAL_RESOURCE_SETTING. AWS documents that "by default, fail open is
+	// disabled, which means the failure mode is closed", and that with it
+	// enabled "DNS Firewall allows queries to proceed if it is unable to
+	// properly evaluate them". The third value defers the decision to a
+	// setting that is not in this plan, so a plan carrying it has not decided
+	// the failure mode and the predicate must not read it as either answer.
+	// That is the shape mismatch this field was found in: a two valued Go type
+	// standing in for a three valued AWS one rounds the unknown case to
+	// whichever answer the author was hoping for.
+	FailOpen FailOpenSetting
 	// Rules are the rule group's rules, and the predicate requires that the
 	// last one by priority blocks every domain.
 	Rules []DNSFirewallRule
 }
 
+// FailOpenSetting is the FirewallConfig.FirewallFailOpen value.
+type FailOpenSetting string
+
+// The three values AWS accepts.
+const (
+	// FailClosed is DISABLED, which AWS documents as the default and describes
+	// as favouring security over availability: DNS Firewall returns a failure
+	// error when it cannot properly evaluate a query.
+	FailClosed FailOpenSetting = "DISABLED"
+	// FailOpenEnabled is ENABLED, which allows queries to proceed when DNS
+	// Firewall cannot evaluate them. It is the value that turns this
+	// containment into a best effort.
+	FailOpenEnabled FailOpenSetting = "ENABLED"
+	// FailOpenDeferred is USE_LOCAL_RESOURCE_SETTING, which takes the answer
+	// from somewhere this plan does not describe. A plan holding it has not
+	// decided the failure mode, and the predicate says so rather than guessing.
+	FailOpenDeferred FailOpenSetting = "USE_LOCAL_RESOURCE_SETTING"
+)
+
 // DNSFirewallRule is one rule in the group.
 type DNSFirewallRule struct {
-	// Priority orders the rules. Lower is evaluated first.
+	// Priority orders the rules. AWS states that DNS Firewall "processes the
+	// rules in a rule group by order of priority, starting from the lowest
+	// setting", and that "you must specify a unique priority for each rule in
+	// a rule group". Both halves are checked: the order decides which rule
+	// answers, and a duplicate is a plan AWS refuses to apply, which is not a
+	// containment either.
 	Priority int
 	// Domains are the domain patterns the rule matches. "*" is every domain.
+	//
+	// A domain specification "can optionally start with * (asterisk)" and may
+	// otherwise hold only letters, digits, hyphens and the label separator, so
+	// a star anywhere but the front is not a pattern AWS will accept. That is
+	// why the generator refuses to translate a manifest host with a star in
+	// the middle rather than dropping it or widening it.
 	Domains []string
-	// Action is ALLOW, BLOCK, or ALERT. ALERT logs and permits, which is worth
-	// naming because it is the value somebody sets while tuning and leaves.
+	// Action is ALLOW, BLOCK, or ALERT.
+	//
+	// ALERT is not a weaker BLOCK. AWS defines ALLOW as "permit the request to
+	// go through" and ALERT as "permit the request and send metrics and logs
+	// to Cloud Watch", so both of them let the query out and only BLOCK
+	// disallows it. An ALERT rule matching every domain ahead of the terminal
+	// BLOCK is therefore a rule group that blocks nothing at all, which is the
+	// shape this file's predicate was found unable to see.
 	Action string
 }

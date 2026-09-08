@@ -332,6 +332,25 @@ type RuntimeConfig struct {
 	Root string
 	// Runtime is the manifest's runtime block, as a copy.
 	Runtime schema.Runtime
+	// Egress is the manifest's egress catalogue, as a copy.
+	//
+	// A runtime that places containers somewhere other than this machine has
+	// to build the network the sidecar runs in, and the shape of that network
+	// depends on what the environment is allowed to reach: a host declared
+	// allow or sandbox is one the sidecar forwards to for real and therefore
+	// has to resolve, and a host declared block, mock, capture or synth is
+	// answered locally and must NOT resolve, because a name the sidecar
+	// answers resolving publicly is a way around the decision the manifest
+	// made about it.
+	//
+	// It is here so a runtime composes with that catalogue rather than
+	// carrying a second list of hosts that can disagree with it. The ECS
+	// runtime is the first to need it, for the Route 53 Resolver DNS Firewall
+	// rule group that is the only thing on AWS able to close the resolver
+	// path: security groups and network ACLs cannot filter the Amazon DNS
+	// server, so the allow list in that rule group is where the manifest's
+	// answer has to end up.
+	Egress schema.Egress
 	// TTL is how long an environment this runtime creates may live, already
 	// parsed from the manifest. Zero means no expiry.
 	TTL time.Duration
