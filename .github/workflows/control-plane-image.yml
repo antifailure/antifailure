@@ -347,9 +347,19 @@ jobs:
           test "$ee" != "$ce" || { echo "FAIL: both artifacts are the same image"; exit 1; }
           echo "two distinct images loaded"
 
+      # Run through `bash` rather than by executing the path. The script is
+      # committed 100755 and that is still the right mode for anybody running
+      # it by hand, but this checkout's git is configured with
+      # core.fileMode=false, so a `chmod +x` here is invisible to `git add`, the
+      # file stays 100644 in the index, and nothing local says so. That is
+      # exactly how this step failed the first time it ran: exit 126,
+      # "Permission denied", against a file that is executable on the machine
+      # that wrote it. The mode is fixed AND the invocation no longer depends on
+      # it, because a workflow that breaks on a file attribute git was told to
+      # ignore is a workflow that will break again.
       - name: Licensed 200, unlicensed 402, community 404
         run: |
-          deploy/docker/enterprise-image-proof.sh \
+          bash deploy/docker/enterprise-image-proof.sh \
             "${ENTERPRISE_IMAGE}:${{ needs.meta.outputs.tag }}" \
             "${COMMUNITY_IMAGE}:${{ needs.meta.outputs.tag }}"
 
