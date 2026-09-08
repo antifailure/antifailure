@@ -127,8 +127,14 @@ func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
 		// use an address no rule names.
 		destinations: newDestinations(eng.Rules(), "", eng.AllowsIPv6()),
 		transport:    &http.Transport{MaxIdleConnsPerHost: 4, IdleConnTimeout: time.Second},
+		// Built the same way main does, because a path that only exists in
+		// production is a path no test can fail on.
+		transportH2:  newForwardTransport(h2ALPN()),
+		transportH2C: newForwardTransport(h2cPriorKnowledge()),
 	}
 	s.transport.DialContext = s.dialGuarded
+	s.transportH2.DialContext = s.dialGuarded
+	s.transportH2C.DialContext = s.dialGuarded
 
 	done := make(chan struct{})
 	go func() {
@@ -163,6 +169,8 @@ func newSidecar(t *testing.T, egress *schema.Egress) *sidecar {
 		_ = pw.Close()
 		<-done
 		s.transport.CloseIdleConnections()
+		s.transportH2.CloseIdleConnections()
+		s.transportH2C.CloseIdleConnections()
 	})
 	return s
 }

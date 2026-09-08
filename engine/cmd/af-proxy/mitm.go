@@ -184,6 +184,12 @@ func (p *proxy) inspectTLS(conn net.Conn, br *bufio.Reader, sni string) {
 	server := tls.Server(&prefixedConn{Conn: conn, r: br}, &tls.Config{
 		Certificates: []tls.Certificate{*leaf},
 		MinVersion:   tls.VersionTLS12,
+		// Offered in preference order, and the negotiated protocol decides
+		// how the connection is read below. Naming none of them left the
+		// negotiated protocol empty, which every gRPC client refuses outright:
+		// HTTP/2 over TLS is negotiated with ALPN, gRPC is HTTP/2, so a
+		// terminator that selects no protocol is one gRPC will not talk to.
+		NextProtos: []string{"h2", "http/1.1"},
 	})
 	_ = server.SetDeadline(time.Now().Add(30 * time.Second))
 	if err := server.Handshake(); err != nil {
@@ -202,6 +208,15 @@ func (p *proxy) inspectTLS(conn net.Conn, br *bufio.Reader, sni string) {
 	}
 	_ = server.SetDeadline(time.Time{})
 	defer func() { _ = server.Close() }()
+
+	// The reader follows the handshake. Negotiating h2 and then reading
+	// HTTP/1.1 anyway would be worse than negotiating nothing, because the
+	// client would have committed to HTTP/2 and every frame it sent would be
+	// misparsed as a request line.
+	if server.ConnectionState().NegotiatedProtocol == "h2" {
+		p.serveInspectedH2(server, sni)
+		return
+	}
 
 	// One connection can carry many requests, and each is decided on its own.
 	// A client that keeps a connection open to an allowed path and then asks
