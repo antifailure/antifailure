@@ -1330,6 +1330,23 @@ func (v *validator) load(m *schema.Manifest) {
 			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
 			"Set source_config.path to the file the traffic is read from.")
 	}
+	if t := l.Traffic; t != nil {
+		if strings.TrimSpace(t.Profile) == "" {
+			v.add("load.traffic.profile",
+				"The traffic block names no profile.",
+				"Give the path to the committed profile, relative to the repository root, "+
+					"for example .antifailure/traffic.json. Record one with af traffic record.")
+		} else if c, ok := confine(t.Profile); !ok || c == "" {
+			v.add("load.traffic.profile",
+				fmt.Sprintf("The traffic profile %q is not a file inside the repository.", t.Profile),
+				"Use a path relative to the repository root, not the root itself and not a path outside it.")
+		}
+		if _, err := ParseDuration(t.MaxAge); err != nil {
+			v.add("load.traffic.max_age",
+				fmt.Sprintf("The maximum age %q is not a duration.", t.MaxAge),
+				"Use a number of hours or days, for example 336h or 14d.")
+		}
+	}
 	v.loadThresholds(l)
 
 	for i := range l.Scenarios {

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/antifailure/antifailure/engine/internal/traffic"
 	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -81,6 +82,24 @@ type Observation struct {
 	// says why the configured source produced nothing.
 	Traffic       string
 	TrafficReason string
+	// Sent is every route a load run would actually send at this environment,
+	// which is the shape after the safe list has refused what it refuses. Not
+	// the shape and not the safe list: a route the shape carries and the safe
+	// list refuses is never sent, and a pattern in the safe list that no
+	// source produces sends nothing.
+	Sent []traffic.Endpoint
+	// SentRate is how many requests a second the run would send, which is the
+	// shape's rate times the manifest's scale.
+	SentRate float64
+	// TrafficProfile is what production actually served, read from the
+	// committed profile, and TrafficProfileReason says why there is none.
+	//
+	// A nil profile with a reason is the case this exists for. Which routes a
+	// run sends was always readable and was always reported as a reproduction
+	// of production's traffic; what was never available was the list to
+	// compare it against.
+	TrafficProfile       *traffic.Profile
+	TrafficProfileReason string
 
 	// Stores describes each declared datastore this environment BRANCHED, as
 	// that store's own provider answered for it.
@@ -218,7 +237,7 @@ func Build(obs Observation) Inventory {
 			thirdParty(obs),
 			auth(obs),
 			runtime(obs),
-			traffic(obs),
+			trafficDimension(obs),
 			datastores(obs),
 			topology(obs),
 		},
@@ -622,34 +641,6 @@ func runtime(obs Observation) Dimension {
 		NotApplicable: "the environment runs on " + where +
 			", and nothing in the manifest says what production runs on, so there is nothing to compare it against",
 	}
-}
-
-func traffic(obs Observation) Dimension {
-	d := Dimension{Name: schema.FidelityTraffic}
-	l := obs.Manifest.Load
-	if l == nil || !l.Enabled {
-		d.NotApplicable = "the manifest does not ask for traffic, so there is none to reproduce"
-		return d
-	}
-	c := Component{Name: "endpoint mix"}
-	switch {
-	case obs.TrafficReason != "":
-		c.State, c.Detail = Absent, obs.TrafficReason
-	// Keyed on whether a shape was actually read, not on which source the
-	// manifest named. This arm used to test l.Source == LoadAccessLog, which
-	// was every connected source at the time it was written. OpenTelemetry
-	// became a real source afterwards, and an otel run would have fallen to
-	// the default arm below and been reported as the engine's own shape while
-	// carrying production's routes and production's rate. A report that calls
-	// real traffic a default is worse than one that says nothing.
-	case obs.Traffic != "":
-		c.State, c.Detail = Reproduced, obs.Traffic
-	default:
-		c.State = Absent
-		c.Detail = "the traffic is the engine's own default shape, not production's"
-	}
-	d.Components = append(d.Components, c)
-	return d
 }
 
 func orUnknown(s string) string {

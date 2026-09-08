@@ -15,6 +15,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/fidelity"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/personas"
+	"github.com/antifailure/antifailure/engine/internal/traffic"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/internal/volume"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -672,8 +673,41 @@ func (o *Orchestrator) observeTraffic(obs *fidelity.Observation) {
 	// gap that made an otel run report the default shape.
 	if shape.Source != "" && shape.Source != "default" {
 		obs.Traffic = fmt.Sprintf("%d routes read from %s, at %.0f requests a second",
-			len(shape.Routes), l.SourceConfig["path"], shape.RequestsPerSecond)
+			len(shape.Routes), describeTrafficSource(l), shape.RequestsPerSecond)
 	}
+
+	// What the run would actually send, which is the shape after the safe list
+	// has refused what it refuses. The mix is what somebody configured; this
+	// is what leaves the generator, and the gap between the two is where the
+	// 2026-09-06 failure lived.
+	safe, unsafe := o.SafeRoutes()
+	sendable, _ := shape.Safe(safe, unsafe)
+	obs.Sent = make([]traffic.Endpoint, 0, len(sendable.Routes))
+	for _, r := range sendable.Routes {
+		obs.Sent = append(obs.Sent, traffic.Endpoint{Method: r.Method, Path: r.Path})
+	}
+	_, scale := ResolveLoadRate(LoadOptions{}, l)
+	obs.SentRate = shape.RequestsPerSecond * scale
+	obs.TrafficProfile, obs.TrafficProfileReason = o.trafficProfile()
+}
+
+// describeTrafficSource names where the mix came from, in the manifest's own
+// words.
+//
+// The path when there is one, and the source's name when there is not. This
+// line used to print l.SourceConfig["path"] unconditionally, so a manifest
+// with source: none and four safe_routes produced the sentence "4 routes read
+// from , at 5 requests a second". The missing name is a small thing beside the
+// verdict of reproduced that stood next to it, and both came from the same
+// place: nothing here had been told what production serves.
+func describeTrafficSource(l *schema.Load) string {
+	if path := l.SourceConfig["path"]; path != "" {
+		return path
+	}
+	if l.Source != "" && l.Source != schema.LoadNone {
+		return string(l.Source)
+	}
+	return "the routes safe_routes names, which is a list written by hand"
 }
 
 // oneLine keeps a reason on one line of a report.

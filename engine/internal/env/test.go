@@ -724,14 +724,24 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 		return nil, nil, err
 	}
 	cfg := o.opts.Manifest.Load
-	var safe, unsafe []string
-	if cfg != nil {
-		safe, unsafe = cfg.SafeRoutes, cfg.UnsafeRoutes
-	}
-	if len(safe) == 0 {
-		// Reads under the root, which is what a smoke test wants and is the
-		// only thing that can be assumed safe without being told.
-		safe = []string{"GET /**"}
+	safe, unsafe := o.SafeRoutes()
+	// Production's own p95 per route, for the routes this shape could not
+	// carry one for. Without it load.thresholds.p95_increase is a threshold
+	// with nothing on the other side of the comparison, which is what this
+	// repository's own manifest says of it: "It was set to 0.5 here and had
+	// never once been able to fire."
+	profile, profileWhy := o.trafficProfile()
+	shape, filled := withProfileBaselines(shape, profile)
+	baselines := ""
+	switch {
+	case filled > 0:
+		baselines = fmt.Sprintf("%d of %d routes take their p95 baseline from the traffic profile collected on %s",
+			filled, len(shape.Routes), profile.CollectedAt.UTC().Format("2006-01-02"))
+	case profile == nil && !shapeHasBaseline(shape):
+		// Said rather than left silent. A run whose every route has no
+		// baseline evaluates p95_increase against nothing and prints no
+		// breach, which reads exactly like a run that found no regression.
+		baselines = "no route has a p95 baseline, so p95_increase cannot fire: " + profileWhy
 	}
 	sendable, refused := shape.Safe(safe, unsafe)
 	if len(sendable.Routes) == 0 {
@@ -744,6 +754,7 @@ func (o *Orchestrator) Load(ctx context.Context, opts LoadOptions) (*load.Result
 	res, err := load.Run(ctx, load.Options{
 		BaseURL: status.URL, Shape: sendable, Scale: scale, Duration: duration,
 		Seed: opts.Seed, Clock: o.opts.Clock, Progress: opts.Progress,
+		Baselines: baselines,
 	})
 	return res, refused, err
 }
@@ -783,16 +794,7 @@ func (o *Orchestrator) Scenarios(ctx context.Context, opts ScenarioOptions) ([]l
 			"detail", "no scenarios are declared; add load.scenarios to the manifest")
 	}
 
-	cfg := o.opts.Manifest.Load
-	var safe, unsafe []string
-	if cfg != nil {
-		safe, unsafe = cfg.SafeRoutes, cfg.UnsafeRoutes
-	}
-	if len(safe) == 0 {
-		// The same default the mix takes. Reads under the root are the only
-		// thing that can be assumed safe without being told.
-		safe = []string{"GET /**"}
-	}
+	safe, unsafe := o.SafeRoutes()
 
 	return load.RunScenarios(ctx, load.ScenarioOptions{
 		BaseURL: status.URL, Runs: runs,

@@ -37,6 +37,12 @@ type Options struct {
 	Clock clock.Clock
 	// Progress receives a line every second, and may be nil.
 	Progress func(Progress)
+	// Baselines says where the per route p95 comparisons came from, when they
+	// did not come from the shape itself. It is carried into the result and
+	// printed, because a threshold that fires has to be able to say what it
+	// fired against, and a baseline recorded on another day is a different
+	// claim from one measured in the same file the traffic came from.
+	Baselines string
 }
 
 // Progress is how far along a run is.
@@ -76,6 +82,9 @@ type Result struct {
 	ErrorRate float64 `json:"error_rate"`
 	// Overall is every request together.
 	Overall Latency `json:"overall"`
+	// Baselines says where the per route p95 comparisons came from, empty when
+	// they came from the shape itself.
+	Baselines string `json:"baselines,omitempty"`
 }
 
 // RouteResult is one route's measurement.
@@ -331,6 +340,7 @@ func finish(m *meter, opts Options, started time.Time) *Result {
 	elapsed := opts.Clock.Since(started)
 	res := &Result{
 		Source:     opts.Shape.Source,
+		Baselines:  opts.Baselines,
 		TargetRate: opts.Shape.RequestsPerSecond * opts.Scale,
 		Sent:       m.sent, Duration: elapsed,
 		Overall: percentiles(m.all),

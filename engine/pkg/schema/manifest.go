@@ -806,6 +806,33 @@ type Load struct {
 	UnsafeRoutes []string          `json:"unsafe_routes,omitempty" yaml:"unsafe_routes,omitempty"`
 	Scenarios    []LoadScenario    `json:"scenarios,omitempty" yaml:"scenarios,omitempty"`
 	Thresholds   *LoadThresholds   `json:"thresholds,omitempty" yaml:"thresholds,omitempty"`
+	// Traffic names the committed profile of what production serves, which is
+	// the denominator every route in a load run is measured against.
+	Traffic *Traffic `json:"traffic,omitempty" yaml:"traffic,omitempty"`
+}
+
+// Traffic names the committed record of what production actually serves.
+//
+// Without one, safe_routes is a list somebody wrote from memory and nothing
+// can say how much of production it misses. Measured on this repository on
+// 2026-09-06: a migration held AccessExclusiveLock on nine relations for
+// thirty seconds and the load run over four hand written routes reported 0.0
+// percent failed, because none of the four read the locked table. The profile
+// is what turns that list into a fraction of production's requests.
+//
+// It is a path rather than a collector endpoint, deliberately, and for the
+// same reason database.volume is. The profile is recorded once from telemetry
+// a team already has, and committed; every machine that reads it afterwards,
+// including a pull request check that can reach nothing, reads a file. Nothing
+// here reports from inside a running application.
+type Traffic struct {
+	// Profile is the artifact, relative to the repository root. Written by
+	// af traffic record and read by everything that needs a denominator.
+	Profile string `json:"profile" yaml:"profile"`
+	// MaxAge is how old the profile may be before it is refused. A stale
+	// profile is not a smaller number, it is an unknown one, so it is refused
+	// the way a stale golden is rather than quoted.
+	MaxAge string `json:"max_age,omitempty" yaml:"max_age,omitempty"`
 }
 
 // LoadScenario points at a journey document and says how hard to run it.
