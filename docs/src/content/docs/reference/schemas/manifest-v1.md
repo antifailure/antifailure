@@ -129,7 +129,7 @@ One store the environment holds. Database is a single struct and it is Postgres,
 | `from` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `name` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `provider` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
-| `source_url_env` | string | no | The NAME of the variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. A connection string written here rather than a variable name is refused, and the refusal does not print it back. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `source_url_env` | string | no | The variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. Max length 128. |
 | `stance` | `golden`, `empty`, `derived`, `topics_only` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
 
 ## Egress
@@ -380,12 +380,12 @@ One request sent to both versions.
 
 ## Resources
 
-The size one instance of this service is given. Each value is both the request and the limit, so the service gets what it asked for and takes no more. Omit either key to leave that dimension uncapped.
+Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `cpu` | string | no | CPU for one instance, as a number of cores or as thousandths with an m: 2, 0.5, 500m. On Kubernetes it is the request and the limit, which puts the pod in the Guaranteed class; on the local runtime it is the daemon's own cpu constraint. A value the runtime cannot place is refused with AF-RUN-047 naming the shortfall, rather than accepted and left Pending. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
-| `memory` | string | no | Memory for one instance, with a unit: 512Mi, 2Gi. Mi and Gi are powers of two, M and G powers of ten. A bare number is refused, because nobody who writes 512 means 512 bytes. On Kubernetes it is the request and the limit; on the local runtime it is the daemon's memory constraint, so a service over it is killed rather than allowed to take the machine down. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
+| `cpu` | string | no | Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
+| `memory` | string | no | Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
 
 ## Rolling compatibility
 
@@ -407,8 +407,23 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `kubeconfig_context` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
 | `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
-| `provider` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to `local`. Max length 64. |
+| `provider` | `local`, `kubernetes` | no | Defaults to `local`. |
+| `requires` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
+| `targets` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
 | `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
+
+## Runtime target
+
+One place an environment may be placed. A runtime plus the facts about where it is, and the second half is the part no runtime supplies for itself: a kubeconfig context is a name on somebody's laptop and it does not say which region the cluster is in.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `domain` | string | no | Wildcard domain for environments placed here. Omitted inherits runtime.domain. Max length 253. |
+| `kubeconfig_context` | string | no | Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing. Max length 253. |
+| `name` | string | **yes** | Unique within the manifest. It names the target in the placement decision and in the refusal when none will do. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `namespace_prefix` | string | no | Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix. Max length 40. |
+| `provider` | `local`, `kubernetes` | no | The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts. |
+| `tags` | object | no | What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check. Max properties 16. |
 
 ## Service
 
@@ -428,7 +443,7 @@ One process the environment runs. A service is built from the repository, given 
 | `path` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | `port` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
 | `replicas` | integer | no | How many instances of this service to run. Both runtimes start this many, behind the one name other services resolve, so a bug that only appears at more than one instance appears here. Omitted means one. A cron service may not ask for more than one, because a scheduled job that runs on three instances runs three times. Minimum 1, maximum 10. |
-| `resources` | [Resources](#resources) | no | The size one instance of this service is given. |
+| `resources` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
 | `schedule` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
 ## Subset
