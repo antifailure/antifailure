@@ -949,6 +949,9 @@ func TestEveryToolsBinaryNameIsIgnored(t *testing.T) {
 	exempt := map[string]string{
 		"docs": "also the documentation site at the repository root, so ignoring " +
 			"the name would ignore the tree",
+		"internal": "not a command. It holds packages the tools share, so no build " +
+			"writes a binary of this name, and /internal in .gitignore would ignore " +
+			"any directory of that name anywhere at the root",
 	}
 
 	entries, err := os.ReadDir(filepath.Join(root, "tools"))

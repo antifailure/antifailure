@@ -126,6 +126,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/antifailure/antifailure/tools/internal/generated"
 )
 
 const routesPath = "tools/docs/contact-routes.tsv"
@@ -574,6 +576,18 @@ func collect(root string) ([]string, error) {
 		}
 		rel = filepath.ToSlash(rel)
 		if skipFiles[rel] || testFile(rel) || !text(path) {
+			return nil
+		}
+		// Generated Go is skipped, because its literals were authored
+		// somewhere else and are scanned where they were authored.
+		//
+		// engine/internal/docs/pages.gen.go carries the documentation site
+		// page by page, so an example address inside a guide arrived here as
+		// an address this project publishes and cannot answer. It is real
+		// prose in a Markdown page, this walk already reads that page, and
+		// reading it twice through a copy only produces a second report of
+		// the same line under a filename nobody can fix.
+		if strings.HasSuffix(rel, ".go") && generated.Is(path) {
 			return nil
 		}
 		out = append(out, rel)

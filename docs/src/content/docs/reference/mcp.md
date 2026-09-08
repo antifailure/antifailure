@@ -458,6 +458,56 @@ code this build does not have is reported as unknown rather than answered with
 an invented entry. The text you pass is never echoed back and only the codes in
 it are used.
 
+### `search_documentation`, `list_documentation` and `read_documentation_page`
+
+This documentation, served to the agent, in pieces small enough to act on.
+
+Antifailure is new, so no model has it in its training data. An agent given the
+tools above can run a rehearsal and read a verdict while having no way to find
+out what a `stance` is, what the `topology` dimension measures, or why a golden
+that fails verification cannot be branched. It guesses, and it guesses
+confidently, because nothing tells it otherwise.
+
+The hard part is not availability, it is cost. There are 92 pages here and
+1.1 MB of them, and a tool that answers a narrow question with a whole page is
+worse than no tool at all: it spends the context the caller needed to act on
+the answer, and it spends it invisibly. So:
+
+- **`search_documentation` returns excerpts and never pages.** A hit is a page
+  path, the heading path it came from, the anchor that reads that section on
+  its own, and the few lines around the match. You state the budget with
+  `max_chars` and `max_results` and the tool keeps it: excerpts are shortened
+  and then dropped to stay inside it.
+- **Every response says what it did NOT return.** `pages_matched`,
+  `pages_shown`, `pages_not_shown`, the paths of the pages that were dropped,
+  and a note explaining why. A short answer is never mistaken for a complete
+  one, because a silent truncation is a reader believing it has seen
+  everything.
+- **`list_documentation` is the cheap way to orient.** With no arguments it
+  names every page this build ships, grouped by section, for a small fraction
+  of what one page costs. Pass `section` for that section's pages with a
+  description each, or `path` for one page's headings and anchors, so the next
+  call can be exact.
+- **`read_documentation_page` is bounded.** Pass `section` with an anchor to
+  read one heading and nothing else. A page longer than `max_chars` is cut at a
+  line boundary, marked where it was cut, and reported with the exact
+  characters withheld and the anchors of every section past the cut.
+- **A path this build does not ship is refused** with the nearest paths named,
+  rather than answered with nothing. An empty result reads exactly like a page
+  with nothing in it.
+
+What one answer costs against what the whole set would cost is measured by
+`engine/internal/docs/benchmark_test.go`, which `just benchmark` runs, and the
+dated report is in `benchmarks/`. The figures are not repeated here on purpose:
+this page is one of the 92 the harness measures, so a number written on it
+changes the corpus it is a number about, and a self referential figure is stale
+the moment it is committed.
+
+The pages are compiled into the binary by `tools/docsembed`, so they are the
+documentation for the build you are talking to rather than whatever is on the
+website today, and no network is used. `just generate` regenerates them and CI
+fails if the committed copy has drifted from `docs/src/content/docs`.
+
 ### `explain_effective_configuration`
 
 The settings this project actually runs under, with every default filled in.

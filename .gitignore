@@ -138,6 +138,7 @@ runner/artifacts/
 /contactcheck
 /cost
 /docscheck
+/docsembed
 /dogfood
 /errcheck
 /errgen
