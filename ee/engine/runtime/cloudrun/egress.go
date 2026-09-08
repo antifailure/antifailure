@@ -588,6 +588,22 @@ func checkNeighbouringService(p Plan) (Verdict, string) {
 	for _, s := range p.Services {
 		own[serviceResource(p, s.Name)] = true
 	}
+	// The identity has to belong to this environment and not to the
+	// installation, and this is the check that says so.
+	//
+	// It is here rather than on the metadata path because it decides a
+	// different question. One service account shared by every environment
+	// leaves the metadata path exactly as open as it already is, and it
+	// destroys this one: an invoker binding granted so that a web service can
+	// call its own worker is then held by the principal every other
+	// environment also runs as, so every environment can call every other
+	// environment's services and each binding reads as correct on its own.
+	if local, _, ok := strings.Cut(p.Identity.Email, "@"); !ok || local != p.Network.Subnet.Name {
+		missing = append(missing, fmt.Sprintf(
+			"the environment runs as %q, which is not this environment's own identity %q, so "+
+				"every environment shares one principal and a binding granted to one is held "+
+				"by all of them", p.Identity.Email, p.Network.Subnet.Name))
+	}
 	for _, s := range p.Services {
 		if s.AllowUnauthenticated {
 			missing = append(missing, fmt.Sprintf(
@@ -615,10 +631,11 @@ func checkNeighbouringService(p Plan) (Verdict, string) {
 	}
 	return Closed, fmt.Sprintf(
 		"no service accepts unauthenticated callers, every service has an ingress setting other "+
-			"than %q, and the environment identity holds invoker bindings on its own %d services "+
-			"and on nothing else. The separation is IAM rather than the network, because at the "+
-			"network layer a call to a neighbour and a call to this environment's own worker are "+
-			"the same packets to the same address", IngressAll, len(p.Services))
+			"than %q, and %s, which is this environment's own identity and no other "+
+			"environment's, holds invoker bindings on its own %d services and on nothing else. "+
+			"The separation is IAM rather than the network, because at the network layer a call "+
+			"to a neighbour and a call to this environment's own worker are the same packets to "+
+			"the same address", IngressAll, p.Identity.Email, len(p.Services))
 }
 
 // checkNeighbouringAddress is about destinations inside the network, where the

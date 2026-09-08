@@ -39,7 +39,6 @@ const (
 	EnvRegion      = "AF_CLOUDRUN_REGION"
 	EnvNetwork     = "AF_CLOUDRUN_NETWORK"
 	EnvSubnetRange = "AF_CLOUDRUN_SUBNET_RANGE"
-	EnvIdentity    = "AF_CLOUDRUN_SERVICE_ACCOUNT"
 	EnvResolver    = "AF_CLOUDRUN_RESOLVER"
 )
 
@@ -147,7 +146,6 @@ func (p *Provider) inputs() (Inputs, []string) {
 		Region:      strings.TrimSpace(get(EnvRegion)),
 		Network:     strings.TrimSpace(get(EnvNetwork)),
 		SubnetRange: strings.TrimSpace(get(EnvSubnetRange)),
-		Identity:    strings.TrimSpace(get(EnvIdentity)),
 		Resolver:    strings.TrimSpace(get(EnvResolver)),
 		// The example the report is generated for. A RuntimeConfig carries the
 		// manifest's runtime block and not its services, so the provider
@@ -165,7 +163,6 @@ func (p *Provider) inputs() (Inputs, []string) {
 		{EnvRegion, in.Region == ""},
 		{EnvNetwork, in.Network == ""},
 		{EnvSubnetRange, in.SubnetRange == ""},
-		{EnvIdentity, in.Identity == ""},
 		{EnvResolver, in.Resolver == ""},
 	} {
 		if pair.empty {
@@ -208,9 +205,6 @@ type Inputs struct {
 	// and two environments in one subnet cannot be separated by any rule that
 	// can be written.
 	SubnetRange string
-	// Identity is the service account the environment runs as. It must not be
-	// the project's Compute Engine default account.
-	Identity string
 	// Resolver is the address, inside SubnetRange, of the name server the
 	// network's outbound server policy sends queries to.
 	Resolver string
@@ -240,6 +234,20 @@ func (in Inputs) withServices(names ...string) Inputs {
 // and run nothing.
 func Generate(in Inputs, envID string) Plan {
 	tag := "af-" + envID
+	// One service account per environment, derived rather than configured.
+	//
+	// It was an installation wide variable and that was wrong in a way no
+	// egress rule shows. Every environment would have run as one principal, so
+	// the invoker binding that lets a web service call its own worker would
+	// have been held by the principal every other environment also runs as,
+	// and every environment could call every other environment's services with
+	// each binding still reading as correct on its own.
+	//
+	// The cost is real and belongs beside the decision: this makes an
+	// environment cost a service account, so the project's quota on service
+	// accounts becomes a ceiling on environments per project. This lane did
+	// not measure that quota.
+	identity := fmt.Sprintf("%s@%s.iam.gserviceaccount.com", tag, in.Project)
 	subnet := Subnet{
 		Name:      tag,
 		IPv4Range: in.SubnetRange,
@@ -271,7 +279,7 @@ func Generate(in Inputs, envID string) Plan {
 			Network:        in.Network,
 			Subnet:         subnet.Name,
 			NetworkTags:    []string{tag},
-			ServiceAccount: in.Identity,
+			ServiceAccount: identity,
 			Volumes:        nil,
 		})
 	}
@@ -280,7 +288,7 @@ func Generate(in Inputs, envID string) Plan {
 		Project:  in.Project,
 		Region:   in.Region,
 		Services: services,
-		Identity: ServiceAccount{Email: in.Identity},
+		Identity: ServiceAccount{Email: identity},
 		Network: NetworkPlan{
 			Name:   in.Network,
 			Subnet: subnet,

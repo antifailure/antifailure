@@ -20,7 +20,6 @@ func reference() cloudrun.Inputs {
 		Region:      "us-central1",
 		Network:     "af-net",
 		SubnetRange: "10.20.1.0/26",
-		Identity:    "af-example@antifailure-twins.iam.gserviceaccount.com",
 		Resolver:    "10.20.1.10",
 		Services:    []string{"web", "worker"},
 	}
@@ -236,6 +235,17 @@ func mutations() []mutation {
 					Role:     cloudrun.RoleInvoker,
 					Resource: "projects/antifailure-twins/locations/us-central1/services/af-other-web",
 				})
+			},
+		},
+		{
+			path: "a-neighbouring-environments-service",
+			what: "one service account shared by every environment",
+			apply: func(p *cloudrun.Plan) {
+				// The shape this was in before: an installation wide identity
+				// read from a variable. Every rule in the plan still reads as
+				// correct and every environment can invoke every other one's
+				// services, because they are all the same principal.
+				p.Identity.Email = "antifailure@antifailure-twins.iam.gserviceaccount.com"
 			},
 		},
 		{
@@ -619,7 +629,6 @@ func referenceEnv() func(string) string {
 		cloudrun.EnvRegion:      "us-central1",
 		cloudrun.EnvNetwork:     "af-net",
 		cloudrun.EnvSubnetRange: "10.20.1.0/26",
-		cloudrun.EnvIdentity:    "af-example@antifailure-twins.iam.gserviceaccount.com",
 		cloudrun.EnvResolver:    "10.20.1.10",
 	}
 	return func(k string) string { return env[k] }
