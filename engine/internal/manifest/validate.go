@@ -624,7 +624,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 				"Use lower case letters, digits, hyphens and underscores, for example clickhouse or elasticsearch.")
 		}
 
-		v.datastoreStance(p, d)
+		v.datastoreStance(p, d, m)
 		v.datastoreSource(p, d, m)
 
 		if d.Name == schema.PrimaryDatastore {
@@ -654,7 +654,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 }
 
 // datastoreStance is the half of the check that refuses a silent default.
-func (v *validator) datastoreStance(p string, d schema.Datastore) {
+func (v *validator) datastoreStance(p string, d schema.Datastore, m *schema.Manifest) {
 	if d.Stance == "" {
 		v.add(p+".stance",
 			fmt.Sprintf("The datastore %q declares no stance.", orUnnamed(d.Name)),
@@ -682,6 +682,10 @@ func (v *validator) datastoreStance(p string, d schema.Datastore) {
 				"Name the datastore it is rebuilt from, usually primary. A search index built from the branch cannot go stale against it; a clone of one can.")
 		}
 	}
+
+	v.datastoreRebuild(p, d, m)
+	v.datastoreTopics(p, d)
+	v.datastoreIsRunBySomething(p, d, m)
 
 	if d.Stance != schema.StanceDerived && d.From != "" {
 		v.add(p+".from",
@@ -740,6 +744,140 @@ func redactURLish(value string) string {
 		return "a connection string"
 	}
 	return value
+}
+
+// datastoreRebuild refuses a derived store that names no command, and a
+// command on a store that derives from nothing.
+//
+// The rebuild is what makes derived a stance rather than a label. Without a
+// command the engine has a store declared as rebuilt from the branch and no
+// way to rebuild it, which is an empty search index in an environment whose
+// manifest says it holds one, and that is the failure the whole stance key
+// exists to stop, one level down.
+func (v *validator) datastoreRebuild(p string, d schema.Datastore, m *schema.Manifest) {
+	if d.Stance != schema.StanceDerived {
+		if d.Rebuild != nil {
+			v.add(p+".rebuild",
+				fmt.Sprintf("The datastore %q declares a rebuild and its stance is %s.", orUnnamed(d.Name), d.Stance),
+				"Only a derived store is rebuilt from another one. Either set the stance to derived or remove rebuild.")
+		}
+		return
+	}
+	if d.Rebuild == nil {
+		v.add(p+".rebuild",
+			fmt.Sprintf("The datastore %q is derived and nothing says how to rebuild it.", orUnnamed(d.Name)),
+			"Add rebuild with a service whose image the command runs in and the command itself, for example the index command your application already has. It runs once the branch is ready, inside the environment, and a non-zero exit fails the environment rather than leaving an index nobody built.")
+		return
+	}
+	if d.Rebuild.Command == "" {
+		v.add(p+".rebuild.command",
+			fmt.Sprintf("The rebuild of the datastore %q has no command.", orUnnamed(d.Name)),
+			"Write the command that builds this store from the one it reads.")
+	}
+	switch {
+	case d.Rebuild.Service == "":
+		v.add(p+".rebuild.service",
+			fmt.Sprintf("The rebuild of the datastore %q names no service.", orUnnamed(d.Name)),
+			"Name the service whose image the command runs in. It is usually the application's own, because the code that knows how to index this product's rows is the product's code.")
+	case !hasService(m, d.Rebuild.Service):
+		v.add(p+".rebuild.service",
+			fmt.Sprintf("No service is named %q.", d.Rebuild.Service),
+			"The rebuild runs in a service's image, so the name has to be one this manifest declares.")
+	}
+}
+
+// datastoreTopics refuses a broker with no declared shape, and topics on a
+// store that is not one.
+//
+// A topics_only store whose topics nobody listed is a broker the environment
+// starts and creates nothing in, which is indistinguishable from the empty
+// stance and is not what the manifest said. The stance's whole content is the
+// list.
+func (v *validator) datastoreTopics(p string, d schema.Datastore) {
+	if d.Stance != schema.StanceTopicsOnly {
+		if len(d.Topics) > 0 {
+			v.add(p+".topics",
+				fmt.Sprintf("The datastore %q declares topics and its stance is %s.", orUnnamed(d.Name), d.Stance),
+				"Only a topics_only store is created with topics. Either set the stance to topics_only or remove topics.")
+		}
+		return
+	}
+	if len(d.Topics) == 0 {
+		v.add(p+".topics",
+			fmt.Sprintf("The datastore %q is topics_only and lists no topics.", orUnnamed(d.Name)),
+			"List the topics the twin needs, with the partitions each has and the consumer groups that read it. A broker with nothing in it is the empty stance, and this one says the shape is reproduced.")
+		return
+	}
+	seen := map[string]int{}
+	for i, t := range d.Topics {
+		tp := fmt.Sprintf("%s.topics[%d]", p, i)
+		first, dup := seen[t.Name]
+		switch {
+		case t.Name == "":
+			v.add(tp+".name", "The topic has no name.",
+				"Name it the way production names it. A consumer subscribing to a name that is not there reads nothing and says nothing.")
+		case dup:
+			v.add(tp+".name", fmt.Sprintf("Two topics are both named %q.", t.Name),
+				fmt.Sprintf("The first is %s.topics[%d]. One topic is created once.", p, first))
+		default:
+			seen[t.Name] = i
+		}
+		if t.Partitions < 0 {
+			v.add(tp+".partitions",
+				fmt.Sprintf("The topic %q asks for %d partitions.", t.Name, t.Partitions),
+				"A partition count is one or more. Leave it out for one, which is what a broker does with an unspecified count.")
+		}
+		for gi, g := range t.ConsumerGroups {
+			if g == "" {
+				v.add(fmt.Sprintf("%s.consumer_groups[%d]", tp, gi),
+					fmt.Sprintf("The topic %q names a consumer group with no name.", t.Name),
+					"Name the group your consumers join, so the twin commits its offsets before they start.")
+			}
+		}
+	}
+}
+
+// datastoreIsRunBySomething refuses a store nothing in this environment brings
+// up.
+//
+// The engine provides the container for a golden store and for nothing else: a
+// cache, a broker and a search index are ordinary services running stock
+// images, which is how every compose file in the world already declares them,
+// and the datastore entry says what happens to their contents. So a store
+// declared empty, derived or topics_only with no service of its name and no
+// provider is a manifest asking the environment to hold a store and nothing
+// starting one.
+//
+// That is refused HERE rather than discovered later, because the later
+// discovery is the failure this whole key exists to remove: the run comes up
+// green, the report says the manifest declared a cache, and there is no cache.
+func (v *validator) datastoreIsRunBySomething(p string, d schema.Datastore, m *schema.Manifest) {
+	if d.Stance == schema.StanceGolden || d.Name == "" || d.Provider != "" {
+		// A golden store's container is the engine's own, and a store naming
+		// a provider is that provider's business: it may be a managed one
+		// with an address the environment can already reach, and requiring a
+		// local service for it would refuse the correct manifest.
+		return
+	}
+	if hasService(m, d.Name) {
+		return
+	}
+	v.add(p+".name",
+		fmt.Sprintf("The datastore %q declares the stance %s and nothing in this manifest runs it.", d.Name, d.Stance),
+		fmt.Sprintf("Declare a service called %s running the store's image, which is how an environment starts a store it does not hold a golden of, or name a provider that supplies one. Without either, the environment would come up with the store declared and no store in it.", d.Name))
+}
+
+// hasService reports whether the manifest declares a service by that name.
+func hasService(m *schema.Manifest, name string) bool {
+	if m == nil {
+		return false
+	}
+	for i := range m.Services {
+		if m.Services[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // primaryDatastore keeps the entry database: normalizes into in agreement with

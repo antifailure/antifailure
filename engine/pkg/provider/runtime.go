@@ -153,12 +153,50 @@ type EnvSpec struct {
 	CACertPEM string
 	// CAKeyPEM is the matching private key, which goes to the sidecar alone.
 	CAKeyPEM secret.Value
+	// StanceJobs are commands the runtime runs to completion INSIDE the
+	// environment, once every service is up, to bring a declared datastore to
+	// the state its stance asks for.
+	//
+	// Inside rather than from the caller's machine, because that is the only
+	// place the store has an address: a broker and a search index are
+	// ordinary services on the environment's network with no published port,
+	// and the whole point of the environment is that nothing outside it can
+	// reach in. A job runs in a service's own image, on the same network,
+	// with the same variables that service receives, which is what lets the
+	// command be the product's own index command rather than something
+	// written for this.
+	//
+	// After every service, because a job talks to one: creating a topic needs
+	// the broker listening, and rebuilding a search index needs both the
+	// index and whatever it reads. A failure here fails the environment. An
+	// index nobody built and a broker with no topics look exactly like a
+	// working twin until something reads them.
+	StanceJobs []StanceJob
 	// Journal records a resource before it is created. A runtime must call it
 	// and must respect an error from it, because a resource created before it
 	// was recorded is a resource teardown cannot find.
 	Journal func(kind, id string) error
 	// Progress receives human readable progress, already redacted.
 	Progress func(line string)
+}
+
+// StanceJob is one command that realizes a datastore's declared stance.
+//
+// It carries the store rather than only the command so that a failure names
+// the store somebody has to look at. "the search datastore could not be
+// rebuilt" is a sentence a person acts on; a non-zero exit from a container
+// called api-2 is not.
+type StanceJob struct {
+	// Store is the datastore in the manifest.
+	Store string
+	// Stance is what was declared for it, for the message.
+	Stance string
+	// Service names the service whose image and variables the command runs
+	// with. The runtime looks it up in Services and refuses a name that is
+	// not there rather than inventing a container.
+	Service string
+	// Command runs to completion. A non-zero exit fails the environment.
+	Command string
 }
 
 // ServiceSpec is one container to run.

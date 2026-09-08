@@ -40,6 +40,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // DatabaseAlias is the hostname the database answers to inside an environment.
@@ -279,6 +280,16 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			return env, err
 		}
 	}
+	// Every service is up, so every store a stance job talks to is listening.
+	//
+	// Here rather than beside the service that runs it: a rebuild reads one
+	// store and writes another, and a topic creation needs a broker that has
+	// finished starting. Ordering it against a single service would be
+	// guessing which of the two it meant.
+	if err := r.runStanceJobs(ctx, spec, nets, proxyIP, journal, progress); err != nil {
+		return env, err
+	}
+
 	// Back into the order the manifest declares, not the order they started
 	// in.
 	//
@@ -295,6 +306,69 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	// pull request comment, and the address a person opens.
 	sortByManifestOrder(env.Services, spec.Services)
 	return env, nil
+}
+
+// runStanceJobs brings every declared datastore to the state its stance asks
+// for, once every service is up.
+//
+// A failure here fails the environment, and that is the whole reason the jobs
+// exist. A broker with no topics and a search index nobody built look exactly
+// like a working twin: the containers are running, the report says the
+// manifest declared them, and the first thing that reads either one gets
+// nothing. That is the same failure as a blank ClickHouse in an analytics
+// product's twin, one store further out, so it is refused in the same way
+// rather than logged.
+func (r *Runtime) runStanceJobs(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	nets networks,
+	proxyIP string,
+	journal func(string, string) error,
+	progress func(string),
+) error {
+	for _, job := range spec.StanceJobs {
+		s, ok := serviceNamed(spec.Services, job.Service)
+		if !ok {
+			// Named and not running. The manifest's own validation refuses a
+			// rebuild naming a service that does not exist, so reaching here
+			// means the service was dropped between the two, and saying which
+			// store is now unrealizable beats a container create that fails
+			// on a missing image.
+			return aferrors.Coded(aferrors.AFRUN040, "detail", fmt.Sprintf(
+				"the %s datastore declares the stance %s, whose command runs in the image of "+
+					"a service called %s, and this environment is not running one",
+				job.Store, job.Stance, job.Service))
+		}
+		progress(fmt.Sprintf("%s: %s", job.Store, stanceLine(job)))
+		if err := r.runOnceAs(ctx, spec, s, nets, proxyIP, job.Command,
+			job.Store+"-stance", "the "+job.Store+" datastore's "+job.Stance+" stance",
+			nil, journal); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stanceLine is what the run says it is doing about one store.
+func stanceLine(job provider.StanceJob) string {
+	switch job.Stance {
+	case string(schema.StanceTopicsOnly):
+		return "creating the declared topics and consumer groups, with no messages"
+	case string(schema.StanceDerived):
+		return "rebuilding it from the branch"
+	default:
+		return "applying the " + job.Stance + " stance"
+	}
+}
+
+// serviceNamed finds one service in a spec.
+func serviceNamed(services []provider.ServiceSpec, name string) (provider.ServiceSpec, bool) {
+	for _, s := range services {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return provider.ServiceSpec{}, false
 }
 
 // sortByManifestOrder puts running services back into the order they were

@@ -357,6 +357,61 @@ type Datastore struct {
 	// tables are created by migrations is still worth branching, and refusing
 	// would make the first `af up` on a new project impossible.
 	SourceURLEnv string `json:"source_url_env,omitempty" yaml:"source_url_env,omitempty"`
+	// Topics are the topics a topics_only broker is created with, and the
+	// consumer groups created against them. Required for that stance and
+	// refused for the others.
+	//
+	// Declared rather than discovered, because there is nothing to discover:
+	// a broker's topics live in production and copying the messages in them
+	// is the thing this stance exists to refuse. What a twin needs is the
+	// SHAPE, so that a consumer subscribing to a topic finds it and a
+	// producer writing to one is not creating it by accident, and the shape
+	// is something only the person writing the manifest knows.
+	Topics []DatastoreTopic `json:"topics,omitempty" yaml:"topics,omitempty"`
+	// Rebuild is the command that builds a derived store from the one named
+	// in From. Required for that stance and refused for the others.
+	Rebuild *DatastoreRebuild `json:"rebuild,omitempty" yaml:"rebuild,omitempty"`
+}
+
+// DatastoreTopic is one topic a topics_only broker is created with.
+type DatastoreTopic struct {
+	// Name is the topic.
+	Name string `json:"name" yaml:"name"`
+	// Partitions is how many the topic is created with. Zero means one,
+	// which is what a broker does with an unspecified count.
+	//
+	// It is here because a partition count is not cosmetic: a consumer group
+	// with more members than partitions leaves members idle, and ordering is
+	// per partition, so a twin whose topic has one partition where production
+	// has twelve cannot reproduce a reordering bug at all.
+	Partitions int `json:"partitions,omitempty" yaml:"partitions,omitempty"`
+	// ConsumerGroups are the groups created against this topic, with their
+	// offsets committed and no messages behind them.
+	//
+	// A group is created rather than left to appear on its own because a
+	// consumer that joins a group nobody created reads from the end by
+	// default, so the twin's first run of a consumer silently skips whatever
+	// the twin's own producers wrote before it started.
+	ConsumerGroups []string `json:"consumer_groups,omitempty" yaml:"consumer_groups,omitempty"`
+}
+
+// DatastoreRebuild is how a derived store is built from the one it reads.
+//
+// A command rather than a copy, and that is the whole argument for the stance.
+// A search index cloned from production is stale against the branch the moment
+// the branch is masked: the documents in it name people who do not exist in
+// the twin's Postgres, so a search returns a row a join cannot resolve. An
+// index BUILT from the branch cannot be stale against it, because the branch
+// is what it read.
+type DatastoreRebuild struct {
+	// Service names the service whose image the command runs in. It is the
+	// application's own image in almost every case, because the code that
+	// knows how to index this product's rows is the product's code.
+	Service string `json:"service" yaml:"service"`
+	// Command is what rebuilds the store. It runs once, to completion, inside
+	// the environment, after every service is up, and a non-zero exit fails
+	// the environment rather than leaving an index nobody built.
+	Command string `json:"command" yaml:"command"`
 }
 
 // Mode is what happens to an outbound request.
