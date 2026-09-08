@@ -505,12 +505,78 @@ type EmulatorContainer struct {
 	Env map[string]string
 	// Command overrides the image's own command. Empty uses the image's.
 	//
-	// Here because more than one published emulator needs an argument to be
-	// usable inside a container network at all: Azurite binds to loopback
-	// unless it is told otherwise, and an emulator listening on 127.0.0.1
-	// answers nothing from the sidecar while looking perfectly healthy in its
-	// own logs.
+	// Not a convenience. For Google there is no other way to say which
+	// emulator you mean: the Cloud CLI image ships Pub/Sub, Firestore,
+	// Datastore and Bigtable behind ONE entrypoint, which is the CLI, so
+	// Image, Port and Env alone describe four identical containers that run
+	// nothing. And Azurite binds to loopback unless it is told otherwise, and
+	// an emulator listening on 127.0.0.1 answers nothing from the sidecar
+	// while looking perfectly healthy in its own logs.
+	//
+	// LocalStack is the reason neither of those was noticed first: it is one
+	// image whose entrypoint is the emulator, so it needs none of this. One
+	// reference implementation is not a contract.
 	Command []string
+	// Maintainer records who stands behind this image.
+	//
+	// DECLARED, never inferred from the registry the image happens to sit in.
+	// A registry path is a fact about hosting and this is a fact about
+	// support, and the two disagree exactly where it matters: fake-gcs-server
+	// is the de facto GCS emulator and Google does not publish it, because
+	// Google ships no GCS emulator at all. Somebody choosing to trust an
+	// environment's answers about object storage should read that from the
+	// declaration rather than infer it from a hostname.
+	Maintainer EmulatorMaintainer
+	// Companions are containers this emulator does not work without.
+	//
+	// The Azure Service Bus emulator is the case: it refuses to start without
+	// an MSSQL container beside it, so an emulator socket that could only
+	// describe one container could not describe Service Bus at all. They are
+	// started on the INNER network alone, exactly as the emulator is, so they
+	// have no route out either and the Reach behaviour covers them without
+	// knowing they exist.
+	//
+	// Each carries its own digest and its own Maintainer, because a companion
+	// is a third party image running beside a copy of production data on the
+	// same terms as the emulator, and "it came with the emulator" is not a
+	// provenance. A companion's own Companions are refused rather than walked:
+	// one level is what the known cases need, and a graph here would be a
+	// dependency resolver nobody asked for.
+	Companions []EmulatorContainer
+}
+
+// EmulatorMaintainer says who stands behind an emulator image.
+//
+// A closed set rather than a free string, for the same reason DatastoreStance
+// is: the interesting values are few, the difference between them is what
+// somebody is actually deciding, and a string would collect eleven spellings
+// of "community" that no report could group.
+type EmulatorMaintainer string
+
+const (
+	// MaintainerVendor is the cloud provider whose API is being emulated:
+	// Microsoft's Azurite and Service Bus emulators, Google's own Pub/Sub and
+	// Firestore emulators.
+	MaintainerVendor EmulatorMaintainer = "vendor"
+	// MaintainerCommercial is a company that is not the vendor and sells or
+	// supports the emulator, which is LocalStack.
+	MaintainerCommercial EmulatorMaintainer = "commercial"
+	// MaintainerCommunity is a project with no company behind it.
+	// fsouza/fake-gcs-server is the one that matters, because it is the de
+	// facto GCS emulator and Google ships none.
+	MaintainerCommunity EmulatorMaintainer = "community"
+	// MaintainerFirstParty is an image built in this repository. Nothing here
+	// is one today and the value exists so that the day something is, it is
+	// not quietly filed as vendor.
+	MaintainerFirstParty EmulatorMaintainer = "first_party"
+)
+
+// AllEmulatorMaintainers returns every value, in the order a report lists
+// them, which runs from the strongest claim of support to the weakest.
+func AllEmulatorMaintainers() []EmulatorMaintainer {
+	return []EmulatorMaintainer{
+		MaintainerFirstParty, MaintainerVendor, MaintainerCommercial, MaintainerCommunity,
+	}
 }
 
 // Emulator is a third party service answered inside the environment.
@@ -946,15 +1012,71 @@ func (r *Registry) Validate(reserved map[string][]string) error {
 				"the emulator %q answers for no hosts, so no request could ever reach it",
 				e.Name())
 		}
-		if !strings.Contains(c.Image, "@sha256:") {
-			return fmt.Errorf(
-				"the emulator %q is pinned by %q rather than by digest. An emulator answers "+
-					"for a production API, and a tag that moves changes what an environment "+
-					"was tested against with nothing in the repository changing",
-				e.Name(), c.Image)
+		if err := validateEmulatorContainer(e.Name(), "", c); err != nil {
+			return err
+		}
+		for _, companion := range c.Companions {
+			if len(companion.Companions) > 0 {
+				return fmt.Errorf(
+					"the emulator %q has a companion %q that declares companions of its own. "+
+						"One level is what the known cases need, and a graph here would be a "+
+						"dependency resolver nobody asked for",
+					e.Name(), companion.Image)
+			}
+			if err := validateEmulatorContainer(e.Name(), companion.Image, companion); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// validateEmulatorContainer holds one container to the two rules every image
+// running beside a copy of production data has to satisfy.
+//
+// Companion is the companion's image when this is a companion, and empty for
+// the emulator's own container. It is threaded through so a refusal names the
+// MSSQL image somebody forgot to pin rather than only the Service Bus emulator
+// that pulled it in, which is the difference between a message you can act on
+// and one you have to go looking behind.
+func validateEmulatorContainer(name, companion string, c EmulatorContainer) error {
+	what := fmt.Sprintf("the emulator %q", name)
+	if companion != "" {
+		what = fmt.Sprintf("the companion %q of the emulator %q", companion, name)
+	}
+	if !strings.Contains(c.Image, "@sha256:") {
+		return fmt.Errorf(
+			"%s is pinned by %q rather than by digest. An emulator answers for a production "+
+				"API, and a tag that moves changes what an environment was tested against "+
+				"with nothing in the repository changing", what, c.Image)
+	}
+	if !knownMaintainer(c.Maintainer) {
+		return fmt.Errorf(
+			"%s declares the maintainer %q, and the values are %s. Who stands behind an "+
+				"image is declared rather than inferred from the registry it sits in, "+
+				"because a registry path is a fact about hosting and this is a fact about "+
+				"support: the de facto GCS emulator is community maintained and Google "+
+				"ships none at all", what, c.Maintainer, maintainerList())
+	}
+	return nil
+}
+
+func knownMaintainer(m EmulatorMaintainer) bool {
+	for _, known := range AllEmulatorMaintainers() {
+		if m == known {
+			return true
+		}
+	}
+	return false
+}
+
+func maintainerList() string {
+	all := AllEmulatorMaintainers()
+	out := make([]string, 0, len(all))
+	for _, m := range all {
+		out = append(out, string(m))
+	}
+	return strings.Join(out, ", ")
 }
 
 // Registered names what is plugged in, for af version and af doctor.
