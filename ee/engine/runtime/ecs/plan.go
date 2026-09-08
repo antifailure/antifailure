@@ -101,24 +101,9 @@ type Container struct {
 	// Essential marks a container whose exit stops the task.
 	Essential bool
 	// Command is the entrypoint override, which is how the containment probe
-	// is expressed in a task definition: ECS has no field for "run this first
-	// and stop if it fails", so the probe is a container whose command is the
-	// attempt and whose dependency ordering makes everything else wait.
+	// is expressed in a task definition: there is no field for "try this
+	// first", so the probe is a container whose command is the attempt.
 	Command []string
-	// DependsOn orders this container after others. It is what makes the
-	// probe run BEFORE any application image rather than beside it, which is
-	// the whole difference between a check and a bystander.
-	DependsOn []ContainerDependency
-}
-
-// ContainerDependency is one entry of a container's dependsOn list.
-type ContainerDependency struct {
-	// ContainerName is the container waited on.
-	ContainerName string
-	// Condition is START, COMPLETE, SUCCESS or HEALTHY. SUCCESS is the only
-	// one that means the waited on container exited zero, so it is the only
-	// one under which a failing probe stops the thing it was probing for.
-	Condition string
 }
 
 // NetworkPlan is the VPC, the subnets, the security group, the route table,

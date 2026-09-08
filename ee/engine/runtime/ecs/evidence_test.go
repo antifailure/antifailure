@@ -408,10 +408,40 @@ func TestTheProbeContainerIsEmittedOnlyWithAnImage(t *testing.T) {
 	probe := withProbe.TaskDefinition.Containers[0]
 	require.Equal(t, ecs.ProbeContainerName, probe.Name)
 	require.Equal(t, in.ProbeImage, probe.Image)
-	require.True(t, probe.Essential,
-		"a probe whose failure does not stop the task is a bystander")
+	require.False(t, probe.Essential,
+		"on ECS the exit of an essential container stops the whole task, and a probe is a "+
+			"thing that runs and finishes, so marking it essential would kill every "+
+			"environment the moment the probe succeeded")
 	require.Equal(t, []string{"/bin/sh", "-c", ecs.ProbeScript("af-example")}, probe.Command)
 	require.Contains(t, detailByID(ecs.Evaluate(withProbe))[imds], ecs.ProbeContainerName)
+}
+
+// TestEveryProbeTargetPointsAtARealPath stops a target from settling a path
+// that is not in the enumeration.
+//
+// Without it a renamed path id would leave the probe recording results nobody
+// reads, and the verdict would stay unproven forever while a file full of
+// answers sat beside it. That is the quietest possible failure: the report is
+// still honest, the probe still runs, and the two never meet.
+func TestEveryProbeTargetPointsAtARealPath(t *testing.T) {
+	observable := map[string]bool{}
+	for _, p := range ecs.Paths() {
+		if p.Observe != nil {
+			observable[p.ID] = true
+		}
+	}
+	require.NotEmpty(t, ecs.Targets())
+	for _, target := range ecs.Targets() {
+		require.True(t, observable[target.PathID],
+			"the probe attempts %s for path %q, and no path with that id reads an observation",
+			target.Address, target.PathID)
+		require.NotEmpty(t, target.Why,
+			"%s is dialled and no source is recorded for the address, and an address asserted "+
+				"from memory makes a probe report confidently about the wrong endpoint",
+			target.Address)
+		require.NotContains(t, target.Why, "--")
+		require.NotContains(t, target.Why, "\u2014")
+	}
 }
 
 // mustFind returns one environment's observation or fails the test.
