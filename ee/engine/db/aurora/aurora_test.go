@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/ee/engine/awsauth"
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
@@ -237,11 +237,17 @@ func TestTheDatabaseTheProviderHandsOutHoldsTheSourcesRows(t *testing.T) {
 	require.Equal(t, 2, rows, "the branch does not hold the source's rows")
 }
 
-func TestAPublishedGoldenHasNoWriterInstance(t *testing.T) {
-	// The line that makes keeping several goldens affordable. An Aurora
-	// cluster's volume is clonable with nothing attached to it, so a published
-	// golden costs storage and no compute, and a provider that left the writer
-	// running would bill for every golden ever refreshed.
+func TestAPublishedGoldenKeepsItsWriterInstance(t *testing.T) {
+	// The obvious saving this provider does NOT take, asserted so that nobody
+	// takes it later without an account to check it against.
+	//
+	// Deleting the writer would make a published golden cost storage and no
+	// compute, and it ought to work, because a cluster's volume survives
+	// without one and cloning is a cluster level operation. The only
+	// instrument here that could say whether it does is the fake in this
+	// repository, and a fake agreeing with the assumption that produced it is
+	// not evidence. An untested cost saving that silently breaks branching is
+	// worse than the standing cost.
 	server := newFake(t, seedSQL, "")
 	p := newProvider(t, server)
 	ctx := context.Background()
@@ -250,14 +256,69 @@ func TestAPublishedGoldenHasNoWriterInstance(t *testing.T) {
 	version, err := p.RefreshGolden(ctx, golden)
 	require.NoError(t, err)
 
-	require.Contains(t, server.Actions(), "DeleteDBInstance",
-		"the golden kept its writer instance, so every golden ever refreshed goes on "+
-			"costing compute")
+	require.NotContains(t, server.Actions(), "DeleteDBInstance",
+		"the golden's writer instance was deleted. That may well be safe and nobody "+
+			"here can show it is: cloning a cluster with nothing attached is unproven "+
+			"without an AWS account, and the fake would agree with either answer")
 
-	// And it is still branchable, which is the half that would make deleting
-	// the instance a bug rather than a saving.
-	_, err = p.Branch(ctx, version.ID, "env_after_instance_removed")
+	_, err = p.Branch(ctx, version.ID, "env_after_publish")
 	require.NoError(t, err)
+}
+
+func TestAClusterThatIsNotOursIsRefusedWithASentinel(t *testing.T) {
+	// The refusal a caller has to be able to recognise without matching on
+	// English, because it is the one that stops a misconfigured project
+	// operating on somebody else's infrastructure.
+	server := newFake(t, seedSQL, "")
+	require.NoError(t, server.SeedSourceWithEngine(
+		"af-b-ffffffffffff", "aurora-postgresql", "16.4", ""))
+	p := newProvider(t, server)
+
+	err := p.Destroy(context.Background(), provider.Branch{ProviderRef: "af-b-ffffffffffff"})
+	require.ErrorIs(t, err, aurora.ErrNotOurs)
+}
+
+func TestAnAbandonedCandidateIsSweptByTheNextRefresh(t *testing.T) {
+	// A candidate is a full clone of production with an instance attached. One
+	// left by a process that died between the clone and the publish is
+	// unreachable by ListGoldens, unbranchable by anything, and billing.
+	server := newFake(t, seedSQL, "")
+	ctx := context.Background()
+
+	// A provider whose clock is a day ahead, so the candidate the first
+	// refresh abandons is already older than the sweep's window when the
+	// second refresh looks at it. The window is six hours and waiting for it
+	// is not a test.
+	opts := options(t, server)
+	p, err := aurora.New(ctx, opts)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+
+	abandoned, record := spec("aaaa0001")
+	record.fail = true
+	_, err = p.RefreshGolden(ctx, abandoned)
+	require.Error(t, err)
+
+	// The failed refresh removes its own candidate, so the sweep has nothing
+	// to find here and the assertion is that it runs at all and removes
+	// nothing it should not. A candidate an abrupt death left behind cannot be
+	// produced without killing a process mid call, so what is proved is the
+	// sweep's selectivity rather than its trigger, and that is said plainly
+	// rather than claimed as more.
+	later := opts
+	later.Now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	q, err := aurora.New(ctx, later)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = q.Close() })
+
+	golden, _ := spec("aaaa0002")
+	version, err := q.RefreshGolden(ctx, golden)
+	require.NoError(t, err)
+
+	goldens, err := q.ListGoldens(ctx)
+	require.NoError(t, err)
+	require.Len(t, goldens, 1, "the sweep removed a golden it should not have")
+	require.Equal(t, version.ID, goldens[0].ID)
 }
 
 func TestAFailedVerificationPublishesNothingAndLeavesNoCluster(t *testing.T) {
@@ -319,7 +380,7 @@ func TestAMissignedRequestIsRefusedByTheFake(t *testing.T) {
 	// for the same request.
 	server := newFake(t, seedSQL, "")
 	opts := options(t, server)
-	opts.Credentials = &awsauth.Credentials{
+	opts.Credentials = &cloudauth.AWSCredentials{
 		AccessKeyID:     testCredentials.AccessKeyID,
 		SecretAccessKey: "not-the-secret-these-were-signed-with",
 	}

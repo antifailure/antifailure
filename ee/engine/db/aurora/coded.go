@@ -31,6 +31,7 @@ package aurora
 // happened to mention another code from matching the wrong one.
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 )
@@ -47,6 +48,20 @@ const (
 	codeGoldenReferenced = "AF-DB-005"
 	codeBranchLimit      = "AF-DB-006"
 )
+
+// ErrNotOurs reports that a cluster carries no antifailure tag.
+//
+// A sentinel and NOT a catalog code, which is a deliberate refusal to reach for
+// the nearest one. This is the check that stops a misconfigured project
+// operating on somebody else's infrastructure, so a caller has to be able to
+// tell it from an AWS failure without matching on English, and errors.Is does
+// that. What it must not do is borrow a code that already means something else:
+// AF-DB-002 is "the source database could not be reached", and dressing this
+// refusal in it would put a sentence about an unreachable host in front of
+// somebody whose real problem is that they pointed the manifest at a cluster
+// they do not own. The catalog belongs to the engine and this module cannot add
+// to it, so the honest answer is a sentinel with a sentence of its own.
+var ErrNotOurs = errors.New("aurora: this cluster was not created by antifailure")
 
 // codedError is an error carrying a catalog code.
 type codedError struct {

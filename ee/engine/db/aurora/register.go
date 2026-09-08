@@ -42,7 +42,7 @@ func (Registration) Name() string { return Name }
 // Every value comes through cfg, and nothing here reads the process
 // environment. That is what makes each credential this provider uses declared
 // and auditable, and it is not cosmetic: the AWS credential chain inside
-// awsauth is given cfg.Lookup wrapped as a Getenv, so even AWS_ACCESS_KEY_ID
+// cloudauth is given cfg.Lookup wrapped as a Getenv, so even AWS_ACCESS_KEY_ID
 // resolves through the same chain as everything else and appears in the same
 // audit trail.
 func (Registration) Open(ctx context.Context, cfg extension.DatabaseConfig) (provider.Database, error) {

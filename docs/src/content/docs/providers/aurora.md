@@ -55,11 +55,16 @@ whose tag does not is left alone, not adopted and not deleted. Names collide,
 and a provider that trusted the prefix would eventually destroy a cluster it
 never created.
 
-**A published golden has no writer instance.** The masking and the verification
-run against one, and it is deleted once they have. An Aurora cluster's volume
-exists whether or not an instance is attached to it, and a volume with nothing
-attached is still clonable, so a golden costs storage and no compute from the
-moment it is published. That is what makes keeping several of them affordable.
+**A published golden keeps its writer instance, and that costs you money.** The
+obvious saving is to delete it: a cluster's volume exists whether or not an
+instance is attached, cloning is a cluster level operation, and a golden that
+cost storage and no compute would make keeping several of them cheap. It ought
+to work. Nobody who wrote this provider has an Aurora account, the only thing
+here that could say whether it does is a fake this repository also wrote, and a
+fake agreeing with the assumption that produced it is not evidence. An untested
+cost saving that silently breaks branching is worse than the standing cost, so
+the instance stays until somebody with an account has run it. If that is you,
+the measurement is worth more to us than the saving is to you.
 
 ## Credentials
 
@@ -70,6 +75,11 @@ declared and appears in the same audit trail as the rest.
 `AWS_REGION` says which region the cluster is in. A cluster in `eu-west-1` does
 not exist in `us-east-1`, and asking the wrong region answers that the cluster
 is not there, which is a confusing way to learn about a typo.
+
+**The source cluster's own password is never read.** Not at startup, not during
+a refresh, not to connect to a clone, not anywhere. That is the sentence to
+check first if you are reviewing this for security, and the rest of this section
+is how it is true.
 
 `AF_AURORA_BRANCH_KEY`, or whatever `api_key_env` names, is **not the source
 cluster's password**. A clone inherits the master credential of the cluster it
@@ -115,6 +125,20 @@ string under a second name would be a pool that is not one.
 **It does not implement IAM database authentication.** Aurora supports it, it
 would be the better credential, and it is not here. It is named because a
 capability that is named and not built is worse than one that is absent.
+
+## Air gapped installations
+
+**Aurora is refused under `AF_AIR_GAPPED`, deliberately.** The permitted
+providers there are `docker`, `dblab` and `pgurl`, all three of which the
+operator hosts or supplies. Cloning an Aurora cluster needs `rds.amazonaws.com`,
+which an air gapped network by definition cannot reach, so permitting it would
+produce an environment that failed at its first API call rather than at
+validation.
+
+The refusal happens before the environment is created and it names the manifest
+line, which is the difference that matters: the same installation used to get
+three minutes into an `af up` and fail on a refused connection, and one of those
+tells you what to change while the other tells you the network is broken.
 
 ## What the tests prove, and what they do not
 

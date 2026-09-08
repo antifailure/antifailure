@@ -28,7 +28,7 @@
 //
 // The signature check is worth its own sentence, because it is the part most
 // likely to be mistaken for circular. The ALGORITHM is proved elsewhere,
-// against the worked example AWS publishes, in ee/engine/awsauth. What is
+// against the worked example AWS publishes, in ee/engine/cloudauth. What is
 // proved here is that the provider USED it correctly for this request: the
 // right region, the right service, the body it actually sent, the credentials
 // it actually found, and the session token inside the signature rather than
@@ -50,7 +50,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
-	"github.com/antifailure/antifailure/ee/engine/awsauth"
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // Fault is one way this control plane can be broken on purpose.
@@ -111,7 +111,7 @@ type Options struct {
 	Region string
 	// Credentials are what requests must be signed with. The fake recomputes
 	// the signature and refuses one that does not match.
-	Credentials awsauth.Credentials
+	Credentials cloudauth.AWSCredentials
 	// Fault is the single thing broken on purpose, or empty.
 	Fault Fault
 }
@@ -479,7 +479,7 @@ func readForm(r *http.Request) (url.Values, error) {
 // verifySignature recomputes the request's signature and compares it.
 //
 // The reasoning about what this proves is at the top of the file: the
-// algorithm is proved against AWS's published example in ee/engine/awsauth,
+// algorithm is proved against AWS's published example in ee/engine/cloudauth,
 // and what is proved HERE is that the provider used it for this request, with
 // this region, this service and this body. A provider that signed the empty
 // string, or signed for us-east-1 while talking to eu-west-1, or attached a
@@ -520,7 +520,7 @@ func (s *Server) verifySignature(r *http.Request, action string) error {
 	if err != nil {
 		return err
 	}
-	expected, err := awsauth.Sign(awsauth.Request{
+	expected, err := cloudauth.SignV4(cloudauth.SigV4Request{
 		Method: r.Method, URL: s.http.URL + r.URL.RequestURI(), Body: body,
 		Headers: headers, Region: s.region, Service: "rds",
 		Credentials: s.opts.Credentials, Now: signedAt,

@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antifailure/antifailure/ee/engine/awsauth"
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/ee/engine/db/aurora/fakerds"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
@@ -43,7 +43,7 @@ const testRegion = "eu-west-1"
 // The credentials these suites sign with. They are AWS's own published example
 // values, they authenticate nothing, and the fake holds the same pair so that
 // a signature can be recomputed and compared.
-var testCredentials = awsauth.Credentials{
+var testCredentials = cloudauth.AWSCredentials{
 	AccessKeyID:     "AKIA" + "IOSFODNN7EXAMPLE",
 	SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
 	Source:          "the test",

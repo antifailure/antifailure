@@ -66,7 +66,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the pgx driver
 
-	"github.com/antifailure/antifailure/ee/engine/awsauth"
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
@@ -198,7 +198,7 @@ type Options struct {
 	// chain.
 	Getenv func(string) string
 	// Credentials supplies AWS keys directly instead of discovering them.
-	Credentials *awsauth.Credentials
+	Credentials *cloudauth.AWSCredentials
 	// Now is the clock. Library code here never calls time.Now, so that
 	// timeouts are testable without waiting for wall time.
 	Now func() time.Time
@@ -272,7 +272,15 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 		api: &client{
 			region:   opts.Region,
 			endpoint: endpointFor(opts.Region, opts.Endpoint),
-			chain:    &awsauth.Chain{Getenv: opts.Getenv, Static: opts.Credentials},
+			// A getenv that reads nothing rather than a nil one, and that is a
+			// guard rather than a formality. cloudauth.AWSChain calls the
+			// function it is given without checking it, so a provider built
+			// without one would panic on the first request that had to
+			// discover credentials. Reading nothing is also the direction this
+			// has to fail in: a provider that forgot to wire the engine's
+			// chain finds no credentials rather than quietly signing with
+			// whatever is exported in the operator's shell.
+			chain: cloudauth.NewAWSChain(getenvOr(opts.Getenv), opts.Credentials),
 		},
 		source:        opts.SourceCluster,
 		branchKey:     opts.BranchKey,
@@ -331,6 +339,20 @@ func New(ctx context.Context, opts Options) (*Provider, error) {
 	}
 	p.major = majorOf(source.EngineVersion)
 	return p, nil
+}
+
+// getenvOr is the credential chain's environment reader, never nil.
+//
+// cloudauth.AWSChain dereferences the function it is given, so a nil one is a
+// panic on the first discovery rather than a refusal. Reading nothing is the
+// safe answer: every credential a provider uses is meant to be declared and
+// resolved through the engine's chain, so a provider with no reader should find
+// nothing rather than fall through to the operator's shell.
+func getenvOr(getenv func(string) string) func(string) string {
+	if getenv == nil {
+		return func(string) string { return "" }
+	}
+	return getenv
 }
 
 func or(value, fallback string) string {
@@ -435,6 +457,14 @@ func containsInt(xs []int, n int) bool {
 // does not set it, and there is nothing it could do: the clone is complete
 // before this provider can run a line of SQL.
 func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) (provider.GoldenVersion, error) {
+	// What a killed refresh left behind, before this one adds to it. A
+	// candidate is a full clone of production with an instance attached, so
+	// one abandoned by a process that died between the clone and the publish
+	// goes on billing until somebody notices it in a console. It is swept on
+	// the way in rather than by a timer, because a refresh is the only moment
+	// this provider is certainly running.
+	p.sweepCandidates(ctx)
+
 	created := p.now().UTC()
 	version := provider.NewGoldenVersionID(created, spec.RulesHash)
 	cluster := goldenPrefix + shortHash(version)
@@ -505,17 +535,21 @@ func (p *Provider) RefreshGolden(ctx context.Context, spec provider.GoldenSpec) 
 		return provider.GoldenVersion{}, err
 	}
 
-	// The writer instance goes away and the cluster stays. A published golden
-	// is a volume, and a volume is clonable without anything attached to it,
-	// so from here it costs storage and no compute. This is the line that
-	// makes keeping several goldens affordable, and it is also why ListGoldens
-	// reads tags rather than connecting: there is nothing to connect to.
-	if writer := live.writer(); writer != "" {
-		if err := p.api.deleteInstance(ctx, writer); err != nil {
-			return provider.GoldenVersion{}, err
-		}
-	}
-
+	// THE GOLDEN KEEPS ITS WRITER INSTANCE, and that is a decision rather than
+	// an omission.
+	//
+	// Deleting it would be the obvious saving. A cluster's storage survives
+	// without compute, cloning is a cluster level operation, and a published
+	// golden that costs storage and no compute is what makes keeping several
+	// of them affordable. It ought to work.
+	//
+	// NOBODY HERE HAS AN AURORA ACCOUNT. The only instrument that could say
+	// whether cloning a cluster with no instances attached actually works is
+	// the fake in ee/engine/db/aurora/fakerds, which this repository wrote,
+	// and a fake agreeing with the assumption that produced it is not
+	// evidence. Shipping an untested cost saving that silently breaks
+	// branching is worse than the standing cost, so the instance stays until
+	// somebody with an account has run it.
 	publish = true
 	return provider.GoldenVersion{
 		ID:          version,
@@ -764,6 +798,41 @@ func (p *Provider) Destroy(ctx context.Context, b provider.Branch) error {
 	return p.destroyCluster(ctx, name)
 }
 
+// sweepCandidates removes clones that a killed refresh abandoned.
+//
+// Only candidates, and only ones older than the window a refresh could still
+// be inside. A candidate is a cluster tagged by this provider whose kind was
+// never flipped to golden, so it is unreachable by ListGoldens and unbranchable
+// by anything, and it is also a full clone of production with an instance
+// attached. Best effort: a sweep that failed must not fail the refresh that
+// triggered it, because the refresh is the useful work and the sweep is
+// tidying somebody else's crash.
+func (p *Provider) sweepCandidates(ctx context.Context) {
+	clusters, err := p.api.describeClusters(ctx, "")
+	if err != nil {
+		return
+	}
+	cutoff := p.now().Add(-candidateAge)
+	for _, c := range clusters {
+		tags := c.tags()
+		if tags[tagMarker] != Name || tags[tagKind] != kindCandidate {
+			continue
+		}
+		created := firstTime(parseTagTime(tags[tagCreated]), c.Created.Time)
+		if created.IsZero() || created.After(cutoff) {
+			// A candidate a refresh could still be filling. Removing one that
+			// another process is masking would turn one slow refresh into a
+			// corrupt one, and a clone of a large database is not quick.
+			continue
+		}
+		_ = p.destroyCluster(ctx, c.Identifier)
+	}
+}
+
+// candidateAge is how old a candidate has to be before it can only be an
+// orphan. Deliberately generous, for the reason sweepCandidates gives.
+const candidateAge = 6 * time.Hour
+
 // destroyCluster removes a cluster and its instances, checking the marker
 // first.
 //
@@ -779,9 +848,13 @@ func (p *Provider) destroyCluster(ctx context.Context, name string) error {
 		return nil
 	}
 	if cluster.tags()[tagMarker] != Name {
-		return fmt.Errorf(
-			"the cluster %s was not created by antifailure, so it is left alone. "+
-				"Nothing here is removed on the strength of its name", name)
+		// Coded rather than a bare sentence, because this is the refusal that
+		// stops a misconfigured project operating on somebody else's
+		// infrastructure, and a caller has to be able to tell it apart from an
+		// AWS failure without matching on English.
+		return fmt.Errorf("%w: %s is left alone. Nothing here is removed on the "+
+			"strength of its name, because a customer whose own cluster is called "+
+			"%s must not lose it to our teardown", ErrNotOurs, name, name)
 	}
 	for _, m := range cluster.Members {
 		if err := p.api.deleteInstance(ctx, m.Instance); err != nil {

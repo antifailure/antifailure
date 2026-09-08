@@ -5,10 +5,10 @@ package aurora
 // The RDS query API, which is the whole of what this provider says to AWS.
 //
 // Eight actions, one endpoint, one signature algorithm, and no SDK. The
-// reasoning is the one written over ee/engine/awsauth: the SDK that would
+// reasoning is the one written over ee/engine/cloudauth: the SDK that would
 // supply this brings roughly a hundred packages into a binary that also holds
 // credentials, and what it would save is a form encoded POST and an XML
-// unmarshal. The signing is not duplicated here; awsauth has the only copy and
+// unmarshal. The signing is not duplicated here; cloudauth has the only copy and
 // it is checked against the example AWS publishes.
 //
 // The query protocol rather than the newer JSON one because RDS has only the
@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/antifailure/antifailure/ee/engine/awsauth"
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // apiVersion is the RDS query API version. It is a date and it does not move;
@@ -49,7 +49,7 @@ const maxResponse = 8 << 20
 type client struct {
 	region   string
 	endpoint string
-	chain    *awsauth.Chain
+	chain    *cloudauth.AWSChain
 	http     *http.Client
 
 	// calls counts control plane requests, which is the measurement the
@@ -134,7 +134,7 @@ func (c *client) do(ctx context.Context, action string, params url.Values) ([]by
 	headers := map[string]string{
 		"Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
 	}
-	signed, err := awsauth.Sign(awsauth.Request{
+	signed, err := cloudauth.SignV4(cloudauth.SigV4Request{
 		Method: "POST", URL: c.endpoint, Body: body, Headers: headers,
 		Region: c.region, Service: "rds", Credentials: creds, Now: time.Now().UTC(),
 	})
