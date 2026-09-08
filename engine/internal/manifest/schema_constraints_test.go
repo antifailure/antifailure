@@ -1084,12 +1084,12 @@ func TestSchemaConstraintReport(t *testing.T) {
 // from that file removes a row from the published reference page that
 // tools/schemadoc generates, which is a promise withdrawn from users, and a
 // gate that only noticed additions would be half an instrument.
-const wantConstraints = 570
+const wantConstraints = 567
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
 // the goal is zero.
-const wantExceptions = 6
+const wantExceptions = 0
 
 // TestEverySchemaConstraintIsEnforced is the gate.
 //

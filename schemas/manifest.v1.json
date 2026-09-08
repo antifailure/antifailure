@@ -5,9 +5,6 @@
   "description": "The file antifailure.yaml at the root of a repository. It describes what to build, where the database comes from, what the environment may reach on the network, who the agents log in as, and what they do. It is the whole configuration surface: nothing about an environment is configured anywhere else.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version"
-  ],
   "properties": {
     "version": {
       "type": "integer",
@@ -313,7 +310,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
+          "examples": [
             "docker",
             "neon",
             "supabase",
@@ -508,7 +505,7 @@
         },
         "max_age": {
           "type": "string",
-          "pattern": "^[0-9]+(h|d)$",
+          "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "168h",
           "description": "How stale a golden may be before af up refreshes it first."
         },
@@ -1588,13 +1585,13 @@
         },
         "ttl": {
           "type": "string",
-          "pattern": "^[0-9]+(h|d)$",
+          "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "24h",
           "description": "How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl."
         },
         "max_ttl": {
           "type": "string",
-          "pattern": "^[0-9]+(h|d)$",
+          "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "168h",
           "description": "The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound."
         },

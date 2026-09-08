@@ -164,26 +164,31 @@ func (n *bounds) resolve(root *bounds) *bounds {
 // export_test.go, so there is one list rather than two that agree until
 // somebody edits one.
 var boundsExceptions = []struct{ Path, Keyword, Why string }{
-	{"", "required=version",
-		"Parse deliberately assumes version 1 when the key is absent, and says so: refusing " +
-			"would be pedantic for a field that has only ever had one value. 37 of the 51 whole " +
-			"manifests in the published documentation omit it, so the documentation and the engine " +
-			"agree with each other and disagree with the schema."},
-
-	{"database.provider", "enum",
-		"Providers are a registry, not a closed set. A provider registered from outside the " +
-			"engine module is resolvable and runnable, and this enum is a snapshot of the ones that " +
-			"shipped, so enforcing it would make the documented extension point unusable from a " +
-			"manifest. internal/env's registered provider test names acmedb and is right to."},
-	{"runtime.provider", "enum",
-		"The same, for runtimes. internal/env's registered provider test names acmert."},
-
-	{"runtime.ttl", "pattern",
-		"The schema says hours or days. ParseDuration accepts ms, s, m, h and d, and its own " +
-			"error message advertises all five, so a thirty minute lifetime is legal, useful and " +
-			"refused by the published pattern alone."},
-	{"runtime.max_ttl", "pattern", "The same duration, the same parser, the same narrow pattern."},
-	{"runtime.idle_sleep", "pattern", "The same duration, the same parser, the same narrow pattern."},
+	// EMPTY, AND THAT IS THE POINT. It held six entries for one afternoon,
+	// and every one of them was a place the published schema was wrong rather
+	// than a place the engine fell short, which is drift running the opposite
+	// direction to the 168 this file was written for. All three were fixed in
+	// the schema rather than excused here:
+	//
+	//   version in the root required list. Parse deliberately assumes version
+	//   1 when the key is absent. 37 of the 51 whole manifests in the
+	//   published documentation omit it and ZERO of them broke anything else,
+	//   so the documentation and the engine agreed with each other and the
+	//   schema was alone.
+	//
+	//   The enum on database.provider and runtime.provider. Providers are a
+	//   registry, and a closed enum made a documented extension point
+	//   unusable from a manifest: internal/env registers acmedb and acmert and
+	//   names them. They are examples now, which is what they always were.
+	//
+	//   The pattern on runtime.ttl, max_ttl and idle_sleep, which published
+	//   hours and days while ParseDuration accepted ms, s, m, h and d and said
+	//   so in its own error message. Widened, which refuses nothing that was
+	//   valid before.
+	//
+	// An entry here means the engine publishes a promise it will not keep, so
+	// adding one fails TestEverySchemaConstraintIsEnforced until somebody
+	// argues for it in a commit message and changes wantExceptions on purpose.
 }
 
 // subscript erases array indices so that services[0].env[2].name and the
