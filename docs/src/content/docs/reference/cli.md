@@ -1158,6 +1158,7 @@ af mask plan
 Subcommands:
 
 - [`af mask apply`](#af-mask-apply) Rewrite this environment's data according to the plan.
+- [`af mask crossstore`](#af-mask-crossstore) Check that one person masks to the same person in every store.
 - [`af mask init`](#af-mask-init) Read the schema and write masking.yaml with a rule for every column.
 - [`af mask plan`](#af-mask-plan) Show what masking would do, column by column.
 - [`af mask preview`](#af-mask-preview) Show what a few rows would look like after masking.
@@ -1185,6 +1186,46 @@ af mask apply
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--branch` | - | Branch to mask, defaulting to the checked out one. |
+
+### `af mask crossstore`
+
+Check that one person masks to the same person in every store.
+
+Determinism inside one store has been enforced since the beginning, by the key
+derivation. Across two stores it was a property of the construction that
+nothing checked, and a property nothing checks is a property you have somebody's
+word for.
+
+The failure it exists to catch is silent. An empty ClickHouse beside a masked
+Postgres is a twin that is visibly incomplete and somebody notices within a
+minute of opening a chart. One identity masked into two different fake people
+is a twin that is confidently wrong: every join across the two stores returns
+nothing or returns the wrong person, every report built on it is plausible, and
+nothing anywhere says so.
+
+It reads schemas and no rows. The check masks its own probe values through both
+stores' rules and compares the outputs, so what it needs from a store is the
+catalog, which is why it is safe to point at production. Every store it reads
+is named, every store it could not read is named with the reason, and a run
+that reached one store reports that it proved nothing rather than reporting a
+hundred percent of one.
+
+Each datastore says where its schema is read from with source_url_env, which
+names an environment variable and never the connection string. The primary
+takes that from database.source_url_env and does not repeat it.
+
+```
+af mask crossstore [flags]
+```
+
+```
+af mask crossstore
+af mask crossstore --format json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
 
 ### `af mask init`
 
