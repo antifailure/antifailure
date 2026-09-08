@@ -79,16 +79,23 @@ type Options struct {
 	// CopyOnWriteSamples is how many branches are timed per size. Zero uses
 	// the default.
 	CopyOnWriteSamples int
-	// HarnessCopiesEveryBranch is how a TEST FIXTURE declares that the storage
-	// it built copies the golden's bytes on every branch, whatever the
-	// provider would do against the real service. It is the only thing in the
-	// suite that can raise the third verdict, and cow.go carries the reasoning
-	// for why it sits here and not on provider.Caps.
+	// RealService names the actual service this run drives, and LEAVING IT
+	// EMPTY is what makes the service owned behaviours report UNPROVEN.
 	//
-	// The value is the mechanism, in prose, and it is printed in the run's
-	// report. Empty means the fixture makes no such claim, which is the
-	// default and the state every existing run is in.
-	HarnessCopiesEveryBranch string
+	// It is an assertion of reality rather than an admission of simulation, and
+	// that direction is the whole of it: a field a fake sets to excuse itself
+	// is a field a fake can simply never set, and the next lane would inherit a
+	// measured verdict from a control plane that measured nothing. Forgetting
+	// this produces the safe answer.
+	//
+	// Set it only when the run really drives the thing whose capability is
+	// being decided. A fake cloud control plane over a real local Postgres does
+	// NOT qualify, however real the Postgres is: the service under test is the
+	// vendor's, and what the stopwatch timed was Postgres. verdict.go carries
+	// the reasoning and serviceOwnedBehaviors carries the list.
+	//
+	// The value is the service, in prose, and it is printed in the report.
+	RealService string
 	// CopyOnWriteTimeout bounds CopyOnWrite_BranchTimeMatchesTheDeclaration
 	// alone. Zero uses DefaultCopyOnWriteTimeout.
 	//
@@ -210,6 +217,19 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 				// able to see exactly which guarantee this provider does not
 				// make.
 				t.Skipf("skipped: %s does not declare %s", nameOf(probe), reason)
+			}
+			// The third verdict, decided here rather than inside the
+			// behaviour, and deliberately NOT a skip.
+			//
+			// Beside the skip because this is the same position in the run and
+			// a reader looks in one place for both. Separate from it because
+			// the two are different claims: the line above says this provider
+			// makes no such claim, and this one says the provider DOES make the
+			// claim and this run cannot reach it. A reader who confuses them
+			// reads an unmeasured commercial claim as a supported one.
+			if why := unprovenReason(b, opts); why != "" {
+				unprovenHere(t, found, nameOf(probe), b.Name, why)
+				return
 			}
 			limit := opts.Timeout
 			if b.Name == "CopyOnWrite_BranchTimeMatchesTheDeclaration" {

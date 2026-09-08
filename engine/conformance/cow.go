@@ -257,91 +257,9 @@ func copyOnWriteAllowance(smallTimes []time.Duration) time.Duration {
 // that threshold and the behaviour would then be measuring an empty table.
 const ballastTable = "conformance_ballast"
 
-// minHarnessLimitReason is the shortest a fixture's declaration may be.
-//
-// Crude on purpose, and it is not the thing doing the work. The reason is
-// PRINTED, in the run's report and beside the verdict, so a reader judges it;
-// this only stops the field being set to a word. A fixture that has thought
-// about why its storage cannot exhibit the claim has a sentence about it, and
-// one that has not should notice that it is being asked for one.
-const minHarnessLimitReason = 24
-
-// harnessLimit reads the fixture's declaration and refuses the three ways it
-// could be a loophole rather than a verdict.
-//
-// WHY THIS IS ON Options AND NOT ON provider.Caps, which is the first
-// condition of the ruling and the whole design.
-//
-// Options is the argument the TEST FIXTURE passes to RunDatabase. Caps is what
-// the provider returns from Capabilities(), which is the thing under
-// examination. A field here is a claim about the storage the fixture built; a
-// field there would be a claim by the subject about itself, and the suite
-// exists because a declaration nothing can refuse is worth nothing. So
-// Capabilities() cannot reach this, no method of provider.Database is consulted
-// for it, and there is no route by which a provider asks to be excused.
-//
-// That placement is necessary and it is not sufficient, because a fixture and
-// the provider it exercises are often written by the same person. Three
-// refusals do the rest, and each one costs a fixture something real.
-//
-// ONE. It is refused unless the provider declares CopyOnWrite true. On the
-// false side the copying harness exhibits exactly the property being asserted,
-// so the check is fully armed and there is nothing to be unable to see. A lane
-// copying its fixture across the wave from a provider that clones to one that
-// restores from a snapshot is told, rather than quietly keeping a verdict that
-// no longer applies.
-//
-// TWO. It must be corroborated by the measurement, below. A fixture that
-// declares it copies and then branches in constant time has said something
-// false about itself, and the suite fails it for the declaration rather than
-// passing it on the reading. So the field cannot be set defensively by somebody
-// who has not looked: setting it on a fixture that is in fact flat turns a pass
-// into a failure. It is a falsifiable claim about the harness, not an
-// annotation on the provider.
-//
-// THREE. It buys nothing. It cannot produce a pass, the run prints a block
-// naming it, and CopyOnWriteClaim renders the declaration as "unproven"
-// wherever a customer would read it. A provider that copies and declares
-// otherwise reaches the same place by claiming this as it does by being caught:
-// a claim it cannot publish.
-//
-// What remains, stated rather than papered over, is that a copying harness
-// cannot tell an honest provider from a dishonest one, because the two produce
-// the same readings on it. That is a property of the harness and not a gap in
-// this code, and it is why the ruling keeps the other route open: proving the
-// provider against the real service with an account settles it, and nothing
-// short of that does.
-func (h *harness) harnessLimit(caps provider.Caps) string {
-	h.t.Helper()
-	limit := strings.TrimSpace(h.opts.HarnessCopiesEveryBranch)
-	if limit == "" {
-		return ""
-	}
-	if !caps.CopyOnWrite {
-		h.t.Fatalf("this fixture declares that its storage copies every branch, and the "+
-			"provider declares CopyOnWrite FALSE. A copying harness exhibits a copying "+
-			"provider exactly, so this behaviour can settle that declaration and has to. "+
-			"The declaration is for a provider whose claim the harness cannot reach, and "+
-			"there is nothing here it cannot reach. The fixture said: %q", limit)
-	}
-	if len(limit) < minHarnessLimitReason {
-		h.t.Fatalf("this fixture declares that its storage copies every branch and gives %q as "+
-			"the reason, which is %d characters. The reason is published beside the verdict "+
-			"and is the only thing a reader has to judge whether the limit is structural or "+
-			"an excuse, so it has to name the mechanism: what the harness does instead of "+
-			"sharing storage, and why it has no choice.", limit, len(limit))
-	}
-	return limit
-}
-
 // copyOnWriteMatchesTheDeclaration is the behaviour.
 func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	caps := h.p.Capabilities()
-	// Read and refused FIRST, before two goldens are built and six branches are
-	// timed. A configuration this behaviour is going to refuse should be
-	// refused in a second rather than after half an hour of measuring, and a
-	// fixture whose declaration is wrong finds out on the run that made it.
-	limit := h.harnessLimit(caps)
 	small, large, samples := h.copyOnWriteSettings()
 
 	smallV, smallBytes := h.refreshWithBallast(ctx, small)
@@ -433,15 +351,6 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 
 	if caps.CopyOnWrite {
 		if grown > allowance {
-			// The third verdict, and the only place in the suite that reaches
-			// it. A copy was measured, and the fixture said before the run
-			// that its own storage copies whatever the provider does. Neither
-			// PROVED nor REFUTED is a statement these readings support: the
-			// stopwatch is reading the harness.
-			if limit != "" {
-				h.unprovenBecauseTheHarnessCopies(limit, delta, grown, allowance, marginal)
-				return
-			}
 			h.t.Fatalf("this provider declares CopyOnWrite, and branching the golden with %s "+
 				"more data in it took %s longer, which is past the %s this machine's noise "+
 				"can account for. Copy on write means a branch shares storage with its golden, "+
@@ -452,26 +361,6 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 				bytesText(delta), grown.Round(time.Millisecond),
 				allowance.Round(time.Millisecond), marginal)
 		}
-		// The fixture's declaration, falsified. It said its storage copies
-		// every branch and the stopwatch says this one did not, so the thing
-		// that is wrong is the declaration rather than the provider. Refused
-		// rather than ignored, because a fixture allowed to claim a limit it
-		// does not have could set the field on every run in the wave and never
-		// be contradicted, and the third verdict would then be an annotation
-		// instead of a measurement nobody could fake.
-		if limit != "" {
-			h.t.Fatalf("this fixture declares that its storage copies every branch, and "+
-				"branching the golden with %s more data in it took only %s longer, inside "+
-				"the %s this machine's noise can account for. The harness exhibited shared "+
-				"storage, so it was able to settle this claim after all and the verdict is "+
-				"the pass it just measured. The declaration is what is wrong here: it is a "+
-				"statement about the fixture, it is checked against the fixture's own "+
-				"readings on every run, and it cannot be carried from one harness to "+
-				"another as a property of the provider. The fixture said: %q",
-				bytesText(delta), grown.Round(time.Millisecond),
-				allowance.Round(time.Millisecond), limit)
-		}
-
 		// A pass here is a bounded claim and it says so. The bound is the
 		// number printed above: this run refused every copy slower than
 		// `refusable` seconds per GiB and could not have refused a faster one,
@@ -515,50 +404,6 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 			allowance.Round(time.Millisecond), ts.Round(time.Millisecond),
 			neededSizeAdvice(grown, allowance, delta))
 	}
-}
-
-// unprovenBecauseTheHarnessCopies records and prints the third verdict.
-//
-// It prints the same numbers a pass or a failure would, because the reading is
-// not in doubt and is not what the verdict turns on: a copy was measured, at a
-// rate the run states, and the only open question is whose copy it was. A
-// verdict that withheld the measurement would be asking to be believed, which
-// is the posture this whole file was written against.
-//
-// The declared latency assertion that follows a pass is deliberately NOT made
-// here, and saying so is part of the verdict. That assertion asks whether a
-// provider whose branch time does not grow with the data is still inside the
-// latency it declared, and its premise is the thing this run could not
-// establish. Making it anyway would be reporting the harness's copy time as
-// the provider's branch latency, which is a number nobody should publish.
-func (h *harness) unprovenBecauseTheHarnessCopies(
-	limit string, delta int64, grown, allowance time.Duration, marginal float64,
-) {
-	h.t.Helper()
-	because := fmt.Sprintf(
-		"branching the golden with %s more data in it took %s longer, past the %s this "+
-			"machine's noise accounts for, which is %.2f seconds per GiB of copying.\n"+
-			"The provider declares CopyOnWrite true and the fixture declared, before the "+
-			"run, that its own storage copies every branch: %s\n"+
-			"So the stopwatch measured the harness and not the provider, and neither PROVED "+
-			"nor REFUTED is a thing these readings can say. The declared branch latency was "+
-			"NOT checked at the large size either, because that assertion's premise is the "+
-			"one this run could not reach.\n"+
-			"Settling it needs a harness that can share storage, which for this claim means "+
-			"the real service with an account.",
-		bytesText(delta), grown.Round(time.Millisecond),
-		allowance.Round(time.Millisecond), marginal, limit)
-
-	h.found.add(Finding{
-		Provider: h.p.Name(),
-		Behavior: "CopyOnWrite_BranchTimeMatchesTheDeclaration",
-		Answer:   Unproven,
-		Because:  because,
-	})
-	// Logged here as well as reported at the end of the run, because a reader
-	// who ran this one behaviour with -run sees the subtest's own output and
-	// should not have to know that the summary comes from somewhere else.
-	h.t.Logf("\nUNPROVEN. This is not a pass.\n%s\n", because)
 }
 
 // branchIsWithinTheDeclaredLatency is the assertion Caps.ExpectedBranchLatency

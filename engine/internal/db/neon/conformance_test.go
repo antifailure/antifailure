@@ -56,6 +56,19 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
+		// The real Neon API, reached with a real key. This suite refuses to run
+		// without credentials rather than falling back to a fake, so asserting
+		// it here cannot be true on a run that did not have them.
+		//
+		// Asserting it does NOT mean this suite proves anything in CI. It skips
+		// entirely without credentials, so on an ordinary run the behaviour never
+		// executes and no verdict is reached. The assertion says what a run WOULD
+		// be driving if it ran; the ledger in engine/conformance/ledger.go is what
+		// says whether anybody has run it, and it records this provider as
+		// unproven. A green check on this package is not a measurement of the
+		// copy on write claim, and that gap predates the third verdict rather
+		// than being created by it.
+		RealService: "the real Neon API, against a real project",
 		// Every step crosses the public internet to a compute that may be
 		// starting cold, so this is generous. It is still a bound: a hung call
 		// fails the behaviour rather than the job.

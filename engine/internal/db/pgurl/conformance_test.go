@@ -62,6 +62,12 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
+		// A real Postgres server, which for THIS provider is the whole of the
+		// service: pgurl ships against any reachable Postgres, so the thing the
+		// stopwatch times here is the thing a customer would run. That is what
+		// makes this one of the two suites in the repository that can decide a
+		// copy on write declaration with no account at all.
+		RealService: "a real Postgres server, which is this provider's entire service",
 		// Generous but bounded. Every behaviour here is a CREATE DATABASE or a
 		// file copy on a server that other suites are hammering at the same
 		// time, and a hung call must fail the behaviour rather than the job.

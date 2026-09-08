@@ -216,56 +216,55 @@ Those two are complementary, so one of the two possible declarations is refused
 on every run. There is no reading of the stopwatch that lets both pass, which is
 the property a check needs before a green one means anything.
 
-### The third answer, for a harness that cannot exhibit the behaviour
+### The third answer, and why the default is unproven
 
-The stopwatch is only as good as the storage underneath the run, and there is a
-harness on which a truthful `CopyOnWrite: true` cannot pass. A fake cloud
+The stopwatch is only as good as the storage under the run, and a fake cloud
 control plane over one local Postgres can only hand back a branch carrying the
-golden's data with `CREATE DATABASE ... TEMPLATE`, which copies files. The large
-arm is then slower by seconds per gibibyte whatever the provider would do
-against the real service, so the stopwatch is reading the harness.
-
-Declaring `false` to get a green is a lie about the product. Skipping the
-behaviour turns off the one instrument that can refuse this category's central
-commercial claim. Loosening the allowance leaves it running, printing a verdict,
-and unable to refuse anything.
-
-So the behaviour has a third answer, **unproven**, and it is not a pass.
+golden's data with `CREATE DATABASE ... TEMPLATE`, which copies files. On that
+harness a truthful `CopyOnWrite: true` fails, and a `CopyOnWrite: false` passes
+comfortably. **Both answers are about the harness and neither is about your
+product**, so the behaviour has a third one.
 
 ```
 NOT PROVED BY THIS RUN. This is not a pass.
   UNPROVEN  aurora  CopyOnWrite_BranchTimeMatchesTheDeclaration
 ```
 
-`Options.HarnessCopiesEveryBranch` is the only thing that reaches it. It is a
-sentence your TEST FIXTURE writes about the storage it built, naming the
-mechanism, and it is nothing a provider can reach: `Capabilities()` is the thing
-under examination, and a subject that could excuse itself from a check is the
-unfalsifiable declaration this whole behaviour exists to refuse.
+**`Options.RealService` decides it, and leaving it empty is what produces the
+unproven verdict.** It is an assertion of reality, not an admission of
+simulation:
 
-Four things make it a verdict rather than a way out.
+```go
+conformance.RunDatabase(t, factory, conformance.Options{
+    RealService: "the real Neon API, against a real project",
+})
+```
 
-- **The measurement still runs, in full.** Both goldens are built, both arms are
-  timed, the ballast is weighed in the branch, and every number is printed.
-  Unproven changes what the readings are turned into, never whether they were
-  taken.
-- **It is refused unless you declare `CopyOnWrite: true`.** On the false side a
-  copying harness exhibits exactly what is being asserted, so there is nothing
-  it cannot reach.
-- **It is checked against your own readings.** A fixture that declares its
-  storage copies and then branches in constant time is failed for the
-  declaration. Setting the field on a harness that turns out to share storage
-  turns a pass into a failure, so it cannot be set defensively by somebody who
-  has not looked.
-- **It buys nothing you can publish.** `conformance.CopyOnWriteClaim` renders the
-  declaration as the word `unproven` wherever a customer would read it, the
-  ledger in `engine/conformance/ledger.go` records the verdict per provider, and
-  a test refuses a comparison table cell that says otherwise.
+A field you set to excuse a fake is a field a fake can simply never set, and the
+next author writes a control plane, never learns the field exists, and collects a
+measured verdict from a run that measured nothing. Forgetting this one produces
+the safe answer instead. Set it only when the run really drives the service whose
+capability is being decided: a fake control plane over a real local Postgres does
+**not** qualify, however real the Postgres is, because what the stopwatch timed
+was Postgres.
 
-What remains, and it is stated rather than papered over: a copying harness
-cannot tell an honest provider from a dishonest one, because the two produce the
-same readings on it. That is a property of the harness. Settling it needs the
-real service with an account, and nothing short of that does.
+**It is symmetric.** A run that asserts nothing is unproven whether you declare
+`true` or `false`. The false side is the one worth spelling out, because it is the one that
+would otherwise ship: a snapshot restore provider declaring `false` against a
+copying fake passes comfortably, publishes a certified claim that its service is
+not copy on write, and nobody rereads a green check.
+
+**The measurement is not taken.** The verdict is decided before the behaviour
+runs, so two goldens and six branches could not change it, and publishing what a
+simulator timed invites somebody to quote it as though it were about the product.
+
+**It is not a skip, and it never uses the word.** A skip says this provider makes
+no such claim. An unproven says the provider does make the claim and this run
+could not reach it. The verdict is reprinted at the end of the run, the ledger in
+`engine/conformance/ledger.go` records it per provider, and
+`conformance.CopyOnWriteClaim` renders it, so the cell in the published
+comparison table reads `unproven` rather than blank. A blank cell is taken for a
+pass by every reader in a hurry.
 
 The suite makes a golden large by writing ballast into it from inside the `Mask`
 callback, so a provider needs no extra method: hand `Mask` a connection string
@@ -297,9 +296,12 @@ stronger statement than the one your run printed.
 the cost for a provider that bills by the gibibyte, and
 `AF_CONFORMANCE_COW_LARGE_BYTES` and its two siblings do the same from the
 environment for a machine that cannot afford the default. Both have floors, and
-both make the run say it was tuned. There is deliberately no way to skip the
-behaviour: a run that shrank says how far it shrank and what it could still
-refuse, and that can be read, where a run that skipped cannot.
+both make the run say it was tuned. Against a real service there is deliberately
+no way to skip the behaviour: a run that shrank says how far it shrank and what
+it could still refuse, and that can be read, where a run that skipped cannot.
+The one case that is neither a pass nor a shrunken run is the third verdict
+above, and it is not a skip either: it is a verdict, it prints, and it makes the
+claim unpublishable.
 
 `ExpectedBranchLatency` is checked the same way.
 `Branch_IsWithinTheDeclaredLatency` times the fastest of three branches of the
