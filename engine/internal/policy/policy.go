@@ -91,6 +91,15 @@ type Decision struct {
 	Fixtures string
 	// WebhookPath is where a sandbox or mock delivers inbound callbacks.
 	WebhookPath string
+	// Emulator names the emulator that answers this request, for a rule in
+	// emulate mode, and is empty for every other mode.
+	//
+	// It is the name and not an address. The sidecar looks the address up in
+	// the routes the engine wrote for it, so a rule cannot name a place to
+	// send traffic: it can only name something a registration already
+	// declared, and the registration is what the engine checked the digest
+	// and the hosts of.
+	Emulator string
 
 	// why records what matched. It is a value rather than a sentence because
 	// building the sentence allocates, and Evaluate runs on every outbound
@@ -123,8 +132,9 @@ func (d Decision) NamesHost() bool { return d.namesHost }
 // Allowed reports whether the request reaches the real destination.
 //
 // Only two modes do. Capture and mock answer without leaving the environment,
-// and synth answers from a model, so a workflow that touched one is reported
-// unverified rather than passed.
+// synth answers from a model, so a workflow that touched one is reported
+// unverified rather than passed, and emulate answers from a container on the
+// environment's own network, which has no route out at all.
 func (d Decision) Allowed() bool {
 	return d.Mode == schema.ModeAllow || d.Mode == schema.ModeSandbox
 }
@@ -150,6 +160,9 @@ func (d Decision) Reason() string {
 		return base + " " + d.note
 	case d.Mode == schema.ModeSynth:
 		return base + " A workflow that touches a synthesized response reports unverified rather than passed."
+	case d.Mode == schema.ModeEmulate && d.Emulator != "":
+		return base + " The " + d.Emulator +
+			" emulator answers it inside the environment, so the application needs no endpoint override."
 	}
 	return base
 }
@@ -554,6 +567,7 @@ func (e *Engine) Evaluate(req Request) Decision {
 			Credential:  c.rule.Credential,
 			Fixtures:    c.rule.Fixtures,
 			WebhookPath: c.rule.WebhookPath,
+			Emulator:    c.rule.Emulator,
 			why:         why,
 			host:        host,
 			note:        c.rule.Note,
@@ -738,9 +752,19 @@ func (e *Engine) InspectsHost(host string, port int) bool {
 // inspectMode reports whether a mode can be served without reading the
 // request. Only block and allow can: one refuses everything to the host and
 // the other forwards everything to it.
+//
+// Emulate is here for a reason worth stating, because getting it wrong in the
+// safe direction is invisible. An emulate rule that was tunnelled would open a
+// connection to the real s3.amazonaws.com and hand it to the application
+// encrypted end to end, which is the exact opposite of what the rule asked
+// for: the request would leave the environment. The certificate this decides
+// to issue is what lets the sidecar answer for the provider's own hostname
+// with the emulator behind it, and it is the whole of the no endpoint override
+// claim.
 func inspectMode(m schema.Mode) bool {
 	switch m {
-	case schema.ModeCapture, schema.ModeMock, schema.ModeSandbox, schema.ModeSynth:
+	case schema.ModeCapture, schema.ModeMock, schema.ModeEmulate,
+		schema.ModeSandbox, schema.ModeSynth:
 		return true
 	}
 	return false

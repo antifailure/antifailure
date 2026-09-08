@@ -548,9 +548,18 @@ type EmulatorContainer struct {
 // not have. What the engine adds is that the application needs no endpoint
 // override to reach one, and that is routing, which lives in the sidecar.
 //
-// The routing is not built yet, so REGISTERING AN EMULATOR TODAY DOES NOTHING
-// BEYOND APPEARING IN af license status AND BEING VALIDATED. Said plainly for
-// the same reason it is said on Datastore.
+// The routing exists. An egress rule in emulate mode names one of these by
+// Name, the engine starts Container() on the environment's inner network,
+// which has no route out, and the sidecar answers for every host in Hosts()
+// with a certificate the environment already trusts and forwards to the
+// container. The application needs no endpoint override, which is the whole
+// reason this socket is a declaration rather than an implementation.
+//
+// What a registration still does NOT get is a covered surface. The sidecar
+// forwards every request for a listed host, so an operation the emulator does
+// not implement is answered by the emulator's own error rather than by a
+// refusal naming the gap. Said plainly for the same reason it was said when
+// the routing was missing.
 type Emulator interface {
 	// Name is the value an egress rule will name this emulator by.
 	Name() string

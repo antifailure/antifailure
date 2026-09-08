@@ -1924,6 +1924,15 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	spec.SandboxCredentials = resolved.Sidecar
 	spec.ModelEnv = o.modelEnv(ctx)
 
+	// Resolved before anything starts, so that a rule naming an emulator this
+	// build does not have refuses the environment rather than producing one
+	// whose S3 calls fail three minutes later.
+	emulators, err := emulatorsFor(o.opts.Manifest.Egress, o.extensions())
+	if err != nil {
+		return result, err
+	}
+	spec.Emulators = emulators
+
 	// The resolved values reach the services here rather than in the spec
 	// builder, because the lookup is per environment and the builder runs per
 	// service. Each service still receives only the names it declared, so one

@@ -112,6 +112,7 @@ const (
 	KindBranch    = "branch"
 	KindService   = "service"
 	KindSidecar   = "sidecar"
+	KindEmulator  = "emulator"
 	KindNetwork   = "network"
 	KindVolume    = "volume"
 )

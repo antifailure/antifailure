@@ -230,8 +230,14 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if spec.CACertPEM != "" {
 		ca = &envcert.Authority{CertPEM: spec.CACertPEM, KeyPEM: spec.CAKeyPEM}
 	}
+	// Before the sidecar, so that the sidecar reporting ready means every
+	// address an outbound call can be answered from already resolves.
+	if err := r.startEmulators(ctx, spec.EnvID, spec.Emulators, nets, journal, progress); err != nil {
+		return env, err
+	}
 	proxyIP, err := r.startProxy(ctx, spec.EnvID, spec.Egress, names, spec.Datastores, ca,
-		spec.SandboxCredentials, spec.MockPacks, spec.ModelEnv, nets, journal, progress)
+		spec.SandboxCredentials, spec.MockPacks, spec.ModelEnv, spec.Emulators,
+		nets, journal, progress)
 	if err != nil {
 		return env, err
 	}

@@ -138,6 +138,21 @@ type EnvSpec struct {
 	// MockPacks are fixture packs from the repository, as raw JSON. The packs
 	// that ship with the engine are always available and are not listed here.
 	MockPacks []string
+	// Emulators are the third party services answered inside the environment,
+	// one per emulator an egress rule names.
+	//
+	// They are separate from Services because nothing about them comes from
+	// the manifest except the name: the image, its digest, the port and the
+	// variables belong to whoever registered the emulator, and were checked
+	// when the registry validated the registration. A manifest that could
+	// describe the container could describe any container.
+	//
+	// A runtime that cannot run them must REFUSE the environment rather than
+	// start it without them. An emulate rule with no emulator behind it is an
+	// environment whose S3 calls fail, reported as an environment that came
+	// up, and the whole point of this list is that somebody is about to
+	// believe their application was tested against S3.
+	Emulators []EmulatorSpec
 	// ModelEnv carries a model key to the sidecar, for a rule in synth mode.
 	// It is passed as an environment variable rather than written into a
 	// file, so a key never lands on disk.
@@ -243,6 +258,29 @@ func (j StanceJob) Line() string {
 	default:
 		return "applying the " + j.Stance + " stance"
 	}
+}
+
+// EmulatorSpec is one emulator container to run inside the environment.
+//
+// It joins the environment's inner network and nothing else, so it has no
+// route out. That is a property of the network rather than a promise made
+// here: the local runtime creates the inner network with Docker's internal
+// flag, which is the only setting that actually removes a container's route to
+// the internet. Turning off IP masquerading looks like it should work and does
+// not, and that was measured rather than assumed.
+type EmulatorSpec struct {
+	// Name is what an egress rule refers to, and what the sidecar's route is
+	// keyed by.
+	Name string
+	// Image is the container image, pinned by digest. The registry refuses a
+	// registration whose image is pinned by a tag, because an emulator
+	// answers for a production API and a tag that moves changes what an
+	// environment was tested against with nothing in the repository changing.
+	Image string
+	// Port is the port inside the container the sidecar forwards to.
+	Port int
+	// Env is what the container is started with.
+	Env map[string]string
 }
 
 // ServiceSpec is one container to run.
