@@ -299,7 +299,7 @@ func (r Report) String() string {
 	fmt.Fprintf(&b, "%d of %d egress paths out of an ECS task on Fargate are closed by the "+
 		"generated configuration (%d open, %d unproven).\n", r.Closed, r.Total, r.Open, r.Unproven)
 	for _, v := range r.Verdicts {
-		fmt.Fprintf(&b, "  %-8s %s\n           %s\n", v.Verdict, v.Path.ID, v.Detail)
+		fmt.Fprintf(&b, "  %-9s %s\n             %s\n", v.Verdict, v.Path.ID, v.Detail)
 	}
 	b.WriteString("\n" + Caveat + "\n")
 	return b.String()
