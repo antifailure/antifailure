@@ -209,11 +209,14 @@ func Paths() []Path {
 		{
 			ID:   "the-platforms-own-capture-of-stdout-and-stderr",
 			Name: "everything the application prints, which leaves the environment with no socket, no rule and no route",
-			Why: "This is the path that makes the whole product's claim narrower than it sounds. A " +
-				"twin holds masked production data, and a single log line carrying a row leaves " +
-				"the environment into the project's logs, where the audience is everyone with " +
-				"log access rather than everyone with environment access. It is a route people " +
-				"use on purpose, to get data out of a sandbox, and it is also the accident that " +
+			Why: "This is the path that makes the whole product's claim narrower than it sounds. " +
+				"A twin holds masked production data, and a single log line carrying a row " +
+				"leaves the environment into the project's logs, where the audience is everyone " +
+				"with log access rather than everyone with environment access. Google states " +
+				"that logs are picked up automatically from standard output, standard error, " +
+				"any file under /var/log and syslog, so it is not only the streams: a file " +
+				"written in the container is published as well. It is a route people use on " +
+				"purpose, to get data out of a sandbox, and it is also the accident that " +
 				"happens on the first debugging afternoon.",
 			ClosedBy: "nothing in the Cloud Run configuration. The platform captures the streams " +
 				"and no field in this plan turns that off. A Cloud Logging exclusion filter is a " +
@@ -669,10 +672,10 @@ func checkPlatformLogCapture(p Plan) (Verdict, string) {
 		names = append(names, s.Name)
 	}
 	return Open, fmt.Sprintf(
-		"the platform captures the standard output and standard error of %s and sends them to "+
-			"the project's logs. No field in this plan turns that off, no rule in this network "+
-			"is on the path, and a masked row printed once has left the environment",
-		strings.Join(names, ", "))
+		"the platform captures the standard output, the standard error, anything under /var/log "+
+			"and syslog from %s, and sends it to the project's logs. No field in this plan turns "+
+			"that off, no rule in this network is on the path, and a masked row printed once has "+
+			"left the environment", strings.Join(names, ", "))
 }
 
 // checkVolumeMounts is closed by construction, which is exactly why it needs a
