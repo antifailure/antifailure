@@ -176,8 +176,30 @@ func (s *Source) Available(ctx context.Context) (bool, string) {
 	return true, ""
 }
 
+// ErrUnlicensed is a lookup attempted without the enterprise_secrets feature.
+//
+// A distinct error so a caller can tell it from a store that is down. Both are
+// "no value", and only one of them is fixed by installing a licence.
+var ErrUnlicensed = errors.New("the enterprise_secrets feature is not licensed")
+
 // Lookup returns a value, refreshing the credential once if it is rejected.
 func (s *Source) Lookup(ctx context.Context, name string) (string, bool, error) {
+	// THE SECOND ASKING, AND IT IS NOT REDUNDANT.
+	//
+	// Available is where the licence is reported, and every caller in this
+	// repository consults it before calling this: the chain skips a source that
+	// is not available, and so does the single-source lookup beside it. That is
+	// a two call contract, and a two call contract is a chokepoint only while
+	// everybody remembers the first call. A caller that reached this method
+	// directly would be handed the customer's secret with no licence at all,
+	// and nothing in the type system or in a review would show it.
+	//
+	// So the gate is on the method that returns the value, not only on the one
+	// that describes the source. The cost is a map read per lookup.
+	if !feature.Enabled(ctx, license.FeatureSecrets) {
+		return "", false, fmt.Errorf("%w: %s", ErrUnlicensed, licenceReason(feature.StatusFrom(ctx)))
+	}
+
 	value, found, err := s.backend.Fetch(ctx, name)
 	if err == nil || !errors.Is(err, ErrRejected) {
 		return value, found, err
