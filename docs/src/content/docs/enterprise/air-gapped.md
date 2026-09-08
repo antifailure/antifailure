@@ -159,6 +159,10 @@ closed.
 **The Kubernetes runtime.** `af` talks to whatever cluster your kubeconfig names.
 That is your cluster by definition, and the guard does not sit on the client.
 
+**The Docker daemon.** `af` talks to the daemon `DOCKER_HOST` names, which is a
+unix socket on the machine by default and is permitted for that reason. Pointing
+it at a remote daemon over TCP is a connection the guard does not sit on.
+
 ## Proving it
 
 The count that matters is not a list of call sites, it is what a real run does.

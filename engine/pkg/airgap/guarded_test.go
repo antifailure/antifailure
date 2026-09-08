@@ -74,6 +74,12 @@ func TestEveryOutboundClientInTheProductGoesThroughTheGuard(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
 
+	// engine and ee, and deliberately not tools. Nothing under tools/ ships:
+	// they are the generators and gates CI runs, they are a separate module
+	// that the engine's dependency graph does not contain, and several of them
+	// exist precisely to talk to GitHub. Walking them would produce findings
+	// that can only ever be exemptions, and a list of permanent exemptions is
+	// how a real one gets waved through.
 	var findings []finding
 	for _, tree := range []string{"engine", "ee"} {
 		walk(t, filepath.Join(root, tree), root, &findings)
