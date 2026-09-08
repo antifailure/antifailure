@@ -233,12 +233,21 @@ export async function seed(admin: postgres.Sql): Promise<Seeded> {
     INSERT INTO organizations (slug, name) VALUES (${slug}, 'Enterprise') RETURNING id`
   const orgId = org!.id
   const handle = randomBytes(32).toString('base64url')
+  // The entity id is unique per seed, not a constant.
+  //
+  // sso_connections carries a unique index on idp_entity_id, which is correct:
+  // two organizations pointing at one identity provider entity is a mistake
+  // worth refusing. A constant here meant this suite could be run once against
+  // a database and never again, and the second run failed inside
+  // _bt_check_unique with no connection to what it was testing. It cost two
+  // debugging cycles in the session that wrote it, once blamed on leftover
+  // state and once on a leaked process, and it was neither.
   await admin`
     INSERT INTO sso_connections (
       org_id, handle, kind, display_name, enabled, default_role,
       idp_entity_id, idp_sso_url, idp_certificates)
     VALUES (
       ${orgId}, ${handle}, 'saml', 'Directory', true, 'member',
-      'https://idp.test/metadata', 'https://idp.test/sso', ${admin.array([] as string[])})`
+      ${`https://idp.test/${slug}/metadata`}, 'https://idp.test/sso', ${admin.array([] as string[])})`
   return { orgId, slug, handle }
 }

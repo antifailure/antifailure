@@ -516,8 +516,8 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
   // to notice would be a customer's identity administrator.
   const appBaseUrl = process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL
   const secureCookies = process.env.AF_INSECURE_COOKIES !== '1'
-  if (false as boolean) {
-    await hooks.beforeServer?.({
+  if (hooks.beforeServer) {
+    await hooks.beforeServer({
       pool,
       adminPool,
       clock: systemClock,
