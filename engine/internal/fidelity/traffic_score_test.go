@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/fidelity"
+	"github.com/antifailure/antifailure/engine/internal/load"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/traffic"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
@@ -138,6 +139,30 @@ func trafficTwinWithProfile(t *testing.T) fidelity.Observation {
 	obs.SentRate = twinSendRate
 	obs.TrafficProfile = &p
 	return obs
+}
+
+// The routes written out above have to be the ones that manifest actually
+// produces, or the benchmark measures an environment nobody has.
+//
+// Written out and then checked, rather than derived, for the reason the volume
+// benchmark writes its tables out: a reader has to be able to count four
+// against fourteen without running anything, and a number nothing holds to its
+// own source is a number that drifts.
+func TestTheRoutesTheTwinSendsAreTheOnesItsManifestNames(t *testing.T) {
+	t.Parallel()
+	body, err := os.ReadFile(filepath.Join("testdata", trafficManifestFile))
+	require.NoError(t, err)
+	m, err := manifest.Parse(body, "antifailure.yaml", "")
+	require.NoError(t, err)
+
+	shape, ok := load.ShapeFromSafeRoutes(m.Load.SafeRoutes)
+	require.True(t, ok, "the manifest's safe list produces no concrete route at all")
+	sendable, _ := shape.Safe(m.Load.SafeRoutes, m.Load.UnsafeRoutes)
+	got := make([]traffic.Endpoint, 0, len(sendable.Routes))
+	for _, r := range sendable.Routes {
+		got = append(got, traffic.Endpoint{Method: r.Method, Path: r.Path})
+	}
+	require.ElementsMatch(t, twinSends, got)
 }
 
 // TestRecordTheTrafficScoreOnAnAnalyticsTwin writes the report for the twin.
