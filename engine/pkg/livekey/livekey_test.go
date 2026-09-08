@@ -211,6 +211,12 @@ func liveCloudVectors() []liveVector {
 		{"gcp service account key, decoded", "GCP service account key", serviceAccountParsed(pemBody)},
 		{"gcp service account key, wrapped over lines", "GCP service account key",
 			serviceAccountParsed(fake("", 64, base64s) + "\n" + fake("", 64, base64s))},
+		// The marker ahead of the key rather than behind it. A JSON object has
+		// no guaranteed field order once a program has been over it, so a
+		// lookaround that only searched forward would miss this one.
+		{"gcp service account key, marker first", "GCP service account key",
+			"{\"client_email\": \"af@af.iam.gserviceaccount.com\", \"private_key\": \"" +
+				pemHeader + "\n" + pemBody + "\n" + pemFooter + "\"}"},
 
 		{"azure storage key, connection string", "Azure storage account key",
 			storageConnection("afexample", fake("", 86, base64s))},
@@ -253,6 +259,13 @@ func benignVectors() []struct{ name, text string } {
 		{"redacted, ellipsis", "SharedAccessKey=..." },
 		{"redacted, env sample", "AZURE_CLIENT_SECRET=\nAZURE_TENANT_ID=\n"},
 		{"redacted, google key placeholder", "key=AIza<YOUR_KEY_HERE>"},
+		// The reason only LEADING characters are skipped. Left to run, the gap
+		// would let the words of a sentence accumulate into sixty characters
+		// of key material that is not there.
+		{"redacted, body replaced by prose",
+			`{"private_key": "` + pemHeader +
+				` the body of this key was removed before the file was committed to the repository",` +
+				` "client_email": "af@af.iam.gserviceaccount.com"}`},
 		{"redacted, service account body removed",
 			`{"private_key":"` + pemHeader + `\nREDACTED\n` + pemFooter +
 				`\n","client_email":"af@af.iam.gserviceaccount.com"}`},
@@ -271,6 +284,10 @@ func benignVectors() []struct{ name, text string } {
 		// SHAPED and is exactly what a sandbox is supposed to hold.
 		{"azurite, by account name", storageConnection("devstoreaccount1", fake("", 86, base64s))},
 		{"azurite, by shorthand", "UseDevelopmentStorage=true;AccountKey=" + fake("", 86, base64s) + "=="},
+		// Field order in a connection string is not fixed either, so the
+		// excusing marker has to be found on both sides of the key.
+		{"azurite, account name after the key",
+			"AccountKey=" + fake("", 86, base64s) + "==;AccountName=devstoreaccount1"},
 
 		// A private key that is not Google's. Naming the wrong provider sends
 		// somebody to rotate a credential that has nothing to do with the
