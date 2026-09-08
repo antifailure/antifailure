@@ -5322,11 +5322,46 @@ license leaves you with it rather than with nothing.
 
 ## What is in ` + "`" + `ee/` + "`" + `
 
+<<<<<<< HEAD
 ` + "`" + `sso` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `multi_runtime` + "`" + `,
 ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `support_access` + "`" + `,
 ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `air_gapped` + "`" + `, ` + "`" + `cloud_database` + "`" + `, ` + "`" + `cloud_runtime` + "`" + `.
+=======
+<!-- entitlement-count:start -->
+Of the 12 features a license can carry, **3 are refused when the license does not name them**. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+<!-- entitlement-count:end -->
+>>>>>>> 9ccf7d74 (ee: nine of twelve licensed features permitted nothing and refused nothing)
 
-Each is named in the license, so a license permits exactly what was bought.
+The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
+place this product records what a license permits. Every row saying a feature is
+refused names the file that refuses it, and a test opens that file and requires
+a ` + "`" + `feature.Enabled` + "`" + ` call for that exact feature in it, so a row cannot claim an
+enforcement it does not have. Rows that say nothing changes are the honest
+answer rather than an omission: a feature that is sold and never checked is a
+gap worth publishing, and this page is where it gets published.
+
+<!-- entitlements:start -->
+| Feature | What it is | Without it |
+| --- | --- | --- |
+| ` + "`" + `air_gapped` + "`" + ` | An installation that reaches nothing outside the operator's own network. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `audit_stream` + "`" + ` | Privileged actions forwarded to the organization's own SIEM. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `billing` + "`" + ` | Subscriptions, invoices and the plan an organization is on. | Nothing changes. It is implemented and deliberately available to everyone. |
+| ` + "`" + `compliance_packs` + "`" + ` | SOC 2 and ISO 27001 evidence gathered from the control plane's own records. | Withheld. ` + "`" + `compliance/command.go:Command` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `enterprise_dashboard` + "`" + ` | The console: environments, masking, egress, audit and workloads. | Not refused by this name. The hosted control plane refuses the capability on the plan as a whole; a self hosted installation with no license keeps it. |
+| ` + "`" + `enterprise_secrets` + "`" + ` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. ` + "`" + `secrets/source.go:Source.Available` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `multi_runtime` + "`" + ` | Placing an environment across several runtimes at once, by requirement and by tag. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `policy_enforcement` + "`" + ` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. ` + "`" + `policyenforce/policyenforce.go:Hook.Check` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `rbac` + "`" + ` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
+| ` + "`" + `scim` + "`" + ` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `sso` + "`" + ` | Single sign on against the organization's own identity provider. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `support_access` + "`" + ` | A supported way for the vendor to see what a customer sees. | Nothing changes, because the capability is not built yet. |
+<!-- entitlements:end -->
+
+The distinction in the third column between a feature that is refused and one
+the hosted control plane covers under its plan is the one worth reading twice. A
+license carries twelve names and the hosted plan gate carries one boolean, so a
+license naming a feature and a plan that does not are not reconcilable by
+anything. Both are real refusals and only the first is keyed on what was bought.
 
 ### Two of those cannot be sold
 

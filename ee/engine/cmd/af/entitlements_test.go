@@ -1,0 +1,317 @@
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
+package main_test
+
+// What the licence actually turns on, measured rather than described.
+//
+// This file is here for the same reason main_test.go is: this is the only place
+// where the enterprise edition exists as a whole. main.go imports compliance,
+// secrets and policyenforce, so their init functions have run and
+// feature.Sites is populated. In any one of those packages the registry holds
+// one entry, and in ee/engine/feature it holds none at all, so the two
+// reconciliations below can only be made from here. A version of them written
+// next to the catalogue would pass on an empty map and prove nothing, which is
+// the shape of failure this repository keeps finding in its own instruments.
+//
+// Two things are checked, and they are different questions.
+//
+// The first is agreement: the catalogue and the registry name the same sites,
+// in both directions, so neither a feature declared and left out of the
+// catalogue nor a catalogue entry claiming a declaration that was deleted can
+// pass.
+//
+// The second is BEHAVIOUR, and it is the one the lane's number comes from. For
+// every gated feature, the real entry point is called twice: once with a licence
+// that grants everything except that feature, and once with a licence that
+// grants it. The first must do less. "It compiles", "the constant is declared"
+// and "Sites is non empty" are not verification; the refusal is.
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/antifailure/antifailure/ee/engine/compliance"
+	"github.com/antifailure/antifailure/ee/engine/feature"
+	"github.com/antifailure/antifailure/ee/engine/license"
+	"github.com/antifailure/antifailure/ee/engine/policyenforce"
+	"github.com/antifailure/antifailure/ee/engine/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
+)
+
+// withEverythingExcept grants every feature the licence sells but one.
+//
+// Deliberately not an empty licence. An empty one proves that the code path
+// needs A licence and not that it needs THIS entitlement, and the difference is
+// the whole of what a per feature gate is for: a customer who bought four
+// features and not the fifth has a valid, active, honoured licence.
+func withEverythingExcept(missing license.Feature) context.Context {
+	granted := []license.Feature{}
+	for _, f := range license.AllFeatures() {
+		if f != missing {
+			granted = append(granted, f)
+		}
+	}
+	return withFeatures(granted...)
+}
+
+func withFeatures(features ...license.Feature) context.Context {
+	v := license.NewVerifier(nil)
+	status := v.Evaluate(license.Claims{
+		ID: "l", Org: "acme", Plan: "enterprise", Features: features,
+		IssuedAt: time.Now().Add(-time.Hour), ExpiresAt: time.Now().AddDate(1, 0, 0),
+	}, license.Evaluation{Org: "acme", Now: time.Now()})
+	return feature.With(context.Background(), status)
+}
+
+func TestEveryGatedFeatureIsDeclaredWhereTheCatalogueSaysItIs(t *testing.T) {
+	for _, e := range feature.Catalogue() {
+		if e.State != feature.StateGated {
+			continue
+		}
+		sites := feature.Sites(e.Feature)
+		require.Containsf(t, sites, e.EnforcedAt,
+			"the catalogue says %s is enforced at %s and the registry holds %v. Either the "+
+				"Declare call is missing from the enterprise binary's imports, or the two "+
+				"strings have drifted.",
+			e.Feature, e.EnforcedAt, sites)
+	}
+}
+
+func TestEveryDeclaredSiteBelongsToAGatedCatalogueEntry(t *testing.T) {
+	// The reverse, and the one that catches the next lane rather than the last.
+	// A feature gated in code and absent from the catalogue is a feature the
+	// licensing page does not know is enforced, so a customer reading the page
+	// is told they get something a licence withholds. This fails until the
+	// catalogue is updated, which is the intended cost of adding a gate.
+	for _, f := range license.AllFeatures() {
+		sites := feature.Sites(f)
+		if len(sites) == 0 {
+			continue
+		}
+		entry, ok := feature.Of(f)
+		require.Truef(t, ok,
+			"%s is declared at %v and has no catalogue entry", f, sites)
+		require.Equalf(t, feature.StateGated, entry.State,
+			"%s is declared at %v and the catalogue calls it %q. A site that refuses IS a "+
+				"gate, so either the state is stale or the Declare is.",
+			f, sites, entry.State)
+		require.Containsf(t, sites, entry.EnforcedAt,
+			"%s is declared at %v and the catalogue names %s", f, sites, entry.EnforcedAt)
+	}
+}
+
+func TestNothingIsDeclaredForAFeatureNoLicenceCanCarry(t *testing.T) {
+	// A call site for a feature no licence grants is dead code that looks like
+	// enforcement, which is the mirror image of a feature nobody checks. The
+	// registry's own doc comment names both and this is the second one.
+	sellable := map[license.Feature]bool{}
+	for _, f := range license.AllFeatures() {
+		sellable[f] = true
+	}
+	for _, f := range feature.Declared() {
+		require.Truef(t, sellable[f],
+			"%s is declared as an enforcement site and no licence can grant it, so that "+
+				"check can never pass", f)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The measurement
+// ---------------------------------------------------------------------------
+
+// proof is one feature's entry point and what to look for when it runs.
+type proof struct {
+	feature license.Feature
+	// run exercises the real entry point under the given context and reports
+	// whether THE LICENSED BEHAVIOUR HAPPENED, plus one line saying what it saw.
+	//
+	// "The licensed behaviour happened" rather than "it refused", and the
+	// difference is not cosmetic: it is the bug this harness was written with.
+	// For a secret source the licensed behaviour is a store that answers, and
+	// for the compliance command it is a report. For the policy hook it is the
+	// REFUSAL: an unlicensed hook permits, because a policy nobody paid for
+	// must not start refusing environments. Written as "did it refuse", the
+	// policy row failed against correct code and the other two passed, which is
+	// a harness reporting the wrong answer twice over.
+	run func(t *testing.T, ctx context.Context) (licensed bool, what string)
+}
+
+// entryPoints is the real call for each feature that has one.
+//
+// One per gated feature and no more. A feature missing from this list is not
+// silently skipped: TestTheEntitlementIsWhatDecides requires the list and the
+// catalogue's gated set to be the same set, so adding a gate without adding a
+// proof of it fails.
+func entryPoints() []proof {
+	return []proof{
+		{
+			feature: license.FeaturePolicy,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				// A policy that refuses this request outright, so the only
+				// variable between the two calls is the entitlement.
+				hook := policyenforce.NewHook(policyenforce.Policy{
+					DeniedHosts: []string{"api.stripe.com"},
+				}, nil)
+				err := hook.Check(ctx, extension.EnvironmentRequest{
+					Org: "acme", Repository: "acme/app", Branch: "main", EnvID: "af-1",
+					EgressHosts: []string{"api.stripe.com"},
+					EgressModes: map[string]string{"api.stripe.com": "sandbox"},
+				})
+				// The licensed behaviour is the refusal. A hook whose licence
+				// has lapsed permits, which is what the gate inside Check is
+				// for: an expired customer must not keep a feature they cannot
+				// turn off without a restart, and must not have their
+				// environments refused by one either.
+				if err == nil {
+					return false, "Hook.Check permitted the environment"
+				}
+				return true, "Hook.Check refused: " + firstLine(err.Error())
+			},
+		},
+		{
+			feature: license.FeatureSecrets,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				source := secrets.New(reachableBackend{})
+				ok, why := source.Available(ctx)
+				if ok {
+					return true, "Source.Available reported the store usable"
+				}
+				return false, "Source.Available refused: " + firstLine(why)
+			},
+		},
+		{
+			feature: license.FeatureCompliance,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				var out, errs strings.Builder
+				code := compliance.Command(ctx, []string{"soc2", "--org", "acme"},
+					compliance.Options{
+						Stdout: &out, Stderr: &errs,
+						Gather: func(context.Context, string, time.Time, time.Time) (
+							compliance.Evidence, error) {
+							return compliance.Evidence{
+								Org: "acme", From: time.Now().AddDate(-1, 0, 0), To: time.Now(),
+							}, nil
+						},
+					})
+				if code == 0 {
+					require.NotEmpty(t, out.String(),
+						"af compliance exited 0 and wrote no report")
+					return true, "af compliance produced a report"
+				}
+				require.Empty(t, out.String(),
+					"a refusal wrote a partial document to standard output")
+				return false, "af compliance exited " + itoa(code) + ": " + firstLine(errs.String())
+			},
+		},
+	}
+}
+
+func TestTheEntitlementIsWhatDecides(t *testing.T) {
+	// The number, measured. For each gated feature: with everything else
+	// granted and this one missing, the entry point must do less; with it
+	// granted, it must do the thing.
+	//
+	// Both halves matter and the second is the one an over eager gate breaks. A
+	// check written the wrong way round refuses under a valid licence, and a
+	// test that only looked at the refusal would call that a pass.
+	proofs := entryPoints()
+
+	haveProof := map[license.Feature]bool{}
+	for _, p := range proofs {
+		haveProof[p.feature] = true
+	}
+	for _, f := range feature.GatedFeatures() {
+		require.Truef(t, haveProof[f],
+			"%s is marked gated in the catalogue and this file exercises no entry point for "+
+				"it, so the claim rests on a string rather than on a refusal", f)
+	}
+	for _, p := range proofs {
+		entry, ok := feature.Of(p.feature)
+		require.Truef(t, ok, "%s is exercised here and is not in the catalogue", p.feature)
+		require.Equalf(t, feature.StateGated, entry.State,
+			"%s is exercised as a gate and the catalogue does not call it gated", p.feature)
+	}
+
+	decided := 0
+	for _, p := range proofs {
+		p := p
+		passed := t.Run(string(p.feature), func(t *testing.T) {
+			without, sawWithout := p.run(t, withEverythingExcept(p.feature))
+			require.Falsef(t, without,
+				"with a valid licence granting every feature except %s, the licensed behaviour "+
+					"still happened: %s. The entitlement is not what decides.",
+				p.feature, sawWithout)
+
+			with, sawWith := p.run(t, withFeatures(license.AllFeatures()...))
+			require.Truef(t, with,
+				"with %s granted the licensed behaviour did not happen: %s. A gate that "+
+					"refuses a customer who paid is worse than no gate, and a test that only "+
+					"looked at the refusal would call that a pass.",
+				p.feature, sawWith)
+
+			t.Logf("%s: without it, %s. With it, %s.", p.feature, sawWithout, sawWith)
+		})
+		if passed {
+			decided++
+		}
+	}
+
+	t.Logf("licensed features whose entitlement decides the behaviour: %d of %d",
+		decided, len(license.AllFeatures()))
+}
+
+func TestTheFeaturesThatRefuseNothingAreTheOnesTheCatalogueNames(t *testing.T) {
+	// The unflattering half, asserted rather than left to a reader.
+	//
+	// Nine of twelve features change nothing when they are absent. That is the
+	// finding, and pinning it here means the day one of them gains a real gate,
+	// this fails until somebody moves it in the catalogue, and the day a tenth
+	// quietly loses one, this fails too.
+	for _, e := range feature.Catalogue() {
+		if e.State == feature.StateGated {
+			continue
+		}
+		require.Emptyf(t, feature.Sites(e.Feature),
+			"the catalogue calls %s %q and something declared an enforcement site for it: %v",
+			e.Feature, e.State, feature.Sites(e.Feature))
+	}
+}
+
+// reachableBackend is a secret store that works, so the only thing that can
+// refuse a lookup is the licence.
+type reachableBackend struct{}
+
+func (reachableBackend) Describe() string { return "a test store at memory://entitlements" }
+
+func (reachableBackend) Reach(context.Context) error { return nil }
+
+func (reachableBackend) Fetch(context.Context, string) (string, bool, error) {
+	return "value", true, nil
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	digits := ""
+	for n > 0 {
+		digits = string(rune('0'+n%10)) + digits
+		n /= 10
+	}
+	return digits
+}

@@ -547,6 +547,13 @@ func TestTheRefusalCarriesTheDocumentedErrorCode(t *testing.T) {
 
 func TestFeatureIsDeclaredSoItCannotBeSoldAndNeverChecked(t *testing.T) {
 	t.Parallel()
-	require.Contains(t, feature.Sites(license.FeaturePolicy),
-		"ee/engine/policyenforce.Hook")
+	// Against the catalogue rather than against a literal, so that the site
+	// this package registers and the site the licensing page publishes cannot
+	// be two different strings. A literal here agreed with itself and with
+	// nothing else, which is how the compliance declaration spent its whole
+	// life naming a function that does not check a licence.
+	entry, ok := feature.Of(license.FeaturePolicy)
+	require.True(t, ok, "policy_enforcement is not in the entitlement catalogue")
+	require.Equal(t, feature.StateGated, entry.State)
+	require.Contains(t, feature.Sites(license.FeaturePolicy), entry.EnforcedAt)
 }
