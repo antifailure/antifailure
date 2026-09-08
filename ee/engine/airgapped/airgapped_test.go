@@ -269,26 +269,28 @@ func TestTheLicenceItselfCannotPhoneHome(t *testing.T) {
 	// reviewer has to notice.
 	forbidden := map[string]bool{"net": true, "net/http": true, "crypto/tls": true}
 
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "../license", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.ImportsOnly)
+	entries, err := os.ReadDir("../license")
 	require.NoError(t, err)
-	require.NotEmpty(t, pkgs, "the licence package was not parsed, so NOTHING was checked")
 
+	fset := token.NewFileSet()
 	var found []string
 	files := 0
-	for _, pkg := range pkgs {
-		for name, file := range pkg.Files {
-			files++
-			for _, imp := range file.Imports {
-				p := strings.Trim(imp.Path.Value, `"`)
-				if forbidden[p] {
-					found = append(found, filepath.Base(name)+" imports "+p)
-				}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files++
+		file, err := parser.ParseFile(fset, filepath.Join("../license", name), nil, parser.ImportsOnly)
+		require.NoErrorf(t, err, "%s could not be parsed, so it was NOT checked", name)
+		for _, imp := range file.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			if forbidden[path] {
+				found = append(found, name+" imports "+path)
 			}
 		}
 	}
 	require.Positive(t, files, "no files were read, so NOTHING was checked")
-	require.Emptyf(t, found, "licence verification is offline and %d of its files can dial", len(found))
+	require.Emptyf(t, found, "licence verification is offline and %d of its files can dial: %v",
+		len(found), found)
 }
