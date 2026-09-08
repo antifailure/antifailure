@@ -111,6 +111,12 @@ type Observation struct {
 	// then does the dimension report what is in it.
 	Stores []Store
 
+	// Stances describes what this environment did about each store declared
+	// with a stance other than golden. A store with no entry here is one
+	// nothing asked about, which is a different answer from one that was asked
+	// about and is not running.
+	Stances []Stance
+
 	// CrossStore is what the cross store masking check found, and
 	// CrossStoreReason says why it could not be run. Nil with an empty reason
 	// means nothing asked, which is what an environment with one store is.
@@ -206,6 +212,52 @@ type Store struct {
 	Tables       int
 	Rows         int64
 	BranchReason string
+}
+
+// Stance is what this environment DID about one store the manifest declares
+// with a stance other than golden.
+//
+// Separate from Store above, which is a branch and its provenance, because
+// these three stances have neither. A store declared empty, derived or
+// topics_only has no golden, no attestation and no branch, and reporting it
+// through a struct built for those would answer four questions about it that
+// nobody asked and none of which apply.
+//
+// What it carries instead is the two things a reader needs in order to tell a
+// deliberate position from an omission: whether the store is actually running
+// in this environment, and whether this environment's own run did the thing
+// the stance asks for. The manifest's declaration is not one of them. The
+// manifest is already in the observation, and a report built from a
+// declaration alone is the report believing a manifest instead of an
+// environment, which is the failure the datastores dimension was written to
+// stop one level up.
+type Stance struct {
+	// Store is the datastore's name in the manifest.
+	Store string
+	// Running reports that a service of the store's name is up in this
+	// environment, and RunningReason says why nothing could be asked when
+	// that could not be established.
+	//
+	// A store the environment does not hold is ABSENT whatever its stance
+	// says, and that is the case this field exists for: a manifest declaring
+	// a cache empty and an environment with no cache in it are not the same
+	// result, and before this they read identically.
+	Running       bool
+	RunningReason string
+	// Ran reports that this environment's own run recorded the job the stance
+	// asks for, and RanReason says what was found when it did not.
+	//
+	// Read from the journal rather than assumed from the manifest. An
+	// environment brought up by a build that had no stance jobs is running the
+	// same containers, from the same manifest, with a broker that has no topic
+	// in it, and the manifest cannot tell those apart. The journal is the only
+	// thing in this product that records what a particular run actually did.
+	//
+	// It is not consulted for the empty stance, which has no job: the store
+	// starting and holding nothing IS the stance, and there is nothing for a
+	// run to have done beyond starting it.
+	Ran       bool
+	RanReason string
 }
 
 // There is deliberately no Empty field here, unlike the primary database's.

@@ -180,6 +180,23 @@ type EnvSpec struct {
 	Progress func(line string)
 }
 
+// StanceJobName is what a runtime calls the one shot job that realizes a
+// store's stance, and it is a contract rather than a convenience.
+//
+// A run records every resource it is about to create in the journal, and the
+// journal is the only thing in this product that says what a PARTICULAR run
+// did. The fidelity report reads it back to answer a question the manifest
+// cannot: whether the environment in front of somebody was brought up by a
+// build that creates topics, or by one that did not and left a broker with the
+// same name, the same image and nothing in it.
+//
+// So the name a runtime journals has to be one the report can recognise, and
+// composing it here rather than in each runtime is what keeps the two ends
+// from drifting apart silently. A runtime that names it something else is not
+// wrong in any way a test would catch: the environment comes up, the job runs,
+// and the report quietly says unmeasured forever.
+func StanceJobName(store string) string { return store + "-stance" }
+
 // StanceJob is one command that realizes a datastore's declared stance.
 //
 // It carries the store rather than only the command so that a failure names

@@ -3,6 +3,7 @@ package fidelity
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -52,11 +53,22 @@ import (
 // what can be seen. That is the line that makes the score go down on exactly
 // the stack this dimension was added for.
 //
-// A store recognised from a service image, or declared with any other stance,
-// is UNMEASURED, which keeps it out of the score in both directions: nothing
-// here has shown that it reproduces production and nothing here has shown that
-// it does not. Either way the report carries the sentence, in the exclusions
-// list every reader of the headline is pointed at.
+// A store declared with one of the other three stances is SUBSTITUTED when
+// this environment did what the stance asks and the store is running, ABSENT
+// when it is not running, and UNMEASURED when the run that brought this
+// environment up recorded no such job. That was UNMEASURED in every case until
+// `af up` learned to act on those three, and the sentence attached to each of
+// them said that nothing here started the store, ran the rebuild or created a
+// topic, which stopped being true the moment the jobs existed. Substituted
+// puts them in the denominator: an empty cache does not reproduce production's
+// cache, the score goes down for saying so, and the detail beside it carries
+// the declared reason so a reader can see the position rather than a gap.
+//
+// A store recognised from a service IMAGE and declared nowhere is still
+// UNMEASURED, which keeps it out of the score in both directions: nobody chose
+// a stance for it, so nothing here has shown that it reproduces production and
+// nothing here has shown that it does not. Either way the report carries the
+// sentence, in the exclusions list every reader of the headline is pointed at.
 
 // datastores reports every datastore in the environment other than the primary
 // database.
@@ -76,6 +88,13 @@ func datastores(obs Observation) Dimension {
 	branched := make(map[string]Store, len(obs.Stores))
 	for _, st := range obs.Stores {
 		branched[st.Name] = st
+	}
+	// What the environment did about each store that is not a golden. A store
+	// with no entry here was never asked about, which is the zero Stance and
+	// is reported as such rather than as a store that answered no.
+	stances := make(map[string]Stance, len(obs.Stances))
+	for _, st := range obs.Stances {
+		stances[st.Store] = st
 	}
 
 	found := make([]Component, 0, len(obs.Manifest.Datastores)+len(obs.Manifest.Services))
@@ -103,7 +122,7 @@ func datastores(obs Observation) Dimension {
 				storeProvenanceComponent(ds.Name, st))
 			continue
 		}
-		found = append(found, declaredComponent(ds))
+		found = append(found, declaredComponent(ds, stances[ds.Name]))
 	}
 
 	for _, svc := range obs.Manifest.Services {
@@ -331,10 +350,11 @@ func describeStore(s Store) string {
 }
 
 // declaredComponent is one store the manifest declares and this environment
-// does NOT hold a branch of, in the state the declaration puts it in.
+// does NOT hold a branch of, in the state this environment put it in.
 //
-// TWO STATES, and which one a stance gets is the whole of this function. A
-// store the environment branched never reaches here: it is reported by the two
+// FOUR STATES now, one per stance, and which one a store gets turns on what
+// the environment did rather than on what the manifest said. A store the
+// environment branched never reaches here: it is reported by the two
 // components above, from what the branch holds.
 //
 // A stance of golden is ABSENT. The manifest asked for a masked, verified copy
@@ -343,31 +363,130 @@ func describeStore(s Store) string {
 // branched one, so there is nothing to read. So it is counted, in the
 // denominator, and the score goes down, which is the point: an analytics
 // product's twin holding masked Postgres metadata and zero events must not
-// score as a faithful twin, and until the lane that wrote this it did, because
-// unmeasured kept the one store the product is about out of the number in both
-// directions.
+// score as a faithful twin.
 //
-// Every other stance stays UNMEASURED. Nothing in this build starts a second
-// store, rebuilds one from the branch or creates a topic in one, so whether an
-// empty store came up empty on purpose or came up at all is genuinely unknown
-// here. A store reported reproduced because somebody declared it empty would
-// be the report believing a manifest instead of an environment, which is the
-// failure one level up from the one the dimension was added for. L4.4 is the
-// lane that makes those three into first class outcomes; this one must not
-// pre-empt it by scoring a declaration.
-func declaredComponent(ds schema.Datastore) Component {
-	c := Component{Name: ds.Name, Detail: declaredReason(ds)}
+// The other three used to be UNMEASURED, and the sentence attached to each of
+// them said that nothing here started the store, ran the rebuild or created a
+// topic. That was true when it was written and it is now false, which is the
+// worse of the two failures an instrument can have: the report was describing
+// a build that no longer exists. `af up` starts the store, runs the rebuild
+// and creates the topics, and a job that fails fails the environment.
+//
+// So each of them is now SUBSTITUTED when the environment did it, and that
+// choice is deliberate in both directions.
+//
+// Not Reproduced, because none of the three is production's data and the whole
+// argument for the stances is that it should not be. An empty cache holds
+// nothing production holds. A rebuilt index holds documents built from the
+// branch, which is the point of it and is not a copy of production's index. A
+// broker created with topics and consumer groups holds no message at all.
+// Substituted is the state this package defines for something that stands in
+// and behaves without being the real thing, and all three are exactly that.
+//
+// Not Unmeasured either, which is what they were, and this is the change that
+// moves the number. Unmeasured keeps a component out of the score in both
+// directions, so a twin of a product whose events live in Kafka scored the
+// same whether its broker had the declared topics in it or was an empty
+// container nobody had touched. Substituted puts it in the denominator: the
+// score goes DOWN for declaring a cache empty, honestly, because an empty
+// cache does not reproduce production's cache, and the detail beside it says
+// out loud that somebody chose that and why.
+//
+// A store that is NOT running is ABSENT whatever its stance says. The manifest
+// asked the environment to hold a store and it does not hold one, and that is
+// the failure the run by something check in validation refuses at the other
+// end.
+//
+// A store that is running and whose job this environment's own run did NOT
+// record stays UNMEASURED, and it is the honest answer rather than a
+// concession. An environment brought up by a build that had no stance jobs is
+// running the same containers from the same manifest with a broker that has no
+// topic in it, and nothing here can tell that apart from one whose topics were
+// created except by asking what the run recorded.
+func declaredComponent(ds schema.Datastore, st Stance) Component {
+	c := Component{Name: ds.Name}
 	if ds.Stance == schema.StanceGolden {
-		c.State = Absent
+		c.State, c.Detail = Absent, declaredReason(ds, goldenGap)
 		return c
 	}
-	c.State = Unmeasured
+	switch {
+	case st.RunningReason != "":
+		c.State = Unmeasured
+		c.Detail = declaredReason(ds, st.RunningReason)
+	case !st.Running:
+		c.State = Absent
+		c.Detail = declaredReason(ds, "no service of that name is running in this environment, "+
+			"so the environment does not hold the store the manifest declared")
+	case ds.Stance == schema.StanceEmpty:
+		// The one stance with no job. Starting the store IS the stance, so
+		// the store running is the whole of the observation and there is
+		// nothing a run could separately have recorded.
+		c.State = Substituted
+		c.Detail = declaredReason(ds, "it is running and holds nothing, which is the stance")
+	case !st.Ran:
+		c.State = Unmeasured
+		c.Detail = declaredReason(ds, st.RanReason)
+	default:
+		c.State = Substituted
+		c.Detail = declaredReason(ds, ranDetail(ds))
+	}
 	return c
 }
 
-// declaredReason says what the manifest chose for a store and what this build
-// has done about it, which are two different sentences and both belong here.
-func declaredReason(ds schema.Datastore) string {
+// ranDetail says what this environment did about a store whose job it ran.
+//
+// The counts are the manifest's, and that is deliberate and is not the report
+// believing a declaration: the run created exactly what was declared or failed
+// the environment, so the declared shape and the created shape are the same
+// list. What the observation supplies is that the run HAPPENED here, which is
+// the part a manifest cannot say.
+func ranDetail(ds schema.Datastore) string {
+	switch ds.Stance {
+	case schema.StanceTopicsOnly:
+		groups := 0
+		for _, t := range ds.Topics {
+			groups += len(t.ConsumerGroups)
+		}
+		return fmt.Sprintf(
+			"this environment's run created %s and %s in it, with no messages, and a create "+
+				"that failed would have failed the environment",
+			plural(int64(len(ds.Topics)), "topic", "topics"),
+			plural(int64(groups), "consumer group", "consumer groups"))
+	case schema.StanceDerived:
+		out := "this environment's run rebuilt it"
+		if ds.From != "" {
+			out += " from " + ds.From
+		}
+		if ds.Rebuild != nil {
+			out += " by running " + strconv.Quote(ds.Rebuild.Command) + " in " + ds.Rebuild.Service
+		}
+		return out + ", so what it holds was built from this branch rather than copied from " +
+			"production and left stale against it"
+	default:
+		return "this environment's run applied the stance"
+	}
+}
+
+// goldenGap is what a store declared golden and never branched is missing.
+//
+// The four facts named one by one rather than summarised. The database
+// dimension reports a branch as its golden, its attestation, its tables and
+// its rows; this store has none of those, and naming each is what tells
+// somebody which four things would have to appear before this line changes.
+const goldenGap = "nothing here built one: no golden, no attestation, no tables and no rows. " +
+	"af golden refresh makes a golden of this store and af up branches it, and " +
+	"this environment holds neither"
+
+// declaredReason says what the manifest chose for a store and what this
+// environment then did about it, which are two different sentences and both
+// belong here.
+//
+// The declared BECAUSE is carried through as written, and it is the reason
+// this function exists rather than a state alone. An empty store somebody
+// decided on and an empty store nobody explained look identical in a running
+// environment and score identically here; the sentence is the only thing that
+// tells a reviewer which one they are looking at.
+func declaredReason(ds schema.Datastore, did string) string {
 	var b strings.Builder
 	b.WriteString("a ")
 	b.WriteString(ds.Engine)
@@ -380,38 +499,16 @@ func declaredReason(ds schema.Datastore) string {
 	if ds.Because != "" {
 		b.WriteString(", because ")
 		b.WriteString(ds.Because)
+	} else if ds.Stance != schema.StanceGolden {
+		// Said out loud rather than left as a shorter sentence. The stance key
+		// exists so that a store's contents are a decision somebody made, and
+		// a decision with no reason written down is the half of it this
+		// report can still see is missing.
+		b.WriteString(", with no reason declared")
 	}
 	b.WriteString(", and ")
-	b.WriteString(stanceGap(ds.Stance))
+	b.WriteString(did)
 	return b.String()
-}
-
-// stanceGap is what this build has NOT done for a stance, in the words
-// somebody has to act on.
-func stanceGap(stance schema.DatastoreStance) string {
-	switch stance {
-	case schema.StanceEmpty:
-		return "nothing here started it, so the declaration is recorded and unchecked"
-	case schema.StanceDerived:
-		return "nothing here ran that rebuild, so nothing knows whether it would succeed"
-	case schema.StanceTopicsOnly:
-		return "nothing here created a topic, so the broker is a declaration rather than a shape"
-	case schema.StanceGolden:
-		// The four facts named one by one rather than summarised. The database
-		// dimension reports a branch as its golden, its attestation, its
-		// tables and its rows; this store has none of those, and naming each
-		// is what tells somebody which four things would have to appear before
-		// this line changes.
-		return "nothing here built one: no golden, no attestation, no tables and no rows. " +
-			"af golden refresh makes a golden of this store and af up branches it, and " +
-			"this environment holds neither"
-	default:
-		// A stance no build of this engine knows. Validation refuses one, so
-		// reaching here means a manifest parsed by a newer engine than the one
-		// reading it, and the honest sentence is that this build did nothing
-		// rather than a guess at what the stance meant.
-		return "this build does not know that stance, so nothing here acted on it"
-	}
 }
 
 // datastoreReason says why the component could not be measured, in the words

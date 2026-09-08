@@ -341,7 +341,8 @@ func (r *Runtime) runStanceJobs(
 		}
 		progress(fmt.Sprintf("%s: %s", job.Store, stanceLine(job)))
 		if err := r.runOnceAs(ctx, spec, s, nets, proxyIP, job.Command,
-			job.Store+"-stance", "the "+job.Store+" datastore's "+job.Stance+" stance",
+			provider.StanceJobName(job.Store),
+			"the "+job.Store+" datastore's "+job.Stance+" stance",
 			nil, journal); err != nil {
 			return err
 		}
