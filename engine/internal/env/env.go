@@ -1540,6 +1540,14 @@ func reservedProviderNames() map[string][]string {
 		extension.SocketDatabaseProvider: {
 			string(schema.DBDocker), string(schema.DBNeon),
 			string(schema.DBSupabase), string(schema.DBDBLab),
+			// pgurl was missing from this list while being a case in the
+			// switch below, which is the precise failure the list exists to
+			// prevent: a build registering a provider called pgurl would have
+			// validated cleanly, been consulted only after the built in
+			// switch, and never once been used. Found by writing down the
+			// five extension points, and the reason there is now a test that
+			// reads the schema's constants rather than trusting this slice.
+			string(schema.DBPgURL),
 		},
 		extension.SocketRuntimeProvider: {
 			string(schema.RuntimeLocal), string(schema.RuntimeKubernetes),
