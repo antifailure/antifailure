@@ -7,7 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/fidelity"
+	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/redact"
+	"github.com/antifailure/antifailure/engine/internal/state"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -271,4 +275,212 @@ func TestNamesTheStanceJob_DoesNotCreditOneStoreWithAnothersJob(t *testing.T) {
 	require.False(t, namesTheStanceJob("af-svc-shop-bus-stance", "cache"))
 	require.False(t, namesTheStanceJob("af-svc-shop-bus-migrate", "bus"))
 	require.False(t, namesTheStanceJob("", "bus"))
+}
+
+func TestStanceJobs_LeavesAProviderBackedStoreAlone(t *testing.T) {
+	// Validation accepts a store that names a provider and no service of its
+	// own name, on the grounds that the provider may be a managed store the
+	// environment can already reach. This build does nothing about it: a
+	// datastore provider is what refreshes, masks, verifies and branches a
+	// golden, and no other stance has any of those done to it.
+	//
+	// So there is no job, and the honest half is that the report says it could
+	// not check the store rather than counting it either way. That is asserted
+	// in the fidelity package; here the point is that nothing is invented for
+	// it.
+	o, _ := stanceFixture(t, &schema.Manifest{
+		Name:     "app",
+		Services: []schema.Service{{Name: "web", Kind: schema.ServiceWeb, Port: 3000}},
+		Datastores: []schema.Datastore{{
+			Name: "cache", Engine: "redis", Provider: "elasticache",
+			Stance: schema.StanceEmpty, Because: "a cache is rebuilt from the primary",
+		}},
+	})
+	jobs, err := o.stanceJobs()
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+}
+
+func TestManifestRunsAServiceCalled_AnswersForBothShapes(t *testing.T) {
+	// The predicate that decides which of two honest sentences the report
+	// carries about a provider backed store. A store with a provider AND a
+	// service of its own name is started by this environment and is observed
+	// like any other.
+	m := &schema.Manifest{Services: []schema.Service{{Name: "cache"}, {Name: "web"}}}
+	require.True(t, manifestRunsAServiceCalled(m, "cache"))
+	require.False(t, manifestRunsAServiceCalled(m, "bus"))
+	require.False(t, manifestRunsAServiceCalled(nil, "cache"))
+}
+
+// observeStances, which is where the report stops believing the manifest.
+
+// stanceObservation runs observeStances against a real state database, with
+// the journal records a run would have left.
+func stanceObservation(
+	t *testing.T, m *schema.Manifest, running []string, journalled []string,
+) []fidelity.Stance {
+	t.Helper()
+	ctx := t.Context()
+	root := t.TempDir()
+	c := clock.New()
+	st, err := state.Open(ctx, root)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+
+	o, err := New(Options{
+		Root: root, Manifest: m, Branch: "main", Clock: c, Redactor: redact.New(),
+		Getenv:   func(string) string { return "" },
+		Progress: func(string) {},
+	})
+	require.NoError(t, err)
+
+	j := journal.New(st, c, nil)
+	for _, name := range journalled {
+		_, err := j.Intent(ctx, o.envID, "local", journal.KindContainer, name, nil)
+		require.NoError(t, err)
+	}
+
+	obs := &fidelity.Observation{EnvID: o.envID, Manifest: m}
+	for _, name := range running {
+		obs.Running = append(obs.Running, provider.RunningService{Name: name, Ready: true})
+	}
+	o.observeStances(ctx, &session{db: st, journal: j}, obs)
+	return obs.Stances
+}
+
+func stanceFor(t *testing.T, all []fidelity.Stance, store string) fidelity.Stance {
+	t.Helper()
+	for _, st := range all {
+		if st.Store == store {
+			return st
+		}
+	}
+	t.Fatalf("no stance was observed for %q", store)
+	return fidelity.Stance{}
+}
+
+// twoStores is a cache that starts empty and a broker whose shape a run
+// creates, each started by a service of its own name.
+func twoStores() *schema.Manifest {
+	return &schema.Manifest{
+		Name: "app",
+		Services: []schema.Service{
+			{Name: "web", Kind: schema.ServiceWeb, Port: 3000},
+			{Name: "cache", Kind: schema.ServiceWorker},
+			{Name: "bus", Kind: schema.ServiceWorker},
+		},
+		Datastores: []schema.Datastore{
+			{Name: "cache", Engine: "redis", Stance: schema.StanceEmpty, Because: "rebuilt from the primary"},
+			{Name: "bus", Engine: "kafka", Stance: schema.StanceTopicsOnly,
+				Topics: []schema.DatastoreTopic{{Name: "events"}}},
+		},
+	}
+}
+
+func TestObserveStances_ReadsTheRunsOwnJournalRatherThanTheManifest(t *testing.T) {
+	// The question a manifest cannot answer. An environment brought up by a
+	// build with no stance jobs runs the same services from the same file with
+	// a broker that has nothing in it, and the journal is the only thing in
+	// this product that records what a particular run did.
+	m := twoStores()
+	with := stanceObservation(t, m, []string{"web", "cache", "bus"}, nil)
+	require.False(t, stanceFor(t, with, "bus").Ran)
+	require.Contains(t, stanceFor(t, with, "bus").RanReason, "recorded no topics_only job")
+}
+
+func TestObserveStances_CreditsAJobThisEnvironmentRecorded(t *testing.T) {
+	m := twoStores()
+	// The name the local runtime journals, which pkg/provider composes so that
+	// the runtime writing it and this reading it cannot drift apart.
+	all := stanceObservation(t, m, []string{"web", "cache", "bus"},
+		[]string{"af-svc-ANY-bus-stance"})
+	bus := stanceFor(t, all, "bus")
+	require.True(t, bus.Running)
+	require.True(t, bus.Ran, "the run journalled the job and the report did not see it")
+}
+
+func TestObserveStances_AsksNothingAboutAnEmptyStoresJob(t *testing.T) {
+	// The one stance with no job. Asking the journal about it would produce an
+	// absence that means nothing and would read as one that means something.
+	all := stanceObservation(t, twoStores(), []string{"web", "cache", "bus"}, nil)
+	cache := stanceFor(t, all, "cache")
+	require.True(t, cache.Running)
+	require.False(t, cache.Ran)
+	require.Empty(t, cache.RanReason)
+}
+
+func TestObserveStances_ReportsAStoreThatIsNotRunning(t *testing.T) {
+	all := stanceObservation(t, twoStores(), []string{"web"}, nil)
+	require.False(t, stanceFor(t, all, "cache").Running)
+	require.Empty(t, stanceFor(t, all, "cache").RunningReason,
+		"the runtime answered, so there is no reason it could not be asked")
+}
+
+func TestObserveStances_SaysWhenTheRuntimeCouldNotBeAsked(t *testing.T) {
+	// Not knowing whether a store is running is a different answer from
+	// knowing it is not, and only one of them belongs in a denominator.
+	m := twoStores()
+	root := t.TempDir()
+	c := clock.New()
+	st, err := state.Open(t.Context(), root)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	o, err := New(Options{
+		Root: root, Manifest: m, Branch: "main", Clock: c, Redactor: redact.New(),
+		Getenv: func(string) string { return "" }, Progress: func(string) {},
+	})
+	require.NoError(t, err)
+
+	obs := &fidelity.Observation{
+		EnvID: o.envID, Manifest: m,
+		ServicesReason: "the runtime could not be reached",
+	}
+	o.observeStances(t.Context(), &session{db: st, journal: journal.New(st, c, nil)}, obs)
+	require.Equal(t, "the runtime could not be reached", stanceFor(t, obs.Stances, "cache").RunningReason)
+	require.False(t, stanceFor(t, obs.Stances, "cache").Running)
+}
+
+func TestObserveStances_SaysThatAProviderBackedStoreWasNotChecked(t *testing.T) {
+	// Validation accepts a store that names a provider and no service of its
+	// own name. This build neither starts it nor asks that provider about it,
+	// because a datastore provider is what branches a golden. Saying so beats
+	// reporting it absent, which would be claiming to know that a managed
+	// store somebody else supplies is not there.
+	m := &schema.Manifest{
+		Name:     "app",
+		Services: []schema.Service{{Name: "web", Kind: schema.ServiceWeb, Port: 3000}},
+		Datastores: []schema.Datastore{{
+			Name: "cache", Engine: "redis", Provider: "elasticache",
+			Stance: schema.StanceEmpty, Because: "rebuilt from the primary",
+		}},
+	}
+	cache := stanceFor(t, stanceObservation(t, m, []string{"web"}, nil), "cache")
+	require.False(t, cache.Running)
+	require.Contains(t, cache.RunningReason, "it names the provider elasticache")
+	require.Contains(t, cache.RunningReason, "nothing here can say what it holds")
+}
+
+func TestObserveStances_ObservesAProviderBackedStoreThisEnvironmentStarts(t *testing.T) {
+	// The control on the sentence above. A store with a provider AND a service
+	// of its own name IS started here, so it is observed like any other rather
+	// than excused by the presence of a provider key.
+	m := twoStores()
+	m.Datastores[0].Provider = "elasticache"
+	cache := stanceFor(t, stanceObservation(t, m, []string{"web", "cache"}, nil), "cache")
+	require.True(t, cache.Running)
+	require.Empty(t, cache.RunningReason)
+}
+
+func TestObserveStances_SaysNothingAboutAGoldenStore(t *testing.T) {
+	// The golden stance is measured from the branch, by observeDatastores, and
+	// a second entry here would be one store answered for twice.
+	m := twoStores()
+	m.Datastores = append(m.Datastores, schema.Datastore{
+		Name: "events", Engine: "clickhouse", Stance: schema.StanceGolden,
+	})
+	all := stanceObservation(t, m, []string{"web", "cache", "bus", "events"}, nil)
+	for _, st := range all {
+		require.NotEqual(t, "events", st.Store)
+	}
+	require.Len(t, all, 2)
 }

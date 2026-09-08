@@ -361,7 +361,19 @@ func (o *Orchestrator) observeStances(
 
 	for _, ds := range declared {
 		st := fidelity.Stance{Store: ds.Name, RunningReason: obs.ServicesReason}
-		if obs.ServicesReason == "" {
+		switch {
+		case ds.Provider != "" && !manifestRunsAServiceCalled(o.opts.Manifest, ds.Name):
+			// A store left to a provider, which validation allows and this
+			// build does nothing about. A datastore provider is what
+			// refreshes, masks, verifies and branches a GOLDEN, so nothing
+			// here opens one for any other stance, and nothing here started
+			// this store either. Said out loud rather than reported as
+			// absent, which would be this claiming to know that a managed
+			// store somebody else supplies is not there.
+			st.RunningReason = "it names the provider " + ds.Provider +
+				", so this build neither starts it nor asks that provider about it, " +
+				"and nothing here can say what it holds"
+		case obs.ServicesReason == "":
 			st.Running = running[ds.Name]
 		}
 		switch {
@@ -380,6 +392,25 @@ func (o *Orchestrator) observeStances(
 		}
 		obs.Stances = append(obs.Stances, st)
 	}
+}
+
+// manifestRunsAServiceCalled reports whether the environment starts a container
+// of that name itself.
+//
+// The same question validation asks, asked again here because the answer
+// decides which of two honest sentences the report carries. A store with both
+// a provider and a service of its own name IS started by this environment, so
+// it is observed like any other; one with a provider and no service is not.
+func manifestRunsAServiceCalled(m *schema.Manifest, name string) bool {
+	if m == nil {
+		return false
+	}
+	for i := range m.Services {
+		if m.Services[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // stanceJobsRecorded reads back which stores this environment's own run

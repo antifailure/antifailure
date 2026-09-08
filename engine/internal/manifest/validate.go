@@ -853,10 +853,18 @@ func (v *validator) datastoreTopics(p string, d schema.Datastore) {
 // green, the report says the manifest declared a cache, and there is no cache.
 func (v *validator) datastoreIsRunBySomething(p string, d schema.Datastore, m *schema.Manifest) {
 	if d.Stance == schema.StanceGolden || d.Name == "" || d.Provider != "" {
-		// A golden store's container is the engine's own, and a store naming
-		// a provider is that provider's business: it may be a managed one
-		// with an address the environment can already reach, and requiring a
-		// local service for it would refuse the correct manifest.
+		// A golden store's container is the engine's own.
+		//
+		// A store naming a PROVIDER is left alone for a different reason, and
+		// it is a limit rather than a check. That provider is somebody else's
+		// implementation, it may be a managed store with an address the
+		// environment can already reach, and refusing it here would refuse a
+		// correct manifest for a build this one knows nothing about. What
+		// this build does with such a store is nothing: it opens a datastore
+		// provider for a golden and for no other stance, because a provider
+		// is what refreshes, masks, verifies and branches one. So the
+		// fidelity report says out loud that it could not check it, rather
+		// than this refusing it or either of them pretending.
 		return
 	}
 	if hasService(m, d.Name) {
@@ -864,7 +872,7 @@ func (v *validator) datastoreIsRunBySomething(p string, d schema.Datastore, m *s
 	}
 	v.add(p+".name",
 		fmt.Sprintf("The datastore %q declares the stance %s and nothing in this manifest runs it.", d.Name, d.Stance),
-		fmt.Sprintf("Declare a service called %s running the store's image, which is how an environment starts a store it does not hold a golden of, or name a provider that supplies one. Without either, the environment would come up with the store declared and no store in it.", d.Name))
+		fmt.Sprintf("Declare a service called %s running the store's image, which is how an environment starts a store it does not hold a golden of. Naming a provider is the other way out and this build does not start one for you: the fidelity report then says it could not check the store rather than counting it. Without either, the environment comes up with the store declared and no store in it.", d.Name))
 }
 
 // hasService reports whether the manifest declares a service by that name.
