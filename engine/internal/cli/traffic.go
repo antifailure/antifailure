@@ -328,7 +328,7 @@ func printTrafficCoverage(env *Env, cov *traffic.Coverage, reason string) {
 	const most = 12
 	for i, r := range missed {
 		if i == most {
-			env.Out.Printf("    # and %d more, in af traffic show --format json\n", len(missed)-most)
+			env.Out.Printf("    # and %d more, in af traffic show --output json\n", len(missed)-most)
 			break
 		}
 		env.Out.Printf("    - %s\n", r.Route.String())
