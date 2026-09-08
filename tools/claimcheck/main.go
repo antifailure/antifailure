@@ -29,6 +29,7 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -103,6 +104,15 @@ func looksLikeAPath(tok string) bool {
 		return false
 	case strings.HasPrefix(tok, "-"):
 		// A command line flag, such as -trimpath.
+		return false
+	}
+	// A CIDR is not a path and never will be. It matches every other rule here,
+	// because it is dots and digits with a slash in the middle, and the air
+	// gapped page names 10.0.0.0/8 for the same reason any networking document
+	// does. A rule rather than an entry in notAPath, because there will be more
+	// of these and an exemption list that grows one address range at a time is
+	// a list nobody rereads.
+	if _, _, err := net.ParseCIDR(tok); err == nil {
 		return false
 	}
 	// Either it has a separator, or it names a file by extension.
