@@ -4,9 +4,7 @@
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE.md",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
+  "exports": { ".": "./src/index.ts" },
   "scripts": {
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
