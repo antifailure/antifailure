@@ -45,9 +45,20 @@ than take this paragraph's word for it.
    gone, which is the claim the paragraph below used to make about a mirror.
 4. **Symbol inspection of the artifact that ships.** The job builds
    `cmd/af` and fails if `strings` finds any `antifailure/.../ee/` package
-   path in the binary. `.dockerignore` excludes `ee` from the image build
-   context, so the published control plane image is built from a context that
-   does not contain it.
+   path in the binary. The repository root `.dockerignore` excludes `ee` from
+   the build context, so the published **community** control plane image is
+   built from a context that does not contain it, and the community leg of
+   `control-plane-image.yml` asserts that the image it produced holds no `ee`
+   tree at all.
+
+   That sentence used to have no qualifier, because there was one image. There
+   are now two, and the enterprise one obviously must see `ee`. It does not get
+   there by weakening the line above: `deploy/docker/control-plane-enterprise.Dockerfile`
+   carries its own ignore file beside it, which BuildKit reads in place of the
+   root one for that Dockerfile alone. The qualifier is written down rather
+   than left implied for the reason the paragraph further down gives: a claim
+   that was true when it was written and is no longer true in a new context
+   reads exactly like one that still holds.
 
 WHAT THIS SECTION USED TO SAY, and why it is written down rather than quietly
 replaced. It claimed `depguard` in Go and an import restriction in Biome; this
@@ -79,3 +90,47 @@ a license expires, features enter a grace period with daily warnings and then
 degrade to community behavior. Settings are preserved on disk throughout, so
 renewing restores them exactly. Nothing is deleted and no environment stops
 working because a license lapsed.
+
+## Running the enterprise control plane
+
+`ee/web/server` is the enterprise entry point: the process that mounts single
+sign-on and directory provisioning onto the control plane. Everything else,
+every environment variable, every refusal, the pool, the sweeps and the server
+itself, is the community `boot.ts`, unchanged. The enterprise edition adds
+registrations and nothing else, which is why there is no second copy of the
+configuration to drift.
+
+It is published as `ghcr.io/antifailure/control-plane-enterprise`, built by the
+same workflow and under the same tag as `ghcr.io/antifailure/control-plane`. So
+the two are the same commit, the same console build, the same migrations and
+the same bootstrap entrypoint, and `node bootstrap.mjs` and `node
+maintenance.mjs` mean exactly what they mean in the community image. A Helm
+release or a container app pointed at the enterprise repository instead of the
+community one needs no other change.
+
+Five variables are read only by this edition. Two of them are required and the
+process says so and exits rather than starting half configured:
+
+- `AF_EE_SSO_KEY`, **required**, 32 bytes of base64. Single sign-on encrypts the
+  client secret and the service provider key it stores under it. Generate one
+  with `openssl rand -base64 32`. A key that is a single repeated byte is
+  refused, because that is the shape of a placeholder somebody meant to replace.
+- `AF_ENTERPRISE_BASE_URL`, **required unless `AF_APP_BASE_URL` is set**, which
+  it defaults to. Where these routes publish themselves. The process refuses to
+  start when neither is set: an identity provider configured with an assertion
+  consumer URL pointing nowhere is a failure that appears in somebody else's
+  admin console.
+- `AF_LICENSE_PUBLIC_KEYS`, as `kid=base64`, the keys this installation trusts.
+  The same name and the same form the engine reads, so one key configures both.
+- `AF_LICENSE_KEY`, the licence itself.
+- `AF_ORG`, the organization slug the licence was issued to.
+
+A licence that does not parse is refused at startup rather than degraded. That
+is a deployment mistake and not a commercial state, and starting anyway would
+mean an enterprise deployment quietly serving 402 to its own identity provider
+because somebody pasted a truncated key.
+
+**With no licence the enterprise routes are mounted and answer 402**, naming
+the feature and the variable to set. They are not left unmounted. A 404 says
+the feature does not exist, and is indistinguishable from a build that never
+had it, a renamed route and a proxy that dropped the path.

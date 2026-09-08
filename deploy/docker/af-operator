@@ -1,2 +1,24 @@
 #!/bin/sh
-exec node /app/apps/api/src/operator-cli.ts "$@"
+# The operator command, on PATH, in whichever control plane image it lands in.
+#
+# It used to be one line naming /app/apps/api, which was correct for as long as
+# there was one image. The enterprise image cannot use that layout: it holds two
+# npm workspaces, and the enterprise packages reach the community ones through
+# relative symlinks npm wrote from the lockfile, so the community tree has to
+# sit at /app/web rather than at /app for those links to land anywhere. A
+# hardcoded path in a file both images copy is a wrapper that is wrong in one of
+# them, and wrong in the way that only appears when somebody runs it.
+#
+# So it looks, in both places, and REFUSES rather than falling through to node
+# with a path that does not exist. `node /nonexistent/x.ts` fails with a module
+# error naming a file, which sends the reader looking for a missing source file
+# instead of at the layout that moved.
+for dir in /app/apps/api /app/web/apps/api; do
+  if [ -f "$dir/src/operator-cli.ts" ]; then
+    exec node "$dir/src/operator-cli.ts" "$@"
+  fi
+done
+
+echo "af-operator: found no operator-cli.ts under /app/apps/api or /app/web/apps/api." >&2
+echo "af-operator: this image's layout is not one this wrapper knows about." >&2
+exit 1

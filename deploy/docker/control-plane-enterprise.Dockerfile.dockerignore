@@ -1,0 +1,82 @@
+# The build context for the enterprise control plane image.
+#
+# WHY THIS FILE EXISTS AT ALL, WHICH IS NOT A PACKAGING PREFERENCE. The
+# repository root .dockerignore excludes ee/, and ee/README.md names that
+# exclusion as the fourth of the four mechanisms that keep enterprise code out
+# of the community artifact: "`.dockerignore` excludes `ee` from the image build
+# context, so the published control plane image is built from a context that
+# does not contain it." That sentence has to stay true. Deleting the line to let
+# this image build would trade a real edition boundary for a convenience, and it
+# would do it silently, because nothing downstream would go red.
+#
+# BuildKit reads `<dockerfile>.dockerignore` from beside the Dockerfile and uses
+# it INSTEAD OF the root .dockerignore for that Dockerfile alone. So the
+# community image keeps a context that cannot see ee/, this image gets one that
+# can, and neither list is a compromise between the two.
+#
+# IF THIS FILE IS EVER NOT READ, THE BUILD FAILS LOUDLY RATHER THAN WRONGLY.
+# The classic pre-BuildKit builder does not support a per-Dockerfile ignore
+# file. Under it the root list applies, ee/ is absent from the context, and
+# `COPY ee/web/package.json` fails with a missing file. That is the correct
+# failure mode and it is worth knowing about: this cannot degrade into an image
+# that quietly ships without the enterprise tree, because every enterprise path
+# in the Dockerfile is a COPY and a COPY of nothing is an error.
+#
+# The list below is the root one, with three deliberate differences, each
+# marked. Everything else is kept in step with it on purpose: a context that
+# drifts is how the sibling image once tarred up six hundred megabytes of
+# marketing site and took thirty minutes instead of forty seconds.
+.git
+.github
+engine
+runner
+tools
+docs
+examples
+schemas
+bin
+infra
+www
+deploy
+# DIFFERENCE 1. The Dockerfiles have to survive the exclusion above, the same
+# way they do in the root list: `af up` sends the context to the daemon and
+# names the Dockerfile inside it, so an excluded one is simply not there.
+!deploy/docker/control-plane-enterprise.Dockerfile
+!deploy/docker/bootstrap.mjs
+!deploy/docker/maintenance.mjs
+!deploy/docker/af-operator
+!deploy/docker/personas.mjs
+# DIFFERENCE 2. ee/ is NOT excluded here, which is the entire reason this file
+# exists. What is excluded from it is the same class of thing excluded from
+# web/: the Go module, which this image does not run, the tests, and the
+# installed and generated trees, which the image builds from the lockfile.
+ee/engine
+ee/web/node_modules
+ee/web/**/node_modules
+ee/web/**/test
+web/node_modules
+web/**/node_modules
+web/**/.next
+web/**/test
+**/*.test.ts
+.antifailure
+.gate-reports
+.playwright-mcp
+**/*.broken.*
+console/node_modules
+console/.next
+console/out
+**/.env
+**/.env.*
+# DIFFERENCE 3, and it is a difference in effect rather than in the line. A
+# single `*` in an ignore pattern does not cross a `/`, so `*.md` is markdown at
+# the top level only and ee/LICENSE.md reaches the context on its own. The
+# negation is written anyway, because that is a property of Docker's matcher
+# rather than of anything visible here, and the cost of a reader getting it
+# wrong is an image that ships without the license it is covered by. This image
+# is not MIT, and the license belongs inside it rather than in a registry label
+# alone.
+*.md
+!ee/LICENSE.md
+antifailure.yaml
+masking.yaml
