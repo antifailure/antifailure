@@ -130,6 +130,14 @@ type Server struct {
 	// calls counts requests per action, which is what the benchmark reads to
 	// show that a branch's control plane work does not depend on size.
 	calls map[string]int
+	// requests keeps the last form each action arrived with, so a test can
+	// assert on what was SENT rather than only on what came back. The clone
+	// is the case that needs it: RestoreType is the difference between this
+	// provider's claim and L2.3's, and it is invisible in the response.
+	requests map[string]url.Values
+	// order is every action in the order it arrived, which is how a test
+	// shows that two branches at two sizes did the same work.
+	order []string
 	// copied counts the bytes this fake copied making clones. It is the fake's
 	// own cost and it is reported precisely so that nobody mistakes it for
 	// Aurora's: Aurora copies none of these bytes and this file copies all of
@@ -211,6 +219,7 @@ func New(opts Options) (*Server, error) {
 		clusters:  map[string]*cluster{},
 		instances: map[string]*instance{},
 		calls:     map[string]int{},
+		requests:  map[string]url.Values{},
 		host:      parsed.Hostname(),
 		port:      port,
 		pgUser:    user,
@@ -234,6 +243,31 @@ func (s *Server) Calls() map[string]int {
 		out[k] = v
 	}
 	return out
+}
+
+// LastRequest is the form the named action last arrived with.
+func (s *Server) LastRequest(action string) url.Values {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requests[action]
+}
+
+// Actions is every action received, in order.
+func (s *Server) Actions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.order...)
+}
+
+// Reset forgets the call record without touching the clusters, so a test can
+// measure one operation rather than a whole run.
+func (s *Server) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = map[string]int{}
+	s.requests = map[string]url.Values{}
+	s.order = nil
+	s.copied = 0
 }
 
 // BytesCopied is what this fake copied, which Aurora would not have.
@@ -276,6 +310,14 @@ func (s *Server) Close() []error {
 // cloned. The rows put here are what every conformance behaviour reads back
 // out of a branch.
 func (s *Server) SeedSource(identifier, seedSQL string) error {
+	return s.SeedSourceWithEngine(identifier, "aurora-postgresql", "16.4", seedSQL)
+}
+
+// SeedSourceWithEngine is SeedSource for a cluster that is not Aurora
+// PostgreSQL, which is what a test pointing the provider at the wrong thing
+// needs. Nothing else can produce that cluster, and the refusal it triggers is
+// the one that stops a flat cost quietly becoming a linear one.
+func (s *Server) SeedSourceWithEngine(identifier, engine, version, seedSQL string) error {
 	s.mu.Lock()
 	database := s.nextName("db")
 	s.mu.Unlock()
@@ -284,7 +326,7 @@ func (s *Server) SeedSource(identifier, seedSQL string) error {
 		return fmt.Errorf("fakerds: creating the source database: %w", err)
 	}
 	if seedSQL != "" {
-		conn, err := s.connect(database, s.pgUser, "")
+		conn, err := s.connect(database)
 		if err != nil {
 			return err
 		}
@@ -298,7 +340,7 @@ func (s *Server) SeedSource(identifier, seedSQL string) error {
 	defer s.mu.Unlock()
 	s.clusters[identifier] = &cluster{
 		id: identifier, status: "available",
-		engine: "aurora-postgresql", engineVersion: "16.4",
+		engine: engine, engineVersion: version,
 		master: s.pgUser, password: s.adminPassword(),
 		database: database, storageGB: 1, created: time.Now().UTC(),
 		tags: map[string]string{},
@@ -350,15 +392,18 @@ func (s *Server) adminPassword() string {
 	return password
 }
 
-func (s *Server) connect(database, user, password string) (*sql.DB, error) {
+// connect opens one of this fake's databases as the administering user.
+//
+// The credential is the one in AdminURL, kept whole rather than rebuilt: an
+// earlier version took the username out and put it back with an empty
+// password, which authenticated as nobody and failed with a message about the
+// password rather than about the rebuild.
+func (s *Server) connect(database string) (*sql.DB, error) {
 	parsed, err := url.Parse(s.opts.AdminURL)
 	if err != nil {
 		return nil, err
 	}
 	parsed.Path = "/" + database
-	if user != "" {
-		parsed.User = url.UserPassword(user, password)
-	}
 	conn, err := sql.Open("pgx", parsed.String())
 	if err != nil {
 		return nil, err
@@ -394,6 +439,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.calls[action]++
+	s.requests[action] = body
+	s.order = append(s.order, action)
 	s.mu.Unlock()
 
 	switch action {
