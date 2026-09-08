@@ -1,5 +1,8 @@
 package ecs
 
+// Not MIT. This directory is covered by the Antifailure Enterprise License; see
+// ee/LICENSE.md.
+
 import (
 	"context"
 	"fmt"
@@ -228,9 +231,9 @@ type Inputs struct {
 // Everything in an Antifailure environment leaves through the sidecar, so the
 // application never resolves anything and the sidecar resolves only what it is
 // going to connect to. A host declared block, mock, capture or synth is
-// answered by the sidecar out of a fixture, an inbox or a model, and letting it
-// resolve publicly would hand the application a way around the very decision
-// the manifest made about it. A host declared allow or sandbox is one the
+// answered by the sidecar out of a fixture, an inbox or a model, and a name the
+// sidecar answers resolving publicly is a route around the decision the
+// manifest made about it. A host declared allow or sandbox is one the
 // sidecar forwards to for real, so it has to resolve or the environment does
 // not work.
 //

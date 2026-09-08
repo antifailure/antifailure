@@ -1,5 +1,8 @@
 package ecs_test
 
+// Not MIT. This directory is covered by the Antifailure Enterprise License; see
+// ee/LICENSE.md.
+
 import (
 	"os"
 	"path/filepath"
