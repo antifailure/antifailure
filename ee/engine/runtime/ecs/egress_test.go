@@ -591,6 +591,16 @@ func TestEveryPathIsDescribed(t *testing.T) {
 
 // TestTheReportCarriesItsCaveat is the one assertion that guards the honesty of
 // every number this package produces.
+//
+// The first three assertions are on the FIRST LINE rather than anywhere in the
+// output, and that is the load bearing part. A reader must not be able to see
+// "10 closed" without also seeing "1 open" and "2 unproven" in the same breath,
+// because the open and unproven counts are what stop the ten from reading as a
+// containment guarantee. A summary that quotes the numerator alone is how a
+// figure stops being true while every word in it stays accurate, and quoting
+// the headline is exactly what a person does. Asserting on the whole output
+// would pass a report that moved the caveat counts to the bottom, which is the
+// same report with the honesty removed.
 func TestTheReportCarriesItsCaveat(t *testing.T) {
 	out := ecs.Evaluate(referencePlan()).String()
 
@@ -600,7 +610,14 @@ func TestTheReportCarriesItsCaveat(t *testing.T) {
 	// -v this is the evidence, in continuous integration as well as here.
 	t.Log("\n" + out)
 
-	require.Contains(t, out, "10 of 13 egress paths")
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	require.Contains(t, first, "10 of 13 egress paths",
+		"the headline must carry the ratio")
+	require.Contains(t, first, "2 unproven",
+		"the headline must carry the unproven count beside the closed count, so that "+
+			"neither can be quoted without the other")
+	require.Contains(t, first, "1 open",
+		"the headline must carry the open count beside the closed count")
 	require.Contains(t, out, "10 are closed by the generated configuration and 0 by an attempt")
 	require.Contains(t, out, ecs.Caveat)
 	require.Contains(t, out, "not that AWS was seen enforcing it")
