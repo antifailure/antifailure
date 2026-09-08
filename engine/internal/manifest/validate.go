@@ -798,6 +798,18 @@ func (v *validator) egress(m *schema.Manifest) {
 			"The default egress mode is allow, so the environment can reach the whole internet.",
 			"This is how a preview environment emails a real customer. Set it to block and add rules for the hosts you need.")
 	}
+	// Emulate is the one mode a default cannot express, because the emulator
+	// is named on the rule and a default names no rule. The schema still
+	// lists it in both enums, which is deliberate: the two enums are required
+	// to agree so that a sentence claiming to name every mode can be checked
+	// against one list, and the check that a mode is usable where it was
+	// written belongs here rather than in a document that cannot say why.
+	if e.Default == schema.ModeEmulate {
+		v.add("egress.default",
+			"The default egress mode is emulate, and a default names no emulator.",
+			"Emulate answers from a named emulator, and the name lives on a rule. "+
+				"Set the default to block and write an emulate rule for each host an emulator answers for.")
+	}
 
 	seen := map[string]int{}
 	for i := range e.Rules {
@@ -843,6 +855,18 @@ func (v *validator) egress(m *schema.Manifest) {
 		if r.Credential != "" && r.Mode != schema.ModeSandbox {
 			v.add(base+".credential",
 				fmt.Sprintf("A credential is only used in sandbox mode, and this rule is %s.", r.Mode), "")
+		}
+		if r.Mode == schema.ModeEmulate && r.Emulator == "" {
+			v.add(base+".emulator",
+				fmt.Sprintf("The emulate rule for %q names no emulator.", r.Host),
+				"Name the registered emulator that answers this host, such as emulator: localstack. "+
+					"Emulate is routing to something a registration supplied, so a rule with nothing to route to "+
+					"could only fall through to block, and a rule that silently does nothing is how somebody "+
+					"comes to believe an environment was tested against a service it never reached.")
+		}
+		if r.Emulator != "" && r.Mode != schema.ModeEmulate {
+			v.add(base+".emulator",
+				fmt.Sprintf("An emulator is only used in emulate mode, and this rule is %s.", r.Mode), "")
 		}
 		if r.RateLimit != "" {
 			if _, _, err := ParseRate(r.RateLimit); err != nil {

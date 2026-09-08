@@ -275,6 +275,18 @@ func (p *proxy) serveInspected(w net.Conn, req *http.Request, host string) bool 
 		p.emit(rec)
 		return false
 	}
+
+	if d.Mode == schema.ModeEmulate {
+		// This is the path that carries the whole claim. The client believed
+		// it was talking to the provider over TLS, the certificate it checked
+		// was issued for the provider's own name by the authority this
+		// environment installed, and the answer came from a container beside
+		// it. Nothing in the application knows.
+		p.serveEmulated(w, req, host, d, &rec)
+		rec.Duration = time.Since(started).String()
+		p.emit(rec)
+		return false
+	}
 	if !d.Allowed() {
 		rec.Status = http.StatusForbidden
 		rec.Duration = time.Since(started).String()

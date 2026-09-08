@@ -19,10 +19,17 @@
 // The rules, restated because they are the reason the file is shaped this way:
 // specificity decides rather than order, and the default is block.
 
-export type Mode = 'block' | 'allow' | 'capture' | 'mock' | 'sandbox' | 'synth'
+export type Mode =
+  | 'block'
+  | 'allow'
+  | 'capture'
+  | 'mock'
+  | 'emulate'
+  | 'sandbox'
+  | 'synth'
 
 export const ALL_MODES: readonly Mode[] = [
-  'block', 'allow', 'capture', 'mock', 'sandbox', 'synth',
+  'block', 'allow', 'capture', 'mock', 'emulate', 'sandbox', 'synth',
 ]
 
 export interface EgressRule {
@@ -35,6 +42,11 @@ export interface EgressRule {
   fixtures?: string
   webhook_path?: string
   note?: string
+  /** The registered emulator that answers this host, for an emulate rule.
+   *  A name and never an address: the sidecar looks the address up in the
+   *  routes the engine wrote for it, so a rule cannot name a place to send
+   *  traffic to. */
+  emulator?: string
 }
 
 export interface Egress {
@@ -60,9 +72,12 @@ export interface Decision {
   credential: string
   fixtures: string
   webhookPath: string
+  /** The emulator that answers this request, for an emulate rule. */
+  emulator: string
   matched: boolean
   /** Whether the request reaches the real destination. Only allow and sandbox
-   *  do: capture and mock answer inside the environment, and synth invents. */
+   *  do: capture and mock answer inside the environment, synth invents, and
+   *  emulate is answered by a container on a network with no route out. */
   allowed: boolean
   reason: string
 }
@@ -406,7 +421,13 @@ function matchRule(c: Compiled, n: Normalized): Why | null {
 /** Whether a mode can be served without reading the request. Only block and
  *  allow can: one refuses everything to the host, the other forwards it. */
 function inspectMode(m: Mode): boolean {
-  return m === 'capture' || m === 'mock' || m === 'sandbox' || m === 'synth'
+  return (
+    m === 'capture' ||
+    m === 'mock' ||
+    m === 'emulate' ||
+    m === 'sandbox' ||
+    m === 'synth'
+  )
 }
 
 export class PolicyEngine {
@@ -444,6 +465,7 @@ export class PolicyEngine {
         credential: c.rule.credential ?? '',
         fixtures: c.rule.fixtures ?? '',
         webhookPath: c.rule.webhook_path ?? '',
+        emulator: c.rule.emulator ?? '',
         matched: true,
         allowed: c.rule.mode === 'allow' || c.rule.mode === 'sandbox',
         reason: ruleReason(c.rule, w),
@@ -452,7 +474,7 @@ export class PolicyEngine {
     return {
       mode: this.fallback,
       ruleHost: '',
-      rateLimit: '', credential: '', fixtures: '', webhookPath: '',
+      rateLimit: '', credential: '', fixtures: '', webhookPath: '', emulator: '',
       matched: false,
       allowed: this.fallback === 'allow' || this.fallback === 'sandbox',
       reason: defaultReason(this.fallback, n.host),
@@ -565,6 +587,9 @@ function ruleReason(rule: EgressRule, w: Why): string {
   if (rule.note) return `${base} ${rule.note}`
   if (rule.mode === 'synth') {
     return `${base} A workflow that touches a synthesized response reports unverified rather than passed.`
+  }
+  if (rule.mode === 'emulate' && rule.emulator) {
+    return `${base} The ${rule.emulator} emulator answers it inside the environment, so the application needs no endpoint override.`
   }
   return base
 }

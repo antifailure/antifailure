@@ -34,6 +34,7 @@ type PolicyRuleJSON struct {
 	Credential  string   `json:"credential,omitempty"`
 	Fixtures    string   `json:"fixtures,omitempty"`
 	WebhookPath string   `json:"webhook_path,omitempty"`
+	Emulator    string   `json:"emulator,omitempty"`
 	Note        string   `json:"note,omitempty"`
 }
 
@@ -64,6 +65,7 @@ type ExplainJSON struct {
 	Credential  string             `json:"credential,omitempty"`
 	Fixtures    string             `json:"fixtures,omitempty"`
 	WebhookPath string             `json:"webhook_path,omitempty"`
+	Emulator    string             `json:"emulator,omitempty"`
 	Matched     []ExplainMatchJSON `json:"matched"`
 }
 
@@ -130,7 +132,7 @@ in the decision, no matter where it sits in the file.`),
 						Host: r.Host, Mode: string(r.Mode), Paths: r.Paths,
 						Methods: r.Methods, RateLimit: r.RateLimit,
 						Credential: r.Credential, Fixtures: r.Fixtures,
-						WebhookPath: r.WebhookPath, Note: r.Note,
+						WebhookPath: r.WebhookPath, Emulator: r.Emulator, Note: r.Note,
 					})
 				}
 				return env.Out.JSON(doc)
@@ -229,6 +231,8 @@ func modeVerb(m schema.Mode) string {
 		return "captured into the inbox"
 	case schema.ModeMock:
 		return "answered from a mock"
+	case schema.ModeEmulate:
+		return "answered by an emulator inside the environment"
 	case schema.ModeSandbox:
 		return "sent to the provider's sandbox"
 	case schema.ModeSynth:
@@ -275,6 +279,7 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 					Request: req.String(), Mode: string(d.Mode), Allowed: d.Allowed(),
 					Rule: d.RuleHost, Reason: d.Reason(), RateLimit: d.RateLimit,
 					Credential: d.Credential, Fixtures: d.Fixtures, WebhookPath: d.WebhookPath,
+					Emulator: d.Emulator,
 					Matched: make([]ExplainMatchJSON, 0, len(chain)),
 				}
 				for i, m := range chain {
@@ -301,6 +306,11 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 			}
 			if d.Fixtures != "" {
 				detail = append(detail, [2]string{"Fixtures", d.Fixtures})
+			}
+			if d.Emulator != "" {
+				detail = append(detail, [2]string{"Emulator",
+					d.Emulator + " answers inside the environment, at the provider's own hostname, " +
+						"so the application reaches it with no endpoint override."})
 			}
 			if d.WebhookPath != "" {
 				detail = append(detail, [2]string{"Webhooks", "delivered to " + d.WebhookPath})

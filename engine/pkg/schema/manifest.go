@@ -374,6 +374,25 @@ const (
 	// ModeSandbox substitutes test credentials and forwards to the provider's
 	// sandbox.
 	ModeSandbox Mode = "sandbox"
+	// ModeEmulate answers from an emulator running inside the environment,
+	// which the application reaches with no endpoint override and no client
+	// construction that only exists in tests.
+	//
+	// It is the one mode that is pure routing. Antifailure writes no
+	// emulators: LocalStack, Azurite and the vendors' own emulators exist and
+	// carry years of fidelity work a hand written replacement would not have.
+	// What is missing from all of them is that using one normally means
+	// changing the application, and an application changed for the test is not
+	// the application that ships. So the sidecar terminates TLS with the
+	// certificate the environment already trusts, answers for the provider's
+	// own hostname, and forwards to the emulator's address on the
+	// environment's own network. The unmodified production code path runs.
+	//
+	// The emulator is named by the rule and supplied by a registration, which
+	// is what keeps this mode from being a second implementation of mock: mock
+	// answers from a fixture the sidecar holds, and emulate hands the request
+	// to a real service that holds state.
+	ModeEmulate Mode = "emulate"
 	// ModeSynth asks a model to invent a response, and marks every result that
 	// touched it as unverified rather than passed.
 	ModeSynth Mode = "synth"
@@ -381,7 +400,9 @@ const (
 
 // AllModes returns every mode, in the order they appear in the documentation.
 func AllModes() []Mode {
-	return []Mode{ModeBlock, ModeAllow, ModeCapture, ModeMock, ModeSandbox, ModeSynth}
+	return []Mode{
+		ModeBlock, ModeAllow, ModeCapture, ModeMock, ModeEmulate, ModeSandbox, ModeSynth,
+	}
 }
 
 // Egress says what the environment may reach.
@@ -402,6 +423,19 @@ type EgressRule struct {
 	Fixtures    string   `json:"fixtures,omitempty" yaml:"fixtures,omitempty"`
 	WebhookPath string   `json:"webhook_path,omitempty" yaml:"webhook_path,omitempty"`
 	Note        string   `json:"note,omitempty" yaml:"note,omitempty"`
+	// Emulator names the registered emulator that answers this host, for a
+	// rule in emulate mode. Required there and refused on every other mode.
+	//
+	// A name rather than an image, for the same reason database.provider is a
+	// name: the image, its digest, the port and what it is started with belong
+	// to whoever registered the emulator and are checked when they register
+	// it, and a manifest that could name an image could name any image.
+	//
+	// A name this build has not registered is refused at validation rather
+	// than falling through to block, because a rule that silently does
+	// nothing is how somebody comes to believe an environment was tested
+	// against S3.
+	Emulator string `json:"emulator,omitempty" yaml:"emulator,omitempty"`
 }
 
 // LoginStrategy is how a persona signs in.

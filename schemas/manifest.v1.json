@@ -631,7 +631,7 @@
     },
     "egressRule": {
       "title": "Egress rule",
-      "description": "What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, or sent to the provider's own sandbox.",
+      "description": "What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, answered by an emulator inside the environment, or sent to the provider's own sandbox.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -651,10 +651,11 @@
             "allow",
             "capture",
             "mock",
+            "emulate",
             "sandbox",
             "synth"
           ],
-          "description": "block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. synth asks a model to invent a response and marks every result that touched it as unverified."
+          "description": "block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. emulate answers from an emulator running inside the environment, which the application reaches with no endpoint override. synth asks a model to invent a response and marks every result that touched it as unverified."
         },
         "paths": {
           "type": "array",
@@ -709,6 +710,12 @@
           "type": "string",
           "maxLength": 512,
           "description": "Why this rule exists. Rendered in the network policy view, because a rule nobody can explain is a rule nobody dares remove."
+        },
+        "emulator": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63,
+          "description": "Name of the registered emulator that answers this host, for a rule in emulate mode. Required there and refused on every other mode. A name this build has not registered is refused rather than falling through to block."
         }
       }
     },
