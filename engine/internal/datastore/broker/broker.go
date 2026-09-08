@@ -85,6 +85,7 @@ func Command(engine, host string, port int, topics []schema.DatastoreTopic) (str
 	var b strings.Builder
 	b.WriteString(kafkaPrelude)
 	b.WriteString("B=" + host + ":" + strconv.Itoa(port) + "\n")
+	b.WriteString(kafkaWait)
 	for _, t := range topics {
 		if !validKafkaName.MatchString(t.Name) {
 			return "", fmt.Errorf(
@@ -149,6 +150,34 @@ find_tool() {
 }
 T=$(find_tool kafka-topics)
 G=$(find_tool kafka-consumer-groups)
+`
+
+// kafkaWait blocks until the broker answers, and fails saying so when it never
+// does.
+//
+// The runtime starts this job once every service container has been CREATED
+// and started, which is not the same as a broker having finished electing
+// itself a controller and opened its listener. A broker declares no health
+// path in anybody's compose file, so there is nothing for the readiness wait
+// to have waited on, and without this the very first create would race the
+// listener and fail an environment for a reason that has nothing to do with
+// the manifest.
+//
+// --list rather than a TCP probe, because the port accepting a connection is
+// not the same as the broker being able to answer a metadata request, and the
+// second is what every line after this needs.
+//
+// Two minutes, then a refusal that says what it waited for. A job that hung
+// forever would take the whole af up with it and report nothing.
+const kafkaWait = `i=0
+until "$T" --bootstrap-server "$B" --list >/dev/null 2>&1; do
+  i=$((i+1))
+  if [ "$i" -ge 60 ]; then
+    echo "antifailure: $B did not answer a metadata request within two minutes, so the declared topics could not be created" >&2
+    exit 1
+  fi
+  sleep 2
+done
 `
 
 // validKafkaName is what a broker accepts as a topic or a group.

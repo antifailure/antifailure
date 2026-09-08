@@ -1889,9 +1889,19 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 	for _, sv := range specs {
 		names[sv.Name] = true
 	}
+	// Before the spec rather than inside the runtime, because the manifest is
+	// here. A store this build cannot bring to its declared stance is refused
+	// NOW, before a single image runs: the alternative is an environment that
+	// comes up green with a broker holding no topic in it, which is the empty
+	// stance under a different word and is not what the manifest said.
+	stanceJobs, err := o.stanceJobs()
+	if err != nil {
+		return result, err
+	}
 	spec := provider.EnvSpec{
 		EnvID: o.envID, Branch: o.opts.Branch, Services: specs,
 		Datastores:           providedStores,
+		StanceJobs:           stanceJobs,
 		Egress:               o.opts.Manifest.Egress,
 		DatabaseURL:          insideURL,
 		MigrationDatabaseURL: insideMigrateURL,
