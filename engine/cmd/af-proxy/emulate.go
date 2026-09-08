@@ -218,3 +218,36 @@ func accessKeyID(authorization string) string {
 	}
 	return ""
 }
+
+// insideBodyLimit bounds a request this sidecar answers itself.
+//
+// It exists because answering a request means holding its body in memory, and
+// the sidecar is one process serving every service in the environment.
+const insideBodyLimit = 1 << 20
+
+// oversizedEmulateReason is the one line the decision log gets.
+const oversizedEmulateReason = "This request is larger than the sidecar will hold in memory " +
+	"on the plain proxy port, and an emulated request cannot be truncated: the emulator " +
+	"would store a short object and answer as though it had stored the whole one."
+
+// oversizedEmulateBody is what a developer reads, and it names the way out.
+//
+// The way out is real rather than a shrug. Every cloud SDK speaks HTTPS, and
+// the inspected path streams the body straight through with no limit at all,
+// so an application reaching this has been configured to talk to a cloud API
+// over plain HTTP, which is a thing worth telling somebody about on its own.
+func oversizedEmulateBody(host string, req *http.Request) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Antifailure refused this request rather than truncating it.\n\n")
+	fmt.Fprintf(&b, "  %s http://%s%s\n\n", req.Method, host, req.URL.Path)
+	fmt.Fprintf(&b, "The body is larger than %d bytes, and this request arrived over plain\n",
+		insideBodyLimit)
+	fmt.Fprintf(&b, "HTTP through the proxy port, where the sidecar has to hold the whole body\n")
+	fmt.Fprintf(&b, "in memory before it can answer. Cutting it short would leave the emulator\n")
+	fmt.Fprintf(&b, "holding a short object behind a success, which is the one outcome worse\n")
+	fmt.Fprintf(&b, "than a refusal because it is believed.\n\n")
+	fmt.Fprintf(&b, "Use https for %s. Every cloud SDK does by default, the sidecar terminates\n", host)
+	fmt.Fprintf(&b, "it with the certificate this environment already trusts, and that path\n")
+	fmt.Fprintf(&b, "streams the body through with no limit.\n")
+	return b.String()
+}

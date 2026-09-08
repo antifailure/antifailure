@@ -686,9 +686,32 @@ func (p *proxy) serveInsideTheEnvironment(
 	host := preq.Host
 	// The larger of the two limits the modes below apply, so neither is
 	// handed a body this function truncated first. Each still applies its own.
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	//
+	// One byte past it, because emulate cannot tolerate a truncation the way
+	// capture can. A captured message that lost its last kilobyte is a log
+	// entry somebody reads; an emulated PUT that lost its last kilobyte is an
+	// object the emulator now holds, wrong, with a 200 in front of it. So the
+	// extra byte is how this tells "exactly at the limit" from "over it", and
+	// over it is refused below rather than silently cut.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, insideBodyLimit+1))
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	if d.Mode == schema.ModeEmulate && len(body) > insideBodyLimit {
+		rec.Status = http.StatusRequestEntityTooLarge
+		rec.Allowed = false
+		rec.Reason = oversizedEmulateReason
+		rec.Duration = time.Since(started).String()
+		p.emit(*rec)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = io.WriteString(w, oversizedEmulateBody(host, r))
+		return
+	}
+	if len(body) > insideBodyLimit {
+		body = body[:insideBodyLimit]
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {

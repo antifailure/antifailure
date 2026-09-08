@@ -446,7 +446,13 @@ func (r *Runtime) Down(ctx context.Context, envID string) (provider.Teardown, er
 	}
 	for _, c := range containers {
 		switch c.Labels[dockerutil.LabelKind] {
-		case dockerutil.KindService, dockerutil.KindSidecar:
+		// The emulator is here because the environment created it and nothing
+		// else owns it. Leaving it out was a real leak found before it
+		// shipped: an emulator container survived Down, stayed attached to the
+		// network, and the network could then never be removed either, so
+		// "the state goes away with the environment" would have been false in
+		// exactly the way nobody checks.
+		case dockerutil.KindService, dockerutil.KindSidecar, dockerutil.KindEmulator:
 		default:
 			// The database branch carries this environment's label because it
 			// belongs to this environment, but the database provider owns it.
@@ -616,7 +622,8 @@ func (r *Runtime) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	}
 	for _, c := range containers {
 		kind := c.Labels[dockerutil.LabelKind]
-		if kind != dockerutil.KindService && kind != dockerutil.KindSidecar {
+		if kind != dockerutil.KindService && kind != dockerutil.KindSidecar &&
+			kind != dockerutil.KindEmulator {
 			continue
 		}
 		out = append(out, provider.Resource{

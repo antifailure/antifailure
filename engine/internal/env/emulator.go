@@ -61,7 +61,7 @@ func emulatorsFor(
 		}
 		c := e.Container()
 		out = append(out, provider.EmulatorSpec{
-			Name: e.Name(), Image: c.Image, Port: c.Port, Env: c.Env,
+			Name: e.Name(), Image: c.Image, Port: c.Port, Env: c.Env, Command: c.Command,
 		})
 	}
 	return out, nil

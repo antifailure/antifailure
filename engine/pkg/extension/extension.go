@@ -503,6 +503,14 @@ type EmulatorContainer struct {
 	Port int
 	// Env is what the container is started with.
 	Env map[string]string
+	// Command overrides the image's own command. Empty uses the image's.
+	//
+	// Here because more than one published emulator needs an argument to be
+	// usable inside a container network at all: Azurite binds to loopback
+	// unless it is told otherwise, and an emulator listening on 127.0.0.1
+	// answers nothing from the sidecar while looking perfectly healthy in its
+	// own logs.
+	Command []string
 }
 
 // Emulator is a third party service answered inside the environment.

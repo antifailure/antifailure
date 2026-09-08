@@ -58,10 +58,10 @@ type sidecarConfig struct {
 	// rule names an emulator and the sidecar looks the address up here, so a
 	// manifest can never name a place to send traffic to: only something a
 	// registration already declared and the registry already checked.
-	Emulators   map[string]emulatorRoute `json:"emulators,omitempty"`
-	Resolver    string                   `json:"resolver,omitempty"`
-	CACert      string            `json:"ca_cert,omitempty"`
-	CAKey       string            `json:"ca_key,omitempty"`
+	Emulators map[string]emulatorRoute `json:"emulators,omitempty"`
+	Resolver  string                   `json:"resolver,omitempty"`
+	CACert    string                   `json:"ca_cert,omitempty"`
+	CAKey     string                   `json:"ca_key,omitempty"`
 }
 
 // emulatorRoute mirrors the sidecar's own type of the same name, declared here
