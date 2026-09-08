@@ -458,6 +458,15 @@ GCS emulator and Google does not publish it, because Google ships no GCS emulato
 at all. Somebody deciding whether to trust an environment's answers about object
 storage should read that rather than infer it from a hostname.
 
+**An image that pulls is not an image that starts, and no emulator may require a
+cloud account.** `localstack/localstack` exits 55 on licence activation before it
+binds a port, which is a container that pulled, started, and answers nothing.
+Google's six start with no account, no token and no credential. The suite catches
+this without a rule of its own: a container that never binds fails
+`Covered_IsAnswered`, because the probe goes to your own declared hostname and
+there is nothing on the other end. Check it before you pin a digest, because the
+failure arrives as a routing problem and is not one.
+
 ```go
 func TestMyEmulator(t *testing.T) {
     conformance.RunEmulator(t, factory, conformance.EmulatorOptions{})

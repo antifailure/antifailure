@@ -506,10 +506,19 @@ type EmulatorContainer struct {
 	// Command overrides the image's own command. Empty uses the image's.
 	//
 	// Not a convenience. For Google there is no other way to say which
-	// emulator you mean: the Cloud CLI image ships Pub/Sub, Firestore,
-	// Datastore and Bigtable behind ONE entrypoint, which is the CLI, so
-	// Image, Port and Env alone describe four identical containers that run
-	// nothing. And Azurite binds to loopback unless it is told otherwise, and
+	// emulator you mean, and the image configs say so rather than a docs page:
+	// gcr.io/google.com/cloudsdktool/google-cloud-cli has NO entrypoint and
+	// the command bash, and it ships Pub/Sub, Firestore, Datastore and
+	// Bigtable, so Image, Port and Env alone describe four identical
+	// containers that run a shell and exit.
+	//
+	// The two Google images that need NO command say the same thing from the
+	// other side, and leaving one out is as wrong as leaving one in:
+	// fsouza/fake-gcs-server carries the entrypoint /bin/fake-gcs-server
+	// -data /data and gcr.io/cloud-spanner-emulator/emulator carries the
+	// command ./gateway_main --hostname 0.0.0.0, so a command on either
+	// replaces a working entrypoint. All three read out of the registry by
+	// L3.3 rather than taken from documentation. And Azurite binds to loopback unless it is told otherwise, and
 	// an emulator listening on 127.0.0.1 answers nothing from the sidecar
 	// while looking perfectly healthy in its own logs.
 	//
