@@ -743,7 +743,8 @@ const defaultTuning = `{
         "services[].env[].from": "OTHER_VAR",
         "load.source_config": {
           "path": "telemetry/traces.json"
-        }
+        },
+        "datastores[].from": "primary"
       },
       "prune": [
         "database.source_url_env",
@@ -992,7 +993,7 @@ func attributable(target string, r refusal) bool {
 	if len(r.paths) == 0 {
 		return true
 	}
-	target = strings.TrimSuffix(target, "[]")
+	target = indexed.ReplaceAllString(target, "")
 	for _, p := range r.paths {
 		p = indexed.ReplaceAllString(p, "")
 		if p == target || strings.HasPrefix(p, target+".") || strings.HasPrefix(p, target+"[") ||
@@ -1003,7 +1004,11 @@ func attributable(target string, r refusal) bool {
 	return false
 }
 
-var indexed = regexp.MustCompile(`\[[0-9]+\]`)
+// indexed erases array subscripts, so that the constraint path
+// services[].env[].name and the engine's services[0].env[2].name are the
+// same place. Erasing it on only one side is a bug this had: it scored 119
+// correct refusals as REFUSED-ELSEWHERE.
+var indexed = regexp.MustCompile(`\[[0-9]*\]`)
 
 // TestSchemaConstraintReport prints the measurement. It asserts nothing; the
 // gate is TestEverySchemaConstraintIsEnforced.
