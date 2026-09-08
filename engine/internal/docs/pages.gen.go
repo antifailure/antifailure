@@ -2476,13 +2476,64 @@ dialect settles.
 
 ### The check that says the two stores agree
 
-The guarantee is checked rather than argued. The check takes two stores' plans,
-finds every identifier that appears in both, masks probe values through each
-side, and reports the share that come out identical:
+The guarantee is checked rather than argued, and you run the check on your own
+stores rather than reading about ours. Give each datastore the name of the
+variable holding a read only connection string:
+
+` + "`" + "`" + "`" + `yaml
+database:
+  source_url_env: PRODUCTION_DATABASE_URL
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: CLICKHOUSE_URL
+` + "`" + "`" + "`" + `
+
+Then:
+
+` + "`" + "`" + "`" + `
+af mask crossstore
+` + "`" + "`" + "`" + `
+
+It takes both stores' plans, finds every identifier that appears in both, masks
+probe values through each side, and reports the share that come out identical:
 
 ` + "`" + "`" + "`" + `
 join keys verified identical across primary and events: 4 of 4 (100.0%)
 ` + "`" + "`" + "`" + `
+
+**It reads catalogs and no rows.** The probe values are its own, so what it
+needs from a store is the schema, which is why it is safe to point at
+production. The report says how many tables and columns it read and that it read
+no rows, as a field rather than as a promise on this page.
+
+**That is enforced by a test rather than by intent.** A live test runs the
+check against a real ClickHouse, then reads the server's OWN ` + "`" + `system.query_log` + "`" + `
+back and fails if any statement the check sent selected from a data table. A
+sentence saying no rows are read is something anybody can write; a query log
+the server keeps is something that can contradict it, and if it ever does, the
+` + "`" + `rows_read` + "`" + ` of zero in the report is a lie and the build says so.
+
+A table the reader deliberately left out is named with the reason, because a
+share of the join keys it could see is a true answer to a smaller question when
+half a schema was dropped in silence. A ClickHouse view has no rows of its own
+and a ` + "`" + `Distributed` + "`" + ` engine is a pointer at another server, so neither is a store
+whose masking can be compared. Both are left out of the comparison and named in
+the report, rather than dropped in silence.
+
+Every store it could not read is named with the reason, and a store that names
+no ` + "`" + `source_url_env` + "`" + ` is named as never read at all. A run that reached one store
+says it proved nothing rather than reporting a hundred percent of one, and that
+answer carries a different exit code from a real disagreement: one is a
+statement about your data and the other is a statement about what could be
+reached.
+
+The same question is the ` + "`" + `cross_store` + "`" + ` question of the ` + "`" + `inspect_data_masking` + "`" + `
+tool, where it answers PASS, FAIL or INCONCLUSIVE. Where two stores are present
+it is also a line in the [component inventory](/docs/concepts/inventory), and
+until something compares them that line reads unmeasured rather than passed.
 
 Anything below 100 percent is a bug, and there are three ways to get there:
 
@@ -2513,11 +2564,14 @@ different values for one field. A rule settles it:
 ### What is not built yet
 
 The dialect boundary is the classification, the statements and the verification
-scan. Nothing yet refreshes a golden for a second store, branches one, or opens
-a connection to one: there is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries
-other than ` + "`" + `primary` + "`" + ` are reported with their declared stance rather than
-measured. Said here rather than left to be discovered, because a boundary that
-looks complete from outside is how somebody ends up trusting one.
+scan. Nothing yet refreshes a golden for a second store or branches one: there
+is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries other than ` + "`" + `primary` + "`" + ` are
+reported with their declared stance rather than measured. ` + "`" + `af mask crossstore` + "`" + `
+opens a connection to a second store to READ ITS CATALOG and nothing else; a
+ClickHouse is read over its HTTP interface, and a URL naming the native port is
+refused with the HTTP one in the message rather than attempted. Said here rather
+than left to be discovered, because a boundary that looks complete from outside
+is how somebody ends up trusting one.
 
 ## Writing the rules from the schema
 
@@ -3996,6 +4050,121 @@ against reality. A silent skip is how a provider ends up claiming conformance
 it does not have, so the suite is built to make skipping visible rather than
 convenient.
 
+### Copy on write, which is measured rather than believed
+
+` + "`" + `CopyOnWrite` + "`" + ` says a branch shares storage with its golden, so branch time does
+not grow with the database. It is the claim a customer is really buying, so the
+suite does not take your word for it.
+
+` + "`" + `CopyOnWrite_BranchTimeMatchesTheDeclaration` + "`" + ` builds two goldens, one of them
+half a gibibyte larger than the other, branches each of them several times
+alternately, and takes the fastest of each. Then it asks one question in two
+directions:
+
+- Declared ` + "`" + `true` + "`" + `, and the larger golden branched measurably slower: **fail**.
+  You are copying, and whoever waits for an environment is paying for it.
+- Declared ` + "`" + `false` + "`" + `, and the larger golden branched no slower: **fail**. You have
+  a flat branch time and are not saying so, which puts the wrong row in the
+  comparison table a buyer chooses from.
+
+Those two are complementary, so one of the two possible declarations is refused
+on every run. There is no reading of the stopwatch that lets both pass, which is
+the property a check needs before a green one means anything.
+
+### The third answer, and why the default is unproven
+
+The stopwatch is only as good as the storage under the run, and a fake cloud
+control plane over one local Postgres can only hand back a branch carrying the
+golden's data with ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + `, which copies files. On that
+harness a truthful ` + "`" + `CopyOnWrite: true` + "`" + ` fails, and a ` + "`" + `CopyOnWrite: false` + "`" + ` passes
+comfortably. **Both answers are about the harness and neither is about your
+product**, so the behaviour has a third one.
+
+` + "`" + "`" + "`" + `
+NOT PROVED BY THIS RUN. This is not a pass.
+  UNPROVEN  aurora  CopyOnWrite_BranchTimeMatchesTheDeclaration
+` + "`" + "`" + "`" + `
+
+**` + "`" + `Options.RealService` + "`" + ` decides it, and leaving it empty is what produces the
+unproven verdict.** It is an assertion of reality, not an admission of
+simulation:
+
+` + "`" + "`" + "`" + `go
+conformance.RunDatabase(t, factory, conformance.Options{
+    RealService: "the real Neon API, against a real project",
+})
+` + "`" + "`" + "`" + `
+
+A field you set to excuse a fake is a field a fake can simply never set, and the
+next author writes a control plane, never learns the field exists, and collects a
+measured verdict from a run that measured nothing. Forgetting this one produces
+the safe answer instead. Set it only when the run really drives the service whose
+capability is being decided: a fake control plane over a real local Postgres does
+**not** qualify, however real the Postgres is, because what the stopwatch timed
+was Postgres.
+
+**It is symmetric.** A run that asserts nothing is unproven whether you declare
+` + "`" + `true` + "`" + ` or ` + "`" + `false` + "`" + `. The false side is the one worth spelling out, because it is the one that
+would otherwise ship: a snapshot restore provider declaring ` + "`" + `false` + "`" + ` against a
+copying fake passes comfortably, publishes a certified claim that its service is
+not copy on write, and nobody rereads a green check.
+
+**The measurement is not taken.** The verdict is decided before the behaviour
+runs, so two goldens and six branches could not change it, and publishing what a
+simulator timed invites somebody to quote it as though it were about the product.
+
+**It is not a skip, and it never uses the word.** A skip says this provider makes
+no such claim. An unproven says the provider does make the claim and this run
+could not reach it. The verdict is reprinted at the end of the run, the ledger in
+` + "`" + `engine/conformance/ledger.go` + "`" + ` records it per provider, and
+` + "`" + `conformance.CopyOnWriteClaim` + "`" + ` renders it, so the cell in the published
+comparison table reads ` + "`" + `unproven` + "`" + ` rather than blank. A blank cell is taken for a
+pass by every reader in a hurry.
+
+The suite makes a golden large by writing ballast into it from inside the ` + "`" + `Mask` + "`" + `
+callback, so a provider needs no extra method: hand ` + "`" + `Mask` + "`" + ` a connection string
+that works, which every other behaviour needs anyway, and the sizing takes care
+of itself. It also weighs the last branch it makes, because a branch that is
+fast because it is EMPTY would otherwise read as one that is fast because it
+shares storage.
+
+### What the check can and cannot see, printed every time
+
+The allowance the growth is measured against is not a constant. It is twice the
+spread the small golden's own branch times showed during this run, floored at a
+quarter of a second: the machine saying how far its readings travel while the
+data is held still. On a quiet machine that collapses and the check sharpens;
+under load it widens rather than accusing an honest provider of copying.
+
+So the power of the check varies, and every run prints it:
+
+` + "`" + "`" + "`" + `
+  this run could refuse    a copy slower than 0.49 seconds per GiB, and nothing faster
+` + "`" + "`" + "`" + `
+
+Read that line before believing a pass. It is the bound on what the run was
+able to see, and a provider whose branch times are erratic gets a weaker bound
+than one whose are steady. Raise ` + "`" + `Options.CopyOnWriteLargeBytes` + "`" + ` if you want a
+stronger statement than the one your run printed.
+
+` + "`" + `CopyOnWriteSmallBytes` + "`" + `, ` + "`" + `CopyOnWriteLargeBytes` + "`" + ` and ` + "`" + `CopyOnWriteSamples` + "`" + ` tune
+the cost for a provider that bills by the gibibyte, and
+` + "`" + `AF_CONFORMANCE_COW_LARGE_BYTES` + "`" + ` and its two siblings do the same from the
+environment for a machine that cannot afford the default. Both have floors, and
+both make the run say it was tuned. Against a real service there is deliberately
+no way to skip the behaviour: a run that shrank says how far it shrank and what
+it could still refuse, and that can be read, where a run that skipped cannot.
+The one case that is neither a pass nor a shrunken run is the third verdict
+above, and it is not a skip either: it is a verdict, it prints, and it makes the
+claim unpublishable.
+
+` + "`" + `ExpectedBranchLatency` + "`" + ` is checked the same way.
+` + "`" + `Branch_IsWithinTheDeclaredLatency` + "`" + ` times the fastest of three branches of the
+conformance dataset against the number you declared. Declare what your service
+does, not what you hope it does: the number is what the engine plans an
+environment around, and a provider that has got slower has to fail here rather
+than degrade quietly.
+
 ## Proving the suite can fail
 
 A green conformance run is worth exactly as much as your confidence that the
@@ -4360,6 +4529,24 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
+## Features that cannot be issued
+
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are in the set above, and a request naming
+either of them is refused. Nothing in this product enforces them, so a license
+carrying one would verify, report itself active, print the feature in
+` + "`" + `af license status` + "`" + `, and change nothing about what the software does.
+
+That is a worse failure than an unknown name, because everything about it reads
+as a supported feature: it is in the documentation, in the price list, and in
+the generator's own set. The only two people positioned to discover it are the
+customer who paid and the person who sold it.
+
+Both refusals are in the product rather than in a checklist. The generator will
+not sign one, and the verifier carries the name and never permits it, exactly as
+it treats a feature from a release the binary predates. When either capability
+is built, one entry is removed from ` + "`" + `notShipped` + "`" + ` in
+` + "`" + `ee/engine/license/license.go` + "`" + ` and both refusals lift together.
+
 ## Step three: sign it
 
 The private key arrives in the environment from the vault, for the length of
@@ -4592,6 +4779,32 @@ license leaves you with it rather than with nothing.
 
 Each is named in the license, so a license permits exactly what was bought.
 
+### Two of those cannot be sold
+
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are names in the catalogue and nothing
+else. There is no implementation of either, so there is nothing a license could
+switch on, and both are refused twice: ` + "`" + `tools/licensegen` + "`" + ` will not sign a
+request naming one, and the verifier carries the name through and never permits
+it.
+
+That is deliberate rather than an oversight waiting to be tidied. The
+alternative, a license check placed in front of a capability that does not
+exist, is a declared enforcement site that can never run, which reads as a
+working feature from every direction and is harder to find than the gap it
+covers. A feature nobody can buy and nobody can be granted cannot be mistaken
+for one that ships.
+
+` + "`" + `rbac` + "`" + ` is a third case and a different one. The custom roles library is complete
+and tested, and nothing stores a role model, so an organization has no way to
+have one. It is reported and not enforced, and it is written down here rather
+than gated for the same reason: a check on a path nothing reaches is worse than
+no check.
+
+Both lists are held to the code by a test rather than by a habit. ` + "`" + `notShipped` + "`" + `
+in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place either statement lives,
+and this page, the generator and the enterprise feature registry are all checked
+against it in both directions.
+
 ## Contributing
 
 Contributions are under the DCO, not a CLA. You keep your copyright. See
@@ -4646,10 +4859,18 @@ allowed_regions:
   - westeurope
 ` + "`" + "`" + "`" + `
 
-` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part. A
-pattern that matches no column in the database counts as unsatisfied, because a
-policy that quietly passes when the thing it protects is absent stops protecting
-the moment somebody renames a table.
+` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part.
+Write the schema too, as ` + "`" + `public.users.email` + "`" + `, when you mean one schema in
+particular; a pattern without one names that table in whichever schema holds
+it.
+
+The rule is checked against the database's own catalogue, so it means every
+column it names. ` + "`" + `"*.email"` + "`" + ` is satisfied when every email column in the
+database is masked, and a plan that masks ` + "`" + `users.email` + "`" + ` and leaves
+` + "`" + `contacts.email` + "`" + ` readable is refused by name. A pattern that matches no column
+at all counts as unsatisfied too, because a policy that quietly passes when the
+thing it protects is absent stops protecting the moment somebody renames a
+table.
 
 ` + "`" + `denied_hosts` + "`" + ` refuses a host named in any mode other than ` + "`" + `block` + "`" + `. A repository
 may still write a ` + "`" + `block` + "`" + ` rule for one, so that it can document what it
@@ -4678,13 +4899,33 @@ ask would turn the rule into decoration.
 
 ## Where it runs
 
-The check happens before anything is created, not after. A policy that refused
-an environment halfway through would leave resources behind and a decision
-nobody can act on.
+Most of the policy is checked before anything is created, not after. A policy
+that refused an environment halfway through would leave resources behind and a
+decision nobody can act on.
 
-The extension point it uses is in the community edition, in
-` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the socket is MIT so that anybody
-can write a hook, and the enterprise edition supplies one implementation of it.
+` + "`" + `required_masked_columns` + "`" + ` is the exception, and the reason is worth knowing
+before you write one. At creation time the engine has read a manifest, and a
+manifest enumerates services rather than columns. Expanding a column pattern
+there would mean expanding it against the tables a manifest happens to mention,
+which is not the set of tables that exist, and a required pattern that matched
+nothing in that smaller set would refuse a repository whose schema satisfies it
+perfectly.
+
+So the masking rule is checked during a golden refresh instead, after the
+engine has read the database's catalogue and worked out which columns its rules
+will rewrite, and before the first row is rewritten. A refusal there means the
+golden is never published, and an unverified golden cannot be branched, so no
+environment can hold data the policy refused. It is later than the other rules
+and it is still before the data exists.
+
+One consequence to plan for: a golden published before you tightened the policy
+is not re-examined. Refresh the golden after a policy change, with
+` + "`" + `af golden refresh` + "`" + `, and the new rule decides whether it may be published.
+
+The extension points it uses are in the community edition, in
+` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the sockets are MIT so that anybody
+can write a hook, and the enterprise edition supplies one implementation of
+them.
 
 ## Hooks can only refuse
 
@@ -4701,12 +4942,23 @@ that lives in somebody's plugin.
 ` + "`" + "`" + "`" + `go
 type PolicyHook interface {
     // Returns an error to refuse. Nil permits nothing; it declines to object.
-    Check(ctx context.Context, req Request) error
+    Check(ctx context.Context, req EnvironmentRequest) error
+}
+
+type MaskingHook interface {
+    // Asked during a golden refresh, with the columns a plan will rewrite and
+    // the whole catalogue it read them from.
+    CheckMasking(ctx context.Context, req MaskingRequest) error
 }
 ` + "`" + "`" + "`" + `
 
+A hook may implement either or both. ` + "`" + `MaskingRequest` + "`" + ` carries two column lists
+and a hook needs both: masked columns alone cannot tell a database that has no
+email column from one that has three and masks none of them, and those deserve
+opposite answers.
+
 Register it with the engine's extension registry. The community build registers
-nothing, so the check iterates an empty slice and returns nil.
+nothing, so each check iterates an empty slice and returns nil.
 
 Related: [licensing](/docs/enterprise/licensing), [egress](/docs/concepts/egress).
 `,
@@ -4820,6 +5072,116 @@ label would be charging for the community edition.
 
 What the enterprise edition adds is not a third runtime. It is the choice between
 several at once: the requirements, the tags and the refusal described above.
+
+## Why there is no ECS runtime
+
+` + "`" + `runtime.provider: ecs` + "`" + ` is registered in the enterprise binary and it refuses,
+every time, with a report rather than an error. The reason is worth reading
+before assuming it is a gap somebody will close next release.
+
+A runtime is allowed to exist here only if it can prove an environment has no
+way out, and the Kubernetes runtime proves it the only way a proof works: it
+creates the ` + "`" + `NetworkPolicy` + "`" + ` objects itself, then runs one pod under exactly the
+rules a service runs under and has it try to escape before any application image
+starts. If any attempt gets out the environment does not start and you get
+**AF-RUN-043**. That is not caution. Several container network plugins accept a
+` + "`" + `NetworkPolicy` + "`" + ` object and enforce nothing, every status reads green, and the
+only thing that can tell the two apart is a packet.
+
+ECS on Fargate cannot be given the same treatment, for two reasons that are
+properties of the platform rather than of this implementation.
+
+**The image pull runs inside the boundary.** A kubelet pulls on the node, so a
+pod can be denied every egress rule and still start. On Fargate platform version
+1.4.0 the ECR login, the image pull and the log push all flow over the task's own
+network interface, under the task's own security group, and AWS states that a
+Fargate task must have a route to the registry to pull an image. So a security
+group that denies egress does not produce a contained environment. It produces a
+task that never starts, and the endpoints that let it start are themselves
+reachable addresses.
+
+**The enforcement cannot be observed without an account.** Whether a cluster
+enforces a ` + "`" + `NetworkPolicy` + "`" + ` is answerable on a laptop in ninety seconds. Whether
+AWS enforces a route table is a fact about an account, and no test in this
+repository is permitted to need one.
+
+So what ships is the enumeration and the predicate over it, and the refusal
+carries both. Thirteen distinct egress paths out of a Fargate task, of which
+**ten are closed by the configuration this runtime would generate, one is open,
+and two are not decided by either the configuration or AWS's own
+documentation**. Every closed verdict carries the grade of evidence behind it,
+and the report separates the closures computed from a JSON document from any
+recorded by an attempt made inside a running task, because those are different
+claims.
+
+The one that is open is the task metadata endpoint, which is on by default for
+every Fargate task on platform version 1.4.0 or later with no documented way to
+turn it off.
+
+The two that are unproven are named rather than rounded up, because an unproven
+verdict is not a weaker closed one. The instance metadata service at
+` + "`" + `169.254.169.254` + "`" + ` is the sharper of them: the Fargate launch type removes the
+documented credential source, because EC2 instance profiles are not available to
+containers in Fargate tasks, but AWS does not state that the address stops
+answering, and those are different claims. The local Amazon Time Sync Service at
+` + "`" + `169.254.169.123` + "`" + ` is the other. Settling either needs one request from one
+running task, which is a request from a task in somebody's AWS account, so
+nothing here moves them on an absence of evidence.
+
+Two paths that a reader of an earlier draft of this page would have found in the
+open column are closed, and how they closed is the reusable part. The interface
+endpoints the image pull needs and the S3 gateway endpoint the layers come from
+cannot be disconnected without giving up the ability to start an environment at
+all. But reaching ECR is not the same question as reaching **any** repository,
+any log group and any bucket in the region, and only the second is an
+exfiltration path. A VPC endpoint policy naming this environment's own
+repository, log group and bucket closes the second while leaving the first, so
+the weaker half of the question was the one being answered.
+
+One finding is worth carrying away even if you never run on ECS. **On AWS the
+security group is irrelevant to a DNS query.** The VPC user guide states that
+traffic to and from the Amazon DNS server cannot be filtered with network ACLs
+or security groups, and that resolver answers recursive queries for public names
+from anywhere in the VPC. A DNS question is chosen by whoever asks it, so that
+is a data channel out that no security group audit will ever show you. Closing
+it takes a Route 53 Resolver DNS Firewall rule group whose last rule blocks every
+domain and which does not fail open. A containment argument carried over from
+Kubernetes gets this one wrong, because there the same attempt is closed by the
+policy that closes everything else.
+
+**A DNS Firewall rule group is read by priority from the lowest number up, and
+that is where the second finding is.** A group holding ` + "`" + `ALLOW` + "`" + ` on every domain
+at priority 5 and ` + "`" + `BLOCK` + "`" + ` on every domain at priority 1000 blocks nothing at all,
+because ` + "`" + `ALLOW` + "`" + ` permits the request to go through and the lower priority is
+consulted first. It reads as configured in a console screenshot. The check
+refuses that shape, along with a terminal rule moved off the end by priority, two
+rules sharing the last priority, which AWS refuses to create anyway, and a domain
+with a star anywhere but the front, which a DNS Firewall domain list cannot hold.
+
+The rule group's allow list is generated from the manifest's own egress
+catalogue rather than from a list of AWS names kept beside it. A host the
+manifest declares ` + "`" + `allow` + "`" + ` or ` + "`" + `sandbox` + "`" + ` is one the sidecar forwards to for real
+and therefore has to resolve; a host declared ` + "`" + `block` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `capture` + "`" + ` or
+` + "`" + `synth` + "`" + ` is answered locally and must not resolve, because a name the sidecar
+answers resolving publicly is a route around the decision the manifest made
+about it. A declared host that cannot be expressed as a DNS Firewall domain is
+named in the refusal rather than dropped or widened.
+
+**The honest summary is that Antifailure runs on EKS and not on raw ECS.** Use
+` + "`" + `runtime.provider: kubernetes` + "`" + ` against an EKS cluster, where the probe runs.
+
+The report is generated for a real network rather than for a made up one, so
+that the security group rules and route table entries it judges are the ones
+your account would get. Six variables describe that network, and they are
+variables rather than manifest fields because a VPC identifier is a property of
+one company's account and does not belong in a file that gets forked:
+` + "`" + `AF_ECS_REGION` + "`" + `, ` + "`" + `AF_ECS_CLUSTER` + "`" + `, ` + "`" + `AF_ECS_VPC_ID` + "`" + `, ` + "`" + `AF_ECS_VPC_CIDR` + "`" + `,
+` + "`" + `AF_ECS_SUBNET_IDS` + "`" + ` and ` + "`" + `AF_ECS_SUBNET_CIDRS` + "`" + `, the last two comma separated and
+in matching order. Setting them changes the report and does not change the
+answer, and the refusal you get without them says so before you go and build a
+VPC to find out. A seventh, ` + "`" + `AF_ECS_PROBE_IMAGE` + "`" + `, is optional and names the
+image the containment probe container would run; with it unset the plan carries
+no probe container and the instance metadata path says so.
 
 Related: [scheduling](/docs/concepts/scheduling), [manifest reference](/docs/reference/manifest#placement), [licensing](/docs/enterprise/licensing).
 `,
@@ -6257,6 +6619,192 @@ piece, and the page opens by saying what still works without it, which is all
 of it. Read that one when you want environments that outlive a workflow run, a
 shared address for them, or a record across repositories.
 `,
+	"guides/azure.md": `---
+title: Azure
+description: The Azure services an environment answers for, the ones it refuses, and what each costs.
+sidebar:
+  order: 23
+---
+
+An application in an environment reaches Azure Blob Storage, Queue Storage and
+Table Storage without knowing it. It builds
+` + "`" + `https://youraccount.blob.core.windows.net` + "`" + ` the way it does in production, that
+name resolves to the environment's sidecar, the sidecar terminates TLS with a
+certificate authority the environment already trusts, and Azurite answers.
+
+There is no endpoint override, no ` + "`" + `BlobEndpoint=` + "`" + ` in a connection string that
+only exists in tests, and no client construction that differs from the one that
+ships. That is the whole point of this page. The emulator is a commodity;
+reaching it without changing the application is not.
+
+## The surface
+
+This table is **the** surface. A host outside it is not routed to an emulator:
+it falls through to the environment's egress policy, whose default is block, so
+it is refused rather than answered. A silent wrong answer from an emulator is
+worse than a refusal, because it will be believed.
+
+| Service | Host | Emulator | Answered by |
+| --- | --- | --- | --- |
+| Azure Blob Storage | ` + "`" + `*.blob.core.windows.net` + "`" + ` | ` + "`" + `azure-blob` + "`" + ` | Azurite |
+| Azure Queue Storage | ` + "`" + `*.queue.core.windows.net` + "`" + ` | ` + "`" + `azure-queue` + "`" + ` | Azurite |
+| Azure Table Storage | ` + "`" + `*.table.core.windows.net` + "`" + ` | ` + "`" + `azure-table` + "`" + ` | Azurite |
+
+Azurite is published by Microsoft and is MIT licensed. It is the only one of
+the three Microsoft Azure emulators that is open source, and that difference
+decides more of this page than weight does.
+
+## Why three emulators for one image
+
+Azurite is a single container that listens on **three ports**: blob on 10000,
+queue on 10001 and table on 10002. An emulator declaration carries one port, so
+blob, queue and table are registered separately against the same image.
+
+The shape turned out better than the constraint that produced it. An
+environment starts the emulators its egress rules name, so a manifest that
+touches blob only starts one container and pays for one, and a refusal is
+written per service: a request to Azure Files is refused with Files named,
+rather than with "Azure" named.
+
+## The account name travels in the host
+
+Azure puts the storage account in the first label of the hostname, so
+` + "`" + `youraccount.blob.core.windows.net` + "`" + ` carries the account the way a virtual
+hosted S3 URL carries the bucket. The sidecar rewrites the destination and
+**preserves the Host header**, and Azurite reads the account out of that header
+when the host is a name rather than an address.
+
+So nothing needs to tell Azurite which account it is serving through a flag.
+` + "`" + `AZURITE_ACCOUNTS` + "`" + ` is deliberately not set, because the account an environment
+needs is whichever one its substituted credential names, and that is a property
+of the manifest rather than of this build.
+
+The credential is substituted, not passed through. A request signed with a key
+the environment recognises as live is refused before it leaves, and the
+emulator has no route out in any case: it attaches to the environment's inner
+network, which is created ` + "`" + `internal` + "`" + `, so having nowhere to send a credential is
+a property of the network rather than a promise.
+
+## What it costs per environment
+
+Measured on 2026-09-08 on an Apple Silicon machine, 8 core, with Docker
+Desktop holding 7.654 GiB, **at load averages between 24 and 28**, because the
+machine was running other work at the same time. The load is published with the
+numbers rather than left out: the memory figures are stable under it and the
+start times are not, and saying which is which is worth more than a best case.
+
+Image sizes are compressed download bytes for the ` + "`" + `linux/arm64` + "`" + ` member, read
+from the registry.
+
+| Container | Image | Resident | Started |
+| --- | --- | --- | --- |
+| ` + "`" + `azure-blob` + "`" + ` | 108.9 MiB | 69.9 MiB | bound all three ports |
+| ` + "`" + `azure-queue` + "`" + ` | the same image, nothing more on disk | 66.7 MiB | bound all three ports |
+| ` + "`" + `azure-table` + "`" + ` | the same image, nothing more on disk | 67.1 MiB | bound all three ports |
+| **all three** | **108.9 MiB once** | **203.8 MiB** | |
+
+One Azurite measured alone was 83.5 MiB, so the marginal cost of the second and
+third is about 67 MiB each. An environment that names only blob pays 69.9 MiB
+and one image.
+
+That is the whole cost of Azure Blob, Queue and Table in an environment: **one
+image and about 200 MiB of memory**, or a third of that for one service.
+
+### What Service Bus would have cost, which is why it is not here
+
+| Container | Image | Result |
+| --- | --- | --- |
+| ` + "`" + `servicebus-emulator` + "`" + ` | 81.7 MiB | halted: ` + "`" + `SQL Health Check failed` + "`" + ` |
+| ` + "`" + `mssql/server` + "`" + ` companion | 595.9 MiB, AMD64 only | **killed after 707 seconds, never ready** |
+
+**677.6 MiB of image before either process answers anything**, against 108.9 MiB
+for all of Azurite. The SQL Server companion was given a 3 GB allocation of its
+own and was killed by the memory limit after 707 seconds, having reached TLS
+initialisation and no further; it never printed ` + "`" + `SQL Server is now ready for
+client connections` + "`" + `, and the Service Bus emulator beside it then failed its SQL
+health check and halted. Under emulated AMD64 on ARM64 this is what the pair
+does on a developer laptop.
+
+The load average was 25 to 26 throughout, on a shared machine, so this does not
+prove SQL Server cannot start here. It does mean the pair is in a different
+class of weight from Azurite by roughly an order of magnitude in image bytes and
+more than that in memory, and that a developer with an Apple Silicon machine
+who names Service Bus in a manifest would be waiting on an emulated SQL Server
+rather than testing their application. Opt in is the right answer even before
+the EULA below.
+
+### Cosmos DB
+
+` + "`" + `cosmosdb/linux/azure-cosmos-emulator:vnext-preview` + "`" + ` has a real ARM64 build and
+needs no companion. It is **645.6 MiB of image**, six times Azurite, and held
+**89.9 MiB resident**. Its readiness was NOT measured: the predicate used to
+watch for it matched the word ` + "`" + `ready` + "`" + ` inside its own retry line
+` + "`" + `readiness check still waiting for Postgres startup` + "`" + `, so the 97 seconds it
+reported is not a start time and is not published as one. Its own health line
+still read ` + "`" + `PostgreSQL=FAIL, Gateway=FAIL, Explorer=FAIL` + "`" + ` at that point.
+
+## Not answered, and why
+
+Naming a service and not building it is worse than leaving it out, so these
+are named here rather than discovered in a failure.
+
+### Azure Service Bus
+
+Microsoft publishes an emulator for it and this build does not start one, for
+two measured reasons and one that is not about cost at all.
+
+**Its wire protocol may not reach an emulator at all.** Every Azure Service Bus
+SDK defaults to AMQP 1.0 on port 5672, which is not HTTP. A rule in emulate
+mode makes the sidecar terminate the connection and read an HTTP request out of
+it, so an AMQP connection would be dropped rather than forwarded. Service Bus
+also speaks HTTP on 5300, and that path would work.
+
+This is the reason that would matter most, and it is **NOT CONFIRMED BY
+EXPERIMENT**. It was reasoned from ` + "`" + `policy.inspectMode` + "`" + ` and the sidecar's
+` + "`" + `http.ReadRequest` + "`" + ` by the lane that owns the routing, and neither that lane nor
+this one has driven an AMQP client at an emulate rule. It is recorded here
+because a reader deciding whether to wait for Service Bus deserves to know the
+strongest argument against it exists, and recorded as unconfirmed because it
+has not been run.
+
+**It cannot be declared yet.** ` + "`" + `mcr.microsoft.com/azure-messaging/servicebus-emulator` + "`" + `
+requires a SQL Server container beside it, which it dials on startup, and an
+emulator declaration carries one image. Nothing here can express a companion.
+
+**It refuses to start until somebody accepts a EULA.** Started bare, with no
+environment set, it exits with code 133 in 47 seconds and says so: the
+Service Bus emulator EULA has to be accepted through ` + "`" + `ACCEPT_EULA=Y` + "`" + `. That is
+an acceptance a user makes, not one a build makes on their behalf, which is a
+better reason for it to be opt in than any number on this page.
+
+**Its companion has no ARM64 build.** ` + "`" + `mcr.microsoft.com/mssql/server:2022-latest` + "`" + `
+is a single AMD64 manifest with no ARM64 member, so on an Apple Silicon machine
+Service Bus drags an emulated AMD64 SQL Server into every environment that
+names it. Measured above: 677.6 MiB of image, and the SQL Server never became
+ready in 707 seconds with 3 GB of its own.
+
+### Azure Cosmos DB
+
+The Linux emulator is a single image with a real ARM64 build and no EULA gate,
+and its cost is above. It is not registered here because nothing in the
+conformance suite proves it, and a service in the surface that nothing proves is
+a claim rather than a capability. At 645.6 MiB it is also six times Azurite, so
+if it lands it lands opt in.
+
+### Everything else Azure runs
+
+Azure Files (` + "`" + `*.file.core.windows.net` + "`" + `), Data Lake Storage Gen2
+(` + "`" + `*.dfs.core.windows.net` + "`" + `), Key Vault (` + "`" + `*.vault.azure.net` + "`" + `), Event Hubs and the
+management plane are outside the surface. So are the sovereign cloud suffixes
+` + "`" + `core.chinacloudapi.cn` + "`" + ` and ` + "`" + `core.usgovcloudapi.net` + "`" + `, which are different hosts
+and are refused rather than answered.
+
+Two of these are worth calling out because a reader is likely to expect them to
+be covered by something that is. A **Service Bus queue is not a Queue Storage
+queue**, and the **Cosmos DB Table API** is not Table Storage: it speaks the
+same protocol on ` + "`" + `table.cosmos.azure.com` + "`" + ` but its partitioning and throughput
+behaviour is what a Cosmos user is testing, and Azurite is not that.
+`,
 	"guides/build.md": `---
 title: Building services
 description: How an image is produced for each service, and what to do when it will not build.
@@ -7484,15 +8032,47 @@ The egress sidecar is always a single pod whatever any service asks for,
 because it is the environment's only resolver and its only route out, and a
 second one would split the record of what was refused across two decision logs.
 
-The manifest's ` + "`" + `resources` + "`" + ` is still **refused at validation** rather than
-applied. Neither ` + "`" + `cpu` + "`" + ` nor ` + "`" + `memory` + "`" + ` reaches any runtime: they are dropped
-between the manifest and the runtime contract, so honouring them here alone
-would mean one runtime enforcing a cap the other ignores. Until both do, a
-manifest carrying either one is rejected by name, because a service that
-quietly ran with no limit under ` + "`" + `resources.memory: 512Mi` + "`" + ` is the worse of the
-two answers: the run goes green having proved nothing about the case its author
-was worried about. That is the argument ` + "`" + `replicas` + "`" + ` used to be on the wrong side
-of.
+The manifest's ` + "`" + `resources` + "`" + ` becomes the container's ` + "`" + `ResourceRequirements` + "`" + `, and
+the request and the limit are the SAME figure, which puts the pod in the
+Guaranteed quality of service class. A dimension the manifest did not name is
+left out of both maps rather than set to zero: a zero request is a request for
+nothing and a zero limit is a limit of nothing, so a service that named no size
+produces the identical Deployment it produced before the key was honoured.
+
+The gap between a small request and a larger limit is where a node is
+oversubscribed. Every pod is placed against its request and may then grow into
+its limit, so a node that fits ten environments on paper runs eleven and the
+eleventh takes memory from the others. The symptom is a workflow that reads as
+flaky, and a twin whose failures belong to the machine rather than to the
+change under test is worth less than no twin.
+
+` + "`" + `af up` + "`" + ` checks the sizes against the cluster BEFORE it creates anything, and
+refuses with **AF-RUN-047** naming the shortfall. Without that check a request
+larger than any node is accepted by the API server and the pod sits ` + "`" + `Pending` + "`" + `
+with an event nobody is watching, so ` + "`" + `af up` + "`" + ` waits out the readiness timeout
+and reports a service that did not start. The free figure is each schedulable
+node's allocatable minus the requests of the pods already on it, which is the
+quantity the scheduler itself places against; allocatable alone would accept an
+environment onto a full cluster. Cordoned and not ready nodes are left out,
+because a node that still reports its allocatable and can hold nothing makes
+the cluster look larger than it is.
+
+Two necessary conditions, neither sufficient: every instance has to fit on some
+single node, and the total has to fit in what is free across all of them. A set
+that passes both can still fail to pack, and the scheduler remains the
+authority on that. What is refused here is only the cases where no packing
+exists at all, which are the ones a person cannot diagnose from a ` + "`" + `Pending` + "`" + `
+pod.
+
+A cluster that will not let ` + "`" + `af` + "`" + ` list its nodes or its pods is one this cannot
+check. It says so on the progress channel and lets the environment through,
+rather than reporting nothing and passing: refusing to start because a
+permission is narrow would break every cluster where ` + "`" + `af` + "`" + ` has namespace scoped
+access and nothing more.
+
+` + "`" + `af status` + "`" + ` reports the applied size off the pod the cluster is running rather
+than off the spec that was sent, because a runtime that echoed the request back
+would agree with the manifest whether or not anything was applied.
 
 ## Teardown
 
@@ -8083,6 +8663,37 @@ always the one a service was told at startup: an application that builds
 absolute URLs from ` + "`" + `AF_PUBLIC_URL` + "`" + ` or ` + "`" + `AF_ENV_URL` + "`" + ` may name the port it lost.
 Bringing the environment up again after freeing the port gives every container
 the same answer.
+
+## Size
+
+` + "`" + "`" + "`" + `
+AF-RUN-047 This runtime cannot place the sizes the manifest asks for: service
+"clickhouse" asks for 32Gi of memory per instance and the roomiest node has
+7Gi free, so one instance of it cannot be placed at all
+` + "`" + "`" + "`" + `
+
+` + "`" + `resources.cpu` + "`" + ` and ` + "`" + `resources.memory` + "`" + ` become the daemon's own cpu and memory
+constraint. There is no scheduler here to reserve anything, so the single value
+the manifest carries is applied as the cap alone: a container gets that share
+of the machine under contention and no more, and one over its memory cap is
+killed rather than allowed to take the machine down with it. That is the half
+of the promise this runtime can keep, and it is the half that matters on a
+laptop, where the failure being reproduced is one environment starving another.
+
+The check runs before the network is created, so an environment this machine
+cannot hold leaves nothing behind for ` + "`" + `af down` + "`" + ` to find.
+
+**What it does not account for.** Docker reserves nothing. A container with no
+memory limit, which is most of them and every container this machine was
+already running, is not holding anything the daemon can subtract, so the
+comparison is against the whole machine rather than against what is free. This
+refuses an environment that could never fit and it does not refuse the eleventh
+environment on a machine that holds ten. The cluster check does better, because
+a cluster scheduler has the fact this one does not: what every pod asked for.
+
+The daemon's memory is the Docker VM's, not the machine's. A laptop with plenty
+of memory whose VM was given a quarter of it has a quarter here, and ` + "`" + `docker
+info` + "`" + ` is where that number comes from.
 
 ## Disk
 
@@ -9794,6 +10405,42 @@ signing secrets. A value typed into the manifest instead would be the first
 thing to drift from the one the sender uses, and every event would then be
 refused as unsigned by the very verification this exists to exercise.
 
+## The GitHub App's own key
+
+A GitHub App is three credentials, and the webhook secret is only one of them.
+The other two are the numeric App id and the private key the App signs its JWT
+with, and an application that reads all three usually refuses to start with
+some of them: a webhook secret with no private key is an endpoint that verifies
+deliveries and can do nothing with them.
+
+So a manifest that declares a webhook path for GitHub is offered a private key
+as well, under ` + "`" + `GITHUB_APP_PRIVATE_KEY` + "`" + `, generated for the life of the
+environment:
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: api
+    env:
+      - name: AF_GITHUB_APP_ID
+        value: "1"
+      - name: AF_GITHUB_APP_PRIVATE_KEY
+        from: GITHUB_APP_PRIVATE_KEY
+      - name: AF_GITHUB_APP_WEBHOOK_SECRET
+        from: GITHUB_WEBHOOK_SECRET
+` + "`" + "`" + "`" + `
+
+It is a real RSA key in PKCS#8, because the applications that read one reject a
+placeholder, and it is a different key in every environment. It authenticates
+nothing: GitHub has never seen it, and ` + "`" + `api.github.com` + "`" + ` is reachable only if
+your own egress rules allow it.
+
+Exporting ` + "`" + `GITHUB_APP_PRIVATE_KEY` + "`" + ` yourself wins over the generated one, for
+the case where you are rehearsing against an App you really registered.
+
+Writing the key into the manifest instead is the thing this replaces. A
+manifest is committed, so a key written there is a key in the repository for as
+long as the file is there, and the engine refuses a value that carries one.
+
 ## Delivery failed
 
 ` + "`" + "`" + "`" + `
@@ -10861,14 +11508,18 @@ database:
 
 | Provider | Where the data lives | Branch time | Needs |
 | --- | --- | --- | --- |
-| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Grows with the database | A Docker daemon |
+| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Flat, because the daemon's storage driver shares layers | A Docker daemon |
 | [` + "`" + `neon` + "`" + `](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
 | [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
 
-` + "`" + `docker` + "`" + ` is the default and needs nothing. It is the right choice for a
-repository whose database is small enough that copying it is not the slow part.
+` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
+rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
+one and the daemon's storage driver shares the layers, so the two cost the same.
+What is not flat is building the golden, because that commits an image. This row
+said "Grows with the database" until somebody ran the measurement, which is the
+whole argument for having one.
 
 ` + "`" + `neon` + "`" + ` is the right choice when it is. Neon branches are copy on write, so
 creating one takes about as long for a hundred gigabytes as for a hundred rows.
@@ -12862,6 +13513,7 @@ af mask plan
 Subcommands:
 
 - [` + "`" + `af mask apply` + "`" + `](#af-mask-apply) Rewrite this environment's data according to the plan.
+- [` + "`" + `af mask crossstore` + "`" + `](#af-mask-crossstore) Check that one person masks to the same person in every store.
 - [` + "`" + `af mask init` + "`" + `](#af-mask-init) Read the schema and write masking.yaml with a rule for every column.
 - [` + "`" + `af mask plan` + "`" + `](#af-mask-plan) Show what masking would do, column by column.
 - [` + "`" + `af mask preview` + "`" + `](#af-mask-preview) Show what a few rows would look like after masking.
@@ -12889,6 +13541,48 @@ af mask apply
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to mask, defaulting to the checked out one. |
+
+### ` + "`" + `af mask crossstore` + "`" + `
+
+Check that one person masks to the same person in every store.
+
+Determinism inside one store has been enforced since the beginning, by the key
+derivation. Across two stores it was a property of the construction that
+nothing checked, and a property nothing checks is a property you have somebody's
+word for.
+
+The failure it exists to catch is silent. An empty ClickHouse beside a masked
+Postgres is a twin that is visibly incomplete and somebody notices within a
+minute of opening a chart. One identity masked into two different fake people
+is a twin that is confidently wrong: every join across the two stores returns
+nothing or returns the wrong person, every report built on it is plausible, and
+nothing anywhere says so.
+
+It reads schemas and no rows. The check masks its own probe values through both
+stores' rules and compares the outputs, so what it needs from a store is the
+catalog, which is why it is safe to point at production. Every store it reads
+is named, every store it could not read is named with the reason, and a run
+that reached one store reports that it proved nothing rather than reporting a
+hundred percent of one.
+
+Each datastore says where its schema is read from with source_url_env, which
+names an environment variable and never the connection string. The primary
+takes that from database.source_url_env and does not repeat it.
+
+` + "`" + "`" + "`" + `
+af mask crossstore [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Reads both stores' catalogs and no rows, which is what makes it safe
+# to point at production.
+af mask crossstore
+af mask crossstore --branch main
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
 
 ### ` + "`" + `af mask init` + "`" + `
 
@@ -16114,6 +16808,30 @@ Verification could not read {table}.{column} ({type}), no masking rule covers it
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification) |
 
+### AF-MSK-014
+
+The same identifier does not mask to the same value in every store: {detail}
+
+**What to do.** Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
+### AF-MSK-015
+
+The cross store check did not compare every store it was given: {detail}
+
+**What to do.** Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
 ## Egress
 
 ### AF-NET-001
@@ -16504,6 +17222,18 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
+### AF-RUN-047
+
+This runtime cannot place the sizes the manifest asks for: {detail}
+
+**What to do.** Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
 ## Scheduling
 
 ### AF-SCH-001
@@ -16834,7 +17564,7 @@ what it deliberately does not cover.
 | ` + "`" + `replicas` + "`" + ` | int | How many instances to run, 1 to 10. Both runtimes start this many behind the one name other services resolve. See below. |
 | ` + "`" + `depends_on` + "`" + ` | list | Other services that must start first. |
 | ` + "`" + `env` + "`" + ` | list | Variables this service needs, by name. |
-| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
+| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
 | ` + "`" + `build` + "`" + ` | block | See below. |
 
 ### What a service is given
@@ -16914,6 +17644,66 @@ The bound is 1 to 10, and a ` + "`" + `cron` + "`" + ` service may not ask for m
 instance runs the schedule, so three instances send the nightly email three
 times, which is a bug to reproduce inside a service rather than the meaning of
 a manifest key.
+
+### ` + "`" + `resources` + "`" + `
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: clickhouse
+    kind: worker
+    resources:
+      cpu: "2"
+      memory: 4Gi
+` + "`" + "`" + "`" + `
+
+The size ONE instance is given. A service asking for ` + "`" + `replicas: 3` + "`" + ` and ` + "`" + `2` + "`" + ` of
+CPU asks the machine for six cores, not two.
+
+` + "`" + `cpu` + "`" + ` is a number of cores, or thousandths with an ` + "`" + `m` + "`" + `: ` + "`" + `2` + "`" + `, ` + "`" + `0.5` + "`" + `, ` + "`" + `500m` + "`" + `.
+` + "`" + `memory` + "`" + ` needs a unit: ` + "`" + `512Mi` + "`" + `, ` + "`" + `2Gi` + "`" + `. ` + "`" + `Mi` + "`" + ` and ` + "`" + `Gi` + "`" + ` are powers of two, ` + "`" + `M` + "`" + ` and
+` + "`" + `G` + "`" + ` powers of ten, which is what those suffixes mean in a Deployment and what
+somebody copying a value out of one expects. A bare ` + "`" + `memory: 512` + "`" + ` is refused,
+because Kubernetes reads it as 512 bytes and nobody who writes it means that.
+
+**Each value is the request AND the limit**, not a request with a larger limit
+behind it. On Kubernetes that is the Guaranteed quality of service class. The
+familiar shape, a small request under a large limit, is where a node gets
+oversubscribed: every container is placed against its request and then grows
+into its limit, so a machine that fits ten environments on paper runs eleven
+and the eleventh takes memory from the others. The symptom is a workflow that
+reads as flaky, and a twin whose failures belong to the machine rather than to
+the change under test is worth less than no twin. One number also means
+environments per node is a division rather than a guess.
+
+On the local runtime there is no scheduler to reserve anything, so the value is
+the daemon's own cpu and memory constraint: the container gets that share under
+contention and no more, and one over its memory cap is killed rather than
+allowed to take the machine down with it.
+
+Omitting a key leaves that dimension uncapped, which is what every service had
+before the key was honoured, so an existing manifest produces the identical
+container and the identical Deployment it did before. The two keys are
+independent: a service may cap CPU alone, memory alone, or neither.
+
+**A size the runtime cannot place is refused before anything is created**, with
+**AF-RUN-047** naming the shortfall. Without that, a request larger than any
+node is accepted by the API server, the pod sits ` + "`" + `Pending` + "`" + ` with an event nobody
+is watching, and ` + "`" + `af up` + "`" + ` waits out its readiness timeout and reports a service
+that did not start, which reads as a slow cluster. On a cluster the check is
+against allocatable minus what the pods already there requested, so a full
+cluster refuses rather than accepts. It is a necessary condition and not a
+sufficient one: it refuses the sets for which no placement exists, and leaves
+bin packing to the scheduler.
+
+A service's ` + "`" + `migrate` + "`" + ` command runs under the same cap as the service. It does
+not double what the environment asks the machine for, because the migration
+finishes before the service starts. A migration that needs more memory than the
+service it belongs to is a case this key cannot express today.
+
+` + "`" + `af status` + "`" + ` reports the size the runtime ACTUALLY applied, read back off the
+running pod or the daemon's record of the container rather than echoed from
+the manifest. A runtime that accepts a cap and emits none would otherwise
+report exactly what a correct one reports.
 
 ### ` + "`" + `build` + "`" + `
 
@@ -17075,7 +17865,7 @@ datastores:
 | ` + "`" + `stance` + "`" + ` | Required. See below. |
 | ` + "`" + `because` + "`" + ` | Why that stance was chosen, carried into the fidelity report as written. Required for ` + "`" + `empty` + "`" + `. |
 | ` + "`" + `from` + "`" + ` | The store a ` + "`" + `derived` + "`" + ` one is rebuilt from. Required for ` + "`" + `derived` + "`" + ` and refused for the rest. |
-| ` + "`" + `source_url_env` + "`" + ` | The variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from. Omitted, the golden holds no rows and every refresh says so. |
+| ` + "`" + `source_url_env` + "`" + ` | The NAME of the variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
 
 The ` + "`" + `database` + "`" + ` block above is not replaced and does not move. It normalizes
 into the entry named ` + "`" + `primary` + "`" + `, so a manifest that declares only ` + "`" + `database:` + "`" + `
@@ -17122,6 +17912,34 @@ validator refuses a store with no stance and the
 [component inventory](/docs/concepts/inventory) names each one, and nothing here
 starts an ` + "`" + `empty` + "`" + ` store, runs a ` + "`" + `derived` + "`" + ` rebuild or creates a topic. A store
 whose engine this build cannot mask is REFUSED rather than published unmasked.
+
+### Checking that one person is one person in both stores
+
+The paragraph above says one customer masks to one fake customer in both
+stores. ` + "`" + `af mask crossstore` + "`" + ` is what checks it rather than asserting it:
+
+` + "`" + "`" + "`" + `
+af mask crossstore
+` + "`" + "`" + "`" + `
+
+It reads each declared store's catalog through the variable its
+` + "`" + `source_url_env` + "`" + ` names, assigns the one ` + "`" + `masking.yaml` + "`" + ` to all of them, finds
+every identifier that appears in more than one store, masks probe values
+through each side, and reports the share that come out identical.
+
+**It reads catalogs and no rows**, which is why it is safe to point at
+production: the probe values are its own, so what it needs from a store is the
+schema. ` + "`" + `rows_read` + "`" + ` is a field of the report rather than a promise on this
+page, and a live test reads the ClickHouse server's own ` + "`" + `system.query_log` + "`" + ` back
+and fails if any statement the check sent selected from a data table. See
+[masking](/docs/concepts/masking) for what it finds.
+
+Every store it could not read is named with the reason, a store that names no
+` + "`" + `source_url_env` + "`" + ` is named as never read at all, and a run that reached one store
+says it proved nothing rather than reporting a hundred percent of one. A pair
+that disagreed and a store that was never opened carry different exit codes,
+because one is a statement about your data and the other is a statement about
+what could be reached.
 
 **The fidelity report reads the branch**, not the declaration. A store declared
 ` + "`" + `golden` + "`" + ` that this environment branched is reported the way the primary
@@ -17203,7 +18021,7 @@ name.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + ` or ` + "`" + `kubernetes` + "`" + `. Any other name is refused, and the message lists the two this build has plus anything a registered runtime provider added. |
+| ` + "`" + `provider` + "`" + ` | Which runtime places the environment. ` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are built in, and a build registers any others it carries. The schema keeps no list, the way ` + "`" + `datastore.engine` + "`" + ` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
 | ` + "`" + `ttl` + "`" + ` | How long an environment lives. |
 | ` + "`" + `max_ttl` + "`" + ` | The furthest ` + "`" + `af env extend` + "`" + ` may push an environment's expiry, measured from creation. |
 | ` + "`" + `idle_sleep` + "`" + ` | Suspend after this long with no traffic. |
@@ -17940,7 +18758,7 @@ torn down, and there is no argument that leaves it running.
 
 ### ` + "`" + `inspect_data_masking` + "`" + `
 
-What masking does to this environment's data, without changing any of it. Three
+What masking does to this environment's data, without changing any of it. Four
 questions, chosen with ` + "`" + `question` + "`" + `.
 
 ` + "`" + `plan` + "`" + ` says what masking WOULD do, column by column, compiled from the live
@@ -17950,7 +18768,17 @@ which is the list somebody has to answer: left alone, a column called
 to show whether the rules actually fire. ` + "`" + `verify` + "`" + ` reads the data back and runs
 the same detectors that would find the data if it leaked.
 
-**No value is ever returned by any of the three.** Masking is a privacy boundary,
+` + "`" + `cross_store` + "`" + ` asks whether one person masks to the SAME person in every declared
+store, which is the question a twin holding a Postgres and a ClickHouse has and a
+twin holding one store does not. One identity masked into two people is a twin
+that is confidently wrong: every join across the two stores returns somebody
+else, and every report built on it is plausible. It reads catalogs and NO ROWS,
+so it is safe to point at production, and ` + "`" + `rows_read` + "`" + ` is a field of the answer
+rather than a promise in this page. It returns ` + "`" + `INCONCLUSIVE` + "`" + ` rather than ` + "`" + `PASS` + "`" + `
+when fewer than two stores could be read or when the two share no identifier,
+because a percentage over zero comparisons is not a pass.
+
+**No value is ever returned by any of the four.** Masking is a privacy boundary,
 and a preview that showed the values it is deciding about would leak exactly the
 data being removed, to a model, into a transcript. What comes back is the shape
 of the change: the column, the transform, whether the value changed at all, its
