@@ -139,7 +139,7 @@ What the environment may reach on the network. Everything leaves through the sid
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `allow_ipv6` | boolean | no | Whether the environment may open IPv6 connections. Off by default, because an IPv6 path that bypasses the proxy is the most common way an egress control is silently defeated. Defaults to `false`. |
-| `default` | `block`, `allow`, `capture`, `mock`, `sandbox`, `synth` | no | What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer. Defaults to `block`. |
+| `default` | `block`, `allow`, `capture`, `mock`, `emulate`, `sandbox`, `synth` | no | What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer. emulate is listed here and is refused as a default, because the emulator is named on a rule and a default names no rule; the refusal says so, which a missing enum value could not. Defaults to `block`. |
 | `rules` | list of [Egress rule](#egress-rule) | no | What the environment may do with one host. Max items 500. |
 
 ## Egress rule
