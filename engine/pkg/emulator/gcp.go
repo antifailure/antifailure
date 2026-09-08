@@ -177,6 +177,14 @@ var pubsub = &Emulator{
 	Image:        gcloudImage,
 	Port:         PubSubPort,
 	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// The image is the CLI, so the command is what decides which emulator
+	// this container is. 0.0.0.0 rather than the default localhost bind,
+	// because the address the sidecar forwards to is the container's
+	// address on the inner network.
+	Command: []string{
+		"gcloud", "beta", "emulators", "pubsub", "start",
+		"--host-port=0.0.0.0:8085", "--project=af-environment",
+	},
 	Services: []Service{
 		{
 			Name:   "Cloud Pub/Sub",
@@ -204,6 +212,14 @@ var firestore = &Emulator{
 	Image:        gcloudImage,
 	Port:         FirestorePort,
 	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// The image is the CLI, so the command is what decides which emulator
+	// this container is. 0.0.0.0 rather than the default localhost bind,
+	// because the address the sidecar forwards to is the container's
+	// address on the inner network.
+	Command: []string{
+		"gcloud", "emulators", "firestore", "start",
+		"--host-port=0.0.0.0:8086",
+	},
 	Services: []Service{
 		{
 			Name:   "Cloud Firestore",
@@ -230,11 +246,25 @@ var datastore = &Emulator{
 	Image:        gcloudImage,
 	Port:         DatastorePort,
 	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// The image is the CLI, so the command is what decides which emulator
+	// this container is. 0.0.0.0 rather than the default localhost bind,
+	// because the address the sidecar forwards to is the container's
+	// address on the inner network.
+	Command: []string{
+		"gcloud", "beta", "emulators", "datastore", "start",
+		"--host-port=0.0.0.0:8087", "--project=af-environment",
+	},
 	Services: []Service{
 		{
 			Name:   "Cloud Datastore",
 			Hosts:  []string{"datastore.googleapis.com"},
 			Proves: "put an entity, get it by key and run a query",
+			Note: "Google's own page for this emulator opens with \"This content applies to " +
+				"the emulator for legacy Cloud Datastore\". A database created today is " +
+				"Firestore in Datastore mode and is served by the Firestore emulator with " +
+				"--database-mode=datastore-mode, which is a different container. This one is " +
+				"here for a database that predates that, and a project on the current product " +
+				"should be reaching for the Firestore emulator instead.",
 		},
 	},
 	Outside: []Service{{
@@ -254,6 +284,14 @@ var bigtable = &Emulator{
 	Image:        gcloudImage,
 	Port:         BigtablePort,
 	Env:          map[string]string{"CLOUDSDK_CORE_DISABLE_PROMPTS": "1"},
+	// The image is the CLI, so the command is what decides which emulator
+	// this container is. 0.0.0.0 rather than the default localhost bind,
+	// because the address the sidecar forwards to is the container's
+	// address on the inner network.
+	Command: []string{
+		"gcloud", "beta", "emulators", "bigtable", "start",
+		"--host-port=0.0.0.0:8088",
+	},
 	Services: []Service{
 		{
 			Name: "Cloud Bigtable",

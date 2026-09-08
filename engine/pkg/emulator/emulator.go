@@ -102,6 +102,10 @@ type Emulator struct {
 	Port int
 	// Env is what the container is started with.
 	Env map[string]string
+	// Command replaces the image's own command. Empty for an image whose
+	// entrypoint is already the emulator, which is most of them and is not
+	// all of them: see extension.EmulatorContainer.Command.
+	Command []string
 	// Services are the cloud services this emulator answers for. THIS IS THE
 	// SURFACE. A host outside it is refused rather than answered, because a
 	// silent wrong answer from an emulator is worse than a refusal: it will
@@ -145,7 +149,10 @@ func (e *Emulator) Container() extension.EmulatorContainer {
 	for k, v := range e.Env {
 		env[k] = v
 	}
-	return extension.EmulatorContainer{Image: e.Image, Port: e.Port, Env: env}
+	cmd := append([]string(nil), e.Command...)
+	return extension.EmulatorContainer{
+		Image: e.Image, Port: e.Port, Env: env, Command: cmd,
+	}
 }
 
 // ServiceFor returns the covered service a host belongs to.

@@ -503,6 +503,21 @@ type EmulatorContainer struct {
 	Port int
 	// Env is what the container is started with.
 	Env map[string]string
+	// Command replaces the image's own command, and it is empty for an image
+	// whose entrypoint is already the emulator.
+	//
+	// It exists because not every cloud ships one image per emulator. Google
+	// ships FOUR of its five official emulators inside a single image, the
+	// Google Cloud CLI, and which emulator a container is running is decided
+	// by the command it was started with rather than by its image, its port
+	// or its environment. Without this field those four are four identical
+	// containers that run a command line tool and answer nothing, and the
+	// declaration reads as though it started them.
+	//
+	// A slice rather than a string, because a string would be run through a
+	// shell and an emulator's arguments carry addresses and ports that a
+	// shell would be free to reinterpret.
+	Command []string
 }
 
 // Emulator is a third party service answered inside the environment.
