@@ -249,3 +249,26 @@ func TestStanceJobs_KeepsTheManifestsOrder(t *testing.T) {
 	require.Equal(t, "bus", jobs[0].Store)
 	require.Equal(t, "search", jobs[1].Store)
 }
+
+// The evidence the report reads back, and the one way it can name the wrong
+// store.
+
+func TestNamesTheStanceJob_RecognisesBothRuntimesNaming(t *testing.T) {
+	// The local runtime journals af-svc-ENV-store-stance and the Kubernetes
+	// one journals NAMESPACE/store-stance. A match that knew only one of them
+	// would report the other runtime's environments unmeasured forever, with
+	// nothing failing anywhere.
+	require.True(t, namesTheStanceJob("af-svc-shop-main-abc123-bus-stance", "bus"))
+	require.True(t, namesTheStanceJob("af-shop-main-abc123/bus-stance", "bus"))
+	require.True(t, namesTheStanceJob("bus-stance", "bus"))
+}
+
+func TestNamesTheStanceJob_DoesNotCreditOneStoreWithAnothersJob(t *testing.T) {
+	// The character in front of the suffix is the whole of this. Without it a
+	// store called e matches the job of a store called cache, and one store's
+	// report carries another's evidence.
+	require.False(t, namesTheStanceJob("af-svc-shop-cache-stance", "e"))
+	require.False(t, namesTheStanceJob("af-svc-shop-bus-stance", "cache"))
+	require.False(t, namesTheStanceJob("af-svc-shop-bus-migrate", "bus"))
+	require.False(t, namesTheStanceJob("", "bus"))
+}

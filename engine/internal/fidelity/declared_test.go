@@ -90,6 +90,20 @@ func TestABrokerThatIsRunningAndWasNeverShapedIsNotCountedAsShaped(t *testing.T)
 	require.Contains(t, bus.Detail, "recorded no job")
 }
 
+func TestAStoreNothingAskedAboutIsNotReportedAsMissing(t *testing.T) {
+	t.Parallel()
+	// Silence must not read as a negative. A caller that never took the stance
+	// observation would otherwise have every declared cache reported absent,
+	// which is a real zero in a real denominator for a question nobody put.
+	obs := analyticsStack(t)
+	obs.Stances = nil
+	for _, name := range []string{"cache", "bus"} {
+		c := componentState(t, fidelity.Build(obs), schema.FidelityDatastores, name)
+		require.Equalf(t, fidelity.Unmeasured, c.State, "%s", name)
+		require.Contains(t, c.Detail, "nothing here asked what this environment did about it")
+	}
+}
+
 func TestADeclaredStoreThatIsNotRunningIsAbsent(t *testing.T) {
 	t.Parallel()
 	// The manifest asked the environment to hold a store and it does not hold

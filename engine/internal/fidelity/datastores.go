@@ -122,7 +122,8 @@ func datastores(obs Observation) Dimension {
 				storeProvenanceComponent(ds.Name, st))
 			continue
 		}
-		found = append(found, declaredComponent(ds, stances[ds.Name]))
+		st, asked := stances[ds.Name]
+		found = append(found, declaredComponent(ds, st, asked))
 	}
 
 	for _, svc := range obs.Manifest.Services {
@@ -403,13 +404,22 @@ func describeStore(s Store) string {
 // running the same containers from the same manifest with a broker that has no
 // topic in it, and nothing here can tell that apart from one whose topics were
 // created except by asking what the run recorded.
-func declaredComponent(ds schema.Datastore, st Stance) Component {
+//
+// A store NOTHING ASKED ABOUT is UNMEASURED too, and it is a separate arm from
+// the one above rather than the zero value falling through it. Silence must not
+// read as a negative: a caller that never took the stance observation would
+// otherwise have every declared cache reported absent, which is a real zero in
+// a real denominator for a question nobody put.
+func declaredComponent(ds schema.Datastore, st Stance, asked bool) Component {
 	c := Component{Name: ds.Name}
 	if ds.Stance == schema.StanceGolden {
 		c.State, c.Detail = Absent, declaredReason(ds, goldenGap)
 		return c
 	}
 	switch {
+	case !asked:
+		c.State = Unmeasured
+		c.Detail = declaredReason(ds, "nothing here asked what this environment did about it")
 	case st.RunningReason != "":
 		c.State = Unmeasured
 		c.Detail = declaredReason(ds, st.RunningReason)
@@ -425,7 +435,7 @@ func declaredComponent(ds schema.Datastore, st Stance) Component {
 		c.Detail = declaredReason(ds, "it is running and holds nothing, which is the stance")
 	case !st.Ran:
 		c.State = Unmeasured
-		c.Detail = declaredReason(ds, st.RanReason)
+		c.Detail = declaredReason(ds, orUnknownRun(st.RanReason))
 	default:
 		c.State = Substituted
 		c.Detail = declaredReason(ds, ranDetail(ds))
@@ -465,6 +475,18 @@ func ranDetail(ds schema.Datastore) string {
 	default:
 		return "this environment's run applied the stance"
 	}
+}
+
+// orUnknownRun keeps the sentence a sentence when a caller reports a job it
+// did not run and gives no reason.
+//
+// A detail ending in "and " is the shape a reader cannot act on, and a zero
+// value reaching here is a caller that has not said what it looked at.
+func orUnknownRun(reason string) string {
+	if reason != "" {
+		return reason
+	}
+	return "nothing here says whether this environment's own run did what the stance asks"
 }
 
 // goldenGap is what a store declared golden and never branched is missing.
