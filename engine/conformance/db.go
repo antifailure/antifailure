@@ -83,9 +83,9 @@ type Options struct {
 	//
 	// A separate number rather than the shared one, because that behaviour is
 	// structurally more expensive than every other in the suite by a wide
-	// margin: it builds two goldens, one of them a gibibyte, and branches each
-	// of them several times, where the rest build one small golden and branch
-	// it once or twice. A single timeout tuned for the others is too short for
+	// margin: it builds two goldens, one of them half a gibibyte, and branches
+	// each of them several times, where the rest build one small golden and
+	// branch it once or twice. A single timeout tuned for the others is too short for
 	// this one, and one tuned for this one stops a hung call anywhere else
 	// failing the behaviour rather than the job, which is what the timeout is
 	// for.
@@ -589,11 +589,11 @@ func (h *harness) capabilitiesAreSelfConsistent() {
 	// rules: it refuses copy on write declared without branching, and copy on
 	// write declared without a golden. Neither has a subject on this side. A
 	// database provider that does not declare Branching has already been
-	// refused four lines above, because the interface says a provider without
-	// it is not a database provider; and provider.Caps has no Golden field
-	// because RefreshGolden is a method every database provider implements,
-	// so there is no configuration in which a database provider has no golden
-	// to share storage with. Restating either rule here would be a branch no
+	// refused at the top of this function, because the interface says a
+	// provider without it is not a database provider; and Caps has no Golden
+	// field, because RefreshGolden is a method every database provider
+	// implements, so there is no configuration in which a database provider
+	// has no golden to share storage with. Restating either rule here would be a branch no
 	// input can reach, and an unreachable check is indistinguishable from a
 	// check that works right up until somebody relies on it.
 	//
