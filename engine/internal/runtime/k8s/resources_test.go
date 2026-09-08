@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/antifailure/antifailure/engine/internal/capacity"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
@@ -143,20 +142,6 @@ func TestPodRequestsSumsTheContainersThatRunTogether(t *testing.T) {
 	cpu, mem := podRequests(pod)
 	require.Equal(t, int64(750), cpu)
 	require.Equal(t, int64(gib+gib/2), mem)
-}
-
-func TestAsksForLeavesOutAServiceThatNamedNoSize(t *testing.T) {
-	// A zero row would make the environment look like it asked for something
-	// and got nothing, and it would put a service with no request into a
-	// shortfall message that has nothing to say about it.
-	got := asksFor([]provider.ServiceSpec{
-		{Name: "web", Port: 8080},
-		{Name: "clickhouse", Replicas: 2, MemoryBytes: 4 * gib},
-	})
-	require.Len(t, got, 1)
-	require.Equal(t, capacity.Ask{
-		Service: "clickhouse", Instances: 2, MemoryBytes: 4 * gib,
-	}, got[0])
 }
 
 func requirement(milliCPU, memoryBytes int64) corev1.ResourceRequirements {

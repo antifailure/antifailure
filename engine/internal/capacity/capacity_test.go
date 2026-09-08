@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/capacity"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 // Whether a node can hold what an environment asked for.
@@ -200,4 +201,34 @@ func TestEnvironmentsPerNode_ReportsNoneWhenOneDoesNotFit(t *testing.T) {
 		{Service: "clickhouse", Instances: 1, MemoryBytes: 8 * gib},
 	})
 	require.Equal(t, 0, got.Count)
+}
+
+func TestAsksFor_LeavesOutAServiceThatNamedNoSize(t *testing.T) {
+	t.Parallel()
+	// A zero row would make the environment look like it asked for something
+	// and got nothing, and it would put a service with no request into a
+	// shortfall message that has nothing to say about it.
+	//
+	// Tested here rather than once per runtime because there is one of these
+	// now. There were two, identical, in the local and the Kubernetes
+	// packages, which is the shape serviceSpec had when health_timeout went
+	// missing from one of the two copies.
+	got := capacity.AsksFor([]provider.ServiceSpec{
+		{Name: "web", Port: 8080},
+		{Name: "clickhouse", Replicas: 2, MemoryBytes: 4 * gib},
+	})
+	require.Len(t, got, 1)
+	require.Equal(t, capacity.Ask{
+		Service: "clickhouse", Instances: 2, MemoryBytes: 4 * gib,
+	}, got[0])
+}
+
+func TestAsksFor_ReadsTheInstanceCountThroughTheSpecsOwnRule(t *testing.T) {
+	t.Parallel()
+	// Zero replicas is one instance, and the rule for that lives in
+	// provider.ServiceSpec.Instances rather than being restated here. A second
+	// spelling of it would be the thing this function was merged to stop.
+	got := capacity.AsksFor([]provider.ServiceSpec{{Name: "web", MemoryBytes: gib}})
+	require.Len(t, got, 1)
+	require.Equal(t, 1, got[0].Instances)
 }
