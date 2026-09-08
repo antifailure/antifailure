@@ -63,12 +63,21 @@ var aws = &Emulator{
 	Image:      awsImage,
 	Port:       AWSPort,
 	Env: map[string]string{
-		// The allowlist, and the reason it is one. SERVICES alone only
-		// decides what is loaded eagerly; STRICT_SERVICE_LOADING makes it the
-		// set of services that may be loaded at all, so a call to a service
-		// outside the surface is refused by LocalStack itself rather than
-		// quietly answered by an implementation nothing in this repository
-		// has ever tested.
+		// The allowlist, and what it is and is not worth. MEASURED on
+		// 2026-09-08 against this digest: with these two set, 23 of the 35
+		// services LocalStack knows about report disabled, and twelve report
+		// available. Nine of those twelve are the surface, the tenth is
+		// dynamodbstreams which the surface routes, and the other two are kms
+		// and lambda, which load because services in the list depend on them.
+		//
+		// So this is a reduction and NOT the refusal. A GET to
+		// /2015-03-31/functions with a Lambda Host header is answered 200
+		// with {"Functions": []} by this container, which is exactly the
+		// silent wrong answer a surface is supposed to prevent. What prevents
+		// it is the ROUTING: lambda.*.amazonaws.com is not a host any service
+		// below claims, so nothing sends the request here at all and the
+		// environment's egress policy refuses it. Do not read this pair as a
+		// second wall. It is a smaller attack surface and a shorter start.
 		"SERVICES": "s3,sqs,sns,dynamodb,kinesis,events,secretsmanager,ssm,sts",
 
 		"STRICT_SERVICE_LOADING": "1",

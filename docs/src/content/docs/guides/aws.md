@@ -66,10 +66,24 @@ S3.
 | API Gateway, CloudFormation, IAM, CloudWatch, and the rest of AWS | Outside the surface, and refused by the egress policy rather than answered. |
 | S3 dualstack, transfer acceleration and S3 Express One Zone | Further spellings of the S3 endpoint that resolve under different names. They reach nothing, and the refusal says no rule matches rather than naming S3. |
 
-The emulator container is started with `SERVICES` listing the nine services and
-`STRICT_SERVICE_LOADING` set, so the allowlist is enforced by LocalStack itself
-as well as by the routing. A service outside the surface is refused twice and
-answered zero times.
+### Where the refusal actually happens
+
+The refusal is in the ROUTING, and it is worth being precise about that rather
+than claiming a second wall that does not exist.
+
+The container is started with `SERVICES` listing the nine and
+`STRICT_SERVICE_LOADING` set. Measured against the pinned digest on 2026-09-08,
+that leaves 23 of the 35 services LocalStack knows about reporting `disabled`
+and twelve reporting `available`: the nine above, DynamoDB Streams which the
+surface routes, and KMS and Lambda, which load because services in the list
+depend on them. A GET to `/2015-03-31/functions` with a Lambda `Host` header is
+then answered `200 {"Functions": []}` by the container.
+
+That is exactly the silent wrong answer a declared surface exists to prevent,
+and what prevents it is that `lambda.*.amazonaws.com` is not a host any covered
+service claims. Nothing routes the request to the emulator, so the environment's
+egress policy decides it, and the default is `block`. The container allowlist is
+a smaller attack surface and a shorter start, not the refusal.
 
 ## How the application reaches it, which is DNS and not a proxy variable
 
