@@ -139,7 +139,7 @@ docker run -d --name "$pg" --network "$net" \
   -e POSTGRES_USER=af_migrator \
   -e POSTGRES_DB=antifailure \
   -e "POSTGRES_PASSWORD=${password_migrator}" \
-  postgres:17-alpine >/dev/null
+  postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 >/dev/null
 
 for _ in $(seq 1 60); do
   if docker exec "$pg" pg_isready -U af_migrator -d antifailure >/dev/null 2>&1; then
