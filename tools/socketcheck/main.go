@@ -82,10 +82,6 @@ var notConsulted = map[string]string{
 	"AuditSink": "Registry.Audit has no caller anywhere in the engine, so a registered " +
 		"sink receives nothing. Closing it means emitting the entries the audit log " +
 		"already writes through the registry as well.",
-	"Emulator": "an egress rule cannot name an emulator yet and the sidecar has no route " +
-		"to one, so a registration describes a container nothing starts. Closing it means " +
-		"the emulate mode and the sidecar route that makes an unmodified application " +
-		"reach it.",
 }
 
 // inventoryMethods are the registry methods that walk every socket at once.

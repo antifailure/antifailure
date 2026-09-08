@@ -30,6 +30,7 @@ stable   github.com/antifailure/antifailure/engine/conformance     The suite tha
 
 unstable github.com/antifailure/antifailure/engine/pkg/afcli       The socket the enterprise binary plugs its command tree into. Deliberately narrow rather than a general embedding API for the CLI.
 unstable github.com/antifailure/antifailure/engine/pkg/edition     How a binary reports which edition it is. Enterprise wiring, and the set of editions is ours to change.
+unstable github.com/antifailure/antifailure/engine/pkg/emulator    The emulator images this build can start, declared as data. Public only so the notices generator, which lives in another module and cannot import engine/internal, reads the same declaration the engine starts the container from. The set of emulators and the digests move whenever an upstream image does.
 unstable github.com/antifailure/antifailure/engine/pkg/extension   The registration point for an edition's extra behaviour. The same socket as afcli, one layer down.
 unstable github.com/antifailure/antifailure/engine/pkg/livekey     Reads the live key material a hosted deployment is configured with. Internal plumbing that happens to sit outside internal so the enterprise module can reach it.
 unstable github.com/antifailure/antifailure/engine/chaos           The suite that proves the failure paths the documentation claims. Tests of this repository, run against this repository, and not an interface anybody integrates against.

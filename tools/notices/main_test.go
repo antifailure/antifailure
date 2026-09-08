@@ -139,6 +139,13 @@ func TestTheGeneratedProseStaysInsideItsWidth(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(render(many, nil), "\n") {
+		// A line that is one unbreakable token has no wrap point, and a
+		// sha256 digest is 71 characters of exactly that. The rule is
+		// about prose the reader has to scan, not about a value that
+		// would be wrong if it were shortened.
+		if !strings.Contains(strings.TrimSpace(line), " ") {
+			continue
+		}
 		if len(line) > 74 {
 			t.Errorf("a generated line is %d characters: %q", len(line), line)
 		}
