@@ -7,15 +7,18 @@ import type { Post } from "@/lib/blog";
  * and the Stripe pack being complete enough to run checkout, subscribe, renew
  * and cancel with signed webhooks and no network.
  *
- * The manifest accepts six modes and the title says five, which is an argument
+ * The manifest accepts seven modes and the title says five, which is an argument
  * the post now makes rather than a number that is wrong. synth is held out on
  * the merits: runner/src/verdict.ts:60 maps a synthesized response to
  * unverified, and :129 keeps it unverified even when every assertion passed,
  * so it is the one mode whose output cannot be evidence. af-proxy/synth.go
  * says the same from the other side, calling it an escape hatch and telling
  * anyone without a model key to write a fixture instead. The body names it and
- * says why, because a title that counts five while the product has six is only
- * honest if the piece supports it.
+ * says why, because a title that counts five while the product has seven is only
+ * honest if the piece supports it. EMULATE arrived after the post was published
+ * and is held out on a different ground from synth: it is not one of several
+ * answers to an outbound call, it is the same answer as MOCK given by a real
+ * service instead of a fixture, and the post's argument does not change with it.
  *
  * The slug is deliberately stale and must stay that way. www/lib/blog.ts says
  * never change one after publishing, and a slug is an identifier rather than a
@@ -27,7 +30,7 @@ export const EGRESS_MODES: Post = {
   title: "There are five useful answers to an outbound HTTP call in a test environment",
   dek: "Most environments have two: let it through, or break. Neither is right for a payment processor, and the gap is where test runs charge real cards.",
   summary:
-    "Five of the six per-host egress modes for a pre-production environment, what each is for, and why the default must be to refuse.",
+    "Five of the seven per-host egress modes for a pre-production environment, what each is for, and why the default must be to refuse.",
   published: "2026-08-27",
   tags: ["Testing", "Networking", "Third-party APIs"],
   body: (
@@ -84,16 +87,26 @@ export const EGRESS_MODES: Post = {
         </li>
       </ul>
       <p>
-        There is a sixth mode and this post is not counting it. <strong>SYNTH</strong>{" "}
-        asks a model to invent the response, which is worth having when a
-        provider offers no sandbox and you have no fixture yet and the run
-        would otherwise stop dead. It is not an answer in the sense the other
-        five are. Anything that touches a synthesized response is reported as
-        unverified rather than passed, even when every assertion held, because
-        the reply came from a model and not from the thing under test. The
-        five above give you a result you can rely on. That one gives you a
-        shape to keep moving against, and tells you plainly that nothing you
-        just saw is evidence.
+        Two more modes exist and this post counts neither, for opposite reasons.{" "}
+        <strong>SYNTH</strong> asks a model to invent the response, which is
+        worth having when a provider offers no sandbox and you have no fixture
+        yet and the run would otherwise stop dead. It is not an answer in the
+        sense the five above are. Anything that touches a synthesized response
+        is reported as unverified rather than passed, even when every assertion
+        held, because the reply came from a model and not from the thing under
+        test. The five above give you a result you can rely on. That one gives
+        you a shape to keep moving against, and tells you plainly that nothing
+        you just saw is evidence.
+      </p>
+      <p>
+        <strong>EMULATE</strong> is left out because it is not a sixth answer,
+        it is the fifth one given by a real service. It hands the request to
+        LocalStack or Azurite running beside your application, so the state is
+        real and the operations are the provider's own rather than a pack you
+        wrote. What it adds is not a new decision about the call, it is that
+        your application needs no endpoint override to reach it, which is a
+        story about your code rather than about the mode. It arrived after this
+        post and did not change its argument.
       </p>
 
       <h2>Why stateful mocking is a different thing</h2>

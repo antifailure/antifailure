@@ -50,8 +50,9 @@ network with no route out. The only thing on both networks is a sidecar that
 owns the namespace, so a client that ignores its proxy variables has nowhere to
 send the packet. Interception is by DNS, which is what makes it work for
 runtimes with no proxy support and for SDKs that bundle their own client. Each
-host gets one of six modes: `block`, `allow`, `sandbox`, `capture`, `mock` and
-`synth`. A live credential on the way out is refused rather than redacted.
+host gets one of seven modes: `block`, `allow`, `sandbox`, `capture`, `mock`,
+`emulate` and `synth`. A live credential on the way out is refused rather than
+redacted.
 
 **Agents, not scripts.** A workflow is a sentence. The runner drives a real
 browser through the accessibility tree, signs in the way a person does with a

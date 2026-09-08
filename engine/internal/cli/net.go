@@ -250,6 +250,13 @@ func styleForMode(m schema.Mode) Style {
 		return StyleGood
 	case schema.ModeSynth:
 		return StyleBad
+	case schema.ModeCapture, schema.ModeMock, schema.ModeEmulate:
+		// Answered inside the environment, so nothing left and nothing was
+		// invented. Emulate is named here rather than left to fall through,
+		// because it is the mode most easily mistaken for sandbox, which IS
+		// warned about: both hand the request to a real service, and only one
+		// of them is on a network with a route out.
+		return StyleDim
 	default:
 		return StyleDim
 	}
@@ -280,7 +287,7 @@ matched, so a surprising answer is diagnosable rather than mysterious.`),
 					Rule: d.RuleHost, Reason: d.Reason(), RateLimit: d.RateLimit,
 					Credential: d.Credential, Fixtures: d.Fixtures, WebhookPath: d.WebhookPath,
 					Emulator: d.Emulator,
-					Matched: make([]ExplainMatchJSON, 0, len(chain)),
+					Matched:  make([]ExplainMatchJSON, 0, len(chain)),
 				}
 				for i, m := range chain {
 					doc.Matched = append(doc.Matched, ExplainMatchJSON{

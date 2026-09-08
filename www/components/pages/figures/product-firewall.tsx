@@ -3,8 +3,8 @@ import { FloatWindow, SageWell } from "@/components/pages/solutions/well";
 import { cn } from "@/lib/cn";
 
 // BLOCK, not DENY. The manifest's egress modes are block, allow, capture,
-// mock, sandbox and synth, so a figure of a manifest driven run that offers
-// DENY names an outcome the validator would refuse.
+// mock, emulate, sandbox and synth, so a figure of a manifest driven run that
+// offers DENY names an outcome the validator would refuse.
 const MODES = ["MOCK", "CAPTURE", "BLOCK"] as const;
 
 type Tone = "plain" | "sage" | "success" | "danger" | "muted";

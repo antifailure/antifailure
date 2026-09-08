@@ -131,6 +131,7 @@ func (r *Runtime) startEmulator(
 			Image:  e.Image,
 			Labels: labels,
 			Env:    emulatorEnv(e.Env),
+			Cmd:    e.Command,
 		},
 		&container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},

@@ -23,7 +23,7 @@ export function FintechPage() {
         kicker="Simulators, not live processors"
         title="Charging a card from a twin is an existential failure."
         items={[
-          { title: "The mode is set per host", body: "block, allow, capture, mock, sandbox or synth, written against the host in antifailure.yaml." },
+          { title: "The mode is set per host", body: "block, allow, capture, mock, emulate, sandbox or synth, written against the host in antifailure.yaml." },
           { title: "Nothing leaves without a rule", body: "Egress defaults to block, so a processor nobody configured is refused on its first run rather than passed through." },
           { title: "The ledger records the decision", body: "Each attempt is stored with the mode that decided it, so the reason a request never left is readable afterwards." },
         ]}

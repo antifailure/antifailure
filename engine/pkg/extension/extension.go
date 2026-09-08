@@ -534,6 +534,11 @@ type EmulatorContainer struct {
 	// containers that run a command line tool and answer nothing, and the
 	// declaration reads as though it started them.
 	//
+	// Azurite needs it too, for a smaller reason with the same shape: it binds
+	// to loopback unless it is told otherwise, and an emulator listening on
+	// 127.0.0.1 answers nothing from the sidecar while looking perfectly
+	// healthy in its own logs.
+	//
 	// A slice rather than a string, because a string would be run through a
 	// shell and an emulator's arguments carry addresses and ports that a
 	// shell would be free to reinterpret.

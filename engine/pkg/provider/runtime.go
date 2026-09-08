@@ -281,6 +281,8 @@ type EmulatorSpec struct {
 	Port int
 	// Env is what the container is started with.
 	Env map[string]string
+	// Command overrides the image's own command. Empty uses the image's.
+	Command []string
 }
 
 // ServiceSpec is one container to run.
