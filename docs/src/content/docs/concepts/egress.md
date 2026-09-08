@@ -41,6 +41,7 @@ egress:
 | `sandbox` | Sent to the provider's sandbox, with the sandbox credential substituted for the one the application holds. |
 | `capture` | Answered locally and recorded, so a workflow finishes and nothing leaves. |
 | `mock` | Answered from a fixture pack, with no network at all. |
+| `emulate` | Answered by an emulator running inside the environment, at the provider's own hostname, so the application needs no endpoint override. |
 | `synth` | Answered by a model, for an API with no sandbox and no fixture. |
 
 `sandbox` is the one worth understanding. The application inside the container
@@ -68,7 +69,8 @@ outside them falls through to the next rule that matches, and then to the
 default. `rate_limit` is a token bucket, which is what stops a retry loop in a
 preview from looking like an attack to somebody's rate limiter.
 
-`fixtures` names a pack for `mock` mode.
+`fixtures` names a pack for `mock` mode. `emulator` names the emulator for
+`emulate` mode, and is required there and refused everywhere else.
 
 ## Matching a host
 
@@ -115,6 +117,64 @@ an address, or a pattern whose stars are all interior. A host swept in by a
 leading wildcard, or reached through `default: capture` with no rule at all, is
 refused instead, with a decision saying so, because an invented success is
 believed and nobody wrote that host down.
+
+## Emulate answers at the provider's own hostname
+
+`emulate` hands the request to an emulator running beside your services.
+LocalStack, Azurite and the vendors' own emulators carry years of fidelity work
+that a replacement written here would not have, so Antifailure writes none of
+them and routes to them instead.
+
+```yaml
+    - host: "s3.*.amazonaws.com"
+      mode: emulate
+      emulator: localstack
+    - host: "*.s3.*.amazonaws.com"
+      mode: emulate
+      emulator: localstack
+      note: "the bucket is in the hostname, so this is a second rule"
+```
+
+The reason the mode exists is what it does not ask you to change. Using an
+emulator normally means an endpoint override, or a client constructed one way in
+tests and another way in production, and an application changed for the test is
+not the application that ships. Here the name still resolves to the sidecar, the
+sidecar still presents a certificate for `s3.us-east-1.amazonaws.com` signed by
+the authority the environment already trusts, and the body is forwarded to a
+container on the environment's own network. Your SDK is configured for
+production and stays that way.
+
+`emulator` names a registration rather than an image or an address. What
+container runs, which digest it is pinned to and what it is started with belong
+to whoever registered the emulator, so a manifest cannot point traffic at a host
+of its choosing. A name this build has not registered refuses the environment
+before it starts, rather than falling through to `block`, because a rule that
+silently does nothing is how somebody comes to believe an environment was tested
+against S3.
+
+The emulator container joins the environment's inner network and nothing else.
+That network is created with Docker's `internal` flag, so the emulator has no
+route to the internet at all, which is a property of the network rather than a
+promise made here.
+
+### Two headers are deliberately not rewritten
+
+The destination is rewritten. The request is not.
+
+The `Host` header keeps the name your application asked for. Virtual hosted
+addressing puts the S3 bucket in the hostname, so
+`mybucket.s3.us-east-1.amazonaws.com` **is** the request, and an emulator told
+the host is `af-emu-localstack:4566` has been told the bucket is called
+`af-emu`. LocalStack, Azurite and fake-gcs-server all read it from the header.
+
+The `Authorization` header is forwarded untouched. `sandbox` replaces a
+credential because the request leaves the environment and a real provider is on
+the other end; here the other end has no route out, so there is nothing for a
+credential to leak to. Re-signing is not an option either, because SigV4 signs
+the `Host` header, so replacing the credential without re-signing would produce
+a signature that disagrees with its own request. The sidecar records the access
+key id, never the secret, so that the live credential tripwire's refusals can be
+read against the requests that were accepted.
 
 ## Reading a decision
 
@@ -237,7 +297,7 @@ means the client pins its own.
   disable pinning in the client for previews.
 ```
 
-`sandbox`, `capture`, `mock` and `synth` all terminate TLS, because deciding
+`sandbox`, `capture`, `mock`, `emulate` and `synth` all terminate TLS, because deciding
 what a request means requires reading it. A client that pins a certificate will
 refuse. `allow` does not intercept, so a pinned client works, at the cost of
 the engine not seeing what it sent.

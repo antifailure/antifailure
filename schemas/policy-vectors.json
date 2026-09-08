@@ -995,6 +995,11 @@
             "webhook_path": "/hooks/mock"
           },
           {
+            "host": "emulate.test",
+            "mode": "emulate",
+            "emulator": "localstack"
+          },
+          {
             "host": "sandbox.test",
             "mode": "sandbox",
             "credential": "STRIPE_SECRET_KEY",
@@ -1104,6 +1109,30 @@
         },
         {
           "request": {
+            "host": "emulate.test",
+            "tls": true,
+            "string": "GET https://emulate.test"
+          },
+          "decision": {
+            "mode": "emulate",
+            "rule_host": "emulate.test",
+            "emulator": "localstack",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for emulate.test decided emulate because the host matches exactly. The localstack emulator answers it inside the environment, so the application needs no endpoint override."
+          },
+          "chain": [
+            {
+              "host": "emulate.test",
+              "index": 4,
+              "specificity": 1048576,
+              "why": "the host matches exactly"
+            }
+          ],
+          "inspects_host": true
+        },
+        {
+          "request": {
             "host": "sandbox.test",
             "tls": true,
             "string": "GET https://sandbox.test"
@@ -1120,7 +1149,7 @@
           "chain": [
             {
               "host": "sandbox.test",
-              "index": 4,
+              "index": 5,
               "specificity": 1048576,
               "why": "the host matches exactly"
             }
@@ -1143,9 +1172,156 @@
           "chain": [
             {
               "host": "synth.test",
-              "index": 5,
+              "index": 6,
               "specificity": 1048576,
               "why": "the host matches exactly"
+            }
+          ],
+          "inspects_host": true
+        }
+      ]
+    },
+    {
+      "name": "two rules, one emulator: S3 is reached under two different hostnames",
+      "egress": {
+        "default": "block",
+        "rules": [
+          {
+            "host": "*.amazonaws.com",
+            "mode": "block",
+            "note": "The cloud is refused unless a rule names the service."
+          },
+          {
+            "host": "s3.*.amazonaws.com",
+            "mode": "emulate",
+            "note": "Path style addressing.",
+            "emulator": "localstack"
+          },
+          {
+            "host": "*.s3.*.amazonaws.com",
+            "mode": "emulate",
+            "note": "Virtual hosted addressing, where the bucket is in the hostname.",
+            "emulator": "localstack"
+          },
+          {
+            "host": "email.*.amazonaws.com",
+            "mode": "capture"
+          }
+        ]
+      },
+      "requests": [
+        {
+          "request": {
+            "host": "s3.us-east-1.amazonaws.com",
+            "method": "PUT",
+            "path": "/mybucket/key",
+            "tls": true,
+            "string": "PUT https://s3.us-east-1.amazonaws.com/mybucket/key"
+          },
+          "decision": {
+            "mode": "emulate",
+            "rule_host": "s3.*.amazonaws.com",
+            "emulator": "localstack",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for s3.*.amazonaws.com decided emulate because one label fills each star in s3.*.amazonaws.com. Path style addressing."
+          },
+          "chain": [
+            {
+              "host": "s3.*.amazonaws.com",
+              "index": 1,
+              "specificity": 65554,
+              "why": "one label fills each star in s3.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": true
+        },
+        {
+          "request": {
+            "host": "mybucket.s3.us-east-1.amazonaws.com",
+            "method": "PUT",
+            "path": "/key",
+            "tls": true,
+            "string": "PUT https://mybucket.s3.us-east-1.amazonaws.com/key"
+          },
+          "decision": {
+            "mode": "emulate",
+            "rule_host": "*.s3.*.amazonaws.com",
+            "emulator": "localstack",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.s3.*.amazonaws.com decided emulate because one label fills each star in *.s3.*.amazonaws.com. Virtual hosted addressing, where the bucket is in the hostname."
+          },
+          "chain": [
+            {
+              "host": "*.s3.*.amazonaws.com",
+              "index": 2,
+              "specificity": 4115,
+              "why": "one label fills each star in *.s3.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": true
+        },
+        {
+          "request": {
+            "host": "sts.us-east-1.amazonaws.com",
+            "tls": true,
+            "string": "GET https://sts.us-east-1.amazonaws.com"
+          },
+          "decision": {
+            "mode": "block",
+            "rule_host": "*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for *.amazonaws.com decided block because the host ends in .amazonaws.com. The cloud is refused unless a rule names the service."
+          },
+          "chain": [
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
+            }
+          ],
+          "inspects_host": false
+        },
+        {
+          "request": {
+            "host": "email.us-east-1.amazonaws.com",
+            "tls": true,
+            "string": "GET https://email.us-east-1.amazonaws.com"
+          },
+          "decision": {
+            "mode": "capture",
+            "rule_host": "email.*.amazonaws.com",
+            "matched": true,
+            "allowed": false,
+            "reason": "The rule for email.*.amazonaws.com decided capture because one label fills each star in email.*.amazonaws.com."
+          },
+          "chain": [
+            {
+              "host": "email.*.amazonaws.com",
+              "index": 3,
+              "specificity": 65557,
+              "why": "one label fills each star in email.*.amazonaws.com"
+            },
+            {
+              "host": "*.amazonaws.com",
+              "index": 0,
+              "specificity": 4110,
+              "why": "the host ends in .amazonaws.com"
             }
           ],
           "inspects_host": true

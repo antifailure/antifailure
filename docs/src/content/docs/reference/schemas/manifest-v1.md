@@ -144,15 +144,16 @@ What the environment may reach on the network. Everything leaves through the sid
 
 ## Egress rule
 
-What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, or sent to the provider's own sandbox.
+What the environment may do with one host. A rule is per host because that is the unit a person can reason about: allowed, blocked, answered from a fixture, answered by an emulator inside the environment, or sent to the provider's own sandbox.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `credential` | string | no | Name of the environment variable holding the sandbox credential for this host. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `emulator` | string | no | Name of the registered emulator that answers this host, for a rule in emulate mode. Required there and refused on every other mode. A name this build has not registered is refused rather than falling through to block. Max length 63, matches `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`. |
 | `fixtures` | string | no | Path to a fixture pack or an OpenAPI document for mock mode, relative to the repository root. Max length 512. |
 | `host` | string | **yes** | Host to match. A leading *. matches one or more labels. A star anywhere else is one whole label, so email.*.amazonaws.com reaches SES in any region and reaches nothing else, and *.s3.*.amazonaws.com reaches a bucket in any region. An IP literal matches only itself. Max length 253. |
 | `methods` | list of string | no | Restrict the rule to these HTTP methods. Max items 10. |
-| `mode` | `block`, `allow`, `capture`, `mock`, `sandbox`, `synth` | **yes** | block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. synth asks a model to invent a response and marks every result that touched it as unverified. |
+| `mode` | `block`, `allow`, `capture`, `mock`, `emulate`, `sandbox`, `synth` | **yes** | block refuses with a readable decision. allow passes through with a rate limit. sandbox substitutes test credentials and forwards to the provider's sandbox. capture records the message into the inbox and returns the provider's success shape. mock answers from a fixture or an offline pack. emulate answers from an emulator running inside the environment, which the application reaches with no endpoint override. synth asks a model to invent a response and marks every result that touched it as unverified. |
 | `note` | string | no | Why this rule exists. Rendered in the network policy view, because a rule nobody can explain is a rule nobody dares remove. Max length 512. |
 | `paths` | list of string | no | Restrict the rule to these path prefixes. Anything else on the same host falls through to the next rule. Max items 100. |
 | `rate_limit` | string | no | Token bucket rate, for example 10/s or 600/m. Applies to allow and sandbox. Matches `^[0-9]+/(s\|m\|h)$`. |

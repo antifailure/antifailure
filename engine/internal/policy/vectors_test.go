@@ -66,6 +66,7 @@ type vectorDecision struct {
 	Credential  string      `json:"credential,omitempty"`
 	Fixtures    string      `json:"fixtures,omitempty"`
 	WebhookPath string      `json:"webhook_path,omitempty"`
+	Emulator    string      `json:"emulator,omitempty"`
 	Matched     bool        `json:"matched"`
 	Allowed     bool        `json:"allowed"`
 	Reason      string      `json:"reason"`
@@ -222,6 +223,7 @@ func corpus() []vectorPolicy {
 					{Host: "capture.test", Mode: schema.ModeCapture},
 					{Host: "mock.test", Mode: schema.ModeMock, Fixtures: "fixtures/mock",
 						WebhookPath: "/hooks/mock"},
+					{Host: "emulate.test", Mode: schema.ModeEmulate, Emulator: "localstack"},
 					{Host: "sandbox.test", Mode: schema.ModeSandbox, Credential: "STRIPE_SECRET_KEY",
 						WebhookPath: "/api/webhooks/stripe"},
 					{Host: "synth.test", Mode: schema.ModeSynth},
@@ -232,8 +234,41 @@ func corpus() []vectorPolicy {
 				{Request: vectorReq{Host: "allow.test", TLS: true}},
 				{Request: vectorReq{Host: "capture.test", TLS: true}},
 				{Request: vectorReq{Host: "mock.test", TLS: true}},
+				{Request: vectorReq{Host: "emulate.test", TLS: true}},
 				{Request: vectorReq{Host: "sandbox.test", TLS: true}},
 				{Request: vectorReq{Host: "synth.test", TLS: true}},
+			},
+		},
+		{
+			// The shape the emulate mode exists for, and the reason a rule
+			// names an emulator rather than an address. Two rules name one
+			// LocalStack because virtual hosted addressing and path style
+			// addressing are two different hostnames for one service, and a
+			// reimplementation that carried the emulator name on only the
+			// rule it happened to test would show the wrong answer for the
+			// other one.
+			Name: "two rules, one emulator: S3 is reached under two different hostnames",
+			Egress: schema.Egress{
+				Default: schema.ModeBlock,
+				Rules: []schema.EgressRule{
+					{Host: "*.amazonaws.com", Mode: schema.ModeBlock,
+						Note: "The cloud is refused unless a rule names the service."},
+					{Host: "s3.*.amazonaws.com", Mode: schema.ModeEmulate, Emulator: "localstack",
+						Note: "Path style addressing."},
+					{Host: "*.s3.*.amazonaws.com", Mode: schema.ModeEmulate, Emulator: "localstack",
+						Note: "Virtual hosted addressing, where the bucket is in the hostname."},
+					{Host: "email.*.amazonaws.com", Mode: schema.ModeCapture},
+				},
+			},
+			Requests: []vectorRequest{
+				{Request: vectorReq{Host: "s3.us-east-1.amazonaws.com", TLS: true,
+					Method: "PUT", Path: "/mybucket/key"}},
+				{Request: vectorReq{Host: "mybucket.s3.us-east-1.amazonaws.com", TLS: true,
+					Method: "PUT", Path: "/key"}},
+				// A different service under the same domain is still refused,
+				// so naming an emulator widens nothing beyond its own rules.
+				{Request: vectorReq{Host: "sts.us-east-1.amazonaws.com", TLS: true}},
+				{Request: vectorReq{Host: "email.us-east-1.amazonaws.com", TLS: true}},
 			},
 		},
 		{
@@ -272,7 +307,8 @@ func buildVectors(t *testing.T) vectorFile {
 			vr.Decision = vectorDecision{
 				Mode: d.Mode, RuleHost: d.RuleHost, RateLimit: d.RateLimit,
 				Credential: d.Credential, Fixtures: d.Fixtures, WebhookPath: d.WebhookPath,
-				Matched: d.Matched(), Allowed: d.Allowed(), Reason: d.Reason(),
+				Emulator: d.Emulator,
+				Matched:  d.Matched(), Allowed: d.Allowed(), Reason: d.Reason(),
 			}
 			vr.Chain = make([]vectorMatch, 0, len(chain))
 			for _, m := range chain {
