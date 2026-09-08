@@ -8,38 +8,59 @@ on:
   pull_request:
 
 # A second push cancels the first run on a BRANCH, because the answer about the
-# older commit stopped mattering the moment the newer one arrived. On main it
-# does not, and the reason is directly below.
+# older commit stopped mattering the moment the newer one arrived. On main
+# nothing supersedes anything, and the reason is directly below.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # A run on main is the verdict a tag and a deploy are read against, so it
-  # is never cancelled. On a branch the saving is real and nothing depends
-  # on the superseded answer, so cancelling stays.
+  # EVERY COMMIT ON MAIN GETS ITS OWN GROUP. On a branch the group is the ref,
+  # unchanged, and cancelling the superseded run stays.
   #
-  # Six merges landed inside one run's length on 2026-09-02 and each cancelled
-  # the one before it, so main went from 09:07 to past 12:30 with no COMPLETED
-  # run at all. Cancelled is not red, but it is not a verdict either, and at
-  # the time `release.yml` had no gate of its own, so the only thing standing
-  # between an unverified commit and published binaries was somebody holding
-  # merges by hand.
+  # This was the ref alone, with `cancel-in-progress: false` doing the
+  # protecting on main and a comment here saying a run on main is never
+  # cancelled. That sentence was wrong, its own last paragraph said so thirty
+  # lines further down, and between the two of them the file both promised the
+  # protection and withdrew it.
   #
-  # `release.yml` has a gate now and it reads THIS workflow's conclusion, which
-  # makes this line matter more rather than less: the gate refuses a cancelled
-  # run, so a main run that never finished is a release that cannot be cut.
+  # `cancel-in-progress: false` protects a run that has STARTED and nothing
+  # else. GitHub holds exactly ONE pending run per concurrency group, so every
+  # new merge cancels the run queued behind the one in progress. On 2026-09-08
+  # four pull requests merged inside four minutes and the API recorded this:
   #
-  # There is no clause for tags here because this workflow does not run on
-  # one. The `on:` block above is a push to main and a pull request, and
-  # nothing else, so `refs/tags/` is a ref this expression is never evaluated
-  # against. The first version of this line excluded tags anyway, which read
-  # as protection and was a condition that could not be true.
+  #   09078be0  created 13:09:53  jobs started 13:12:57  in_progress
+  #   39a771ff  created 13:13:15  NO JOBS AT ALL         cancelled 13:13:51
+  #   f5e2ef68  created 13:13:50  NO JOBS AT ALL         cancelled 13:14:23
+  #   822584fa  created 13:14:22  no jobs yet            pending
   #
-  # What this does NOT buy, so nobody reads more into it than it does: a run
-  # that has already STARTED is never cancelled, and that is the whole of it.
-  # GitHub still cancels a run that is merely PENDING when a newer one queues
-  # behind the same in progress run. So the newest commit always reaches a
-  # verdict, which is what a tag and a deploy are read against, and commits in
-  # between a burst of merges still get skipped. Every commit reaching a
-  # verdict needs a merge queue, not a bigger timeout.
+  # Each cancellation lands one second after the NEXT run is created, and both
+  # cancelled runs carry an empty job list, so neither ran a single check. The
+  # same shape emptied main from 09:07 to past 12:30 on 2026-09-02, which is
+  # the incident the old comment was written about.
+  #
+  # The old comment concluded that every commit reaching a verdict "needs a
+  # merge queue". It does not. Keying the group on the commit gives each push to
+  # main a group of one, so no run supersedes another and no pending run is ever
+  # taken. security.yml reached this answer for its daily scan on 2026-09-05 by
+  # keying its group on the event, and nobody carried the idea back to the runs
+  # it was learned from. This is that.
+  #
+  # WHAT IT COSTS, stated here rather than discovered later: runner minutes. Six
+  # merges in a burst now run six full CI runs where two ran before, and past
+  # the account's concurrency limit they QUEUE. A queue is a delay. A cancelled
+  # pending run was a permanent hole in main's history, and a hole cannot be
+  # re-run into existence once the next merge has landed on top of it.
+  #
+  # There is no clause for tags because this workflow does not run on one. The
+  # `on:` block above is a push to main and a pull request and nothing else, so
+  # `refs/tags/` is a ref this expression is never evaluated against.
+  #
+  # `tools/mainverdict` is what notices when this stops working, and it is not
+  # decoration: a run can still be cancelled by hand, a job can still hit its
+  # own timeout-minutes, and this expression can be edited back by somebody who
+  # reads the group as noise.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'branch' }}
+  # Kept, and now the belt to the group's braces. On main the group holds one
+  # run, so there is nothing left to supersede and this decides nothing; it
+  # stays false to say what must happen if the group is ever narrowed back. On a
+  # branch it is the whole of the saving.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read, and only read. No job in this workflow writes anything back, and a
