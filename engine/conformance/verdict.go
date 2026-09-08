@@ -75,9 +75,9 @@ package conformance
 // prescribed fake. And nobody would ever look at it again, because green checks
 // do not get read.
 //
-// So an unasserted run is unproven in BOTH directions, whatever the measurement
-// would have said. A passing measurement on a simulator is not reportable as a
-// pass.
+// So a run that asserts nothing is unproven in BOTH directions, whatever the
+// measurement would have said. A passing measurement on a simulator is not
+// reportable as a pass.
 //
 // THE MEASUREMENT IS NOT TAKEN, AND THAT IS DELIBERATE.
 //

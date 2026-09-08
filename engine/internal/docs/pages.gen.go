@@ -4082,8 +4082,8 @@ capability is being decided: a fake control plane over a real local Postgres doe
 **not** qualify, however real the Postgres is, because what the stopwatch timed
 was Postgres.
 
-**It is symmetric.** An unasserted run is unproven whether you declare ` + "`" + `true` + "`" + ` or
-` + "`" + `false` + "`" + `. The false side is the one worth spelling out, because it is the one that
+**It is symmetric.** A run that asserts nothing is unproven whether you declare
+` + "`" + `true` + "`" + ` or ` + "`" + `false` + "`" + `. The false side is the one worth spelling out, because it is the one that
 would otherwise ship: a snapshot restore provider declaring ` + "`" + `false` + "`" + ` against a
 copying fake passes comfortably, publishes a certified claim that its service is
 not copy on write, and nobody rereads a green check.

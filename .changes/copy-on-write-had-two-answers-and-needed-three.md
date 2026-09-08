@@ -17,7 +17,7 @@ assertion of reality rather than an admission of simulation, because a field a
 fake sets to excuse itself is a field a fake can simply never set. Forgetting
 this one produces the safe answer.
 
-It is symmetric. An unasserted run is unproven whether the provider declares
+It is symmetric. A run that asserts nothing is unproven whether the provider declares
 true or false, because the false side is the one that would otherwise ship: a
 snapshot restore provider passing comfortably against a copying fake publishes a
 certified claim about its service, and nobody rereads a green check.
