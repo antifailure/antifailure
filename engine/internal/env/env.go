@@ -1002,6 +1002,14 @@ func (o *Orchestrator) runtimeIdentity(ctx context.Context, s *session) string {
 	if s != nil && s.runtime != nil {
 		return s.runtime.Name()
 	}
+	// No session, which is the reader that has not built a runtime. The
+	// manifest's own provider rather than a constant, because a constant here
+	// is the defect this function was written to remove and putting a smaller
+	// one back at the bottom of it would be the same mistake in a quieter
+	// place.
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil && m.Runtime.Provider != "" {
+		return string(m.Runtime.Provider)
+	}
 	return string(schema.RuntimeLocal)
 }
 

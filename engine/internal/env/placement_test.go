@@ -8,6 +8,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/edition"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -238,13 +239,27 @@ func TestRuntimeIdentity_IsTheTargetNameSoTheRegistryCanTellTwoClustersApart(t *
 func TestRuntimeIdentity_FallsBackToTheRuntimeItActuallyBuilt(t *testing.T) {
 	t.Parallel()
 	// An unplaced manifest, which is every manifest that existed before this.
-	// The runtime's own name is at least true, and it is what the registry has
-	// always been given for a local environment.
-	o := placed(t, &schema.Runtime{Provider: schema.RuntimeLocal})
-	rt, err := o.newRuntime(context.Background())
+	// The runtime that was actually built is what the registry should be told.
+	//
+	// The manifest says kubernetes and the session holds a local runtime, which
+	// is a state no real run reaches and is exactly what makes this test able
+	// to fail: with both set to local, a version that ignored the session
+	// entirely would answer local and look correct. The two have to disagree
+	// for the answer to name which one was consulted.
+	o := placed(t, &schema.Runtime{Provider: schema.RuntimeKubernetes})
+	rt, err := local.New(local.Options{Clock: o.opts.Clock, Redactor: o.opts.Redactor})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close() })
 	require.Equal(t, "local", o.runtimeIdentity(context.Background(), &session{runtime: rt}))
+}
+
+func TestRuntimeIdentity_FallsBackToTheDeclaredProviderWithNoSession(t *testing.T) {
+	t.Parallel()
+	// The reader that has not built a runtime. A constant here would be the
+	// same defect this function exists to remove, in a quieter place, so it is
+	// the manifest's own answer.
+	o := placed(t, &schema.Runtime{Provider: schema.RuntimeKubernetes})
+	require.Equal(t, "kubernetes", o.runtimeIdentity(context.Background(), nil))
 }
 
 func TestPlacement_RefusesAManifestWithNoRuntimeBlockRatherThanCrashing(t *testing.T) {
