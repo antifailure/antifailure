@@ -553,7 +553,7 @@ runtime:
 A target inherits `provider`, `domain`, `namespace_prefix` and
 `kubeconfig_context` from the block above it, so a fleet of clusters is one
 provider line and a list of contexts rather than the same four settings written
-out per target. `af check` prints each target with its tags and marks the one
+out per target. `af explain` prints each target with its tags and marks the one
 this manifest would be placed on.
 
 **The tags are declared here rather than discovered from the cluster**, and that
@@ -568,8 +568,8 @@ consulted a cluster's health would send `af up` to one cluster and `af status` t
 another the moment one of them was unreachable, and the second command would
 report that your environment does not exist.
 
-**A requirement nothing can satisfy is refused rather than ignored**, at `af
-check`, before anything is dispatched:
+**A requirement nothing can satisfy is refused rather than ignored**, when the
+manifest is read, before anything is dispatched:
 
 - `requires` with no `targets`. There is one runtime, it carries no tags, and so
   nothing could ever match.

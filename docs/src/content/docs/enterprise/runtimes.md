@@ -47,8 +47,9 @@ Placing an EU repository's environment in a US pool because the EU pool was full
 is the kind of helpfulness that ends a compliance audit badly. A requirement
 that can be silently ignored is not a requirement.
 
-The same reasoning is why a requirement nothing can satisfy is refused at `af
-check` rather than at dispatch. The requirement and the targets are in one file,
+The same reasoning is why a requirement nothing can satisfy is refused when the
+manifest is read rather than at dispatch. The requirement and the targets are in
+one file,
 so the contradiction is decidable before anything runs, and the person looking at
 it is the person who wrote both lines. A scheduler in a cluster reporting the
 same thing an hour later is reporting it to somebody who cannot fix it.
