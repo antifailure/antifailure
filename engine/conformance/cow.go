@@ -183,46 +183,44 @@ const (
 // and a provider wanting a tighter answer sets a larger large size.
 const (
 	copyOnWriteNoiseFloor      = 250 * time.Millisecond
-	copyOnWriteJitterFraction  = 0.5
+	copyOnWriteSpreadFactor    = 2
 	copyOnWriteBallastRowBytes = 1024
 )
 
 // copyOnWriteAllowance is the boundary both sides of the assertion are
 // measured against: how much extra branch time is attributable to noise rather
-// than to the extra data. Three terms, and the largest wins.
+// than to the extra data.
 //
-// The OBSERVED SPREAD of the small arm is the one that matters most and it is
-// the one a fixed number cannot supply. It is this machine, during this run,
-// telling the measurement how much its own timings move when nothing about the
-// data has changed. On a quiet machine it collapses and the instrument gets
-// sharper; under load it widens and stops accusing an honest provider of
-// copying. Taken from the small arm rather than the large one because the
-// minimum already absorbs a slow large sample, and what inflates the growth is
-// an anomalously FAST small one.
+// It is the OBSERVED SPREAD of the small arm, doubled, with an absolute floor.
+// The spread is this machine, during this run, saying how far its own readings
+// travel while the data is held constant, which is the exact quantity the
+// allowance is meant to be. Taken from the small arm rather than the large one
+// because the minimum already absorbs a slow large sample, and what inflates
+// the growth is an anomalously FAST small one. Doubled because three readings
+// underestimate a range, and heavily so on a machine whose load is drifting.
 //
-// The ABSOLUTE FLOOR covers a provider whose branching is quick and whose
-// spread is therefore a few milliseconds, where any hiccup would clear it. A
-// quarter of a second is longer than a scheduling hiccup that survives taking
-// the minimum of several alternating samples, and it is a small fraction of
-// what moving a gibibyte costs on any storage that exists.
+// The ABSOLUTE FLOOR covers a provider whose branching is quick enough that
+// the spread is a few milliseconds and any hiccup would clear it. A quarter of
+// a second survives taking the minimum of several alternating samples, and it
+// is a small fraction of what moving half a gibibyte costs on any storage that
+// exists.
 //
-// The PROPORTIONAL term covers the case three samples are too few to reveal:
-// a spread that came out near zero by luck on a provider whose timings do in
-// fact move by seconds. Half is deliberately generous.
+// It USED to carry a third term, half the small arm's own minimum, as a proxy
+// for the noise on a provider whose timings move by seconds. Measuring the
+// thing it was a proxy for is what removed it. On the shared cluster at load
+// twenty six, the small arm read 30.4s and 26.8s: a spread of 3.6s, where half
+// the minimum was 13.4s. The proxy was four times the noise it stood in for,
+// and every second of that came out of the instrument's ability to see a copy.
+// When the quantity can be measured, a proxy for it is a threshold nobody has
+// checked, which is the same defect as the capability this file exists to
+// falsify.
 //
-// The cost of that generosity is a real limit and is stated rather than
-// hidden. A provider whose branch takes eight seconds could copy up to four
-// seconds worth of data and still be called copy on write here. Sensitivity is
-// bounded by the provider's OWN fixed cost, so the instrument is sharp on a
-// fast provider and blunt on a slow one, and the remedy is a larger large
-// size rather than a smaller allowance. The failure messages say so, with the
-// size that would have been needed, computed from what was measured.
+// A real limit remains and the failure messages state it: sensitivity is
+// bounded by how still the provider's own timings are, so the instrument is
+// sharp on a steady provider and blunt on an erratic one, and the remedy is a
+// larger large size rather than a smaller allowance.
 func copyOnWriteAllowance(smallTimes []time.Duration) time.Duration {
-	best, worst := minDuration(smallTimes), maxDuration(smallTimes)
-	allowance := worst - best
-	if proportional := time.Duration(float64(best) * copyOnWriteJitterFraction); proportional > allowance {
-		allowance = proportional
-	}
+	allowance := (maxDuration(smallTimes) - minDuration(smallTimes)) * copyOnWriteSpreadFactor
 	if allowance < copyOnWriteNoiseFloor {
 		allowance = copyOnWriteNoiseFloor
 	}
@@ -697,14 +695,6 @@ func (h *harness) requireBallast(ctx context.Context, b provider.Branch, golden 
 			"fraction of production.",
 			bytesText(golden), bytesText(got))
 	}
-}
-
-func copyOnWriteAllowance(small time.Duration) time.Duration {
-	proportional := time.Duration(float64(small) * copyOnWriteJitterFraction)
-	if proportional > copyOnWriteNoiseFloor {
-		return proportional
-	}
-	return copyOnWriteNoiseFloor
 }
 
 // neededSizeAdvice turns the reading into the size that would have decided it.
