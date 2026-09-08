@@ -318,8 +318,13 @@ func Dropped() int {
 	return state.dropped
 }
 
-// Attempts returns every connection this process tried to make since the last
+// Attempts returns the connections this process tried to make since the last
 // Reset, in order.
+//
+// Recorded only while sealed, and never for a unix socket, so the community
+// edition carries no ledger at all and a sealed run's ledger is not buried
+// under Docker API calls. Both exclusions are stated here rather than left for
+// somebody to infer from a shorter number than they expected.
 func Attempts() []Attempt {
 	state.mu.RLock()
 	defer state.mu.RUnlock()
@@ -384,7 +389,11 @@ func Check(site Site, network, address string) error {
 	if !sealed {
 		return nil
 	}
-	if network == "unix" || strings.HasPrefix(network, "unix") {
+	// unix, unixgram and unixpacket. Permitted and NOT recorded: the Docker
+	// daemon is reached this way hundreds of times in one lifecycle, and a
+	// ledger full of them would bury the entries that mean something. It is
+	// not a network address in the sense this feature is about.
+	if strings.HasPrefix(network, "unix") {
 		return nil
 	}
 
