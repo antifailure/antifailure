@@ -1,0 +1,125 @@
+
+Fidelity of posthog-hobb-posthog-hobby-c4220c
+services       unmeasured (37 unmeasured)
+  db           unmeasured   nothing is running for this environment; bring it up with af up first
+  redis7       unmeasured   nothing is running for this environment; bring it up with af up first
+  valkey       unmeasured   nothing is running for this environment; bring it up with af up first
+  clickhouse   unmeasured   nothing is running for this environment; bring it up with af up first
+  zookeeper    unmeasured   nothing is running for this environment; bring it up with af up first
+  kafka        unmeasured   nothing is running for this environment; bring it up with af up first
+  worker       unmeasured   nothing is running for this environment; bring it up with af up first
+  web          unmeasured   nothing is running for this environment; bring it up with af up first
+  plugins      unmeasured   nothing is running for this environment; bring it up with af up first
+  ingestion-g… unmeasured   nothing is running for this environment; bring it up with af up first
+  ingestion-s… unmeasured   nothing is running for this environment; bring it up with af up first
+  recording-a… unmeasured   nothing is running for this environment; bring it up with af up first
+  ingestion-e… unmeasured   nothing is running for this environment; bring it up with af up first
+  ingestion-l… unmeasured   nothing is running for this environment; bring it up with af up first
+  ingestion-t… unmeasured   nothing is running for this environment; bring it up with af up first
+  proxy        unmeasured   nothing is running for this environment; bring it up with af up first
+  objectstora… unmeasured   nothing is running for this environment; bring it up with af up first
+  seaweedfs    unmeasured   nothing is running for this environment; bring it up with af up first
+  browserless  unmeasured   nothing is running for this environment; bring it up with af up first
+  asyncmigrat… unmeasured   nothing is running for this environment; bring it up with af up first
+  temporal     unmeasured   nothing is running for this environment; bring it up with af up first
+  elasticsear… unmeasured   nothing is running for this environment; bring it up with af up first
+  temporal-ad… unmeasured   nothing is running for this environment; bring it up with af up first
+  temporal-ui  unmeasured   nothing is running for this environment; bring it up with af up first
+  temporal-dj… unmeasured   nothing is running for this environment; bring it up with af up first
+  capture      unmeasured   nothing is running for this environment; bring it up with af up first
+  capture-logs unmeasured   nothing is running for this environment; bring it up with af up first
+  replay-capt… unmeasured   nothing is running for this environment; bring it up with af up first
+  property-de… unmeasured   nothing is running for this environment; bring it up with af up first
+  livestream   unmeasured   nothing is running for this environment; bring it up with af up first
+  personhog-r… unmeasured   nothing is running for this environment; bring it up with af up first
+  personhog-r… unmeasured   nothing is running for this environment; bring it up with af up first
+  feature-fla… unmeasured   nothing is running for this environment; bring it up with af up first
+  hypercache-… unmeasured   nothing is running for this environment; bring it up with af up first
+  kafka-init   unmeasured   nothing is running for this environment; bring it up with af up first
+  cymbal       unmeasured   nothing is running for this environment; bring it up with af up first
+  cymbal-reso… unmeasured   nothing is running for this environment; bring it up with af up first
+
+database       unmeasured (2 unmeasured)
+  data         unmeasured   the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-posthog-hobb-posthog-hobby-c4220c/json": context cancel…
+  provenance   unmeasured   the provider could not be asked which golden this branch came from: db.docker: list golden images: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/images/json?filters=%7B%22reference%22%3A%7B%22antifailure%2Fgolden%3A%2A%22%3Atrue…
+
+third_party    not measured: the manifest names no third party hosts, and everything else is in block mode
+
+auth           not measured: the manifest declares no personas
+
+runtime        not measured: the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+
+traffic        not measured: the manifest does not ask for traffic, so there is none to reproduce
+
+datastores     unmeasured (9 unmeasured)
+  clickhouse   unmeasured   a clickhouse running clickhouse/clickhouse-server:26.6.2.158 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  db           unmeasured   a postgres running postgres:15.12-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  elasticsear… unmeasured   a elasticsearch running elasticsearch:7.17.28 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  kafka        unmeasured   a kafka running docker.io/redpandadata/redpanda:v25.1.9 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  kafka-init   unmeasured   a kafka running docker.io/redpandadata/redpanda:v25.1.9 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  objectstora… unmeasured   a object store running minio/minio:RELEASE.2025-04-22T22-12-26Z that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  redis7       unmeasured   a redis running redis:7.2-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  seaweedfs    unmeasured   a object store running chrislusf/seaweedfs:4.29 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  valkey       unmeasured   a redis running valkey/valkey:8.1-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+
+topology       not measured: no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+
+Nothing in this environment could be measured, so there is no score.
+A component is production's own when the environment reaches the real thing.
+A substitution, a refusal and an absence are all counted and none of them
+counts as reproduced. Nothing unmeasured is counted either way.
+
+Not measured, and so not counted:
+  auth           the manifest declares no personas
+  database       data: the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-posthog-hobb-posthog-hobby-c4220c/json": context cancel…
+  database       provenance: the provider could not be asked which golden this branch came from: db.docker: list golden images: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/images/json?filters=%7B%22reference%22%3A%7B%22antifailure%2Fgolden%3A%2A%22%3Atrue…
+  datastores     clickhouse: a clickhouse running clickhouse/clickhouse-server:26.6.2.158 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     db: a postgres running postgres:15.12-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     elasticsearch: a elasticsearch running elasticsearch:7.17.28 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     kafka: a kafka running docker.io/redpandadata/redpanda:v25.1.9 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     kafka-init: a kafka running docker.io/redpandadata/redpanda:v25.1.9 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     objectstorage: a object store running minio/minio:RELEASE.2025-04-22T22-12-26Z that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     redis7: a redis running redis:7.2-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     seaweedfs: a object store running chrislusf/seaweedfs:4.29 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     valkey: a redis running valkey/valkey:8.1-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  runtime        the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+  services       asyncmigrationscheck: nothing is running for this environment; bring it up with af up first
+  services       browserless: nothing is running for this environment; bring it up with af up first
+  services       capture: nothing is running for this environment; bring it up with af up first
+  services       capture-logs: nothing is running for this environment; bring it up with af up first
+  services       clickhouse: nothing is running for this environment; bring it up with af up first
+  services       cymbal: nothing is running for this environment; bring it up with af up first
+  services       cymbal-resolution: nothing is running for this environment; bring it up with af up first
+  services       db: nothing is running for this environment; bring it up with af up first
+  services       elasticsearch: nothing is running for this environment; bring it up with af up first
+  services       feature-flags: nothing is running for this environment; bring it up with af up first
+  services       hypercache-server: nothing is running for this environment; bring it up with af up first
+  services       ingestion-error-tracking: nothing is running for this environment; bring it up with af up first
+  services       ingestion-general: nothing is running for this environment; bring it up with af up first
+  services       ingestion-logs: nothing is running for this environment; bring it up with af up first
+  services       ingestion-sessionreplay: nothing is running for this environment; bring it up with af up first
+  services       ingestion-traces: nothing is running for this environment; bring it up with af up first
+  services       kafka: nothing is running for this environment; bring it up with af up first
+  services       kafka-init: nothing is running for this environment; bring it up with af up first
+  services       livestream: nothing is running for this environment; bring it up with af up first
+  services       objectstorage: nothing is running for this environment; bring it up with af up first
+  services       personhog-replica: nothing is running for this environment; bring it up with af up first
+  services       personhog-router: nothing is running for this environment; bring it up with af up first
+  services       plugins: nothing is running for this environment; bring it up with af up first
+  services       property-defs-rs: nothing is running for this environment; bring it up with af up first
+  services       proxy: nothing is running for this environment; bring it up with af up first
+  services       recording-api: nothing is running for this environment; bring it up with af up first
+  services       redis7: nothing is running for this environment; bring it up with af up first
+  services       replay-capture: nothing is running for this environment; bring it up with af up first
+  services       seaweedfs: nothing is running for this environment; bring it up with af up first
+  services       temporal: nothing is running for this environment; bring it up with af up first
+  services       temporal-admin-tools: nothing is running for this environment; bring it up with af up first
+  services       temporal-django-worker: nothing is running for this environment; bring it up with af up first
+  services       temporal-ui: nothing is running for this environment; bring it up with af up first
+  services       valkey: nothing is running for this environment; bring it up with af up first
+  services       web: nothing is running for this environment; bring it up with af up first
+  services       worker: nothing is running for this environment; bring it up with af up first
+  services       zookeeper: nothing is running for this environment; bring it up with af up first
+  third_party    the manifest names no third party hosts, and everything else is in block mode
+  topology       no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+  traffic        the manifest does not ask for traffic, so there is none to reproduce

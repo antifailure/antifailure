@@ -1,0 +1,27 @@
+version: 1
+name: clickhouse-1s-1k
+
+# Converted from ClickHouse's own published recipe, fetched from
+# ClickHouse/examples at docker-compose-recipes/recipes/ch-1S_1K/docker-compose.yaml.
+# Nothing here was invented: every service, image, port and dependency below is
+# in that file.
+
+services:
+  - name: clickhouse-keeper
+    kind: worker
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-keeper:latest-alpine
+
+  - name: clickhouse
+    kind: web
+    port: 8123
+    health_path: /ping
+    depends_on:
+      - clickhouse-keeper
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-server:latest
+
+egress:
+  default: block

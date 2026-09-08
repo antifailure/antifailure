@@ -1,0 +1,61 @@
+
+Fidelity of supabase-sel-supabase-selfhos-0d277b
+services       unmeasured (11 unmeasured)
+  studio       unmeasured   nothing is running for this environment; bring it up with af up first
+  api-gw       unmeasured   nothing is running for this environment; bring it up with af up first
+  auth         unmeasured   nothing is running for this environment; bring it up with af up first
+  rest         unmeasured   nothing is running for this environment; bring it up with af up first
+  realtime     unmeasured   nothing is running for this environment; bring it up with af up first
+  storage      unmeasured   nothing is running for this environment; bring it up with af up first
+  imgproxy     unmeasured   nothing is running for this environment; bring it up with af up first
+  meta         unmeasured   nothing is running for this environment; bring it up with af up first
+  functions    unmeasured   nothing is running for this environment; bring it up with af up first
+  db           unmeasured   nothing is running for this environment; bring it up with af up first
+  supavisor    unmeasured   nothing is running for this environment; bring it up with af up first
+
+database       unmeasured (2 unmeasured)
+  data         unmeasured   the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-supabase-sel-supabase-selfhos-0d277b/json": context can…
+  provenance   unmeasured   the provider could not be asked which golden this branch came from: db.docker: list golden images: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/images/json?filters=%7B%22reference%22%3A%7B%22antifailure%2Fgolden%3A%2A%22%3Atrue…
+
+third_party    not measured: the manifest names no third party hosts, and everything else is in block mode
+
+auth           not measured: the manifest declares no personas
+
+runtime        not measured: the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+
+traffic        not measured: the manifest does not ask for traffic, so there is none to reproduce
+
+datastores     unmeasured (3 unmeasured)
+  db           unmeasured   a postgres running supabase/postgres:17.6.1.136 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  meta         unmeasured   a postgres running supabase/postgres-meta:v0.96.6 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  rest         unmeasured   a postgres running postgrest/postgrest:v14.12 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+
+topology       not measured: no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+
+Nothing in this environment could be measured, so there is no score.
+A component is production's own when the environment reaches the real thing.
+A substitution, a refusal and an absence are all counted and none of them
+counts as reproduced. Nothing unmeasured is counted either way.
+
+Not measured, and so not counted:
+  auth           the manifest declares no personas
+  database       data: the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-supabase-sel-supabase-selfhos-0d277b/json": context can…
+  database       provenance: the provider could not be asked which golden this branch came from: db.docker: list golden images: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/images/json?filters=%7B%22reference%22%3A%7B%22antifailure%2Fgolden%3A%2A%22%3Atrue…
+  datastores     db: a postgres running supabase/postgres:17.6.1.136 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     meta: a postgres running supabase/postgres-meta:v0.96.6 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     rest: a postgres running postgrest/postgrest:v14.12 that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  runtime        the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+  services       api-gw: nothing is running for this environment; bring it up with af up first
+  services       auth: nothing is running for this environment; bring it up with af up first
+  services       db: nothing is running for this environment; bring it up with af up first
+  services       functions: nothing is running for this environment; bring it up with af up first
+  services       imgproxy: nothing is running for this environment; bring it up with af up first
+  services       meta: nothing is running for this environment; bring it up with af up first
+  services       realtime: nothing is running for this environment; bring it up with af up first
+  services       rest: nothing is running for this environment; bring it up with af up first
+  services       storage: nothing is running for this environment; bring it up with af up first
+  services       studio: nothing is running for this environment; bring it up with af up first
+  services       supavisor: nothing is running for this environment; bring it up with af up first
+  third_party    the manifest names no third party hosts, and everything else is in block mode
+  topology       no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+  traffic        the manifest does not ask for traffic, so there is none to reproduce

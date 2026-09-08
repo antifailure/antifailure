@@ -1,0 +1,368 @@
+version: 1
+name: supabase-selfhost
+services:
+- name: studio
+  kind: worker
+  build:
+    strategy: image
+    image: supabase/studio:2026.08.03-sha-022b374
+  env:
+  - name: HOSTNAME
+    value: 0.0.0.0
+  - name: STUDIO_PG_META_URL
+    value: http://meta:8080
+  - name: POSTGRES_PORT
+    value: '5432'
+  - name: POSTGRES_HOST
+    value: db
+  - name: POSTGRES_DB
+    value: postgres
+  - name: POSTGRES_PASSWORD
+  - name: POSTGRES_USER_READ_WRITE
+    value: postgres
+  - name: PG_META_CRYPTO_KEY
+  - name: PGRST_DB_SCHEMAS
+    value: public,graphql_public
+  - name: PGRST_DB_MAX_ROWS
+    value: '1000'
+  - name: PGRST_DB_EXTRA_SEARCH_PATH
+    value: public
+  - name: DEFAULT_ORGANIZATION_NAME
+    value: Default Organization
+  - name: DEFAULT_PROJECT_NAME
+    value: Default Project
+  - name: OPENAI_API_KEY
+  - name: SUPABASE_URL
+    value: http://api-gw:8000
+  - name: SUPABASE_PUBLIC_URL
+    value: http://localhost:8000
+  - name: SUPABASE_ANON_KEY
+  - name: SUPABASE_SERVICE_KEY
+  - name: AUTH_JWT_SECRET
+  - name: SUPABASE_PUBLISHABLE_KEY
+    value: ''
+  - name: SUPABASE_SECRET_KEY
+    value: ''
+  - name: ENABLED_FEATURES_LOGS_ALL
+    value: 'false'
+  - name: SNIPPETS_MANAGEMENT_FOLDER
+    value: /app/snippets
+  - name: EDGE_FUNCTIONS_MANAGEMENT_FOLDER
+    value: /app/edge-functions
+- name: api-gw
+  kind: web
+  port: 8000
+  depends_on:
+  - studio
+  build:
+    strategy: image
+    image: envoyproxy/envoy:v1.39.0
+  env:
+  - name: ANON_KEY
+  - name: SERVICE_ROLE_KEY
+  - name: SUPABASE_PUBLISHABLE_KEY
+    value: ''
+  - name: SUPABASE_SECRET_KEY
+    value: ''
+  - name: ANON_KEY_ASYMMETRIC
+    value: ''
+  - name: SERVICE_ROLE_KEY_ASYMMETRIC
+    value: ''
+  - name: SUPABASE_PUBLIC_URL
+    value: http://localhost:8000
+  - name: DASHBOARD_USERNAME
+    value: supabase
+  - name: DASHBOARD_PASSWORD
+- name: auth
+  kind: worker
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: supabase/gotrue:v2.189.0
+  env:
+  - name: GOTRUE_API_HOST
+    value: 0.0.0.0
+  - name: GOTRUE_API_PORT
+    value: '9999'
+  - name: API_EXTERNAL_URL
+    value: http://localhost:8000/auth/v1
+  - name: GOTRUE_DB_DRIVER
+    value: postgres
+  - name: GOTRUE_DB_DATABASE_URL
+  - name: GOTRUE_SITE_URL
+    value: http://localhost:3000
+  - name: GOTRUE_URI_ALLOW_LIST
+    value: ''
+  - name: GOTRUE_DISABLE_SIGNUP
+    value: 'false'
+  - name: GOTRUE_JWT_ADMIN_ROLES
+    value: service_role
+  - name: GOTRUE_JWT_AUD
+    value: authenticated
+  - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+    value: authenticated
+  - name: GOTRUE_JWT_EXP
+    value: '3600'
+  - name: GOTRUE_JWT_SECRET
+  - name: GOTRUE_JWT_ISSUER
+    value: http://localhost:8000/auth/v1
+  - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+    value: 'true'
+  - name: GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED
+    value: 'false'
+  - name: GOTRUE_MAILER_AUTOCONFIRM
+    value: 'false'
+  - name: GOTRUE_SMTP_ADMIN_EMAIL
+    value: admin@example.com
+  - name: GOTRUE_SMTP_HOST
+    value: supabase-mail
+  - name: GOTRUE_SMTP_PORT
+    value: '2500'
+  - name: GOTRUE_SMTP_USER
+    value: fake_mail_user
+  - name: GOTRUE_SMTP_PASS
+    value: fake_mail_password
+  - name: GOTRUE_SMTP_SENDER_NAME
+    value: fake_sender
+  - name: GOTRUE_MAILER_URLPATHS_INVITE
+    value: '"/auth/v1/verify"'
+  - name: GOTRUE_MAILER_URLPATHS_CONFIRMATION
+    value: '"/auth/v1/verify"'
+  - name: GOTRUE_MAILER_URLPATHS_RECOVERY
+    value: '"/auth/v1/verify"'
+  - name: GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE
+    value: '"/auth/v1/verify"'
+  - name: GOTRUE_EXTERNAL_PHONE_ENABLED
+    value: 'true'
+  - name: GOTRUE_SMS_AUTOCONFIRM
+    value: 'true'
+- name: rest
+  kind: worker
+  command: postgrest
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: postgrest/postgrest:v14.12
+  env:
+  - name: PGRST_DB_URI
+  - name: PGRST_DB_SCHEMAS
+    value: public,graphql_public
+  - name: PGRST_DB_MAX_ROWS
+    value: '1000'
+  - name: PGRST_DB_EXTRA_SEARCH_PATH
+    value: public
+  - name: PGRST_DB_ANON_ROLE
+    value: anon
+  - name: PGRST_ADMIN_SERVER_PORT
+    value: '3001'
+  - name: PGRST_ADMIN_SERVER_HOST
+    value: localhost
+  - name: PGRST_JWT_SECRET
+    value: ${JWT_SECRET}
+  - name: PGRST_DB_USE_LEGACY_GUCS
+    value: 'false'
+  - name: PGRST_APP_SETTINGS_JWT_SECRET
+  - name: PGRST_APP_SETTINGS_JWT_EXP
+    value: '3600'
+- name: realtime
+  kind: worker
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: supabase/realtime:v2.102.3
+  env:
+  - name: PORT
+    value: '4000'
+  - name: DB_HOST
+    value: db
+  - name: DB_PORT
+    value: '5432'
+  - name: DB_USER
+    value: supabase_admin
+  - name: DB_PASSWORD
+  - name: DB_NAME
+    value: postgres
+  - name: DB_AFTER_CONNECT_QUERY
+    value: SET search_path TO _realtime
+  - name: DB_ENC_KEY
+  - name: API_JWT_SECRET
+  - name: SECRET_KEY_BASE
+  - name: METRICS_JWT_SECRET
+  - name: ERL_AFLAGS
+    value: -proto_dist inet_tcp
+  - name: DNS_NODES
+    value: ''''''
+  - name: RLIMIT_NOFILE
+    value: '10000'
+  - name: APP_NAME
+    value: realtime
+  - name: SEED_SELF_HOST
+    value: 'true'
+  - name: RUN_JANITOR
+    value: 'true'
+  - name: DISABLE_HEALTHCHECK_LOGGING
+    value: 'true'
+- name: storage
+  kind: worker
+  depends_on:
+  - db
+  - rest
+  - imgproxy
+  build:
+    strategy: image
+    image: supabase/storage-api:v1.60.4
+  env:
+  - name: ANON_KEY
+  - name: SERVICE_KEY
+  - name: POSTGREST_URL
+    value: http://rest:3000
+  - name: AUTH_JWT_SECRET
+  - name: DATABASE_URL
+  - name: STORAGE_PUBLIC_URL
+    value: http://localhost:8000
+  - name: REQUEST_ALLOW_X_FORWARDED_PATH
+    value: 'true'
+  - name: FILE_SIZE_LIMIT
+    value: '52428800'
+  - name: STORAGE_BACKEND
+    value: file
+  - name: GLOBAL_S3_BUCKET
+    value: stub
+  - name: FILE_STORAGE_BACKEND_PATH
+    value: /var/lib/storage
+  - name: TENANT_ID
+    value: stub
+  - name: REGION
+    value: stub
+  - name: ENABLE_IMAGE_TRANSFORMATION
+    value: 'true'
+  - name: IMGPROXY_URL
+    value: http://imgproxy:5001
+  - name: S3_PROTOCOL_ACCESS_KEY_ID
+  - name: S3_PROTOCOL_ACCESS_KEY_SECRET
+- name: imgproxy
+  kind: worker
+  build:
+    strategy: image
+    image: darthsim/imgproxy:v3.30.1
+  env:
+  - name: IMGPROXY_BIND
+    value: :5001
+  - name: IMGPROXY_LOCAL_FILESYSTEM_ROOT
+    value: /
+  - name: IMGPROXY_USE_ETAG
+    value: 'true'
+  - name: IMGPROXY_AUTO_WEBP
+    value: 'true'
+  - name: IMGPROXY_MAX_SRC_RESOLUTION
+    value: '16.8'
+- name: meta
+  kind: worker
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: supabase/postgres-meta:v0.96.6
+  env:
+  - name: PG_META_PORT
+    value: '8080'
+  - name: PG_META_DB_HOST
+    value: db
+  - name: PG_META_DB_PORT
+    value: '5432'
+  - name: PG_META_DB_NAME
+    value: postgres
+  - name: PG_META_DB_USER
+    value: postgres
+  - name: PG_META_DB_PASSWORD
+  - name: CRYPTO_KEY
+- name: functions
+  kind: worker
+  command: start --main-service /home/deno/functions/main
+  depends_on:
+  - api-gw
+  build:
+    strategy: image
+    image: supabase/edge-runtime:v1.74.0
+  env:
+  - name: JWT_SECRET
+  - name: SUPABASE_URL
+    value: http://api-gw:8000
+  - name: SUPABASE_PUBLIC_URL
+    value: http://localhost:8000
+  - name: SUPABASE_ANON_KEY
+  - name: SUPABASE_SERVICE_ROLE_KEY
+  - name: SUPABASE_PUBLISHABLE_KEYS
+    value: '{"default":""}'
+  - name: SUPABASE_SECRET_KEYS
+    value: '{"default":""}'
+  - name: SUPABASE_DB_URL
+  - name: VERIFY_JWT
+    value: 'false'
+- name: db
+  kind: worker
+  command: postgres -c config_file=/etc/postgresql/postgresql.conf -c log_min_messages=fatal
+  build:
+    strategy: image
+    image: supabase/postgres:17.6.1.136
+  env:
+  - name: POSTGRES_HOST
+    value: /var/run/postgresql
+  - name: PGPORT
+    value: '5432'
+  - name: POSTGRES_PORT
+    value: '5432'
+  - name: PGPASSWORD
+  - name: POSTGRES_PASSWORD
+  - name: PGDATABASE
+    value: postgres
+  - name: POSTGRES_DB
+    value: postgres
+  - name: JWT_SECRET
+  - name: JWT_EXP
+    value: '3600'
+- name: supavisor
+  kind: web
+  port: 5432
+  command: /bin/sh -c /app/bin/migrate && /app/bin/supavisor eval "$(cat /etc/pooler/pooler.exs)" && /app/bin/server
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: supabase/supavisor:2.9.5
+  env:
+  - name: PORT
+    value: '4000'
+  - name: POSTGRES_PORT
+    value: '5432'
+  - name: POSTGRES_HOST
+    value: db
+  - name: POSTGRES_DB
+    value: postgres
+  - name: POSTGRES_PASSWORD
+  - name: DATABASE_URL
+  - name: CLUSTER_POSTGRES
+    value: 'true'
+  - name: SECRET_KEY_BASE
+  - name: VAULT_ENC_KEY
+  - name: API_JWT_SECRET
+  - name: METRICS_JWT_SECRET
+  - name: REGION
+    value: local
+  - name: ERL_AFLAGS
+    value: -proto_dist inet_tcp
+  - name: POOLER_TENANT_ID
+    value: your-tenant-id
+  - name: POOLER_DEFAULT_POOL_SIZE
+    value: '20'
+  - name: POOLER_MAX_CLIENT_CONN
+    value: '100'
+  - name: POOLER_POOL_MODE
+    value: transaction
+  - name: DB_POOL_SIZE
+    value: '5'
+egress:
+  default: block
