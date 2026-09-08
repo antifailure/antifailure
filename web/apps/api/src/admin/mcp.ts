@@ -255,8 +255,9 @@ export const MCP_TOOLS: readonly McpToolFact[] = [
   {
     name: 'inspect_data_masking',
     does:
-      'Ask what masking does to this environment\'s data, without changing any of it. Three ' +
-      'questions, chosen with the question argument.',
+      'Ask what masking does to this environment\'s data, without changing any of it. Four ' +
+      'questions, chosen with the question argument. The fourth, cross_store, asks whether one ' +
+      'person masks to the same person in every declared store, and it reads catalogs and no rows.',
     refuses: 'This tool cannot change data.',
     servedBy: 'engine/internal/mcp/tools_mask.go:newInspectMaskingTool',
   },
