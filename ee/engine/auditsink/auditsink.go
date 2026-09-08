@@ -69,13 +69,27 @@ import (
 
 func init() {
 	// Recorded so that a feature which is sold and never checked shows up as
-	// such. Before this file, audit_stream was exactly that: see
-	// ee/engine/feature, and the three site names below are what
-	// feature.Sites(FeatureAuditStream) had none of.
-	feature.Declare(license.FeatureAuditStream, "ee/engine/auditsink.Syslog")
-	feature.Declare(license.FeatureAuditStream, "ee/engine/auditsink.Webhook")
-	feature.Declare(license.FeatureAuditStream, "ee/engine/auditsink.ObjectStore")
+	// such. Before this file, audit_stream was exactly that: feature.Sites for
+	// it was empty, because there was no implementation of the interface
+	// anywhere to check anything.
+	//
+	// One site rather than one per sink, and it names the file holding the
+	// check rather than the three Write methods that consult it. That is the
+	// honest answer to "where is this enforced": all three sinks are gated by
+	// the same line, and three names pointing at one line would read as three
+	// independent controls.
+	feature.Declare(license.FeatureAuditStream, AuditStreamSite)
 }
+
+// AuditStreamSite is where audit_stream is enforced, in the form the licence
+// catalogue and the feature registry both name a site: the path from ee/engine
+// to the file holding the check, then the symbol that makes it.
+//
+// A constant rather than two string literals, because the whole purpose of the
+// registry is that the page a customer reads and the code that enforces cannot
+// name two different places, and two literals is exactly how they would come
+// to differ.
+const AuditStreamSite = "auditsink/auditsink.go:auditsink.permitted"
 
 // permitted reports whether this installation may forward, right now.
 //

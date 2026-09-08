@@ -273,10 +273,38 @@ func TestTheFeatureRecordsItsEnforcementSites(t *testing.T) {
 	// silently free. Before this package, feature.Sites(FeatureAuditStream)
 	// had nothing in it, which is exactly what that registry exists to make
 	// visible.
-	sites := feature.Sites(license.FeatureAuditStream)
-	require.Contains(t, sites, "ee/engine/auditsink.Syslog")
-	require.Contains(t, sites, "ee/engine/auditsink.Webhook")
-	require.Contains(t, sites, "ee/engine/auditsink.ObjectStore")
+	require.Contains(t, feature.Sites(license.FeatureAuditStream), AuditStreamSite)
+}
+
+func TestTheEnforcementSiteNamesAFileThatChecksThisExactFeature(t *testing.T) {
+	t.Parallel()
+	// The assertion above is strictly weaker than it looks: a registry
+	// containing three strings passes it even when all three name nothing.
+	// That is not hypothetical. compliance_packs was declared at
+	// ee/engine/compliance.Pack.Evaluate for its whole life, and Pack.Evaluate
+	// takes an Evidence and no context, so it cannot ask about a licence at
+	// all. The string agreed with itself and with nothing else.
+	//
+	// So the site is read as a path, the file is opened, and it has to really
+	// call feature.Enabled for THIS feature. A site naming a file that checks
+	// a different feature fails, which is the other half of the same defect.
+	path, symbol, found := strings.Cut(AuditStreamSite, ":")
+	require.True(t, found, "a site is path:symbol, and %q has no colon", AuditStreamSite)
+	require.NotEmpty(t, symbol)
+
+	// Relative to ee/engine, which is what the licence catalogue's paths are
+	// relative to, and the test runs in the package directory.
+	source, err := os.ReadFile(filepath.Join("..", path))
+	require.NoErrorf(t, err, "%s names a file that does not exist", AuditStreamSite)
+
+	require.Contains(t, string(source), "feature.Enabled(ctx, license.FeatureAuditStream)",
+		"%s names a file that never asks about the feature it claims to gate", AuditStreamSite)
+
+	// And the symbol half names something in it, so a site cannot drift onto a
+	// file that happens to check the feature somewhere else entirely.
+	parts := strings.Split(symbol, ".")
+	require.Contains(t, string(source), "func "+parts[len(parts)-1],
+		"%s names a symbol that is not defined in that file", AuditStreamSite)
 }
 
 // ---------------------------------------------------------------------------

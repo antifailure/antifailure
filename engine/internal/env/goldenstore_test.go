@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/golden"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -88,7 +90,7 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	storeDir := t.TempDir()
 
 	// Machine one. It has the production credential and a subset block.
-	first, firstGoldens, stopFirst := requireOrchestrator(
+	first, firstGoldens, firstAudit, stopFirst := requireOrchestrator(
 		t, storeProject, "publisher", sourceURL, storeDir)
 	defer stopFirst()
 
@@ -117,7 +119,7 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	// Machine two. Same manifest, same store, and NO production credential at
 	// all, which is the point: a runner that cannot reach production is
 	// exactly what this is for.
-	second, secondGoldens, stopSecond := requireOrchestrator(
+	second, secondGoldens, secondAudit, stopSecond := requireOrchestrator(
 		t, storeProject, "puller", "", storeDir)
 	defer stopSecond()
 
@@ -161,6 +163,29 @@ func TestPublishAndPull_ASecondMachineBranchesWhatTheFirstPublished(t *testing.T
 	require.NoError(t, conn.QueryRow(ctx,
 		"SELECT count(*) FROM customers WHERE region_code = 'us'").Scan(&americans))
 	require.Equal(t, int64(0), americans, "and it is still a slice rather than everything")
+
+	// The two golden audit entries, which is the only place in the repository
+	// either call site is reached. A masked copy of production leaving this
+	// machine for a store other people can read from, and one arriving on a
+	// machine that has no production credential at all, are the two acts in
+	// this whole flow a security team would ask about.
+	published := firstAudit.only(t, "golden.published")
+	require.Equal(t, "golden", published.TargetType)
+	require.Equal(t, refreshed.Version, published.TargetID)
+	require.Equal(t, "engine", published.Origin)
+	require.False(t, published.OccurredAt.IsZero())
+	require.Equal(t, storeProject, published.Detail["project"])
+	require.NotEmpty(t, published.Detail["store"], "which store it went to is the point of the entry")
+	require.Positive(t, published.Detail["bytes"])
+
+	pulledEntry := secondAudit.only(t, "golden.pulled")
+	require.Equal(t, "golden", pulledEntry.TargetType)
+	require.Equal(t, pulled.Version, pulledEntry.TargetID,
+		"the entry names the local identifier, because that is what this machine now holds")
+	require.Equal(t, refreshed.Version, pulledEntry.Detail["from"],
+		"and the one it came from, because the two are deliberately different")
+	require.Equal(t, true, pulledEntry.Detail["verified"])
+	require.False(t, pulledEntry.OccurredAt.IsZero())
 }
 
 // A shared store does not make one project's golden everybody's.
@@ -186,7 +211,7 @@ func TestPull_RefusesAGoldenPublishedByAnotherProject(t *testing.T) {
 	defer stopSource()
 	storeDir := t.TempDir()
 
-	publisher, publisherGoldens, stopPublisher := requireOrchestrator(
+	publisher, publisherGoldens, _, stopPublisher := requireOrchestrator(
 		t, storeProject, "publisher", sourceURL, storeDir)
 	defer stopPublisher()
 
@@ -199,7 +224,7 @@ func TestPull_RefusesAGoldenPublishedByAnotherProject(t *testing.T) {
 	// provider, the same Postgres version, the same declared source variable
 	// and the same subset. Only the manifest name differs, which is the thing
 	// that says whose work this is.
-	stranger, strangerGoldens, stopStranger := requireOrchestrator(
+	stranger, strangerGoldens, _, stopStranger := requireOrchestrator(
 		t, "some-other-app", "puller", "", storeDir)
 	defer stopStranger()
 
@@ -221,7 +246,7 @@ func TestPull_RefusesAGoldenPublishedByAnotherProject(t *testing.T) {
 
 	// The counter check, so this test cannot pass by the pull being broken for
 	// everybody: the project that published it can still pull it.
-	owner, ownerGoldens, stopOwner := requireOrchestrator(
+	owner, ownerGoldens, _, stopOwner := requireOrchestrator(
 		t, storeProject, "puller", "", storeDir)
 	defer stopOwner()
 	ok, err := owner.PullGolden(ctx, "")
@@ -248,7 +273,7 @@ func TestPull_RefusesAVersionWhosePublishDidNotFinish(t *testing.T) {
 	require.NoError(t, store.Put(ctx, golden.DumpName("gv_halfpublished"), 3,
 		strings.NewReader("abc")))
 
-	o, _, stop := requireOrchestrator(t, storeProject, "puller", "", storeDir)
+	o, _, _, stop := requireOrchestrator(t, storeProject, "puller", "", storeDir)
 	defer stop()
 
 	_, err = o.PullGolden(ctx, "gv_halfpublished")
@@ -378,9 +403,45 @@ const storeProject = "app-goldenstore"
 // publisher has a value for it. That asymmetry is the whole reason a golden's
 // identity records the variable's NAME rather than the resolved host: a runner
 // that could resolve production would not need the store.
+// goldenAuditSink records the entries a golden publish and pull forward.
+//
+// The engine's audit socket had no production caller at all before this lane,
+// so a sink in a test is the only thing that can tell publishGolden and
+// pullWithin apart from two functions that merely compile.
+type goldenAuditSink struct {
+	mu      sync.Mutex
+	entries []extension.AuditEntry
+}
+
+func (g *goldenAuditSink) Name() string { return "golden-audit-recorder" }
+
+func (g *goldenAuditSink) Write(_ context.Context, entry extension.AuditEntry) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.entries = append(g.entries, entry)
+	return nil
+}
+
+// only returns the single entry with an action, failing with what did arrive.
+func (g *goldenAuditSink) only(t *testing.T, action string) extension.AuditEntry {
+	t.Helper()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var seen []string
+	for _, e := range g.entries {
+		if e.Action == action {
+			return e
+		}
+		seen = append(seen, e.Action)
+	}
+	require.FailNowf(t, "no "+action+" reached the sink",
+		"%d entries arrived: %s", len(g.entries), strings.Join(seen, ", "))
+	return extension.AuditEntry{}
+}
+
 func requireOrchestrator(
 	t *testing.T, project, branch, sourceURL, storeDir string,
-) (*Orchestrator, *ownGoldens, func()) {
+) (*Orchestrator, *ownGoldens, *goldenAuditSink, func()) {
 	t.Helper()
 	one := 1
 	env := map[string]string{"AF_GOLDEN_STORE": storeDir}
@@ -405,6 +466,18 @@ func requireOrchestrator(
 		env["PROD_URL"] = sourceURL
 	}
 
+	// A registry with an audit sink in it, on every orchestrator these tests
+	// build. Two of the five privileged actions the engine forwards,
+	// golden.published and golden.pulled, happen inside publishGolden and
+	// pullWithin, and this is the only test in the repository that reaches
+	// either. Without a sink here those two call sites are proved by the
+	// compiler and by nothing else, which is the exact shape of the defect
+	// this whole lane exists to close: code that exists, compiles, and is
+	// never shown to do anything.
+	audit := &goldenAuditSink{}
+	registry := extension.NewRegistry()
+	registry.AddAuditSink(audit)
+
 	o, err := New(Options{
 		Root:     t.TempDir(),
 		Manifest: &schema.Manifest{Name: project, Database: db},
@@ -415,11 +488,12 @@ func requireOrchestrator(
 			v, ok := env[k]
 			return v, ok
 		})),
+		Extensions: registry,
 	})
 	require.NoError(t, err)
 
 	mine := &ownGoldens{}
-	return o, mine, func() {
+	return o, mine, audit, func() {
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		// Whatever THIS orchestrator made, it takes away, and nothing else.
@@ -526,7 +600,7 @@ func TestOrchestratorTeardown_LeavesGoldensItDidNotCreate(t *testing.T) {
 		})
 	}
 
-	o, mine, stop := requireOrchestrator(t, storeProject, "teardown", "", t.TempDir())
+	o, mine, _, stop := requireOrchestrator(t, storeProject, "teardown", "", t.TempDir())
 	// Only one of the two is claimed, which is the whole point.
 	mine.add(ours)
 	stop()
