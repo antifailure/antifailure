@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,5 +142,73 @@ func TestAThresholdsFileWithNoDefaultIsRefused(t *testing.T) {
 	}
 	if _, err := readConfig(p); err == nil {
 		t.Fatal("a file with no default was accepted, so every package would pass")
+	}
+}
+
+// The case the gate could not see. report() builds its package list from the
+// PROFILE, so a package the thresholds name and the profile does not carry was
+// never iterated, never compared to its floor, and never printed even under
+// -all. internal/masking is held at 100 percent because a missed line there is
+// a masking failure; if its tests stopped building, it left the profile and
+// this gate went on printing a count and exiting 0.
+func TestAStrictPackageMissingFromTheProfileIsNamed(t *testing.T) {
+	cfg, err := readConfig("thresholds.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Everything the thresholds name, except the one that fell out.
+	byPkg := map[string]counts{}
+	for _, tierPkgs := range [][]string{cfg.Strict.Packages, cfg.High.Packages} {
+		for _, p := range tierPkgs {
+			if p == "internal/masking" {
+				continue
+			}
+			byPkg[p] = counts{covered: 10, total: 10}
+		}
+	}
+	missing := unmeasured(cfg, byPkg)
+	if len(missing) != 1 {
+		t.Fatalf("unmeasured = %v, want exactly the one package that is not in the profile", missing)
+	}
+	if !strings.Contains(missing[0], "internal/masking") {
+		t.Errorf("the report does not name the missing package: %q", missing[0])
+	}
+	if !strings.Contains(missing[0], "strict") {
+		t.Errorf("the report does not say which tier was left unmeasured: %q", missing[0])
+	}
+}
+
+// The other direction, so the refusal cannot be satisfied by refusing
+// everything. A profile that carries every named package must be accepted.
+func TestAProfileCarryingEveryNamedPackageIsAccepted(t *testing.T) {
+	cfg, err := readConfig("thresholds.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPkg := map[string]counts{}
+	for _, tierPkgs := range [][]string{cfg.Strict.Packages, cfg.High.Packages} {
+		for _, p := range tierPkgs {
+			byPkg[p] = counts{covered: 10, total: 10}
+		}
+	}
+	if missing := unmeasured(cfg, byPkg); len(missing) != 0 {
+		t.Fatalf("a complete profile was reported as unmeasured: %v", missing)
+	}
+}
+
+// A tier entry may name a tree rather than a package, which is thresholdFor's
+// rule and has to be this one too. Naming only a subpackage must satisfy the
+// entry, or the refusal would fire on a correct profile.
+func TestASubpackageSatisfiesATreeEntry(t *testing.T) {
+	cfg := config{
+		Strict:  tier{Min: 100, Packages: []string{"internal/masking"}},
+		Default: tier{Min: 85},
+	}
+	byPkg := map[string]counts{"internal/masking/dialect": {covered: 1, total: 1}}
+	if missing := unmeasured(cfg, byPkg); len(missing) != 0 {
+		t.Fatalf("a subpackage did not satisfy the tree it sits under: %v", missing)
+	}
+	if missing := unmeasured(cfg, map[string]counts{"internal/maskingother": {covered: 1, total: 1}}); len(missing) != 1 {
+		t.Fatalf("a package that merely shares a prefix satisfied the entry: %v", missing)
 	}
 }
