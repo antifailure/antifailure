@@ -78,12 +78,12 @@ recorded with the site that made it.
 | the control plane identity discovery | the control plane's OIDC endpoint |
 | the device authorization login | the control plane |
 | the load generator | the application under test |
-| the s3 golden store | AWS |
-| the azure blob golden store | Azure |
-| the neon control API | `console.neon.tech` |
-| the supabase management API | `api.supabase.com` |
-| the database lab API | your DBLab server |
-| the clickhouse HTTP interface | your ClickHouse server |
+| the S3 golden store | AWS |
+| the Azure Blob golden store | Azure |
+| the Neon control API | `console.neon.tech` |
+| the Supabase management API | `api.supabase.com` |
+| the Database Lab API | your DBLab server |
+| the ClickHouse HTTP interface | your ClickHouse server |
 | the service readiness probe | the environment, over loopback |
 | the webhook delivery | a service in the environment |
 | the doctor reachability check | whatever it was asked about |
