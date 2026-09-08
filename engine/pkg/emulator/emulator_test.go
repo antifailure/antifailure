@@ -241,3 +241,50 @@ func readGuide(t *testing.T) string {
 	require.NoError(t, err, "the AWS guide is where the surface is published")
 	return string(body)
 }
+
+// The engine resolves an emulate rule through the registry and through nothing
+// else, so an emulator this repository ships has to arrive the same way one
+// written outside it does. A declaration nobody registers is a provider named
+// and not built.
+func TestRegisterBuiltin_PutsTheAWSEmulatorWhereTheEngineLooksForIt(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	emulator.RegisterBuiltin(r)
+
+	found, ok := r.EmulatorNamed("aws")
+	require.True(t, ok, "an egress rule naming aws would be refused by this build")
+	require.Contains(t, found.Container().Image, "@sha256:")
+	require.NoError(t, r.Validate(map[string][]string{}))
+}
+
+// An organization that registered its own licensed image under the name aws
+// made a deliberate choice, and a built in registration must not undo it or
+// sit beside it. Two emulators under one name is what the registry refuses.
+func TestRegisterBuiltin_LeavesAnOutsideRegistrationOfTheSameNameAlone(t *testing.T) {
+	t.Parallel()
+	r := extension.NewRegistry()
+	theirs := &outsideEmulator{}
+	r.AddEmulator(theirs)
+	emulator.RegisterBuiltin(r)
+
+	require.Equal(t, []string{"aws"}, r.EmulatorNames(),
+		"the built in registration was added beside theirs, and the registry refuses that")
+	found, ok := r.EmulatorNamed("aws")
+	require.True(t, ok)
+	require.Equal(t, "example.invalid/localstack@sha256:"+strings.Repeat("a", 64),
+		found.Container().Image, "the built in image displaced the one they chose")
+	require.NoError(t, r.Validate(map[string][]string{}))
+}
+
+// outsideEmulator is what an organization with a LocalStack licence registers:
+// the same name, their own image.
+type outsideEmulator struct{}
+
+func (outsideEmulator) Name() string    { return "aws" }
+func (outsideEmulator) Hosts() []string { return []string{"s3.amazonaws.com"} }
+func (outsideEmulator) Container() extension.EmulatorContainer {
+	return extension.EmulatorContainer{
+		Image: "example.invalid/localstack@sha256:" + strings.Repeat("a", 64),
+		Port:  4566,
+	}
+}

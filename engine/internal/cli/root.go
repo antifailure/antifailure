@@ -22,6 +22,8 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/events"
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/emulator"
+	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
 // Version information, set by the linker at release time.
@@ -198,6 +200,22 @@ func Execute(ctx context.Context, args []string, opts Options) int {
 	if opts.Clock == nil {
 		opts.Clock = clock.New()
 	}
+
+	// The emulators this build ships, put where the engine looks for one.
+	//
+	// An emulate rule is resolved through the extension registry and through
+	// nothing else, on purpose: the manifest names an emulator and the
+	// registration supplies the image, the digest, the port and the
+	// variables, so a repository cannot decide what answers for
+	// s3.amazonaws.com inside an environment. That means an emulator this
+	// repository ships has to arrive the same way one written outside it
+	// does, and a declaration nobody registers is a provider named and not
+	// built. Here rather than in an init, because a package that registers
+	// itself into a process wide registry as a side effect of being imported
+	// is a registration nobody can see at the call site and no test can
+	// choose not to have. A name already registered is left alone, so a build
+	// that plugged in its own licensed image keeps it.
+	emulator.RegisterBuiltin(extension.Default)
 
 	out := NewOutput(opts.Stdout, opts.Stderr)
 	out.Color = DetectColor(opts.Stdout, opts.Getenv)
