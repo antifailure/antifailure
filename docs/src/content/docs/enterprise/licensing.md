@@ -170,4 +170,5 @@ the product or the other.
 Contributions are under the DCO, not a CLA. You keep your copyright. See
 `CONTRIBUTING.md`.
 
-Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes).
+Related: [policy](/docs/enterprise/policy), [runtimes](/docs/enterprise/runtimes),
+[air gapped](/docs/enterprise/air-gapped).
