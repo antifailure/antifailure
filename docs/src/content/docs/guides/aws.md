@@ -71,6 +71,27 @@ The emulator container is started with `SERVICES` listing the nine services and
 as well as by the routing. A service outside the surface is refused twice and
 answered zero times.
 
+## How the application reaches it, which is DNS and not a proxy variable
+
+**Zero endpoint overrides is achieved by DNS interception, not by proxy
+configuration.** It is worth reading that sentence twice if you were planning
+around the proxy variables, because one of the two SDKs below ignores them
+completely.
+
+An environment reaches the sidecar two ways. The proxy variables are the weaker
+one: a library is free to ignore them, and the AWS SDK for JavaScript ignores
+them entirely, so `HTTPS_PROXY` does nothing for a Node application. The one
+that always holds is the network. Every external name resolves to the sidecar,
+the sidecar terminates TLS with a certificate authority the environment already
+trusts, and a client that reads no variable at all still arrives there. A
+service that somehow bypassed both has nowhere to send the packet, because the
+inner network has no route out.
+
+The suite that proves this drives both paths on purpose. The AWS SDK for Go is
+driven through the proxy variables, and the AWS SDK for JavaScript is driven
+through DNS, on an internal Docker network with a router answering on 443 and
+one name mapped per hostname. Neither application names an endpoint.
+
 ## What the sidecar rewrites, and what it does not
 
 **The destination is rewritten. The `Host` header and the `Authorization` header
