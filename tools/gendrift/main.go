@@ -155,9 +155,12 @@ func run(root string, strict bool, out io.Writer) error {
 	}
 
 	if len(owned) == 0 && (!strict || len(unowned) == 0) {
-		fmt.Fprintf(out, "gendrift: %d generated %s match their generators\n",
+		// The write is returned rather than discarded. A gate whose only
+		// output is a claim that it looked has to notice when that claim did
+		// not reach anybody.
+		_, err := fmt.Fprintf(out, "gendrift: %d generated %s match their generators\n",
 			countPaths(), plural(countPaths(), "path", "paths"))
-		return nil
+		return err
 	}
 
 	var b strings.Builder
