@@ -35,7 +35,7 @@
 // every request, against the clock, because that is the part that changes.
 
 import type { Extension, ExtensionRoute } from '@antifailure/api'
-import { evaluate, type Claims, type Feature, type Status } from './license.ts'
+import { evaluate, none, type Claims, type Feature, type Status } from './license.ts'
 
 /** The status code for "this installation is not licensed for that".
  *
@@ -57,18 +57,20 @@ export interface GateOptions {
   log?: (line: string) => void
 }
 
-/** The licence right now, from claims parsed once. */
+/**
+ * The licence right now, from claims parsed once.
+ *
+ * No licence is `none`, not `expired`, and the difference is the sentence an
+ * operator is shown. This first said `expired`, because it built an empty
+ * claims object with a zero expiry and evaluated it, and the first run of
+ * entrypoint.test.ts caught it: a customer who had installed the enterprise
+ * image and not yet pasted a key would have been told their licence had run out
+ * and its grace period had ended, and sent to renew something they had never
+ * bought. Both states refuse the same request, which is exactly why the state
+ * has to be right: the code is identical and only the words differ.
+ */
 export function statusNow(options: GateOptions): Status {
-  if (!options.claims) {
-    return evaluate(
-      // No licence is not an error, and it is not a claims object either. The
-      // caller gets the same "not enabled" answer from an absent licence as
-      // from an expired one, which is the contract the Go side states.
-      { id: '', org: options.org, plan: '', features: [], seats: 0, issuedAt: null,
-        expiresAt: new Date(0), graceDays: 0, trial: false, keyId: '' },
-      { org: options.org, now: options.now(), revoked: options.revoked },
-    )
-  }
+  if (!options.claims) return none()
   return evaluate(options.claims, { org: options.org, now: options.now(), revoked: options.revoked })
 }
 
