@@ -124,10 +124,11 @@ func mutations() []mutation {
 				p.Network.SecurityGroup.Egress = append(p.Network.SecurityGroup.Egress,
 					ecs.Rule{Protocol: "tcp", FromPort: 443, ToPort: 443, CIDRv4: "0.0.0.0/0"})
 			},
-			// It also opens the resolver path, because a rule covering every
-			// address on port 443 covers port 53 only if the range does; this
-			// one does not, so the resolver path is untouched. It opens the
-			// neighbour path, because 0.0.0.0/0 is wider than the subnets.
+			// It opens the neighbour path as well, because 0.0.0.0/0 is wider
+			// than this environment's subnets. It does NOT open the resolver
+			// path, because this rule is port 443 and that check looks for a
+			// rule reaching port 53, which is the distinction that keeps the
+			// two paths separate rather than one path counted twice.
 			alsoOpens: []string{"a-neighbouring-environment"},
 		},
 		{
