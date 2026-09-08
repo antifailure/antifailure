@@ -91,10 +91,12 @@ knowing which: a branch there is a container over the golden image's shared
 layers, so nothing is copied when one is made, and the time in that provider
 goes into building the image rather than into branching it.
 
-The [database providers](/docs/providers/databases) page still describes
-`docker` branch time as growing with the database. That sentence predates this
-matrix and is not something this page measured either way; the `benchmarks/`
-report is where a number for it would come from, and there is not one yet.
+The [database providers](/docs/providers/databases) page agrees, and it did not
+always. It published `docker` branch time as growing with the database until
+the conformance suite branched an 8 MiB golden and a 512 MiB one against a real
+daemon and the two cost the same. This matrix asserted the shared layers and
+that page asserted the opposite, and the measurement is what settled which of
+them was writing down an assumption.
 
 ### Datastore providers
 
