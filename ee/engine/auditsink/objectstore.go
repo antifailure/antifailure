@@ -34,20 +34,18 @@ package auditsink
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -96,9 +94,7 @@ type ObjectStore struct {
 	bucket    string
 	prefix    string
 	region    string
-	accessKey string
-	secretKey string
-	session   string
+	creds     cloudauth.AWSCredentials
 	pathStyle bool
 
 	// Azure Blob.
@@ -182,10 +178,13 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 	if s.bucket == "" {
 		return nil, fmt.Errorf("%s names no bucket", redact(raw))
 	}
-	s.accessKey = getenv(AWSAccessKeyIDEnv)
-	s.secretKey = getenv(AWSSecretAccessKeyEnv)
-	s.session = getenv(AWSSessionTokenEnv)
-	if s.accessKey == "" || s.secretKey == "" {
+	s.creds = cloudauth.AWSCredentials{
+		AccessKeyID:     getenv(AWSAccessKeyIDEnv),
+		SecretAccessKey: getenv(AWSSecretAccessKeyEnv),
+		SessionToken:    getenv(AWSSessionTokenEnv),
+		Source:          "the environment",
+	}
+	if s.creds.AccessKeyID == "" || s.creds.SecretAccessKey == "" {
 		return nil, fmt.Errorf(
 			"an s3 audit sink signs its requests with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, " +
 				"and one of them is not set on this machine. They are read from the environment " +
@@ -343,146 +342,43 @@ func (s *ObjectStore) do(req *http.Request) error {
 
 // sign applies Signature Version 4 to a request.
 //
-// The same algorithm and the same shape as engine/internal/golden's, which is
-// exercised against a real server rather than a fixture. Four parts of it are
-// where implementations go wrong and all four are here on purpose: the payload
-// hash is a real SHA-256 of the body rather than UNSIGNED-PAYLOAD, the signed
-// header set includes host and every x-amz-, the path is escaped per segment
-// with the separators left alone, and the credential scope pins the date, the
-// region and the service so a signature cannot be replayed elsewhere tomorrow.
-func (s *ObjectStore) sign(req *http.Request, payload []byte) error {
-	now := time.Now().UTC()
-	amzDate := now.Format("20060102T150405Z")
-	dateOnly := now.Format("20060102")
-
-	sum := sha256.Sum256(payload)
-	payloadHash := hex.EncodeToString(sum[:])
-
-	req.Header.Set("x-amz-date", amzDate)
-	req.Header.Set("x-amz-content-sha256", payloadHash)
-	if req.Host == "" {
-		req.Host = req.URL.Host
-	}
-	if s.session != "" {
-		req.Header.Set("x-amz-security-token", s.session)
-	}
-
-	signed, canonical := signedHeaders(req)
-	canonicalRequest := strings.Join([]string{
-		req.Method,
-		canonicalPath(req.URL),
-		canonicalQuery(req.URL),
-		canonical,
-		signed,
-		payloadHash,
-	}, "\n")
-
-	crSum := sha256.Sum256([]byte(canonicalRequest))
-	scope := strings.Join([]string{dateOnly, s.region, "s3", "aws4_request"}, "/")
-	toSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256", amzDate, scope, hex.EncodeToString(crSum[:]),
-	}, "\n")
-
-	key := hmacSHA256([]byte("AWS4"+s.secretKey), dateOnly)
-	key = hmacSHA256(key, s.region)
-	key = hmacSHA256(key, "s3")
-	key = hmacSHA256(key, "aws4_request")
-	signature := hex.EncodeToString(hmacSHA256(key, toSign))
-
-	req.Header.Set("Authorization", fmt.Sprintf(
-		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		s.accessKey, scope, signed, signature))
-	return nil
-}
-
-func hmacSHA256(key []byte, data string) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write([]byte(data))
-	return h.Sum(nil)
-}
-
-// signedHeaders returns the signed header list and the canonical block.
-func signedHeaders(req *http.Request) (string, string) {
-	names := []string{"host"}
-	values := map[string]string{"host": req.Host}
-	for name, vs := range req.Header {
-		lower := strings.ToLower(name)
-		if !strings.HasPrefix(lower, "x-amz-") && lower != "content-type" {
-			continue
-		}
-		names = append(names, lower)
-		collapsed := make([]string, len(vs))
-		for i, v := range vs {
-			collapsed[i] = strings.Join(strings.Fields(v), " ")
-		}
-		values[lower] = strings.Join(collapsed, ",")
-	}
-	sort.Strings(names)
-
-	var block strings.Builder
-	for _, n := range names {
-		block.WriteString(n)
-		block.WriteString(":")
-		block.WriteString(values[n])
-		block.WriteString("\n")
-	}
-	return strings.Join(names, ";"), block.String()
-}
-
-// canonicalPath escapes each path segment, leaving the separators alone.
-func canonicalPath(u *url.URL) string {
-	path := u.EscapedPath()
-	if path == "" {
-		return "/"
-	}
-	segments := strings.Split(path, "/")
-	for i, seg := range segments {
-		raw, err := url.PathUnescape(seg)
-		if err != nil {
-			raw = seg
-		}
-		segments[i] = awsEscape(raw)
-	}
-	return strings.Join(segments, "/")
-}
-
-// canonicalQuery sorts and escapes the query with AWS's rules.
-func canonicalQuery(u *url.URL) string {
-	values := u.Query()
-	keys := make([]string, 0, len(values))
-	for k := range values {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var parts []string
-	for _, k := range keys {
-		vs := append([]string(nil), values[k]...)
-		sort.Strings(vs)
-		for _, v := range vs {
-			parts = append(parts, awsEscape(k)+"="+awsEscape(v))
-		}
-	}
-	return strings.Join(parts, "&")
-}
-
-// awsEscape percent encodes everything outside the unreserved set.
+// Through ee/engine/cloudauth rather than here, and the first version of this
+// file got that wrong. It carried its own hundred lines of Signature Version 4,
+// which compiled, passed a test that recomputed the signature independently,
+// and was still a defect: a second implementation of a cloud's authentication
+// inside the enterprise module. TestThreeCloudsAreSignedByOneImplementation
+// exists for exactly that and named this file.
 //
-// Not url.QueryEscape, which writes a space as + and leaves alone some
-// characters this has to encode. The difference is invisible until a key with a
-// space in it fails to sign.
-func awsEscape(s string) string {
-	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
-	var b strings.Builder
-	for i := range len(s) {
-		c := s[i]
-		if strings.IndexByte(unreserved, c) >= 0 {
-			b.WriteByte(c)
-			continue
-		}
-		fmt.Fprintf(&b, "%%%02X", c)
+// The reason the gate is right and the duplicate was wrong is not tidiness.
+// Two signers that agree today look exactly like one signer, right up until a
+// fix lands in one of them, and a signing bug is invisible until a server
+// refuses a request that a customer's audit archive needed.
+func (s *ObjectStore) sign(req *http.Request, payload []byte) error {
+	headers := map[string]string{}
+	for name := range req.Header {
+		headers[strings.ToLower(name)] = req.Header.Get(name)
 	}
-	return b.String()
+
+	signed, err := cloudauth.SignV4(cloudauth.SigV4Request{
+		Method:  req.Method,
+		URL:     req.URL.String(),
+		Body:    payload,
+		Headers: headers,
+		Region:  s.region,
+		// S3 rather than the host, because the service name is part of the
+		// credential scope and a signature scoped to the wrong service is
+		// refused with a message about the date.
+		Service:     "s3",
+		Credentials: s.creds,
+		Now:         time.Now().UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	for name, value := range signed {
+		req.Header.Set(name, value)
+	}
+	return nil
 }
 
 // isAzureBlob reports whether a URL addresses Azure Blob storage.

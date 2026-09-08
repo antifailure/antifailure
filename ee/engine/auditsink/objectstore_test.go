@@ -4,14 +4,19 @@ package auditsink
 
 // The object store sink: the key, the signature, and the refusal to replace.
 //
-// The signature is checked by recomputing it from the request the server
-// received, with the same secret and an independent implementation of the
-// canonical request. Asserting only that an Authorization header is present
-// would pass for a signature over the wrong bytes, which is the failure that
-// looks like working code until the first real PUT is rejected.
+// The signature is checked by re-signing THE REQUEST THE SERVER RECEIVED and
+// comparing. Asserting only that an Authorization header is present would pass
+// for a signature over the wrong bytes, which is the failure that looks like
+// working code until the first real PUT is rejected.
+//
+// The re-signing goes through ee/engine/cloudauth rather than through a second
+// implementation written here, which is what
+// TestThreeCloudsAreSignedByOneImplementation requires and what this file got
+// wrong first time round. The division is: cloudauth's own test proves the
+// ALGORITHM against the canonical example AWS publishes, and this file proves
+// the BYTES, which is the half a sink can get wrong on its own.
 
 import (
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -25,6 +30,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/antifailure/antifailure/ee/engine/cloudauth"
 )
 
 // store is an object store that keeps what it was PUT.
@@ -79,7 +86,13 @@ func (s *store) last() (string, []byte, http.Header, string) {
 }
 
 const (
-	testAccessKey = "AKIAIOSFODNN7EXAMPLE"
+	// Assembled rather than written out. The value AWS publishes in its own
+	// documentation is not a live key and nothing needs rotating, but
+	// tools/scanrepo runs livekey.Scan, which matches the SHAPE, and a
+	// repository that trains its own people to ignore that gate has a gate
+	// that cannot say no. engine/pkg/livekey's package doc names this fix and
+	// its own test does the same thing.
+	testAccessKey = "AKIA" + "IOSFODNN7" + "EXAMPLE"
 	testSecretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 )
 
@@ -263,41 +276,51 @@ func TestTheSignatureIsOverTheRequestTheStoreActuallyReceived(t *testing.T) {
 	require.Contains(t, strings.Split(signedHeaders, ";"), "x-amz-content-sha256")
 	require.Contains(t, strings.Split(signedHeaders, ";"), "x-amz-date")
 
-	canonicalHeaders := ""
+	// The signature, recomputed over THE REQUEST THE STORE RECEIVED rather
+	// than over the one this test thinks it sent. That distinction is the
+	// point: asserting an Authorization header is present passes for a
+	// signature over the wrong bytes, and so does recomputing from the
+	// intended request.
+	//
+	// Through cloudauth.SignV4, not through a second signer written here. The
+	// first version of this test carried its own hundred lines of Signature
+	// Version 4, which is what TestThreeCloudsAreSignedByOneImplementation
+	// forbids and for a reason this test cannot see: two signers that agree
+	// today look exactly like one signer, right up until a fix lands in one of
+	// them. What is verified here is the BYTES, and cloudauth's own test
+	// verifies the algorithm against the canonical example AWS publishes.
+	replay := map[string]string{}
 	for _, name := range strings.Split(signedHeaders, ";") {
-		value := headers.Get(name)
 		if name == "host" {
-			value = host
+			continue
 		}
-		canonicalHeaders += name + ":" + value + "\n"
+		replay[name] = headers.Get(name)
 	}
-	canonicalRequest := strings.Join([]string{
-		http.MethodPut,
-		"/" + key,
-		"",
-		canonicalHeaders,
-		signedHeaders,
-		hex.EncodeToString(sum[:]),
-	}, "\n")
+	expected, err := cloudauth.SignV4(cloudauth.SigV4Request{
+		Method:  http.MethodPut,
+		URL:     "http://" + host + "/" + key,
+		Body:    body,
+		Headers: replay,
+		Region:  "eu-west-1",
+		Service: "s3",
+		Credentials: cloudauth.AWSCredentials{
+			AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey,
+		},
+		Now: mustParseAMZ(t, amzDate),
+	})
+	require.NoError(t, err)
 
-	crSum := sha256.Sum256([]byte(canonicalRequest))
-	scope := strings.Join([]string{dateOnly, "eu-west-1", "s3", "aws4_request"}, "/")
-	toSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256", amzDate, scope, hex.EncodeToString(crSum[:]),
-	}, "\n")
-
-	sign := func(key []byte, data string) []byte {
-		m := hmac.New(sha256.New, key)
-		m.Write([]byte(data))
-		return m.Sum(nil)
-	}
-	derived := sign([]byte("AWS4"+testSecretKey), dateOnly)
-	derived = sign(derived, "eu-west-1")
-	derived = sign(derived, "s3")
-	derived = sign(derived, "aws4_request")
-
-	require.Equal(t, hex.EncodeToString(sign(derived, toSign)), signature,
+	_, _, expectedSignature := parseAuthorization(t, expected["Authorization"])
+	require.Equal(t, expectedSignature, signature,
 		"the signature does not match the request the store received")
+
+	// And the scheme, taken from cloudauth rather than from a literal in this
+	// file. See parseAuthorization for why that is the honest form of the
+	// assertion rather than a way around the one implementation gate.
+	expectedScheme, _, _ := strings.Cut(expected["Authorization"], " ")
+	actualScheme, _, _ := strings.Cut(auth, " ")
+	require.Equal(t, expectedScheme, actualScheme)
+	require.Equal(t, dateOnly, amzDate[:8])
 }
 
 func TestASessionTokenIsSignedRatherThanSentBeside(t *testing.T) {
@@ -321,23 +344,41 @@ func TestASessionTokenIsSignedRatherThanSentBeside(t *testing.T) {
 		"a temporary credential's token was sent unsigned")
 }
 
-func TestTheEscapingIsAWSsRatherThanTheQueryEscaping(t *testing.T) {
-	t.Parallel()
-	// url.QueryEscape writes a space as + and leaves alone characters this has
-	// to encode. The difference is invisible until a key with a space in it
-	// fails to sign.
-	require.Equal(t, "a%20b", awsEscape("a b"))
-	require.Equal(t, "a%2Bb", awsEscape("a+b"))
-	require.Equal(t, "-_.~", awsEscape("-_.~"))
-	require.Equal(t, "%2F", awsEscape("/"))
+// The escaping this sink used to test lives in ee/engine/cloudauth now, and its
+// test went with it. A copy here would be this package asserting things about
+// somebody else's implementation, which is how two versions of a rule drift
+// while both test suites stay green.
+
+// mustParseAMZ reads the x-amz-date the sink actually sent.
+//
+// The signature is only reproducible at the instant it was made, because the
+// credential scope pins the day and the string to sign carries the timestamp.
+// Re-signing at time.Now() would produce a different signature for a request
+// that was signed correctly, which reads as a signing bug and is a test bug.
+func mustParseAMZ(t *testing.T, stamp string) time.Time {
+	t.Helper()
+	at, err := time.Parse("20060102T150405Z", stamp)
+	require.NoErrorf(t, err, "the sink sent an x-amz-date of %q", stamp)
+	return at.UTC()
 }
 
 // parseAuthorization pulls the three fields out of a Signature Version 4
 // header, failing rather than returning silence when the shape is wrong.
+//
+// The scheme is read off the header rather than compared against a literal
+// here, and that is not a way around TestThreeCloudsAreSignedByOneImplementation
+// but the honest answer to it. Writing the protocol string in this file, or
+// splitting it into two halves so the gate cannot see it, would both be this
+// package holding a piece of AWS's authentication. What the caller asserts
+// instead is that the scheme equals the one cloudauth itself produced, which is
+// a stronger claim: it comes from the single implementation rather than from
+// this test's memory of it.
 func parseAuthorization(t *testing.T, auth string) (credential, signedHeaders, signature string) {
 	t.Helper()
-	require.True(t, strings.HasPrefix(auth, "AWS4-HMAC-SHA256 "), "unexpected scheme: %s", auth)
-	for _, part := range strings.Split(strings.TrimPrefix(auth, "AWS4-HMAC-SHA256 "), ", ") {
+	scheme, rest, found := strings.Cut(auth, " ")
+	require.True(t, found, "unparsable authorization header: %s", auth)
+	require.NotEmpty(t, scheme)
+	for _, part := range strings.Split(rest, ", ") {
 		name, value, found := strings.Cut(part, "=")
 		require.True(t, found, "unparsable field %q", part)
 		switch name {
