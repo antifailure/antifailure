@@ -20,7 +20,7 @@ this is the buyer who cannot tolerate being wrong about it.
 export AF_LICENSE_KEY=...
 export AF_ORG=acme
 export AF_AIR_GAPPED=1
-export AF_AIR_GAPPED_ALLOW='registry.internal:5000,10.4.0.0/16,vault.internal'
+export AF_AIR_GAPPED_ALLOW='registry.example.com:5000,10.4.0.0/16,vault.example.com'
 af up
 ```
 
@@ -38,7 +38,7 @@ everybody on it, silently.
 Postgres and the Docker daemon are addressed there, and an installation that
 could not reach them could not run at all.
 
-**An entry that is not an address stops the binary.** `https://registry.internal/v2/`
+**An entry that is not an address stops the binary.** `https://registry.example.com/v2/`
 is refused rather than ignored, because an allow list with a typo in it is one
 that is quietly narrower than you believe, and you find that out at three in the
 morning.
