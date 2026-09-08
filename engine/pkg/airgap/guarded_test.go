@@ -167,6 +167,13 @@ import (
 
 var a = airgap.Client(airgap.SiteTelemetry, time.Second)
 var b = airgap.Transport(airgap.SiteTelemetry)
+var d = &http.Client{Timeout: time.Second, Transport: airgap.Transport(airgap.SiteLoadTest)}
+
+func g() *http.Client {
+	tr := airgap.Transport(airgap.SiteLoadTest)
+	tr.DisableCompression = true
+	return &http.Client{Transport: tr}
+}
 
 func c(ctx context.Context) (*http.Request, error) {
 	return http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
@@ -175,7 +182,10 @@ func c(ctx context.Context) (*http.Request, error) {
 
 	var findings []finding
 	walk(t, dir, dir, &findings)
-	require.Empty(t, findings)
+	require.Empty(t, findings,
+		"a client literal whose Transport is the guard's is guarded, and so is one "+
+			"built from a local the caller customised, which is how both load runners "+
+			"and the conformance suite write theirs")
 }
 
 func walk(t *testing.T, dir, root string, out *[]finding) {
@@ -207,27 +217,38 @@ func walk(t *testing.T, dir, root string, out *[]finding) {
 	require.NoError(t, err)
 }
 
-// banned maps a package-qualified name to what it is, for the message.
+// bannedTypes are types whose CONSTRUCTION opens a connection outside the
+// guard. Flagged only as a composite literal, never as a type reference.
 //
-// http.Transport is deliberately NOT here. A transport with no DialContext is
-// unguarded, but a transport is also the thing airgap.Transport returns and the
-// thing every caller then adjusts, and flagging the type would flag the fix.
-// What is flagged is the client, and a client is what actually dials.
-var banned = map[string]map[string]bool{
+// The distinction is the whole reason there are two maps. `&http.Client{}` is a
+// client nothing guards; `Client *http.Client` on a struct and
+// `hc *http.Client` on a parameter are the ordinary way every one of these
+// packages passes a client around, including the guarded ones, and a rule that
+// could not tell them apart would report fifteen findings on a clean tree and
+// be switched off within a day.
+var bannedTypes = map[string]map[string]bool{
+	"http": {"Client": true, "Transport": true},
+	"net":  {"Dialer": true},
+}
+
+// bannedValues are values and calls that reach the network outside the guard.
+//
+// airgap.Reset is not one of those. It is the one function in the guard that
+// can undo the seal, it is exported only because the tests that need it are in
+// three packages across two modules, and a call to it from production code is
+// the same class of defect. It is reported in the same pass because a separate
+// pass is a second thing to remember.
+var bannedValues = map[string]map[string]bool{
 	"http": {
-		"Client": true, "DefaultClient": true, "DefaultTransport": true,
+		"DefaultClient": true, "DefaultTransport": true,
 		"Get": true, "Post": true, "PostForm": true, "Head": true,
 	},
 	"net": {
 		"Dial": true, "DialTimeout": true, "DialIP": true, "DialTCP": true,
-		"DialUDP": true, "Dialer": true,
+		"DialUDP":    true,
 		"LookupHost": true, "LookupIP": true, "LookupAddr": true,
 	},
-	"tls": {"Dial": true, "DialWithDialer": true},
-	// Not an outbound client. Reset is the one function here that can undo the
-	// air gap, and it exists only because the tests that need it are in three
-	// packages and two modules. A call to it from production code is the same
-	// class of defect as an unguarded client and is reported in the same pass.
+	"tls":    {"Dial": true, "DialWithDialer": true},
 	"airgap": {"Reset": true},
 }
 
@@ -267,9 +288,9 @@ func inspect(t *testing.T, path, rel string) []finding {
 	}
 
 	var found []finding
-	note := func(pos token.Pos, local, sel string) {
+	note := func(pos token.Pos, local, sel string, set map[string]map[string]bool) {
 		pkg, ok := names[local]
-		if !ok || !banned[pkg][sel] {
+		if !ok || !set[pkg][sel] {
 			return
 		}
 		found = append(found, finding{
@@ -280,24 +301,85 @@ func inspect(t *testing.T, path, rel string) []finding {
 		switch v := n.(type) {
 		case *ast.CompositeLit:
 			// &http.Client{...} and net.Dialer{...}. The type may be behind a
-			// pointer, which is how every one of these is written.
+			// pointer, which is how every one of these is written, and the
+			// pointer is a UnaryExpr wrapping this node rather than part of it.
 			if sel, ok := v.Type.(*ast.SelectorExpr); ok {
 				if id, ok := sel.X.(*ast.Ident); ok {
-					note(sel.Pos(), id.Name, sel.Sel.Name)
+					// An http.Client written as a literal is fine when its
+					// Transport is the guard's. Four callers need one: two load
+					// runners and the release check set CheckRedirect, and the
+					// conformance suite turns keep alive off, and none of those
+					// is expressible as a bare airgap.Client. What is NOT fine
+					// is a literal with no Transport at all, because nil means
+					// http.DefaultTransport and that dials anywhere.
+					if !guardedTransport(v, names) {
+						note(sel.Pos(), id.Name, sel.Sel.Name, bannedTypes)
+					}
 				}
 			}
 		case *ast.SelectorExpr:
-			// http.DefaultClient, http.Get(...), net.Dial(...). A call is a
-			// SelectorExpr too, so one case covers both and the value form is
-			// what matters: assigning http.DefaultClient to a field is exactly
-			// as unguarded as calling it.
+			// http.DefaultClient, http.Get(...), net.Dial(...), airgap.Reset().
+			// A call is a SelectorExpr too, so one case covers both, and the
+			// value form is what matters: assigning http.DefaultClient to a
+			// field is exactly as unguarded as calling it.
+			//
+			// The two sets are disjoint, which is what stops a composite
+			// literal being counted twice. ast.Inspect descends into a
+			// CompositeLit's Type, so this case sees the same http.Client the
+			// case above just reported, and the first version of this walk
+			// returned every constructed client twice.
 			if id, ok := v.X.(*ast.Ident); ok {
-				note(v.Pos(), id.Name, v.Sel.Name)
+				note(v.Pos(), id.Name, v.Sel.Name, bannedValues)
 			}
 		}
 		return true
 	})
 	return found
+}
+
+// guardedTransport reports whether a composite literal sets Transport from the
+// guard.
+//
+// Deliberately narrow: the value has to be a call on the airgap package, or an
+// identifier assigned from one earlier in the same function, which is how the
+// two load runners write it. Anything cleverer would be a checker guessing, and
+// a checker that guesses in the permissive direction is the one that lets the
+// real case through.
+func guardedTransport(lit *ast.CompositeLit, names map[string]string) bool {
+	for _, el := range lit.Elts {
+		kv, ok := el.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok || key.Name != "Transport" {
+			continue
+		}
+		return fromAirgap(kv.Value, names)
+	}
+	return false
+}
+
+// fromAirgap reports whether an expression is a call on the guard package, or a
+// plain identifier, which is the local variable the load runners build first.
+func fromAirgap(e ast.Expr, names map[string]string) bool {
+	switch v := e.(type) {
+	case *ast.CallExpr:
+		sel, ok := v.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		id, ok := sel.X.(*ast.Ident)
+		return ok && names[id.Name] == "airgap"
+	case *ast.Ident:
+		// A local, which this walk does not follow. It is accepted because the
+		// alternative is refusing the shape the two load runners use, and the
+		// assignment that built it is three lines above in the same function
+		// where a reader sees it. The walk's job is finding the client nobody
+		// thought about, not proving dataflow.
+		return true
+	}
+	return false
 }
 
 // repoRoot walks up from this package to the directory holding go.work.
