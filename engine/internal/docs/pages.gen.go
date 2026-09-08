@@ -6311,6 +6311,20 @@ are named here rather than discovered in a failure.
 Microsoft publishes an emulator for it and this build does not start one, for
 two measured reasons and one that is not about cost at all.
 
+**Its wire protocol may not reach an emulator at all.** Every Azure Service Bus
+SDK defaults to AMQP 1.0 on port 5672, which is not HTTP. A rule in emulate
+mode makes the sidecar terminate the connection and read an HTTP request out of
+it, so an AMQP connection would be dropped rather than forwarded. Service Bus
+also speaks HTTP on 5300, and that path would work.
+
+This is the reason that would matter most, and it is **NOT CONFIRMED BY
+EXPERIMENT**. It was reasoned from ` + "`" + `policy.inspectMode` + "`" + ` and the sidecar's
+` + "`" + `http.ReadRequest` + "`" + ` by the lane that owns the routing, and neither that lane nor
+this one has driven an AMQP client at an emulate rule. It is recorded here
+because a reader deciding whether to wait for Service Bus deserves to know the
+strongest argument against it exists, and recorded as unconfirmed because it
+has not been run.
+
 **It cannot be declared yet.** ` + "`" + `mcr.microsoft.com/azure-messaging/servicebus-emulator` + "`" + `
 requires a SQL Server container beside it, which it dials on startup, and an
 emulator declaration carries one image. Nothing here can express a companion.
