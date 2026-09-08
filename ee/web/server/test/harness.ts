@@ -114,11 +114,60 @@ export function licenseFor(
 // test runner will not exit while a child's stdio pipes are open. A harness
 // whose cleanup depends on the test taking the happy path is a harness that
 // stops working exactly when a test fails, which is the only time it matters.
-const started: Running[] = []
+//
+// A LIST OF STOPPERS RATHER THAN OF STARTED SERVERS, and registered at spawn
+// rather than at first successful listen. Two of the cases in entrypoint.test.ts
+// assert that a process REFUSES to start. In those, startEntryPoint rejects and
+// never builds its Running value, so a list of Running values did not have the
+// child on it and could not stop it. The harness promised that everything it
+// starts is on this list; this is what makes that true.
+const stoppers: Array<() => Promise<void>> = []
 
 /** Stops everything, whatever happened to the test that started it. */
 export async function stopAll(): Promise<void> {
-  await Promise.all(started.splice(0).map((r) => r.stop()))
+  await Promise.all(stoppers.splice(0).map((stop) => stop()))
+}
+
+/** How long a process gets to die after SIGKILL before the harness says so. */
+const stopDeadlineMs = 10_000
+
+/**
+ * Stops one child, whatever state it is in, however many times it is called.
+ *
+ * THE BUG THIS EXISTS TO END, and it cost a 25 minute CI timeout that reported
+ * itself as `cancelled`: this used to resolve early only when `child.exitCode`
+ * was not null. `exitCode` is null for a process that died from a SIGNAL, and
+ * SIGKILL is how this harness stops one, so the SECOND stop of an
+ * already-stopped child decided it was still running, attached an `exit`
+ * listener to an event that had already fired, killed a pid that was gone, and
+ * never resolved. Two cases stop their own process in a `finally` and their
+ * entries stayed on the list, so teardown stopped each of them a second time
+ * and `stopAll` never returned. Eleven tests passed and the file hung until the
+ * job's clock ran out.
+ *
+ * `signalCode` is the other half of the same question, so both are asked. The
+ * deadline is here because a teardown that hangs says nothing and a teardown
+ * that fails says which process would not die.
+ */
+function stopChild(child: ChildProcess, entry: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve()
+      return
+    }
+    const deadline = setTimeout(() => {
+      reject(new Error(
+        `${path.basename(entry)} (pid ${String(child.pid)}) did not die within ` +
+        `${String(stopDeadlineMs)}ms of SIGKILL. Failing here rather than waiting, because ` +
+        `a teardown that hangs is reported as a cancelled job and says nothing at all.`,
+      ))
+    }, stopDeadlineMs)
+    child.once('exit', () => {
+      clearTimeout(deadline)
+      resolve()
+    })
+    child.kill('SIGKILL')
+  })
 }
 
 export interface Running {
@@ -165,6 +214,23 @@ export async function startEntryPoint(
   child.stdout?.on('data', (c) => { output += String(c) })
   child.stderr?.on('data', (c) => { output += String(c) })
 
+  // Registered HERE, before the process has been given a chance to fail, and
+  // self removing so that a test which stops its own process in a `finally`
+  // does not leave a second stop for teardown to trip over.
+  const stop = async (): Promise<void> => {
+    const at = stoppers.indexOf(stop)
+    if (at !== -1) {
+      stoppers.splice(at, 1)
+    }
+    await stopChild(child, entry)
+    // The pipes, not just the process. The runner will not exit while a
+    // child's stdio is open, and an exited child whose reader is still
+    // attached is the shape that hung this file before.
+    child.stdout?.destroy()
+    child.stderr?.destroy()
+  }
+  stoppers.push(stop)
+
   const port = await new Promise<number>((resolve, reject) => {
     // Thirty seconds, because the first start on a cold database opens a pool
     // and reads the console build. A start-up that never listens is itself a
@@ -204,17 +270,8 @@ export async function startEntryPoint(
           ...(init?.headers ?? {}),
         },
       }),
-    stop: () =>
-      new Promise<void>((resolve) => {
-        if (child.exitCode !== null) {
-          resolve()
-          return
-        }
-        child.on('exit', () => resolve())
-        child.kill('SIGKILL')
-      }),
+    stop,
   }
-  started.push(running)
   return running
 }
 
@@ -255,20 +312,25 @@ export async function seed(admin: postgres.Sql): Promise<Seeded> {
 // ---------------------------------------------------------------------------
 // Why package.json runs the two files as two processes
 //
-// `node --test test/*.test.ts`, which is what every other package here uses and
-// what this one used first, hangs. Each file passes on its own, in seconds, and
-// together they reach the runner's four minute wall and report
-// "Promise resolution is still pending but the event loop has already
-// resolved", with two cancelled files and nothing that says why.
+// THE ORIGINAL REASON WAS WRONG AND IS RECORDED HERE BECAUSE IT COST A JOB.
 //
-// This file starts real processes and holds their stdio pipes, and license.ts's
-// suite drives the same module-level extension registry that the entry point
-// registers into. Sharing one runner between those two is not something either
-// suite needs, and the cost of finding out exactly which of them is holding the
-// loop open is not worth paying to keep one command.
+// `node --test test/*.test.ts` hung, and this comment used to say that sharing
+// a runner was the cause and that finding out which suite held the loop open
+// was not worth the cost. Splitting the command did not fix it: on 2026-09-08
+// `entrypoint.test.ts` hung ON ITS OWN for twenty minutes after its last test
+// passed, and the enterprise job hit its 25 minute wall and reported itself as
+// `cancelled`, which reads as concurrency rather than as anything being wrong.
 //
-// So the script runs them separately, which is isolation the suites should have
-// had anyway: a suite that mutates a process-wide registry and a suite that
-// spawns servers are not neighbours. Recorded here rather than left as an odd
-// looking script, because the next person to tidy it back into one invocation
-// will get a four minute red with no explanation in it.
+// The cause was in this file and it is fixed above. `stop()` decided whether a
+// process was still running by reading `exitCode` alone, `exitCode` is null for
+// a process killed by a signal, and SIGKILL is how this harness stops one. Two
+// cases stop their own process in a `finally` and stayed on the list, so
+// teardown stopped them a second time, waited for an `exit` that had already
+// fired, and never returned.
+//
+// Both files now pass in one runner: 31 tests, three consecutive runs, exit 0.
+// The two invocations are kept anyway, and now only for the reason that stands
+// on its own: a suite that mutates a process-wide registry and a suite that
+// spawns servers are not neighbours. Nobody tidying this back into one command
+// will get a four minute red, and nobody reading it should be told a cause that
+// was never the cause.
