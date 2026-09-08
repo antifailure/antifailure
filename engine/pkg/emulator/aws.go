@@ -16,7 +16,14 @@ const AWSName = "aws"
 // whose emulator needs somebody's account contradicts the rule that no cloud
 // account may be required to run the community suite, so this pins the final
 // community build, which starts offline and answers for the nine services
-// below. LocalStack 4.14.1 is what it reports as its version.
+// below.
+//
+// The image says so itself, which is worth more than that measurement because
+// it needs no daemon and no gigabyte of pull. Read each digest's config blob
+// out of the registry: the description label on the current image is
+// "LocalStack Pro Docker image" and on this one it is "LocalStack Docker
+// image", and LOCALSTACK_BUILD_VERSION is 2026.8.1 against 4.14.1.dev75. The
+// community-archive tag resolves to the digest below. Checked 2026-09-08.
 //
 // An organization with a LocalStack licence points an environment at the
 // supported image by registering an emulator named aws of their own through
