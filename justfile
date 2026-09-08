@@ -1443,11 +1443,13 @@ fuzz-engine seconds="60":
 
 # Regenerate everything that is generated, then prove nothing changed.
 #
-# Scoped to the generated files rather than the whole tree. CI can diff
-# everything because it runs on a clean checkout; you cannot, because you are
-# always in the middle of an edit, and a gate that fails whenever you have
-# uncommitted work is a gate you learn to skip. The property either way is the
-# same: what is generated matches what it is generated from.
+# The comparison is `tools/gendrift`, which knows which generator owns which
+# path and says so when one has drifted. Here it looks only at what it owns,
+# because you are always in the middle of an edit and a gate that fails on
+# uncommitted work is a gate you learn to skip. CI adds -strict, which also
+# refuses a changed path no generator claims, and can do that because it runs
+# on a clean checkout. The property either way is the same: what is generated
+# matches what it is generated from.
 _generated:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1472,27 +1474,16 @@ _generated:
     # exists to catch.
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi:check --workspace apps/api
-    git diff --exit-code -- \
-      THIRD_PARTY_NOTICES.md \
-      www/public/errors.v1.json \
-      engine/internal/errors/codes.gen.go \
-      docs/src/content/docs/reference/errors.md \
-      www/public/lint-findings.v1.json \
-      engine/internal/insights/findings.gen.go \
-      engine/internal/insights/findings.register.json \
-      docs/src/content/docs/reference/lint-findings.md \
-      engine/internal/proxyimage/sources.gen.go \
-      engine/internal/docs/pages.gen.go \
-      schemas/policy-vectors.json \
-      schemas/mockpack-vectors.json \
-      schemas/webhook-vectors.json \
-      schemas/events.v1.json \
-      engine/internal/events/stream.register.json \
-      docs/src/content/docs/reference/cli.md \
-      docs/src/content/docs/reference/transforms.md \
-      docs/src/content/docs/guides/dashboard.md \
-      engine/internal/hud/testdata \
-      docs/src/content/docs/reference/schemas
+    # Scoped to what the generators own, which is what `gendrift` is for.
+    # This used to be `git diff` against a literal list of paths spelled out
+    # here, and CI compared the whole tree instead, so the two gates asked
+    # different questions and only one of them could ever notice a generator
+    # that started writing somewhere new. Both ask this now, and the list lives
+    # beside the mapping from a path to the command that rewrites it.
+    #
+    # No -strict here, unlike CI. You are always in the middle of an edit, and
+    # a gate that fails on your uncommitted work is a gate you learn to skip.
+    go run ./tools/gendrift .
 
 # Every manifest field either does something or is refused.
 #
