@@ -1,12 +1,18 @@
 package manifest_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
+
+// manifestExplain renders at an unbounded width, so an assertion about a line
+// is not really an assertion about where the wrapper happened to break it.
+func manifestExplain(m *schema.Manifest) string { return manifest.Explain(m, 0) }
 
 // The rules that refuse a placement nothing could ever satisfy.
 //
@@ -231,4 +237,46 @@ func TestParse_AcceptsAManifestWithNoPlacementAtAll(t *testing.T) {
 	m := mustParse(t, minimal)
 	require.Empty(t, m.Runtime.Targets)
 	require.Empty(t, m.Runtime.Requires)
+}
+
+func TestExplain_ShowsWhichTargetTheManifestWouldBePlacedOn(t *testing.T) {
+	t.Parallel()
+	// af explain answers "what is actually in force", and for a fleet the
+	// answer is not the list somebody wrote, it is the one the list resolves
+	// to. Printing the targets and leaving the reader to apply the matching
+	// rule themselves is how somebody reads three EU clusters and assumes the
+	// wrong one.
+	m := mustParse(t, minimal+`
+runtime:
+  provider: local
+  requires:
+    region: eu-west-1
+  targets:
+    - name: virginia
+      tags:
+        region: us-east-1
+    - name: dublin
+      tags:
+        region: eu-west-1
+    - name: frankfurt
+      tags:
+        region: eu-central-1
+`)
+	out := strings.Join(strings.Fields(manifestExplain(m)), " ")
+	require.Contains(t, out, "requires region=eu-west-1")
+	require.Contains(t, out, "dublin, local, region=eu-west-1 <- placed here")
+	// And only one of them is marked, or the mark says nothing.
+	require.Equal(t, 1, strings.Count(out, "<- placed here"))
+	require.Contains(t, out, "virginia, local, region=us-east-1")
+}
+
+func TestExplain_SaysNothingAboutPlacementWhenThereIsNone(t *testing.T) {
+	t.Parallel()
+	// Every manifest that declares no targets, which is all of them. A runtime
+	// section that grew two lines about placement on every manifest in the
+	// world would be noise in the one command whose job is to show what is in
+	// force.
+	out := manifestExplain(mustParse(t, minimal))
+	require.NotContains(t, out, "target")
+	require.NotContains(t, out, "requires")
 }
