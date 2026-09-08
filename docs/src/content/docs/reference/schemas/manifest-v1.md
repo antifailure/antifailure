@@ -222,7 +222,7 @@ The masked, verified copy every environment branches from.
 | `max_age` | string | no | How stale a golden may be before af up refreshes it first. Defaults to `168h`. Matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 | `retain` | integer | no | How many versions to keep. A referenced version is never collected regardless of this. Defaults to `5`. Minimum 1, maximum 100. |
 | `schedule` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
-| `storage` | `local`, `azure_blob`, `s3` | no | Where dumps and attestations live. Defaults to `local`. |
+| `storage` | `local`, `azure_blob`, `s3`, `gcs` | no | Where dumps and attestations live. Defaults to `local`. |
 | `storage_url` | string | no | Container or bucket URL for a remote store. Credentials come from the secrets subsystem, never from this URL. Max length 1024. |
 
 ## Insights

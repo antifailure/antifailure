@@ -1740,7 +1740,7 @@ anybody.
 | ` + "`" + `third_party` + "`" + ` | The hosts the egress policy names, the mode each is in, and which mock pack answers for the ones in mock mode. |
 | ` + "`" + `auth` + "`" + ` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | ` + "`" + `runtime` + "`" + ` | Where the environment runs. |
-| ` + "`" + `traffic` + "`" + ` | Which routes a load run would actually send, measured against the committed traffic profile of what production served, and how fast it sends against production's own rate. With no profile both are ` + "`" + `unmeasured` + "`" + ` and say so: four routes somebody wrote by hand used to report as a reproduction of production's traffic. |
+| ` + "`" + `traffic` + "`" + ` | Where the endpoint mix comes from, through the same code the load run uses. |
 | ` + "`" + `datastores` + "`" + ` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares ` + "`" + `golden` + "`" + ` and this environment branched reports what the branch holds and which golden it came from, the way ` + "`" + `database` + "`" + ` does. One declared ` + "`" + `golden` + "`" + ` that nothing branched is ` + "`" + `absent` + "`" + `. The others are ` + "`" + `unmeasured` + "`" + ` by name. |
 | ` + "`" + `topology` + "`" + ` | How many instances of each service are running, against how many the manifest asked for. |
 
@@ -2092,9 +2092,6 @@ load:
   duration: 5m
   safe_routes: ["GET /**", "POST /api/search"]
   unsafe_routes: ["POST /api/payments/**", "DELETE /**"]
-  traffic:
-    profile: .antifailure/traffic.json
-    max_age: 336h
   thresholds:
     p95_increase: 0.25
     error_rate: 0.01
@@ -2179,63 +2176,6 @@ Everything else works: the mix, the relative weights and the arrival rate,
 which is counted from the timestamps rather than assumed. When no line carries
 a readable timestamp the report says the arrival rate was assumed rather than
 presenting a guess as production's number.
-
-## What production actually serves
-
-` + "`" + "`" + "`" + `yaml
-load:
-  traffic:
-    profile: .antifailure/traffic.json
-    max_age: 336h
-` + "`" + "`" + "`" + `
-
-A route list written by hand cannot know which routes touch which tables.
-Measured on the Antifailure repository on 2026-09-06: a migration held an
-` + "`" + `ACCESS EXCLUSIVE` + "`" + ` lock on nine relations for thirty seconds, ` + "`" + `pg_locks` + "`" + `
-confirmed it from a second connection, and ` + "`" + `af load smoke` + "`" + ` ran through the
-whole window reporting 0.0 percent failed with p95 improving from 41 ms to
-17 ms. None of its four ` + "`" + `safe_routes` + "`" + ` reads the locked table. It was not a
-weak result. It was a green one.
-
-` + "`" + `af traffic record` + "`" + ` counts what production served, from an OpenTelemetry trace
-export or a combined format access log that a collector or a reverse proxy
-already wrote, and writes a profile you commit beside the manifest:
-
-| It records | From a trace export | From an access log |
-| --- | --- | --- |
-| The endpoint mix, per route | yes | yes |
-| The arrival rate, over the window it saw | yes | yes |
-| Production's p95, per route | yes | no, a log line carries no duration |
-| Peak concurrency | yes | no |
-
-It carries no request body, no header, no query string and no identifier: a
-path with an identifier in it collapses to ` + "`" + `/users/{id}` + "`" + ` before it is counted,
-so what lands in the file is a route and a number. Nothing here opens a socket,
-there is no agent, and no application code changes. The file is one you already
-have.
-
-` + "`" + "`" + "`" + `
-af traffic record --from telemetry/traces.json
-af traffic show
-` + "`" + "`" + "`" + `
-
-` + "`" + `af traffic show` + "`" + ` prints what production serves, busiest route first, with a
-mark against every route your run reaches, and prints the ` + "`" + `safe_routes` + "`" + ` lines
-that would cover the ones it does not. It prints them. It does not write them:
-this measures and states, and the manifest confirms it. A route being served in
-production is not a promise that sending it a thousand times is safe.
-
-With a profile, three things change. The fidelity report's traffic dimension
-states the fraction of production's requests your run actually sends and names
-the heaviest route it never touches, instead of reporting any shape at all as
-a reproduction. The arrival rate is stated beside production's own. And
-` + "`" + `p95_increase` + "`" + ` becomes able to fire under ` + "`" + `access_log` + "`" + ` and ` + "`" + `none` + "`" + `, because the
-profile carries the baseline the source could not.
-
-A profile older than ` + "`" + `max_age` + "`" + ` is refused rather than quoted, the way a stale
-golden is refused rather than branched. Fourteen days by default, where the
-volume profile's is thirty: an endpoint mix moves at the rate a team ships, and
-a volume profile at the rate a business grows.
 
 ## Safe and unsafe routes
 
@@ -2376,17 +2316,11 @@ source, so a route the source could not measure is never a breach. Absolute
 numbers are deliberately not used: they fail on a slow CI runner and tell you
 nothing about the change.
 
-Which means the threshold needs durations from somewhere, and the traffic
-source carries them only under ` + "`" + `otel` + "`" + `. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + `
-with nothing else to compare against is refused by the manifest, and the
-default is not applied there either: a threshold the report lists and no route
-can be measured against is a check everybody believes is running.
-
-The second place a baseline can come from is a recorded traffic profile, which
-carries production's own p95 per route. Declare ` + "`" + `load.traffic.profile` + "`" + ` and the
-threshold is allowed under any source, because the comparison now has something
-on the other side of it. The run says which routes took their baseline from the
-profile, and says so when none could.
+Which means the threshold needs a source that carries durations, and only
+` + "`" + `otel` + "`" + ` does. Setting it under ` + "`" + `access_log` + "`" + ` or ` + "`" + `none` + "`" + ` is refused by the
+manifest, and the default is not applied there either: a threshold the report
+lists and no route can be measured against is a check everybody believes is
+running.
 
 ` + "`" + "`" + "`" + `
 AF-LOD-016 The p95_increase threshold proved nothing: no baseline for any of
@@ -2542,64 +2476,13 @@ dialect settles.
 
 ### The check that says the two stores agree
 
-The guarantee is checked rather than argued, and you run the check on your own
-stores rather than reading about ours. Give each datastore the name of the
-variable holding a read only connection string:
-
-` + "`" + "`" + "`" + `yaml
-database:
-  source_url_env: PRODUCTION_DATABASE_URL
-
-datastores:
-  - name: events
-    engine: clickhouse
-    stance: golden
-    source_url_env: CLICKHOUSE_URL
-` + "`" + "`" + "`" + `
-
-Then:
-
-` + "`" + "`" + "`" + `
-af mask crossstore
-` + "`" + "`" + "`" + `
-
-It takes both stores' plans, finds every identifier that appears in both, masks
-probe values through each side, and reports the share that come out identical:
+The guarantee is checked rather than argued. The check takes two stores' plans,
+finds every identifier that appears in both, masks probe values through each
+side, and reports the share that come out identical:
 
 ` + "`" + "`" + "`" + `
 join keys verified identical across primary and events: 4 of 4 (100.0%)
 ` + "`" + "`" + "`" + `
-
-**It reads catalogs and no rows.** The probe values are its own, so what it
-needs from a store is the schema, which is why it is safe to point at
-production. The report says how many tables and columns it read and that it read
-no rows, as a field rather than as a promise on this page.
-
-**That is enforced by a test rather than by intent.** A live test runs the
-check against a real ClickHouse, then reads the server's OWN ` + "`" + `system.query_log` + "`" + `
-back and fails if any statement the check sent selected from a data table. A
-sentence saying no rows are read is something anybody can write; a query log
-the server keeps is something that can contradict it, and if it ever does, the
-` + "`" + `rows_read` + "`" + ` of zero in the report is a lie and the build says so.
-
-A table the reader deliberately left out is named with the reason, because a
-share of the join keys it could see is a true answer to a smaller question when
-half a schema was dropped in silence. A ClickHouse view has no rows of its own
-and a ` + "`" + `Distributed` + "`" + ` engine is a pointer at another server, so neither is a store
-whose masking can be compared. Both are left out of the comparison and named in
-the report, rather than dropped in silence.
-
-Every store it could not read is named with the reason, and a store that names
-no ` + "`" + `source_url_env` + "`" + ` is named as never read at all. A run that reached one store
-says it proved nothing rather than reporting a hundred percent of one, and that
-answer carries a different exit code from a real disagreement: one is a
-statement about your data and the other is a statement about what could be
-reached.
-
-The same question is the ` + "`" + `cross_store` + "`" + ` question of the ` + "`" + `inspect_data_masking` + "`" + `
-tool, where it answers PASS, FAIL or INCONCLUSIVE. Where two stores are present
-it is also a line in the [component inventory](/docs/concepts/inventory), and
-until something compares them that line reads unmeasured rather than passed.
 
 Anything below 100 percent is a bug, and there are three ways to get there:
 
@@ -2630,14 +2513,11 @@ different values for one field. A rule settles it:
 ### What is not built yet
 
 The dialect boundary is the classification, the statements and the verification
-scan. Nothing yet refreshes a golden for a second store or branches one: there
-is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries other than ` + "`" + `primary` + "`" + ` are
-reported with their declared stance rather than measured. ` + "`" + `af mask crossstore` + "`" + `
-opens a connection to a second store to READ ITS CATALOG and nothing else; a
-ClickHouse is read over its HTTP interface, and a URL naming the native port is
-refused with the HTTP one in the message rather than attempted. Said here rather
-than left to be discovered, because a boundary that looks complete from outside
-is how somebody ends up trusting one.
+scan. Nothing yet refreshes a golden for a second store, branches one, or opens
+a connection to one: there is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries
+other than ` + "`" + `primary` + "`" + ` are reported with their declared stance rather than
+measured. Said here rather than left to be discovered, because a boundary that
+looks complete from outside is how somebody ends up trusting one.
 
 ## Writing the rules from the schema
 
@@ -3124,28 +3004,7 @@ requests is the fastest way to shorten a queue, and
 ` + "`" + `af env prune` + "`" + ` lists everything older than a day and removes nothing, and
 ` + "`" + `af env prune --yes` + "`" + ` removes what it listed.
 
-## What runs today, and what is waiting for a queue
-
-Worth being blunt about, because the sections above describe a scheduler and
-only one half of it is reachable from a command line.
-
-**Placement runs.** ` + "`" + `af up` + "`" + ` calls the scheduler to choose which declared target
-an environment goes to, and an unsatisfiable requirement is refused by name. See
-[multiple runtimes](/docs/enterprise/runtimes).
-
-**Fair sharing, ageing, priority and queue positions are implemented and
-tested, and nothing feeds them a queue yet.** A command line has one run, so the
-round is a round of one, ageing has nothing to promote past, and the limit is
-never reached. Those parts start deciding when a control plane dispatches
-batches rather than a person running a command, and ` + "`" + `AF-SCH-002` + "`" + ` above is
-reserved for that day rather than produced today.
-
-They are described here rather than left out because they are the reason the
-decision is a call into one function instead of a loop written at the call site:
-the placement a person sees on a laptop is made by the code that will make it in
-a cluster, rather than by a second implementation that agrees until it does not.
-
-Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal), [multiple runtimes](/docs/enterprise/runtimes).
+Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal).
 `,
 	"concepts/subsetting.md": `---
 title: Subsetting
@@ -4116,121 +3975,6 @@ against reality. A silent skip is how a provider ends up claiming conformance
 it does not have, so the suite is built to make skipping visible rather than
 convenient.
 
-### Copy on write, which is measured rather than believed
-
-` + "`" + `CopyOnWrite` + "`" + ` says a branch shares storage with its golden, so branch time does
-not grow with the database. It is the claim a customer is really buying, so the
-suite does not take your word for it.
-
-` + "`" + `CopyOnWrite_BranchTimeMatchesTheDeclaration` + "`" + ` builds two goldens, one of them
-half a gibibyte larger than the other, branches each of them several times
-alternately, and takes the fastest of each. Then it asks one question in two
-directions:
-
-- Declared ` + "`" + `true` + "`" + `, and the larger golden branched measurably slower: **fail**.
-  You are copying, and whoever waits for an environment is paying for it.
-- Declared ` + "`" + `false` + "`" + `, and the larger golden branched no slower: **fail**. You have
-  a flat branch time and are not saying so, which puts the wrong row in the
-  comparison table a buyer chooses from.
-
-Those two are complementary, so one of the two possible declarations is refused
-on every run. There is no reading of the stopwatch that lets both pass, which is
-the property a check needs before a green one means anything.
-
-### The third answer, and why the default is unproven
-
-The stopwatch is only as good as the storage under the run, and a fake cloud
-control plane over one local Postgres can only hand back a branch carrying the
-golden's data with ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + `, which copies files. On that
-harness a truthful ` + "`" + `CopyOnWrite: true` + "`" + ` fails, and a ` + "`" + `CopyOnWrite: false` + "`" + ` passes
-comfortably. **Both answers are about the harness and neither is about your
-product**, so the behaviour has a third one.
-
-` + "`" + "`" + "`" + `
-NOT PROVED BY THIS RUN. This is not a pass.
-  UNPROVEN  aurora  CopyOnWrite_BranchTimeMatchesTheDeclaration
-` + "`" + "`" + "`" + `
-
-**` + "`" + `Options.RealService` + "`" + ` decides it, and leaving it empty is what produces the
-unproven verdict.** It is an assertion of reality, not an admission of
-simulation:
-
-` + "`" + "`" + "`" + `go
-conformance.RunDatabase(t, factory, conformance.Options{
-    RealService: "the real Neon API, against a real project",
-})
-` + "`" + "`" + "`" + `
-
-A field you set to excuse a fake is a field a fake can simply never set, and the
-next author writes a control plane, never learns the field exists, and collects a
-measured verdict from a run that measured nothing. Forgetting this one produces
-the safe answer instead. Set it only when the run really drives the service whose
-capability is being decided: a fake control plane over a real local Postgres does
-**not** qualify, however real the Postgres is, because what the stopwatch timed
-was Postgres.
-
-**It is symmetric.** A run that asserts nothing is unproven whether you declare
-` + "`" + `true` + "`" + ` or ` + "`" + `false` + "`" + `. The false side is the one worth spelling out, because it is the one that
-would otherwise ship: a snapshot restore provider declaring ` + "`" + `false` + "`" + ` against a
-copying fake passes comfortably, publishes a certified claim that its service is
-not copy on write, and nobody rereads a green check.
-
-**The measurement is not taken.** The verdict is decided before the behaviour
-runs, so two goldens and six branches could not change it, and publishing what a
-simulator timed invites somebody to quote it as though it were about the product.
-
-**It is not a skip, and it never uses the word.** A skip says this provider makes
-no such claim. An unproven says the provider does make the claim and this run
-could not reach it. The verdict is reprinted at the end of the run, the ledger in
-` + "`" + `engine/conformance/ledger.go` + "`" + ` records it per provider, and
-` + "`" + `conformance.CopyOnWriteClaim` + "`" + ` renders it, so the cell in the published
-comparison table reads ` + "`" + `unproven` + "`" + ` rather than blank. A blank cell is taken for a
-pass by every reader in a hurry.
-
-The suite makes a golden large by writing ballast into it from inside the ` + "`" + `Mask` + "`" + `
-callback, so a provider needs no extra method: hand ` + "`" + `Mask` + "`" + ` a connection string
-that works, which every other behaviour needs anyway, and the sizing takes care
-of itself. It also weighs the last branch it makes, because a branch that is
-fast because it is EMPTY would otherwise read as one that is fast because it
-shares storage.
-
-### What the check can and cannot see, printed every time
-
-The allowance the growth is measured against is not a constant. It is twice the
-spread the small golden's own branch times showed during this run, floored at a
-quarter of a second: the machine saying how far its readings travel while the
-data is held still. On a quiet machine that collapses and the check sharpens;
-under load it widens rather than accusing an honest provider of copying.
-
-So the power of the check varies, and every run prints it:
-
-` + "`" + "`" + "`" + `
-  this run could refuse    a copy slower than 0.49 seconds per GiB, and nothing faster
-` + "`" + "`" + "`" + `
-
-Read that line before believing a pass. It is the bound on what the run was
-able to see, and a provider whose branch times are erratic gets a weaker bound
-than one whose are steady. Raise ` + "`" + `Options.CopyOnWriteLargeBytes` + "`" + ` if you want a
-stronger statement than the one your run printed.
-
-` + "`" + `CopyOnWriteSmallBytes` + "`" + `, ` + "`" + `CopyOnWriteLargeBytes` + "`" + ` and ` + "`" + `CopyOnWriteSamples` + "`" + ` tune
-the cost for a provider that bills by the gibibyte, and
-` + "`" + `AF_CONFORMANCE_COW_LARGE_BYTES` + "`" + ` and its two siblings do the same from the
-environment for a machine that cannot afford the default. Both have floors, and
-both make the run say it was tuned. Against a real service there is deliberately
-no way to skip the behaviour: a run that shrank says how far it shrank and what
-it could still refuse, and that can be read, where a run that skipped cannot.
-The one case that is neither a pass nor a shrunken run is the third verdict
-above, and it is not a skip either: it is a verdict, it prints, and it makes the
-claim unpublishable.
-
-` + "`" + `ExpectedBranchLatency` + "`" + ` is checked the same way.
-` + "`" + `Branch_IsWithinTheDeclaredLatency` + "`" + ` times the fastest of three branches of the
-conformance dataset against the number you declared. Declare what your service
-does, not what you hope it does: the number is what the engine plans an
-environment around, and a provider that has got slower has to fail here rather
-than degrade quietly.
-
 ## Proving the suite can fail
 
 A green conformance run is worth exactly as much as your confidence that the
@@ -4785,9 +4529,10 @@ A JSON file describing what was bought.
 | ` + "`" + `grace_days` + "`" + ` | How long after expiry features keep working. Defaults to 14. |
 | ` + "`" + `trial` + "`" + ` | Marks an evaluation license, which shows a banner. |
 
-The features are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `compliance_packs` + "`" + `,
-` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `,
-` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `. Anything else
+The features are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `cloud_database` + "`" + `,
+` + "`" + `cloud_runtime` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `,
+` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `,
+` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `. Anything else
 is refused at issue time, because the verifier cannot refuse it: a license
 issued for a newer release names features an older binary has never heard of,
 and rejecting the whole license over one unknown name would take away the
@@ -4796,24 +4541,6 @@ acting on it, and the generator is the only place the set can be closed.
 
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
-
-## Features that cannot be issued
-
-` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are in the set above, and a request naming
-either of them is refused. Nothing in this product enforces them, so a license
-carrying one would verify, report itself active, print the feature in
-` + "`" + `af license status` + "`" + `, and change nothing about what the software does.
-
-That is a worse failure than an unknown name, because everything about it reads
-as a supported feature: it is in the documentation, in the price list, and in
-the generator's own set. The only two people positioned to discover it are the
-customer who paid and the person who sold it.
-
-Both refusals are in the product rather than in a checklist. The generator will
-not sign one, and the verifier carries the name and never permits it, exactly as
-it treats a feature from a release the binary predates. When either capability
-is built, one entry is removed from ` + "`" + `notShipped` + "`" + ` in
-` + "`" + `ee/engine/license/license.go` + "`" + ` and both refusals lift together.
 
 ## Step three: sign it
 
@@ -5043,35 +4770,9 @@ license leaves you with it rather than with nothing.
 
 ` + "`" + `sso` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `multi_runtime` + "`" + `,
 ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `support_access` + "`" + `,
-` + "`" + `compliance_packs` + "`" + `, ` + "`" + `air_gapped` + "`" + `.
+` + "`" + `compliance_packs` + "`" + `, ` + "`" + `air_gapped` + "`" + `, ` + "`" + `cloud_database` + "`" + `, ` + "`" + `cloud_runtime` + "`" + `.
 
 Each is named in the license, so a license permits exactly what was bought.
-
-### Two of those cannot be sold
-
-` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are names in the catalogue and nothing
-else. There is no implementation of either, so there is nothing a license could
-switch on, and both are refused twice: ` + "`" + `tools/licensegen` + "`" + ` will not sign a
-request naming one, and the verifier carries the name through and never permits
-it.
-
-That is deliberate rather than an oversight waiting to be tidied. The
-alternative, a license check placed in front of a capability that does not
-exist, is a declared enforcement site that can never run, which reads as a
-working feature from every direction and is harder to find than the gap it
-covers. A feature nobody can buy and nobody can be granted cannot be mistaken
-for one that ships.
-
-` + "`" + `rbac` + "`" + ` is a third case and a different one. The custom roles library is complete
-and tested, and nothing stores a role model, so an organization has no way to
-have one. It is reported and not enforced, and it is written down here rather
-than gated for the same reason: a check on a path nothing reaches is worse than
-no check.
-
-Both lists are held to the code by a test rather than by a habit. ` + "`" + `notShipped` + "`" + `
-in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place either statement lives,
-and this page, the generator and the enterprise feature registry are all checked
-against it in both directions.
 
 ## Contributing
 
@@ -5127,18 +4828,10 @@ allowed_regions:
   - westeurope
 ` + "`" + "`" + "`" + `
 
-` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part.
-Write the schema too, as ` + "`" + `public.users.email` + "`" + `, when you mean one schema in
-particular; a pattern without one names that table in whichever schema holds
-it.
-
-The rule is checked against the database's own catalogue, so it means every
-column it names. ` + "`" + `"*.email"` + "`" + ` is satisfied when every email column in the
-database is masked, and a plan that masks ` + "`" + `users.email` + "`" + ` and leaves
-` + "`" + `contacts.email` + "`" + ` readable is refused by name. A pattern that matches no column
-at all counts as unsatisfied too, because a policy that quietly passes when the
-thing it protects is absent stops protecting the moment somebody renames a
-table.
+` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part. A
+pattern that matches no column in the database counts as unsatisfied, because a
+policy that quietly passes when the thing it protects is absent stops protecting
+the moment somebody renames a table.
 
 ` + "`" + `denied_hosts` + "`" + ` refuses a host named in any mode other than ` + "`" + `block` + "`" + `. A repository
 may still write a ` + "`" + `block` + "`" + ` rule for one, so that it can document what it
@@ -5167,33 +4860,13 @@ ask would turn the rule into decoration.
 
 ## Where it runs
 
-Most of the policy is checked before anything is created, not after. A policy
-that refused an environment halfway through would leave resources behind and a
-decision nobody can act on.
+The check happens before anything is created, not after. A policy that refused
+an environment halfway through would leave resources behind and a decision
+nobody can act on.
 
-` + "`" + `required_masked_columns` + "`" + ` is the exception, and the reason is worth knowing
-before you write one. At creation time the engine has read a manifest, and a
-manifest enumerates services rather than columns. Expanding a column pattern
-there would mean expanding it against the tables a manifest happens to mention,
-which is not the set of tables that exist, and a required pattern that matched
-nothing in that smaller set would refuse a repository whose schema satisfies it
-perfectly.
-
-So the masking rule is checked during a golden refresh instead, after the
-engine has read the database's catalogue and worked out which columns its rules
-will rewrite, and before the first row is rewritten. A refusal there means the
-golden is never published, and an unverified golden cannot be branched, so no
-environment can hold data the policy refused. It is later than the other rules
-and it is still before the data exists.
-
-One consequence to plan for: a golden published before you tightened the policy
-is not re-examined. Refresh the golden after a policy change, with
-` + "`" + `af golden refresh` + "`" + `, and the new rule decides whether it may be published.
-
-The extension points it uses are in the community edition, in
-` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the sockets are MIT so that anybody
-can write a hook, and the enterprise edition supplies one implementation of
-them.
+The extension point it uses is in the community edition, in
+` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the socket is MIT so that anybody
+can write a hook, and the enterprise edition supplies one implementation of it.
 
 ## Hooks can only refuse
 
@@ -5210,23 +4883,12 @@ that lives in somebody's plugin.
 ` + "`" + "`" + "`" + `go
 type PolicyHook interface {
     // Returns an error to refuse. Nil permits nothing; it declines to object.
-    Check(ctx context.Context, req EnvironmentRequest) error
-}
-
-type MaskingHook interface {
-    // Asked during a golden refresh, with the columns a plan will rewrite and
-    // the whole catalogue it read them from.
-    CheckMasking(ctx context.Context, req MaskingRequest) error
+    Check(ctx context.Context, req Request) error
 }
 ` + "`" + "`" + "`" + `
 
-A hook may implement either or both. ` + "`" + `MaskingRequest` + "`" + ` carries two column lists
-and a hook needs both: masked columns alone cannot tell a database that has no
-email column from one that has three and masks none of them, and those deserve
-opposite answers.
-
 Register it with the engine's extension registry. The community build registers
-nothing, so each check iterates an empty slice and returns nil.
+nothing, so the check iterates an empty slice and returns nil.
 
 Related: [licensing](/docs/enterprise/licensing), [egress](/docs/concepts/egress).
 `,
@@ -5237,40 +4899,17 @@ sidebar:
   order: 5
 ---
 
-*More than one placement target requires an enterprise license with the
-` + "`" + `multi_runtime` + "`" + ` feature. One target needs no license.*
+*Requires an enterprise license with the ` + "`" + `multi_runtime` + "`" + ` feature.*
 
 With one runtime there is nothing to decide. With several, an environment has to
 go somewhere, and where is a policy question: a region for data residency, a
 pool with more memory for a heavy repository, an isolated pool for repositories
 that handle regulated data.
 
-` + "`" + "`" + "`" + `yaml
-runtime:
-  provider: kubernetes
-  domain: preview.example.com
-  requires:
-    region: eu-west-1
-  targets:
-    - name: frankfurt
-      kubeconfig_context: eu-prod
-      domain: eu.preview.example.com
-      tags:
-        region: eu-west-1
-    - name: virginia
-      kubeconfig_context: us-prod
-      domain: us.preview.example.com
-      tags:
-        region: us-east-1
 ` + "`" + "`" + "`" + `
-
-That repository is placed in Frankfurt. Every command that has to find the
-environment afterwards works it out the same way, from the same file.
-
-` + "`" + "`" + "`" + `
-AF-SCH-001 No runtime satisfies the placement requirement region=eu-west-2.
-  Next: Declare a target under runtime.targets carrying that tag, or relax
-  runtime.requires. Nothing was created.
+AF-SCH-001 No runtime satisfies the placement requirement region=eu-west.
+  Next: Register a runtime that meets it, or relax the requirement in the
+  placement rules.
 ` + "`" + "`" + "`" + `
 
 ## Why it refuses rather than falls back
@@ -5279,179 +4918,33 @@ Placing an EU repository's environment in a US pool because the EU pool was full
 is the kind of helpfulness that ends a compliance audit badly. A requirement
 that can be silently ignored is not a requirement.
 
-The same reasoning is why a requirement nothing can satisfy is refused when the
-manifest is read rather than at dispatch. The requirement and the targets are in
-one file,
-so the contradiction is decidable before anything runs, and the person looking at
-it is the person who wrote both lines. A scheduler in a cluster reporting the
-same thing an hour later is reporting it to somebody who cannot fix it.
+A run that cannot be placed is queued and reported, with its position, the same
+as any other run waiting for capacity.
 
-## Requirements and tags
+## Requirements
 
-Attributes, matched by equality against what each target declares: region,
-instance class, isolation level, whatever your organization decides matters.
-Every requirement must be met; empty requires means any target will do, and the
-first one listed wins.
+Attributes, matched against what each registered runtime declares: region,
+instance class, isolation level, whatever your organisation decides matters.
 
-**The tags are declared in the manifest, not discovered from the cluster.** A
-kubeconfig context is a name on somebody's laptop and it does not say which
-region the cluster is in. Writing the claim in the repository puts it under
-review next to the requirement that reads it, and it is one fewer thing that can
-be changed by anyone with access to a cluster.
-
-## What placement does not decide
-
-**Capacity and health are not inputs.** The engine places one environment from a
-command line and holds no capacity ledger, so it has nothing to report for either
-and does not invent one. ` + "`" + `engine/internal/scheduler` + "`" + ` carries the fair share
-round, the aging that stops a nightly job starving behind pull requests, the per
-organization limit and the queue position for the day a control plane dispatches
-batches; the engine calls the same function with the one run it has, so the
-decision on a laptop is made by the code that will make it in a cluster rather
-than by a second implementation that agrees until it does not.
-
-The consequence worth stating plainly: **this does not fail over.** A target that
-is unreachable is an error, not a reason to place somewhere else. Placement is a
-pure function of the manifest, and it has to be, because ` + "`" + `af up` + "`" + `, ` + "`" + `af status` + "`" + `,
-` + "`" + `af logs` + "`" + ` and ` + "`" + `af down` + "`" + ` each decide independently. A placement that varied with a
-cluster's health would have ` + "`" + `af status` + "`" + ` asking the wrong cluster and reporting
-that your environment does not exist.
-
-## Residency
-
-A target's ` + "`" + `region` + "`" + ` tag is what fills the region an organization policy's
-` + "`" + `allowed_regions` + "`" + ` rule compares against. Before targets existed nothing in the
-product knew where an environment ran, so that rule had no value to read. A
-target that carries a region can be refused by a residency policy; one that does
-not carry a region cannot be, and the policy says so rather than passing.
-
-See [policy](/docs/enterprise/policy).
+The scheduler treats an unsatisfiable requirement as different from a full
+queue, because the fixes are different. A full queue resolves itself. An
+unsatisfiable requirement never will, and saying "queued" would be a lie that
+lasts until somebody investigates.
 
 ## The community edition
 
-Two runtimes, both built. ` + "`" + `runtime.provider` + "`" + ` names ` + "`" + `local` + "`" + ` or ` + "`" + `kubernetes` + "`" + `, and
-any other name is refused with a message that lists what this build has rather
-than quietly substituting one. The Kubernetes runtime builds a Deployment, a
-Service and an Ingress per web service and has been selectable the whole time.
+Two runtimes, both built. ` + "`" + `runtime.provider` + "`" + ` in the manifest names ` + "`" + `local` + "`" + ` and
+` + "`" + `kubernetes` + "`" + `, and this page said for a long time that only ` + "`" + `local` + "`" + ` existed.
+That was stale rather than cautious: the Kubernetes runtime builds a Deployment,
+a Service and an Ingress per web service and has been selectable the whole time.
+Any other name is refused with a message rather than quietly substituted, and
+the message lists the two this build has.
 
-One target is community too. It decides nothing: it labels the single runtime
-you already had so a residency policy has something to read, and charging for a
-label would be charging for the community edition.
+What the enterprise edition adds here is not a third runtime. It is placement
+across several of them at once: the requirements, the tags and the scheduling
+described above.
 
-What the enterprise edition adds is not a third runtime. It is the choice between
-several at once: the requirements, the tags and the refusal described above.
-
-## Why there is no ECS runtime
-
-` + "`" + `runtime.provider: ecs` + "`" + ` is registered in the enterprise binary and it refuses,
-every time, with a report rather than an error. The reason is worth reading
-before assuming it is a gap somebody will close next release.
-
-A runtime is allowed to exist here only if it can prove an environment has no
-way out, and the Kubernetes runtime proves it the only way a proof works: it
-creates the ` + "`" + `NetworkPolicy` + "`" + ` objects itself, then runs one pod under exactly the
-rules a service runs under and has it try to escape before any application image
-starts. If any attempt gets out the environment does not start and you get
-**AF-RUN-043**. That is not caution. Several container network plugins accept a
-` + "`" + `NetworkPolicy` + "`" + ` object and enforce nothing, every status reads green, and the
-only thing that can tell the two apart is a packet.
-
-ECS on Fargate cannot be given the same treatment, for two reasons that are
-properties of the platform rather than of this implementation.
-
-**The image pull runs inside the boundary.** A kubelet pulls on the node, so a
-pod can be denied every egress rule and still start. On Fargate platform version
-1.4.0 the ECR login, the image pull and the log push all flow over the task's own
-network interface, under the task's own security group, and AWS states that a
-Fargate task must have a route to the registry to pull an image. So a security
-group that denies egress does not produce a contained environment. It produces a
-task that never starts, and the endpoints that let it start are themselves
-reachable addresses.
-
-**The enforcement cannot be observed without an account.** Whether a cluster
-enforces a ` + "`" + `NetworkPolicy` + "`" + ` is answerable on a laptop in ninety seconds. Whether
-AWS enforces a route table is a fact about an account, and no test in this
-repository is permitted to need one.
-
-So what ships is the enumeration and the predicate over it, and the refusal
-carries both. Thirteen distinct egress paths out of a Fargate task, of which
-**ten are closed by the configuration this runtime would generate, one is open,
-and two are not decided by either the configuration or AWS's own
-documentation**. Every closed verdict carries the grade of evidence behind it,
-and the report separates the closures computed from a JSON document from any
-recorded by an attempt made inside a running task, because those are different
-claims.
-
-The one that is open is the task metadata endpoint, which is on by default for
-every Fargate task on platform version 1.4.0 or later with no documented way to
-turn it off.
-
-The two that are unproven are named rather than rounded up, because an unproven
-verdict is not a weaker closed one. The instance metadata service at
-` + "`" + `169.254.169.254` + "`" + ` is the sharper of them: the Fargate launch type removes the
-documented credential source, because EC2 instance profiles are not available to
-containers in Fargate tasks, but AWS does not state that the address stops
-answering, and those are different claims. The local Amazon Time Sync Service at
-` + "`" + `169.254.169.123` + "`" + ` is the other. Settling either needs one request from one
-running task, which is a request from a task in somebody's AWS account, so
-nothing here moves them on an absence of evidence.
-
-Two paths that a reader of an earlier draft of this page would have found in the
-open column are closed, and how they closed is the reusable part. The interface
-endpoints the image pull needs and the S3 gateway endpoint the layers come from
-cannot be disconnected without giving up the ability to start an environment at
-all. But reaching ECR is not the same question as reaching **any** repository,
-any log group and any bucket in the region, and only the second is an
-exfiltration path. A VPC endpoint policy naming this environment's own
-repository, log group and bucket closes the second while leaving the first, so
-the weaker half of the question was the one being answered.
-
-One finding is worth carrying away even if you never run on ECS. **On AWS the
-security group is irrelevant to a DNS query.** The VPC user guide states that
-traffic to and from the Amazon DNS server cannot be filtered with network ACLs
-or security groups, and that resolver answers recursive queries for public names
-from anywhere in the VPC. A DNS question is chosen by whoever asks it, so that
-is a data channel out that no security group audit will ever show you. Closing
-it takes a Route 53 Resolver DNS Firewall rule group whose last rule blocks every
-domain and which does not fail open. A containment argument carried over from
-Kubernetes gets this one wrong, because there the same attempt is closed by the
-policy that closes everything else.
-
-**A DNS Firewall rule group is read by priority from the lowest number up, and
-that is where the second finding is.** A group holding ` + "`" + `ALLOW` + "`" + ` on every domain
-at priority 5 and ` + "`" + `BLOCK` + "`" + ` on every domain at priority 1000 blocks nothing at all,
-because ` + "`" + `ALLOW` + "`" + ` permits the request to go through and the lower priority is
-consulted first. It reads as configured in a console screenshot. The check
-refuses that shape, along with a terminal rule moved off the end by priority, two
-rules sharing the last priority, which AWS refuses to create anyway, and a domain
-with a star anywhere but the front, which a DNS Firewall domain list cannot hold.
-
-The rule group's allow list is generated from the manifest's own egress
-catalogue rather than from a list of AWS names kept beside it. A host the
-manifest declares ` + "`" + `allow` + "`" + ` or ` + "`" + `sandbox` + "`" + ` is one the sidecar forwards to for real
-and therefore has to resolve; a host declared ` + "`" + `block` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `capture` + "`" + ` or
-` + "`" + `synth` + "`" + ` is answered locally and must not resolve, because a name the sidecar
-answers resolving publicly is a route around the decision the manifest made
-about it. A declared host that cannot be expressed as a DNS Firewall domain is
-named in the refusal rather than dropped or widened.
-
-**The honest summary is that Antifailure runs on EKS and not on raw ECS.** Use
-` + "`" + `runtime.provider: kubernetes` + "`" + ` against an EKS cluster, where the probe runs.
-
-The report is generated for a real network rather than for a made up one, so
-that the security group rules and route table entries it judges are the ones
-your account would get. Six variables describe that network, and they are
-variables rather than manifest fields because a VPC identifier is a property of
-one company's account and does not belong in a file that gets forked:
-` + "`" + `AF_ECS_REGION` + "`" + `, ` + "`" + `AF_ECS_CLUSTER` + "`" + `, ` + "`" + `AF_ECS_VPC_ID` + "`" + `, ` + "`" + `AF_ECS_VPC_CIDR` + "`" + `,
-` + "`" + `AF_ECS_SUBNET_IDS` + "`" + ` and ` + "`" + `AF_ECS_SUBNET_CIDRS` + "`" + `, the last two comma separated and
-in matching order. Setting them changes the report and does not change the
-answer, and the refusal you get without them says so before you go and build a
-VPC to find out. A seventh, ` + "`" + `AF_ECS_PROBE_IMAGE` + "`" + `, is optional and names the
-image the containment probe container would run; with it unset the plan carries
-no probe container and the instance metadata path says so.
-
-Related: [scheduling](/docs/concepts/scheduling), [manifest reference](/docs/reference/manifest#placement), [licensing](/docs/enterprise/licensing).
+Related: [scheduling](/docs/concepts/scheduling), [licensing](/docs/enterprise/licensing).
 `,
 	"enterprise/scim.md": `---
 title: SCIM provisioning
@@ -6886,192 +6379,6 @@ the App must be granted, forks, and teardown.
 piece, and the page opens by saying what still works without it, which is all
 of it. Read that one when you want environments that outlive a workflow run, a
 shared address for them, or a record across repositories.
-`,
-	"guides/azure.md": `---
-title: Azure
-description: The Azure services an environment answers for, the ones it refuses, and what each costs.
-sidebar:
-  order: 23
----
-
-An application in an environment reaches Azure Blob Storage, Queue Storage and
-Table Storage without knowing it. It builds
-` + "`" + `https://youraccount.blob.core.windows.net` + "`" + ` the way it does in production, that
-name resolves to the environment's sidecar, the sidecar terminates TLS with a
-certificate authority the environment already trusts, and Azurite answers.
-
-There is no endpoint override, no ` + "`" + `BlobEndpoint=` + "`" + ` in a connection string that
-only exists in tests, and no client construction that differs from the one that
-ships. That is the whole point of this page. The emulator is a commodity;
-reaching it without changing the application is not.
-
-## The surface
-
-This table is **the** surface. A host outside it is not routed to an emulator:
-it falls through to the environment's egress policy, whose default is block, so
-it is refused rather than answered. A silent wrong answer from an emulator is
-worse than a refusal, because it will be believed.
-
-| Service | Host | Emulator | Answered by |
-| --- | --- | --- | --- |
-| Azure Blob Storage | ` + "`" + `*.blob.core.windows.net` + "`" + ` | ` + "`" + `azure-blob` + "`" + ` | Azurite |
-| Azure Queue Storage | ` + "`" + `*.queue.core.windows.net` + "`" + ` | ` + "`" + `azure-queue` + "`" + ` | Azurite |
-| Azure Table Storage | ` + "`" + `*.table.core.windows.net` + "`" + ` | ` + "`" + `azure-table` + "`" + ` | Azurite |
-
-Azurite is published by Microsoft and is MIT licensed. It is the only one of
-the three Microsoft Azure emulators that is open source, and that difference
-decides more of this page than weight does.
-
-## Why three emulators for one image
-
-Azurite is a single container that listens on **three ports**: blob on 10000,
-queue on 10001 and table on 10002. An emulator declaration carries one port, so
-blob, queue and table are registered separately against the same image.
-
-The shape turned out better than the constraint that produced it. An
-environment starts the emulators its egress rules name, so a manifest that
-touches blob only starts one container and pays for one, and a refusal is
-written per service: a request to Azure Files is refused with Files named,
-rather than with "Azure" named.
-
-## The account name travels in the host
-
-Azure puts the storage account in the first label of the hostname, so
-` + "`" + `youraccount.blob.core.windows.net` + "`" + ` carries the account the way a virtual
-hosted S3 URL carries the bucket. The sidecar rewrites the destination and
-**preserves the Host header**, and Azurite reads the account out of that header
-when the host is a name rather than an address.
-
-So nothing needs to tell Azurite which account it is serving through a flag.
-` + "`" + `AZURITE_ACCOUNTS` + "`" + ` is deliberately not set, because the account an environment
-needs is whichever one its substituted credential names, and that is a property
-of the manifest rather than of this build.
-
-The credential is substituted, not passed through. A request signed with a key
-the environment recognises as live is refused before it leaves, and the
-emulator has no route out in any case: it attaches to the environment's inner
-network, which is created ` + "`" + `internal` + "`" + `, so having nowhere to send a credential is
-a property of the network rather than a promise.
-
-## What it costs per environment
-
-Measured on 2026-09-08 on an Apple Silicon machine, 8 core, with Docker
-Desktop holding 7.654 GiB, **at load averages between 24 and 28**, because the
-machine was running other work at the same time. The load is published with the
-numbers rather than left out: the memory figures are stable under it and the
-start times are not, and saying which is which is worth more than a best case.
-
-Image sizes are compressed download bytes for the ` + "`" + `linux/arm64` + "`" + ` member, read
-from the registry.
-
-| Container | Image | Resident | Started |
-| --- | --- | --- | --- |
-| ` + "`" + `azure-blob` + "`" + ` | 108.9 MiB | 69.9 MiB | bound all three ports |
-| ` + "`" + `azure-queue` + "`" + ` | the same image, nothing more on disk | 66.7 MiB | bound all three ports |
-| ` + "`" + `azure-table` + "`" + ` | the same image, nothing more on disk | 67.1 MiB | bound all three ports |
-| **all three** | **108.9 MiB once** | **203.8 MiB** | |
-
-One Azurite measured alone was 83.5 MiB, so the marginal cost of the second and
-third is about 67 MiB each. An environment that names only blob pays 69.9 MiB
-and one image.
-
-That is the whole cost of Azure Blob, Queue and Table in an environment: **one
-image and about 200 MiB of memory**, or a third of that for one service.
-
-### What Service Bus would have cost, which is why it is not here
-
-| Container | Image | Result |
-| --- | --- | --- |
-| ` + "`" + `servicebus-emulator` + "`" + ` | 81.7 MiB | halted: ` + "`" + `SQL Health Check failed` + "`" + ` |
-| ` + "`" + `mssql/server` + "`" + ` companion | 595.9 MiB, AMD64 only | **killed after 707 seconds, never ready** |
-
-**677.6 MiB of image before either process answers anything**, against 108.9 MiB
-for all of Azurite. The SQL Server companion was given a 3 GB allocation of its
-own and was killed by the memory limit after 707 seconds, having reached TLS
-initialisation and no further; it never printed ` + "`" + `SQL Server is now ready for
-client connections` + "`" + `, and the Service Bus emulator beside it then failed its SQL
-health check and halted. Under emulated AMD64 on ARM64 this is what the pair
-does on a developer laptop.
-
-The load average was 25 to 26 throughout, on a shared machine, so this does not
-prove SQL Server cannot start here. It does mean the pair is in a different
-class of weight from Azurite by roughly an order of magnitude in image bytes and
-more than that in memory, and that a developer with an Apple Silicon machine
-who names Service Bus in a manifest would be waiting on an emulated SQL Server
-rather than testing their application. Opt in is the right answer even before
-the EULA below.
-
-### Cosmos DB
-
-` + "`" + `cosmosdb/linux/azure-cosmos-emulator:vnext-preview` + "`" + ` has a real ARM64 build and
-needs no companion. It is **645.6 MiB of image**, six times Azurite, and held
-**89.9 MiB resident**. Its readiness was NOT measured: the predicate used to
-watch for it matched the word ` + "`" + `ready` + "`" + ` inside its own retry line
-` + "`" + `readiness check still waiting for Postgres startup` + "`" + `, so the 97 seconds it
-reported is not a start time and is not published as one. Its own health line
-still read ` + "`" + `PostgreSQL=FAIL, Gateway=FAIL, Explorer=FAIL` + "`" + ` at that point.
-
-## Not answered, and why
-
-Naming a service and not building it is worse than leaving it out, so these
-are named here rather than discovered in a failure.
-
-### Azure Service Bus
-
-Microsoft publishes an emulator for it and this build does not start one, for
-two measured reasons and one that is not about cost at all.
-
-**Its wire protocol may not reach an emulator at all.** Every Azure Service Bus
-SDK defaults to AMQP 1.0 on port 5672, which is not HTTP. A rule in emulate
-mode makes the sidecar terminate the connection and read an HTTP request out of
-it, so an AMQP connection would be dropped rather than forwarded. Service Bus
-also speaks HTTP on 5300, and that path would work.
-
-This is the reason that would matter most, and it is **NOT CONFIRMED BY
-EXPERIMENT**. It was reasoned from ` + "`" + `policy.inspectMode` + "`" + ` and the sidecar's
-` + "`" + `http.ReadRequest` + "`" + ` by the lane that owns the routing, and neither that lane nor
-this one has driven an AMQP client at an emulate rule. It is recorded here
-because a reader deciding whether to wait for Service Bus deserves to know the
-strongest argument against it exists, and recorded as unconfirmed because it
-has not been run.
-
-**It cannot be declared yet.** ` + "`" + `mcr.microsoft.com/azure-messaging/servicebus-emulator` + "`" + `
-requires a SQL Server container beside it, which it dials on startup, and an
-emulator declaration carries one image. Nothing here can express a companion.
-
-**It refuses to start until somebody accepts a EULA.** Started bare, with no
-environment set, it exits with code 133 in 47 seconds and says so: the
-Service Bus emulator EULA has to be accepted through ` + "`" + `ACCEPT_EULA=Y` + "`" + `. That is
-an acceptance a user makes, not one a build makes on their behalf, which is a
-better reason for it to be opt in than any number on this page.
-
-**Its companion has no ARM64 build.** ` + "`" + `mcr.microsoft.com/mssql/server:2022-latest` + "`" + `
-is a single AMD64 manifest with no ARM64 member, so on an Apple Silicon machine
-Service Bus drags an emulated AMD64 SQL Server into every environment that
-names it. Measured above: 677.6 MiB of image, and the SQL Server never became
-ready in 707 seconds with 3 GB of its own.
-
-### Azure Cosmos DB
-
-The Linux emulator is a single image with a real ARM64 build and no EULA gate,
-and its cost is above. It is not registered here because nothing in the
-conformance suite proves it, and a service in the surface that nothing proves is
-a claim rather than a capability. At 645.6 MiB it is also six times Azurite, so
-if it lands it lands opt in.
-
-### Everything else Azure runs
-
-Azure Files (` + "`" + `*.file.core.windows.net` + "`" + `), Data Lake Storage Gen2
-(` + "`" + `*.dfs.core.windows.net` + "`" + `), Key Vault (` + "`" + `*.vault.azure.net` + "`" + `), Event Hubs and the
-management plane are outside the surface. So are the sovereign cloud suffixes
-` + "`" + `core.chinacloudapi.cn` + "`" + ` and ` + "`" + `core.usgovcloudapi.net` + "`" + `, which are different hosts
-and are refused rather than answered.
-
-Two of these are worth calling out because a reader is likely to expect them to
-be covered by something that is. A **Service Bus queue is not a Queue Storage
-queue**, and the **Cosmos DB Table API** is not Table Storage: it speaks the
-same protocol on ` + "`" + `table.cosmos.azure.com` + "`" + ` but its partitioning and throughput
-behaviour is what a Cosmos user is testing, and Azurite is not that.
 `,
 	"guides/build.md": `---
 title: Building services
@@ -8618,47 +7925,15 @@ The egress sidecar is always a single pod whatever any service asks for,
 because it is the environment's only resolver and its only route out, and a
 second one would split the record of what was refused across two decision logs.
 
-The manifest's ` + "`" + `resources` + "`" + ` becomes the container's ` + "`" + `ResourceRequirements` + "`" + `, and
-the request and the limit are the SAME figure, which puts the pod in the
-Guaranteed quality of service class. A dimension the manifest did not name is
-left out of both maps rather than set to zero: a zero request is a request for
-nothing and a zero limit is a limit of nothing, so a service that named no size
-produces the identical Deployment it produced before the key was honoured.
-
-The gap between a small request and a larger limit is where a node is
-oversubscribed. Every pod is placed against its request and may then grow into
-its limit, so a node that fits ten environments on paper runs eleven and the
-eleventh takes memory from the others. The symptom is a workflow that reads as
-flaky, and a twin whose failures belong to the machine rather than to the
-change under test is worth less than no twin.
-
-` + "`" + `af up` + "`" + ` checks the sizes against the cluster BEFORE it creates anything, and
-refuses with **AF-RUN-047** naming the shortfall. Without that check a request
-larger than any node is accepted by the API server and the pod sits ` + "`" + `Pending` + "`" + `
-with an event nobody is watching, so ` + "`" + `af up` + "`" + ` waits out the readiness timeout
-and reports a service that did not start. The free figure is each schedulable
-node's allocatable minus the requests of the pods already on it, which is the
-quantity the scheduler itself places against; allocatable alone would accept an
-environment onto a full cluster. Cordoned and not ready nodes are left out,
-because a node that still reports its allocatable and can hold nothing makes
-the cluster look larger than it is.
-
-Two necessary conditions, neither sufficient: every instance has to fit on some
-single node, and the total has to fit in what is free across all of them. A set
-that passes both can still fail to pack, and the scheduler remains the
-authority on that. What is refused here is only the cases where no packing
-exists at all, which are the ones a person cannot diagnose from a ` + "`" + `Pending` + "`" + `
-pod.
-
-A cluster that will not let ` + "`" + `af` + "`" + ` list its nodes or its pods is one this cannot
-check. It says so on the progress channel and lets the environment through,
-rather than reporting nothing and passing: refusing to start because a
-permission is narrow would break every cluster where ` + "`" + `af` + "`" + ` has namespace scoped
-access and nothing more.
-
-` + "`" + `af status` + "`" + ` reports the applied size off the pod the cluster is running rather
-than off the spec that was sent, because a runtime that echoed the request back
-would agree with the manifest whether or not anything was applied.
+The manifest's ` + "`" + `resources` + "`" + ` is still **refused at validation** rather than
+applied. Neither ` + "`" + `cpu` + "`" + ` nor ` + "`" + `memory` + "`" + ` reaches any runtime: they are dropped
+between the manifest and the runtime contract, so honouring them here alone
+would mean one runtime enforcing a cap the other ignores. Until both do, a
+manifest carrying either one is rejected by name, because a service that
+quietly ran with no limit under ` + "`" + `resources.memory: 512Mi` + "`" + ` is the worse of the
+two answers: the run goes green having proved nothing about the case its author
+was worried about. That is the argument ` + "`" + `replicas` + "`" + ` used to be on the wrong side
+of.
 
 ## Teardown
 
@@ -9249,37 +8524,6 @@ always the one a service was told at startup: an application that builds
 absolute URLs from ` + "`" + `AF_PUBLIC_URL` + "`" + ` or ` + "`" + `AF_ENV_URL` + "`" + ` may name the port it lost.
 Bringing the environment up again after freeing the port gives every container
 the same answer.
-
-## Size
-
-` + "`" + "`" + "`" + `
-AF-RUN-047 This runtime cannot place the sizes the manifest asks for: service
-"clickhouse" asks for 32Gi of memory per instance and the roomiest node has
-7Gi free, so one instance of it cannot be placed at all
-` + "`" + "`" + "`" + `
-
-` + "`" + `resources.cpu` + "`" + ` and ` + "`" + `resources.memory` + "`" + ` become the daemon's own cpu and memory
-constraint. There is no scheduler here to reserve anything, so the single value
-the manifest carries is applied as the cap alone: a container gets that share
-of the machine under contention and no more, and one over its memory cap is
-killed rather than allowed to take the machine down with it. That is the half
-of the promise this runtime can keep, and it is the half that matters on a
-laptop, where the failure being reproduced is one environment starving another.
-
-The check runs before the network is created, so an environment this machine
-cannot hold leaves nothing behind for ` + "`" + `af down` + "`" + ` to find.
-
-**What it does not account for.** Docker reserves nothing. A container with no
-memory limit, which is most of them and every container this machine was
-already running, is not holding anything the daemon can subtract, so the
-comparison is against the whole machine rather than against what is free. This
-refuses an environment that could never fit and it does not refuse the eleventh
-environment on a machine that holds ten. The cluster check does better, because
-a cluster scheduler has the fact this one does not: what every pod asked for.
-
-The daemon's memory is the Docker VM's, not the machine's. A laptop with plenty
-of memory whose VM was given a quarter of it has a quarter here, and ` + "`" + `docker
-info` + "`" + ` is where that number comes from.
 
 ## Disk
 
@@ -10991,42 +10235,6 @@ signing secrets. A value typed into the manifest instead would be the first
 thing to drift from the one the sender uses, and every event would then be
 refused as unsigned by the very verification this exists to exercise.
 
-## The GitHub App's own key
-
-A GitHub App is three credentials, and the webhook secret is only one of them.
-The other two are the numeric App id and the private key the App signs its JWT
-with, and an application that reads all three usually refuses to start with
-some of them: a webhook secret with no private key is an endpoint that verifies
-deliveries and can do nothing with them.
-
-So a manifest that declares a webhook path for GitHub is offered a private key
-as well, under ` + "`" + `GITHUB_APP_PRIVATE_KEY` + "`" + `, generated for the life of the
-environment:
-
-` + "`" + "`" + "`" + `yaml
-services:
-  - name: api
-    env:
-      - name: AF_GITHUB_APP_ID
-        value: "1"
-      - name: AF_GITHUB_APP_PRIVATE_KEY
-        from: GITHUB_APP_PRIVATE_KEY
-      - name: AF_GITHUB_APP_WEBHOOK_SECRET
-        from: GITHUB_WEBHOOK_SECRET
-` + "`" + "`" + "`" + `
-
-It is a real RSA key in PKCS#8, because the applications that read one reject a
-placeholder, and it is a different key in every environment. It authenticates
-nothing: GitHub has never seen it, and ` + "`" + `api.github.com` + "`" + ` is reachable only if
-your own egress rules allow it.
-
-Exporting ` + "`" + `GITHUB_APP_PRIVATE_KEY` + "`" + ` yourself wins over the generated one, for
-the case where you are rehearsing against an App you really registered.
-
-Writing the key into the manifest instead is the thing this replaces. A
-manifest is committed, so a key written there is a key in the repository for as
-long as the file is there, and the engine refuses a value that carries one.
-
 ## Delivery failed
 
 ` + "`" + "`" + "`" + `
@@ -11527,11 +10735,249 @@ page as Markdown is [` + "`" + `/docs/index.md` + "`" + `](/docs/index.md).
   }
 </style>
 `,
+	"providers/databases.md": `---
+title: Database providers
+description: What a database provider is, which ones ship, how to choose, and what every one of them guarantees.
+sidebar:
+  order: 2
+---
+
+A database provider is what creates the copy of production each environment
+gets. It is the extension point most repositories care about first, and it is
+meant to be written by people outside this repository.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  provider: docker   # or neon, supabase, dblab, or pgurl
+  version: 17
+` + "`" + "`" + "`" + `
+
+## What ships
+
+| Provider | Where the data lives | Branch time | Needs |
+| --- | --- | --- | --- |
+| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Grows with the database | A Docker daemon |
+| [` + "`" + `neon` + "`" + `](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
+| [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
+| [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
+| [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+
+` + "`" + `docker` + "`" + ` is the default and needs nothing. It is the right choice for a
+repository whose database is small enough that copying it is not the slow part.
+
+` + "`" + `neon` + "`" + ` is the right choice when it is. Neon branches are copy on write, so
+creating one takes about as long for a hundred gigabytes as for a hundred rows.
+
+` + "`" + `dblab` + "`" + ` is the same property without the account. A Database Lab Engine holds
+one full size copy of production on ZFS and hands out thin clones of it, on
+your hardware, with nothing leaving your network. The cost is that you run it:
+it needs ZFS, a machine large enough to hold production once, and its own data
+retrieval configured against your source.
+
+` + "`" + `pgurl` + "`" + ` is the one for every Postgres nobody wrote a provider for: a self
+hosted cluster, a machine at a host with no API, a managed Postgres whose
+vendor is not in this list. It needs no account and no vendor at all, only a
+server it may create databases on. Branch time is not flat there, and the
+measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
+described.
+
+` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
+Branch time is not flat, because Supabase creates a branch with no data in it
+and the golden has to be copied in, but what you get back is a real Supabase
+project with the Auth, Storage and Realtime services your application is
+calling, which neither of the others can offer. A branch is billed by the hour.
+
+A provider named in the manifest and neither built into this binary nor
+registered with it is refused at startup rather than substituted. Falling back
+to ` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it. The
+refusal names every provider the build does have, registered ones included, so
+a misspelling is answered rather than merely rejected.
+
+A build outside this repository can add its own without forking the engine.
+[Writing a provider](/docs/contributing/provider-authoring) has the
+registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `.
+
+## What every provider guarantees
+
+These are not documentation. They are a conformance suite that any
+implementation runs, so that "conformant" is something a test decides rather
+than something a maintainer judges.
+
+- A refresh masks, then verifies, and publishes nothing if verification fails.
+- An unverified golden cannot be branched. This is the product's central
+  promise and it is enforced in the provider, not in a checklist.
+- Branching twice for one environment returns one branch. The engine retries
+  after timeouts, and a retry that creates a second resource is how an orphan
+  is made.
+- Destroying something already destroyed succeeds, because teardown retries.
+- A connection string is a secret: it renders as ` + "`" + `[redacted]` + "`" + ` everywhere text
+  is produced.
+- Every resource the provider holds can be enumerated, so the leak detector has
+  something to compare the journal against.
+- A capability a provider does not have is skipped by name in the suite output,
+  never silently.
+
+## Direct and pooled connections
+
+A provider may offer a pooled endpoint. Where it does, services receive the
+pooled connection string and migrations receive the direct one, because a
+transaction pooler does not support the session level features migrations use.
+Where it does not, both receive the same string.
+
+Nothing has to be configured for this. The engine asks based on what the
+provider declares.
+
+## Writing one
+
+Implement ` + "`" + `provider.Database` + "`" + ` and run the suite:
+
+` + "`" + "`" + "`" + `go
+func TestMyProvider(t *testing.T) {
+    conformance.RunDatabase(t, factory, conformance.Options{})
+}
+` + "`" + "`" + "`" + `
+
+Declare only the capabilities you actually have. Declaring one you do not makes
+the suite run a behaviour it should have skipped, which fails, which is the
+intended outcome: a capability is a promise the suite checks.
+
+Register it under a name this build does not already have. ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `,
+` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `pgurl` + "`" + ` are reserved, and a registration under one of
+them is refused at validation rather than accepted and then never consulted.
+`,
+	"providers/datastores.md": `---
+title: Datastore providers
+description: Every store an environment holds other than the primary Postgres, the stance each one declares, and why there is no default.
+sidebar:
+  order: 8
+---
+
+A datastore is a store the environment holds that is not the primary Postgres:
+a ClickHouse, a Redis, a Kafka, an Elasticsearch, a Mongo.
+
+Before the ` + "`" + `datastores` + "`" + ` list existed there was one golden, one masking pass,
+one verification scan and one branch, all of them Postgres, and every other
+store a manifest declared came up as an empty container that no part of the
+fidelity report mentioned. For a stack whose events live in ClickHouse, that
+means a twin holding masked Postgres metadata and zero events, with the
+instrument whose job is to tell you your twin is not production reporting it as
+faithful.
+
+` + "`" + "`" + "`" + `yaml
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: CLICKHOUSE_PRODUCTION_URL
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: "a cache is rebuilt from the primary and a copy would be noise"
+` + "`" + "`" + "`" + `
+
+The ` + "`" + `database:` + "`" + ` block normalizes into the entry named ` + "`" + `primary` + "`" + `, so a manifest
+that declares only a database already has this list and does not have to write
+it. ` + "`" + `primary` + "`" + ` is reserved for that entry.
+
+## The stance is the feature
+
+**Not every datastore should be cloned, and pretending otherwise is its own
+failure.** A Redis used purely as a cache is CORRECT to start empty, and a plan
+that copied it would be copying noise and calling it fidelity. Kafka usually
+wants topics and consumer groups rather than a replay of production traffic. An
+Elasticsearch index is often better rebuilt from the Postgres branch than
+cloned, because a clone can be stale against the branch in a way a rebuild
+cannot.
+
+So what an environment does with a store's contents is DECLARED per store:
+
+| Stance | What it means | Also needs |
+| --- | --- | --- |
+| ` + "`" + `golden` + "`" + ` | A masked, verified copy that environments branch from | ` + "`" + `source_url_env` + "`" + `, the variable holding production's connection string |
+| ` + "`" + `empty` + "`" + ` | Starts with nothing in it, on purpose | ` + "`" + `because` + "`" + `, in the words of whoever chose it |
+| ` + "`" + `derived` + "`" + ` | Rebuilt from another store once that one is ready | ` + "`" + `from` + "`" + `, naming that store |
+| ` + "`" + `topics_only` + "`" + ` | Topics and consumer groups, with no messages | |
+
+**There is no default, and a datastore that declares no stance is refused at
+validation.** That is the whole design. An empty store nobody chose and an
+empty store somebody decided on look identical in a running environment, and a
+silent default is exactly how somebody ends up trusting a blank ClickHouse.
+
+` + "`" + `because` + "`" + ` is required for ` + "`" + `empty` + "`" + ` and is carried into the fidelity report as
+written. It is the only thing that tells the two empties apart afterwards.
+
+## Every stance is visible in the fidelity report
+
+Which is what makes this honest rather than convenient. ` + "`" + `empty` + "`" + ` is a legitimate
+answer; an INVISIBLE ` + "`" + `empty` + "`" + ` is not. The report names every declared store with
+the stance somebody chose, so a store that holds nothing appears in the
+denominator rather than outside the fraction.
+
+## What a stance does today
+
+The ` + "`" + `golden` + "`" + ` stance is brought up: the store is refreshed, masked, verified,
+attested and branched like the primary database. Any other stance is validated,
+carried into the report, and announced at ` + "`" + `af up` + "`" + ` as a store this build did not
+start, by name and by stance. It is said out loud rather than skipped silently,
+because an unimplemented stance that says nothing is the same failure as an
+undeclared empty store wearing a manifest entry.
+
+## What ships
+
+| Provider | Engine | Mechanism | Holds a golden | Branch shares storage |
+| --- | --- | --- | --- | --- |
+| ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `ATTACH PARTITION FROM` + "`" + ` against a local ClickHouse the engine starts | yes | usually |
+
+ClickHouse branch time is the interesting column and the answer is measured
+rather than assumed in either direction. ` + "`" + `ATTACH PARTITION FROM` + "`" + ` hardlinks the
+golden's parts when the source and the destination sit on one disk, and a
+branch of ten thousand rows and a branch of a million then take the same few
+hundred milliseconds. What the provider cannot see from the client is the
+server's storage policy: with a multi disk policy, or a source and a
+destination on different volumes, ClickHouse copies the parts instead and
+branch time becomes proportional to size. So the capability is declared false
+and the fast case is a bonus rather than a promise.
+
+` + "`" + `engine` + "`" + ` is an open string in the manifest rather than a closed list, which is
+deliberate: a manifest naming an engine this build has no provider for is
+refused BY NAME by the provider lookup, and that says more than an unknown
+enum value would. The refusal lists the engines the build can provide.
+
+## Choosing a provider for an engine
+
+` + "`" + `provider` + "`" + ` selects an implementation where more than one thing can provide an
+engine. Omit it for the engine's own default. A registered provider is
+consulted after the built in one and never before it, so a registration adds an
+implementation and can never take one over.
+
+## Writing one
+
+Implement ` + "`" + `provider.Datastore` + "`" + ` and declare ` + "`" + `DatastoreCaps` + "`" + `: the engine name,
+whether an environment can get its own copy, whether the store can hold a
+masked verified copy at all, and whether a branch shares storage with its
+golden.
+
+**Declaring ` + "`" + `Golden: false` + "`" + ` is a legitimate answer rather than a missing
+feature.** A cache that is correct to start empty says so, and the conformance
+suite then skips the golden behaviours by name instead of running behaviours
+the provider never claimed.
+
+` + "`" + "`" + "`" + `go
+func TestMyDatastore(t *testing.T) {
+    conformance.RunDatastore(t, factory, conformance.DatastoreOptions{})
+}
+` + "`" + "`" + "`" + `
+
+The datastore suite ships with a broken fake and a self test in the same
+commit, which breaks the fake one behaviour at a time and requires each break
+to turn the suite red.
+`,
 	"providers/dblab.md": `---
 title: DBLab
 description: Using a self hosted Database Lab Engine as the database provider, how to stand one up, and what it does with your data.
 sidebar:
-  order: 4
+  order: 5
 ---
 
 A Database Lab Engine holds one full size copy of production on ZFS and hands
@@ -11866,11 +11312,108 @@ is named ` + "`" + `af-` + "`" + `, and it ignores clones and snapshots that are
 shared with somebody's real work is one where a leak report eventually gets
 ignored.
 `,
+	"providers/emulators.md": `---
+title: Emulators
+description: How a third party API is answered inside an environment, why Antifailure writes none of them, and what a declaration has to carry.
+sidebar:
+  order: 10
+---
+
+An emulator is a third party API answered inside the environment: an S3, a
+queue, a pub/sub topic, a blob store. It is the fifth extension point and the
+only one with nothing built in, which is deliberate rather than unfinished.
+
+## Antifailure does not write emulators
+
+No hand written S3, no hand written SQS, no blob store core, no queue core. If
+a future change proposes one, this paragraph is the answer.
+
+LocalStack, Azurite, the Microsoft Service Bus and Cosmos emulators, the
+` + "`" + `gcloud` + "`" + ` emulators and ` + "`" + `fake-gcs-server` + "`" + ` exist, are mature, and carry years of
+fidelity work. S3 alone has a decade of edge cases in it. A hand written
+replacement would be worse on day one and probably for two years, and nobody
+buys this product because its S3 emulator is good.
+
+**What this engine adds is the part people hate about those emulators.** Using
+LocalStack normally means changing the application: an endpoint override, an
+` + "`" + `AWS_ENDPOINT_URL` + "`" + `, a client construction that only exists in tests. That makes
+the test prove less, because the code under test is not the code that ships.
+Here none of that is needed. Every name resolves to the environment's sidecar,
+the sidecar terminates TLS with a certificate authority the environment already
+trusts, and it answers for ` + "`" + `s3.amazonaws.com` + "`" + ` itself. The unmodified production
+code path runs against the emulator. The emulator is a commodity; making it
+invisible is not.
+
+How a request actually gets there is the egress subsystem's job and the mode in
+the manifest decides it. See [egress](/docs/concepts/egress), which is the page
+that says what each mode does with a request.
+
+## What a declaration carries
+
+` + "`" + "`" + "`" + `go
+type Emulator interface {
+    Name() string                    // what an egress rule names it by
+    Hosts() []string                 // the hostnames it answers for
+    Container() EmulatorContainer    // the image, the port, the environment
+}
+` + "`" + "`" + "`" + `
+
+Two things are refused at validation rather than accepted, and both were
+refusals somebody wanted later:
+
+- **An emulator that answers for no hosts is refused.** No request could ever
+  reach it, so a registration with an empty host list is a registration that
+  does nothing, and doing nothing quietly is what this whole extension system
+  is built to avoid.
+- **An image pinned by a tag rather than by a digest is refused.** An emulator
+  is the thing answering for a production API. A tag that moves changes what an
+  environment was tested against with nothing in the repository changing, and
+  then the run that passes yesterday and fails today has no diff to blame.
+  ` + "`" + `@sha256:` + "`" + ` or it does not register.
+
+Two emulators registered under one name, or one registered with no name at all,
+are refused for the same reason every other extension point refuses them.
+
+## Costs that are named rather than hidden
+
+Each of these is a real cost of using somebody else's emulator, and the rule is
+that they are stated rather than discovered:
+
+- **Coverage belongs to whoever integrates one.** The covered surface is
+  recorded and anything outside it is refused with the provider's own error
+  shape. A silent wrong answer from an emulator is worse than a refusal,
+  because it will be trusted.
+- **Weight.** The Azure Service Bus emulator wants an MSSQL container beside
+  it. That is measured and said out loud rather than absorbed.
+- **Licensing and supply chain.** Every image is pinned by digest, recorded in
+  ` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + `, and given the same no egress treatment as any other
+  container in the environment.
+- **There is no official Cloud Storage emulator.** Google ships them for
+  Pub/Sub, Firestore, Datastore, Bigtable and Spanner and none for Cloud
+  Storage, so ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto choice and is community
+  maintained. Stated plainly here rather than left for somebody to find.
+
+## A bad emulator is not tolerated either
+
+The commodity argument runs both ways. Not writing emulators does not mean
+putting up with a wrong one. Where an integration is wrong in a way that
+matters, the fix is upstream or a documented refusal. It is not a fork, and it
+is not a locally patched image that nobody else can reproduce.
+
+## Writing one
+
+Implement ` + "`" + `extension.Emulator` + "`" + ` and register it with ` + "`" + `AddEmulator` + "`" + `. Give it the
+hostnames the vendor's own SDK resolves, pin the image by digest, and declare
+what it covers.
+
+Nothing is reserved here, because no emulator is built into this binary. A
+registration can shadow nothing.
+`,
 	"providers/limits.md": `---
 title: Provider limits
 description: What happens when a provider runs out of branches, and what to do about it.
 sidebar:
-  order: 6
+  order: 11
 ---
 
 Every hosted provider has a ceiling on how many databases exist at once, and it
@@ -11941,7 +11484,7 @@ this tool's, and the provider's documentation is where the current numbers are.
 title: Neon
 description: Using Neon as the database provider, what it does well, and what it costs.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 Neon branches share storage with their parent, so creating one takes about as
@@ -12074,120 +11617,143 @@ left nothing behind. If a run is killed, ` + "`" + `AF_NEON_SWEEP=1 go test
 ./engine/internal/db/neon -run TestSweepLeftovers` + "`" + ` removes what it made.
 `,
 	"providers/overview.md": `---
-title: Database providers
-description: What a provider is, which ones ship, and how to choose.
+title: Extension points
+description: The five things a build can add without forking the engine, what ships for each, and which edition each one belongs to.
 sidebar:
   order: 1
 ---
 
-A database provider is what creates the copy of production each environment
-gets. It is the main extension point, and it is meant to be written by people
-outside this repository.
+An environment is assembled out of parts, and five of those parts are things
+somebody outside this repository can supply. This page is the map of all five.
+Each has its own page under Providers with the detail, the capabilities and
+the refusals.
 
-` + "`" + "`" + "`" + `yaml
-database:
-  provider: docker   # or neon, supabase, dblab, or pgurl
-  version: 17
-` + "`" + "`" + "`" + `
-
-## What ships
-
-| Provider | Where the data lives | Branch time | Needs |
+| Extension point | What it supplies | What ships | Where the detail is |
 | --- | --- | --- | --- |
-| ` + "`" + `docker` + "`" + ` | A container on the machine running ` + "`" + `af` + "`" + ` | Flat, because the daemon's storage driver shares layers | A Docker daemon |
-| [` + "`" + `neon` + "`" + `](/docs/providers/neon) | A Neon project | Flat, because branches share storage | A Neon project and an API key |
-| [` + "`" + `dblab` + "`" + `](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
-| [` + "`" + `supabase` + "`" + `](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
-| [` + "`" + `pgurl` + "`" + `](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| Database provider | The environment's primary Postgres, and the branch of the golden it runs on | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` | [Database providers](/docs/providers/databases) |
+| Datastore provider | Every other store the manifest declares, and what its stance does to the contents | ` + "`" + `clickhouse` + "`" + ` | [Datastore providers](/docs/providers/datastores) |
+| Runtime | Where the containers actually run | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | [Runtimes](/docs/providers/runtimes) |
+| Golden store | Where a golden's dump and its attestation live | ` + "`" + `local` + "`" + `, ` + "`" + `s3` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `gcs` + "`" + ` | [Golden stores](/docs/providers/stores) |
+| Emulator | A third party API answered inside the environment | nothing built in | [Emulators](/docs/providers/emulators) |
 
-` + "`" + `docker` + "`" + ` is the default and needs nothing. Its branch time is flat, measured
-rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
-one and the daemon's storage driver shares the layers, so the two cost the same.
-What is not flat is building the golden, because that commits an image. This row
-said "Grows with the database" until somebody ran the measurement, which is the
-whole argument for having one.
+The interfaces are in ` + "`" + `engine/pkg/extension` + "`" + `, which is a public package for
+exactly this reason: an interface declared in an internal package is one a
+build outside the module cannot name, let alone implement.
 
-` + "`" + `neon` + "`" + ` is the right choice when it is. Neon branches are copy on write, so
-creating one takes about as long for a hundred gigabytes as for a hundred rows.
+## The three rules that hold for all five
 
-` + "`" + `dblab` + "`" + ` is the same property without the account. A Database Lab Engine holds
-one full size copy of production on ZFS and hands out thin clones of it, on
-your hardware, with nothing leaving your network. The cost is that you run it:
-it needs ZFS, a machine large enough to hold production once, and its own data
-retrieval configured against your source.
+**A registration adds a choice and can never replace one.** The engine
+consults its own built in providers first and the registry afterwards. So a
+registration under a built in name would never be used, and it is refused at
+validation rather than ignored. The alternative is a build somebody believes
+overrides the Docker provider and which silently does not.
 
-` + "`" + `pgurl` + "`" + ` is the one for every Postgres nobody wrote a provider for: a self
-hosted cluster, a machine at a host with no API, a managed Postgres whose
-vendor is not in this list. It needs no account and no vendor at all, only a
-server it may create databases on. Branch time is not flat there, and the
-measured seconds per gigabyte are published in ` + "`" + `benchmarks/` + "`" + ` rather than
-described.
+**A name in the manifest that this build does not have is refused, and the
+refusal lists what there is.** It is never substituted. Falling back to
+` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it, and a
+datastore quietly starting empty is how somebody ends up trusting a blank
+ClickHouse. The refusal names registered providers too, so a misspelling is
+answered rather than merely rejected.
 
-` + "`" + `supabase` + "`" + ` is the right choice when your application already lives there.
-Branch time is not flat, because Supabase creates a branch with no data in it
-and the golden has to be copied in, but what you get back is a real Supabase
-project with the Auth, Storage and Realtime services your application is
-calling, which neither of the others can offer. A branch is billed by the hour.
+**A capability is a promise a suite checks.** Every point declares what it can
+do, and the conformance suite runs a behaviour only where it was declared and
+skips it BY NAME where it was not. Declaring a capability you do not have
+makes the suite run a behaviour it should have skipped, which fails, which is
+the intended outcome.
 
-A provider named in the manifest and neither built into this binary nor
-registered with it is refused at startup rather than substituted. Falling back
-to ` + "`" + `docker` + "`" + ` would hand somebody an empty preview with no reason for it. The
-refusal names every provider the build does have, registered ones included, so
-a misspelling is answered rather than merely rejected.
+## Which edition an extension point belongs to
 
-A build outside this repository can add its own without forking the engine.
-[Writing a provider](/docs/contributing/provider-authoring) has the
-registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `.
+One rule decides it, and it is about who the value is for rather than about
+how hard the code was:
 
-## What every provider guarantees
+> A provider goes in the enterprise edition when it needs an ORGANIZATION to
+> exist. One developer with their own account and their own card gets MIT, in
+> the engine, next to ` + "`" + `supabase` + "`" + `.
 
-These are not documentation. They are a conformance suite that any
-implementation runs, so that "conformant" is something a test decides rather
-than something a maintainer judges.
+What follows from it:
 
-- A refresh masks, then verifies, and publishes nothing if verification fails.
-- An unverified golden cannot be branched. This is the product's central
-  promise and it is enforced in the provider, not in a checklist.
-- Branching twice for one environment returns one branch. The engine retries
-  after timeouts, and a retry that creates a second resource is how an orphan
-  is made.
-- Destroying something already destroyed succeeds, because teardown retries.
-- A connection string is a secret: it renders as ` + "`" + `[redacted]` + "`" + ` everywhere text
-  is produced.
-- Every resource the provider holds can be enumerated, so the leak detector has
-  something to compare the journal against.
-- A capability a provider does not have is skipped by name in the suite output,
-  never silently.
+- **Anything with an MIT peer in the engine stays MIT.** The ` + "`" + `s3` + "`" + ` and
+  ` + "`" + `azure_blob` + "`" + ` golden stores are MIT, so ` + "`" + `gcs` + "`" + ` is, and it lives in
+  ` + "`" + `engine/internal/golden` + "`" + ` beside them rather than in ` + "`" + `ee/` + "`" + `.
+- **All emulation is MIT**, and **all datastore support is MIT**. Neither is
+  an upsell. They are what makes ` + "`" + `af up` + "`" + ` work for ordinary software.
+- What is licensed sits above them: cross account goldens, residency
+  placement, federated identity, running more than one runtime at once, and
+  the managed database providers that need an IAM role somebody in an
+  organization has to grant.
 
-## Direct and pooled connections
+The community edition is the whole product minus ` + "`" + `ee/` + "`" + `. An expired licence
+leaves you with it rather than with nothing.
 
-A provider may offer a pooled endpoint. Where it does, services receive the
-pooled connection string and migrations receive the direct one, because a
-transaction pooler does not support the session level features migrations use.
-Where it does not, both receive the same string.
+## The matrix
 
-Nothing has to be configured for this. The engine asks based on what the
-provider declares.
+Every provider this build has, what it actually does underneath, and what it
+declares. Capabilities are read from the provider's own ` + "`" + `Capabilities()` + "`" + `
+rather than described here twice, so the column is the value the conformance
+suite tests against.
+
+### Database providers
+
+| Provider | Mechanism | Branch shares storage | Reset in place | Pooled endpoint | Subsetting | Edition |
+| --- | --- | --- | --- | --- | --- | --- |
+| ` + "`" + `docker` + "`" + ` | A container per branch on the local daemon, from an image with the golden committed into it | yes, the daemon's storage driver | yes | no | yes | MIT |
+| ` + "`" + `neon` + "`" + ` | A Neon branch of the golden branch | yes | yes | yes | no | MIT |
+| ` + "`" + `supabase` + "`" + ` | A Supabase branch, which is a whole separate project, with the golden copied in | no | yes | yes | no | MIT |
+| ` + "`" + `dblab` + "`" + ` | A ZFS clone handed out by a Database Lab Engine you run | yes | yes | no | no | MIT |
+| ` + "`" + `pgurl` + "`" + ` | A ` + "`" + `CREATE DATABASE ... TEMPLATE` + "`" + ` on any Postgres you can reach | no | yes | no | yes | MIT |
+
+` + "`" + `neon` + "`" + `, ` + "`" + `dblab` + "`" + ` and ` + "`" + `docker` + "`" + ` are the three where branch time does not grow
+with the database. That is the whole reason to choose one of them.
+
+### Datastore providers
+
+| Provider | Engine | Mechanism | Holds a golden | Branch shares storage | Edition |
+| --- | --- | --- | --- | --- | --- |
+| ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `clickhouse` + "`" + ` | ` + "`" + `ATTACH PARTITION FROM` + "`" + ` against a local server the engine starts | yes | usually, and it depends on the server's storage policy rather than on this provider | MIT |
+
+### Runtimes
+
+| Runtime | Mechanism | Reachable from the machine that ran ` + "`" + `af` + "`" + ` | Logs | Can attach a local database container | Edition |
+| --- | --- | --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | Containers on the local Docker daemon, with a port forwarder per web service | yes | yes | yes | MIT |
+| ` + "`" + `kubernetes` + "`" + ` | A Deployment, Service and Ingress per web service | only with a domain to publish under | yes | no | MIT |
+
+Running more than one runtime from one control plane is the ` + "`" + `multi_runtime` + "`" + `
+licensed feature. Running either one on its own is not.
+
+### Golden stores
+
+| Store | Mechanism | Credential | Edition |
+| --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | A directory, written beside and renamed into place | none | MIT |
+| ` + "`" + `s3` + "`" + ` | The S3 REST API, signed with Signature Version 4 written here | ` + "`" + `AWS_ACCESS_KEY_ID` + "`" + ` and ` + "`" + `AWS_SECRET_ACCESS_KEY` + "`" + ` | MIT |
+| ` + "`" + `azure_blob` + "`" + ` | The Blob REST API | a container shared access signature carried in the URL | MIT |
+| ` + "`" + `gcs` + "`" + ` | The Cloud Storage JSON API | a service account key, or the metadata server | MIT |
+
+` + "`" + `s3` + "`" + ` also addresses Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces
+and Wasabi. What is proved about each is on the [golden
+stores](/docs/providers/stores) page, including which of them is proved end to
+end and which are proved only to be addressed correctly.
+
+### Emulators
+
+Nothing is built in, and that is deliberate rather than unfinished.
+Antifailure does not write emulators: LocalStack, Azurite and the vendors' own
+emulators exist and carry years of fidelity work a hand written replacement
+would not have. What the engine adds is that the application needs no endpoint
+override to reach one. See [Emulators](/docs/providers/emulators).
 
 ## Writing one
 
-Implement ` + "`" + `provider.Database` + "`" + ` and run the suite:
-
-` + "`" + "`" + "`" + `go
-func TestMyProvider(t *testing.T) {
-    conformance.RunDatabase(t, factory, conformance.Options{})
-}
-` + "`" + "`" + "`" + `
-
-Declare only the capabilities you actually have. Declaring one you do not makes
-the suite run a behaviour it should have skipped, which fails, which is the
-intended outcome: a capability is a promise the suite checks.
+[Writing a provider](/docs/contributing/provider-authoring) has the
+registration, which is four lines around ` + "`" + `engine/pkg/afcli` + "`" + `, and the
+conformance suite each point runs.
 `,
 	"providers/pgurl.md": `---
 title: Any Postgres
 description: Using any reachable Postgres as the database provider, what it creates on your server, and what branching costs there.
 sidebar:
-  order: 5
+  order: 6
 ---
 
 Every other provider here is a provider for one product. ` + "`" + `pgurl` + "`" + ` is the one for
@@ -12327,11 +11893,277 @@ string, because this provider does not declare pooled endpoints. A skip is
 always named: a silent one is how a provider ends up claiming conformance it
 does not have.
 `,
+	"providers/runtimes.md": `---
+title: Runtimes
+description: Where an environment's containers actually run, what each runtime declares it can do, and why a runtime says no rather than reporting an address that does not resolve.
+sidebar:
+  order: 9
+---
+
+A runtime is where an environment's containers actually run. Everything above
+it, the manifest, the golden, the masking, the sidecar, the fidelity report, is
+the same whichever one is chosen.
+
+` + "`" + "`" + "`" + `yaml
+runtime:
+  provider: local   # or kubernetes
+` + "`" + "`" + "`" + `
+
+## What ships
+
+| Runtime | An environment is | Detail |
+| --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | A network on the local Docker daemon, one container per service, plus a port forwarder per web service | [The local runtime](/docs/guides/local-runtime) |
+| ` + "`" + `kubernetes` + "`" + ` | A namespace, with a Deployment and a Service per service and an Ingress per web service | [The Kubernetes runtime](/docs/guides/kubernetes-runtime) |
+
+Both are MIT and both are in the engine. Running one is not an enterprise
+feature. Running SEVERAL from one control plane, and placing an environment on
+the right one, is the ` + "`" + `multi_runtime` + "`" + ` licensed feature, because deciding which
+pool an environment belongs in is a question only an organization has:
+residency, an isolated pool for regulated repositories, a pool with more
+memory. See [multiple runtimes](/docs/enterprise/runtimes).
+
+## What a runtime declares
+
+Three capabilities, and each of them exists because the honest answer is
+sometimes no.
+
+| Capability | ` + "`" + `local` + "`" + ` | ` + "`" + `kubernetes` + "`" + ` |
+| --- | --- | --- |
+| Reachable from the machine that ran ` + "`" + `af` + "`" + ` | yes | only with a ` + "`" + `domain` + "`" + ` to publish under |
+| Logs | yes | yes |
+| Can attach a database container from the local daemon | yes | no |
+
+**Reachability is not a formality.** The Kubernetes runtime declares it only
+when a domain is configured, because without one there is no Ingress and no
+address a caller could reach, and declaring otherwise would mean ` + "`" + `af up` + "`" + `
+printing a URL that resolves to nothing.
+
+**Attaching a local database is the one that decides your database provider.** A
+database container on the machine that ran ` + "`" + `af` + "`" + ` is not reachable from a
+cluster, so on Kubernetes the database has to be one the environment can
+already reach: ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + ` or ` + "`" + `pgurl` + "`" + ` pointed at a server the
+cluster can route to. A runtime that declared this true when it was not would
+make the engine attach a branch no pod can connect to.
+
+## Containment is the runtime's job
+
+Whichever runtime is chosen, an environment reaches nothing it was not given.
+The egress policy, the sidecar that terminates TLS with a certificate the
+environment already trusts, and the network rules that make the sidecar the
+only way out are all built by the runtime. A runtime that cannot enforce that
+is not a runtime this engine will ship, whatever else it can do. See
+[egress](/docs/concepts/egress).
+
+## Writing one
+
+Implement ` + "`" + `provider.Runtime` + "`" + ` and run the suite:
+
+` + "`" + "`" + "`" + `go
+func TestMyRuntime(t *testing.T) {
+    conformance.RunRuntime(t, factory, conformance.RuntimeOptions{})
+}
+` + "`" + "`" + "`" + `
+
+The runtime suite ships with a deliberately BROKEN fake and a self test that
+proves the suite fails against it, one behaviour at a time. That is the
+standard every extension point here is held to, and it is not a formality: a
+conformance suite nobody has proved can fail is a suite that proves nothing,
+and a declared behaviour means nothing until somebody has watched it say no.
+
+A behaviour a runtime cannot support is skipped EXPLICITLY, naming the missing
+capability. A silent skip is how an implementation ends up claiming
+conformance it does not have, and the skip line is what a reviewer reads.
+
+` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are reserved names. A registration under one of them
+is refused at validation rather than accepted and then never consulted, because
+the built in runtimes are looked up first.
+`,
+	"providers/stores.md": `---
+title: Golden stores
+description: Where a golden's dump and its attestation live, the four stores that ship, and exactly what is proved about the services that speak the S3 API.
+sidebar:
+  order: 7
+---
+
+A golden store is where a golden's dump and its attestation live when they
+live somewhere other than the machine that made them.
+
+The reason to have one at all: a golden made on a laptop cannot be branched by
+a runner, and a fleet that refreshes production once per runner is a fleet that
+reads production once per runner. One machine refreshes and publishes; the rest
+pull what it published.
+
+` + "`" + "`" + "`" + `yaml
+database:
+  golden:
+    storage: gcs                      # or local, s3, azure_blob
+    storage_url: $AF_GOLDEN_STORE_URL
+` + "`" + "`" + "`" + `
+
+The attestation travels beside the dump and is checked before the dump is used.
+That ordering is the point: a dump on its own is a database somebody could have
+put anything in, and the signed statement of what the verification scan found
+is what makes it a golden rather than a file.
+
+## What ships
+
+| Store | ` + "`" + `storage_url` + "`" + ` | Credential | Comes from |
+| --- | --- | --- | --- |
+| ` + "`" + `local` + "`" + ` | a directory, or ` + "`" + `file:///path` + "`" + ` | none | the filesystem |
+| ` + "`" + `s3` + "`" + ` | ` + "`" + `s3://bucket/prefix` + "`" + `, or ` + "`" + `https://host/bucket/prefix` + "`" + ` for a server that is not AWS | ` + "`" + `AWS_ACCESS_KEY_ID` + "`" + `, ` + "`" + `AWS_SECRET_ACCESS_KEY` + "`" + `, optionally ` + "`" + `AWS_SESSION_TOKEN` + "`" + ` and ` + "`" + `AWS_REGION` + "`" + ` | the environment |
+| ` + "`" + `azure_blob` + "`" + ` | the container's https URL with a shared access signature | the signature, in the URL | the environment |
+| ` + "`" + `gcs` + "`" + ` | ` + "`" + `gs://bucket/prefix` + "`" + `, or ` + "`" + `https://host/bucket/prefix` + "`" + ` for a server that is not Google | ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + `, or the metadata server | the environment |
+
+All four are MIT and all four are in the engine. The editions rule says
+anything with an MIT peer in the engine stays MIT, and these are each other's
+peers.
+
+## The credential never lives in the manifest
+
+A ` + "`" + `storage_url` + "`" + ` written as ` + "`" + `$VARIABLE` + "`" + ` or ` + "`" + `${VARIABLE}` + "`" + ` is read from the
+environment. That is what lets a container shared access signature or a bucket
+URL with a credential in it stay out of a file that is committed. It is the
+same rule ` + "`" + `source_url_env` + "`" + ` follows, in the form a URL can carry.
+
+The ` + "`" + `s3` + "`" + ` and ` + "`" + `gcs` + "`" + ` stores go further and take no credential from the URL at
+all. They read it from the environment by the names the vendor's own tools
+already use, so a machine already set up for the AWS CLI or for ` + "`" + `gcloud` + "`" + ` needs
+nothing else.
+
+A message about a URL never prints its credential back out. A shared access
+signature is a query string and a bucket URL can carry a user info section, so
+both are stripped before a URL reaches an error.
+
+## ` + "`" + `local` + "`" + `
+
+A directory, and the right answer more often than it sounds: a shared runner
+with a volume, a CI cache, an NFS mount. Objects are written beside their final
+name and renamed into place, so a reader never sees a half written dump and a
+crash leaves a temporary file rather than a truncated one wearing the real name.
+
+## ` + "`" + `s3` + "`" + `, and the five other services that speak it
+
+Signature Version 4 is implemented in this repository rather than taken from
+the AWS SDK, for the same reason the Blob store speaks REST: three operations
+against a stable, fully specified protocol are not worth a dependency tree in a
+binary otherwise built from a handful of libraries.
+
+A ` + "`" + `s3://bucket/prefix` + "`" + ` URL addresses AWS virtual hosted, as
+` + "`" + `bucket.s3.<region>.amazonaws.com` + "`" + `. A full ` + "`" + `https://host/bucket/prefix` + "`" + ` URL
+addresses a server that is not AWS PATH STYLE, because a bucket prefixed onto
+an endpoint that is an address, or onto a regional host that does not serve
+wildcard subdomains, is a hostname that does not resolve.
+
+| Service | ` + "`" + `storage_url` + "`" + ` | ` + "`" + `AWS_REGION` + "`" + ` |
+| --- | --- | --- |
+| Amazon S3 | ` + "`" + `s3://your-bucket/goldens` + "`" + ` | your region |
+| Cloudflare R2 | ` + "`" + `https://<account>.r2.cloudflarestorage.com/your-bucket/goldens` + "`" + ` | ` + "`" + `auto` + "`" + ` |
+| MinIO | ` + "`" + `http://minio.internal:9000/your-bucket/goldens` + "`" + ` | ` + "`" + `us-east-1` + "`" + ` |
+| Backblaze B2 | ` + "`" + `https://s3.<region>.backblazeb2.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-west-004` + "`" + ` |
+| DigitalOcean Spaces | ` + "`" + `https://<region>.digitaloceanspaces.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `nyc3` + "`" + ` |
+| Wasabi | ` + "`" + `https://s3.<region>.wasabisys.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-east-2` + "`" + ` |
+
+**Set ` + "`" + `AWS_REGION` + "`" + `.** Signature Version 4 pins the region into the credential
+scope, so a request signed for ` + "`" + `us-east-1` + "`" + ` against a bucket in ` + "`" + `us-west-004` + "`" + ` is
+refused, and it is refused with a 403 that reads exactly like a wrong secret
+key. The default when the variable is unset is ` + "`" + `us-east-1` + "`" + `, which is right for
+AWS in that region and for MinIO and is wrong for the rest.
+
+### What is proved, and what is not
+
+This matters more than the table. "Works with R2, B2, Spaces and Wasabi" is
+the kind of sentence that turns out to be wrong, so here is the split:
+
+- **MinIO is proved end to end**, by a suite that runs the four operations
+  against a real MinIO. It is the store's own signing that is under test there:
+  a wrong signature is indistinguishable from a right one until a server
+  rejects it, and a fixture cannot reject anything.
+- **The other four are proved to be ADDRESSED correctly and are not proved to
+  answer.** A test asserts, for each of them, the host the request goes to, the
+  path style addressing, and a credential scope naming that vendor's region.
+  What it cannot assert is that Cloudflare, Backblaze, DigitalOcean and Wasabi
+  accept the result, because that needs an account with each and no test in
+  this repository may require a cloud account.
+
+If one of the four does not work for you, that is a bug worth reporting rather
+than a limitation to work around. The protocol is the same one MinIO answers.
+
+## ` + "`" + `azure_blob` + "`" + `
+
+The ` + "`" + `storage_url` + "`" + ` is the CONTAINER's URL carrying a shared access signature,
+which is what the portal and the CLI both produce. Nothing here ever sees an
+account key. Scope the signature to one container with read, write, delete and
+list, give it an expiry, and put the whole URL in the environment variable the
+manifest names.
+
+A 403 from this store is almost always the signature: expired, scoped to the
+wrong container, or missing one of the four permissions. The message says so,
+because a bare 403 sends somebody to look at their network.
+
+## ` + "`" + `gcs` + "`" + `
+
+The Cloud Storage JSON API, spoken directly for the same reason as the other
+two. Two ways to get a token, matching where this actually runs:
+
+- **The metadata server**, which is what a Cloud Run service, a GKE workload
+  and a Compute Engine instance all have, and which needs no key material at
+  all. This is the better path wherever it exists.
+- **A service account key**, signed here into an RS256 assertion and exchanged
+  for an access token. This is what a CI runner outside Google has. Point
+  ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS` + "`" + ` at the key file, or put the document itself
+  in ` + "`" + `GOOGLE_APPLICATION_CREDENTIALS_JSON` + "`" + `.
+
+The key is parsed when the store is opened, so a key that is not a key is
+reported before anything depends on the answer. The metadata server is NOT
+probed then: off Google that name does not resolve, and paying a second for
+that on every command would be a second on every command. A ` + "`" + `gs://` + "`" + ` URL with no
+credential anywhere therefore opens and then refuses at the first request,
+naming the variable that fixes it.
+
+An endpoint that is not Google's with no credential configured sends no
+` + "`" + `Authorization` + "`" + ` header at all. That is what lets a Cloud Storage emulator be
+reached with no Google account anywhere. A ` + "`" + `gs://` + "`" + ` URL never gets that
+treatment: an unauthenticated request to Google is a 401, and refusing with the
+variable named beats a 401 twenty minutes into a refresh.
+
+The service account needs ` + "`" + `storage.objects` + "`" + ` on the bucket. A 401 from this
+store is the token and a 403 is the grant, and the message distinguishes them,
+because they have different fixes and the same digit count.
+
+### There is no official Cloud Storage emulator
+
+Google ships emulators for Pub/Sub, Firestore, Datastore, Bigtable and Spanner,
+and none for Cloud Storage. ` + "`" + `fsouza/fake-gcs-server` + "`" + ` is the de facto choice and
+is community maintained. The suite for this store runs against it, and what
+that proves is the four operations against the JSON API. It does not prove
+authentication, because that server verifies none. The two token paths are
+covered separately, against a server the test stands up, which is as close as a
+machine with no Google account gets.
+
+## Writing one
+
+Implement ` + "`" + `extension.GoldenStore` + "`" + `, which opens an ` + "`" + `extension.ObjectStore` + "`" + ` with
+` + "`" + `Name` + "`" + `, ` + "`" + `Put` + "`" + `, ` + "`" + `Get` + "`" + `, ` + "`" + `List` + "`" + ` and ` + "`" + `Delete` + "`" + `.
+
+Two details decide whether it works rather than nearly works:
+
+- **Return ` + "`" + `extension.ErrObjectNotFound` + "`" + ` for an object that is not there.** A
+  store outside this module cannot name the engine's own sentinel, so a store
+  that returns some other error turns every "no golden published yet" into "the
+  store is broken". They are the same HTTP status on more than one service.
+- **Removing what is not there must succeed.** Teardown retries, and a retry
+  that fails on the work it already did is a teardown that never finishes.
+
+` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + ` and ` + "`" + `gcs` + "`" + ` are reserved names and a registration
+under one of them is refused at validation rather than accepted and then never
+consulted, because the built in stores are looked up first.
+`,
 	"providers/supabase.md": `---
 title: Supabase
 description: Using Supabase as the database provider, what a branch really is, and what it costs.
 sidebar:
-  order: 3
+  order: 4
 ---
 
 A Supabase branch is a whole separate project: its own Postgres, its own API
@@ -14099,7 +13931,6 @@ af mask plan
 Subcommands:
 
 - [` + "`" + `af mask apply` + "`" + `](#af-mask-apply) Rewrite this environment's data according to the plan.
-- [` + "`" + `af mask crossstore` + "`" + `](#af-mask-crossstore) Check that one person masks to the same person in every store.
 - [` + "`" + `af mask init` + "`" + `](#af-mask-init) Read the schema and write masking.yaml with a rule for every column.
 - [` + "`" + `af mask plan` + "`" + `](#af-mask-plan) Show what masking would do, column by column.
 - [` + "`" + `af mask preview` + "`" + `](#af-mask-preview) Show what a few rows would look like after masking.
@@ -14127,48 +13958,6 @@ af mask apply
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to mask, defaulting to the checked out one. |
-
-### ` + "`" + `af mask crossstore` + "`" + `
-
-Check that one person masks to the same person in every store.
-
-Determinism inside one store has been enforced since the beginning, by the key
-derivation. Across two stores it was a property of the construction that
-nothing checked, and a property nothing checks is a property you have somebody's
-word for.
-
-The failure it exists to catch is silent. An empty ClickHouse beside a masked
-Postgres is a twin that is visibly incomplete and somebody notices within a
-minute of opening a chart. One identity masked into two different fake people
-is a twin that is confidently wrong: every join across the two stores returns
-nothing or returns the wrong person, every report built on it is plausible, and
-nothing anywhere says so.
-
-It reads schemas and no rows. The check masks its own probe values through both
-stores' rules and compares the outputs, so what it needs from a store is the
-catalog, which is why it is safe to point at production. Every store it reads
-is named, every store it could not read is named with the reason, and a run
-that reached one store reports that it proved nothing rather than reporting a
-hundred percent of one.
-
-Each datastore says where its schema is read from with source_url_env, which
-names an environment variable and never the connection string. The primary
-takes that from database.source_url_env and does not repeat it.
-
-` + "`" + "`" + "`" + `
-af mask crossstore [flags]
-` + "`" + "`" + "`" + `
-
-` + "`" + "`" + "`" + `
-# Reads both stores' catalogs and no rows, which is what makes it safe
-# to point at production.
-af mask crossstore
-af mask crossstore --branch main
-` + "`" + "`" + "`" + `
-
-| Flag | Default | What it does |
-| --- | --- | --- |
-| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
 
 ### ` + "`" + `af mask init` + "`" + `
 
@@ -15131,106 +14920,6 @@ af token rm afe_1a2b3c4d
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--control-plane` + "`" + ` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
-
-### ` + "`" + `af traffic` + "`" + `
-
-What production serves, and how much of it a load run actually sends.
-
-A load run sends the routes safe_routes names. Without a traffic profile
-nothing says how much of production that is, so four routes written by hand
-report in the same words and with the same verdict as a mix read from a week of
-production telemetry.
-
-That is not a cosmetic gap. Measured on this repository on 2026-09-06: a
-migration held an exclusive lock on nine relations for thirty seconds and the
-load run over four hand written routes reported 0.0 percent failed, because
-none of the four reads the locked table. A hand written route list cannot know
-which routes touch which tables.
-
-A profile is the endpoint mix, the arrival rate, the peak concurrency and the
-per route p95, counted from telemetry a team already has. It carries no request
-body, no header, no query string and no identifier. It is a count per route,
-which is what makes it safe to commit beside the manifest, and committing it is
-the point: the check running on a pull request cannot reach production.
-
-Declare where it lives under load.traffic.profile, and how old it may be under
-load.traffic.max_age. A profile past that age is refused rather than quoted.
-
-` + "`" + "`" + "`" + `
-af traffic
-` + "`" + "`" + "`" + `
-
-` + "`" + "`" + "`" + `
-af traffic show
-` + "`" + "`" + "`" + `
-
-Subcommands:
-
-- [` + "`" + `af traffic record` + "`" + `](#af-traffic-record) Count what production served from a trace export or an access log.
-- [` + "`" + `af traffic show` + "`" + `](#af-traffic-show) Print what production serves and which of it this run sends.
-
-### ` + "`" + `af traffic record` + "`" + `
-
-Count what production served from a trace export or an access log.
-
-Reads the file load.source_config.path names, which --from overrides, and
-writes the profile to the path load.traffic.profile names, which --out
-overrides.
-
-Two sources, both of them a file. An OpenTelemetry trace export in OTLP/JSON
-answers every question the profile asks, because a span carries a start and an
-end: the mix, the rate, the per route p95 a threshold compares against, and the
-peak concurrency. A combined format access log answers the mix and the rate,
-and says in the profile that it could answer neither of the others.
-
-Nothing here opens a socket, and there is no agent to install. The file is one
-a collector or a reverse proxy already wrote.
-
-` + "`" + "`" + "`" + `
-af traffic record [flags]
-` + "`" + "`" + "`" + `
-
-` + "`" + "`" + "`" + `
-# Counts an OpenTelemetry export or an access log a collector already
-# wrote. Nothing here opens a socket and there is no agent to install.
-af traffic record
-af traffic record --from telemetry/traces.json --out .antifailure/traffic.json
-` + "`" + "`" + "`" + `
-
-| Flag | Default | What it does |
-| --- | --- | --- |
-| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
-| ` + "`" + `--from` + "`" + ` | - | Read this file instead of the one load.source_config.path names. |
-| ` + "`" + `--out` + "`" + ` | - | Write the profile here instead of where the manifest says. |
-
-### ` + "`" + `af traffic show` + "`" + `
-
-Print what production serves and which of it this run sends.
-
-Reads the profile the manifest names and prints it, busiest route first, with a
-mark against every route a load run would actually send.
-
-The routes with no mark are the finding. They are what production serves and
-this run never touches, so they are what a green run says nothing about, and
-the safe_routes lines that would cover them are printed at the end for somebody
-to read and paste. Nothing is written for you: this measures and states, and
-the manifest confirms it.
-
-A profile older than load.traffic.max_age is REFUSED rather than printed with a
-warning beside it. A stale denominator is not a smaller number, it is an
-unknown one.
-
-` + "`" + "`" + "`" + `
-af traffic show [flags]
-` + "`" + "`" + "`" + `
-
-` + "`" + "`" + "`" + `
-af traffic show
-` + "`" + "`" + "`" + `
-
-| Flag | Default | What it does |
-| --- | --- | --- |
-| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
 
 ### ` + "`" + `af up` + "`" + `
 
@@ -16348,7 +16037,7 @@ Scripts can branch on these. They are stable.
 | ` + "`" + `9` + "`" + ` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
 | ` + "`" + `10` + "`" + ` | Interrupted, or a teardown left resources recorded. Run ` + "`" + `af down` + "`" + ` again. |
 
-27 further codes are reserved for features this version does not have. They are in ` + "`" + `engine/internal/errors/catalog.yaml` + "`" + ` and are left out here because this page is for looking up an error you have actually seen.
+28 further codes are reserved for features this version does not have. They are in ` + "`" + `engine/internal/errors/catalog.yaml` + "`" + ` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -16730,7 +16419,7 @@ The source database at {host} could not be reached.
 | --- | --- |
 | Exit code | ` + "`" + `5` + "`" + ` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-003
 
@@ -16742,7 +16431,7 @@ The source database is Postgres {found}, and this provider supports {supported}.
 | --- | --- |
 | Exit code | ` + "`" + `3` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-004
 
@@ -16802,7 +16491,7 @@ The database provider {provider} at {endpoint} rejected the configured credentia
 | --- | --- |
 | Exit code | ` + "`" + `4` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-009
 
@@ -17170,15 +16859,15 @@ Organization policy {policy} refuses this environment: {detail}
 
 ### AF-EE-011
 
-This manifest declares {count} placement targets and {feature} is not licensed here.
+The provider {provider} needs the {feature} feature: {reason}
 
-**What to do.** Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.
+**What to do.** Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.
 
 | | |
 | --- | --- |
-| Exit code | ` + "`" + `4` + "`" + ` |
+| Exit code | ` + "`" + `6` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+| More | [enterprise/licensing](/docs/enterprise/licensing) |
 
 ## Extensions
 
@@ -17493,30 +17182,6 @@ Verification could not read {table}.{column} ({type}), no masking rule covers it
 | Exit code | ` + "`" + `7` + "`" + ` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification) |
-
-### AF-MSK-014
-
-The same identifier does not mask to the same value in every store: {detail}
-
-**What to do.** Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.
-
-| | |
-| --- | --- |
-| Exit code | ` + "`" + `7` + "`" + ` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking) |
-
-### AF-MSK-015
-
-The cross store check did not compare every store it was given: {detail}
-
-**What to do.** Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.
-
-| | |
-| --- | --- |
-| Exit code | ` + "`" + `1` + "`" + ` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [concepts/masking](/docs/concepts/masking) |
 
 ## Egress
 
@@ -17908,44 +17573,6 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
-### AF-RUN-047
-
-This runtime cannot place the sizes the manifest asks for: {detail}
-
-**What to do.** Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.
-
-| | |
-| --- | --- |
-| Exit code | ` + "`" + `1` + "`" + ` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [reference/manifest](/docs/reference/manifest) |
-
-## Scheduling
-
-### AF-SCH-001
-
-No runtime satisfies the placement requirement {requirement}.
-
-**What to do.** Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.
-
-| | |
-| --- | --- |
-| Exit code | ` + "`" + `5` + "`" + ` |
-| Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
-
-### AF-SCH-003
-
-No placement target could take this environment: {detail}
-
-**What to do.** The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.
-
-| | |
-| --- | --- |
-| Exit code | ` + "`" + `5` + "`" + ` |
-| Retryable | Yes. The engine retries automatically where it can. |
-| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
-
 ## Secrets
 
 ### AF-SEC-001
@@ -18250,7 +17877,7 @@ what it deliberately does not cover.
 | ` + "`" + `replicas` + "`" + ` | int | How many instances to run, 1 to 10. Both runtimes start this many behind the one name other services resolve. See below. |
 | ` + "`" + `depends_on` + "`" + ` | list | Other services that must start first. |
 | ` + "`" + `env` + "`" + ` | list | Variables this service needs, by name. |
-| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
+| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
 | ` + "`" + `build` + "`" + ` | block | See below. |
 
 ### What a service is given
@@ -18330,66 +17957,6 @@ The bound is 1 to 10, and a ` + "`" + `cron` + "`" + ` service may not ask for m
 instance runs the schedule, so three instances send the nightly email three
 times, which is a bug to reproduce inside a service rather than the meaning of
 a manifest key.
-
-### ` + "`" + `resources` + "`" + `
-
-` + "`" + "`" + "`" + `yaml
-services:
-  - name: clickhouse
-    kind: worker
-    resources:
-      cpu: "2"
-      memory: 4Gi
-` + "`" + "`" + "`" + `
-
-The size ONE instance is given. A service asking for ` + "`" + `replicas: 3` + "`" + ` and ` + "`" + `2` + "`" + ` of
-CPU asks the machine for six cores, not two.
-
-` + "`" + `cpu` + "`" + ` is a number of cores, or thousandths with an ` + "`" + `m` + "`" + `: ` + "`" + `2` + "`" + `, ` + "`" + `0.5` + "`" + `, ` + "`" + `500m` + "`" + `.
-` + "`" + `memory` + "`" + ` needs a unit: ` + "`" + `512Mi` + "`" + `, ` + "`" + `2Gi` + "`" + `. ` + "`" + `Mi` + "`" + ` and ` + "`" + `Gi` + "`" + ` are powers of two, ` + "`" + `M` + "`" + ` and
-` + "`" + `G` + "`" + ` powers of ten, which is what those suffixes mean in a Deployment and what
-somebody copying a value out of one expects. A bare ` + "`" + `memory: 512` + "`" + ` is refused,
-because Kubernetes reads it as 512 bytes and nobody who writes it means that.
-
-**Each value is the request AND the limit**, not a request with a larger limit
-behind it. On Kubernetes that is the Guaranteed quality of service class. The
-familiar shape, a small request under a large limit, is where a node gets
-oversubscribed: every container is placed against its request and then grows
-into its limit, so a machine that fits ten environments on paper runs eleven
-and the eleventh takes memory from the others. The symptom is a workflow that
-reads as flaky, and a twin whose failures belong to the machine rather than to
-the change under test is worth less than no twin. One number also means
-environments per node is a division rather than a guess.
-
-On the local runtime there is no scheduler to reserve anything, so the value is
-the daemon's own cpu and memory constraint: the container gets that share under
-contention and no more, and one over its memory cap is killed rather than
-allowed to take the machine down with it.
-
-Omitting a key leaves that dimension uncapped, which is what every service had
-before the key was honoured, so an existing manifest produces the identical
-container and the identical Deployment it did before. The two keys are
-independent: a service may cap CPU alone, memory alone, or neither.
-
-**A size the runtime cannot place is refused before anything is created**, with
-**AF-RUN-047** naming the shortfall. Without that, a request larger than any
-node is accepted by the API server, the pod sits ` + "`" + `Pending` + "`" + ` with an event nobody
-is watching, and ` + "`" + `af up` + "`" + ` waits out its readiness timeout and reports a service
-that did not start, which reads as a slow cluster. On a cluster the check is
-against allocatable minus what the pods already there requested, so a full
-cluster refuses rather than accepts. It is a necessary condition and not a
-sufficient one: it refuses the sets for which no placement exists, and leaves
-bin packing to the scheduler.
-
-A service's ` + "`" + `migrate` + "`" + ` command runs under the same cap as the service. It does
-not double what the environment asks the machine for, because the migration
-finishes before the service starts. A migration that needs more memory than the
-service it belongs to is a case this key cannot express today.
-
-` + "`" + `af status` + "`" + ` reports the size the runtime ACTUALLY applied, read back off the
-running pod or the daemon's record of the container rather than echoed from
-the manifest. A runtime that accepts a cap and emits none would otherwise
-report exactly what a correct one reports.
 
 ### ` + "`" + `build` + "`" + `
 
@@ -18551,7 +18118,7 @@ datastores:
 | ` + "`" + `stance` + "`" + ` | Required. See below. |
 | ` + "`" + `because` + "`" + ` | Why that stance was chosen, carried into the fidelity report as written. Required for ` + "`" + `empty` + "`" + `. |
 | ` + "`" + `from` + "`" + ` | The store a ` + "`" + `derived` + "`" + ` one is rebuilt from. Required for ` + "`" + `derived` + "`" + ` and refused for the rest. |
-| ` + "`" + `source_url_env` + "`" + ` | The NAME of the variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
+| ` + "`" + `source_url_env` + "`" + ` | The variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from. Omitted, the golden holds no rows and every refresh says so. |
 
 The ` + "`" + `database` + "`" + ` block above is not replaced and does not move. It normalizes
 into the entry named ` + "`" + `primary` + "`" + `, so a manifest that declares only ` + "`" + `database:` + "`" + `
@@ -18598,34 +18165,6 @@ validator refuses a store with no stance and the
 [component inventory](/docs/concepts/inventory) names each one, and nothing here
 starts an ` + "`" + `empty` + "`" + ` store, runs a ` + "`" + `derived` + "`" + ` rebuild or creates a topic. A store
 whose engine this build cannot mask is REFUSED rather than published unmasked.
-
-### Checking that one person is one person in both stores
-
-The paragraph above says one customer masks to one fake customer in both
-stores. ` + "`" + `af mask crossstore` + "`" + ` is what checks it rather than asserting it:
-
-` + "`" + "`" + "`" + `
-af mask crossstore
-` + "`" + "`" + "`" + `
-
-It reads each declared store's catalog through the variable its
-` + "`" + `source_url_env` + "`" + ` names, assigns the one ` + "`" + `masking.yaml` + "`" + ` to all of them, finds
-every identifier that appears in more than one store, masks probe values
-through each side, and reports the share that come out identical.
-
-**It reads catalogs and no rows**, which is why it is safe to point at
-production: the probe values are its own, so what it needs from a store is the
-schema. ` + "`" + `rows_read` + "`" + ` is a field of the report rather than a promise on this
-page, and a live test reads the ClickHouse server's own ` + "`" + `system.query_log` + "`" + ` back
-and fails if any statement the check sent selected from a data table. See
-[masking](/docs/concepts/masking) for what it finds.
-
-Every store it could not read is named with the reason, a store that names no
-` + "`" + `source_url_env` + "`" + ` is named as never read at all, and a run that reached one store
-says it proved nothing rather than reporting a hundred percent of one. A pair
-that disagreed and a store that was never opened carry different exit codes,
-because one is a statement about your data and the other is a statement about
-what could be reached.
 
 **The fidelity report reads the branch**, not the declaration. A store declared
 ` + "`" + `golden` + "`" + ` that this environment branched is reported the way the primary
@@ -18692,44 +18231,6 @@ refused at the line rather than treated as the weakest one.
 
 See [verdicts](/docs/concepts/verdicts) for what each level does to the run
 and to the exit code.
-## ` + "`" + `load` + "`" + `
-
-The whole block is in [Load](/docs/concepts/load). One key is here because it
-is the counterpart of ` + "`" + `database.volume` + "`" + ` above.
-
-### ` + "`" + `traffic` + "`" + `
-
-` + "`" + "`" + "`" + `yaml
-load:
-  traffic:
-    profile: .antifailure/traffic.json
-    max_age: 336h
-` + "`" + "`" + "`" + `
-
-The committed record of what production actually serves. Without it
-` + "`" + `safe_routes` + "`" + ` is a list written from memory and nothing says how much of
-production it misses. Measured on this repository on 2026-09-06: a migration
-held an exclusive lock on nine relations for thirty seconds and the run over
-four hand written routes reported 0.0 percent failed, because none of the four
-reads the locked table.
-
-` + "`" + `af traffic record` + "`" + ` writes the profile from an OpenTelemetry trace export or a
-combined format access log, both files a collector or a reverse proxy already
-wrote. It carries the endpoint mix, the arrival rate, production's p95 per
-route and the peak concurrency, and no request body, header, query string or
-identifier. Nothing in it opens a socket and no application code changes, which
-is why the result is safe to commit, which it has to be: the check running on a
-pull request cannot reach production.
-
-With a profile, the traffic dimension states what fraction of production's
-requests the run actually sends and names the heaviest route it never touches,
-the arrival rate is stated beside production's own, and ` + "`" + `p95_increase` + "`" + ` becomes
-able to fire under a source that carries no durations of its own.
-
-A profile past ` + "`" + `max_age` + "`" + ` is refused rather than quoted. Fourteen days by
-default, where the volume profile's is thirty: an endpoint mix moves at the rate
-a team ships, and a volume profile at the rate a business grows.
-
 ## ` + "`" + `fidelity` + "`" + `
 
 | Key | Notes |
@@ -18745,81 +18246,10 @@ name.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | Which runtime places the environment. ` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are built in, and a build registers any others it carries. The schema keeps no list, the way ` + "`" + `datastore.engine` + "`" + ` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `. ` + "`" + `kubernetes` + "`" + ` is named in the schema and not built yet; asking for it is refused rather than substituted. |
 | ` + "`" + `ttl` + "`" + ` | How long an environment lives. |
-| ` + "`" + `max_ttl` + "`" + ` | The furthest ` + "`" + `af env extend` + "`" + ` may push an environment's expiry, measured from creation. |
 | ` + "`" + `idle_sleep` + "`" + ` | Suspend after this long with no traffic. |
 | ` + "`" + `domain` + "`" + ` | Wildcard domain for preview URLs. |
-| ` + "`" + `namespace_prefix` + "`" + ` | Prefix for Kubernetes namespaces. |
-| ` + "`" + `kubeconfig_context` + "`" + ` | Which cluster. Naming it stops an environment landing on whatever context happened to be current. |
-| ` + "`" + `requires` + "`" + ` | What a target must offer for this repository, as tag equals value. See below. |
-| ` + "`" + `targets` + "`" + ` | The places an environment may be placed, in preference order. See below. |
-
-### Placement
-
-Most repositories have one place environments run, name it in ` + "`" + `provider` + "`" + `, and
-never write either of the last two keys. ` + "`" + `targets` + "`" + ` is for the case where there
-is more than one: two clusters in two regions, a pool with more memory, an
-isolated pool for repositories that handle regulated data.
-
-` + "`" + "`" + "`" + `yaml
-runtime:
-  provider: kubernetes
-  domain: preview.example.com
-  requires:
-    region: eu-west-1
-  targets:
-    - name: frankfurt
-      kubeconfig_context: eu-prod
-      domain: eu.preview.example.com
-      tags:
-        region: eu-west-1
-        class: standard
-    - name: virginia
-      kubeconfig_context: us-prod
-      domain: us.preview.example.com
-      tags:
-        region: us-east-1
-        class: standard
-` + "`" + "`" + "`" + `
-
-A target inherits ` + "`" + `provider` + "`" + `, ` + "`" + `domain` + "`" + `, ` + "`" + `namespace_prefix` + "`" + ` and
-` + "`" + `kubeconfig_context` + "`" + ` from the block above it, so a fleet of clusters is one
-provider line and a list of contexts rather than the same four settings written
-out per target. ` + "`" + `af explain` + "`" + ` prints each target with its tags and marks the one
-this manifest would be placed on.
-
-**The tags are declared here rather than discovered from the cluster**, and that
-is deliberate. A kubeconfig context is a name on somebody's laptop and it does
-not say which region the cluster is in. Putting the claim in the repository puts
-it under review, next to the requirement that reads it.
-
-**Placement is a pure function of this file.** The first target satisfying every
-requirement wins, every time, on every machine. ` + "`" + `af up` + "`" + `, ` + "`" + `af status` + "`" + `, ` + "`" + `af logs` + "`" + `
-and ` + "`" + `af down` + "`" + ` each decide independently and have to agree: a placement that
-consulted a cluster's health would send ` + "`" + `af up` + "`" + ` to one cluster and ` + "`" + `af status` + "`" + ` to
-another the moment one of them was unreachable, and the second command would
-report that your environment does not exist.
-
-**A requirement nothing can satisfy is refused rather than ignored**, when the
-manifest is read, before anything is dispatched:
-
-- ` + "`" + `requires` + "`" + ` with no ` + "`" + `targets` + "`" + `. There is one runtime, it carries no tags, and so
-  nothing could ever match.
-- A requirement no declared target offers. The message names what the targets do
-  offer, because the fix is usually a typo in the value.
-- Two targets with one name, or two Kubernetes targets resolving to one cluster.
-  Choosing between two targets on one cluster decides nothing.
-
-**The ` + "`" + `region` + "`" + ` tag is read by more than placement.** It is what fills the region
-an organization policy's ` + "`" + `allowed_regions` + "`" + ` rule compares against, so a target
-that carries one can be refused by a residency policy and a target that carries
-none cannot be. See [policy](/docs/enterprise/policy).
-
-**More than one target requires an enterprise license** carrying ` + "`" + `multi_runtime` + "`" + `;
-see [multiple runtimes](/docs/enterprise/runtimes). One target needs no license.
-It decides nothing, it only says where the runtime you already had is, which is
-what a residency policy reads.
 
 ## ` + "`" + `github` + "`" + `
 
@@ -19482,7 +18912,7 @@ torn down, and there is no argument that leaves it running.
 
 ### ` + "`" + `inspect_data_masking` + "`" + `
 
-What masking does to this environment's data, without changing any of it. Four
+What masking does to this environment's data, without changing any of it. Three
 questions, chosen with ` + "`" + `question` + "`" + `.
 
 ` + "`" + `plan` + "`" + ` says what masking WOULD do, column by column, compiled from the live
@@ -19492,17 +18922,7 @@ which is the list somebody has to answer: left alone, a column called
 to show whether the rules actually fire. ` + "`" + `verify` + "`" + ` reads the data back and runs
 the same detectors that would find the data if it leaked.
 
-` + "`" + `cross_store` + "`" + ` asks whether one person masks to the SAME person in every declared
-store, which is the question a twin holding a Postgres and a ClickHouse has and a
-twin holding one store does not. One identity masked into two people is a twin
-that is confidently wrong: every join across the two stores returns somebody
-else, and every report built on it is plausible. It reads catalogs and NO ROWS,
-so it is safe to point at production, and ` + "`" + `rows_read` + "`" + ` is a field of the answer
-rather than a promise in this page. It returns ` + "`" + `INCONCLUSIVE` + "`" + ` rather than ` + "`" + `PASS` + "`" + `
-when fewer than two stores could be read or when the two share no identifier,
-because a percentage over zero comparisons is not a pass.
-
-**No value is ever returned by any of the four.** Masking is a privacy boundary,
+**No value is ever returned by any of the three.** Masking is a privacy boundary,
 and a preview that showed the values it is deciding about would leak exactly the
 data being removed, to a model, into a transcript. What comes back is the shape
 of the change: the column, the transform, whether the value changed at all, its
@@ -19947,7 +19367,7 @@ This page is generated from ` + "`" + `schemas/manifest.v1.json` + "`" + `. Edit
 | ` + "`" + `policy` + "`" + ` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | ` + "`" + `runtime` + "`" + ` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | ` + "`" + `services` + "`" + ` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
-| ` + "`" + `version` + "`" + ` | ` + "`" + `1` + "`" + ` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
+| ` + "`" + `version` + "`" + ` | ` + "`" + `1` + "`" + ` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | ` + "`" + `workflows` + "`" + ` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
 
 ## auth
@@ -20027,7 +19447,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | ` + "`" + `max_branches` + "`" + ` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | ` + "`" + `migrations` + "`" + ` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | ` + "`" + `project` + "`" + ` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to ` + "`" + `docker` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `docker` + "`" + `, ` + "`" + `neon` + "`" + `, ` + "`" + `supabase` + "`" + `, ` + "`" + `dblab` + "`" + `, ` + "`" + `pgurl` + "`" + ` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to ` + "`" + `docker` + "`" + `. |
 | ` + "`" + `seed` + "`" + ` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | ` + "`" + `source_url_env` + "`" + ` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `subset` + "`" + ` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
@@ -20046,7 +19466,7 @@ One store the environment holds. Database is a single struct and it is Postgres,
 | ` + "`" + `from` + "`" + ` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
-| ` + "`" + `source_url_env` + "`" + ` | string | no | The NAME of the variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. A connection string written here rather than a variable name is refused, and the refusal does not print it back. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
+| ` + "`" + `source_url_env` + "`" + ` | string | no | The variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. Max length 128. |
 | ` + "`" + `stance` + "`" + ` | ` + "`" + `golden` + "`" + `, ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + `, ` + "`" + `topics_only` + "`" + ` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
 
 ## Egress
@@ -20082,7 +19502,7 @@ One variable a service needs. The manifest declares the name and where the value
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `from` + "`" + ` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
-| ` + "`" + `name` + "`" + ` | string | **yes** | Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_.]*$` + "`" + `. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `required` + "`" + ` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to ` + "`" + `true` + "`" + `. |
 | ` + "`" + `sandbox` + "`" + ` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to ` + "`" + `false` + "`" + `. |
 | ` + "`" + `value` + "`" + ` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
@@ -20136,7 +19556,7 @@ The masked, verified copy every environment branches from.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `max_age` + "`" + ` | string | no | How stale a golden may be before af up refreshes it first. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
+| ` + "`" + `max_age` + "`" + ` | string | no | How stale a golden may be before af up refreshes it first. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 | ` + "`" + `retain` + "`" + ` | integer | no | How many versions to keep. A referenced version is never collected regardless of this. Defaults to ` + "`" + `5` + "`" + `. Minimum 1, maximum 100. |
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | ` + "`" + `storage` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `azure_blob` + "`" + `, ` + "`" + `s3` + "`" + ` | no | Where dumps and attestations live. Defaults to ` + "`" + `local` + "`" + `. |
@@ -20181,7 +19601,6 @@ Traffic shaped like production, compared between the base branch and this one. R
 | ` + "`" + `source` + "`" + ` | ` + "`" + `none` + "`" + `, ` + "`" + `otel` + "`" + `, ` + "`" + `access_log` + "`" + ` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to ` + "`" + `none` + "`" + `. |
 | ` + "`" + `source_config` + "`" + ` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | ` + "`" + `thresholds` + "`" + ` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
-| ` + "`" + `traffic` + "`" + ` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | ` + "`" + `unsafe_routes` + "`" + ` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
 ## Load scenario
@@ -20298,12 +19717,12 @@ One request sent to both versions.
 
 ## Resources
 
-The size one instance of this service is given. Each value is both the request and the limit, so the service gets what it asked for and takes no more. Omit either key to leave that dimension uncapped.
+Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `cpu` + "`" + ` | string | no | CPU for one instance, as a number of cores or as thousandths with an m: 2, 0.5, 500m. On Kubernetes it is the request and the limit, which puts the pod in the Guaranteed class; on the local runtime it is the daemon's own cpu constraint. A value the runtime cannot place is refused with AF-RUN-047 naming the shortfall, rather than accepted and left Pending. Matches ` + "`" + `^[0-9]+(\.[0-9]+)?m?$` + "`" + `. |
-| ` + "`" + `memory` + "`" + ` | string | no | Memory for one instance, with a unit: 512Mi, 2Gi. Mi and Gi are powers of two, M and G powers of ten. A bare number is refused, because nobody who writes 512 means 512 bytes. On Kubernetes it is the request and the limit; on the local runtime it is the daemon's memory constraint, so a service over it is killed rather than allowed to take the machine down. Matches ` + "`" + `^[0-9]+(Mi\|Gi\|M\|G)$` + "`" + `. |
+| ` + "`" + `cpu` + "`" + ` | string | no | Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none. Matches ` + "`" + `^[0-9]+(\.[0-9]+)?m?$` + "`" + `. |
+| ` + "`" + `memory` + "`" + ` | string | no | Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none. Matches ` + "`" + `^[0-9]+(Mi\|Gi\|M\|G)$` + "`" + `. |
 
 ## Rolling compatibility
 
@@ -20323,25 +19742,10 @@ Where and how long the environment runs. The provider decides the machinery; the
 | ` + "`" + `domain` + "`" + ` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to ` + "`" + `localhost` + "`" + `. Max length 253. |
 | ` + "`" + `idle_sleep` + "`" + ` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to ` + "`" + `30m` + "`" + `. Matches ` + "`" + `^[0-9]+(m\|h)$` + "`" + `. |
 | ` + "`" + `kubeconfig_context` + "`" + ` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
-| ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
+| ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 | ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces. Defaults to ` + "`" + `af` + "`" + `. Max length 40. |
-| ` + "`" + `provider` + "`" + ` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to ` + "`" + `local` + "`" + `. Max length 64. |
-| ` + "`" + `requires` + "`" + ` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
-| ` + "`" + `targets` + "`" + ` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
-| ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(ms\|s\|m\|h\|d)$` + "`" + `. |
-
-## Runtime target
-
-One place an environment may be placed. A runtime plus the facts about where it is, and the second half is the part no runtime supplies for itself: a kubeconfig context is a name on somebody's laptop and it does not say which region the cluster is in.
-
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| ` + "`" + `domain` + "`" + ` | string | no | Wildcard domain for environments placed here. Omitted inherits runtime.domain. Max length 253. |
-| ` + "`" + `kubeconfig_context` + "`" + ` | string | no | Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing. Max length 253. |
-| ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. It names the target in the placement decision and in the refusal when none will do. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
-| ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix. Max length 40. |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | no | The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts. |
-| ` + "`" + `tags` + "`" + ` | object | no | What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check. Max properties 16. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | no | Defaults to ` + "`" + `local` + "`" + `. |
+| ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 
 ## Service
 
@@ -20350,7 +19754,7 @@ One process the environment runs. A service is built from the repository, given 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | ` + "`" + `build` + "`" + ` | [Build](#build) | no | How to turn the service directory into an image. |
-| ` + "`" + `command` + "`" + ` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
+| ` + "`" + `command` + "`" + ` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 1024. |
 | ` + "`" + `depends_on` + "`" + ` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | ` + "`" + `env` + "`" + ` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
 | ` + "`" + `health_path` + "`" + ` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to ` + "`" + `/` + "`" + `. Max length 512. |
@@ -20361,7 +19765,7 @@ One process the environment runs. A service is built from the repository, given 
 | ` + "`" + `path` + "`" + ` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | ` + "`" + `port` + "`" + ` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
 | ` + "`" + `replicas` + "`" + ` | integer | no | How many instances of this service to run. Both runtimes start this many, behind the one name other services resolve, so a bug that only appears at more than one instance appears here. Omitted means one. A cron service may not ask for more than one, because a scheduled job that runs on three instances runs three times. Minimum 1, maximum 10. |
-| ` + "`" + `resources` + "`" + ` | [Resources](#resources) | no | The size one instance of this service is given. |
+| ` + "`" + `resources` + "`" + ` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
 ## Subset
@@ -20376,15 +19780,6 @@ Take a production shaped slice rather than the whole database. The closure is co
 | ` + "`" + `seed_table` + "`" + ` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | ` + "`" + `seed_where` + "`" + ` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | ` + "`" + `virtual_relationships` + "`" + ` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
-
-## Traffic
-
-The committed record of what production actually serves, which is the denominator every route in a load run is measured against. Without one safe_routes is a list written from memory and nothing says how much of production it misses. Measured on this repository on 2026-09-06: a migration held an exclusive lock on nine relations for thirty seconds and the run over four hand written routes reported 0.0 percent failed, because none of the four reads the locked table.
-
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| ` + "`" + `max_age` + "`" + ` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to ` + "`" + `336h` + "`" + `. Max length 32. |
-| ` + "`" + `profile` + "`" + ` | string | **yes** | The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier. Max length 512. |
 
 ## Volume
 

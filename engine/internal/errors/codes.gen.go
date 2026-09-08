@@ -201,8 +201,7 @@ const (
 	AFEE004 Code = "AF-EE-004"
 	// Organization policy {policy} refuses this environment: {detail}
 	AFEE010 Code = "AF-EE-010"
-	// This manifest declares {count} placement targets and {feature} is
-	// not licensed here.
+	// The provider {provider} needs the {feature} feature: {reason}
 	AFEE011 Code = "AF-EE-011"
 
 	// Extensions
@@ -417,8 +416,6 @@ const (
 	// The organization is at its concurrent environment limit ({limit});
 	// this run is queued at position {position}.
 	AFSCH002 Code = "AF-SCH-002"
-	// No placement target could take this environment: {detail}
-	AFSCH003 Code = "AF-SCH-003"
 
 	// Secrets
 	// The variables {names} are declared in the manifest but were not
@@ -766,7 +763,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The database provider {provider} is not registered in this build.",
 		NextStep:  "Set database.provider to one of: {available}.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
@@ -775,7 +772,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The source database at {host} could not be reached.",
 		NextStep:  "Check that the host is reachable from this machine and that the connection string names the right port.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
@@ -784,7 +781,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The source database is Postgres {found}, and this provider supports {supported}.",
 		NextStep:  "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
 	},
@@ -829,7 +826,7 @@ var catalog = map[Code]Entry{
 		Area:      "DB",
 		Message:   "The database provider {provider} at {endpoint} rejected the configured credential.",
 		NextStep:  "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
-		Docs:      "providers/overview",
+		Docs:      "providers/databases",
 		Retryable: false,
 		ExitCode:  ExitAuth,
 	},
@@ -1151,11 +1148,11 @@ var catalog = map[Code]Entry{
 	AFEE011: {
 		Code:      AFEE011,
 		Area:      "EE",
-		Message:   "This manifest declares {count} placement targets and {feature} is not licensed here.",
-		NextStep:  "Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.",
-		Docs:      "enterprise/runtimes",
+		Message:   "The provider {provider} needs the {feature} feature: {reason}",
+		NextStep:  "Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.",
+		Docs:      "enterprise/licensing",
 		Retryable: false,
-		ExitCode:  ExitAuth,
+		ExitCode:  ExitPolicyDenied,
 	},
 	AFEXT001: {
 		Code:      AFEXT001,
@@ -1854,7 +1851,7 @@ var catalog = map[Code]Entry{
 		Code:      AFSCH001,
 		Area:      "SCH",
 		Message:   "No runtime satisfies the placement requirement {requirement}.",
-		NextStep:  "Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.",
+		NextStep:  "Register a runtime that meets it, or relax the requirement in the placement rules.",
 		Docs:      "enterprise/runtimes",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -1865,15 +1862,6 @@ var catalog = map[Code]Entry{
 		Message:   "The organization is at its concurrent environment limit ({limit}); this run is queued at position {position}.",
 		NextStep:  "It will start automatically. Tear down an unused environment to start sooner.",
 		Docs:      "concepts/scheduling",
-		Retryable: true,
-		ExitCode:  ExitProvider,
-	},
-	AFSCH003: {
-		Code:      AFSCH003,
-		Area:      "SCH",
-		Message:   "No placement target could take this environment: {detail}",
-		NextStep:  "The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.",
-		Docs:      "enterprise/runtimes",
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},
