@@ -40,7 +40,6 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
-	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // DatabaseAlias is the hostname the database answers to inside an environment.
@@ -339,7 +338,7 @@ func (r *Runtime) runStanceJobs(
 					"a service called %s, and this environment is not running one",
 				job.Store, job.Stance, job.Service))
 		}
-		progress(fmt.Sprintf("%s: %s", job.Store, stanceLine(job)))
+		progress(fmt.Sprintf("%s: %s", job.Store, job.Line()))
 		if err := r.runOnceAs(ctx, spec, s, nets, proxyIP, job.Command,
 			provider.StanceJobName(job.Store),
 			"the "+job.Store+" datastore's "+job.Stance+" stance",
@@ -348,18 +347,6 @@ func (r *Runtime) runStanceJobs(
 		}
 	}
 	return nil
-}
-
-// stanceLine is what the run says it is doing about one store.
-func stanceLine(job provider.StanceJob) string {
-	switch job.Stance {
-	case string(schema.StanceTopicsOnly):
-		return "creating the declared topics and consumer groups, with no messages"
-	case string(schema.StanceDerived):
-		return "rebuilding it from the branch"
-	default:
-		return "applying the " + job.Stance + " stance"
-	}
 }
 
 // serviceNamed finds one service in a spec.

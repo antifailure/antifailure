@@ -412,17 +412,37 @@ func (o *Orchestrator) stanceJobsRecorded(
 			continue
 		}
 		for _, ds := range datastoreDeclarations(o.opts.Manifest) {
-			// Suffix rather than equality, because a runtime prefixes the
-			// environment and its own naming onto the job's name. The leading
-			// hyphen is part of the match and is not decoration: without it a
-			// store called e matches the job of a store called cache, and one
-			// store's report would carry another's evidence.
-			if strings.HasSuffix(rec.IdemKey, "-"+provider.StanceJobName(ds.Name)) {
+			if namesTheStanceJob(rec.IdemKey, ds.Name) {
 				out[ds.Name] = true
 			}
 		}
 	}
 	return out, ""
+}
+
+// namesTheStanceJob reports whether one journalled name is the stance job of
+// one store.
+//
+// A suffix match rather than equality, because each runtime prefixes its own
+// naming onto the job: the local one composes af-svc-<env>-<store>-stance and
+// the Kubernetes one composes <namespace>/<store>-stance. What is checked
+// beyond the suffix is the character in front of it, and that is not
+// decoration. Without it a store called e matches the job of a store called
+// cache, and one store's report carries another's evidence.
+func namesTheStanceJob(idemKey, store string) bool {
+	want := provider.StanceJobName(store)
+	if !strings.HasSuffix(idemKey, want) {
+		return false
+	}
+	if len(idemKey) == len(want) {
+		return true
+	}
+	switch idemKey[len(idemKey)-len(want)-1] {
+	case '-', '/':
+		return true
+	default:
+		return false
+	}
 }
 
 // observeDatastore asks one store's provider about this environment's branch,

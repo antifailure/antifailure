@@ -195,7 +195,17 @@ type EnvSpec struct {
 // from drifting apart silently. A runtime that names it something else is not
 // wrong in any way a test would catch: the environment comes up, the job runs,
 // and the report quietly says unmeasured forever.
-func StanceJobName(store string) string { return store + "-stance" }
+func StanceJobName(store string) string { return store + StanceJobSuffix }
+
+// StanceJobSuffix is what StanceJobName appends, exported on its own because a
+// runtime that keeps its one shot jobs around has to recognise them again.
+//
+// The Kubernetes runtime leaves the Job behind so that its logs still explain
+// what happened, and Status then has to exclude it: a pod labelled bus-stance
+// reported as a running service would put a container that has already exited
+// into af status, into the fidelity report's services dimension, and into the
+// count of what came up.
+const StanceJobSuffix = "-stance"
 
 // StanceJob is one command that realizes a datastore's declared stance.
 //
@@ -214,6 +224,25 @@ type StanceJob struct {
 	Service string
 	// Command runs to completion. A non-zero exit fails the environment.
 	Command string
+}
+
+// Line is what a run says it is doing about one store, and it lives here so
+// that both runtimes say the same thing.
+//
+// A person reading `af up` on Docker and the same manifest on Kubernetes is
+// entitled to the same sentence, and two runtimes each writing their own would
+// diverge the first time one of them was edited. The default arm names the
+// stance rather than guessing at it, because a stance this build does not
+// recognise is a manifest written by a newer one.
+func (j StanceJob) Line() string {
+	switch schema.DatastoreStance(j.Stance) {
+	case schema.StanceTopicsOnly:
+		return "creating the declared topics and consumer groups, with no messages"
+	case schema.StanceDerived:
+		return "rebuilding it from the branch"
+	default:
+		return "applying the " + j.Stance + " stance"
+	}
 }
 
 // ServiceSpec is one container to run.

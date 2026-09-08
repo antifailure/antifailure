@@ -241,6 +241,24 @@ func (f *fakeRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider.E
 		}
 		out.Services = append(out.Services, f.report(svc))
 	}
+	// After every service, because a stance job talks to one: creating a topic
+	// needs the broker listening, and rebuilding a search index needs both the
+	// index and whatever it reads.
+	for _, job := range spec.StanceJobs {
+		if err := f.journalling(journal, "container",
+			spec.EnvID+"-"+provider.StanceJobName(job.Store)); err != nil {
+			if !f.is(flawIgnoresJournalRefusal) {
+				return out, err
+			}
+		}
+		if code := f.runCommand(env, job.Command); code != 0 {
+			if !f.is(flawIgnoresAFailedStanceJob) {
+				return out, aferrors.Coded(aferrors.AFRUN005,
+					"service", "the "+job.Store+" datastore's "+job.Stance+" stance",
+					"code", strconv.Itoa(code))
+			}
+		}
+	}
 	return out, nil
 }
 

@@ -44,3 +44,10 @@ datastores:
   - name: bus
     engine: kafka
     stance: topics_only
+    because: a twin needs the shape a consumer subscribes to, not production's traffic
+    topics:
+      - name: events
+        partitions: 12
+        consumer_groups: [ingest, enrich]
+      - name: alerts
+        consumer_groups: [notify]
