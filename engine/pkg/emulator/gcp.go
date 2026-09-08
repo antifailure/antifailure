@@ -384,3 +384,57 @@ var gcloudLicence = Licence{
 		"governed by that product's own terms.",
 	URL: "https://www.apache.org/licenses/LICENSE-2.0",
 }
+
+// Transport is how an UNMODIFIED vendor client library reaches a service.
+//
+// It is recorded because it decides whether this lane's headline claim holds
+// for that service today, and the answer is not the same for all six. The
+// sidecar terminates TLS with the environment's authority and then reads
+// HTTP/1.1 requests out of the terminated connection; it negotiates no ALPN
+// and speaks no HTTP/2. A REST client falls back to HTTP/1.1 by itself and
+// never notices. A gRPC client cannot: gRPC is defined over HTTP/2, and a
+// terminator that reads HTTP/1.1 meets the HTTP/2 connection preface and
+// refuses it, which is measured in the guide rather than reasoned about here.
+type Transport string
+
+// The two transports a Google client library uses.
+const (
+	TransportREST Transport = "REST over HTTP/1.1"
+	TransportGRPC Transport = "gRPC over HTTP/2"
+)
+
+// gcpTransport is the transport each covered GCP service's own SDK uses with
+// no options passed to it, which is the only configuration this lane may
+// count. Passing a client option that selects a REST fallback is an
+// application change, and an application change is the thing this whole
+// approach exists to avoid.
+var gcpTransport = map[string]Transport{
+	"Cloud Storage":   TransportREST,
+	"Cloud Pub/Sub":   TransportGRPC,
+	"Cloud Firestore": TransportGRPC,
+	"Cloud Datastore": TransportGRPC,
+	"Cloud Bigtable":  TransportGRPC,
+	"Cloud Spanner":   TransportGRPC,
+}
+
+// GCPTransport reports how an unmodified client library reaches a service.
+//
+// A service with no entry returns false rather than a default, because a
+// default here would be a guess printed in a table that a reader would take
+// for a measurement.
+func GCPTransport(service string) (Transport, bool) {
+	t, ok := gcpTransport[service]
+	return t, ok
+}
+
+// GCPNames lists the emulators this file registers, ordered.
+//
+// The list rather than a count, because the count is the interesting number:
+// the AWS surface is one container and this is six, so the per environment
+// cost of a GCP manifest is a sum and not a constant.
+func GCPNames() []string {
+	return []string{
+		BigtableName, DatastoreName, FirestoreName,
+		GCSName, PubSubName, SpannerName,
+	}
+}

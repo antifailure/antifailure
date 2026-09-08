@@ -198,6 +198,16 @@ Worth recording beside it: the gRPC clients made **no token request at all**.
 Google's gRPC client stack signs a self signed JWT locally, so the credential
 gap above is specific to the REST client and does not apply to the other five.
 
+The honest form of this is narrower than "gRPC did not work", and the narrower
+version is worse. gRPC did work through the sidecar in exactly one case.
+`serveTransparentTLS` terminates a connection only when the rule names paths
+or methods, or the mode is capture, mock, sandbox or synth, so a plain `allow`
+rule with no paths is tunnelled untouched. gRPC flowed there, with a decision
+made on the hostname alone: no path, no method and no live credential
+tripwire. It broke the moment anybody wrote a rule that looked inside. So the
+state before this work was not that gRPC was unsupported. It was that gRPC
+worked only where the policy made no decision beyond the name.
+
 ## What it costs per environment
 
 Six services and six containers, so the cost is a sum. These are the
