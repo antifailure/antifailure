@@ -1,5 +1,10 @@
 package aca
 
+// The Azure Container Apps egress rules, and the network security group
+// that has to deny before the environment is allowed to start.
+//
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 import (
 	"fmt"
 	"net/netip"

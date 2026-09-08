@@ -1,5 +1,9 @@
 package aca
 
+// The Azure Container Apps runtime.
+//
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 import (
 	"context"
 	"fmt"

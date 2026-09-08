@@ -1,6 +1,8 @@
 // Package aca is the Azure Container Apps runtime, and like its ECS peer it is
 // a containment proof rather than a placer of containers.
 //
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+//
 // The Kubernetes runtime earns its existence by creating NetworkPolicy objects
 // and then running one pod under them that tries to escape four ways before any
 // application image starts, refusing with AF-RUN-043 when any attempt succeeds.

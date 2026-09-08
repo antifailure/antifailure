@@ -1,5 +1,9 @@
 package aca_test
 
+// The containment proof for the Azure Container Apps runtime.
+//
+// Not MIT. Covered by the Antifailure Enterprise License; see ee/LICENSE.md.
+
 import (
 	"context"
 	"strings"
