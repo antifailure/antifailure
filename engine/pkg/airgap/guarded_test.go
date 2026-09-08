@@ -408,3 +408,71 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// TestTheDocumentedListIsTheRealList keeps the enterprise page's table honest.
+//
+// The page's whole value is that it is specific: it tells a buyer every place
+// this product can reach, by name, before they buy. A list like that is worth
+// nothing the moment it drifts, and it drifts silently, because adding a site
+// constant is a one line change in Go and nobody opens a Markdown file to
+// finish it. That is the same failure the mode list gate exists for.
+//
+// Both directions. A site missing from the page is an outbound path a buyer was
+// not told about. A row on the page that is not a site is a claim about a
+// refusal that does not happen.
+func TestTheDocumentedListIsTheRealList(t *testing.T) {
+	t.Parallel()
+	page := filepath.Join(repoRoot(t), "docs", "src", "content", "docs",
+		"enterprise", "air-gapped.md")
+	body, err := os.ReadFile(page)
+	require.NoErrorf(t, err, "%s could not be read, so NOTHING was checked", page)
+
+	documented := map[string]bool{}
+	for _, line := range strings.Split(string(body), "\n") {
+		if !strings.HasPrefix(line, "| the ") {
+			continue
+		}
+		documented[strings.TrimSpace(strings.SplitN(line, "|", 3)[1])] = true
+	}
+	require.NotEmptyf(t, documented, "no table rows were found in %s, so NOTHING was checked", page)
+
+	declared := map[string]bool{}
+	for _, s := range sitesFromSource(t) {
+		declared[s] = true
+	}
+	require.NotEmpty(t, declared, "no sites were read from the source, so NOTHING was checked")
+
+	for s := range declared {
+		require.Truef(t, documented[s],
+			"%q is a place this product can reach and the enterprise page does not list it", s)
+	}
+	for d := range documented {
+		require.Truef(t, declared[d],
+			"the enterprise page lists %q and no site by that name exists, so it "+
+				"promises a refusal that does not happen", d)
+	}
+}
+
+// sitesFromSource reads the site names out of the package's own source.
+//
+// From the source rather than from a slice in the package, because a slice a
+// developer has to remember to append to has the identical failure this test
+// exists to catch, one level further in.
+func sitesFromSource(t *testing.T) []string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(repoRoot(t), "engine", "pkg", "airgap", "airgap.go"))
+	require.NoError(t, err)
+
+	var out []string
+	for _, line := range strings.Split(string(body), "\n") {
+		_, rest, found := strings.Cut(line, `Site = "`)
+		if !found {
+			continue
+		}
+		name, _, ok := strings.Cut(rest, `"`)
+		if ok {
+			out = append(out, name)
+		}
+	}
+	return out
+}

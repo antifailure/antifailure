@@ -69,11 +69,10 @@ recorded with the site that made it.
 
 | What | Where it would have gone |
 | --- | --- |
-| the release check | `api.github.com` |
-| the self update download | GitHub releases |
+| the release check | `api.github.com`, and the release download `af update` fetches |
 | the telemetry exporter | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | the model key probe | your model provider, from `af model check` and from MCP |
-| the workflow oracle | the application under test |
+| the workflow oracle | the two deployments `af oracle` compares |
 | the identity provider seeding | Clerk, Auth0, WorkOS |
 | the control plane client | the control plane |
 | the control plane identity discovery | the control plane's OIDC endpoint |
@@ -89,6 +88,7 @@ recorded with the site that made it.
 | the webhook delivery | a service in the environment |
 | the doctor reachability check | whatever it was asked about |
 | the enterprise secret store | AWS, GCP, Azure or Vault |
+| the runtime conformance suite | the internet, on purpose, which is why it is here |
 | the container image pull | the registry the image reference names |
 | the container image build | Docker Hub, for the sidecar's base image |
 
