@@ -783,6 +783,53 @@ func TestTheInstanceMetadataVerdictIsNotRoundedUp(t *testing.T) {
 	require.Contains(t, strings.ToLower(detail), "needs an account")
 }
 
+// TestTheTimeSyncVerdictDoesNotImplyAPendingMeasurement pairs a sentence with
+// the structure it describes, because those two drift apart silently.
+//
+// This path is unproven and it is unproven PERMANENTLY as this package stands.
+// It declares no Observe hook and Targets names no probe for it, so
+// EvaluateWith's nil check means an observation recorded against it is accepted
+// by the type and then discarded without a word.
+//
+// That design is deliberate and it is right. The attempt is NTP over UDP,
+// nothing in a minimal container image speaks it, and a probe whose only
+// possible outcome is errored fills a report with the word probe while learning
+// nothing. The defect was the SENTENCE. A detail reading "none has been recorded
+// for this environment" describes a measurement that is pending, a reader has no
+// way to see Targets from the report, and so the report invited somebody to wait
+// for a number that no run will ever supply. Nothing is outstanding. There is
+// nowhere to put an answer.
+//
+// The four assertions hold each other in both directions. Give this path an
+// Observe hook or a probe target and the first two go red, so the wording has to
+// be revisited; put the pending phrasing back and the last two go red.
+func TestTheTimeSyncVerdictDoesNotImplyAPendingMeasurement(t *testing.T) {
+	const id = "the-local-amazon-time-sync-service"
+
+	var path ecs.Path
+	for _, p := range ecs.Paths() {
+		if p.ID == id {
+			path = p
+		}
+	}
+	require.Equal(t, id, path.ID, "the path is gone, so the rest of this proves nothing")
+
+	require.Nil(t, path.Observe,
+		"with no Observe hook EvaluateWith discards an observation about this path, so a "+
+			"hook arriving without a detail rewrite leaves the report describing the old shape")
+	for _, target := range ecs.Targets() {
+		require.NotEqual(t, id, target.PathID,
+			"a probe target for a path with no Observe hook records a result nothing reads")
+	}
+
+	detail := detailByID(ecs.Evaluate(referencePlan()))[id]
+	require.NotContains(t, detail, "none has been recorded",
+		"nothing is pending here, and a detail saying nothing has been recorded YET is a "+
+			"measurement a reader waits for that no run will ever supply")
+	require.Contains(t, detail, "No probe here can record it",
+		"the detail has to say the absence is structural rather than a gap in the data")
+}
+
 func verdictsByID(r ecs.Report) map[string]ecs.Verdict {
 	out := map[string]ecs.Verdict{}
 	for _, v := range r.Verdicts {

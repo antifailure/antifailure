@@ -1055,8 +1055,12 @@ func checkTimeSync(Plan) (Verdict, string) {
 		"the same 1024 packet per second link local budget as the resolver and instance " +
 		"metadata, and the EC2 page gives the IPv4 endpoint as 169.254.169.123. No AWS page " +
 		"this lane read states whether a security group filters it, and no plan field decides " +
-		"it. A probe from one running task settles it and none has been recorded for this " +
-		"environment"
+		"it. No probe here can record it either, and this path carries no probe target for " +
+		"that reason: the attempt is NTP over UDP, nothing in a minimal container image " +
+		"speaks it, and a probe whose only possible outcome is errored would fill this " +
+		"report with the word probe while learning nothing. So nothing about this path is " +
+		"outstanding. There is nowhere to put an answer until something in the task can " +
+		"make that exchange"
 }
 
 // observeLinkLocal turns one recorded attempt into a verdict.
