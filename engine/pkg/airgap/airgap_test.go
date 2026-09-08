@@ -176,6 +176,30 @@ func TestAClientBuiltHereStillReachesTheEnvironmentItIsSupposedTo(t *testing.T) 
 	require.Empty(t, airgap.Refusals())
 }
 
+func TestTwoClientsForOneSiteShareAPool(t *testing.T) {
+	// Not a micro optimisation. neon, supabase and dblab build a client PER
+	// REQUEST and poll an operation in a loop, and before the guard those were
+	// http.Client values with a nil Transport, which is one shared
+	// http.DefaultTransport with one shared pool. A transport per client would
+	// turn every poll into a fresh TCP and TLS handshake and leave an idle
+	// connection behind each time.
+	a := airgap.Client(airgap.SiteNeon, time.Second)
+	b := airgap.Client(airgap.SiteNeon, 2*time.Second)
+	require.Same(t, a.Transport, b.Transport)
+	require.NotSame(t, a, b, "the timeout belongs to the client, not to the pool")
+
+	c := airgap.Client(airgap.SiteSupabase, time.Second)
+	require.NotSame(t, a.Transport, c.Transport,
+		"a site is what the ledger names, so the pools are separated the same way")
+}
+
+func TestTransportIsNewEachTimeBecauseItsCallersWriteToIt(t *testing.T) {
+	// The load generator and the conformance suite both set fields on what
+	// they get back. Handing them a shared value would be one goroutine
+	// writing a transport another is reading.
+	require.NotSame(t, airgap.Transport(airgap.SiteLoadTest), airgap.Transport(airgap.SiteLoadTest))
+}
+
 func TestDialContextRefusesBeforeItOpensASocket(t *testing.T) {
 	sealed(t)
 	_, err := airgap.DialContext(airgap.SiteDoctor)(context.Background(), "tcp", "1.1.1.1:53")

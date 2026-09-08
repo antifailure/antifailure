@@ -460,22 +460,64 @@ func Dial(site Site, network, address string, timeout time.Duration) (net.Conn, 
 	return net.DialTimeout(network, address, timeout)
 }
 
-// Transport returns a transport whose every connection passes the guard.
+// Transport returns a NEW transport whose every connection passes the guard.
 //
 // A clone of http.DefaultTransport rather than a bare &http.Transport{}, so
 // that a client built here keeps the standard library's connection pooling,
-// proxy handling and HTTP/2 rather than silently losing them, which is what a
-// hand rolled transport does and is why several of the clients this replaces
-// were slower than they looked.
+// proxy handling and idle connection timeout rather than silently losing them.
+//
+// New on every call, and that is what it is for: the two callers that use this
+// rather than Client are the load generator and the conformance suite, and both
+// go on to set fields on what they get back. Handing those a shared value would
+// be one goroutine writing a transport another is reading.
+//
+// Everything else wants Client, because a transport is where the connection
+// pool lives and a transport per request is a pool of one used once.
 func Transport(site Site) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.DialContext = DialContext(site)
 	return t
 }
 
+// shared holds one transport per site.
+//
+// The reason is a regression this package caused and then fixed. Several
+// clients here are built PER REQUEST: neon, supabase and dblab all call
+// c.httpClient().Do(req) on every call to a control API, and those poll an
+// operation in a loop. Before the guard they were &http.Client{} values with a
+// nil Transport, which means http.DefaultTransport, which is one shared
+// singleton with one shared pool, so a new client per request still reused the
+// connection. Giving each of them its own cloned transport quietly turned every
+// poll into a fresh TCP and TLS handshake and left an idle connection behind
+// for the pool to time out.
+var shared struct {
+	mu sync.Mutex
+	m  map[Site]*http.Transport
+}
+
+func sharedTransport(site Site) *http.Transport {
+	shared.mu.Lock()
+	defer shared.mu.Unlock()
+	if shared.m == nil {
+		shared.m = map[Site]*http.Transport{}
+	}
+	if t, ok := shared.m[site]; ok {
+		return t
+	}
+	t := Transport(site)
+	shared.m[site] = t
+	return t
+}
+
 // Client returns an http.Client whose every connection passes the guard.
+//
+// The client is new and the transport under it is shared per site, which is the
+// same arrangement the standard library has: an http.Client is a cheap value
+// holding a timeout and a policy, and the pool belongs to the transport. Two
+// clients for the same site reuse each other's connections, which is what the
+// code this replaced got for free from http.DefaultTransport.
 func Client(site Site, timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: Transport(site)}
+	return &http.Client{Timeout: timeout, Transport: sharedTransport(site)}
 }
 
 // CheckImage reports whether this installation may fetch a container image.
