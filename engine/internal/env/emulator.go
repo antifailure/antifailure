@@ -71,7 +71,7 @@ func emulatorsFor(
 		// a registration free to pick one could pick a service's.
 		for i, companion := range c.Companions {
 			spec.Companions = append(spec.Companions, provider.EmulatorCompanion{
-				Name:       fmt.Sprintf("%s-%d", e.Name(), i+1),
+				Name:       provider.CompanionHost(e.Name(), i+1),
 				Image:      companion.Image,
 				Env:        companion.Env,
 				Command:    companion.Command,

@@ -48,17 +48,21 @@ func emulatorName(envID, name string) string {
 	return "af-emu-" + name + "-" + envID
 }
 
-func companionName(envID, name string) string {
-	return "af-emu-companion-" + name + "-" + envID
-}
+// companionName is the container name, which carries the environment id
+// because container names are unique per daemon and aliases are not.
+func companionName(envID, name string) string { return name + "-" + envID }
 
 // CompanionAlias is the hostname a companion answers to inside an environment.
 //
-// The emulator reaches it by this name and nothing else does: the sidecar
-// never forwards to a companion, because a companion is not something the
-// application talks to. That is the whole difference between a companion and a
-// second emulator.
-func CompanionAlias(name string) string { return "af-emu-companion-" + name }
+// The spec's Name IS that hostname, because provider.CompanionHost produced it
+// and a registration has already written it into the principal's environment.
+// Deriving a second spelling here is how the emulator would end up dialling a
+// name nothing answers to.
+//
+// The emulator reaches it and nothing else does: the sidecar never forwards to
+// a companion, because a companion is not something the application talks to.
+// That is the whole difference between a companion and a second emulator.
+func CompanionAlias(name string) string { return name }
 
 // emulatorRoutes maps each emulator to where the sidecar forwards to.
 func emulatorRoutes(specs []provider.EmulatorSpec) map[string]emulatorRoute {
