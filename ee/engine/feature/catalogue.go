@@ -4,6 +4,7 @@ package feature
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/antifailure/antifailure/ee/engine/license"
 )
@@ -80,6 +81,27 @@ const (
 	// refuse. Because says what is actually there, which is usually a schema,
 	// a socket or a pure function with no caller.
 	StateAbsent State = "absent"
+
+	// StateUnmounted is built, complete, tested, and loaded by no binary. So
+	// nobody gets it, whether they paid for it or not.
+	//
+	// ADDED AFTER THIS CATALOGUE WAS WRONG, and the mistake is worth keeping
+	// rather than tidying away, because it is the same mistake in a new place.
+	// sso, scim and rbac sat in the absent column on the evidence that nothing
+	// under web/apps/api/src reads the SSO tables, which is TRUE and is a
+	// statement about one directory. ee/web holds four complete TypeScript
+	// packages, sso with SAML and OIDC, scim, rbac and audit, and I never
+	// looked there. The registry could not have seen them either, correctly:
+	// they do not run in the engine process and no licence key is present in
+	// one. So the measurement was right and its SCOPE was wrong, which is the
+	// failure this file exists to catch, committed by this file.
+	//
+	// It is a separate state from absent because the two say different things
+	// to a buyer and to whoever fixes it. Absent is a feature to build.
+	// Unmounted is a feature already paid for that needs one import, and it is
+	// the worse of the two: absent looks unfinished from every direction, while
+	// unmounted looks finished from every direction except the running process.
+	StateUnmounted State = "unmounted"
 )
 
 // Entitlement is one licensed feature and what this product does about it.
@@ -146,12 +168,16 @@ var catalogue = []Entitlement{
 		Summary:        "Privileged actions forwarded to the organization's own SIEM.",
 		ControlPlaneAt: "",
 		State:          StateAbsent,
-		Because: "extension.AuditSink and Registry.Audit exist in the community engine and NOTHING " +
-			"registers a sink or calls Audit outside extension_test.go. The socket was built and " +
-			"nothing was ever plugged into it, which is the gap ee/engine/cmd/af/main.go warns " +
-			"about in its own header. L0.2 measured the same thing from the other side: nine " +
-			"sockets implementable from outside, six consulted by the engine, and AuditSink is " +
-			"one of the three that are not. Wave 7's L7.1 builds the sinks.",
+		Because: "Absent in the engine and unmounted in the control plane, which is why it is " +
+			"filed under the worse of the two. extension.AuditSink and Registry.Audit exist in " +
+			"the community engine and NOTHING registers a sink or calls Audit outside " +
+			"extension_test.go, verified by grep on this tree: two hits, both in that test. " +
+			"The socket was built and nothing was plugged into it, which is the gap " +
+			"ee/engine/cmd/af/main.go warns about in its own header, and L0.2 measured it from " +
+			"the other side as one of three sockets not consulted. ee/web/audit holds sink " +
+			"implementations for the control plane and no file under web/apps/api/src imports " +
+			"those either. L7.1 builds the engine sinks and L7.6 the entry point that would " +
+			"load the others.",
 	},
 	{
 		Feature:        license.FeatureBilling,
@@ -211,32 +237,42 @@ var catalogue = []Entitlement{
 		Summary:        "Roles, and a permission on every route.",
 		ControlPlaneAt: "permissions.ts:PERMISSIONS",
 		State:          StateFree,
-		Because: "Roles and permissions are real, are enforced on every request by orgProcedure, " +
-			"and are enforced for every organization on every plan including free. Nothing " +
-			"consults the licence, so rbac is sold and given away. Making it gated is a " +
-			"COMMERCIAL decision and not a defect to be fixed quietly: switching it on would " +
-			"refuse permission checks for organizations that have them today, which is a change " +
-			"to what people already paid for rather than a missing check.",
+		Because: "Free rather than unmounted, and it is the only feature where BOTH are true " +
+			"of different code. The roles and permissions in web/apps/api/src/permissions.ts " +
+			"are real, are enforced on every request by orgProcedure, and are enforced for " +
+			"every organization on every plan including free, so nothing consults the licence " +
+			"and rbac is sold and given away. Making that gated is a COMMERCIAL decision and " +
+			"not a defect to fix quietly: switching it on would refuse permission checks for " +
+			"organizations that have them today. Separately, ee/web/rbac adds approvals and a " +
+			"policy file on top, and nothing under web/apps/api/src imports it, so that half " +
+			"is unmounted in the sense the state above describes. The entry is free because " +
+			"what a customer gets today is the working ungated one.",
 	},
 	{
-		Feature: license.FeatureSCIM,
-		Summary: "Directory provisioning, so joiners and leavers arrive from the identity provider.",
-		State:   StateAbsent,
-		Because: "scim_tokens has existed since migration 0014 and nothing under " +
-			"web/apps/api/src reads it, so a SCIM token authenticates nothing. admin/platform.ts " +
-			"records the same finding and deliberately leaves those tokens off the credential " +
-			"list rather than showing a row that cannot be revoked from. There is no " +
-			"provisioning behaviour to refuse.",
+		Feature:        license.FeatureSCIM,
+		Summary:        "Directory provisioning, so joiners and leavers arrive from the identity provider.",
+		ControlPlaneAt: "",
+		State:          StateUnmounted,
+		Because: "ee/web/scim implements the protocol, including the filter grammar and PATCH, " +
+			"and nothing under web/apps/api/src imports it, so not one of its routes is " +
+			"served. admin/platform.ts independently records the other half: scim_tokens has " +
+			"existed since migration 0014 and nothing reads it, so a SCIM token authenticates " +
+			"nothing, which is why the operator portal deliberately leaves those tokens off " +
+			"the credential list rather than showing a row that cannot be revoked from.",
 	},
 	{
-		Feature: license.FeatureSSO,
-		Summary: "Single sign on against the organization's own identity provider.",
-		State:   StateAbsent,
-		Because: "Migration 0014 built the whole schema, and no route configures a connection and " +
-			"no sign in path consults one. writers.test.ts records it under UNWIRED as a table " +
-			"every screen reads and nothing writes: every account still signs in through GitHub " +
-			"or an email link, sso_assertions_seen and sso_break_glass_codes are equally " +
-			"untouched, and no customer can turn single sign on on. There is nothing to refuse.",
+		Feature:        license.FeatureSSO,
+		Summary:        "Single sign on against the organization's own identity provider.",
+		ControlPlaneAt: "",
+		State:          StateUnmounted,
+		Because: "ee/web/sso is a complete implementation, SAML and OIDC, domain binding, " +
+			"assertion replay protection and break glass codes, and NOTHING LOADS IT. No file " +
+			"under web/apps/api/src imports it, so its install() has no caller outside tests " +
+			"and none of its routes is ever registered. Separately, migration 0014's tables " +
+			"have no writer: writers.test.ts records sso_connections under UNWIRED, and the " +
+			"only reads anywhere are two count queries in the operator portal. So a customer " +
+			"who buys sso gets the same product as one who does not, and the reason is one " +
+			"missing import rather than any missing work. L7.6 builds the entry point.",
 	},
 	{
 		Feature:    license.FeatureSecrets,
@@ -245,15 +281,25 @@ var catalogue = []Entitlement{
 		State:      StateGated,
 	},
 	{
-		Feature: license.FeatureSupportAccess,
-		Summary: "A supported way for the vendor to see what a customer sees.",
-		State:   StateAbsent,
-		Because: "support_access has no reference outside the constant and tools/licensegen's " +
-			"copy of the name list. The nearest implemented thing is operator impersonation, " +
-			"which is an OPERATOR capability guarded by admin permissions and by an audit entry " +
-			"that has to exist before the session does, and it is not something a customer's " +
-			"licence turns on. Nothing consults this feature, so nothing changes when it is " +
-			"absent.",
+		Feature:        license.FeatureSupportAccess,
+		Summary:        "A supported way for the vendor to see what a customer sees.",
+		ControlPlaneAt: "admin/customers.ts:registerImpersonationRoutes",
+		State:          StateFree,
+		Because: "Free rather than absent, and the correction is worth recording because the " +
+			"two say different things to a buyer: absent says we did not build it, free says " +
+			"we built it and do not charge for it. This entry read absent on the reasoning " +
+			"that support_access has no reference outside the constant, which is true about " +
+			"the NAME and false about the capability. Operator impersonation is built and is " +
+			"the thing this feature names: POST /v1/admin/impersonation/start and /end, a " +
+			"reason required at the edge and by a CHECK constraint, an audit entry written " +
+			"before the session exists and structurally unable to be skipped because " +
+			"sessions.impersonation_audit_seq is NOT NULL with a foreign key into the chain, a " +
+			"copy of that entry in the CUSTOMER's own log, and a minutes long expiry enforced " +
+			"on every request. What is missing is only that nothing asks the licence first. " +
+			"Adding that ask would be the wrong direction anyway: it is guarded by an operator " +
+			"admin permission rather than by the customer's plan, and refusing support access " +
+			"to a customer whose licence has lapsed withholds help from exactly the person " +
+			"most likely to need it.",
 	},
 }
 
@@ -281,6 +327,35 @@ func Of(f license.Feature) (Entitlement, bool) {
 		}
 	}
 	return Entitlement{}, false
+}
+
+// SplitSite splits a site reference into the file it names and the symbol.
+//
+// The one definition of the format, exported so that the checks in
+// ee/engine/feature and in ee/engine/cmd/af cannot come to disagree about what
+// a site string IS while both believe they are validating it. They read
+// different things, the catalogue and the registry, and they have to read them
+// the same way.
+//
+// The symbol half may be `Command`, `Hook.Check` or `auditsink.permitted`. The
+// receiver or package qualifier is there for a human reader, who needs to know
+// WHICH Check is meant; what a scanner looks for in the file is the last
+// component, because that is what appears after `func`.
+func SplitSite(site string) (file, symbol string, ok bool) {
+	i := strings.IndexByte(site, ':')
+	if i <= 0 || i == len(site)-1 {
+		return "", "", false
+	}
+	file, qualified := site[:i], site[i+1:]
+	if j := strings.LastIndexByte(qualified, '.'); j >= 0 {
+		symbol = qualified[j+1:]
+	} else {
+		symbol = qualified
+	}
+	if symbol == "" {
+		return "", "", false
+	}
+	return file, symbol, true
 }
 
 // GatedFeatures is every feature a missing entitlement actually refuses.

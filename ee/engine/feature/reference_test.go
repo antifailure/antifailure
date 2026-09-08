@@ -72,6 +72,9 @@ func effect(e feature.Entitlement) string {
 		return "Nothing changes. It is implemented and deliberately available to everyone."
 	case feature.StateAbsent:
 		return "Nothing changes, because the capability is not built yet."
+	case feature.StateUnmounted:
+		return "Nothing changes, and not because it is unbuilt. It is implemented and no " +
+			"binary loads it, so nobody has it, paid or not."
 	}
 	return ""
 }

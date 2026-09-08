@@ -28,6 +28,10 @@ package main_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +72,31 @@ func withFeatures(features ...license.Feature) context.Context {
 }
 
 func TestEveryGatedFeatureIsDeclaredWhereTheCatalogueSaysItIs(t *testing.T) {
+	// WHAT THIS DOES NOT CHECK, said out loud because I advised somebody
+	// wrongly about it and L7.1 corrected me from the source.
+	//
+	// Contains, not Equals, so a feature may register more sites than the
+	// catalogue names. Only the catalogue's own EnforcedAt is ever opened and
+	// verified; a second or third registered site is recorded and unchecked,
+	// whatever it is spelled like. I had suggested that respelling extra sites
+	// in path:symbol form would bring them under the instrument. It does not:
+	// the file check iterates feature.Catalogue() and never reads Sites().
+	//
+	// Nor can it be fixed by simply extending the check to every registered
+	// site, which is the interesting part. Where several surfaces share ONE
+	// gate function, only the file holding that function contains the Enabled
+	// literal, so validating the others the same way would reject correct code
+	// and the only way to keep them would be to weaken the literal check to a
+	// bare name match. That is the compliance_packs defect this format exists
+	// to kill, so the resolution is one canonical site per feature rather than
+	// a looser instrument. A fact like "there are three sinks" belongs
+	// somewhere that answers "what can this forward to", not in a registry
+	// whose question is "where is this gated".
+	//
+	// The residue is a real and accepted hole: an extra registered site is a
+	// string nothing verifies. Contains stays because a feature may one day
+	// have two genuinely independent gates in two files, and forbidding that
+	// outright would be a guess about the future rather than a check.
 	for _, e := range feature.Catalogue() {
 		if e.State != feature.StateGated {
 			continue
@@ -102,6 +131,95 @@ func TestEveryDeclaredSiteBelongsToAGatedCatalogueEntry(t *testing.T) {
 		require.Containsf(t, sites, entry.EnforcedAt,
 			"%s is declared at %v and the catalogue names %s", f, sites, entry.EnforcedAt)
 	}
+}
+
+// TestEveryRegisteredSiteNamesAFileThatChecksThatFeature verifies EVERY site in
+// the registry, not only the one the catalogue names.
+//
+// Contributed by L7.1, and it is a better answer than the two I was choosing
+// between. The catalogue check opens e.EnforcedAt alone, so a second or third
+// registered site was a string nothing verified, and I had wrongly suggested
+// that respelling such a site in path:symbol form would bring it under the
+// instrument. It would not: nothing read it.
+//
+// The obvious fix, requiring the registry to hold EXACTLY the catalogue's
+// string, is the wrong one, because a feature may one day have two genuinely
+// independent gates in two files and forbidding that is a guess about the
+// future. This is the third option and it forbids nothing real: two independent
+// gates both pass, because each file really does contain its own Enabled call.
+// The only thing rejected is a site naming a file that does not check this
+// feature, which is precisely the unverifiable string, rejected by the same
+// rule as everything else rather than by a count.
+//
+// It rejects nothing today. All three current Declares name a file holding
+// their own literal, including compliance, whose Declare sits in pack.go and
+// names command.go. A site does not have to name the file it is declared in;
+// what is verified is the file it NAMES.
+//
+// It lives here rather than beside the catalogue for the reason everything else
+// in this file does: in ee/engine/feature the registry is empty, so the loop
+// would run zero times and report success about a check it never made.
+func TestEveryRegisteredSiteNamesAFileThatChecksThatFeature(t *testing.T) {
+	root := eeEngineRoot(t)
+	constants := featureConstants(t, root)
+
+	checked := 0
+	for _, f := range license.AllFeatures() {
+		for _, site := range feature.Sites(f) {
+			file, symbol, ok := feature.SplitSite(site)
+			require.Truef(t, ok,
+				"%s is declared at %q, which is not path:symbol", f, site)
+
+			source, err := os.ReadFile(filepath.Join(root, file))
+			require.NoErrorf(t, err,
+				"%s is declared at %s and that file cannot be read", f, site)
+
+			require.Regexpf(t,
+				regexp.MustCompile(`func (\([^)]*\) )?`+regexp.QuoteMeta(symbol)+`\(`),
+				string(source),
+				"%s is declared at %s and %s does not DEFINE %s", f, site, file, symbol)
+
+			constant := constants[f]
+			require.NotEmptyf(t, constant, "no constant in license.go has the value %q", f)
+			require.Containsf(t, string(source),
+				"feature.Enabled(ctx, license."+constant+")",
+				"%s is declared at %s and %s contains no feature.Enabled(ctx, license.%s) "+
+					"call, so that site is a string nothing can verify",
+				f, site, file, constant)
+			checked++
+		}
+	}
+
+	require.NotZerof(t, checked,
+		"no enforcement site is registered at all, so this checked nothing. Either every "+
+			"Declare has been removed or this binary no longer imports the packages holding them")
+	t.Logf("registered enforcement sites verified: %d", checked)
+}
+
+// eeEngineRoot is the ee/engine directory, from this test's own source path.
+func eeEngineRoot(t *testing.T) string {
+	t.Helper()
+	_, self, _, ok := runtime.Caller(0)
+	require.True(t, ok, "the test cannot locate its own source")
+	return filepath.Dir(filepath.Dir(filepath.Dir(self)))
+}
+
+// featureConstants maps each wire name to its Go constant, read from license.go.
+//
+// A second READER of one source of truth rather than a second list. The
+// catalogue's own check parses the same file for the same mapping; two readers
+// of one file cannot disagree about it, and a hardcoded table here could.
+func featureConstants(t *testing.T, root string) map[license.Feature]string {
+	t.Helper()
+	source, err := os.ReadFile(filepath.Join(root, "license", "license.go"))
+	require.NoError(t, err)
+	out := map[license.Feature]string{}
+	for _, m := range regexp.MustCompile(`(Feature\w+)\s+Feature\s+=\s+"([a-z_]+)"`).
+		FindAllStringSubmatch(string(source), -1) {
+		out[license.Feature(m[2])] = m[1]
+	}
+	require.NotEmpty(t, out, "license.go declares no feature constants, so the parse is wrong")
+	return out
 }
 
 func TestNothingIsDeclaredForAFeatureNoLicenceCanCarry(t *testing.T) {

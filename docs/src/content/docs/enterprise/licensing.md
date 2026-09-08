@@ -134,9 +134,9 @@ gap worth publishing, and this page is where it gets published.
 | `multi_runtime` | Placing an environment across several runtimes at once, by requirement and by tag. | Nothing changes, because the capability is not built yet. |
 | `policy_enforcement` | Organization policy that refuses an environment the manifest would have allowed. | Withheld. `policyenforce/policyenforce.go:Hook.Check` asks the license, and the feature is off when the answer is no. |
 | `rbac` | Roles, and a permission on every route. | Nothing changes. It is implemented and deliberately available to everyone. |
-| `scim` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Nothing changes, because the capability is not built yet. |
-| `sso` | Single sign on against the organization's own identity provider. | Nothing changes, because the capability is not built yet. |
-| `support_access` | A supported way for the vendor to see what a customer sees. | Nothing changes, because the capability is not built yet. |
+| `scim` | Directory provisioning, so joiners and leavers arrive from the identity provider. | Nothing changes, and not because it is unbuilt. It is implemented and no binary loads it, so nobody has it, paid or not. |
+| `sso` | Single sign on against the organization's own identity provider. | Nothing changes, and not because it is unbuilt. It is implemented and no binary loads it, so nobody has it, paid or not. |
+| `support_access` | A supported way for the vendor to see what a customer sees. | Nothing changes. It is implemented and deliberately available to everyone. |
 <!-- entitlements:end -->
 
 The distinction in the third column between a feature that is refused and one

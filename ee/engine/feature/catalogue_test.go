@@ -49,18 +49,13 @@ func repoRoot(t *testing.T) string {
 	return filepath.Dir(filepath.Dir(eeEngine(t)))
 }
 
-// symbolName is the last component of a path:symbol reference's symbol half.
+// symbolName is feature.SplitSite, which is the one definition of the format.
 //
-// Hook.Check is written whole because a reader needs the receiver to know which
-// Check is meant, and the grep needs the method name on its own because that is
-// what appears in the source.
+// A local alias rather than a second implementation. This test and the registry
+// check in ee/engine/cmd/af read different things and have to read them the
+// same way, and two parsers agreeing today is how they come to disagree later.
 func symbolName(reference string) (file, symbol string, ok bool) {
-	parts := strings.SplitN(reference, ":", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	dotted := strings.Split(parts[1], ".")
-	return parts[0], dotted[len(dotted)-1], true
+	return feature.SplitSite(reference)
 }
 
 func TestEveryLicensedFeatureIsInTheCatalogue(t *testing.T) {
@@ -111,7 +106,8 @@ func TestAnEntryThatIsNotGatedSaysWhyOutLoud(t *testing.T) {
 		case feature.StateGated:
 			require.NotEmptyf(t, e.EnforcedAt,
 				"%s is marked gated and names no enforcement site", e.Feature)
-		case feature.StatePlanWide, feature.StateFree, feature.StateAbsent:
+		case feature.StatePlanWide, feature.StateFree, feature.StateAbsent,
+			feature.StateUnmounted:
 			require.Emptyf(t, e.EnforcedAt,
 				"%s names an engine enforcement site and is not marked gated, which is the "+
 					"one combination that cannot be true: a site that refuses IS a gate",
@@ -152,8 +148,21 @@ func TestAGatedEntryNamesAFileThatChecksThatExactFeature(t *testing.T) {
 		require.NoErrorf(t, err,
 			"%s says it is enforced in %s and that file cannot be read", e.Feature, file)
 
-		require.Regexpf(t, regexp.MustCompile(`\b`+regexp.QuoteMeta(symbol)+`\b`), string(source),
-			"%s says it is enforced at %s and %s declares no %s",
+		// DEFINED in that file, not merely mentioned in it. Contributed by
+		// L7.1, which hit the gap while adopting this format: a site can name a
+		// file that contains the Enabled literal for its own reasons and
+		// defines the named symbol somewhere else entirely, and a word grep
+		// accepts it. compliance/command.go is the live example, because it
+		// calls Packs() three times and Packs is declared in frameworks.go.
+		//
+		// The optional receiver group is the general case this had to grow.
+		// Two of the three sites are methods, so the pattern accepts both
+		// `func Command(` and `func (s *Source) Available(`.
+		require.Regexpf(t,
+			regexp.MustCompile(`func (\([^)]*\) )?`+regexp.QuoteMeta(symbol)+`\(`),
+			string(source),
+			"%s says it is enforced at %s and %s does not DEFINE %s. A file that merely "+
+				"mentions the symbol can be a file whose gate lives somewhere else.",
 			e.Feature, e.EnforcedAt, file, symbol)
 
 		// The literal call, spelled with `ctx`, which is a real limit and a
@@ -230,13 +239,15 @@ func TestTheMeasuredNumberIsPublishedRatherThanAsserted(t *testing.T) {
 			t.Logf("  %-9s %-22s %s", e.State, e.Feature, firstSentence(e.Because))
 		}
 	}
-	t.Logf("gated %d, plan wide %d, free %d, absent %d",
+	t.Logf("gated %d, plan wide %d, free %d, unmounted %d, absent %d",
 		byState[feature.StateGated], byState[feature.StatePlanWide],
-		byState[feature.StateFree], byState[feature.StateAbsent])
+		byState[feature.StateFree], byState[feature.StateUnmounted],
+		byState[feature.StateAbsent])
 
 	require.Equal(t, total, byState[feature.StateGated]+byState[feature.StatePlanWide]+
-		byState[feature.StateFree]+byState[feature.StateAbsent],
-		"the four states do not account for every licensed feature")
+		byState[feature.StateFree]+byState[feature.StateUnmounted]+
+		byState[feature.StateAbsent],
+		"the states do not account for every licensed feature")
 }
 
 func firstSentence(s string) string {

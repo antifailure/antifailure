@@ -40,9 +40,38 @@ func StatusFrom(ctx context.Context) license.Status {
 // Enabled reports whether a feature may be used.
 //
 // The whole public surface for the rest of the enterprise code. Every enterprise
-// entry point begins with this, and there is a test that every feature has at
+// entry point that gates on a licence begins with this.
+//
+// THE SENTENCE THAT USED TO BE HERE WAS FALSE, and it is worth saying so rather
+// than quietly deleting it, because it is the same defect as the one this
+// package exists to catch. It read "there is a test that every feature has at
 // least one call site, because a feature nobody checks is a feature that is
-// either free or missing and both are wrong.
+// either free or missing and both are wrong". There was no such test. What
+// existed was TestDeclaredSitesAreRecordedForTheDeadCodeCheck, which declared a
+// site naming ee/web/auth.Handler, a package that has never existed, from a
+// test binary that links none of the packages doing the enforcing, and then
+// asserted that Sites(FeatureCompliance) was EMPTY. It was empty because
+// nothing in that binary could have filled it, so the assertion could not fail
+// for any reason to do with the product. A comment claiming a check, sitting
+// above a check that cannot say no, is exactly what a licensed feature that
+// enforces nothing looks like from the inside.
+//
+// The claim was also wrong on its own terms. Nine of the twelve features have
+// no call site and that is the measured, published state of this product rather
+// than a bug to be asserted away; see catalogue.go. What is actually true, and
+// what is actually tested:
+//
+//   - Every feature a licence can carry has a catalogue entry saying what
+//     happens without it. TestEveryLicensedFeatureIsInTheCatalogue.
+//   - A catalogue entry that CLAIMS enforcement names a file that contains a
+//     literal Enabled call for that exact feature.
+//     TestAGatedEntryNamesAFileThatChecksThatExactFeature.
+//   - Every Declare corresponds to a catalogue entry marked gated, and every
+//     gated entry to a Declare, checked from ee/engine/cmd/af, which is the
+//     only package where every enterprise init has run and this registry is
+//     therefore populated at all.
+//   - Each gated feature's real entry point behaves differently with the
+//     entitlement and without it. TestTheEntitlementIsWhatDecides.
 func Enabled(ctx context.Context, f license.Feature) bool {
 	return StatusFrom(ctx).Enabled(f)
 }
