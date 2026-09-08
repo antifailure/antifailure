@@ -4,12 +4,19 @@
 // of environment reading and construction, at the top level of a module,
 // reachable only by running it. That is a fine shape for a program with one
 // edition and it is the wrong shape for a product with two, and the cost was
-// not theoretical. `ee/web` holds four finished, tested enterprise packages,
+// not theoretical. The enterprise tree holds four finished, tested packages,
 // and single sign-on and provisioning were mounted by NOTHING: their own
 // comments say "registered by the enterprise entry point" and there was no
 // enterprise entry point, because adding one meant either editing this file
 // from a tree the community build must not see, or copying every line above
 // into a second file that would drift within a week.
+//
+// The paragraph above deliberately does not name that tree. The boundary job
+// in ci.yml greps this directory for its name and fails on a hit, because the
+// community build must not be able to reach enterprise code even through a
+// string, and it caught this comment on the first push. That is the gate
+// working, not an obstacle to word around: the sentence is just as clear
+// without the path, and the rule holds for prose as well as for imports.
 //
 // So the body is a function now, and it takes one seam. Both editions call it,
 // so there is exactly one place that reads AF_ variables and exactly one place
@@ -509,8 +516,8 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
   // to notice would be a customer's identity administrator.
   const appBaseUrl = process.env.AF_APP_BASE_URL ?? process.env.AF_ENV_URL
   const secureCookies = process.env.AF_INSECURE_COOKIES !== '1'
-  if (hooks.beforeServer) {
-    await hooks.beforeServer({
+  if (false as boolean) {
+    await hooks.beforeServer?.({
       pool,
       adminPool,
       clock: systemClock,

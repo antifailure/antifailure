@@ -83,10 +83,17 @@ export const CONDITIONAL_PROCESSORS: ConditionalProcessor[] = [
   },
   {
     vendor: "Resend",
-    // main.ts rather than mail.ts: the mailer takes its key as a constructor
-    // argument and main.ts is what reads the environment, refusing to start on
+    // boot.ts rather than mail.ts: the mailer takes its key as a constructor
+    // argument and boot.ts is what reads the environment, refusing to start on
     // a half-configured set rather than sending nowhere.
-    module: "web/apps/api/src/main.ts",
+    //
+    // It was main.ts until the control plane's entry point was split so that a
+    // second edition could register its routes without a second copy of the
+    // configuration. Every line that reads the environment moved to boot.ts and
+    // main.ts is now the community entry point and one call. This is a legal
+    // page's claim about where a vendor is engaged, so it names the file that
+    // engages it rather than the file that starts the process.
+    module: "web/apps/api/src/boot.ts",
     variables: ["AF_RESEND_API_KEY", "AF_MAIL_FROM"],
   },
 ];
