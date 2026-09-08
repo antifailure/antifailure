@@ -25,6 +25,15 @@ import (
 // which no placement exists, and lets the ones that merely might not pack
 // through to the thing that actually packs them.
 //
+// TWO THINGS IT DOES NOT COUNT, said here rather than left to be found. The
+// egress sidecar carries no requirement of its own, because it is the
+// environment's resolver rather than the application and there is nothing in
+// the manifest that sizes it, so an environment costs the cluster slightly
+// more than what is checked here. And a service's migration runs under the
+// SAME cap as the service, which does not double the ask because the migration
+// Job finishes before the Deployment is created; a migration that needs more
+// memory than the service it belongs to is the case this cannot express.
+//
 // WHEN IT CANNOT LOOK IT SAYS SO, rather than passing. A cluster that refuses
 // to list its nodes or its pods is one this cannot check, and reporting
 // nothing there would be a check that answers "fine" to a question it never

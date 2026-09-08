@@ -186,6 +186,11 @@ cluster refuses rather than accepts. It is a necessary condition and not a
 sufficient one: it refuses the sets for which no placement exists, and leaves
 bin packing to the scheduler.
 
+A service's `migrate` command runs under the same cap as the service. It does
+not double what the environment asks the machine for, because the migration
+finishes before the service starts. A migration that needs more memory than the
+service it belongs to is a case this key cannot express today.
+
 `af status` reports the size the runtime ACTUALLY applied, read back off the
 running pod or the daemon's record of the container rather than echoed from
 the manifest. A runtime that accepts a cap and emits none would otherwise
