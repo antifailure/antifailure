@@ -148,11 +148,17 @@ lifecycle continues.
 That last part matters most on teardown. A forwarding outage that stopped an
 environment being destroyed would turn a logging problem into a resource leak,
 which is strictly worse than the problem it came from. So a SIEM you cannot
-reach costs you a line on standard error and nothing else:
+reach costs you one progress line and nothing else, carrying the sink's own
+words about what went wrong:
 
 ```
-af: audit sink: forwarding to syslog over TLS at collector.internal:6514 failed
+audit sink: forwarding to syslog over TLS at collector.internal:6514: dial tcp
+10.0.0.9:6514: i/o timeout
 ```
+
+The environment still comes up, and the teardown still finishes. What is lost is
+the forwarding, and for the webhook not even that: an entry no receiver would
+take is in the dead letter file before `Write` returns.
 
 ## The licence is asked per action, not at startup
 
