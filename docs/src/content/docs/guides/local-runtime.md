@@ -126,9 +126,9 @@ refuses an environment that could never fit and it does not refuse the eleventh
 environment on a machine that holds ten. The cluster check does better, because
 a cluster scheduler has the fact this one does not: what every pod asked for.
 
-The daemon's memory is the Docker VM's, not the Mac's. A machine with 32GB
-whose VM was given 8 has 8 here, and `docker info` is where that number comes
-from.
+The daemon's memory is the Docker VM's, not the machine's. A laptop with plenty
+of memory whose VM was given a quarter of it has a quarter here, and `docker
+info` is where that number comes from.
 
 ## Disk
 
