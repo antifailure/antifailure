@@ -287,9 +287,21 @@ func render(targets []target, mods []module) string {
 	b.WriteString("first time a digest is bumped. These come from the declarations the\n")
 	b.WriteString("engine starts the containers from.\n\n")
 	for _, e := range emulator.Builtin() {
-		fmt.Fprintf(&b, "- %s, %s. %s\n", e.Project, e.Licence.Name, e.Licence.Holder)
+		fmt.Fprintf(&b, "- %s, %s\n", e.Project, e.Licence.Name)
+		// A copyright holder is prose somebody else wrote and its length is
+		// theirs, not ours, so it is wrapped rather than truncated or left to
+		// run past the width every other line here is held to.
+		for _, l := range wrapAt(e.Licence.Holder, 70) {
+			fmt.Fprintf(&b, "  %s\n", l)
+		}
 		fmt.Fprintf(&b, "  - Answers for %s as `%s`\n", e.Vendor, e.Name())
-		fmt.Fprintf(&b, "  - `%s`\n", e.Image)
+		// The repository and the digest on separate lines, because a
+		// sha256 digest is 71 characters of unbreakable token and the
+		// generated prose is held to 74. Splitting at the @ is the only
+		// wrap point a digest reference has.
+		repo, digest, _ := strings.Cut(e.Image, "@")
+		fmt.Fprintf(&b, "  - `%s` pinned at\n", repo)
+		fmt.Fprintf(&b, "  %s\n", digest)
 		fmt.Fprintf(&b, "  - %s\n", e.Licence.URL)
 	}
 
@@ -322,4 +334,24 @@ func wrap(text string, width int) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// wrapAt breaks a line on spaces at a width. A word longer than the width
+// stays on its own line rather than being cut, because a token nobody can
+// break is a value and shortening it would make it wrong.
+func wrapAt(text string, width int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+	lines := []string{words[0]}
+	for _, w := range words[1:] {
+		last := len(lines) - 1
+		if len(lines[last])+1+len(w) <= width {
+			lines[last] += " " + w
+			continue
+		}
+		lines = append(lines, w)
+	}
+	return lines
 }

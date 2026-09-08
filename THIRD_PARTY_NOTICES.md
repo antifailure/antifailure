@@ -128,21 +128,30 @@ it, and an image whose licence is recorded by hand goes stale the
 first time a digest is bumped. These come from the declarations the
 engine starts the containers from.
 
-- LocalStack, Apache License 2.0. Copyright (c) 2017+ LocalStack contributors, Copyright (c) 2016 Atlassian Pty Ltd
+- LocalStack, Apache License 2.0
+  Copyright (c) 2017+ LocalStack contributors, Copyright (c) 2016
+  Atlassian Pty Ltd
   - Answers for AWS as `aws`
-  - `localstack/localstack@sha256:4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572`
+  - `localstack/localstack` pinned at
+  sha256:4aef81c531684570d7b3cfd2805afa02194c929d52bbeedabb7d4874798b1572
   - https://github.com/localstack/localstack/blob/main/LICENSE.txt
-- Azurite, MIT License. Copyright (c) Microsoft Corporation
+- Azurite, MIT License
+  Copyright (c) Microsoft Corporation
   - Answers for Azure as `azure-blob`
-  - `mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5`
+  - `mcr.microsoft.com/azure-storage/azurite` pinned at
+  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
   - https://github.com/Azure/Azurite/blob/main/LICENSE
-- Azurite, MIT License. Copyright (c) Microsoft Corporation
+- Azurite, MIT License
+  Copyright (c) Microsoft Corporation
   - Answers for Azure as `azure-queue`
-  - `mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5`
+  - `mcr.microsoft.com/azure-storage/azurite` pinned at
+  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
   - https://github.com/Azure/Azurite/blob/main/LICENSE
-- Azurite, MIT License. Copyright (c) Microsoft Corporation
+- Azurite, MIT License
+  Copyright (c) Microsoft Corporation
   - Answers for Azure as `azure-table`
-  - `mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5`
+  - `mcr.microsoft.com/azure-storage/azurite` pinned at
+  sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
   - https://github.com/Azure/Azurite/blob/main/LICENSE
 
 ## Node packages
