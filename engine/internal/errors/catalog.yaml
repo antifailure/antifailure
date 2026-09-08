@@ -179,21 +179,21 @@ errors:
     area: DB
     message: "The database provider {provider} is not registered in this build."
     next_step: "Set database.provider to one of: {available}."
-    docs: providers/overview
+    docs: providers/databases
     retryable: false
     exit_code: 3
   - code: AF-DB-002
     area: DB
     message: "The source database at {host} could not be reached."
     next_step: "Check that the host is reachable from this machine and that the connection string names the right port."
-    docs: providers/overview
+    docs: providers/databases
     retryable: true
     exit_code: 5
   - code: AF-DB-003
     area: DB
     message: "The source database is Postgres {found}, and this provider supports {supported}."
     next_step: "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for."
-    docs: providers/overview
+    docs: providers/databases
     retryable: false
     exit_code: 3
   - code: AF-DB-004
@@ -263,7 +263,7 @@ errors:
     area: DB
     message: "The database provider {provider} at {endpoint} rejected the configured credential."
     next_step: "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing."
-    docs: providers/overview
+    docs: providers/databases
     retryable: false
     exit_code: 4
   - code: AF-DB-009
@@ -1130,6 +1130,13 @@ errors:
     docs: enterprise/runtimes
     retryable: false
     exit_code: 4
+  - code: AF-EE-012
+    area: EE
+    message: "The provider {provider} needs the {feature} feature: {reason}"
+    next_step: "Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason."
+    docs: enterprise/licensing
+    retryable: false
+    exit_code: 6
 
   # Scheduling
   - code: AF-SCH-001

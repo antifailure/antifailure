@@ -112,7 +112,7 @@ license leaves you with it rather than with nothing.
 
 `sso`, `scim`, `rbac`, `audit_stream`, `policy_enforcement`, `multi_runtime`,
 `enterprise_secrets`, `billing`, `enterprise_dashboard`, `support_access`,
-`compliance_packs`, `air_gapped`.
+`compliance_packs`, `air_gapped`, `cloud_database`, `cloud_runtime`.
 
 Each is named in the license, so a license permits exactly what was bought.
 
