@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -261,6 +262,20 @@ func (v *validator) resources(base string, s *schema.Service) {
 	if declaredAt(v.doc, base+".resources.cpu") {
 		milli, err := schema.ParseMilliCPU(r.CPU)
 		switch {
+		case errors.Is(err, schema.ErrTooFine):
+			// Its own arm rather than folded into the one below, because the
+			// two are different mistakes and the generic message is wrong
+			// about this one: 0.0001 IS a quantity, and telling its author it
+			// is not sends them looking for a typo that is not there. What is
+			// wrong with it is that a thousandth of a core is the finest thing
+			// either runtime can express, so the value would round to no cap
+			// at all, which is the silence this key was refused for.
+			v.add(base+".resources.cpu",
+				fmt.Sprintf("Service %q asks for %q of CPU, which is a fraction of a "+
+					"thousandth of a core.", s.Name, r.CPU),
+				fmt.Sprintf("A thousandth is the finest share either runtime can hold, "+
+					"so this would round to no cap at all. The smallest is %s.",
+					schema.FormatMilliCPU(schema.MinMilliCPU)))
 		case err != nil:
 			v.add(base+".resources.cpu",
 				fmt.Sprintf("Service %q asks for %q of CPU, which is not a quantity.", s.Name, r.CPU),

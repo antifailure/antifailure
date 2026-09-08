@@ -1,10 +1,21 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 )
+
+// ErrTooFine is a CPU share smaller than a thousandth of a core.
+//
+// A sentinel rather than a string, because the caller has to tell it apart
+// from "this is not a quantity" and the two say different things to whoever
+// wrote the line. 0.0001 IS a quantity; what is wrong with it is that a
+// thousandth is the finest share either runtime can hold, so it would round to
+// no cap at all, which is the silence this key spent a release refused for.
+// Matching on the message would work until somebody reworded it.
+var ErrTooFine = errors.New("finer than a thousandth of a core")
 
 // The units a resources block may be written in.
 //
@@ -48,7 +59,7 @@ func ParseMilliCPU(s string) (int64, error) {
 			return 0, fmt.Errorf("%q is not a CPU quantity", s)
 		}
 		if n != float64(int64(n)) {
-			return 0, fmt.Errorf("%q is a fraction of a thousandth of a core", s)
+			return 0, fmt.Errorf("%q is %w", s, ErrTooFine)
 		}
 		return int64(n), nil
 	}
@@ -61,7 +72,7 @@ func ParseMilliCPU(s string) (int64, error) {
 	// rounds to nothing is the same silence this key was refused for.
 	milli := int64(cores*1000 + 0.5)
 	if float64(milli) != cores*1000 {
-		return 0, fmt.Errorf("%q is a fraction of a thousandth of a core", s)
+		return 0, fmt.Errorf("%q is %w", s, ErrTooFine)
 	}
 	return milli, nil
 }
