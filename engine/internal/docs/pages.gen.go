@@ -4731,10 +4731,18 @@ allowed_regions:
   - westeurope
 ` + "`" + "`" + "`" + `
 
-` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part. A
-pattern that matches no column in the database counts as unsatisfied, because a
-policy that quietly passes when the thing it protects is absent stops protecting
-the moment somebody renames a table.
+` + "`" + `required_masked_columns` + "`" + ` is ` + "`" + `table.column` + "`" + ` with ` + "`" + `*` + "`" + ` allowed in either part.
+Write the schema too, as ` + "`" + `public.users.email` + "`" + `, when you mean one schema in
+particular; a pattern without one names that table in whichever schema holds
+it.
+
+The rule is checked against the database's own catalogue, so it means every
+column it names. ` + "`" + `"*.email"` + "`" + ` is satisfied when every email column in the
+database is masked, and a plan that masks ` + "`" + `users.email` + "`" + ` and leaves
+` + "`" + `contacts.email` + "`" + ` readable is refused by name. A pattern that matches no column
+at all counts as unsatisfied too, because a policy that quietly passes when the
+thing it protects is absent stops protecting the moment somebody renames a
+table.
 
 ` + "`" + `denied_hosts` + "`" + ` refuses a host named in any mode other than ` + "`" + `block` + "`" + `. A repository
 may still write a ` + "`" + `block` + "`" + ` rule for one, so that it can document what it
@@ -4763,13 +4771,33 @@ ask would turn the rule into decoration.
 
 ## Where it runs
 
-The check happens before anything is created, not after. A policy that refused
-an environment halfway through would leave resources behind and a decision
-nobody can act on.
+Most of the policy is checked before anything is created, not after. A policy
+that refused an environment halfway through would leave resources behind and a
+decision nobody can act on.
 
-The extension point it uses is in the community edition, in
-` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the socket is MIT so that anybody
-can write a hook, and the enterprise edition supplies one implementation of it.
+` + "`" + `required_masked_columns` + "`" + ` is the exception, and the reason is worth knowing
+before you write one. At creation time the engine has read a manifest, and a
+manifest enumerates services rather than columns. Expanding a column pattern
+there would mean expanding it against the tables a manifest happens to mention,
+which is not the set of tables that exist, and a required pattern that matched
+nothing in that smaller set would refuse a repository whose schema satisfies it
+perfectly.
+
+So the masking rule is checked during a golden refresh instead, after the
+engine has read the database's catalogue and worked out which columns its rules
+will rewrite, and before the first row is rewritten. A refusal there means the
+golden is never published, and an unverified golden cannot be branched, so no
+environment can hold data the policy refused. It is later than the other rules
+and it is still before the data exists.
+
+One consequence to plan for: a golden published before you tightened the policy
+is not re-examined. Refresh the golden after a policy change, with
+` + "`" + `af golden refresh` + "`" + `, and the new rule decides whether it may be published.
+
+The extension points it uses are in the community edition, in
+` + "`" + `engine/pkg/extension` + "`" + `. That is deliberate: the sockets are MIT so that anybody
+can write a hook, and the enterprise edition supplies one implementation of
+them.
 
 ## Hooks can only refuse
 
@@ -4786,12 +4814,23 @@ that lives in somebody's plugin.
 ` + "`" + "`" + "`" + `go
 type PolicyHook interface {
     // Returns an error to refuse. Nil permits nothing; it declines to object.
-    Check(ctx context.Context, req Request) error
+    Check(ctx context.Context, req EnvironmentRequest) error
+}
+
+type MaskingHook interface {
+    // Asked during a golden refresh, with the columns a plan will rewrite and
+    // the whole catalogue it read them from.
+    CheckMasking(ctx context.Context, req MaskingRequest) error
 }
 ` + "`" + "`" + "`" + `
 
+A hook may implement either or both. ` + "`" + `MaskingRequest` + "`" + ` carries two column lists
+and a hook needs both: masked columns alone cannot tell a database that has no
+email column from one that has three and masks none of them, and those deserve
+opposite answers.
+
 Register it with the engine's extension registry. The community build registers
-nothing, so the check iterates an empty slice and returns nil.
+nothing, so each check iterates an empty slice and returns nil.
 
 Related: [licensing](/docs/enterprise/licensing), [egress](/docs/concepts/egress).
 `,

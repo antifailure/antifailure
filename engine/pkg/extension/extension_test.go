@@ -166,6 +166,31 @@ func TestAMaskingHookSeesTheColumnsAndTheCatalogue(t *testing.T) {
 	require.Equal(t, req, *spy.seen)
 }
 
+func TestASecondMaskingHookUnderTheSameNameIsStillAsked(t *testing.T) {
+	t.Parallel()
+	// The question #335 raised about the runtime socket, asked of this one.
+	// RuntimeProviderNamed is a name keyed lookup that returns the FIRST
+	// match, so a second registration under one name is unreachable and reads
+	// as a feature. This socket has no lookup by name: every registration is
+	// consulted, in order. A masking hook that was silently dropped would be a
+	// policy that never runs, which is the failure this whole package is here
+	// to stop, so it is checked rather than reasoned about.
+	r := extension.NewRegistry()
+	first := &refusingMasking{name: "organization-policy"}
+	second := &refusingMasking{name: "organization-policy"}
+	r.AddMasking(first)
+	r.AddMasking(second)
+
+	require.NoError(t, r.CheckMasking(context.Background(),
+		extension.MaskingRequest{Repository: "acme/app"}))
+	require.NotNil(t, first.seen, "the first registration was not asked")
+	require.NotNil(t, second.seen, "a second registration under one name was silently dropped")
+	require.Equal(t, []string{
+		"masking:organization-policy",
+		"masking:organization-policy",
+	}, r.Registered(), "a registration that is consulted was not listed")
+}
+
 func TestAMaskingHookIsNamedInTheRegistrations(t *testing.T) {
 	t.Parallel()
 	// af doctor prints this. A hook that refuses environments and appears in
