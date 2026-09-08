@@ -7404,15 +7404,47 @@ The egress sidecar is always a single pod whatever any service asks for,
 because it is the environment's only resolver and its only route out, and a
 second one would split the record of what was refused across two decision logs.
 
-The manifest's ` + "`" + `resources` + "`" + ` is still **refused at validation** rather than
-applied. Neither ` + "`" + `cpu` + "`" + ` nor ` + "`" + `memory` + "`" + ` reaches any runtime: they are dropped
-between the manifest and the runtime contract, so honouring them here alone
-would mean one runtime enforcing a cap the other ignores. Until both do, a
-manifest carrying either one is rejected by name, because a service that
-quietly ran with no limit under ` + "`" + `resources.memory: 512Mi` + "`" + ` is the worse of the
-two answers: the run goes green having proved nothing about the case its author
-was worried about. That is the argument ` + "`" + `replicas` + "`" + ` used to be on the wrong side
-of.
+The manifest's ` + "`" + `resources` + "`" + ` becomes the container's ` + "`" + `ResourceRequirements` + "`" + `, and
+the request and the limit are the SAME figure, which puts the pod in the
+Guaranteed quality of service class. A dimension the manifest did not name is
+left out of both maps rather than set to zero: a zero request is a request for
+nothing and a zero limit is a limit of nothing, so a service that named no size
+produces the identical Deployment it produced before the key was honoured.
+
+The gap between a small request and a larger limit is where a node is
+oversubscribed. Every pod is placed against its request and may then grow into
+its limit, so a node that fits ten environments on paper runs eleven and the
+eleventh takes memory from the others. The symptom is a workflow that reads as
+flaky, and a twin whose failures belong to the machine rather than to the
+change under test is worth less than no twin.
+
+` + "`" + `af up` + "`" + ` checks the sizes against the cluster BEFORE it creates anything, and
+refuses with **AF-RUN-047** naming the shortfall. Without that check a request
+larger than any node is accepted by the API server and the pod sits ` + "`" + `Pending` + "`" + `
+with an event nobody is watching, so ` + "`" + `af up` + "`" + ` waits out the readiness timeout
+and reports a service that did not start. The free figure is each schedulable
+node's allocatable minus the requests of the pods already on it, which is the
+quantity the scheduler itself places against; allocatable alone would accept an
+environment onto a full cluster. Cordoned and not ready nodes are left out,
+because a node that still reports its allocatable and can hold nothing makes
+the cluster look larger than it is.
+
+Two necessary conditions, neither sufficient: every instance has to fit on some
+single node, and the total has to fit in what is free across all of them. A set
+that passes both can still fail to pack, and the scheduler remains the
+authority on that. What is refused here is only the cases where no packing
+exists at all, which are the ones a person cannot diagnose from a ` + "`" + `Pending` + "`" + `
+pod.
+
+A cluster that will not let ` + "`" + `af` + "`" + ` list its nodes or its pods is one this cannot
+check. It says so on the progress channel and lets the environment through,
+rather than reporting nothing and passing: refusing to start because a
+permission is narrow would break every cluster where ` + "`" + `af` + "`" + ` has namespace scoped
+access and nothing more.
+
+` + "`" + `af status` + "`" + ` reports the applied size off the pod the cluster is running rather
+than off the spec that was sent, because a runtime that echoed the request back
+would agree with the manifest whether or not anything was applied.
 
 ## Teardown
 
@@ -8003,6 +8035,37 @@ always the one a service was told at startup: an application that builds
 absolute URLs from ` + "`" + `AF_PUBLIC_URL` + "`" + ` or ` + "`" + `AF_ENV_URL` + "`" + ` may name the port it lost.
 Bringing the environment up again after freeing the port gives every container
 the same answer.
+
+## Size
+
+` + "`" + "`" + "`" + `
+AF-RUN-047 This runtime cannot place the sizes the manifest asks for: service
+"clickhouse" asks for 32Gi of memory per instance and the roomiest node has
+7Gi free, so one instance of it cannot be placed at all
+` + "`" + "`" + "`" + `
+
+` + "`" + `resources.cpu` + "`" + ` and ` + "`" + `resources.memory` + "`" + ` become the daemon's own cpu and memory
+constraint. There is no scheduler here to reserve anything, so the single value
+the manifest carries is applied as the cap alone: a container gets that share
+of the machine under contention and no more, and one over its memory cap is
+killed rather than allowed to take the machine down with it. That is the half
+of the promise this runtime can keep, and it is the half that matters on a
+laptop, where the failure being reproduced is one environment starving another.
+
+The check runs before the network is created, so an environment this machine
+cannot hold leaves nothing behind for ` + "`" + `af down` + "`" + ` to find.
+
+**What it does not account for.** Docker reserves nothing. A container with no
+memory limit, which is most of them and every container this machine was
+already running, is not holding anything the daemon can subtract, so the
+comparison is against the whole machine rather than against what is free. This
+refuses an environment that could never fit and it does not refuse the eleventh
+environment on a machine that holds ten. The cluster check does better, because
+a cluster scheduler has the fact this one does not: what every pod asked for.
+
+The daemon's memory is the Docker VM's, not the machine's. A laptop with plenty
+of memory whose VM was given a quarter of it has a quarter here, and ` + "`" + `docker
+info` + "`" + ` is where that number comes from.
 
 ## Disk
 
@@ -16412,6 +16475,18 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
+### AF-RUN-047
+
+This runtime cannot place the sizes the manifest asks for: {detail}
+
+**What to do.** Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
 ## Secrets
 
 ### AF-SEC-001
@@ -16716,7 +16791,7 @@ what it deliberately does not cover.
 | ` + "`" + `replicas` + "`" + ` | int | How many instances to run, 1 to 10. Both runtimes start this many behind the one name other services resolve. See below. |
 | ` + "`" + `depends_on` + "`" + ` | list | Other services that must start first. |
 | ` + "`" + `env` + "`" + ` | list | Variables this service needs, by name. |
-| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, both refused. Neither runtime applies a limit, so a cap written here is enforced nowhere. |
+| ` + "`" + `resources` + "`" + ` | block | ` + "`" + `cpu` + "`" + ` and ` + "`" + `memory` + "`" + `, the size one instance is given. Each is the request and the limit on both runtimes. See below. |
 | ` + "`" + `build` + "`" + ` | block | See below. |
 
 ### What a service is given
@@ -16796,6 +16871,66 @@ The bound is 1 to 10, and a ` + "`" + `cron` + "`" + ` service may not ask for m
 instance runs the schedule, so three instances send the nightly email three
 times, which is a bug to reproduce inside a service rather than the meaning of
 a manifest key.
+
+### ` + "`" + `resources` + "`" + `
+
+` + "`" + "`" + "`" + `yaml
+services:
+  - name: clickhouse
+    kind: worker
+    resources:
+      cpu: "2"
+      memory: 4Gi
+` + "`" + "`" + "`" + `
+
+The size ONE instance is given. A service asking for ` + "`" + `replicas: 3` + "`" + ` and ` + "`" + `2` + "`" + ` of
+CPU asks the machine for six cores, not two.
+
+` + "`" + `cpu` + "`" + ` is a number of cores, or thousandths with an ` + "`" + `m` + "`" + `: ` + "`" + `2` + "`" + `, ` + "`" + `0.5` + "`" + `, ` + "`" + `500m` + "`" + `.
+` + "`" + `memory` + "`" + ` needs a unit: ` + "`" + `512Mi` + "`" + `, ` + "`" + `2Gi` + "`" + `. ` + "`" + `Mi` + "`" + ` and ` + "`" + `Gi` + "`" + ` are powers of two, ` + "`" + `M` + "`" + ` and
+` + "`" + `G` + "`" + ` powers of ten, which is what those suffixes mean in a Deployment and what
+somebody copying a value out of one expects. A bare ` + "`" + `memory: 512` + "`" + ` is refused,
+because Kubernetes reads it as 512 bytes and nobody who writes it means that.
+
+**Each value is the request AND the limit**, not a request with a larger limit
+behind it. On Kubernetes that is the Guaranteed quality of service class. The
+familiar shape, a small request under a large limit, is where a node gets
+oversubscribed: every container is placed against its request and then grows
+into its limit, so a machine that fits ten environments on paper runs eleven
+and the eleventh takes memory from the others. The symptom is a workflow that
+reads as flaky, and a twin whose failures belong to the machine rather than to
+the change under test is worth less than no twin. One number also means
+environments per node is a division rather than a guess.
+
+On the local runtime there is no scheduler to reserve anything, so the value is
+the daemon's own cpu and memory constraint: the container gets that share under
+contention and no more, and one over its memory cap is killed rather than
+allowed to take the machine down with it.
+
+Omitting a key leaves that dimension uncapped, which is what every service had
+before the key was honoured, so an existing manifest produces the identical
+container and the identical Deployment it did before. The two keys are
+independent: a service may cap CPU alone, memory alone, or neither.
+
+**A size the runtime cannot place is refused before anything is created**, with
+**AF-RUN-047** naming the shortfall. Without that, a request larger than any
+node is accepted by the API server, the pod sits ` + "`" + `Pending` + "`" + ` with an event nobody
+is watching, and ` + "`" + `af up` + "`" + ` waits out its readiness timeout and reports a service
+that did not start, which reads as a slow cluster. On a cluster the check is
+against allocatable minus what the pods already there requested, so a full
+cluster refuses rather than accepts. It is a necessary condition and not a
+sufficient one: it refuses the sets for which no placement exists, and leaves
+bin packing to the scheduler.
+
+A service's ` + "`" + `migrate` + "`" + ` command runs under the same cap as the service. It does
+not double what the environment asks the machine for, because the migration
+finishes before the service starts. A migration that needs more memory than the
+service it belongs to is a case this key cannot express today.
+
+` + "`" + `af status` + "`" + ` reports the size the runtime ACTUALLY applied, read back off the
+running pod or the daemon's record of the container rather than echoed from
+the manifest. A runtime that accepts a cap and emits none would otherwise
+report exactly what a correct one reports.
 
 ### ` + "`" + `build` + "`" + `
 
@@ -18556,12 +18691,12 @@ One request sent to both versions.
 
 ## Resources
 
-Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.
+The size one instance of this service is given. Each value is both the request and the limit, so the service gets what it asked for and takes no more. Omit either key to leave that dimension uncapped.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| ` + "`" + `cpu` + "`" + ` | string | no | Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none. Matches ` + "`" + `^[0-9]+(\.[0-9]+)?m?$` + "`" + `. |
-| ` + "`" + `memory` + "`" + ` | string | no | Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none. Matches ` + "`" + `^[0-9]+(Mi\|Gi\|M\|G)$` + "`" + `. |
+| ` + "`" + `cpu` + "`" + ` | string | no | CPU for one instance, as a number of cores or as thousandths with an m: 2, 0.5, 500m. On Kubernetes it is the request and the limit, which puts the pod in the Guaranteed class; on the local runtime it is the daemon's own cpu constraint. A value the runtime cannot place is refused with AF-RUN-047 naming the shortfall, rather than accepted and left Pending. Matches ` + "`" + `^[0-9]+(\.[0-9]+)?m?$` + "`" + `. |
+| ` + "`" + `memory` + "`" + ` | string | no | Memory for one instance, with a unit: 512Mi, 2Gi. Mi and Gi are powers of two, M and G powers of ten. A bare number is refused, because nobody who writes 512 means 512 bytes. On Kubernetes it is the request and the limit; on the local runtime it is the daemon's memory constraint, so a service over it is killed rather than allowed to take the machine down. Matches ` + "`" + `^[0-9]+(Mi\|Gi\|M\|G)$` + "`" + `. |
 
 ## Rolling compatibility
 
@@ -18604,7 +18739,7 @@ One process the environment runs. A service is built from the repository, given 
 | ` + "`" + `path` + "`" + ` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | ` + "`" + `port` + "`" + ` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
 | ` + "`" + `replicas` + "`" + ` | integer | no | How many instances of this service to run. Both runtimes start this many, behind the one name other services resolve, so a bug that only appears at more than one instance appears here. Omitted means one. A cron service may not ask for more than one, because a scheduled job that runs on three instances runs three times. Minimum 1, maximum 10. |
-| ` + "`" + `resources` + "`" + ` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
+| ` + "`" + `resources` + "`" + ` | [Resources](#resources) | no | The size one instance of this service is given. |
 | ` + "`" + `schedule` + "`" + ` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
 ## Subset

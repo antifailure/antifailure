@@ -399,6 +399,8 @@ const (
 	AFRUN045 Code = "AF-RUN-045"
 	// AF_PORT_RANGE_START is set to {value}, which is not a port number.
 	AFRUN046 Code = "AF-RUN-046"
+	// This runtime cannot place the sizes the manifest asks for: {detail}
+	AFRUN047 Code = "AF-RUN-047"
 
 	// Scheduling
 	// No runtime satisfies the placement requirement {requirement}.
@@ -1800,6 +1802,15 @@ var catalog = map[Code]Entry{
 		Docs:      "guides/local-runtime",
 		Retryable: false,
 		ExitCode:  ExitConfiguration,
+	},
+	AFRUN047: {
+		Code:      AFRUN047,
+		Area:      "RUN",
+		Message:   "This runtime cannot place the sizes the manifest asks for: {detail}",
+		NextStep:  "Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.",
+		Docs:      "reference/manifest",
+		Retryable: true,
+		ExitCode:  ExitFailure,
 	},
 	AFSCH001: {
 		Code:      AFSCH001,

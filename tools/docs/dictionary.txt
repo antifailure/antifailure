@@ -50,6 +50,7 @@ posthog
 Procfile
 reprovision
 Scaleway
+schedulable
 SCIM
 semgrep
 SIEM

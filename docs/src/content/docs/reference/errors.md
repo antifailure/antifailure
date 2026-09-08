@@ -1552,6 +1552,18 @@ AF_PORT_RANGE_START is set to {value}, which is not a port number.
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [guides/local-runtime](/docs/guides/local-runtime) |
 
+### AF-RUN-047
+
+This runtime cannot place the sizes the manifest asks for: {detail}
+
+**What to do.** Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.
+
+| | |
+| --- | --- |
+| Exit code | `1` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [reference/manifest](/docs/reference/manifest) |
+
 ## Secrets
 
 ### AF-SEC-001

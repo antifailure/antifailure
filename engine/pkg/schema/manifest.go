@@ -114,7 +114,27 @@ type EnvVar struct {
 // IsRequired reports the effective value of Required.
 func (e EnvVar) IsRequired() bool { return e.Required == nil || *e.Required }
 
-// Resources caps a service's CPU and memory.
+// Resources is the size a service is given, and it is a single number per
+// dimension on purpose.
+//
+// Each value becomes BOTH the request and the limit. On Kubernetes that is the
+// Guaranteed quality of service class: the scheduler reserves exactly what the
+// manifest asked for and the kubelet caps the container at the same figure. On
+// the local runtime, where there is no scheduler to reserve anything, it is the
+// daemon's own cpu and memory constraint.
+//
+// A request that is smaller than the limit is the shape most people know, and
+// it is deliberately not what this is. The gap between the two is where a node
+// is oversubscribed: every container is placed against its request and may then
+// grow into its limit, so a machine that fits ten environments on paper runs
+// eleven and the eleventh takes memory from the others. The symptom is a
+// workflow that reads as flaky, and a twin whose failures are the machine's
+// rather than the change's is worth less than no twin. One number means the
+// environment gets what it asked for and takes no more, and it means
+// environments per node is a division rather than a guess.
+//
+// Both are optional and independent: a service may cap CPU alone, memory
+// alone, or neither.
 type Resources struct {
 	CPU    string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty" yaml:"memory,omitempty"`

@@ -76,3 +76,59 @@ func TestServiceSpec_DoesNotCarryTheMigration(t *testing.T) {
 	spec := serviceSpec(schema.Service{Name: "api", Migrate: "npm run migrate"}, "img")
 	require.Empty(t, spec.Migrate)
 }
+
+func TestServiceSpec_CarriesTheSizeTheManifestAsked(t *testing.T) {
+	t.Parallel()
+	// The manifest's strings become numbers HERE, once, rather than in each
+	// runtime. Two parsers are two chances to disagree about what "512Mi"
+	// means, and the disagreement would surface as one runtime enforcing a cap
+	// the other did not: an environment that passes locally and is killed on
+	// the cluster reads as a flaky cluster.
+	spec := serviceSpec(schema.Service{
+		Name: "clickhouse", Kind: schema.ServiceWorker,
+		Resources: &schema.Resources{CPU: "500m", Memory: "2Gi"},
+	}, "img")
+	require.Equal(t, int64(500), spec.CPUMillis)
+	require.Equal(t, int64(2*1024*1024*1024), spec.MemoryBytes)
+}
+
+func TestServiceSpec_CarriesTheHalfOfTheSizeThatWasNamed(t *testing.T) {
+	t.Parallel()
+	// The two keys are independent. A service may cap memory alone, and
+	// filling in a CPU number nobody wrote would be a cap the author did not
+	// ask for on a dimension they left open.
+	spec := serviceSpec(schema.Service{
+		Name: "web", Port: 3000, Resources: &schema.Resources{Memory: "512Mi"},
+	}, "img")
+	require.Zero(t, spec.CPUMillis)
+	require.Equal(t, int64(512*1024*1024), spec.MemoryBytes)
+}
+
+func TestServiceSpec_LeavesTheSizeAtZeroWhereTheManifestNamedNone(t *testing.T) {
+	t.Parallel()
+	// Zero is what both runtimes read as uncapped, and it is what every
+	// manifest written before this key was honoured produces. An existing
+	// repository has to get the identical container and the identical
+	// Deployment it got before.
+	for _, r := range []*schema.Resources{nil, {}} {
+		spec := serviceSpec(schema.Service{Name: "web", Port: 3000, Resources: r}, "img")
+		require.Zero(t, spec.CPUMillis)
+		require.Zero(t, spec.MemoryBytes)
+	}
+}
+
+func TestServiceSpec_DropsASizeItCannotReadRatherThanDefaultingIt(t *testing.T) {
+	t.Parallel()
+	// The opposite of what the health timeout above does, and deliberately.
+	// An unparseable timeout falls back to the runtime's own default because
+	// a bound on a wait has a safe one. A cap has none: there is no size that
+	// is correct for every service, and running uncapped is exactly what the
+	// manifest was written to stop. A value that will not parse is refused at
+	// validation, so one that reaches here is a manifest that came from a
+	// caller which never saw the schema.
+	spec := serviceSpec(schema.Service{
+		Name: "web", Port: 3000, Resources: &schema.Resources{CPU: "half", Memory: "heaps"},
+	}, "img")
+	require.Zero(t, spec.CPUMillis)
+	require.Zero(t, spec.MemoryBytes)
+}

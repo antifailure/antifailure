@@ -95,6 +95,14 @@ type fakeService struct {
 	// number and the identities as two separate things is what lets one flaw
 	// break the count and another break the processes behind it.
 	instances int
+	// milliCPU and memoryBytes are the size the fake is holding for this
+	// service, and cgroup is what a process inside it would see. Kept as two
+	// separate things for the same reason instances and the identities behind
+	// it are: one flaw breaks the number the runtime reports and another
+	// breaks the thing the number is supposed to be about.
+	milliCPU    int64
+	memoryBytes int64
+	cgroup      string
 }
 
 func newFakeRuntime(state *fakeState, flaw, allowedHost string) *fakeRuntime {
@@ -249,13 +257,41 @@ func (f *fakeRuntime) place(env *fakeEnv, s provider.ServiceSpec) *fakeService {
 			}
 		}
 	}
-	svc := &fakeService{name: s.Name, kind: s.Kind, state: "running", instances: s.Instances()}
+	svc := &fakeService{
+		name: s.Name, kind: s.Kind, state: "running", instances: s.Instances(),
+		milliCPU: s.CPUMillis, memoryBytes: s.MemoryBytes,
+	}
+	// What a process inside would see. "max" where nothing was asked for,
+	// which is the word cgroup v2 uses and what every container this engine
+	// placed reported before the key was honoured.
+	svc.cgroup = "max"
+	if s.MemoryBytes > 0 {
+		svc.cgroup = strconv.FormatInt(s.MemoryBytes, 10)
+	}
+	if f.is(flawIgnoresResources) {
+		// Accepts the size and holds none of it, which is what both runtimes
+		// did while resources.cpu and resources.memory were in the schema and
+		// emitted nowhere.
+		svc.milliCPU, svc.memoryBytes, svc.cgroup = 0, 0, "max"
+	}
+	if f.is(flawSizeNeverApplied) {
+		// Reports the size back and applies nothing. Nothing in the reported
+		// size can see this, which is the whole reason the suite asks the
+		// container.
+		svc.cgroup = "max"
+	}
 	if f.is(flawIgnoresReplicas) {
 		// Runs one whatever was asked for, which is what both runtimes did
 		// before instance counts were honoured.
 		svc.instances = 1
 	}
 	env.services = append(env.services, svc)
+
+	if isCgroupStamp(s.Command) {
+		svc.ready = true
+		svc.logs = append(svc.logs, cgroupMarker+svc.cgroup)
+		return svc
+	}
 
 	if isInstanceStamp(s.Command) {
 		svc.ready = true
@@ -310,6 +346,7 @@ func (f *fakeRuntime) report(s *fakeService) provider.RunningService {
 		Name: s.name, Kind: s.kind, ContainerID: s.name + "-id",
 		URL: s.url, Ready: s.ready, State: s.state, ExitCode: s.exit,
 		Instances: instances,
+		CPUMillis: s.milliCPU, MemoryBytes: s.memoryBytes,
 	}
 	if f.is(flawLosesServiceKind) {
 		out.Kind = ""
@@ -676,6 +713,17 @@ func serveBody(command string) string {
 	}
 	body, _, _ := strings.Cut(after, "'")
 	return body
+}
+
+// isCgroupStamp recognises the command the suite uses to make a service report
+// the memory cap its own process is subject to.
+//
+// Recognised by shape rather than run, for the same reason isInstanceStamp is:
+// this fake starts no processes and has no cgroup. What it reproduces is the
+// OBSERVATION a real runtime produces from that command, which is the cap the
+// container is actually held to rather than the one the runtime was asked for.
+func isCgroupStamp(command string) bool {
+	return strings.Contains(command, cgroupMarker)
 }
 
 // isInstanceStamp recognises the command the suite uses to make each instance

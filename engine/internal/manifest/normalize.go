@@ -147,12 +147,13 @@ func normalizeService(s *schema.Service) {
 	// first and cannot see the difference between the two once it has filled
 	// one in.
 	//
-	// resources.cpu and resources.memory are not defaulted for the older
-	// reason: nothing reads either, validate refuses one an author writes,
-	// and a default would put a key the engine refuses into every normalized
-	// manifest. That is what TestNormalize_IsIdempotent caught when all three
-	// were defaulted here: the manifest this function produced no longer
-	// parsed.
+	// resources.cpu and resources.memory are read now too, in both runtimes,
+	// and they are still not defaulted here for the same reason and one more.
+	// There is no size that is correct for every service, so a default would
+	// be a number nobody chose applied as though somebody had; and an omitted
+	// key means uncapped, which is what every environment this engine placed
+	// was before the key was honoured, so writing one in would change the
+	// meaning of every existing manifest on the first normalize.
 	if s.Build == nil {
 		s.Build = &schema.Build{}
 	}

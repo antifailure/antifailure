@@ -31,7 +31,5 @@
 #
 # THERE IS NO KIND HERE FOR A FIELD THAT IS SIMPLY UNFINISHED. A field somebody
 # intends to implement gets implemented, or it gets refused until it is.
-Resources.CPU	refused	.resources.cpu	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
-Resources.Memory	refused	.resources.memory	Nothing reads it. Neither runtime emits a resource requirement, so a cap written here was enforced nowhere and a service carrying it ran with none.
 LoadThresholds.QueryCountIncrease	refused	load.thresholds.query_count_increase	Nothing measures it. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression.
 Workflow.Tags	label	workflow.tags	A grouping for whoever reads the manifest. The engine does not select or print on it, and the schema says so, so nobody writing tags: [smoke] is promised a way to run just the smoke ones.

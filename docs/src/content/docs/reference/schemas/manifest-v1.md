@@ -380,12 +380,12 @@ One request sent to both versions.
 
 ## Resources
 
-Not read by anything, and refused by the engine. Neither runtime emits a resource requirement, so a cap written here was applied nowhere.
+The size one instance of this service is given. Each value is both the request and the limit, so the service gets what it asked for and takes no more. Omit either key to leave that dimension uncapped.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `cpu` | string | no | Not read by anything, and refused by the engine. No runtime applies a CPU limit, so a service carrying this ran with none. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
-| `memory` | string | no | Not read by anything, and refused by the engine. No runtime applies a memory limit, so a service carrying this ran with none. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
+| `cpu` | string | no | CPU for one instance, as a number of cores or as thousandths with an m: 2, 0.5, 500m. On Kubernetes it is the request and the limit, which puts the pod in the Guaranteed class; on the local runtime it is the daemon's own cpu constraint. A value the runtime cannot place is refused with AF-RUN-047 naming the shortfall, rather than accepted and left Pending. Matches `^[0-9]+(\.[0-9]+)?m?$`. |
+| `memory` | string | no | Memory for one instance, with a unit: 512Mi, 2Gi. Mi and Gi are powers of two, M and G powers of ten. A bare number is refused, because nobody who writes 512 means 512 bytes. On Kubernetes it is the request and the limit; on the local runtime it is the daemon's memory constraint, so a service over it is killed rather than allowed to take the machine down. Matches `^[0-9]+(Mi\|Gi\|M\|G)$`. |
 
 ## Rolling compatibility
 
@@ -428,7 +428,7 @@ One process the environment runs. A service is built from the repository, given 
 | `path` | string | no | Directory containing the service, relative to the repository root. Defaults to the root. A path outside the repository is rejected. Max length 512. |
 | `port` | integer | no | Port the service listens on. Required for a web service unless detection found it. Minimum 1, maximum 65535. |
 | `replicas` | integer | no | How many instances of this service to run. Both runtimes start this many, behind the one name other services resolve, so a bug that only appears at more than one instance appears here. Omitted means one. A cron service may not ask for more than one, because a scheduled job that runs on three instances runs three times. Minimum 1, maximum 10. |
-| `resources` | [Resources](#resources) | no | Not read by anything, and refused by the engine. |
+| `resources` | [Resources](#resources) | no | The size one instance of this service is given. |
 | `schedule` | string | no | Cron expression for a cron service, with an optional CRON_TZ prefix. Evaluated in the declared zone. Max length 128. |
 
 ## Subset

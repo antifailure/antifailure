@@ -783,6 +783,9 @@ services:
   - name: worker
     kind: worker
     replicas: 3
+    resources:
+      cpu: 500m
+      memory: 2Gi
   - name: nightly
     kind: cron
     command: node scripts/nightly.js
@@ -825,6 +828,11 @@ load:
 		// that tells a reader they are looking at a topology rather than a
 		// single copy of everything.
 		"instances 3",
+		// And the size, for the same reason. A twin whose heavy datastore
+		// cannot be sized is not a twin of a production topology, so the page
+		// that explains what the environment will be has to say what each
+		// service was given.
+		"size 500m CPU, 2Gi memory, requested and capped",
 		"npx prisma migrate deploy", "STRIPE_KEY (sandbox)",
 		"PROD_DATABASE_URL", "never stored",
 		"api.stripe.com", "sandbox", "Billing runs against the Stripe sandbox.",
@@ -834,6 +842,28 @@ load:
 		require.Contains(t, out, want, "Explain must mention %q", want)
 	}
 	require.NotContains(t, out, "—", "prose must not use an em dash")
+}
+
+func TestExplain_SaysNothingAboutSizeWhereNoSizeWasNamed(t *testing.T) {
+	t.Parallel()
+	// The control on the line above, and the same judgement the instance count
+	// gets. Every service that named nothing runs uncapped, and a line saying
+	// so on all of them would train the eye past the one manifest where it
+	// says 2Gi.
+	out := strings.Join(strings.Fields(manifest.Explain(mustParse(t, minimal), 0)), " ")
+	require.NotContains(t, out, "size ")
+	require.NotContains(t, out, "uncapped")
+}
+
+func TestExplain_SaysWhichHalfOfTheSizeWasNamed(t *testing.T) {
+	t.Parallel()
+	// Both halves are printed together because they are one decision. A
+	// service capped on memory and not on CPU is a different environment from
+	// one capped on both, and printing only the half that was set would make
+	// the two read alike.
+	m := mustParse(t, minimal+"    resources:\n      memory: 512Mi\n")
+	out := strings.Join(strings.Fields(manifest.Explain(m, 0)), " ")
+	require.Contains(t, out, "size 512Mi memory, requested and capped; CPU uncapped")
 }
 
 func TestExplain_SaysWhenThereAreNoRules(t *testing.T) {

@@ -90,6 +90,13 @@ func Explain(m *schema.Manifest, width int) string {
 			// line on the one manifest where it says three.
 			fmt.Fprintf(&b, "  %-*s instances %d\n", gut, "", s.Replicas)
 		}
+		if size := serviceSize(s); size != "" {
+			// Only where a size was written, for the same reason the instance
+			// count is only printed above one. Every service that named
+			// nothing runs uncapped, and a line saying so on all of them
+			// would train the eye past the one manifest where it says 2Gi.
+			fmt.Fprintf(&b, "  %-*s size %s\n", gut, "", size)
+		}
 		if s.Schedule != "" {
 			fmt.Fprintf(&b, "  %-*s schedule %s\n", gut, "", s.Schedule)
 		}
@@ -498,4 +505,26 @@ func failingPolicies(p *schema.Policy) string {
 		return "nothing; every finding is a warning"
 	}
 	return strings.Join(names, ", ")
+}
+
+// serviceSize is the resources block as one line, and empty where the service
+// named neither.
+//
+// Both halves are printed together because they are one decision: a service
+// capped on memory and not on CPU is a different environment from one capped
+// on both, and printing only the half that was set would make the two read
+// alike.
+func serviceSize(s schema.Service) string {
+	if s.Resources == nil {
+		return ""
+	}
+	switch {
+	case s.Resources.CPU != "" && s.Resources.Memory != "":
+		return fmt.Sprintf("%s CPU, %s memory, requested and capped", s.Resources.CPU, s.Resources.Memory)
+	case s.Resources.CPU != "":
+		return fmt.Sprintf("%s CPU, requested and capped; memory uncapped", s.Resources.CPU)
+	case s.Resources.Memory != "":
+		return fmt.Sprintf("%s memory, requested and capped; CPU uncapped", s.Resources.Memory)
+	}
+	return ""
 }

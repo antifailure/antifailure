@@ -198,6 +198,13 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		progress = func(string) {}
 	}
 
+	// Before the network, so that an environment this machine cannot hold
+	// leaves nothing behind at all. A refusal after the first create is a
+	// refusal plus something for af down to find.
+	if err := r.checkCapacity(ctx, spec); err != nil {
+		return provider.Env{}, err
+	}
+
 	nets, err := r.ensureNetworks(ctx, spec.EnvID, journal)
 	if err != nil {
 		return provider.Env{}, err
@@ -541,6 +548,13 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				Detail:      c.Status,
 				Ready:       true,
 			}
+			// Off the daemon's record of the container rather than off the
+			// manifest, which is where a cap that was accepted and never
+			// applied stops looking like one that was. Once per service, on
+			// the first instance: the instances of one service are created
+			// from one spec, so the second inspect would ask a question whose
+			// answer is already known.
+			rs.CPUMillis, rs.MemoryBytes = r.appliedResources(ctx, c.ID)
 			byService[name] = rs
 			order = append(order, name)
 		}

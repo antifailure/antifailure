@@ -129,6 +129,7 @@ func (r *Runtime) startService(
 	running.ContainerID = ids[0]
 	running.Instances = want
 	running.State = "running"
+	running.CPUMillis, running.MemoryBytes = r.appliedResources(ctx, ids[0])
 
 	// The service itself is on a network with no route out, which is also a
 	// network the host cannot publish a port from. A forwarder on both sides
@@ -313,6 +314,25 @@ func (r *Runtime) create(
 		// visible as a crash loop, not hidden behind a runtime that keeps
 		// starting it until the readiness wait times out with no explanation.
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
+		// The size the manifest asked for, as the daemon's own cpu and memory
+		// constraint.
+		//
+		// There is no scheduler here to reserve anything, so the single value
+		// schema.Resources carries is applied as the cap alone: a container
+		// with NanoCPUs set gets that share of the machine under contention
+		// and no more, and one with Memory set is killed rather than allowed
+		// to take the machine down with it. That is the half of the promise
+		// this runtime can keep, and it is the half that matters on a laptop,
+		// where the failure being reproduced is one environment starving
+		// another.
+		//
+		// Zero is Docker's own word for unconstrained, so a manifest that
+		// named no size produces exactly the container it produced before this
+		// key was honoured.
+		Resources: container.Resources{
+			NanoCPUs: s.CPUMillis * 1_000_000,
+			Memory:   s.MemoryBytes,
+		},
 	}
 
 	netCfg := &network.NetworkingConfig{

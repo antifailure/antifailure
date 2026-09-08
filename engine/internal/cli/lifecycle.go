@@ -49,6 +49,21 @@ type ServiceJSON struct {
 	// consumer reading it as "absent means unknown" would both be reasonable
 	// and only one of them would be right.
 	Instances int `json:"instances"`
+	// CPU and Memory are the size the runtime ACTUALLY applied to one
+	// instance, in the units the manifest is written in, and absent where the
+	// manifest named no size.
+	//
+	// Omitted rather than zeroed when nothing was asked for, which is the
+	// opposite of the choice Instances made above and for the opposite
+	// reason: one is what a service with no replicas key is running, and zero
+	// is not a size anything is running at. An absent key here means
+	// uncapped, and there is no number that says that.
+	//
+	// Read back off the running object rather than echoed from the manifest.
+	// A runtime that accepted a cap and emitted none would otherwise report
+	// exactly what a correct one reports.
+	CPU    string `json:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty"`
 }
 
 // StatusJSON is the machine readable form of af status.
@@ -507,13 +522,39 @@ func servicesJSON(services []provider.RunningService) []ServiceJSON {
 			// is not what it is running.
 			instances = 1
 		}
-		out = append(out, ServiceJSON{
+		row := ServiceJSON{
 			Name: s.Name, Kind: s.Kind, URL: s.URL,
 			Ready: s.Ready, State: s.State, Detail: s.Detail,
 			Instances: instances,
-		})
+		}
+		if s.CPUMillis > 0 {
+			row.CPU = schema.FormatMilliCPU(s.CPUMillis)
+		}
+		if s.MemoryBytes > 0 {
+			row.Memory = schema.FormatMemoryBytes(s.MemoryBytes)
+		}
+		out = append(out, row)
 	}
 	return out
+}
+
+// appliedSize is what the runtime is holding for one instance, as one phrase,
+// and empty where it applied nothing.
+//
+// In the manifest's units rather than in thousandths and bytes, because the
+// reader's next move after seeing it is to compare it against the key they
+// wrote, and a number they have to convert first is one they will not check.
+func appliedSize(s provider.RunningService) string {
+	switch {
+	case s.CPUMillis > 0 && s.MemoryBytes > 0:
+		return fmt.Sprintf("%s CPU, %s", schema.FormatMilliCPU(s.CPUMillis),
+			schema.FormatMemoryBytes(s.MemoryBytes))
+	case s.CPUMillis > 0:
+		return schema.FormatMilliCPU(s.CPUMillis) + " CPU"
+	case s.MemoryBytes > 0:
+		return schema.FormatMemoryBytes(s.MemoryBytes)
+	}
+	return ""
 }
 
 func renderServices(e *Env, services []provider.RunningService) {
@@ -535,6 +576,18 @@ func renderServices(e *Env, services []provider.RunningService) {
 		// the place the interesting number appears.
 		if s.Instances > 1 {
 			detail = fmt.Sprintf("%s  %d instances", detail, s.Instances)
+		}
+		// The applied size, for the same reason and on the same terms as the
+		// count above: only where there is one, because every service that
+		// named no size runs uncapped and a line saying so on all of them
+		// would train the eye past the one that says 2Gi.
+		//
+		// This is the place somebody who wrote resources.memory looks to find
+		// out whether anything happened, and it is the runtime's answer
+		// rather than the manifest's: the two agreed even when nothing was
+		// applied, which is the whole reason the field is read back.
+		if size := appliedSize(s); size != "" {
+			detail = fmt.Sprintf("%s  %s", detail, size)
 		}
 		e.Out.Status(symbol, s.Name, detail)
 		if !s.Ready && s.Detail != "" {

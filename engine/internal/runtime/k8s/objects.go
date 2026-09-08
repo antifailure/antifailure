@@ -13,6 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -563,12 +564,52 @@ func containerFor(spec provider.EnvSpec, s provider.ServiceSpec, migration bool)
 			Name: "af-ca", MountPath: "/etc/antifailure", ReadOnly: true,
 		})
 	}
-	// The manifest's resources block is deliberately not read here, because
-	// it never arrives: provider.ServiceSpec carries no CPU or memory, so the
-	// values are dropped between the manifest and every runtime. Honouring
-	// them on this runtime alone would make one runtime enforce a cap the
-	// other silently ignores, which is worse than neither doing it.
+	c.Resources = resourcesFor(s)
 	return c
+}
+
+// resourcesFor is the size the manifest asked for, as a Kubernetes
+// requirement.
+//
+// Requests and limits are the SAME figure, which puts the pod in the
+// Guaranteed quality of service class. The reasoning is on schema.Resources
+// and the short version is that the gap between a request and a larger limit
+// is where a node is oversubscribed: every pod is placed against its request
+// and then grows into its limit, so a node that fits ten environments on paper
+// runs eleven and the eleventh takes memory from the others. A twin whose
+// failures belong to the machine rather than to the change under test is worth
+// less than no twin.
+//
+// A dimension the manifest did not name is left out of BOTH maps rather than
+// set to zero. A zero request is not "no request", it is a request for
+// nothing, and a zero limit is a limit of nothing: the API server accepts the
+// first and the kubelet refuses to run the second. Omitting is what "the
+// manifest said nothing" has to mean.
+//
+// An empty ResourceRequirements is returned when nothing was named, which is
+// what every service got before this key was honoured and is why an existing
+// manifest produces the identical Deployment it did before.
+func resourcesFor(s provider.ServiceSpec) corev1.ResourceRequirements {
+	list := corev1.ResourceList{}
+	if s.CPUMillis > 0 {
+		list[corev1.ResourceCPU] = *resource.NewMilliQuantity(s.CPUMillis, resource.DecimalSI)
+	}
+	if s.MemoryBytes > 0 {
+		list[corev1.ResourceMemory] = *resource.NewQuantity(s.MemoryBytes, resource.BinarySI)
+	}
+	if len(list) == 0 {
+		return corev1.ResourceRequirements{}
+	}
+	// Two maps rather than one shared one. A ResourceList is a map and both
+	// fields would then alias it, so anything that later edited the limits
+	// would silently edit the requests, and a pod whose request no longer
+	// matched its limit would leave the Guaranteed class without anything
+	// saying so.
+	limits := corev1.ResourceList{}
+	for k, v := range list {
+		limits[k] = v
+	}
+	return corev1.ResourceRequirements{Requests: list, Limits: limits}
 }
 
 // deploymentFor builds one service's Deployment.

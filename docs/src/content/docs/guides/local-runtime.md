@@ -99,6 +99,37 @@ absolute URLs from `AF_PUBLIC_URL` or `AF_ENV_URL` may name the port it lost.
 Bringing the environment up again after freeing the port gives every container
 the same answer.
 
+## Size
+
+```
+AF-RUN-047 This runtime cannot place the sizes the manifest asks for: service
+"clickhouse" asks for 32Gi of memory per instance and the roomiest node has
+7Gi free, so one instance of it cannot be placed at all
+```
+
+`resources.cpu` and `resources.memory` become the daemon's own cpu and memory
+constraint. There is no scheduler here to reserve anything, so the single value
+the manifest carries is applied as the cap alone: a container gets that share
+of the machine under contention and no more, and one over its memory cap is
+killed rather than allowed to take the machine down with it. That is the half
+of the promise this runtime can keep, and it is the half that matters on a
+laptop, where the failure being reproduced is one environment starving another.
+
+The check runs before the network is created, so an environment this machine
+cannot hold leaves nothing behind for `af down` to find.
+
+**What it does not account for.** Docker reserves nothing. A container with no
+memory limit, which is most of them and every container this machine was
+already running, is not holding anything the daemon can subtract, so the
+comparison is against the whole machine rather than against what is free. This
+refuses an environment that could never fit and it does not refuse the eleventh
+environment on a machine that holds ten. The cluster check does better, because
+a cluster scheduler has the fact this one does not: what every pod asked for.
+
+The daemon's memory is the Docker VM's, not the machine's. A laptop with plenty
+of memory whose VM was given a quarter of it has a quarter here, and `docker
+info` is where that number comes from.
+
 ## Disk
 
 ```
