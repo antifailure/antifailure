@@ -719,7 +719,13 @@ func normalizeRuntime(m *schema.Manifest) {
 		}
 		t.Domain = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(t.Domain), "*."))
 		if t.NamespacePrefix == "" {
-			t.NamespacePrefix = DefaultNamespacePfx
+			// The runtime block's, which normalization has already defaulted,
+			// rather than the default itself. Reaching past the block for the
+			// constant would mean a manifest that set namespace_prefix once
+			// got it on the unplaced path and silently lost it on every
+			// target, which is the shape of bug that only shows up as a
+			// namespace nobody expected in a cluster.
+			t.NamespacePrefix = r.NamespacePrefix
 		}
 		if t.KubeconfigContext == "" {
 			t.KubeconfigContext = r.KubeconfigContext
