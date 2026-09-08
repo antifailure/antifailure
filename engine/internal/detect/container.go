@@ -638,11 +638,6 @@ func containerPort(spec string) int {
 	return n
 }
 
-func envNameOf(item string) string {
-	name, _ := envPair(item)
-	return name
-}
-
 // envPair splits a compose environment list entry into its name and value.
 // An entry with no equals sign passes the variable through from the host, so
 // the name is known and the value is not.
