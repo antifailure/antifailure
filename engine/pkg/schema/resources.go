@@ -53,6 +53,18 @@ func ParseMilliCPU(s string) (int64, error) {
 	if t == "" {
 		return 0, fmt.Errorf("no CPU quantity")
 	}
+	// The shape first, because strconv.ParseFloat is far more permissive than
+	// anything a manifest means. It reads "1e3" as a thousand cores, "0x1p4"
+	// as sixteen, and "NaN" and "Inf" as numbers that survive every bound
+	// below and then become whatever int64 conversion does with them. The
+	// pattern in schemas/manifest.v1.json admits digits, one dot and an
+	// optional m, and this is the same rule stated where it is enforced: the
+	// two agreeing is what stops a manifest that passes the schema from
+	// meaning something else here, and what stops one that never saw the
+	// schema from meaning something no schema would allow.
+	if !isDecimal(strings.TrimSuffix(t, "m")) {
+		return 0, fmt.Errorf("%q is not a CPU quantity", s)
+	}
 	if milli := strings.HasSuffix(t, "m"); milli {
 		n, err := strconv.ParseFloat(strings.TrimSuffix(t, "m"), 64)
 		if err != nil || n < 0 {
@@ -75,6 +87,31 @@ func ParseMilliCPU(s string) (int64, error) {
 		return 0, fmt.Errorf("%q is %w", s, ErrTooFine)
 	}
 	return milli, nil
+}
+
+// isDecimal reports whether a string is digits with at most one dot, which is
+// the whole of what a CPU quantity may look like.
+//
+// Written out rather than done with a regexp because this runs on every
+// service of every manifest the engine reads, and because the rule is short
+// enough that the loop is easier to check against the schema's pattern than a
+// second spelling of it would be.
+func isDecimal(s string) bool {
+	if s == "" {
+		return false
+	}
+	dots, digits := 0, 0
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r == '.':
+			dots++
+		default:
+			return false
+		}
+	}
+	return dots <= 1 && digits > 0
 }
 
 // ParseMemoryBytes reads a memory quantity into bytes.

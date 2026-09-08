@@ -1519,6 +1519,27 @@ _generated:
 fieldsweep:
     go run ./tools/fieldsweep -root . -ambiguous
 
+# How many of one environment fit on one node, once the requests are real.
+#
+# NOT a gate, and it takes arguments for the reason it cannot be one: there is
+# no node size that is right for every reader, so a default here would be an
+# invented figure carried into whatever the answer is quoted in. Both sizes are
+# what is FREE on the node rather than what it has, which is the quantity a
+# scheduler places against.
+#
+#     just capacityplan 16 64Gi
+#     just capacityplan 8 32Gi examples/shop/antifailure.yaml
+#
+# It refuses to answer for a manifest where any service named no size, because
+# an unsized service takes whatever is left and a count computed around it is
+# an upper bound wearing the clothes of an answer. That refusal is the state
+# every environment this engine placed was in before resources.cpu and
+# resources.memory were honoured.
+capacityplan cpu memory manifest="antifailure.yaml":
+    cd engine && go run ./cmd/capacityplan \
+      -manifest "{{justfile_directory()}}/{{manifest}}" \
+      -node-cpu "{{cpu}}" -node-memory "{{memory}}"
+
 # Regenerate and keep the result.
 generate:
     go run ./tools/errgen

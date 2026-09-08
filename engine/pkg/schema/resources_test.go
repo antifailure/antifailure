@@ -64,7 +64,15 @@ func TestParseMilliCPU_RefusesAShareFinerThanItCanHold(t *testing.T) {
 
 func TestParseMilliCPU_RefusesWhatIsNotAQuantity(t *testing.T) {
 	t.Parallel()
-	for _, in := range []string{"", "  ", "half", "-1", "-500m", "2 cores", "m", "1e3"} {
+	// The exponent, the hex float, and the two words are here because
+	// strconv.ParseFloat accepts every one of them and a manifest means none
+	// of them. NaN is the sharpest: it passes every bound below it and then
+	// becomes whatever an int64 conversion does with it, which is a cap
+	// nothing applies rather than a refusal somebody can read.
+	for _, in := range []string{
+		"", "  ", "half", "-1", "-500m", "2 cores", "m", ".",
+		"1e3", "0x1p4", "NaN", "Inf", "+2", "1.2.3",
+	} {
 		_, err := schema.ParseMilliCPU(in)
 		require.Error(t, err, "%q is not a CPU quantity", in)
 		require.False(t, errors.Is(err, schema.ErrTooFine),
