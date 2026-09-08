@@ -669,8 +669,17 @@ func (d *PostgresDatabase) Inventory(ctx context.Context) ([]provider.Resource, 
 	out := make([]provider.Resource, 0, len(names))
 	for _, n := range names {
 		kind := "branch"
-		if strings.HasPrefix(n, d.opts.Prefix+"_g_") {
+		switch {
+		case strings.HasPrefix(n, d.opts.Prefix+"_g_"):
 			kind = "golden"
+		case strings.HasPrefix(n, d.opts.Prefix+"_p"):
+			// A prepared copy FlatBranch has not handed out yet. Named rather
+			// than left to fall through to "branch", because a branch with no
+			// environment against its name is exactly what a leak looks like
+			// to whoever reads this inventory, and a resource that is
+			// deliberately waiting should not have to be recognised by the
+			// absence of a field.
+			kind = "pool"
 		}
 		out = append(out, provider.Resource{Kind: kind, ID: n, EnvID: envOf[n]})
 	}
