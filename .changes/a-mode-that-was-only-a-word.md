@@ -35,6 +35,9 @@ environment and are untouched. Refused rather than quietly downgraded, because
 an environment switched from `allow` to `block` behind the operator's back would
 report that it tested a code path it never reached.
 
-Measured on a real Docker lifecycle rather than argued from the source: a full
-`up` and `down` of a sealed environment makes zero connections outside the
-operator's network.
+The deliverable is the measurement, not the flag. A test seals the guard and
+performs a complete lifecycle on real Docker, bringing an environment up,
+serving a request through it and tearing it down, then reads the ledger. It
+asserts zero refusals AND, separately, that the readiness probe is in the
+ledger, because zero refusals out of zero observations is not a measurement and
+would read the same on a build where the guard was never on the path.
