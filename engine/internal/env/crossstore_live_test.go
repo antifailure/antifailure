@@ -179,6 +179,13 @@ func TestCrossStoreLive_TheNumberOnTheUsersOwnStores(t *testing.T) {
 		require.Equal(t, 100.0, res.Report.Cross.Percent())
 		require.Positive(t, res.Report.Tables)
 		require.Positive(t, res.Report.Columns)
+		// Logged rather than only asserted positive, because the lane's number
+		// is quoted against the size of the schema it was computed over. A
+		// share of the join keys is a true answer to a smaller question when
+		// the reader cannot see how much was read to get it.
+		t.Logf("%d of %d join keys identical, over %d tables and %d columns, and %d rows",
+			res.Report.Cross.Identical, res.Report.Cross.Checked,
+			res.Report.Tables, res.Report.Columns, 0)
 	})
 
 	// The other half of the row's acceptance, on the same two stores.

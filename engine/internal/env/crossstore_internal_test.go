@@ -1,10 +1,12 @@
 package env
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/fidelity"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -84,4 +86,65 @@ func TestCrossStoreStores_TheUnnormalizedPrimaryIsStillPostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stores, 1)
 	require.Equal(t, "postgres", stores[0].Engine)
+}
+
+// observeCrossStore, which is what puts the line in the fidelity report.
+//
+// It had no test at all. Every other path into the cross store check has one,
+// and this one was reachable only by running the whole inventory against two
+// live stores, so the two branches that decide NOT to dial anything were
+// covered by nothing. They are the branches that matter most here: a report
+// must not start opening connections to whatever a manifest happens to name,
+// and the reason it did not look has to reach the reader, because an
+// unmeasured line with no reason is the report saying nothing twice.
+//
+// Neither case touches the session, which is why nil is safe to pass and why
+// that is worth saying out loud rather than leaving as a surprise.
+
+func TestObserveCrossStore_NoManifestIsAReasonRatherThanASilentBlank(t *testing.T) {
+	t.Parallel()
+	o := &Orchestrator{}
+	var obs fidelity.Observation
+	o.observeCrossStore(context.Background(), nil, &obs)
+
+	require.Nil(t, obs.CrossStore)
+	require.Contains(t, obs.CrossStoreReason, "no manifest",
+		"an unmeasured line with no reason tells a reader less than no line at all")
+}
+
+// Fewer than two stores naming a source is the ordinary case, and it must not
+// dial anything. Reading a schema means opening a connection, and a report
+// that started connecting to whatever a manifest named would be doing it on
+// behalf of somebody who asked for a report.
+func TestObserveCrossStore_FewerThanTwoSourcesIsNotAnAttempt(t *testing.T) {
+	t.Parallel()
+	m := analyticsManifest()
+	for i := range m.Datastores {
+		if m.Datastores[i].Name != schema.PrimaryDatastore {
+			m.Datastores[i].SourceURLEnv = ""
+		}
+	}
+	o := &Orchestrator{opts: Options{Manifest: m}}
+	var obs fidelity.Observation
+	// A nil session, which is the assertion as much as the reasons below: this
+	// branch returns before anything needs one, so a change that made it open
+	// the state database or a store would panic here rather than pass.
+	o.observeCrossStore(context.Background(), nil, &obs)
+
+	require.Nil(t, obs.CrossStore)
+	require.Contains(t, obs.CrossStoreReason, "source_url_env")
+	require.Contains(t, obs.CrossStoreReason, "af mask crossstore",
+		"the reason has to carry the command, or the reader is told it is unmeasured "+
+			"and not how to measure it")
+}
+
+// The control for the two above: two stores that DO name a source get past the
+// guard, so the guard is refusing on the count rather than on everything.
+func TestObserveCrossStore_TwoSourcesGetPastTheGuard(t *testing.T) {
+	t.Parallel()
+	o := &Orchestrator{opts: Options{Manifest: analyticsManifest()}}
+	var obs fidelity.Observation
+	require.Panics(t, func() { o.observeCrossStore(context.Background(), nil, &obs) },
+		"two stores name a source, so this must reach the work and use the session; "+
+			"a guard that refused here as well would make the reason above unfalsifiable")
 }
