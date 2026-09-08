@@ -75,7 +75,9 @@ cell "surface list: rename Cloud Spanner" TestGCP_CoversEveryServiceTheLaneOwes 
 cell "who ships it: mark gcs as Google's" TestGCP_RecordsWhichEmulatorsGoogleActuallyShips "$GCP" $'\tOfficial:     false,' $'\tOfficial:     true,'
 cell "every emulator names a licence: blank spanner holder" TestEveryBuiltInEmulatorNamesItsProject "$GCP" 'Holder: "Copyright Google LLC",' 'Holder: "",'
 cell "localstack is not Amazon's: mark it official" TestEveryBuiltInEmulatorNamesItsProject "$AWS" $'\tOfficial: false,' $'\tOfficial: true,'
-cell "the real licence: call the CLI proprietary" TestGCP_RecordsTheLicenceEachProjectActuallyShips "$GCP" $'\tName:   "Apache License 2.0",\n\tHolder: "Copyright Google LLC. /google-cloud-sdk/LICENSE' $'\tName:   "Proprietary",\n\tHolder: "Copyright Google LLC. /google-cloud-sdk/LICENSE'
+cell "the real licence: call the CLI proprietary" TestGCP_RecordsTheLicenceEachProjectActuallyShips "$GCP" 'var gcloudLicence = Licence{
+	Name: "Apache License 2.0",' 'var gcloudLicence = Licence{
+	Name: "Proprietary",'
 cell "bigtable admin host: drop it" TestGCP_AnswersForTheBigtableAdminHost "$GCP" 'Hosts:  []string{"bigtable.googleapis.com", "bigtableadmin.googleapis.com"},' 'Hosts:  []string{"bigtable.googleapis.com"},'
 cell "both addressing styles: drop virtual hosted" TestGCP_AnswersForBothCloudStorageAddressingStyles "$GCP" 'Hosts:  []string{"storage.googleapis.com", "*.storage.googleapis.com"},' 'Hosts:  []string{"storage.googleapis.com"},'
 cell "refuses outside the surface: claim www.googleapis.com" TestGCP_RefusesGoogleHostsOutsideTheSurface "$GCP" 'Hosts:  []string{"storage.googleapis.com", "*.storage.googleapis.com"},' 'Hosts:  []string{"storage.googleapis.com", "*.storage.googleapis.com", "www.googleapis.com"},'
