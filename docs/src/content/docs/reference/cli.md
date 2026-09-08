@@ -1219,8 +1219,10 @@ af mask crossstore [flags]
 ```
 
 ```
+# Reads both stores' catalogs and no rows, which is what makes it safe
+# to point at production.
 af mask crossstore
-af mask crossstore --format json
+af mask crossstore --branch main
 ```
 
 | Flag | Default | What it does |

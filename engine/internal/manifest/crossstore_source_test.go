@@ -139,3 +139,59 @@ datastores:
 	require.Contains(t, msg, "reads OTHER_DATABASE_URL and database.source_url_env names PRODUCTION_DATABASE_URL")
 	require.Contains(t, msg, "They are the same store")
 }
+
+// The primary's entry is MADE by normalization out of the database: block, so
+// a credential pasted into database.source_url_env is refused by the datastore
+// check even though nobody wrote a datastores entry. That is the only thing
+// refusing it: validate.go says elsewhere that nothing validates a manifest
+// against the JSON Schema at parse time, so the pattern the schema carries on
+// that field is documentation rather than a gate.
+//
+// What the message must not do is send them to a key that is not in their
+// file. Being told to look at datastores[1].source_url_env, about a value they
+// now have to treat as exposed, when what they wrote was database:, is the
+// worst possible minute to be given the wrong line.
+func TestParse_ACredentialInTheDatabaseBlockIsRefusedAndNamesThatBlock(t *testing.T) {
+	t.Parallel()
+	body := `
+version: 1
+name: shop
+services:
+  - name: web
+    port: 3000
+database:
+  source_url_env: postgres://user:hunter2@db.example.com:5432/shop
+`
+	msg := messages(problems(t, mustFail(t, body)))
+	require.Contains(t, msg, "The database: block gives",
+		"the refusal names the field the author wrote, not the entry normalization made")
+	require.NotContains(t, msg, "datastores[",
+		"a key that is not in their file is not where to send somebody handling an "+
+			"exposed credential")
+	require.NotContains(t, msg, "hunter2")
+	require.NotContains(t, msg, "db.example.com")
+	require.Contains(t, msg, "treat it as exposed")
+}
+
+// The control, so the branch above is choosing between two fields rather than
+// renaming every refusal. A declared store still gets its own path.
+func TestParse_ACredentialInADeclaredStoreStillNamesThatStore(t *testing.T) {
+	t.Parallel()
+	body := `
+version: 1
+name: shop
+services:
+  - name: web
+    port: 3000
+database:
+  source_url_env: PRODUCTION_DATABASE_URL
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: https://user:hunter2@clickhouse.example.com:8443/af
+`
+	msg := messages(problems(t, mustFail(t, body)))
+	require.Contains(t, msg, `The datastore "events" gives`)
+	require.NotContains(t, msg, "The database: block gives")
+}

@@ -2520,7 +2520,8 @@ A table the reader deliberately left out is named with the reason, because a
 share of the join keys it could see is a true answer to a smaller question when
 half a schema was dropped in silence. A ClickHouse view has no rows of its own
 and a ` + "`" + `Distributed` + "`" + ` engine is a pointer at another server, so neither is a store
-whose masking can be compared, and both are said rather than skipped.
+whose masking can be compared. Both are left out of the comparison and named in
+the report, rather than dropped in silence.
 
 Every store it could not read is named with the reason, and a store that names
 no ` + "`" + `source_url_env` + "`" + ` is named as never read at all. A run that reached one store
@@ -12896,8 +12897,10 @@ af mask crossstore [flags]
 ` + "`" + "`" + "`" + `
 
 ` + "`" + "`" + "`" + `
+# Reads both stores' catalogs and no rows, which is what makes it safe
+# to point at production.
 af mask crossstore
-af mask crossstore --format json
+af mask crossstore --branch main
 ` + "`" + "`" + "`" + `
 
 | Flag | Default | What it does |

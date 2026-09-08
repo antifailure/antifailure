@@ -566,7 +566,7 @@ func (v *validator) datastores(m *schema.Manifest) {
 		}
 
 		v.datastoreStance(p, d)
-		v.datastoreSource(p, d)
+		v.datastoreSource(p, d, m)
 
 		if d.Name == schema.PrimaryDatastore {
 			v.primaryDatastore(p, d, m)
@@ -639,15 +639,33 @@ func (v *validator) datastoreStance(p string, d schema.Datastore) {
 // That mistake writes a production credential into a file that is committed,
 // and a message saying only that the value is invalid would leave them looking
 // for a typo in a URL that should not be there at all.
-func (v *validator) datastoreSource(p string, d schema.Datastore) {
+//
+// IT NAMES THE FIELD THEY WROTE, not the field it read. The primary's entry is
+// made by normalization out of the database: block, so a credential pasted
+// into database.source_url_env arrives here as datastores[N].source_url_env,
+// which is a key that is not in their file. Being sent to look at something
+// they did not write, about a value they have to treat as exposed, is the
+// worst possible minute to be given the wrong line number.
+//
+// This is also the only check on that field. The JSON Schema carries the same
+// pattern, and validate.go says elsewhere why that is not a gate: nothing
+// validates a manifest against the schema at parse time. So the primary's
+// value reaching this function through the normalized entry is the thing
+// refusing it at all, rather than a duplicate of a check somewhere else.
+func (v *validator) datastoreSource(p string, d schema.Datastore, m *schema.Manifest) {
 	if d.SourceURLEnv == "" {
 		return
 	}
 	if validEnvName.MatchString(d.SourceURLEnv) {
 		return
 	}
-	v.add(p+".source_url_env",
-		fmt.Sprintf("The datastore %q gives %q as source_url_env, which is not the name of an environment variable.", orUnnamed(d.Name), redactURLish(d.SourceURLEnv)),
+	field, subject := p+".source_url_env", fmt.Sprintf("The datastore %q gives", orUnnamed(d.Name))
+	if d.Name == schema.PrimaryDatastore && m.Database != nil &&
+		d.SourceURLEnv == m.Database.SourceURLEnv {
+		field, subject = "database.source_url_env", "The database: block gives"
+	}
+	v.add(field,
+		fmt.Sprintf("%s %q as source_url_env, which is not the name of an environment variable.", subject, redactURLish(d.SourceURLEnv)),
 		"This field takes the NAME of a variable, such as CLICKHOUSE_URL, and never the connection string itself. The value is read on the machine that already holds it and is never written into the manifest. If a connection string was pasted here, treat it as exposed.")
 }
 
