@@ -1,6 +1,6 @@
 ---
 title: Air gapped
-description: An installation that reaches nothing outside your own network, with the list of what it refuses and the count from a real run.
+description: An installation that reaches nothing outside your own network, with the list of every call site it refuses and what is deliberately not covered.
 sidebar:
   order: 9
 ---
