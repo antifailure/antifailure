@@ -26,32 +26,42 @@ import (
 //	no               no                    PROVED
 //	no               yes                   REFUTED, for the DECLARATION
 //
+// The third row is not repeated here. db_selftest_test.go already carries it as
+// TestTheFlatBranchAffordanceIsHonestWhenItDeclaresCopyOnWrite, against the same
+// provider on the same harness, and a second child of half a gibibyte proving
+// the same sentence is cost with no evidence in it.
+//
 // The fourth row is the lock. A fixture whose storage turns out to share after
 // all has said something false about itself, and the suite fails it for that
 // rather than passing it on the reading, which is what stops the declaration
 // being an annotation somebody sets on every run in the wave.
 //
-// WHAT THESE RUN AT, said out loud because it is not the shipped configuration.
+// WHAT THESE RUN AT, and why the first answer to that was wrong.
 //
 // Each child builds two goldens and branches each of them several times, and
-// the shipped large size is half a gibibyte. Four children of that on a machine
-// with a load average of twenty four is hours, so these run at the floor the
-// behaviour will accept, which is 64 MiB against 4 MiB. That is a weaker
-// sentence than the same proof at the defaults and the suite says so itself:
-// every child prints the sizes it ran at, and prints the copy rate the
-// configuration was able to refuse. What is proved here is that the four cells
-// are reachable and distinguishable, which does not depend on the size.
-
-// The sizes these children run at, and the floors they sit on.
+// the shipped large size is half a gibibyte, so the obvious economy is to run
+// these at the floor the behaviour will accept, 64 MiB against 4 MiB. That was
+// done, it passed on the machine it was written on, and CI refused it.
 //
-// 64 MiB is exactly MinCopyOnWriteLargeBytes, and 4 MiB is exactly a sixteenth
-// of it, which is MinCopyOnWriteRatio. A child configured any smaller is
-// refused by copyOnWriteSettings, which is the behaviour's own answer to a run
-// trying to buy a cheap pass, so these sit on the boundary rather than under it.
-const (
-	selftestSmallBytes = "4194304"
-	selftestLargeBytes = "67108864"
-)
+// CI's storage copied the 60 MiB of extra data in 163ms, inside the 250ms the
+// allowance gives to noise. So nothing was distinguishable: the copying
+// provider was not refused, because its copy was invisible, and the fixture
+// that declared its storage copies was refused, because on that hardware at
+// that size the storage did not measurably copy. Both reds were the instrument
+// working. cow.go says this in advance, about the size rather than about these
+// tests: smaller lets a real copy pass as shared storage on a fast disk, and
+// the default is the smallest size at which a copy running at the speed of the
+// fastest storage that exists is still refused.
+//
+// So these run at the SHIPPED sizes and set no override. That is the same
+// argument db_selftest_test.go already makes for the fault table beside it: a
+// self test run at sizes the suite does not ship proves the faults are
+// catchable at SOME configuration, which is a weaker sentence than anybody
+// reading a green would assume it to be. The economy was buying exactly that
+// weaker sentence, and paying for it with a proof that did not hold on the one
+// machine whose verdict blocks a merge.
+//
+// It costs three children of half a gibibyte. That is the price of the claim.
 
 // theHarnessLimit is the sentence a Wave 2 fixture would write.
 //
@@ -63,14 +73,6 @@ const theHarnessLimit = "this fixture is a fake cloud control plane over one loc
 	"CREATE DATABASE ... TEMPLATE, which copies files"
 
 const cowBehavior = "CopyOnWrite_BranchTimeMatchesTheDeclaration"
-
-// affordableCopyOnWrite points the children at the floor rather than the
-// shipped sizes, and at whichever Postgres the run was given.
-func affordableCopyOnWrite(t *testing.T) {
-	t.Helper()
-	t.Setenv("AF_CONFORMANCE_COW_SMALL_BYTES", selftestSmallBytes)
-	t.Setenv("AF_CONFORMANCE_COW_LARGE_BYTES", selftestLargeBytes)
-}
 
 func requireCopyOnWritePostgres(t *testing.T) {
 	t.Helper()
@@ -89,7 +91,6 @@ func requireCopyOnWritePostgres(t *testing.T) {
 // whole database wave was held for into one that cannot say no.
 func TestACopyingProviderIsStillRefusedWhenNothingDeclaredTheHarness(t *testing.T) {
 	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
 
 	passed, out := runChild(t, child{
 		backend: onPG, behavior: cowBehavior, fault: copyOnWriteThatCopies(),
@@ -108,27 +109,6 @@ func TestACopyingProviderIsStillRefusedWhenNothingDeclaredTheHarness(t *testing.
 	}
 }
 
-// TestAnHonestFlatProviderStillPasses is the second direction.
-//
-// The provider that really does branch in constant time, declaring so, on a
-// harness that can exhibit it, still passes and does not touch the third
-// verdict. Without this the red above would be attributable to the addition
-// rather than to the fault.
-func TestAnHonestFlatProviderStillPasses(t *testing.T) {
-	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
-
-	passed, out := runChild(t, child{backend: onPG, behavior: cowBehavior, flatBranch: true})
-	if !passed {
-		t.Fatalf("the suite FAILED a provider whose branch time really is constant and "+
-			"which declares so. The pass side of the assertion is gone.\n%s", out)
-	}
-	if strings.Contains(out, "UNPROVEN") || strings.Contains(out, "NOT PROVED BY THIS RUN") {
-		t.Fatalf("a run with nothing declared about the harness reached the third verdict, "+
-			"so the verdict is not gated on the declaration at all.\n%s", out)
-	}
-}
-
 // TestTheTemplateCopyHarnessReportsUnproven is the third direction, and it is
 // the one this lane exists for.
 //
@@ -138,7 +118,6 @@ func TestAnHonestFlatProviderStillPasses(t *testing.T) {
 // somebody sees it.
 func TestTheTemplateCopyHarnessReportsUnproven(t *testing.T) {
 	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
 
 	passed, out := runChild(t, child{
 		backend: onPG, behavior: cowBehavior,
@@ -194,7 +173,6 @@ func TestTheTemplateCopyHarnessReportsUnproven(t *testing.T) {
 // never be contradicted.
 func TestAFixtureThatDeclaresALimitItDoesNotHaveIsRefused(t *testing.T) {
 	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
 
 	passed, out := runChild(t, child{
 		backend: onPG, behavior: cowBehavior,
@@ -222,7 +200,6 @@ func TestAFixtureThatDeclaresALimitItDoesNotHaveIsRefused(t *testing.T) {
 // from a provider that clones to one that restores from a snapshot.
 func TestTheHarnessLimitIsRefusedOnAProviderThatDeclaresCopyOnWriteFalse(t *testing.T) {
 	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
 
 	// The plain Postgres backed provider declares CopyOnWrite false, honestly,
 	// because it copies.
@@ -253,7 +230,6 @@ func TestTheHarnessLimitIsRefusedOnAProviderThatDeclaresCopyOnWriteFalse(t *test
 // TestAShortHarnessReasonIsRefused is the second refusal.
 func TestAShortHarnessReasonIsRefused(t *testing.T) {
 	requireCopyOnWritePostgres(t)
-	affordableCopyOnWrite(t)
 
 	passed, out := runChild(t, child{
 		backend: onPG, behavior: cowBehavior,
