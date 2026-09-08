@@ -20152,7 +20152,7 @@ suite that decides whether one of them is finished is
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `default` + "`" + ` | Any mode: ` + "`" + `block` + "`" + ` (default), ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + ` or ` + "`" + `synth` + "`" + `. |
+| ` + "`" + `default` + "`" + ` | Any mode: ` + "`" + `block` + "`" + ` (default), ` + "`" + `allow` + "`" + `, ` + "`" + `capture` + "`" + `, ` + "`" + `mock` + "`" + `, ` + "`" + `sandbox` + "`" + ` or ` + "`" + `synth` + "`" + `. ` + "`" + `emulate` + "`" + ` is refused here, because it answers from an emulator named on the rule and a default names no rule. |
 | ` + "`" + `allow_ipv6` + "`" + ` | Off by default. |
 | ` + "`" + `rules` + "`" + ` | See [egress](/docs/concepts/egress). |
 

@@ -678,11 +678,12 @@
             "allow",
             "capture",
             "mock",
+            "emulate",
             "sandbox",
             "synth"
           ],
           "default": "block",
-          "description": "What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer."
+          "description": "What happens to a host with no rule. Changing this away from block is a deliberate act with a real cost: it is how a preview environment emails a real customer. emulate is listed here and is refused as a default, because the emulator is named on a rule and a default names no rule; the refusal says so, which a missing enum value could not."
         },
         "allow_ipv6": {
           "type": "boolean",
