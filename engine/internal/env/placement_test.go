@@ -246,3 +246,14 @@ func TestRuntimeIdentity_FallsBackToTheRuntimeItActuallyBuilt(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close() })
 	require.Equal(t, "local", o.runtimeIdentity(context.Background(), &session{runtime: rt}))
 }
+
+func TestPlacement_RefusesAManifestWithNoRuntimeBlockRatherThanCrashing(t *testing.T) {
+	t.Parallel()
+	// Normalization fills the block in on anything parsed, so this is the
+	// caller that built one in memory and skipped it. A refusal rather than a
+	// nil dereference halfway through bringing an environment up.
+	o := placed(t, nil)
+	_, err := o.placement(licensed())
+	require.ErrorIs(t, err, aferrors.Coded(aferrors.AFSCH003))
+	require.Contains(t, err.Error(), "no runtime block")
+}

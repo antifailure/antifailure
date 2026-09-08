@@ -880,6 +880,14 @@ func (o *Orchestrator) newRuntime(ctx context.Context) (provider.Runtime, error)
 // satisfies the declared requirement.
 func (o *Orchestrator) placement(ctx context.Context) (schema.RuntimeTarget, error) {
 	cfg := o.opts.Manifest.Runtime
+	// Every caller checks this before asking, and it is checked again here
+	// because the alternative to a refusal is a nil dereference in the middle
+	// of bringing an environment up. Normalization fills the block in on any
+	// parsed manifest, so this is the in-memory caller that skipped it.
+	if cfg == nil {
+		return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFSCH003,
+			"detail", "this manifest has no runtime block, so it declares no targets")
+	}
 
 	// The licence gate, at the only point either path can reach a target, and
 	// on the count rather than on the block. One target is a label on the
