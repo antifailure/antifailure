@@ -315,7 +315,8 @@ func TestTheCommitsRequestStartsAtTheCommitItWasGiven(t *testing.T) {
 	if _, err := c.commits("09078be0", 4); err != nil {
 		t.Fatalf("reading commits: %v", err)
 	}
-	for _, want := range []string{"sha=09078be0", "per_page=4"} {
+	// per_page is the window widened for the first parent walk, not the window.
+	for _, want := range []string{"sha=09078be0", "per_page=16"} {
 		if !strings.Contains(asked[0], want) {
 			t.Errorf("the commits request does not carry %q: %s", want, asked[0])
 		}
@@ -333,5 +334,118 @@ func TestTheCancelledRefusalNamesThePendingCause(t *testing.T) {
 	if !strings.Contains(findings[0].Why, "PENDING") {
 		t.Errorf("a cancelled run refuses without naming the cause this repository has actually "+
 			"met, so the reader goes looking for a person who pressed a button: %q", findings[0].Why)
+	}
+}
+
+// A MERGE COMMIT ON MAIN MUST NOT DRAG THE MERGED BRANCH INTO THE WINDOW.
+// `/commits?sha=main` is `git log`, not `git log --first-parent`, so it returns
+// every commit reachable from the branch in date order. The branch's own
+// commits were never pushed to main, so no push run on main ever judged them,
+// and without this walk each one is reported as a commit nothing ever checked.
+// Every one of those refusals is false, and a watchdog that cries wolf gets
+// muted, which puts the real hole back in the dark.
+//
+// This is not hypothetical here: main's first 200 reachable commits already
+// differ from its first 200 first parents.
+func TestAMergedBranchesCommitsAreNotOnMainsLine(t *testing.T) {
+	merge := commitAt("mmmmmmmm", 1*time.Hour)
+	merge.Parents = []struct {
+		SHA string `json:"sha"`
+	}{{SHA: "pppppppp"}, {SHA: "bbbbbbbb"}}
+
+	onMain := commitAt("pppppppp", 3*time.Hour)
+	onMain.Parents = []struct {
+		SHA string `json:"sha"`
+	}{{SHA: "oooooooo"}}
+
+	// The merged branch's own commit. Newer than `pppppppp`, so a date ordered
+	// list puts it between the two and a walk that trusted the order would take
+	// it. Nothing on main ever ran CI on it.
+	onBranch := commitAt("bbbbbbbb", 2*time.Hour)
+
+	older := commitAt("oooooooo", 4*time.Hour)
+
+	fetched := []commit{merge, onBranch, onMain, older}
+	got := firstParents(fetched, 3)
+
+	var shas []string
+	for _, c := range got {
+		shas = append(shas, c.SHA)
+	}
+	want := []string{"mmmmmmmm", "pppppppp", "oooooooo"}
+	if len(shas) != len(want) {
+		t.Fatalf("the first parent walk returned %v, want %v", shas, want)
+	}
+	for i := range want {
+		if shas[i] != want[i] {
+			t.Fatalf("the first parent walk returned %v, want %v", shas, want)
+		}
+	}
+	for _, s := range shas {
+		if s == "bbbbbbbb" {
+			t.Error("a merged branch's own commit is in the window, so this would refuse main " +
+				"over a commit that was never pushed to it")
+		}
+	}
+}
+
+// The walk stops at the edge of what was fetched rather than guessing. Judging
+// fewer commits than asked for is a smaller lie than judging a commit that is
+// not on this branch's line.
+func TestTheWalkStopsAtTheEdgeOfWhatWasFetched(t *testing.T) {
+	head := commitAt("aaaaaaaa", 1*time.Hour)
+	head.Parents = []struct {
+		SHA string `json:"sha"`
+	}{{SHA: "not_in_this_page"}}
+
+	got := firstParents([]commit{head}, 20)
+	if len(got) != 1 {
+		t.Fatalf("the walk returned %d commits from a page holding one reachable commit", len(got))
+	}
+}
+
+// The whole window is judged when the line is linear, which is what main looks
+// like today. Without this the test above is satisfied by a walk that returns
+// one commit and stops.
+func TestALinearBranchYieldsTheWholeWindow(t *testing.T) {
+	link := func(sha, parent string, ago time.Duration) commit {
+		c := commitAt(sha, ago)
+		c.Parents = []struct {
+			SHA string `json:"sha"`
+		}{{SHA: parent}}
+		return c
+	}
+	fetched := []commit{
+		link("aaaaaaaa", "bbbbbbbb", 1*time.Hour),
+		link("bbbbbbbb", "cccccccc", 2*time.Hour),
+		link("cccccccc", "dddddddd", 3*time.Hour),
+		link("dddddddd", "eeeeeeee", 4*time.Hour),
+	}
+	if got := firstParents(fetched, 4); len(got) != 4 {
+		t.Fatalf("a linear branch of four yielded %d commits", len(got))
+	}
+}
+
+// The commits request asks for more than the window, because the list is date
+// ordered and the walk then reduces it. Asking for exactly the window would
+// leave the walk short by however many off line commits the response carried.
+func TestTheCommitsRequestFetchesWiderThanTheWindow(t *testing.T) {
+	var asked []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.RequestURI())
+		fmt.Fprint(w, `[]`)
+	}))
+	defer server.Close()
+
+	c := &api{base: server.URL, repo: "antifailure/antifailure", token: "t", http: server.Client()}
+	if _, err := c.commits("main", 20); err != nil {
+		t.Fatalf("reading commits: %v", err)
+	}
+	if strings.Contains(asked[0], "per_page=20") {
+		t.Errorf("the commits request asks for exactly the window, so a merge commit in the "+
+			"response leaves the first parent walk short: %s", asked[0])
+	}
+	if !strings.Contains(asked[0], "per_page=80") {
+		t.Errorf("the commits request does not fetch wider than the window: %s", asked[0])
 	}
 }

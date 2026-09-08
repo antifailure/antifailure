@@ -82,9 +82,16 @@ const (
 	// than adding one. When it does not reach, the answer is `could not look`
 	// rather than a quiet pass.
 	runsPerPage = 100
+	// The commit list is fetched wider than the window and then walked down the
+	// first parents, so this is the ceiling on that widening rather than the
+	// number of commits judged.
+	commitsPerPage = 100
 )
 
 // commit is the part of a commit this reasons about.
+//
+// Parents is here for one reason, and it is a correctness one rather than a
+// completeness one. See firstParents.
 type commit struct {
 	SHA    string `json:"sha"`
 	Commit struct {
@@ -92,6 +99,53 @@ type commit struct {
 			Date time.Time `json:"date"`
 		} `json:"committer"`
 	} `json:"commit"`
+	Parents []struct {
+		SHA string `json:"sha"`
+	} `json:"parents"`
+}
+
+// firstParents reduces a commit list to the branch's own line of descent,
+// newest first, and stops at `window` or at the edge of what was fetched.
+//
+// WHY THIS IS NOT TIDYING. `/repos/{repo}/commits?sha=main` is `git log`, not
+// `git log --first-parent`: it returns every commit REACHABLE from the branch,
+// in date order, so a real merge commit on main drags the whole merged
+// branch's history into the window. Those commits were never pushed to main,
+// so no push run on main ever judged them, and this command would report each
+// one as a commit nothing ever checked. Every one of those refusals would be
+// false, and a watchdog that cries wolf is the one thing worse here than no
+// watchdog: it gets muted, and then the real hole is silent again.
+//
+// This repository squash merges through `just merge`, so main's top is linear
+// today and this changes nothing about it. It is not linear further down: the
+// first 200 commits reachable from main differ from its first 200 first
+// parents, so the shape this guards against is already in this history rather
+// than hypothetical.
+func firstParents(commits []commit, window int) []commit {
+	if len(commits) == 0 {
+		return nil
+	}
+	bySHA := make(map[string]commit, len(commits))
+	for _, c := range commits {
+		bySHA[c.SHA] = c
+	}
+	out := make([]commit, 0, window)
+	// The API returns the branch head first, and that is the only commit this
+	// takes on trust from the ordering. Everything after it is reached by
+	// following the first parent, which is a link in the data rather than a
+	// position in a list.
+	cur, ok := bySHA[commits[0].SHA]
+	for ok && len(out) < window {
+		out = append(out, cur)
+		if len(cur.Parents) == 0 {
+			break
+		}
+		// Past the edge of what was fetched, this stops rather than guessing.
+		// Judging fewer commits than asked for is a smaller lie than judging a
+		// commit that is not on this branch's line at all.
+		cur, ok = bySHA[cur.Parents[0].SHA]
+	}
+	return out
 }
 
 // run is the part of a workflow run this reasons about.
@@ -387,8 +441,16 @@ func (a *api) get(path string, into any) error {
 // refusing, and a gate that has never been seen to pass is not a gate anybody
 // should trust.
 func (a *api) commits(from string, window int) ([]commit, error) {
+	// More than the window, because the list is date ordered and firstParents
+	// then walks it. A merge commit on the line puts commits in this response
+	// that are not on it, so asking for exactly `window` would leave the walk
+	// short by however many of them there were.
+	fetch := window * 4
+	if fetch > commitsPerPage {
+		fetch = commitsPerPage
+	}
 	var out []commit
-	err := a.get(fmt.Sprintf("/repos/%s/commits?sha=%s&per_page=%d", a.repo, from, window), &out)
+	err := a.get(fmt.Sprintf("/repos/%s/commits?sha=%s&per_page=%d", a.repo, from, fetch), &out)
 	return out, err
 }
 
@@ -457,10 +519,11 @@ func main() {
 	if start == "" {
 		start = *branch
 	}
-	commits, err := c.commits(start, *window)
+	fetched, err := c.commits(start, *window)
 	if err != nil {
 		fail("reading the commits at %s: %v", start, err)
 	}
+	commits := firstParents(fetched, *window)
 	runs, truncated, err := c.runs(*branch, *workflow)
 	if err != nil {
 		fail("reading the runs on %s: %v", *branch, err)
