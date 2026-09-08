@@ -78,6 +78,18 @@ type Options struct {
 	// CopyOnWriteSamples is how many branches are timed per size. Zero uses
 	// the default.
 	CopyOnWriteSamples int
+	// CopyOnWriteTimeout bounds CopyOnWrite_BranchTimeMatchesTheDeclaration
+	// alone. Zero uses DefaultCopyOnWriteTimeout.
+	//
+	// A separate number rather than the shared one, because that behaviour is
+	// structurally more expensive than every other in the suite by a wide
+	// margin: it builds two goldens, one of them a gibibyte, and branches each
+	// of them several times, where the rest build one small golden and branch
+	// it once or twice. A single timeout tuned for the others is too short for
+	// this one, and one tuned for this one stops a hung call anywhere else
+	// failing the behaviour rather than the job, which is what the timeout is
+	// for.
+	CopyOnWriteTimeout time.Duration
 }
 
 // DefaultSeedSQL is the schema every conformance run works against.
@@ -187,7 +199,17 @@ func RunDatabase(t *testing.T, factory Factory, opts Options) {
 				// make.
 				t.Skipf("skipped: %s does not declare %s", nameOf(probe), reason)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+			limit := opts.Timeout
+			if b.Name == "CopyOnWrite_BranchTimeMatchesTheDeclaration" {
+				limit = opts.CopyOnWriteTimeout
+				if limit <= 0 {
+					limit = DefaultCopyOnWriteTimeout
+				}
+				if limit < opts.Timeout {
+					limit = opts.Timeout
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), limit)
 			defer cancel()
 			runBehavior(ctx, t, b.Name, factory, opts, created)
 		})

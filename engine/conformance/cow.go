@@ -101,6 +101,17 @@ const (
 	DefaultCopyOnWriteLargeBytes int64 = 1 << 30
 	// DefaultCopyOnWriteSamples is how many branches are timed per size.
 	DefaultCopyOnWriteSamples = 3
+	// DefaultCopyOnWriteTimeout bounds this behaviour alone.
+	//
+	// Half an hour, which is long by the standards of every other behaviour in
+	// the suite and is what the work actually is on the slowest provider that
+	// runs it. The docker provider's golden is a committed IMAGE, so a
+	// gibibyte of ballast is a gibibyte written into a container and then
+	// tarred into a layer, twice, before any branch is timed at all. A
+	// behaviour bounded at the suite's usual few minutes would report that
+	// provider as hung rather than as slow, and the difference matters: one is
+	// a defect and the other is the cost of the measurement.
+	DefaultCopyOnWriteTimeout = 30 * time.Minute
 
 	// MinCopyOnWriteRatio is the least the two sizes may differ by.
 	//
