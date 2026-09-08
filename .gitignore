@@ -157,6 +157,7 @@ runner/artifacts/
 /licensegen
 /lintcheck
 /lintgen
+/mainverdict
 /manifestcheck
 /modecheck
 /motioncheck

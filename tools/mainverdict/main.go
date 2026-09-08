@@ -546,16 +546,16 @@ func main() {
 }
 
 func report(w io.Writer, repo, branch string, worst answer, findings []finding, why string) {
-	fmt.Fprintf(w, "mainverdict: %s on %s, %d commits read\n\n", repo, branch, len(findings))
+	_, _ = fmt.Fprintf(w, "mainverdict: %s on %s, %d commits read\n\n", repo, branch, len(findings))
 	for _, f := range findings {
 		mark := map[answer]string{pass: "ok    ", waiting: "wait  ", refuse: "NO    ", couldNotLook: "UNREAD"}[f.Answer]
-		fmt.Fprintf(w, "  %s %s  %s", mark, f.SHA[:min(8, len(f.SHA))], f.Why)
+		_, _ = fmt.Fprintf(w, "  %s %s  %s", mark, f.SHA[:min(8, len(f.SHA))], f.Why)
 		if f.URL != "" {
-			fmt.Fprintf(w, " %s", f.URL)
+			_, _ = fmt.Fprintf(w, " %s", f.URL)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "\nmainverdict: %s. %s\n", worst, why)
+	_, _ = fmt.Fprintf(w, "\nmainverdict: %s. %s\n", worst, why)
 }
 
 // summarise writes to the job summary when there is one. Best effort on
@@ -570,13 +570,13 @@ func summarise(branch string, worst answer, findings []finding, why string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	fmt.Fprintf(f, "### `%s`: %s\n\n%s\n\n", branch, worst, why)
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "### `%s`: %s\n\n%s\n\n", branch, worst, why)
 	for _, x := range findings {
 		if x.Answer == pass {
 			continue
 		}
-		fmt.Fprintf(f, "- `%s` %s %s\n", x.SHA[:min(8, len(x.SHA))], x.Why, x.URL)
+		_, _ = fmt.Fprintf(f, "- `%s` %s %s\n", x.SHA[:min(8, len(x.SHA))], x.Why, x.URL)
 	}
 }
 
