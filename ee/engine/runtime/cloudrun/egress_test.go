@@ -554,6 +554,65 @@ func TestTheSubnetBelongsToTheEnvironment(t *testing.T) {
 	}
 }
 
+// TestTheFourEscapeAttemptsAreAnsweredOneByOne is the lane's acceptance
+// evidence, kept in the repository rather than only in a report.
+//
+// The wave this lane belongs to asks for conformance.RunRuntime green and the
+// four escape attempts quoted individually as refused. RunRuntime takes a
+// factory that produces a runtime and this package produces none, so it cannot
+// run at all and no packet has been observed. What can be said without a
+// project is which of the four behaviours the generated configuration would
+// refuse, and the answer is not four, which is the whole reason this lane ships
+// a refusal.
+//
+// The behaviour names are the ones in engine/conformance/runtime.go, so a
+// rename there and a quiet drift here cannot both happen without this test
+// noticing that a path id has gone.
+func TestTheFourEscapeAttemptsAreAnsweredOneByOne(t *testing.T) {
+	byID := verdictsByID(cloudrun.Evaluate(referencePlan()))
+	for _, c := range []struct {
+		behaviour string
+		path      string
+		want      cloudrun.Verdict
+		note      string
+	}{
+		{
+			behaviour: "Egress_CannotBeBypassedByAddress",
+			path:      "any-public-destination",
+			want:      cloudrun.Closed,
+			note:      "refused by the configuration, and by no packet anybody watched",
+		},
+		{
+			behaviour: "Egress_CannotBeBypassedByUDP",
+			path:      "any-public-destination",
+			want:      cloudrun.Closed,
+			note: "the same rule refuses a query to a public resolver, which is why the two are " +
+				"one path here and two on AWS",
+		},
+		{
+			behaviour: "Egress_CannotReachTheMetadataEndpoint",
+			path:      "the-instance-metadata-server",
+			want:      cloudrun.Open,
+			note: "this one cannot be refused on Cloud Run at all, and it is the behaviour the " +
+				"Kubernetes runtime earns its existence by refusing",
+		},
+		{
+			behaviour: "Egress_NamesDoNotCrossEnvironments",
+			path:      "a-neighbouring-environments-service",
+			want:      cloudrun.Closed,
+			note: "closed by IAM rather than by resolution: every service name resolves into the " +
+				"restricted range, including a neighbour's, and the front end refuses the call " +
+				"rather than the name failing to resolve",
+		},
+	} {
+		require.Equal(t, c.want, byID[c.path],
+			"%s maps to %s, which said %q. %s", c.behaviour, c.path, byID[c.path], c.note)
+	}
+	require.NotEqual(t, cloudrun.Closed, byID["the-resolvers-recursion"],
+		"there is no conformance behaviour for a query through the network's own resolver, "+
+			"because on Kubernetes a NetworkPolicy closes it along with everything else")
+}
+
 func referenceEnv() func(string) string {
 	env := map[string]string{
 		cloudrun.EnvProject:     "antifailure-twins",

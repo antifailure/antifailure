@@ -96,8 +96,11 @@ func Paths() []Path {
 			Name: "the same connection over IPv6, which a firewall rule written in IPv4 does not cover",
 			Why: "A firewall rule names destination ranges, and a range is of one IP version. A " +
 				"network audited in IPv4 and read as contained is wide open over IPv6 the moment " +
-				"the subnet is dual stack, and Direct VPC egress supports dual stack subnets: the " +
-				"instance metadata server publishes an IPv6 address for an instance on one.",
+				"the subnet is dual stack. Google states that dual stack subnets 'let your Cloud " +
+				"Run resources send IPv4 and IPv6 traffic to a VPC network with Direct VPC " +
+				"egress', that an existing IPv4 only subnet can be changed into one, and that a " +
+				"subnet's IPv6 access type may be external, which is a route to the internet " +
+				"that an IPv4 reading of this network calls contained.",
 			ClosedBy: "an IPv4 only subnet with no internal IPv6 range, and a deny all egress rule " +
 				"for every IPv6 destination as well as every IPv4 one",
 			Check: checkPublicIPv6,
