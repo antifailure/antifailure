@@ -1408,6 +1408,13 @@ var registryTagged = regexp.MustCompile(
 // five characters `image:` reads as the field.
 var imageKey = regexp.MustCompile(`(?:^|\s)image:\s*(\S+)`)
 
+// matrixRef matches a `${{ matrix.key }}` interpolation, and matrixEntry the
+// `key: value` of one matrix row. Together they are the only thing that can
+// see an image a matrix CONSUMES rather than builds; see the consumed set in
+// unpinnedImages for why that distinction needs two patterns.
+var matrixRef = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_.-]+)\s*\}\}`)
+var matrixEntry = regexp.MustCompile(`^-?\s*([A-Za-z0-9_.-]+):\s*(\S+)`)
+
 // taggedImage reports whether tok, as it appears in a shell command, names a
 // container image by tag. It is deliberately narrow: the tokens that surround
 // a real `docker run` are ports, environment assignments and flags, and a
@@ -1505,11 +1512,78 @@ func unpinnedImages(name, body string) []imageFinding {
 		joined = append(joined, logical{start, text})
 	}
 
+	// The indentation of the `matrix:` block we are inside, or -1 for none.
+	//
+	// WHY THIS EXISTS. `image:` under `strategy.matrix` is not an image
+	// reference at all, it is a matrix VARIABLE that happens to be called
+	// image, and control-plane-image.yml uses it to name the two images that
+	// workflow BUILDS AND PUSHES. There is no digest to pin them to, because
+	// they do not exist until the job runs. This gate landed in #340 and the
+	// second matrix row landed in #339; each was green alone and main went red
+	// on the pair, which is why the collision is worth naming here rather than
+	// just fixing.
+	//
+	// NARROWED BY CONTEXT, NOT BY SHAPE, and the difference is the whole of
+	// it. The tempting fix is to skip any value with no registry, tag or
+	// digest, since `control-plane` has none. That would also skip a bare
+	// `image: postgres` in a services block, which resolves to :latest and is
+	// exactly what this gate exists to refuse. A hole opened while closing a
+	// false positive is worse than the false positive. TestPinningIgnoresA
+	// BuildMatrixAndStillRefusesABareName pins both directions.
+	//
+	// AND THE MIRROR OF IT, which is why `consumed` exists. A matrix row can
+	// just as easily name an image the workflow PULLS, with a services block
+	// reading it back as `image: ${{ matrix.pgversion }}`. That is the
+	// ordinary way to matrix a database version, and it would be invisible
+	// from both ends: skipped here for sitting in a matrix, and skipped below
+	// for being an expression. So any matrix key an `image:` field
+	// interpolates is checked in the matrix rows that carry it, and only those
+	// keys are. The tree holds no such reference at all today, which is the
+	// only reason this was a hole and never a live gap.
+	consumed := map[string]bool{}
+	if yaml {
+		for _, l := range joined {
+			// From the start of the value to the end of the line, not the
+			// `\S+` the field pattern captures: `${{ matrix.pgversion }}`
+			// carries spaces, so the capture stops at `${{` and the key
+			// this is looking for is in the part that got dropped.
+			for _, m := range imageKey.FindAllStringSubmatchIndex(l.text, -1) {
+				for _, r := range matrixRef.FindAllStringSubmatch(l.text[m[2]:], -1) {
+					consumed[r[1]] = true
+				}
+			}
+		}
+	}
+
+	matrixIndent := -1
+
 	for _, l := range joined {
+		if yaml {
+			indent := len(l.text) - len(strings.TrimLeft(l.text, " "))
+			trimmed := strings.TrimSpace(l.text)
+			if matrixIndent >= 0 && trimmed != "" && indent <= matrixIndent {
+				matrixIndent = -1 // The block ended.
+			}
+			if matrixIndent < 0 && (trimmed == "matrix:" || strings.HasPrefix(trimmed, "matrix:")) {
+				matrixIndent = indent
+			}
+		}
+
+		// 1a. A matrix row naming an image some `image:` field reads back.
+		// The row is the only place that reference is written literally, so it
+		// is the only place it can be pinned.
+		if yaml && matrixIndent >= 0 {
+			if m := matrixEntry.FindStringSubmatch(strings.TrimSpace(l.text)); m != nil && consumed[m[1]] {
+				if ref := m[2]; !strings.Contains(ref, "@sha256:") && !strings.Contains(ref, "$") {
+					out = append(out, imageFinding{l.line, ref, "a matrix row an image: field reads names a tag"})
+				}
+			}
+		}
+
 		// 1. A YAML image field. The workflows write one in a `services:`
 		// block and control-plane-image.yml writes one inside a Deployment it
 		// pipes to kubectl, and both are the same field.
-		if yaml {
+		if yaml && matrixIndent < 0 {
 			for _, m := range imageKey.FindAllStringSubmatch(l.text, -1) {
 				ref := m[1]
 				if strings.Contains(ref, "$") {
@@ -1630,6 +1704,94 @@ func TestEveryContainerImageIsPinnedToADigest(t *testing.T) {
 	}
 	if checked < 25 {
 		t.Fatalf("only %d files were read; the scan has probably stopped matching", checked)
+	}
+}
+
+// A build matrix row is not an image reference, and a bare name in a services
+// block still is.
+//
+// BOTH DIRECTIONS, because only the second one proves the narrowing did not
+// open a hole. main went red when the gate from #340 met the matrix row from
+// #339: `image: control-plane` under `strategy.matrix.include` names an image
+// that workflow BUILDS, so there is no digest in existence to pin it to. The
+// obvious repair, skipping any value with no registry, tag or digest, would
+// also have skipped `image: postgres` in a services block, which resolves to
+// :latest and is the exact thing this gate exists to refuse. So the matcher
+// was narrowed by CONTEXT, and the third case below is what says so.
+func TestPinningIgnoresABuildMatrixAndStillRefusesABareName(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		yaml    string
+		refused bool
+	}{
+		{
+			name: "a matrix row naming an image the workflow builds",
+			yaml: "jobs:\n  build:\n    strategy:\n      matrix:\n        include:\n" +
+				"          - edition: community\n            image: control-plane\n",
+			refused: false,
+		},
+		{
+			name: "a services image pinned to a digest",
+			yaml: "jobs:\n  test:\n    services:\n      db:\n" +
+				"        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73\n",
+			refused: false,
+		},
+		{
+			name:    "a services image with a bare name, which means latest",
+			yaml:    "jobs:\n  test:\n    services:\n      db:\n        image: postgres\n",
+			refused: true,
+		},
+		{
+			name:    "a services image naming a tag",
+			yaml:    "jobs:\n  test:\n    services:\n      db:\n        image: postgres:17-alpine\n",
+			refused: true,
+		},
+		{
+			name: "an image key after the matrix block has ended",
+			yaml: "jobs:\n  build:\n    strategy:\n      matrix:\n        include:\n" +
+				"          - image: control-plane\n    services:\n      db:\n        image: postgres:17-alpine\n",
+			refused: true,
+		},
+		{
+			// The mirror of the first case, and the reason the exemption is
+			// not simply "a matrix row is never an image". Here the row names
+			// something the workflow PULLS, and a services block reads it
+			// back. Nothing else in this file can see it: the row is exempt
+			// for being in a matrix and the services image is exempt for
+			// being an expression.
+			name: "a matrix row an image field reads back, naming a tag",
+			yaml: "jobs:\n  test:\n    strategy:\n      matrix:\n        include:\n" +
+				"          - pgversion: postgres:17-alpine\n" +
+				"    services:\n      db:\n        image: ${{ matrix.pgversion }}\n",
+			refused: true,
+		},
+		{
+			name: "the same row, pinned",
+			yaml: "jobs:\n  test:\n    strategy:\n      matrix:\n        include:\n" +
+				"          - pgversion: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73\n" +
+				"    services:\n      db:\n        image: ${{ matrix.pgversion }}\n",
+			refused: false,
+		},
+		{
+			// Only the keys an image: field actually interpolates are read.
+			// A matrix carrying an unrelated key beside the built image must
+			// stay exempt, or the first case regresses by another route.
+			name: "a matrix key no image field reads",
+			yaml: "jobs:\n  build:\n    strategy:\n      matrix:\n        include:\n" +
+				"          - edition: community\n            image: control-plane\n" +
+				"            runner: ubuntu-24.04\n",
+			refused: false,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			found := unpinnedImages("example.yml", c.yaml)
+			if c.refused && len(found) == 0 {
+				t.Fatalf("this should have been refused and was not: %q", c.yaml)
+			}
+			if !c.refused && len(found) != 0 {
+				t.Fatalf("this should have been allowed and was refused as %q: %q", found[0].ref, c.yaml)
+			}
+		})
 	}
 }
 
