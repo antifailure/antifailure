@@ -401,10 +401,21 @@ const ProbeContainerName = "af-containment-probe"
 // with.
 //
 // The Kubernetes runtime earns its existence by running a pod that tries to
-// escape before any application image starts. ECS has no field for "run this
-// first and stop if it fails", so it is a container whose command is the
-// attempt and which everything else depends on with the SUCCESS condition, the
-// only condition that means the waited on container exited zero.
+// escape before any application image starts. This container is the ECS
+// equivalent of the attempt and NOT of the ordering, and the difference is a
+// gap rather than a detail.
+//
+// It is not essential, because on ECS the exit of an essential container stops
+// the whole task and a probe is a thing that runs and finishes. Making it
+// essential would have killed every environment the moment the probe succeeded,
+// which is the sort of mistake that looks like rigour. The shape that makes a
+// probe run BEFORE an application image on ECS is the application container
+// carrying dependsOn with the SUCCESS condition, the only condition that means
+// the waited on container exited zero, and this plan cannot carry it because it
+// places no application containers at all. So the probe as generated runs
+// BESIDE what it is probing for rather than ahead of it. A runtime that placed
+// application containers would owe that ordering, and this one does not place
+// them because it refuses to start.
 //
 // It is conditional on an image because the alternative was worse. An earlier
 // draft of this function emitted the container unconditionally with a command
@@ -425,7 +436,7 @@ func probeContainer(image, envID string) []Container {
 	return []Container{{
 		Name:      ProbeContainerName,
 		Image:     image,
-		Essential: true,
+		Essential: false,
 		Command:   []string{"/bin/sh", "-c", ProbeScript(envID)},
 	}}
 }
