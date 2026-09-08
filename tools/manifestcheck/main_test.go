@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,7 @@ const schemaJSON = `{
         "additionalProperties": false,
         "properties": {
           "name": {"type": "string"},
+          "kind": {"type": "string", "enum": ["web", "worker", "cron"]},
           "port": {"type": "integer"},
           "health_path": {"type": "string"},
           "env": {"type": "array", "items": {"$ref": "#/$defs/envVar"}}
@@ -173,5 +175,114 @@ func TestCheckingNothingIsAnError(t *testing.T) {
 	_, err := check(t, root)
 	if err == nil || !strings.Contains(err.Error(), "no pages") {
 		t.Fatalf("err = %v, want a refusal to report green on nothing", err)
+	}
+}
+
+// A key that exists carrying a value the schema does not list is the second
+// half of this gate, and it had no test at all until this lane.
+func TestAValueOutsideAClosedEnumIsReported(t *testing.T) {
+	page := "```yaml\nname: x\nservices:\n  - name: web\n    kind: batch\n```\n"
+	root := tree(t, page, "")
+	out, err := check(t, root)
+	if err == nil {
+		t.Fatalf("a value outside a closed enum was accepted, output %q", out)
+	}
+}
+
+// A value the schema does list passes, so the test above is discriminating
+// rather than reporting every value it sees.
+func TestAValueTheEnumListsPasses(t *testing.T) {
+	page := "```yaml\nname: x\nservices:\n  - name: web\n    kind: worker\n```\n"
+	root := tree(t, page, "")
+	if _, err := check(t, root); err != nil {
+		t.Fatalf("a value the enum lists was reported: %v", err)
+	}
+}
+
+// enumNode is the schema for one key of the miniature manifest above.
+func enumNode(t *testing.T, path ...string) (map[string]any, map[string]any) {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(schemaJSON), &doc); err != nil {
+		t.Fatal(err)
+	}
+	node := doc
+	for _, step := range path {
+		next, ok := node[step].(map[string]any)
+		if !ok {
+			t.Fatalf("the miniature schema has no %q under %v", step, path)
+		}
+		node = next
+	}
+	return node, doc
+}
+
+// THE FAILURE THIS TEST IS FOR. The message used to say "The engine refuses it
+// with AF-MAN-002. It has to be one of: ...", which is a claim about a program
+// this gate never reads, and it was false for exactly the field that most
+// needed it: runtime.provider carried an enum, so a page showing a cloud
+// runtime was refused with a remediation saying the engine would refuse it
+// too, while a build carrying that runtime accepts it and runs.
+func TestTheEnumMessageReportsTheSchemaAndNotTheEngine(t *testing.T) {
+	node, doc := enumNode(t, "properties", "services", "items", "properties", "kind")
+	var got []string
+	checkEnum("batch", node, doc, "services[0].kind", func(m string) { got = append(got, m) })
+	if len(got) != 1 {
+		t.Fatalf("checkEnum reported %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "schemas/manifest.v1.json") {
+		t.Errorf("the message does not name what was read: %q", got[0])
+	}
+	if strings.Contains(got[0], "AF-MAN-002") {
+		t.Errorf("the message asserts an error code for a program this gate never read: %q", got[0])
+	}
+	if !strings.Contains(got[0], "cron") || !strings.Contains(got[0], "web") {
+		t.Errorf("the message does not say what the schema does list: %q", got[0])
+	}
+}
+
+// A key with no enum takes any value, which is what a provider registration
+// needs and is the shape datastore.engine and runtime.provider carry.
+func TestAKeyThatDeclaresNoEnumTakesAnyValue(t *testing.T) {
+	node, doc := enumNode(t, "properties", "name")
+	var got []string
+	checkEnum("anything at all", node, doc, "name", func(m string) { got = append(got, m) })
+	if len(got) != 0 {
+		t.Fatalf("a key with no enum reported %v", got)
+	}
+}
+
+// THE ORIGINATING CASE, against the real schema rather than the miniature.
+// A documentation page could not show the manifest line the cloud runtimes
+// exist to answer, because schemas/manifest.v1.json closed runtime.provider to
+// local and kubernetes. Re-adding that enum turns this red.
+func TestTheRealSchemaLetsAPageShowARegisteredRuntime(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "schemas", "manifest.v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "schemas", "manifest.v1.json"), string(body))
+	mustWrite(t, filepath.Join(root, "docs", "src", "content", "docs", "page.md"),
+		"```yaml\nversion: 1\nruntime:\n  provider: ecs\n```\n")
+	if out, err := check(t, root); err != nil {
+		t.Fatalf("the documentation cannot show a registered runtime: %v\n%s", err, out)
+	}
+}
+
+// The other direction, against the same real schema. A set that is genuinely
+// closed stays checked: no registration decides what a service kind is, so a
+// page showing one the schema does not list is still reported.
+func TestTheRealSchemaStillRefusesAValueOutsideAClosedSet(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "schemas", "manifest.v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "schemas", "manifest.v1.json"), string(body))
+	mustWrite(t, filepath.Join(root, "docs", "src", "content", "docs", "page.md"),
+		"```yaml\nversion: 1\nservices:\n  - name: web\n    kind: batch\n```\n")
+	if out, err := check(t, root); err == nil {
+		t.Fatalf("a value outside a closed set was accepted, output %q", out)
 	}
 }

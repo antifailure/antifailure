@@ -17512,7 +17512,7 @@ name.
 
 | Key | Notes |
 | --- | --- |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `. ` + "`" + `kubernetes` + "`" + ` is named in the schema and not built yet; asking for it is refused rather than substituted. |
+| ` + "`" + `provider` + "`" + ` | Which runtime places the environment. ` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are built in, and a build registers any others it carries. The schema keeps no list, the way ` + "`" + `datastore.engine` + "`" + ` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
 | ` + "`" + `ttl` + "`" + ` | How long an environment lives. |
 | ` + "`" + `idle_sleep` + "`" + ` | Suspend after this long with no traffic. |
 | ` + "`" + `domain` + "`" + ` | Wildcard domain for preview URLs. |
@@ -19010,7 +19010,7 @@ Where and how long the environment runs. The provider decides the machinery; the
 | ` + "`" + `kubeconfig_context` + "`" + ` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
 | ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 | ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces. Defaults to ` + "`" + `af` + "`" + `. Max length 40. |
-| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | no | Defaults to ` + "`" + `local` + "`" + `. |
+| ` + "`" + `provider` + "`" + ` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to ` + "`" + `local` + "`" + `. Max length 64. |
 | ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 
 ## Service

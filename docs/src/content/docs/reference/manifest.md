@@ -484,7 +484,7 @@ name.
 
 | Key | Notes |
 | --- | --- |
-| `provider` | `local`. `kubernetes` is named in the schema and not built yet; asking for it is refused rather than substituted. |
+| `provider` | Which runtime places the environment. `local` and `kubernetes` are built in, and a build registers any others it carries. The schema keeps no list, the way `datastore.engine` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
 | `ttl` | How long an environment lives. |
 | `idle_sleep` | Suspend after this long with no traffic. |
 | `domain` | Wildcard domain for preview URLs. |
