@@ -57,7 +57,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
@@ -269,8 +272,31 @@ func (h *harness) copyOnWriteMatchesTheDeclaration(ctx context.Context) {
 	for i := 0; i < samples; i++ {
 		// Alternating, because load drifts and a drift that lands on one arm
 		// reads exactly like the effect being measured.
-		smallTimes = append(smallTimes, h.timeOneBranch(ctx, smallV.ID, fmt.Sprintf("env_cow_small_%d", i)))
-		largeTimes = append(largeTimes, h.timeOneBranch(ctx, largeV.ID, fmt.Sprintf("env_cow_large_%d", i)))
+		smallTimes = append(smallTimes,
+			h.timeOneBranch(ctx, smallV.ID, fmt.Sprintf("env_cow_small_%d", i), nil))
+
+		// The last branch of the large golden is also weighed, and the reason
+		// is the hole a timing test has by construction.
+		//
+		// Everything below reads "this branch was fast" as evidence that the
+		// provider shares storage. A provider that hands back an EMPTY
+		// database is also fast, for a reason that is the opposite of the
+		// claim, and it would pass the flat side of the assertion while giving
+		// an environment nothing. Branch_ReadsAKnownRow catches that with the
+		// seed rows, but it is a different behaviour, and a behaviour whose
+		// central inference depends on another one having run is a behaviour
+		// that is wrong when somebody uses -run.
+		//
+		// So the last sample checks that the branch carries the ballast, and
+		// it costs nothing: pg_total_relation_size is a catalogue lookup, not
+		// a scan, which is why this is affordable at half a gibibyte when
+		// counting the rows would not be.
+		var weigh func(provider.Branch)
+		if i == samples-1 {
+			weigh = func(b provider.Branch) { h.requireBallast(ctx, b, largeBytes) }
+		}
+		largeTimes = append(largeTimes,
+			h.timeOneBranch(ctx, largeV.ID, fmt.Sprintf("env_cow_large_%d", i), weigh))
 	}
 
 	ts, tl := minDuration(smallTimes), minDuration(largeTimes)
@@ -386,7 +412,7 @@ func (h *harness) branchIsWithinTheDeclaredLatency(ctx context.Context) {
 	const attempts = 3
 	times := make([]time.Duration, 0, attempts)
 	for i := 0; i < attempts; i++ {
-		times = append(times, h.timeOneBranch(ctx, gv.ID, fmt.Sprintf("env_latency_%d", i)))
+		times = append(times, h.timeOneBranch(ctx, gv.ID, fmt.Sprintf("env_latency_%d", i), nil))
 	}
 	best := minDuration(times)
 	h.t.Logf("branch of the conformance dataset: %s, best of %s, declared %s",
@@ -402,11 +428,42 @@ func (h *harness) branchIsWithinTheDeclaredLatency(ctx context.Context) {
 	}
 }
 
+// The environment overrides, which exist because the alternative that was
+// actually reached for is worse.
+//
+// This behaviour is the only one in the suite whose cost is set by a size
+// rather than by a round trip, and on a machine whose storage is saturated the
+// default is not a slow test, it is a test that does not finish. The machine
+// this was written on measured CREATE DATABASE TEMPLATE of a fifteen megabyte
+// database at twenty seven seconds, and filling a golden at about a megabyte a
+// second, both of them the disk rather than Postgres. At those rates a default
+// sized run is most of an hour.
+//
+// The obvious response to that is a flag that skips the behaviour, and a flag
+// that skips it is how the one capability carrying the product's commercial
+// claim goes back to being unfalsifiable on exactly the runs where somebody was
+// in a hurry. So the knob shrinks the measurement instead of removing it, the
+// floors still apply so it cannot shrink to nothing, and the run prints both
+// the override and the copy rate it was left able to refuse. A weakened check
+// that says how weak it is can still be read; a skipped one cannot be read at
+// all.
+const (
+	envCopyOnWriteSmall   = "AF_CONFORMANCE_COW_SMALL_BYTES"
+	envCopyOnWriteLarge   = "AF_CONFORMANCE_COW_LARGE_BYTES"
+	envCopyOnWriteSamples = "AF_CONFORMANCE_COW_SAMPLES"
+)
+
 // copyOnWriteSettings resolves the sizes and sample count, refusing a
 // configuration that would make the behaviour unable to answer.
 func (h *harness) copyOnWriteSettings() (small, large int64, samples int) {
 	h.t.Helper()
 	small, large = h.opts.CopyOnWriteSmallBytes, h.opts.CopyOnWriteLargeBytes
+	if v, ok := envBytes(h.t, envCopyOnWriteSmall); ok {
+		small = v
+	}
+	if v, ok := envBytes(h.t, envCopyOnWriteLarge); ok {
+		large = v
+	}
 	if small <= 0 {
 		small = DefaultCopyOnWriteSmallBytes
 	}
@@ -414,6 +471,9 @@ func (h *harness) copyOnWriteSettings() (small, large int64, samples int) {
 		large = DefaultCopyOnWriteLargeBytes
 	}
 	samples = h.opts.CopyOnWriteSamples
+	if v, ok := envBytes(h.t, envCopyOnWriteSamples); ok {
+		samples = int(v)
+	}
 	if samples <= 0 {
 		samples = DefaultCopyOnWriteSamples
 	}
@@ -439,7 +499,42 @@ func (h *harness) copyOnWriteSettings() (small, large int64, samples int) {
 		h.t.Fatalf("copy on write is configured for %d timing per size and needs at least %d; "+
 			"one reading on a loaded machine is a reading of the machine", samples, MinCopyOnWriteSamples)
 	}
+	if small != h.opts.CopyOnWriteSmallBytes || large != h.opts.CopyOnWriteLargeBytes ||
+		samples != h.opts.CopyOnWriteSamples {
+		// Said out loud, always. A measurement taken at other than the sizes
+		// the suite ships is a different measurement, and a reader comparing
+		// two runs has to be able to see that without going to look for an
+		// environment variable somebody set once.
+		h.t.Logf("copy on write is running at %s against %s with %d samples per size, "+
+			"where the suite's own defaults are %s against %s with %d. The refusable rate "+
+			"printed with the verdict is what this configuration was actually able to see.",
+			bytesText(small), bytesText(large), samples,
+			bytesText(DefaultCopyOnWriteSmallBytes), bytesText(DefaultCopyOnWriteLargeBytes),
+			DefaultCopyOnWriteSamples)
+	}
 	return small, large, samples
+}
+
+// envBytes reads one override, and refuses a value it cannot parse rather than
+// falling back to the default.
+//
+// Falling back is what makes a typo invisible: the run would use the shipped
+// size, take an hour on the machine that could not afford it, and report a
+// number nobody asked for. A misspelt value is a person's intent that did not
+// arrive, so it fails.
+func envBytes(t *testing.T, name string) (int64, bool) {
+	t.Helper()
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
+		t.Fatalf("%s is %q, which is not a positive number of bytes. It is refused rather "+
+			"than ignored, because a run that quietly used the default would answer a "+
+			"question nobody asked.", name, raw)
+	}
+	return v, true
 }
 
 // refreshWithBallast publishes a golden carrying roughly the requested number
@@ -544,11 +639,19 @@ func fillBallast(ctx context.Context, candidate secrets.Value, want int64) (int6
 // and a provider whose branches share a machine gets slower as they pile up,
 // which would show up as growth attributable to the ballast when it is
 // attributable to the previous sample.
-func (h *harness) timeOneBranch(ctx context.Context, version, env string) time.Duration {
+func (h *harness) timeOneBranch(ctx context.Context, version, env string, weigh func(provider.Branch)) time.Duration {
 	h.t.Helper()
 	start := time.Now()
 	b, err := h.p.Branch(ctx, version, env)
 	took := time.Since(start)
+	// Checked BEFORE the duration is used anywhere, and that ordering is the
+	// point rather than habit. A dependency that has fallen over produces the
+	// FASTEST reading a stopwatch can take: while this was being written the
+	// shared Postgres went into recovery, and the two branch timings taken
+	// after it did were the best numbers in the table, because a refused
+	// connection returns in a third of a second. On a latency measurement a
+	// catastrophe and a triumph are the same shape, and only the error
+	// distinguishes them.
 	if err != nil {
 		h.t.Fatalf("Branch(%s, %s): %v", version, env, err)
 	}
@@ -557,10 +660,43 @@ func (h *harness) timeOneBranch(ctx context.Context, version, env string) time.D
 	// Registered as well as destroyed below, so that a Fatalf between here and
 	// the destroy still gets swept.
 	h.t.Cleanup(func() { _ = h.p.Destroy(context.Background(), b) })
+	if weigh != nil {
+		weigh(b)
+	}
 	if err := h.p.Destroy(ctx, b); err != nil {
 		h.t.Fatalf("Destroy the timing branch %s: %v", b.ProviderRef, err)
 	}
 	return took
+}
+
+// requireBallast fails a branch that did not bring the golden's bulk with it.
+//
+// Half is the bar rather than all of it, because a provider is entitled to
+// arrive at the same data by a different physical route: a restore rebuilds a
+// heap without the source's dead tuples and its free space map, and a branch
+// that is a little smaller than its golden for that reason is correct. A
+// branch holding a small fraction of the golden is not a copy on write branch
+// however fast it was, and telling those two apart is the whole reason this
+// reads a size rather than requiring equality.
+func (h *harness) requireBallast(ctx context.Context, b provider.Branch, golden int64) {
+	h.t.Helper()
+	var got int64
+	err := h.open(ctx, b).QueryRowContext(ctx,
+		"SELECT pg_total_relation_size($1)", ballastTable).Scan(&got)
+	if err != nil {
+		h.t.Fatalf("weigh the ballast in branch %s: %v. Every reading in this behaviour is "+
+			"the time to produce a branch that HOLDS the golden, and a branch that cannot be "+
+			"read is not one.", b.ProviderRef, err)
+	}
+	if got*2 < golden {
+		h.t.Fatalf("the golden carries %s of ballast and its branch carries %s. This "+
+			"behaviour infers copy on write from a branch being no slower on a large golden "+
+			"than a small one, and a branch that did not bring the data is fast for the "+
+			"opposite reason: it is not a cheap copy of everything, it is an expensive "+
+			"nothing. An environment made from this would look like a twin and hold a "+
+			"fraction of production.",
+			bytesText(golden), bytesText(got))
+	}
 }
 
 func copyOnWriteAllowance(small time.Duration) time.Duration {
