@@ -48,6 +48,7 @@ const (
 	prefixEnv     = "AF_DB_SELFTEST_PREFIX"
 	urlEnv        = "AF_DB_SELFTEST_URL"
 	unverifiedEnv = "AF_DB_SELFTEST_PUBLISH_UNVERIFIED"
+	flatEnv       = "AF_DB_SELFTEST_FLAT_BRANCH"
 )
 
 // The two providers, named so a table can say which one proved a row.
@@ -106,6 +107,7 @@ func TestDatabaseSuiteChild(t *testing.T) {
 				Prefix:            os.Getenv(prefixEnv),
 				SeedSQL:           conformance.DefaultSeedSQL,
 				PublishUnverified: publishUnverified,
+				FlatBranch:        os.Getenv(flatEnv) == "1",
 			})
 			if err != nil {
 				t.Fatalf("build the Postgres backed provider: %v", err)
@@ -124,7 +126,31 @@ func TestDatabaseSuiteChild(t *testing.T) {
 		return p
 	}
 
-	conformance.RunDatabase(t, factory, conformance.Options{Timeout: 3 * time.Minute})
+	conformance.RunDatabase(t, factory, conformance.Options{
+		Timeout: 10 * time.Minute,
+		// The copy on write sizes, held at the suite's own floor rather than
+		// its default, and the reason is a cost this file has to pay four
+		// times over.
+		//
+		// Proving that behaviour needs four children: a provider that copies
+		// and admits it, one that copies and denies it, one that is flat and
+		// admits it, one that is flat and denies it. Each builds two goldens
+		// and branches them, and the copying ones copy the large golden once
+		// per sample while the flat ones copy it once per pool slot. The
+		// server they all share is the same scratch cluster every branch of
+		// this repository runs its database suites against, so the difference
+		// between the floor and the default is several gibibytes of transient
+		// databases on a machine other lanes are working on.
+		//
+		// What this does NOT prove is the shipped default of a gibibyte, and
+		// that is a real gap rather than a rounding: it is stated here so
+		// nobody reads a green self test as having exercised the numbers a
+		// provider actually gets. The floor is the configuration with the
+		// LEAST discriminating power the suite will accept, so a fault caught
+		// here is caught at the default as well.
+		CopyOnWriteLargeBytes: conformance.MinCopyOnWriteLargeBytes,
+		CopyOnWriteSamples:    conformance.MinCopyOnWriteSamples,
+	})
 }
 
 // child describes one re-execution.
@@ -136,6 +162,10 @@ type child struct {
 	// publishUnverified turns on the affordance that makes an unverified
 	// version obtainable. It is not a fault; see the control below.
 	publishUnverified bool
+	// flatBranch turns on the affordance that makes branch time constant,
+	// which is what a copy on write provider has and Postgres does not. It is
+	// not a fault either, and it has its own control below.
+	flatBranch bool
 }
 
 // runChild executes one behaviour in a subprocess and reports whether it
@@ -155,6 +185,9 @@ func runChild(t *testing.T, c child) (bool, string) {
 	)
 	if c.publishUnverified {
 		cmd.Env = append(cmd.Env, unverifiedEnv+"=1")
+	}
+	if c.flatBranch {
+		cmd.Env = append(cmd.Env, flatEnv+"=1")
 	}
 	if c.backend == onPG {
 		cmd.Env = append(cmd.Env, urlEnv+"="+postgresURL(), prefixEnv+"="+newPostgresPrefix(t))
@@ -248,7 +281,7 @@ func TestTheSuitePassesAgainstAProviderThatKeepsItsGuarantees(t *testing.T) {
 // The same control for the provider with storage, run as one child over the
 // whole suite rather than one child per behaviour.
 //
-// It is the only place all twenty four run together, which is what proves the
+// It is the only place all twenty six run together, which is what proves the
 // Postgres fake is a correct provider rather than one that happens to satisfy
 // the five behaviours pointed at it.
 func TestThePostgresBackedFakeKeepsEveryGuarantee(t *testing.T) {
@@ -357,6 +390,14 @@ func TestEveryBehaviorIsProvedAbleToFail(t *testing.T) {
 			// the suite green, so a red here is the fault's.
 			if f == fakes.BranchAcceptsUnverified {
 				c.publishUnverified = true
+			}
+			// The mirror of the line above, for the same reason. This fault's
+			// premise is a provider that branches in constant time and denies
+			// it, so it has no subject on a provider that copies; injectFault
+			// REFUSES it there and the child prints THE FAULT WAS NOT
+			// INJECTED rather than a green nobody could interpret.
+			if f == fakes.CopyOnWriteUnderstated {
+				c.flatBranch = true
 			}
 			passed, out := runChild(t, c)
 
@@ -501,6 +542,36 @@ func TestTheUnverifiedAffordanceBreaksNothingOnItsOwn(t *testing.T) {
 			requireRan(t, behavior, passed, out)
 		})
 	}
+}
+
+// The control for the affordance that makes the flat side of copy on write
+// provable at all.
+//
+// CopyOnWrite_BranchTimeMatchesTheDeclaration asserts in two complementary
+// directions, so proving it can say no needs a provider on each side of the
+// boundary, and Postgres only supplies one of them: CREATE DATABASE ...
+// TEMPLATE copies, so every ordinary Postgres backed provider is on the
+// copying side. FlatBranch puts one on the other side, by making the copies at
+// refresh and handing them out with a rename.
+//
+// Without this control the red under CopyOnWriteUnderstated would be
+// attributable to the affordance rather than to the fault: a provider whose
+// branching is a rename might be failing that behaviour because renaming
+// breaks something, not because the declaration disagrees with the stopwatch.
+// So the same provider, with the honest declaration, has to pass. The pair is
+// what makes each red mean one thing.
+//
+// It runs the copy on write behaviour rather than the whole suite, because the
+// whole suite against a flat provider is a separate and much longer claim, and
+// this control is about one behaviour's boundary.
+func TestTheFlatBranchAffordanceIsHonestWhenItDeclaresCopyOnWrite(t *testing.T) {
+	if !postgresReachable(t) {
+		t.Skipf("skipped: copy on write is a claim about moving bytes and needs a Postgres at %s",
+			postgresURL())
+	}
+	const behavior = "CopyOnWrite_BranchTimeMatchesTheDeclaration"
+	passed, out := runChild(t, child{backend: onPG, behavior: behavior, flatBranch: true})
+	requireRan(t, behavior, passed, out)
 }
 
 // Every behaviour that needs rows is named, and every behaviour that does not

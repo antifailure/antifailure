@@ -58,6 +58,31 @@ type PostgresOptions struct {
 	// affordance rather than a fault, and it is what makes the branch side of
 	// Branch_RefusesAnUnverifiedGolden reachable at all.
 	PublishUnverified bool
+	// FlatBranch makes branching cost the same whatever the golden holds,
+	// which is what a copy on write provider does and what Postgres cannot.
+	//
+	// It is an affordance rather than a fault, and it is the only way
+	// CopyOnWrite_BranchTimeMatchesTheDeclaration can be proved from both
+	// ends. That behaviour needs four providers: one that copies and admits
+	// it, one that copies and denies it, one that is flat and admits it, and
+	// one that is flat and denies it. Postgres gives the first two for
+	// nothing, because CREATE DATABASE ... TEMPLATE is a file copy. It gives
+	// the other two only if something makes a branch constant time, and no
+	// amount of SQL will share storage between two databases.
+	//
+	// So the copy is made at REFRESH, several times, and Branch hands one out
+	// with ALTER DATABASE ... RENAME, which is a catalogue update and costs
+	// the same for a megabyte and a gibibyte. That is not a simulation of copy
+	// on write, it is the same observable contract: the expensive work happens
+	// once when the golden is built, a branch carries ALL of the golden's data
+	// including whatever ballast the suite put in it, and branch time does not
+	// grow with the data. A provider whose branches are ZFS clones or Aurora
+	// fast clones is doing the same trick with better storage.
+	//
+	// The pool is finite. When it runs out a branch falls back to copying,
+	// which is correct rather than flat, and is why the pool is sized from
+	// what the timing behaviour asks for rather than left at one.
+	FlatBranch bool
 }
 
 // PostgresDatabase is the provider. Use [NewPostgresDatabase].
@@ -80,6 +105,14 @@ type pgState struct {
 	goldens  map[string]provider.GoldenVersion
 	branches map[string]provider.Branch // env id -> branch
 	firstOf  map[string]string          // golden id -> first branch database
+	// pool holds the copies FlatBranch made at refresh, per golden, waiting to
+	// be renamed into a branch.
+	pool map[string][]string
+	// pooled counts every pool database ever made, so two of them never share
+	// a name. A counter rather than the golden's identifier plus an index,
+	// because a golden destroyed and remade would then collide with its own
+	// leftovers.
+	pooled int
 }
 
 var pgStates sync.Map // prefix -> *pgState
@@ -107,6 +140,7 @@ func NewPostgresDatabase(ctx context.Context, opts PostgresOptions) (*PostgresDa
 		goldens:  map[string]provider.GoldenVersion{},
 		branches: map[string]provider.Branch{},
 		firstOf:  map[string]string{},
+		pool:     map[string][]string{},
 	})
 	return &PostgresDatabase{opts: opts, state: st.(*pgState)}, nil
 }
@@ -143,10 +177,26 @@ func validIdentifier(s string) bool {
 
 func (d *PostgresDatabase) Name() string { return "postgres-template" }
 
+// Capabilities declares what this provider does, and its copy on write answer
+// is derived from how it actually branches rather than written down beside it.
+//
+// That is the point of the two faults below. Honest is the default in both
+// modes: a copying provider declares false, a FlatBranch one declares true.
+// Each fault flips exactly that one bit and changes nothing else, so a red in
+// CopyOnWrite_BranchTimeMatchesTheDeclaration is attributable to the
+// declaration disagreeing with the stopwatch and to nothing else.
 func (d *PostgresDatabase) Capabilities() provider.Caps {
+	cow := d.opts.FlatBranch
+	switch {
+	case d.is(CopyOnWriteThatCopies):
+		cow = true // and every branch is still a full CREATE DATABASE ... TEMPLATE
+	case d.is(CopyOnWriteUnderstated):
+		cow = false // and every branch is still a constant time rename
+	}
 	return provider.Caps{
 		Branching:             true,
 		Reset:                 true,
+		CopyOnWrite:           cow,
 		PooledEndpoints:       true,
 		MaxConcurrentBranches: PostgresBranchLimit,
 		ExpectedBranchLatency: 30 * time.Second,
@@ -158,6 +208,25 @@ func (d *PostgresDatabase) injectFault(f Fault) bool {
 	switch f {
 	case BranchLosesTheGoldensRows, BranchSharesTheGoldensStorage,
 		BranchesShareOneDatabase, RefreshRebuildsExistingBranches:
+		d.fault = f
+		return true
+	case CopyOnWriteThatCopies:
+		// Refused on a flat provider, and the refusal is the point. This fault
+		// is "declares copy on write and copies anyway", so injecting it into
+		// a provider that does not copy would produce a green run whose
+		// greenness proved nothing, which is the exact confusion Uninjectable
+		// exists to make impossible.
+		if d.opts.FlatBranch {
+			return false
+		}
+		d.fault = f
+		return true
+	case CopyOnWriteUnderstated:
+		// The mirror image: "branches in constant time and denies it" needs a
+		// provider that branches in constant time.
+		if !d.opts.FlatBranch {
+			return false
+		}
 		d.fault = f
 		return true
 	}
@@ -249,6 +318,74 @@ func (d *PostgresDatabase) dropDatabase(ctx context.Context, name string) error 
 	return exec(ctx, d.opts.AdminURL, "DROP DATABASE IF EXISTS "+quoted(name)+" WITH (FORCE)")
 }
 
+// renameDatabase is the constant time half of FlatBranch.
+//
+// A rename is a catalogue update: it moves no bytes, so it costs the same for
+// a golden of eight mebibytes and one of a gibibyte, which is the whole
+// property CopyOnWrite_BranchTimeMatchesTheDeclaration measures.
+func (d *PostgresDatabase) renameDatabase(ctx context.Context, from, to string) error {
+	return exec(ctx, d.opts.AdminURL,
+		"ALTER DATABASE "+quoted(from)+" RENAME TO "+quoted(to))
+}
+
+// FlatBranchPoolSize is how many constant time branches one golden can serve.
+//
+// Three, because CopyOnWrite_BranchTimeMatchesTheDeclaration times three
+// branches per golden by default and a fourth would be copies of a gibibyte
+// nothing asks for. A run configured with more samples than this exhausts the
+// pool, the extra branches fall back to copying, and the behaviour's minimum
+// is taken over the fast ones, so the failure mode is a weaker measurement
+// rather than a wrong one.
+const FlatBranchPoolSize = 3
+
+// fillPool makes the copies a flat branch hands out. Called once per refresh,
+// where the time it costs is not what anything measures.
+func (d *PostgresDatabase) fillPool(ctx context.Context, goldenID, goldenDB string) error {
+	names := make([]string, 0, FlatBranchPoolSize)
+	for i := 0; i < FlatBranchPoolSize; i++ {
+		d.state.mu.Lock()
+		d.state.pooled++
+		name := fmt.Sprintf("%s_p%d", d.opts.Prefix, d.state.pooled)
+		d.state.mu.Unlock()
+		if err := d.copyDatabase(ctx, goldenDB, name); err != nil {
+			return fmt.Errorf("fill the flat branch pool: %w", err)
+		}
+		names = append(names, name)
+	}
+	d.state.mu.Lock()
+	d.state.pool[goldenID] = append(d.state.pool[goldenID], names...)
+	d.state.mu.Unlock()
+	return nil
+}
+
+// takeFromPool pops a prepared copy, or reports that there is none left.
+func (d *PostgresDatabase) takeFromPool(goldenID string) (string, bool) {
+	d.state.mu.Lock()
+	defer d.state.mu.Unlock()
+	free := d.state.pool[goldenID]
+	if len(free) == 0 {
+		return "", false
+	}
+	name := free[len(free)-1]
+	d.state.pool[goldenID] = free[:len(free)-1]
+	return name, true
+}
+
+// drainPool drops whatever the pool still holds for a golden.
+//
+// Without it a flat provider leaves three copies of every golden behind for
+// ever, and a fake that leaks is a fake that teaches the suite to ignore its
+// own leak check.
+func (d *PostgresDatabase) drainPool(ctx context.Context, goldenID string) {
+	d.state.mu.Lock()
+	free := d.state.pool[goldenID]
+	delete(d.state.pool, goldenID)
+	d.state.mu.Unlock()
+	for _, name := range free {
+		_ = d.dropDatabase(ctx, name)
+	}
+}
+
 // emptyEveryTable is what BranchLosesTheGoldensRows does. It leaves the schema
 // exactly as the golden had it, which is what makes the bug survive a look at
 // the environment: the tables are all there.
@@ -326,6 +463,12 @@ func (d *PostgresDatabase) RefreshGolden(ctx context.Context, spec provider.Gold
 	}
 	d.state.mu.Unlock()
 
+	if d.opts.FlatBranch {
+		if err := d.fillPool(ctx, v.ID, db); err != nil {
+			return v, err
+		}
+	}
+
 	if d.is(RefreshRebuildsExistingBranches) {
 		// Every environment that branched an hour ago is quietly remade from
 		// the new version, losing everything it has done since.
@@ -363,6 +506,7 @@ func (d *PostgresDatabase) DestroyGolden(ctx context.Context, version string) er
 	}
 	delete(d.state.goldens, version)
 	d.state.mu.Unlock()
+	d.drainPool(ctx, version)
 	return d.dropDatabase(ctx, d.goldenDB(version))
 }
 
@@ -417,7 +561,19 @@ func (d *PostgresDatabase) Branch(ctx context.Context, version, envID string) (p
 		}
 	}
 	if copyFrom != "" {
-		if err := d.copyDatabase(ctx, copyFrom, target); err != nil {
+		// The flat path, which moves no bytes. Falling back to a copy when the
+		// pool is empty rather than failing, because a provider that refused
+		// its fourth branch would fail behaviours that have nothing to do with
+		// timing and the red would point at the wrong thing.
+		pooled, ok := "", false
+		if d.opts.FlatBranch {
+			pooled, ok = d.takeFromPool(version)
+		}
+		if ok {
+			if err := d.renameDatabase(ctx, pooled, target); err != nil {
+				return provider.Branch{}, fmt.Errorf("hand out a prepared branch: %w", err)
+			}
+		} else if err := d.copyDatabase(ctx, copyFrom, target); err != nil {
 			return provider.Branch{}, fmt.Errorf("branch the golden: %w", err)
 		}
 	}

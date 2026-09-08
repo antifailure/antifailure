@@ -16,8 +16,8 @@
 // and you have learned something the green run could never tell you.
 //
 // There are two providers to break, and the second exists because the first
-// could not reach five of the twenty four behaviours. [InMemoryDatabase] needs
-// nothing and answers nineteen. [NewPostgresDatabase] keeps real rows in real
+// could not reach six of the twenty six behaviours. [InMemoryDatabase] needs
+// nothing and answers twenty. [NewPostgresDatabase] keeps real rows in real
 // databases on a real server, and answers the five about isolation, reset and
 // what a branch actually holds, which are the ones a fake without storage can
 // only pretend to have checked.
@@ -184,6 +184,45 @@ const (
 	// different sets of data answering to one name is how a cleanup destroys
 	// the golden something else is about to branch.
 	RefreshReusesTheVersionIdentifier Fault = "refresh-reuses-the-version-identifier"
+
+	// CopyOnWriteThatCopies declares that branches share storage with their
+	// golden, and copies every byte of it on every branch.
+	//
+	// This is the fault the capability existed without for as long as the
+	// capability existed. Copy on write is the distinguishing commercial claim
+	// of every cloud database in this category, the sentence the wave is sold
+	// on is a sentence about seconds, and until this fault had a behaviour to
+	// go red in, a provider could declare it, copy a terabyte per environment,
+	// and pass the suite.
+	//
+	// It is hosted by the Postgres backed provider, which copies genuinely,
+	// with CREATE DATABASE ... TEMPLATE. Nothing here simulates the copy.
+	CopyOnWriteThatCopies Fault = "copy-on-write-that-copies"
+
+	// CopyOnWriteUnderstated branches in constant time and declares that it
+	// does not, which is the same lie pointing the other way.
+	//
+	// It is a fault rather than modesty, and the reason is the wave's own
+	// deliverable. Every database provider publishes its branch time into one
+	// comparison table, a buyer picks a provider from that table, and a
+	// provider that hides a flat branch time makes that table as wrong as one
+	// that invents it. A check that only fires when a claim is too generous
+	// is half an instrument: it cannot tell a correct declaration from an
+	// unexamined one, because both look like the absence of a complaint.
+	CopyOnWriteUnderstated Fault = "copy-on-write-understated"
+
+	// IgnoresTheDeclaredBranchLatency takes longer to branch than the
+	// provider says branching takes.
+	//
+	// Caps.ExpectedBranchLatency has documented since it was written that "the
+	// suite asserts against it, so a provider that gets slower fails rather
+	// than quietly degrading", and the suite required only that the number be
+	// greater than zero. So a provider could declare eight seconds, take three
+	// minutes, and stay green, and the sentence in the interface described
+	// protection that was not there. internal/db/pgurl kept a private copy of
+	// the assertion for its own provider with a note saying generalising it
+	// belonged to whoever owned the suite.
+	IgnoresTheDeclaredBranchLatency Fault = "ignores-the-declared-branch-latency"
 )
 
 // Faults returns every fault, sorted, so a test can table drive over all of
@@ -229,6 +268,9 @@ var catches = map[Fault]string{
 	GoldenGCDropsAReferencedVersion:           "GoldenGC_RefusesAReferencedVersion",
 	RefreshRebuildsExistingBranches:           "Refresh_DoesNotDisturbExistingBranches",
 	RefreshReusesTheVersionIdentifier:         "Refresh_DoesNotDisturbExistingBranches",
+	CopyOnWriteThatCopies:                     "CopyOnWrite_BranchTimeMatchesTheDeclaration",
+	CopyOnWriteUnderstated:                    "CopyOnWrite_BranchTimeMatchesTheDeclaration",
+	IgnoresTheDeclaredBranchLatency:           "Branch_IsWithinTheDeclaredLatency",
 }
 
 // Catches maps each fault to the conformance behaviour that must fail when it
@@ -262,6 +304,12 @@ func NeedsRows() map[string]bool {
 		"Branch_IsIsolatedFromOtherBranches":     true,
 		"Reset_ReturnsToGoldenState":             true,
 		"Refresh_DoesNotDisturbExistingBranches": true,
+		// Copy on write is a claim about how long it takes to move bytes, so
+		// it is the behaviour with the strongest claim on a real server of
+		// them all: an in-memory provider branches in microseconds whatever it
+		// holds, which is indistinguishable from the property being asserted
+		// and therefore proves nothing about the assertion.
+		"CopyOnWrite_BranchTimeMatchesTheDeclaration": true,
 	}
 }
 
@@ -315,6 +363,13 @@ var providerFaults = map[Fault]bool{
 	BranchSharesTheGoldensStorage:    true,
 	BranchesShareOneDatabase:         true,
 	RefreshRebuildsExistingBranches:  true,
+	// The two copy on write faults are capability flips, and Capabilities
+	// returns no error and takes no context, so a decorator that wanted to
+	// contradict it would have to reimplement the interface rather than
+	// decorate it. They also have to be flipped on a provider whose BRANCHING
+	// matches the lie, which only the provider knows about itself.
+	CopyOnWriteThatCopies:  true,
+	CopyOnWriteUnderstated: true,
 }
 
 // ProviderFaults returns the faults a provider must host itself, sorted.
@@ -474,6 +529,17 @@ func (b *broken) Branch(ctx context.Context, version, envID string) (provider.Br
 		// The failure is reported with no identifier, and the resource is
 		// there. Nothing the caller holds names it.
 		return provider.Branch{}, ctx.Err()
+	}
+	if b.is(IgnoresTheDeclaredBranchLatency) {
+		// Past the number the provider publishes about itself, by a margin no
+		// scheduler produces. A provider that has quietly got slower looks
+		// exactly like this from outside, which is the point: the fault is not
+		// a contrived one, it is what degradation is.
+		select {
+		case <-ctx.Done():
+			return provider.Branch{}, ctx.Err()
+		case <-time.After(b.Database.Capabilities().ExpectedBranchLatency + 50*time.Millisecond):
+		}
 	}
 	if b.is(BranchIsNotIdempotent) {
 		if n := b.count("branch:" + envID); n > 1 {
