@@ -136,12 +136,29 @@ func TestRefreshLive_AGoldenIsCopiedMaskedVerifiedAndBranched(t *testing.T) {
 	require.Empty(t, env.column(
 		"SELECT name FROM system.tables WHERE database = currentDatabase() AND name = 'recent'"))
 
+	// What the branch HOLDS, which is what the fidelity report reads and what
+	// it could not read before: the dimension was built from the manifest
+	// alone, so a store declared golden was reported absent whether or not
+	// anything had branched one.
+	heldTables, heldRows := branchContents(t, ctx, p, branch.EnvID)
+	require.Equal(t, "2", heldTables, "the inventory does not say how many tables the branch holds")
+	require.Equal(t, "4", heldRows,
+		"the inventory does not say how many rows the branch holds: 3 events and 1 session")
+
 	// A branch is the environment's own. Writing into it changes nothing
 	// anybody else can see, which is what makes two environments of one golden
 	// independent.
 	env.exec("INSERT INTO events (uuid, event, distinct_id, properties, ts) VALUES " +
 		"('01890fa1-9e40-7d3c-8b9a-2f5c6d7e8a09', 'pageview', 'someone', '{}', now64(6))")
 	require.Equal(t, []string{"4"}, env.column("SELECT toString(count()) FROM events"))
+
+	// And it is read from the server rather than from the metadata the branch
+	// was created with. The environment wrote a row, so the count moved; a
+	// count taken from the declaration would still say 3, which is the same
+	// defect as reporting a full store absent one level down.
+	_, afterWrite := branchContents(t, ctx, p, branch.EnvID)
+	require.Equal(t, "5", afterWrite,
+		"the inventory reports the golden's row count rather than the branch's")
 	second, err := p.Branch(ctx, gv.ID, "env_l42_refresh_two")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, p.Destroy(context.Background(), second)) })
@@ -194,3 +211,25 @@ func errFindings(report verify.Report) error {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// branchContents reads what the provider says one environment's branch holds.
+//
+// Through Inventory, because that is the socket the engine asks and therefore
+// the only place an answer can reach a report from. A helper that queried the
+// server itself would prove the server knows and say nothing about whether the
+// provider passes it on.
+func branchContents(
+	t *testing.T, ctx context.Context, p *clickhouse.Provider, envID string,
+) (tables, rows string) {
+	t.Helper()
+	inventory, err := p.Inventory(ctx)
+	require.NoError(t, err)
+	for _, r := range inventory {
+		if r.EnvID != envID {
+			continue
+		}
+		return r.Labels["tables"], r.Labels["rows"]
+	}
+	t.Fatalf("the inventory holds nothing for %s, so there is nothing to read", envID)
+	return "", ""
+}

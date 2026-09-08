@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -563,6 +564,14 @@ func (p *Provider) branchName(ctx context.Context, b provider.Branch) (string, e
 // Databases with this provider's marker in their comment and nothing else,
 // which is what keeps a leak report from proposing to drop a developer's own
 // database on a server they also use for something real.
+//
+// A branch also carries what it HOLDS, and that is what the fidelity report
+// reads. The alternative was a method of its own on the datastore interface,
+// and this is the smaller change for the same answer: the engine already asks
+// every provider for an inventory, the primary database already reports which
+// golden a branch came from through a label of exactly this kind, and a
+// provider that cannot say gets a report that says so rather than one that
+// guesses.
 func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 	list, err := p.ours(ctx)
 	if err != nil {
@@ -576,6 +585,12 @@ func (p *Provider) Inventory(ctx context.Context) ([]provider.Resource, error) {
 		}
 		if d.meta.From != "" {
 			labels["golden"] = d.meta.From
+		}
+		if d.meta.Kind == "branch" {
+			if tables, rows, ok := p.contentsOf(ctx, d.name); ok {
+				labels["tables"] = strconv.Itoa(tables)
+				labels["rows"] = strconv.FormatInt(rows, 10)
+			}
 		}
 		out = append(out, provider.Resource{
 			Kind:      "database/" + d.meta.Kind,
@@ -626,6 +641,51 @@ func (p *Provider) dropDatabase(ctx context.Context, name string) error {
 		return fmt.Errorf("datastore.clickhouse: dropping %s: %w", name, err)
 	}
 	return nil
+}
+
+// contentsOf reports the tables a branch holds and the rows in them, and false
+// when the server would not say.
+//
+// Read from the server rather than from the metadata the branch was created
+// with. That metadata records the tables the golden had at the moment they
+// were attached, and a branch is a database an environment then writes to, so
+// a report built from it would keep printing the golden's numbers over a store
+// whose contents had moved. That is the same defect one level down as the one
+// that made a full store read as absent.
+//
+// Both numbers or neither, because a table count with no row count renders as
+// a store that came up empty and the reader cannot tell that from a store that
+// really did. Answering false leaves the report saying the provider does not
+// record it, which is a sentence somebody can act on.
+//
+// total_rows is what the server keeps for a MergeTree, exact from its parts,
+// so nothing here walks the rows. A table whose engine keeps none, a view or a
+// Dictionary, is not counted as a table either: a branch holds the golden's
+// MergeTree tables, and a view is a statement rather than data.
+func (p *Provider) contentsOf(ctx context.Context, name string) (tables int, rows int64, ok bool) {
+	var found bool
+	err := p.server.rows(ctx,
+		"SELECT toString(count()), toString(ifNull(sum(total_rows), 0)) FROM system.tables "+
+			"WHERE database = {db:String} AND total_rows IS NOT NULL",
+		map[string]string{"db": name}, func(r [][]byte) error {
+			if len(r) != 2 {
+				return nil
+			}
+			t, convErr := strconv.Atoi(strings.TrimSpace(string(r[0])))
+			if convErr != nil {
+				return convErr
+			}
+			n, convErr := strconv.ParseInt(strings.TrimSpace(string(r[1])), 10, 64)
+			if convErr != nil {
+				return convErr
+			}
+			tables, rows, found = t, n, true
+			return nil
+		})
+	if err != nil || !found {
+		return 0, 0, false
+	}
+	return tables, rows, true
 }
 
 // sizeOf reports the bytes a database occupies, and zero when it cannot be

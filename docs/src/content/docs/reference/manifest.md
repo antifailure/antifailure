@@ -344,13 +344,21 @@ validator refuses a store with no stance and the
 starts an `empty` store, runs a `derived` rebuild or creates a topic. A store
 whose engine this build cannot mask is REFUSED rather than published unmasked.
 
-**The fidelity report has not caught up with the branching**, and that is worth
-knowing before you read one. The datastores dimension is built from the
-manifest alone, so it reports a store declared `golden` as absent and names the
-golden, the attestation, the tables and the rows it cannot see, whether or not
-`af up` branched one. What would close it is the dimension reading the branch
-that now exists rather than the declaration, and until it does, the report
-understates a twin that holds a masked second store.
+**The fidelity report reads the branch**, not the declaration. A store declared
+`golden` that this environment branched is reported the way the primary
+database is, with its golden, its attestation, its tables and its rows; one the
+environment has not branched is `absent`, and the report names those same four
+things as the ones it does not have. Until that was true the dimension was
+built from the manifest alone, so it said `absent` about a store holding a
+masked, verified copy of production, which understated a twin rather than
+overstating one and was still an instrument saying something untrue about what
+it could see.
+
+What the report still cannot tell you about a branched store is whether what it
+holds is what production holds. Nothing here records a second store's
+production row counts, so that half is reported as an unknown with the reason
+named rather than as a copy of production, which is the same rule
+`database.volume` applies to the primary.
 
 ### Reaching a store from a service
 

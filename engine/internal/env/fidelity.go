@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/verify"
 	"github.com/antifailure/antifailure/engine/internal/volume"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -47,6 +49,7 @@ func (o *Orchestrator) Fidelity(ctx context.Context) (fidelity.Inventory, error)
 	obs := fidelity.Observation{EnvID: o.envID, Manifest: o.opts.Manifest}
 	o.observeRuntime(ctx, &obs)
 	o.observeDatabase(ctx, s, &obs)
+	o.observeDatastores(ctx, s, &obs)
 	o.observeHosts(&obs)
 	o.observeTraffic(&obs)
 	return fidelity.Build(obs), nil
@@ -144,6 +147,18 @@ func (o *Orchestrator) observeAttestation(
 		obs.GoldenReason = "the provider could not list its goldens: " + oneLine(err)
 		return
 	}
+	obs.Attested, obs.Attestation = attestationOf(goldens, version)
+}
+
+// attestationOf reads back one golden's signed statement and says what it
+// covered, or why it cannot be trusted.
+//
+// One function for the primary database and for every declared datastore,
+// rather than the same six checks written twice. This is the product's central
+// guarantee arriving in a report, and a second copy of it is a second thing to
+// keep in step: the copy that forgets to call Verify still prints a confident
+// sentence about a golden somebody edited after it was signed.
+func attestationOf(goldens []provider.GoldenVersion, version string) (attested bool, detail string) {
 	for _, g := range goldens {
 		if g.ID != version {
 			continue
@@ -154,38 +169,168 @@ func (o *Orchestrator) observeAttestation(
 			// lookup. A golden that lost its verification is the one case
 			// somebody has to act on, and an unknown is the one result nobody
 			// acts on.
-			obs.Attestation = "golden " + version + " is no longer marked verified"
-			return
+			return false, "golden " + version + " is no longer marked verified"
 		}
 		if g.Attestation == "" {
-			obs.Attestation = "golden " + version + " carries no attestation, so nothing here can " +
+			return false, "golden " + version + " carries no attestation, so nothing here can " +
 				"check that its data was masked and read back"
-			return
 		}
 		var a verify.Attestation
 		if err := json.Unmarshal([]byte(g.Attestation), &a); err != nil {
-			obs.Attestation = "the attestation on golden " + version + " could not be read: " + oneLine(err)
-			return
+			return false, "the attestation on golden " + version + " could not be read: " + oneLine(err)
 		}
 		if !a.Verify() {
-			obs.Attestation = "the attestation on golden " + version +
+			return false, "the attestation on golden " + version +
 				" does not match its own signature, so it was changed after it was signed"
-			return
 		}
-		obs.Attested = true
-		obs.Attestation = fmt.Sprintf(
+		out := fmt.Sprintf(
 			"%d columns read back over %d rows sampled, signed and still matching its signature",
 			a.Report.Columns, a.Report.RowsSampled)
 		if n := len(a.Report.Skipped); n > 0 {
-			obs.Attestation += fmt.Sprintf(", with %d columns the scan could not read", n)
+			out += fmt.Sprintf(", with %d columns the scan could not read", n)
 		}
-		return
+		return true, out
 	}
 	// Absent rather than unknown for the same reason: the provider was asked
 	// and answered, and the answer is that the golden this branch came from is
 	// gone, so nothing can check what was done to the data in it.
-	obs.Attestation = "golden " + version + " is the one this branch came from and the provider " +
+	return false, "golden " + version + " is the one this branch came from and the provider " +
 		"no longer lists it"
+}
+
+// observeDatastores asks each store the manifest declares golden what its
+// branch holds.
+//
+// The second store, arriving in the report. `af golden refresh` makes a golden
+// of every declared store and `af up` branches each one, and until this the
+// datastores dimension was built from the manifest alone: it read the stance,
+// saw golden, and reported absent whether or not the environment held a masked
+// copy. So an environment that genuinely held a masked, verified, branched
+// ClickHouse was reported as not holding one. That understates rather than
+// overstates, which is the better of the two directions and is still an
+// instrument saying something untrue about what it can see.
+//
+// Only the golden stance is asked about, and that is deliberate rather than
+// unfinished. Nothing here starts an empty store, runs a derived rebuild or
+// creates a topic, so a store declared any of those three stays unmeasured:
+// reporting one reproduced because somebody declared it empty would be the
+// report believing a manifest instead of an environment.
+func (o *Orchestrator) observeDatastores(
+	ctx context.Context, s *session, obs *fidelity.Observation,
+) {
+	golden := make([]schema.Datastore, 0, len(o.opts.Manifest.Datastores))
+	for _, ds := range datastoreDeclarations(o.opts.Manifest) {
+		if ds.Stance == schema.StanceGolden {
+			golden = append(golden, ds)
+		}
+	}
+	if len(golden) == 0 {
+		return
+	}
+	// mustExist, so that taking an inventory never STARTS a datastore. Opening
+	// a ClickHouse provider brings the machine's server up when it is not
+	// running, and a read only command that waits a minute on a container it
+	// then asks nothing is the behaviour openDatastores' own comment warns
+	// about. A store whose server is not there is one this environment does
+	// not hold, which is what the dimension already reports.
+	if err := o.openDatastores(ctx, s, true); err != nil {
+		reason := "the datastore providers could not be opened: " + oneLine(err)
+		for _, ds := range golden {
+			obs.Stores = append(obs.Stores, fidelity.Store{
+				Name: ds.Name, GoldenReason: reason, BranchReason: reason,
+			})
+		}
+		return
+	}
+	for _, h := range s.stores {
+		if h.decl.Stance != schema.StanceGolden {
+			continue
+		}
+		if store, branched := o.observeDatastore(ctx, h); branched {
+			obs.Stores = append(obs.Stores, store)
+		}
+	}
+}
+
+// observeDatastore asks one store's provider about this environment's branch,
+// and reports false when there is no branch to ask about.
+//
+// False rather than a Store carrying nothing, because the two mean different
+// things to the dimension and only one of them is this environment's answer. A
+// store nothing branched is ABSENT with the four missing facts named, which is
+// the sentence the manifest earns by declaring golden; a store that WAS
+// branched is reported from what the branch holds. Returning an empty Store
+// here would turn the first case into a report of a branch with no golden and
+// no rows, which reads as a broken twin rather than as an absent one.
+func (o *Orchestrator) observeDatastore(
+	ctx context.Context, h *datastoreHandle,
+) (fidelity.Store, bool) {
+	store := fidelity.Store{Name: h.decl.Name}
+	inventory, err := h.prov.Inventory(ctx)
+	if err != nil {
+		reason := "the " + h.decl.Name + " datastore could not be asked what it holds: " + oneLine(err)
+		store.GoldenReason, store.BranchReason = reason, reason
+		return store, true
+	}
+
+	var branch provider.Resource
+	found := false
+	for _, r := range inventory {
+		if r.EnvID == o.envID {
+			branch, found = r, true
+			break
+		}
+	}
+	if !found {
+		return fidelity.Store{}, false
+	}
+
+	store.Golden = branch.Labels["golden"]
+	if store.Golden == "" {
+		store.GoldenReason = "this provider does not record which golden the " + h.decl.Name +
+			" datastore's branch came from"
+	} else {
+		goldens, listErr := h.prov.ListGoldens(ctx)
+		if listErr != nil {
+			store.GoldenReason = "the " + h.decl.Name + " datastore could not list its goldens: " +
+				oneLine(listErr)
+		} else {
+			store.Attested, store.Attestation = attestationOf(goldens, store.Golden)
+		}
+	}
+
+	tables, rows, ok := branchContents(branch.Labels)
+	if !ok {
+		store.BranchReason = "this provider does not record what the " + h.decl.Name +
+			" datastore's branch holds"
+		return store, true
+	}
+	store.Tables, store.Rows = tables, rows
+	return store, true
+}
+
+// branchContents reads what a provider says its branch holds.
+//
+// Both labels or neither. A count of tables with no count of rows would render
+// as "12 tables over 0 rows", which is a store somebody would read as empty,
+// and a report that turns a missing number into a zero is the failure this
+// package exists to refuse. A provider that records neither gets the sentence
+// saying so, in the exclusions list, rather than a figure.
+func branchContents(labels map[string]string) (tables int, rows int64, ok bool) {
+	t, hasTables := labels["tables"]
+	r, hasRows := labels["rows"]
+	if !hasTables || !hasRows {
+		return 0, 0, false
+	}
+	tables, err := strconv.Atoi(t)
+	if err != nil {
+		return 0, 0, false
+	}
+	rows, err = strconv.ParseInt(r, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return tables, rows, true
 }
 
 // branchSize counts what the branch holds.

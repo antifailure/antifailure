@@ -222,9 +222,16 @@ func TestBenchmarkTheFidelityScoreBeforeAndAfter(t *testing.T) {
 	require.Equal(t, fidelity.Absent, web.State)
 	require.Contains(t, web.Detail, "1 of 3 instances")
 
+	// The third row: the same manifest with the store it declares golden
+	// actually branched. Not a different environment, the same one after an
+	// af up that branches the store, which the report used to describe
+	// identically to one that had none.
+	branched := measureScore(t, fidelity.Build(branchedTwin(t)))
+	require.Equal(t, scoreOf{reproduced: 9, counted: 9, percent: 100}, branched)
+
 	report := renderScoreBenchmark(
 		headlineOf(t, beforeHealthyText), healthy,
-		headlineOf(t, beforeHalfText), half)
+		headlineOf(t, beforeHalfText), half, branched)
 	t.Log("\n" + report)
 	if out := os.Getenv(scoreBenchmarkOutEnv); out != "" {
 		require.NoError(t, os.MkdirAll(filepath.Dir(out), 0o750))
@@ -238,7 +245,9 @@ const scoreBenchmarkOutEnv = "AF_SCORE_BENCHMARK_OUT"
 
 // renderScoreBenchmark writes the report, dated, because a number older than
 // the code that produced it is withdrawn rather than rounded.
-func renderScoreBenchmark(beforeOne string, one scoreOf, beforeTwo string, two scoreOf) string {
+func renderScoreBenchmark(
+	beforeOne string, one scoreOf, beforeTwo string, two scoreOf, branched scoreOf,
+) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# The fidelity score, before and after\n\nMeasured %s by\n",
 		time.Now().UTC().Format("2006-01-02"))
@@ -257,6 +266,8 @@ func renderScoreBenchmark(beforeOne string, one scoreOf, beforeTwo string, two s
 		quoteScore(beforeOne), renderScore(one))
 	fmt.Fprintf(&b, "| The same, running one instance of each multi instance service | %s | %s |\n",
 		quoteScore(beforeTwo), renderScore(two))
+	fmt.Fprintf(&b, "| The first row again, with the golden ClickHouse actually branched | %s | %s |\n",
+		quoteScore(beforeOne), renderScore(branched))
 
 	b.WriteString("\nThe second row is the environment every user of this engine had until\n")
 	b.WriteString("c2233c50: both runtimes hardcoded one instance, so a manifest asking for\n")
@@ -265,15 +276,24 @@ func renderScoreBenchmark(beforeOne string, one scoreOf, beforeTwo string, two s
 	b.WriteString("absent rather than excluded as unmeasured, because nothing here built a\n")
 	b.WriteString("golden for it and that is a fact about the environment; and the topology\n")
 	b.WriteString("dimension counts instances against the count each service asked for.\n\n")
-	b.WriteString("What would move it back up, honestly: L4.2 filling the ClickHouse with a\n")
-	b.WriteString("masked, verified copy, which is the one component holding the first row\n")
-	b.WriteString("below 100.\n\n")
-	b.WriteString("The denominator here is 9 rather than the 10 this report first carried.\n")
-	b.WriteString("The database dimension's data component became an unknown rather than a\n")
-	b.WriteString("reproduction for an environment with no volume profile, because nothing\n")
-	b.WriteString("had ever compared the branch against production, and an unmeasured\n")
-	b.WriteString("component is in neither half of the score. benchmark-volume-share is the\n")
-	b.WriteString("same twin with a profile, where the component is measured and fails.\n")
+	b.WriteString("The third row is what moved it back up, and it is the same manifest: a\n")
+	b.WriteString("ClickHouse refreshed, masked, verified and branched, reported from what\n")
+	b.WriteString("the branch holds rather than from the declaration. The 90 in the first row\n")
+	b.WriteString("was never a twin missing a tenth of production. It was the report unable\n")
+	b.WriteString("to see a store that was there, which is an understatement rather than an\n")
+	b.WriteString("overstatement and is still a number that was wrong.\n\n")
+	b.WriteString("The third row's two numbers agree and they do not mean the same thing.\n")
+	b.WriteString("The left one is an instrument that was not looking at the second store\n")
+	b.WriteString("at all. The right one is an instrument that read it, named the golden it\n")
+	b.WriteString("came from, checked that golden's signature and counted what the branch\n")
+	b.WriteString("holds.\n")
+	b.WriteString("\nThe denominator in the first two rows is 9 rather than the 10 this\n")
+	b.WriteString("report first carried. The database dimension's data component became an\n")
+	b.WriteString("unknown rather than a reproduction for an environment with no volume\n")
+	b.WriteString("profile, because nothing had ever compared the branch against production,\n")
+	b.WriteString("and an unmeasured component is in neither half of the score.\n")
+	b.WriteString("benchmark-volume-share is the same twin with a profile, where the\n")
+	b.WriteString("component is measured and fails.\n")
 	return b.String()
 }
 

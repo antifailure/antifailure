@@ -81,6 +81,16 @@ type Observation struct {
 	// says why the configured source produced nothing.
 	Traffic       string
 	TrafficReason string
+
+	// Stores describes each declared datastore this environment BRANCHED, as
+	// that store's own provider answered for it.
+	//
+	// A store nothing branched is not in here at all, and the absence is load
+	// bearing: it is what leaves the datastores dimension reporting a store
+	// declared golden as absent, which is the answer for an environment that
+	// has none. Only a store the environment actually holds appears, and only
+	// then does the dimension report what is in it.
+	Stores []Store
 }
 
 // Host is one third party host the egress policy names.
@@ -117,6 +127,50 @@ type Persona struct {
 	// a magic link or a one time code needs to arrive.
 	Deliverable bool
 }
+
+// Store is one declared datastore's branch, as its provider answered for it.
+//
+// The same two questions the database dimension asks about the primary, asked
+// of the second store: which golden this branch came from and whether that
+// golden's attestation still checks out, and what the branch holds. A separate
+// type rather than a second set of fields on Observation, because a datastore
+// has no pooled endpoint, no subset, no personas and no source of traffic, and
+// a struct carrying fields nothing ever fills is one a reader has to check
+// against the code before believing.
+type Store struct {
+	// Name is the store's name in the manifest, which is what the manifest
+	// declared and what its components are named after.
+	Name string
+	// Golden is the golden this branch came from, and GoldenReason says why
+	// the provider could not say.
+	Golden       string
+	GoldenReason string
+	// Attested reports whether that golden is verified and its attestation
+	// parsed and matched its own signature. Attestation describes what the
+	// attestation covered when it did, and says which of those failed when it
+	// did not, so an absence always carries the reason for it.
+	Attested    bool
+	Attestation string
+	// Tables and Rows are what the branch holds, read from the branch.
+	// BranchReason says why they could not be read.
+	//
+	// There is no floor here, unlike the primary database's count. That one
+	// stops a live count at a ceiling because counting every row of a
+	// production sized Postgres to print one number would take minutes; a
+	// store that reports what it holds from its own metadata answers exactly
+	// or does not answer at all, and a provider that cannot answer sets
+	// BranchReason rather than a number somebody would quote.
+	Tables       int
+	Rows         int64
+	BranchReason string
+}
+
+// There is deliberately no Empty field here, unlike the primary database's.
+// Whether a store declares a source is in its own manifest entry, the manifest
+// is part of this observation, and the dimension reads it from there. A copy
+// of a fact the report already holds is a second thing to keep in step, and
+// this is the file whose whole claim is that the inventory is a pure function
+// of what was observed.
 
 // Build turns an observation into an inventory.
 //
