@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -658,16 +659,120 @@ type tuning struct {
 	RefusedFields map[string]string `json:"refused_fields"`
 }
 
+// defaultTuning is the base corpus the gate runs on. AF_SCHEMA_TUNING points
+// it at a file instead, which is how it is developed without recompiling.
+//
+// Two bases rather than one because the manifest has mutually exclusive
+// fields, and a document carrying all of them at once is refused by twenty
+// four of the engine's own cross field rules: a database is built from a
+// source or from a seed and never both, an egress rule in block mode may not
+// carry a credential, a web service may not carry a cron schedule. The second
+// base is the other side of every one of those pairs, so nothing is left
+// unmeasured because it could not share a document with its opposite.
+const defaultTuning = `{
+  "bases": [
+    {
+      "name": "source",
+      "why": "a web service built from an image, a golden from production, egress in sandbox mode",
+      "overrides": {
+        "database.golden.schedule": "0 3 * * *",
+        "database.golden.max_age": "720h",
+        "database.volume.max_age": "720h",
+        "database.subset.virtual_relationships[].from": "orders.user_id",
+        "database.subset.virtual_relationships[].to": "users.id",
+        "egress.rules[].mode": "sandbox",
+        "explore.goals[].name": "explore-goal",
+        "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
+        "load.source": "otel",
+        "load.unsafe_routes": [
+          "/admin"
+        ],
+        "oracle.ignore.fields[]": "$.field",
+        "oracle.probes[].method": "POST",
+        "personas[].email": "person@example.com",
+        "services[].build.strategy": "image",
+        "services[].depends_on": [
+          "dep"
+        ],
+        "services[].env[].value": "http://example.com",
+        "load.source_config": {
+          "path": "telemetry/traces.json"
+        }
+      },
+      "prune": [
+        "database.seed",
+        "datastores[].from",
+        "egress.rules[].fixtures",
+        "services[].schedule",
+        "services[].resources",
+        "load.thresholds.query_count_increase",
+        "services[].env[].from",
+        "services[].env[].sandbox"
+      ],
+      "append": {
+        "services": [
+          {
+            "name": "dep",
+            "kind": "worker"
+          }
+        ]
+      }
+    },
+    {
+      "name": "seed",
+      "why": "the other side of every mutually exclusive pair: a seeded database, a cron service, an egress rule in mock mode, a derived datastore, a variable read from the environment",
+      "overrides": {
+        "database.golden.schedule": "0 3 * * *",
+        "database.golden.max_age": "720h",
+        "database.volume.max_age": "720h",
+        "database.subset.virtual_relationships[].from": "orders.user_id",
+        "database.subset.virtual_relationships[].to": "users.id",
+        "egress.rules[].mode": "mock",
+        "explore.goals[].name": "explore-goal",
+        "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
+        "load.source": "otel",
+        "load.unsafe_routes": [
+          "/admin"
+        ],
+        "oracle.ignore.fields[]": "$.field",
+        "oracle.probes[].method": "POST",
+        "personas[].email": "person@example.com",
+        "services[].kind": "cron",
+        "services[].schedule": "0 3 * * *",
+        "datastores[].stance": "derived",
+        "services[].env[].from": "OTHER_VAR",
+        "load.source_config": {
+          "path": "telemetry/traces.json"
+        }
+      },
+      "prune": [
+        "database.source_url_env",
+        "egress.rules[].credential",
+        "egress.rules[].rate_limit",
+        "services[].port",
+        "services[].build.image",
+        "services[].depends_on",
+        "services[].resources",
+        "load.thresholds.query_count_increase",
+        "services[].env[].value"
+      ]
+    }
+  ],
+  "refused_fields": {
+    "services[].resources": "the engine refuses resources.cpu and resources.memory outright: nothing reads them, so a limit in the manifest would be applied nowhere",
+    "load.thresholds.query_count_increase": "the engine refuses this outright: a load run counts requests, not statements, so nothing could measure it"
+  }
+}`
+
 func loadTuning() tuning {
 	var tn tuning
-	path := os.Getenv("AF_SCHEMA_TUNING")
-	if path == "" {
-		tn.Bases = []baseSpec{{Name: "generated"}}
-		return tn
-	}
-	raw, err := os.ReadFile(path) //nolint:gosec // a developer named this file
-	if err != nil {
-		panic("AF_SCHEMA_TUNING: " + err.Error())
+	raw := []byte(defaultTuning)
+	if path := os.Getenv("AF_SCHEMA_TUNING"); path != "" {
+		var err error
+		raw, err = os.ReadFile(path) //nolint:gosec // a developer named this file
+		if err != nil {
+			panic("AF_SCHEMA_TUNING: " + err.Error())
+		}
 	}
 	if err := json.Unmarshal(raw, &tn); err != nil {
 		panic("AF_SCHEMA_TUNING: " + err.Error())
@@ -739,6 +844,9 @@ const (
 	statusNot      = "NOT-ENFORCED"
 	statusRefused  = "REFUSED-FIELD"
 	statusNoLook   = "COULD-NOT-LOOK"
+	// statusElsewhere is a refusal that names a path other than the one that
+	// was mutated. It is not evidence the constraint is kept.
+	statusElsewhere = "REFUSED-ELSEWHERE"
 )
 
 func measure(t *testing.T) ([]verdict, []builtBase) {
@@ -786,13 +894,17 @@ func measure(t *testing.T) ([]verdict, []builtBase) {
 				name := strings.NewReplacer("/", "_", " ", "_", "*", "star", "[", "", "]", "").Replace(c.id())
 				_ = os.WriteFile(filepath.Join(dumpDir, "bad__"+name+".json"), raw, 0o600)
 			}
-			e := parseErr(bad)
+			r := ask(bad)
 			v.base = b.spec.Name
-			if e == "" {
+			switch {
+			case !r.refused:
 				v.status = statusNot
-			} else {
+			case !attributable(c.Path, r):
+				v.status = statusElsewhere
+				v.engine = firstProblem(r.text)
+			default:
 				v.status = statusEnforced
-				v.engine = firstProblem(e)
+				v.engine = firstProblem(r.text)
 			}
 			measured = true
 			break
@@ -838,6 +950,61 @@ func parseErr(doc any) string {
 	return ""
 }
 
+// refusal is what the engine said about one document: whether it refused it,
+// and which paths it named.
+type refusal struct {
+	refused bool
+	text    string
+	paths   []string
+}
+
+func ask(doc any) refusal {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return refusal{refused: true, text: "marshal: " + err.Error()}
+	}
+	_, err = manifest.Parse(raw, "antifailure.yaml", "")
+	if err == nil {
+		return refusal{}
+	}
+	r := refusal{refused: true, text: err.Error()}
+	var errs *manifest.Errors
+	if errors.As(err, &errs) {
+		for _, p := range errs.Problems {
+			if p.Path != "" {
+				r.paths = append(r.paths, p.Path)
+			}
+		}
+	}
+	return r
+}
+
+// attributable reports whether the engine's complaint is about the place that
+// was mutated, rather than about something the mutation disturbed by accident.
+//
+// This exists because a cell can read ENFORCED for the wrong reason. Deleting
+// a required field or lengthening a name can break a cross field rule
+// somewhere else, and an instrument that only asks "was it refused" would
+// score that as the constraint being kept. A refusal that names no path at all
+// is the YAML decoder rejecting the document before the validator ran, which
+// is a real refusal of that value, so it counts.
+func attributable(target string, r refusal) bool {
+	if len(r.paths) == 0 {
+		return true
+	}
+	target = strings.TrimSuffix(target, "[]")
+	for _, p := range r.paths {
+		p = indexed.ReplaceAllString(p, "")
+		if p == target || strings.HasPrefix(p, target+".") || strings.HasPrefix(p, target+"[") ||
+			strings.HasPrefix(target, p+".") || target == "" {
+			return true
+		}
+	}
+	return false
+}
+
+var indexed = regexp.MustCompile(`\[[0-9]+\]`)
+
 // TestSchemaConstraintReport prints the measurement. It asserts nothing; the
 // gate is TestEverySchemaConstraintIsEnforced.
 func TestSchemaConstraintReport(t *testing.T) {
@@ -881,4 +1048,71 @@ func TestSchemaConstraintReport(t *testing.T) {
 		raw, _ := json.MarshalIndent(rows, "", " ")
 		require.NoError(t, os.WriteFile(out, raw, 0o600))
 	}
+}
+
+// wantConstraints is the number of constraints schemas/manifest.v1.json
+// declares. Pinned so that DELETING one fails this test: a constraint removed
+// from that file removes a row from the published reference page that
+// tools/schemadoc generates, which is a promise withdrawn from users, and a
+// gate that only noticed additions would be half an instrument.
+const wantConstraints = 570
+
+// TestEverySchemaConstraintIsEnforced is the gate.
+//
+// For every constraint the published schema declares, it generates a manifest
+// that violates exactly that one and requires the engine to refuse it, and to
+// refuse it for that reason rather than for something the mutation disturbed
+// by accident. It measures behaviour, never names, because enforcement moves:
+// normalizeDatastores copies database.source_url_env onto the primary
+// datastore's entry, so one check can keep the promise made about two fields,
+// and a sweep pairing a schema field with a Go check by name would score one
+// of them wrong in each direction.
+func TestEverySchemaConstraintIsEnforced(t *testing.T) {
+	verdicts, bases := measure(t)
+
+	for _, b := range bases {
+		require.Emptyf(t, b.err, "the generated base manifest %q is itself refused, so every cell measured against it says nothing:\n%s", b.spec.Name, b.err)
+		require.Emptyf(t, b.unfilled, "no value could be generated for %v, so those fields carry no constraint anywhere in the corpus", b.unfilled)
+	}
+
+	require.Lenf(t, verdicts, wantConstraints,
+		"schemas/manifest.v1.json declares %d constraints and this test was written against %d. "+
+			"Adding one is fine: update wantConstraints. Removing one withdraws a row from the "+
+			"published reference page, so say why in the commit.", len(verdicts), wantConstraints)
+
+	var unenforced, elsewhere, unmeasured []string
+	for _, v := range verdicts {
+		switch v.status {
+		case statusNot:
+			unenforced = append(unenforced, v.c.id())
+		case statusElsewhere:
+			elsewhere = append(elsewhere, v.c.id()+" -> "+v.engine)
+		case statusNoLook:
+			unmeasured = append(unmeasured, v.c.id()+" ("+v.reason+")")
+		}
+	}
+
+	require.Emptyf(t, unenforced,
+		"the schema declares these and the engine accepts a manifest that breaks them, so they are "+
+			"published to users as a promise and kept by nothing:\n  %s",
+		strings.Join(unenforced, "\n  "))
+	require.Emptyf(t, elsewhere,
+		"these were refused, but for a path other than the one that was broken, so the refusal is "+
+			"not evidence the constraint is kept:\n  %s", strings.Join(elsewhere, "\n  "))
+	require.Emptyf(t, unmeasured,
+		"these could not be measured at all, which is not a pass:\n  %s", strings.Join(unmeasured, "\n  "))
+}
+
+// TestTheEmbeddedSchemaIsThePublishedOne. The engine embeds a copy of
+// schemas/manifest.v1.json because go:embed cannot reach outside the module.
+// A copy that drifts would enforce yesterday's contract while the site
+// published today's, which is the exact failure this whole file exists for,
+// one level down.
+func TestTheEmbeddedSchemaIsThePublishedOne(t *testing.T) {
+	published, err := os.ReadFile(filepath.Join("..", "..", "..", "schemas", "manifest.v1.json"))
+	require.NoError(t, err)
+	embedded, err := os.ReadFile("manifest.v1.json")
+	require.NoError(t, err)
+	require.Equal(t, string(published), string(embedded),
+		"engine/internal/manifest/manifest.v1.json is a generated copy and it is stale. Run 'just generate'.")
 }
