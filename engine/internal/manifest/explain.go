@@ -283,6 +283,24 @@ func Explain(m *schema.Manifest, width int) string {
 	// extend can ever give it.
 	fmt.Fprintf(&b, "  extend to    %s\n", value(fmt.Sprintf(
 		"%s at the most, from when it was created", m.Runtime.MaxTTL), 15, width))
+	// Placement, and only when there is any. Where an environment goes is the
+	// question this section answers, and a manifest that declares targets has
+	// a different answer to it than the provider line alone gives. Printing
+	// which target was chosen rather than only the list, because a list is
+	// what was written and the choice is what will happen, and this command
+	// exists to show the second.
+	if len(m.Runtime.Targets) > 0 {
+		fmt.Fprintf(&b, "  requires     %s\n",
+			value(orNone(joinRequirements(m.Runtime.Requires), "nothing, so any target"), 15, width))
+		for _, t := range m.Runtime.Targets {
+			chosen := ""
+			if t.Name == chosenTarget(m.Runtime) {
+				chosen = "  <- placed here"
+			}
+			fmt.Fprintf(&b, "  target       %s\n", value(fmt.Sprintf("%s, %s%s%s",
+				t.Name, t.Provider, describeTags(t.Tags), chosen), 15, width))
+		}
+	}
 	b.WriteString("\n")
 
 	b.WriteString("GitHub\n")
@@ -525,6 +543,57 @@ func serviceSize(s schema.Service) string {
 		return fmt.Sprintf("%s CPU, requested and capped; memory uncapped", s.Resources.CPU)
 	case s.Resources.Memory != "":
 		return fmt.Sprintf("%s memory, requested and capped; CPU uncapped", s.Resources.Memory)
+	}
+	return ""
+}
+
+// joinRequirements renders a placement requirement as a person writes it.
+//
+// Sorted, so that two runs of af check on one manifest print the same line.
+func joinRequirements(requires map[string]string) string {
+	if len(requires) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(requires))
+	for k, v := range requires {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+// describeTags renders what a target offers.
+func describeTags(tags map[string]string) string {
+	if len(tags) == 0 {
+		return ", no tags"
+	}
+	return ", " + joinRequirements(tags)
+}
+
+// chosenTarget is the target this manifest would be placed on.
+//
+// The same rule placement applies, which is the first target satisfying every
+// requirement, because a page that showed the list and not the choice would
+// leave the reader to apply the rule themselves and get it wrong. It is
+// duplicated here rather than called because the engine's version needs a
+// licence and a context and this command has neither: af check explains a
+// manifest, and a manifest explains the same way in both editions.
+//
+// Empty when nothing satisfies the requirement, which validation has already
+// refused by the time anything prints, so it appears only for a manifest built
+// in memory.
+func chosenTarget(r *schema.Runtime) string {
+	for _, t := range r.Targets {
+		satisfied := true
+		for k, want := range r.Requires {
+			if t.Tags[k] != want {
+				satisfied = false
+				break
+			}
+		}
+		if satisfied {
+			return t.Name
+		}
 	}
 	return ""
 }

@@ -514,8 +514,79 @@ name.
 | --- | --- |
 | `provider` | Which runtime places the environment. `local` and `kubernetes` are built in, and a build registers any others it carries. The schema keeps no list, the way `datastore.engine` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
 | `ttl` | How long an environment lives. |
+| `max_ttl` | The furthest `af env extend` may push an environment's expiry, measured from creation. |
 | `idle_sleep` | Suspend after this long with no traffic. |
 | `domain` | Wildcard domain for preview URLs. |
+| `namespace_prefix` | Prefix for Kubernetes namespaces. |
+| `kubeconfig_context` | Which cluster. Naming it stops an environment landing on whatever context happened to be current. |
+| `requires` | What a target must offer for this repository, as tag equals value. See below. |
+| `targets` | The places an environment may be placed, in preference order. See below. |
+
+### Placement
+
+Most repositories have one place environments run, name it in `provider`, and
+never write either of the last two keys. `targets` is for the case where there
+is more than one: two clusters in two regions, a pool with more memory, an
+isolated pool for repositories that handle regulated data.
+
+```yaml
+runtime:
+  provider: kubernetes
+  domain: preview.example.com
+  requires:
+    region: eu-west-1
+  targets:
+    - name: frankfurt
+      kubeconfig_context: eu-prod
+      domain: eu.preview.example.com
+      tags:
+        region: eu-west-1
+        class: standard
+    - name: virginia
+      kubeconfig_context: us-prod
+      domain: us.preview.example.com
+      tags:
+        region: us-east-1
+        class: standard
+```
+
+A target inherits `provider`, `domain`, `namespace_prefix` and
+`kubeconfig_context` from the block above it, so a fleet of clusters is one
+provider line and a list of contexts rather than the same four settings written
+out per target. `af check` prints each target with its tags and marks the one
+this manifest would be placed on.
+
+**The tags are declared here rather than discovered from the cluster**, and that
+is deliberate. A kubeconfig context is a name on somebody's laptop and it does
+not say which region the cluster is in. Putting the claim in the repository puts
+it under review, next to the requirement that reads it.
+
+**Placement is a pure function of this file.** The first target satisfying every
+requirement wins, every time, on every machine. `af up`, `af status`, `af logs`
+and `af down` each decide independently and have to agree: a placement that
+consulted a cluster's health would send `af up` to one cluster and `af status` to
+another the moment one of them was unreachable, and the second command would
+report that your environment does not exist.
+
+**A requirement nothing can satisfy is refused rather than ignored**, at `af
+check`, before anything is dispatched:
+
+- `requires` with no `targets`. There is one runtime, it carries no tags, and so
+  nothing could ever match.
+- A requirement no declared target offers. The message names what the targets do
+  offer, because the fix is usually a typo in the value.
+- Two targets with one name, or two Kubernetes targets resolving to one cluster.
+  Choosing between two targets on one cluster decides nothing.
+
+**The `region` tag is read by more than placement.** It is what fills the region
+an organization policy's `allowed_regions` rule compares against, so a target
+that carries one can be refused by a residency policy and a target that carries
+none cannot be. See [policy](/docs/enterprise/policy).
+
+**More than one target requires an enterprise license** carrying `multi_runtime`;
+see [multiple runtimes](/docs/enterprise/runtimes). One target needs no license.
+It decides nothing, it only says where the runtime you already had is, which is
+what a residency policy reads.
 
 ## `github`
 
