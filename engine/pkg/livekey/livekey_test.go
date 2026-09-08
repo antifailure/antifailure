@@ -200,6 +200,11 @@ func privateKeyVectors() []liveVector {
 			base64.StdEncoding.EncodeToString([]byte("xy" + pkcs8))},
 		{"private key, base64 wrapped with a trailing value", "Private key",
 			encoded(pkcs8) + " " + fake("", 40, base64s)},
+		// No separator in front of it, which is what a run walked backwards
+		// from the marker cannot find the start of. The marker says where the
+		// encoding begins; the characters before it do not.
+		{"private key, base64 wrapped after other base64", "Private key",
+			fake("", 41, base64s) + encoded(pkcs8)},
 	}
 }
 
