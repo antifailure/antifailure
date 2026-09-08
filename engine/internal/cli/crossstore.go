@@ -88,9 +88,6 @@ hundred percent of one.
 Each datastore says where its schema is read from with source_url_env, which
 names an environment variable and never the connection string. The primary
 takes that from database.source_url_env and does not repeat it.`),
-		Example: strings.TrimSpace(`
-af mask crossstore
-af mask crossstore --format json`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o, err := orchestrator(e, branch, false)

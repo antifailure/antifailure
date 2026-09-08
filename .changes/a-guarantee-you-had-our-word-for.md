@@ -57,6 +57,15 @@ disagreed is absent with the pair named, which is the line the whole thing is
 for: one identity masked into two people is a twin that is confidently wrong,
 and every report built on it is plausible.
 
+**A project that lists `datastores` in `fidelity.require` and holds two stores
+will see that requirement go from met to unmeasurable** until each store names a
+`source_url_env`. That is not a regression, it is the point: `require` means
+every component of the dimension was measured and reproduced, and the dimension
+now carries a component that nothing had measured. Reporting it as met would be
+the report asserting a guarantee that nothing checked. Unmeasurable is a
+distinct outcome from broken and is reported as one, so nothing fails as though
+the stores had been compared and disagreed.
+
 The same question is the fourth question `inspect_data_masking` answers, so an
 agent can ask it and get a verdict of PASS, FAIL or INCONCLUSIVE rather than a
 percentage it has to interpret.

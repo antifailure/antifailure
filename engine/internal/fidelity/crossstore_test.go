@@ -18,7 +18,7 @@ import (
 // one did not, so the honest reading of it was that a customer had our word.
 
 // The name Explain prints, which has to survive its twelve character column.
-const crossStoreLine = "cross store"
+const crossStoreLine = fidelity.CrossStoreComponent
 
 // A twin with one store never gets the line. The question does not arise, and
 // a sentence about it on every single store manifest is noise that makes the

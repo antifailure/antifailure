@@ -90,11 +90,15 @@ func TestEveryStoreIsNamedNotJustTheFirst(t *testing.T) {
 	))
 	d, ok := inv.Dimension(schema.FidelityDatastores)
 	require.True(t, ok)
-	require.Len(t, d.Components, 3)
-	// Sorted, so two runs of the same environment print the same bytes.
+	require.Len(t, d.Components, 4)
+	// Sorted, so two runs of the same environment print the same bytes. The
+	// cross store line is appended AFTER the sort, so the question about the
+	// pair reads under the stores it is about rather than alphabetically
+	// among them, and the three stores keep the positions they had.
 	require.Equal(t, "bus", d.Components[0].Name)
 	require.Equal(t, "cache", d.Components[1].Name)
 	require.Equal(t, "events", d.Components[2].Name)
+	require.Equal(t, fidelity.CrossStoreComponent, d.Components[3].Name)
 	require.Contains(t, d.Components[0].Detail, "kafka")
 	require.Contains(t, d.Components[1].Detail, "redis")
 }

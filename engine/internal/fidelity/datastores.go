@@ -142,13 +142,20 @@ func datastores(obs Observation) Dimension {
 	return d
 }
 
-// crossStoreComponentName is the line's name in the report.
+// CrossStoreComponent is the line's name in the report.
 //
 // Short deliberately. Explain renders a component name in a twelve character
 // column and trims what does not fit, so "one person, masked the same in every
-// store" would reach a reader as "one person, …" and say nothing. The name is
+// store" would reach a reader as "one person, ..." and say nothing. The name is
 // the subject and the detail is the sentence.
-const crossStoreComponentName = "cross store"
+//
+// EXPORTED because it is the one component of this dimension that is not a
+// store, and something that counts stores has to be able to say so. The
+// benchmark that measures stores per environment reads len(d.Components) and
+// takes every name in it as a store, which was true until this line existed.
+// A caller left to match the string itself would be a second copy of this
+// name, kept in step with the first by nobody.
+const CrossStoreComponent = "cross store"
 
 // crossStoreComponent is the line that appears where two stores are present.
 //
@@ -181,7 +188,7 @@ func crossStoreComponent(obs Observation, others int) (Component, bool) {
 	if others == 0 {
 		return Component{}, false
 	}
-	c := Component{Name: crossStoreComponentName}
+	c := Component{Name: CrossStoreComponent}
 	if obs.CrossStore == nil {
 		c.State = Unmeasured
 		c.Detail = obs.CrossStoreReason

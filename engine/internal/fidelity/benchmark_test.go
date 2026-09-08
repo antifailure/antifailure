@@ -81,8 +81,17 @@ func measure(t *testing.T, path string) measurement {
 	held, reproduced := 1, 1
 	var stores []string
 	if d, ok := inv.Dimension(schema.FidelityDatastores); ok {
-		held += len(d.Components)
 		for _, c := range d.Components {
+			if c.Name == fidelity.CrossStoreComponent {
+				// Not a store. It is the question of whether one identity
+				// masks to one person ACROSS the stores, and counting it here
+				// would add one to a number whose subject is how many stores
+				// this build can name. A true answer to a different question
+				// is the failure this whole benchmark exists to avoid
+				// publishing.
+				continue
+			}
+			held++
 			stores = append(stores, c.Name)
 		}
 	}
