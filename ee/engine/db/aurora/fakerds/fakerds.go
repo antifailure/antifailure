@@ -614,12 +614,17 @@ func (s *Server) render(c *cluster) clusterXML {
 		AllocatedStorage:  c.storageGB,
 		ClusterCreateTime: c.created.Format(time.RFC3339Nano),
 	}
-	if c.status == "available" {
-		out.Endpoint = s.host
-		out.ReaderEndpoint = s.host
-	}
 	for _, in := range s.instancesOf(c.id) {
 		out.Members = append(out.Members, memberXML{Instance: in.id, Writer: true})
+	}
+	// An endpoint only while something is attached to answer on it. A cluster
+	// with no instances is a volume, and a volume has no address: RDS reports
+	// an empty endpoint for one, and a fake that reported a host would let a
+	// provider connect to a published golden and never find out that it
+	// cannot.
+	if c.status == "available" && len(out.Members) > 0 {
+		out.Endpoint = s.host
+		out.ReaderEndpoint = s.host
 	}
 	keys := make([]string, 0, len(c.tags))
 	for k := range c.tags {
