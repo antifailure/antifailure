@@ -278,6 +278,16 @@ func CopyOnWriteClaim(declared bool, a Answer) string {
 // instead of a condition spread across five provider packages where the sixth
 // one copies a working file and inherits the wrong answer.
 //
+// The relationship this creates for a fake, which is worth naming because it is
+// the opposite of what a reader expects. Under the inverted rule a fake does not
+// opt out of anything; it simply never asserts. So the question somebody asks in
+// six months is not "why did this fake ask to be excused" but "why does this
+// provider not assert a real service", and the answer has to be a test. On the
+// Aurora side that test is TestTheFakeControlPlaneReallyCopies, which asserts the
+// fake control plane's own byte counter MOVES during a branch. It stops being a
+// guard on a skip and becomes the evidence that the assertion would be false, and
+// that is the stronger of the two relationships.
+//
 // One entry today. A second is a candidate and is deliberately NOT here.
 // Branch_IsWithinTheDeclaredLatency times a branch against a declared wall
 // clock number, and against an httptest server that number is a measurement of

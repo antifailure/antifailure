@@ -53,6 +53,9 @@ func TestConformance(t *testing.T) {
 	}, conformance.Options{
 		// A real Database Lab Engine, with real ZFS underneath it. There is no
 		// default token, so a run reaching this line had one.
+		// It skips without one, so like neon and supabase this asserts what a run
+		// would drive rather than proving that one happened. The ledger records
+		// whether anybody fired it, and for this provider nobody has.
 		RealService: "a real Database Lab Engine, on real ZFS",
 		// Generous because a behaviour here is up to three clone creations,
 		// each a ZFS clone plus a container start plus a Postgres recovery,

@@ -66,6 +66,15 @@ func TestConformance(t *testing.T) {
 		// side as deliberately as on the true one: an unmeasured false is the
 		// half of this the first ruling missed, because it passes comfortably
 		// against anything that copies and nobody rereads a green check.
+		//
+		// Asserting it does NOT mean this suite proves anything in CI. It skips
+		// entirely without credentials, so on an ordinary run the behaviour never
+		// executes and no verdict is reached. The assertion says what a run WOULD
+		// be driving if it ran; the ledger in engine/conformance/ledger.go is what
+		// says whether anybody has run it, and it records this provider as
+		// unproven. A green check on this package is not a measurement of the
+		// copy on write claim, and that gap predates the third verdict rather
+		// than being created by it.
 		RealService: "the real Supabase API, against a real project",
 		// Every behaviour crosses the public internet, provisions at least one
 		// project, and copies a database into it. Generous, and still a bound:
