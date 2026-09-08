@@ -84,8 +84,17 @@ suite tests against.
 | `dblab` | A ZFS clone handed out by a Database Lab Engine you run | yes | yes | no | no | MIT |
 | `pgurl` | A `CREATE DATABASE ... TEMPLATE` on any Postgres you can reach | no | yes | no | yes | MIT |
 
-`neon`, `dblab` and `docker` are the three where branch time does not grow
-with the database. That is the whole reason to choose one of them.
+`neon` and `dblab` are the two where a branch is a copy on write clone of a
+full size copy of production, which is the whole reason to choose either.
+`docker` declares the same capability for a different reason and it is worth
+knowing which: a branch there is a container over the golden image's shared
+layers, so nothing is copied when one is made, and the time in that provider
+goes into building the image rather than into branching it.
+
+The [database providers](/docs/providers/databases) page still describes
+`docker` branch time as growing with the database. That sentence predates this
+matrix and is not something this page measured either way; the `benchmarks/`
+report is where a number for it would come from, and there is not one yet.
 
 ### Datastore providers
 

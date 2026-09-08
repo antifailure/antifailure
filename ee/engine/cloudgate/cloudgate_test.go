@@ -63,7 +63,7 @@ func (f *fakeDatabase) DestroyGolden(context.Context, string) error {
 
 func (f *fakeDatabase) Branch(_ context.Context, version, envID string) (provider.Branch, error) {
 	f.rec.did("Branch")
-	return provider.Branch{ID: envID, Version: version}, nil
+	return provider.Branch{EnvID: envID, From: version}, nil
 }
 
 func (f *fakeDatabase) Reset(context.Context, provider.Branch) error {
@@ -113,7 +113,7 @@ func (f *fakeRuntime) Capabilities() provider.RuntimeCaps { return provider.Runt
 
 func (f *fakeRuntime) Up(context.Context, provider.EnvSpec) (provider.Env, error) {
 	f.rec.did("Up")
-	return provider.Env{ID: "env-1"}, nil
+	return provider.Env{EnvID: "env-1"}, nil
 }
 
 func (f *fakeRuntime) Down(context.Context, string) (provider.Teardown, error) {
@@ -123,7 +123,7 @@ func (f *fakeRuntime) Down(context.Context, string) (provider.Teardown, error) {
 
 func (f *fakeRuntime) Status(context.Context, string) (provider.Env, error) {
 	f.rec.did("Status")
-	return provider.Env{ID: "env-1"}, nil
+	return provider.Env{EnvID: "env-1"}, nil
 }
 
 func (f *fakeRuntime) Inventory(context.Context) ([]provider.Resource, error) {
@@ -244,7 +244,7 @@ func TestAnUnlicensedInstallationCannotCreateAndCanAlwaysRemove(t *testing.T) {
 	require.Contains(t, err.Error(), "no licence is installed")
 
 	// Everything that removes, enumerates or reports is never refused.
-	require.NoError(t, db.Destroy(ctx, provider.Branch{ID: "env-1"}))
+	require.NoError(t, db.Destroy(ctx, provider.Branch{EnvID: "env-1"}))
 	require.True(t, rec.ran("Destroy"), "teardown was refused, which orphans a cloud resource")
 
 	require.NoError(t, db.DestroyGolden(ctx, "gv_1"))
@@ -256,10 +256,10 @@ func TestAnUnlicensedInstallationCannotCreateAndCanAlwaysRemove(t *testing.T) {
 
 	_, err = db.ListGoldens(ctx)
 	require.NoError(t, err)
-	require.NoError(t, db.Reset(ctx, provider.Branch{ID: "env-1"}))
-	_, err = db.ConnString(ctx, provider.Branch{ID: "env-1"}, provider.ConnDirect)
+	require.NoError(t, db.Reset(ctx, provider.Branch{EnvID: "env-1"}))
+	_, err = db.ConnString(ctx, provider.Branch{EnvID: "env-1"}, provider.ConnDirect)
 	require.NoError(t, err)
-	_, err = db.Health(ctx, provider.Branch{ID: "env-1"})
+	_, err = db.Health(ctx, provider.Branch{EnvID: "env-1"})
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 }
@@ -279,7 +279,7 @@ func TestALicensedInstallationReachesTheProvider(t *testing.T) {
 
 	branch, err := db.Branch(ctx, "gv_1", "env-1")
 	require.NoError(t, err)
-	require.Equal(t, "env-1", branch.ID)
+	require.Equal(t, "env-1", branch.EnvID)
 	require.True(t, rec.ran("Branch"))
 }
 

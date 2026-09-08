@@ -63,8 +63,8 @@ import (
 func init() {
 	// Recorded so a feature that is sold and checked nowhere shows up as such.
 	// See ee/engine/feature.
-	feature.Declare(license.FeatureCloudDatabase, "ee/engine/cloudgate.gatedDatabase")
-	feature.Declare(license.FeatureCloudRuntime, "ee/engine/cloudgate.gatedRuntime")
+	feature.Declare(license.FeatureCloudDatabase, "cloudgate/cloudgate.go:gatedDatabase.Branch")
+	feature.Declare(license.FeatureCloudRuntime, "cloudgate/cloudgate.go:gatedRuntime.Up")
 }
 
 // Refusal is a licensed provider used without the licence for it.
@@ -125,11 +125,15 @@ func Wrap(reg *extension.Registry) int {
 	return wrapped
 }
 
-// permit answers the licence question for one feature, or says why not.
-func permit(ctx context.Context, f license.Feature, providerName string) error {
-	if feature.Enabled(ctx, f) {
-		return nil
-	}
+// refuse builds the error for a call the licence does not permit.
+//
+// The QUESTION is asked at each call site rather than here, with the feature
+// constant written out, so that the file names the feature it gates. A helper
+// taking the feature as a parameter reads fine and leaves the source with no
+// occurrence of feature.Enabled(ctx, license.FeatureCloudDatabase) anywhere in
+// it, which is a site a reader cannot find by grep and a check cannot match
+// against what was declared.
+func refuse(ctx context.Context, f license.Feature, providerName string) error {
 	return &Refusal{Feature: f, Provider: providerName, Reason: reason(ctx, f)}
 }
 
@@ -199,8 +203,8 @@ func (g *gatedDatabase) Capabilities() provider.Caps { return g.inner.Capabiliti
 func (g *gatedDatabase) RefreshGolden(
 	ctx context.Context, spec provider.GoldenSpec,
 ) (provider.GoldenVersion, error) {
-	if err := permit(ctx, license.FeatureCloudDatabase, g.name); err != nil {
-		return provider.GoldenVersion{}, err
+	if !feature.Enabled(ctx, license.FeatureCloudDatabase) {
+		return provider.GoldenVersion{}, refuse(ctx, license.FeatureCloudDatabase, g.name)
 	}
 	return g.inner.RefreshGolden(ctx, spec)
 }
@@ -208,8 +212,8 @@ func (g *gatedDatabase) RefreshGolden(
 func (g *gatedDatabase) Branch(
 	ctx context.Context, version string, envID string,
 ) (provider.Branch, error) {
-	if err := permit(ctx, license.FeatureCloudDatabase, g.name); err != nil {
-		return provider.Branch{}, err
+	if !feature.Enabled(ctx, license.FeatureCloudDatabase) {
+		return provider.Branch{}, refuse(ctx, license.FeatureCloudDatabase, g.name)
 	}
 	return g.inner.Branch(ctx, version, envID)
 }
@@ -277,8 +281,8 @@ func (g *gatedRuntime) Name() string                       { return g.inner.Name
 func (g *gatedRuntime) Capabilities() provider.RuntimeCaps { return g.inner.Capabilities() }
 
 func (g *gatedRuntime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, error) {
-	if err := permit(ctx, license.FeatureCloudRuntime, g.name); err != nil {
-		return provider.Env{}, err
+	if !feature.Enabled(ctx, license.FeatureCloudRuntime) {
+		return provider.Env{}, refuse(ctx, license.FeatureCloudRuntime, g.name)
 	}
 	return g.inner.Up(ctx, spec)
 }
