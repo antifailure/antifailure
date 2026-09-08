@@ -196,6 +196,20 @@ type ServiceSpec struct {
 	// dependant start when the first of the three was ready, and every one of
 	// those is wrong.
 	Replicas int
+	// CPUMillis is the CPU one instance is given, in thousandths of a core,
+	// and MemoryBytes is the memory. Zero means the manifest named no size.
+	//
+	// Numbers rather than the manifest's strings, resolved once where the
+	// manifest is read. Two runtimes parsing "512Mi" for themselves are two
+	// chances to disagree about what it means, and the disagreement would
+	// surface as one runtime enforcing a cap the other did not, which is a
+	// worse failure than neither enforcing it: the environment that passes
+	// locally and is killed on the cluster looks like a flaky cluster.
+	//
+	// Each is the REQUEST and the LIMIT, not a request with a larger limit
+	// behind it. schema.Resources carries the reasoning.
+	CPUMillis   int64
+	MemoryBytes int64
 }
 
 // Instances is how many containers or pods this service asks for.
@@ -265,6 +279,19 @@ type RunningService struct {
 	// Zero from a runtime that predates instance counts, which every reader
 	// has to treat as one rather than as none.
 	Instances int
+	// CPUMillis and MemoryBytes are the size the runtime ACTUALLY applied to
+	// this service, read back off the running object rather than echoed from
+	// the spec. Zero where no size was asked for, and zero from a runtime
+	// that cannot report one.
+	//
+	// Read back, because echoing the request would make this field agree with
+	// the manifest whether or not anything was applied, which is exactly the
+	// shape the instance count had before Instances was checked from inside a
+	// container. A runtime that accepts a memory cap and sets none reports
+	// what a correct one reports, and the only thing that tells them apart is
+	// asking the object.
+	CPUMillis   int64
+	MemoryBytes int64
 	// ExitCode is the code a finished service exited with, and nil while it
 	// is still running or where the runtime cannot say.
 	//

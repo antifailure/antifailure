@@ -59,6 +59,14 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 		return env, err
 	}
 
+	// Before anything is created, and before the images, for the same reason
+	// the image check is early: a size this cluster cannot place fails as a
+	// pod that stays Pending until the readiness wait gives up, which reads as
+	// a slow cluster rather than as a request nothing can satisfy.
+	if err := r.checkCapacity(ctx, spec, progress); err != nil {
+		return env, err
+	}
+
 	// Before anything is created, because an image that cannot be pulled
 	// fails as a pod stuck in ImagePullBackOff several minutes later, which
 	// reads as a slow cluster rather than as a missing image.
@@ -295,11 +303,25 @@ func (r *Runtime) startService(
 		return running, err
 	}
 	deployment := r.deploymentFor(spec, s, namespace, resolverIP)
-	if _, err := r.cli.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{}); err != nil &&
-		!apierrors.IsAlreadyExists(err) {
+	created, err := r.cli.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
+	switch {
+	case apierrors.IsAlreadyExists(err):
+		// A second af up addresses the first environment rather than making a
+		// second one, so the Deployment that is already there is the one to
+		// report on.
+		created, err = r.cli.AppsV1().Deployments(namespace).Get(ctx, s.Name, metav1.GetOptions{})
+		if err != nil {
+			return running, aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
+		}
+	case err != nil:
 		return running, aferrors.Wrap(err, aferrors.AFRUN040,
 			"detail", fmt.Sprintf("creating %s: %v", s.Name, err))
 	}
+	// Off the object the API server stored, not off the spec that was sent.
+	// Echoing the request back would agree with the manifest whether or not
+	// anything was applied, and a runtime that emitted no requirement would
+	// then report what a correct one reports.
+	running.CPUMillis, running.MemoryBytes = appliedResources(created.Spec.Template.Spec)
 
 	if _, err := r.cli.CoreV1().Services(namespace).Create(ctx,
 		serviceObject(spec.EnvID, namespace, s), metav1.CreateOptions{}); err != nil &&
@@ -833,6 +855,9 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 				Name: name, Kind: pod.Labels[LabelServiceKind], ContainerID: string(pod.UID),
 				State: string(pod.Status.Phase), Detail: podTrouble(pod), Ready: true,
 			}
+			// From the pod the cluster is running, which is where a size that
+			// was accepted and not applied stops looking like one that was.
+			rs.CPUMillis, rs.MemoryBytes = appliedResources(pod.Spec)
 			if podReady(pod) {
 				rs.State = "running"
 			}

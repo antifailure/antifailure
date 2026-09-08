@@ -2164,6 +2164,24 @@ func serviceSpec(svc schema.Service, image string) provider.ServiceSpec {
 		Env:        serviceEnv(svc),
 		Replicas:   svc.Replicas,
 	}
+	// The size, resolved here so that neither runtime parses a manifest
+	// string for itself. A quantity that will not parse is refused at
+	// validation, so an unparseable one here is a manifest that never reached
+	// this function; unlike the health timeout above, a value that somehow did
+	// is dropped rather than defaulted, because there is no safe default for a
+	// cap and running uncapped is what the manifest was written to stop.
+	if r := svc.Resources; r != nil {
+		if r.CPU != "" {
+			if milli, err := schema.ParseMilliCPU(r.CPU); err == nil {
+				spec.CPUMillis = milli
+			}
+		}
+		if r.Memory != "" {
+			if bytes, err := schema.ParseMemoryBytes(r.Memory); err == nil {
+				spec.MemoryBytes = bytes
+			}
+		}
+	}
 	// A timeout that will not parse is refused at validation, so an
 	// unparseable one here is a manifest that never reached this function.
 	// Falling back to the runtime's default rather than failing the run is

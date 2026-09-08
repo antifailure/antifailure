@@ -167,7 +167,7 @@ func (v *validator) services(m *schema.Manifest) {
 
 		v.build(base, s)
 		v.env(base, s)
-		v.deadFields(base, s)
+		v.resources(base, s)
 		v.replicas(base, s)
 
 		if _, err := ParseDuration(s.HealthTimeout); err != nil {
@@ -218,37 +218,77 @@ func (v *validator) replicas(base string, s *schema.Service) {
 	}
 }
 
-// deadFields refuses the two service fields nothing reads.
+// resources checks the size a service asks for.
 //
-// The same judgement loadThresholds applies to query_count_increase, and it is
-// here for the same reason. resources.cpu and resources.memory are in
-// schemas/manifest.v1.json, so the reference documents them and a manifest
-// carrying them parses without a word. Nothing then reads them: neither
-// runtime emits a CPU or a memory limit at all, so a cap written here is
-// enforced nowhere and the service carrying it runs with none.
+// The two keys were REFUSED outright until this lane, and the refusal was the
+// right answer for exactly as long as they did nothing: schemas/
+// manifest.v1.json documented both, the reference rendered both, a manifest
+// carrying them parsed without a word, and neither runtime emitted a resource
+// requirement at all, so a cap written here was enforced nowhere and the
+// service carrying it ran with none. That is the same judgement replicas got,
+// and it is lifted here for the same reason replicas' was: both runtimes apply
+// the value now.
 //
-// That silence is the defect rather than the missing feature. A refusal costs
-// the author a line in the manifest; the silence costs them the finding.
+// What is left is the pair of rules a runtime cannot rescue.
 //
-// replicas was refused here too, and is not any more. It is honoured, in both
-// runtimes, and the rules that remain for it are in replicas below. The
-// refusal was the right answer for exactly as long as the field did nothing.
+// A quantity that will not parse is refused rather than dropped, because
+// dropping it is the silence this key was refused for wearing a different
+// hat. Nothing validates a manifest against the JSON Schema at parse time, so
+// the pattern in schemas/manifest.v1.json does not stand between an author and
+// this function; a manifest can arrive from a caller that never saw the schema.
 //
-// Only a value somebody wrote is refused. normalize fills neither in, so
-// refusing the engine's own defaults would fail every manifest rather than the
-// ones making a promise the engine cannot keep.
-func (v *validator) deadFields(base string, s *schema.Service) {
+// A quantity under the floor is refused where the floor is not the manifest's
+// to choose. Six megabytes is the Docker daemon's own minimum, and a manifest
+// asking for less fails several seconds into an af up with a message about a
+// daemon constant rather than about the line somebody wrote.
+//
+// THERE IS NO CEILING HERE, on purpose. A ceiling would have to be a constant,
+// and a constant cannot know the machine: 64Gi is absurd on a laptop and
+// unremarkable on a cluster node. The runtime refuses what it cannot place, in
+// capacity.Fits, against the free space it actually read, and names the
+// shortfall. That is a better answer than a number picked here, and it is the
+// difference between "the manifest may not say that" and "this cluster does
+// not have that".
+//
+// Only a value somebody wrote is checked. normalize fills neither in, so an
+// empty resources block promises nothing and is accepted: the refusal is keyed
+// on the leaf, never on the parent.
+func (v *validator) resources(base string, s *schema.Service) {
+	r := s.Resources
+	if r == nil {
+		return
+	}
 	if declaredAt(v.doc, base+".resources.cpu") {
-		v.add(base+".resources.cpu",
-			fmt.Sprintf("Nothing reads resources.cpu, so service %q would run with no CPU limit at all.", s.Name),
-			"Neither runtime emits a resource requirement, so this cap is not applied anywhere. "+
-				"Remove it rather than leaving a limit in the manifest that nothing enforces.")
+		milli, err := schema.ParseMilliCPU(r.CPU)
+		switch {
+		case err != nil:
+			v.add(base+".resources.cpu",
+				fmt.Sprintf("Service %q asks for %q of CPU, which is not a quantity.", s.Name, r.CPU),
+				"Write a number of cores, for example 2 or 0.5, or thousandths with an m, "+
+					"for example 500m.")
+		case milli < schema.MinMilliCPU:
+			v.add(base+".resources.cpu",
+				fmt.Sprintf("Service %q asks for %q of CPU, which is no CPU at all.", s.Name, r.CPU),
+				fmt.Sprintf("The smallest share is %s. Remove the key to leave the service uncapped.",
+					schema.FormatMilliCPU(schema.MinMilliCPU)))
+		}
 	}
 	if declaredAt(v.doc, base+".resources.memory") {
-		v.add(base+".resources.memory",
-			fmt.Sprintf("Nothing reads resources.memory, so service %q would run with no memory limit at all.", s.Name),
-			"Neither runtime emits a resource requirement, so this cap is not applied anywhere. "+
-				"Remove it rather than leaving a limit in the manifest that nothing enforces.")
+		bytes, err := schema.ParseMemoryBytes(r.Memory)
+		switch {
+		case err != nil:
+			v.add(base+".resources.memory",
+				fmt.Sprintf("Service %q asks for %q of memory, which is not a quantity.", s.Name, r.Memory),
+				"Write a number and a unit, for example 512Mi or 2Gi. A bare number is not "+
+					"bytes here, it is refused, because nobody who writes 512 means 512 bytes.")
+		case bytes < schema.MinMemoryBytes:
+			v.add(base+".resources.memory",
+				fmt.Sprintf("Service %q asks for %q of memory, which is under what a container may have.",
+					s.Name, r.Memory),
+				fmt.Sprintf("The Docker daemon refuses anything below %s, so this would fail on "+
+					"the local runtime whatever the cluster allows.",
+					schema.FormatMemoryBytes(schema.MinMemoryBytes)))
+		}
 	}
 }
 

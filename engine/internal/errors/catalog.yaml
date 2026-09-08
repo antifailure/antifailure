@@ -594,6 +594,13 @@ errors:
     docs: guides/local-runtime
     retryable: false
     exit_code: 3
+  - code: AF-RUN-047
+    area: RUN
+    message: "This runtime cannot place the sizes the manifest asks for: {detail}"
+    next_step: "Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room."
+    docs: reference/manifest
+    retryable: true
+    exit_code: 1
   - code: AF-RUN-009
     area: RUN
     message: "No free port was found in the range {range} to publish the environment on."

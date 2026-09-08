@@ -1,0 +1,139 @@
+package schema
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// The units a resources block may be written in.
+//
+// They are Kubernetes' units, deliberately, because that is the vocabulary the
+// people who write this key already have and inventing a second spelling of
+// "512Mi" would mean a manifest that reads like a Deployment and means
+// something else. The JSON schema constrains the same shapes, so a manifest
+// that reaches these functions has usually already been through that; these
+// are what decide, because a manifest may arrive from a caller that never
+// validated against the schema at all.
+const (
+	// MinMilliCPU is the smallest CPU share a service may ask for.
+	//
+	// One thousandth of a core, which is Kubernetes' own resolution and the
+	// finest thing Docker's NanoCPUs can express without rounding to nothing.
+	// Below it the value is not a small request, it is a typo.
+	MinMilliCPU = 1
+	// MinMemoryBytes is the smallest memory cap a service may ask for.
+	//
+	// Six megabytes, which is the floor the Docker daemon itself enforces:
+	// anything under it is refused by the daemon with a message about the
+	// minimum rather than about the manifest, several seconds into an af up
+	// and pointing at the wrong file. Refusing it here names the key.
+	MinMemoryBytes = 6 * 1024 * 1024
+)
+
+// ParseMilliCPU reads a CPU quantity into thousandths of a core.
+//
+// "500m" is 500, "1.5" is 1500, "2" is 2000. One function rather than a parse
+// in each runtime, because two parsers are two chances to disagree about what
+// a manifest means, and the disagreement would show up as one runtime
+// enforcing a cap the other did not.
+func ParseMilliCPU(s string) (int64, error) {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return 0, fmt.Errorf("no CPU quantity")
+	}
+	if milli := strings.HasSuffix(t, "m"); milli {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(t, "m"), 64)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("%q is not a CPU quantity", s)
+		}
+		if n != float64(int64(n)) {
+			return 0, fmt.Errorf("%q is a fraction of a thousandth of a core", s)
+		}
+		return int64(n), nil
+	}
+	cores, err := strconv.ParseFloat(t, 64)
+	if err != nil || cores < 0 {
+		return 0, fmt.Errorf("%q is not a CPU quantity", s)
+	}
+	// Rounded rather than truncated, and then checked, so that 0.0005 is
+	// reported as too fine rather than silently becoming zero. A cap that
+	// rounds to nothing is the same silence this key was refused for.
+	milli := int64(cores*1000 + 0.5)
+	if float64(milli) != cores*1000 {
+		return 0, fmt.Errorf("%q is a fraction of a thousandth of a core", s)
+	}
+	return milli, nil
+}
+
+// ParseMemoryBytes reads a memory quantity into bytes.
+//
+// Mi and Gi are powers of two, M and G are powers of ten, which is what those
+// suffixes mean everywhere else and what somebody copying a value out of a
+// Deployment expects.
+//
+// A unit is REQUIRED, which is the one place this deliberately refuses
+// something Kubernetes accepts. "memory: 512" there is 512 bytes, and nobody
+// who writes it means 512 bytes: they mean megabytes, and the container they
+// get is refused by the daemon for being under its floor. The schema's pattern
+// says the same thing, and the two agreeing is what stops a manifest that
+// passes the schema from meaning something else here.
+func ParseMemoryBytes(s string) (int64, error) {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return 0, fmt.Errorf("no memory quantity")
+	}
+	units := []struct {
+		suffix string
+		scale  int64
+	}{
+		{"Mi", 1024 * 1024},
+		{"Gi", 1024 * 1024 * 1024},
+		{"M", 1000 * 1000},
+		{"G", 1000 * 1000 * 1000},
+	}
+	for _, u := range units {
+		if !strings.HasSuffix(t, u.suffix) {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSuffix(t, u.suffix), 10, 64)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("%q is not a memory quantity", s)
+		}
+		if n > (1<<62)/u.scale {
+			return 0, fmt.Errorf("%q is larger than any machine", s)
+		}
+		return n * u.scale, nil
+	}
+	if _, err := strconv.ParseInt(t, 10, 64); err == nil {
+		return 0, fmt.Errorf("%q names no unit", s)
+	}
+	return 0, fmt.Errorf("%q is not a memory quantity", s)
+}
+
+// FormatMilliCPU writes a CPU quantity the way a manifest would.
+//
+// For a message rather than for a manifest: a shortfall reported in
+// thousandths reads as a number nobody wrote, and the point of naming a
+// shortfall is that the reader can find the key it came from.
+func FormatMilliCPU(milli int64) string {
+	if milli%1000 == 0 {
+		return strconv.FormatInt(milli/1000, 10)
+	}
+	return strconv.FormatInt(milli, 10) + "m"
+}
+
+// FormatMemoryBytes writes a memory quantity the way a manifest would.
+func FormatMemoryBytes(bytes int64) string {
+	switch {
+	case bytes >= 1024*1024*1024 && bytes%(1024*1024*1024) == 0:
+		return strconv.FormatInt(bytes/(1024*1024*1024), 10) + "Gi"
+	case bytes >= 1024*1024 && bytes%(1024*1024) == 0:
+		return strconv.FormatInt(bytes/(1024*1024), 10) + "Mi"
+	default:
+		// Rounded up to the megabyte, because a shortfall reported as
+		// 402653184 bytes is a number the reader has to do arithmetic on
+		// before it means anything.
+		return strconv.FormatInt((bytes+1024*1024-1)/(1024*1024), 10) + "Mi"
+	}
+}

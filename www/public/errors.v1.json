@@ -1367,6 +1367,17 @@
       "planned": false
     },
     {
+      "code": "AF-RUN-047",
+      "area": "RUN",
+      "areaName": "Runtime",
+      "message": "This runtime cannot place the sizes the manifest asks for: {detail}",
+      "resolution": "Lower resources.cpu or resources.memory on the services named, run fewer environments on this machine, or place it somewhere with room.",
+      "docs": "https://antifailure.dev/docs/reference/manifest",
+      "retryable": true,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-SEC-001",
       "area": "SEC",
       "areaName": "Secrets",
