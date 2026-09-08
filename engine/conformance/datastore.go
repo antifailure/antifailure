@@ -17,7 +17,7 @@ import (
 // The datastore suite, which is the second one and is deliberately not a copy
 // of the first.
 //
-// RunDatabase checks twenty four behaviours of a Postgres provider, and most
+// RunDatabase checks twenty six behaviours of a Postgres provider, and most
 // of them are about SQL: a known row survives a branch, a sequence comes back
 // after a reset, two branches cannot see each other's writes. None of that can
 // be asked of a datastore in general, because the interface covers ClickHouse
@@ -295,6 +295,28 @@ func (h *dsHarness) capabilitiesAreSelfConsistent() {
 		h.t.Error("copy on write is declared and no golden is; a branch shares storage " +
 			"with the golden it came from, and there is none to share with")
 	}
+	// RECORDED HOLE, on purpose, because a hole nobody wrote down is one
+	// somebody later reads as covered.
+	//
+	// Both rules above are self consistency: they ask whether the declaration
+	// contradicts its neighbours. Neither asks whether it is TRUE. A datastore
+	// declaring CopyOnWrite, Branching and Golden together, and copying every
+	// byte on every branch, still passes this suite.
+	//
+	// The database suite next door now falsifies the same field, by building
+	// two goldens of very different sizes and requiring branch time to grow
+	// with the data if and only if the provider says it does not share
+	// storage. That does not port across as written, and the reason is the
+	// reason this suite exists separately at all: making a golden large means
+	// writing ballast into it, the database suite does that in SQL through the
+	// candidate connection every Postgres provider hands to Mask, and the
+	// stores behind this interface are ClickHouse and Redis and Kafka and a
+	// search index, whose only shared query language is none. The ballast
+	// would have to be per engine, which is a per engine conformance addition
+	// rather than a shared one.
+	//
+	// So the claim on this side is checked for self consistency and is not
+	// falsified, and that sentence is the honest state of it.
 }
 
 // refreshSaysErrNoGolden is the behaviour a cache has to pass.

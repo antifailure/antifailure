@@ -195,6 +195,42 @@ against reality. A silent skip is how a provider ends up claiming conformance
 it does not have, so the suite is built to make skipping visible rather than
 convenient.
 
+### Copy on write, which is measured rather than believed
+
+`CopyOnWrite` says a branch shares storage with its golden, so branch time does
+not grow with the database. It is the claim a customer is really buying, so the
+suite does not take your word for it.
+
+`CopyOnWrite_BranchTimeMatchesTheDeclaration` builds two goldens, one of them a
+gibibyte larger than the other, branches each of them several times alternately,
+and takes the fastest of each. Then it asks one question in two directions:
+
+- Declared `true`, and the larger golden branched measurably slower: **fail**.
+  You are copying, and whoever waits for an environment is paying for it.
+- Declared `false`, and the larger golden branched no slower: **fail**. You have
+  a flat branch time and are not saying so, which puts the wrong row in the
+  comparison table a buyer chooses from.
+
+Those two are complementary, so one of the two possible declarations is refused
+on every run. There is no reading of the stopwatch that lets both pass, which is
+the property a check needs before a green one means anything.
+
+The suite makes a golden large by writing ballast into it from inside the `Mask`
+callback, so a provider needs no extra method: hand `Mask` a connection string
+that works, which every other behaviour needs anyway, and the sizing takes care
+of itself. `Options.CopyOnWriteSmallBytes`, `CopyOnWriteLargeBytes` and
+`CopyOnWriteSamples` tune it for a provider that bills by the gibibyte. They
+have floors, and the floors are the point: below them, copying the extra data
+costs less than the measurement gives to noise, and the behaviour would pass
+every declaration rather than refuse one.
+
+`ExpectedBranchLatency` is checked the same way.
+`Branch_IsWithinTheDeclaredLatency` times the fastest of three branches of the
+conformance dataset against the number you declared. Declare what your service
+does, not what you hope it does: the number is what the engine plans an
+environment around, and a provider that has got slower has to fail here rather
+than degrade quietly.
+
 ## Proving the suite can fail
 
 A green conformance run is worth exactly as much as your confidence that the

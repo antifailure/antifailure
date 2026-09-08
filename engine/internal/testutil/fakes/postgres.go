@@ -3,7 +3,7 @@ package fakes
 // A provider.Database with real storage behind it, so the five conformance
 // behaviours that read rows back can be proved able to fail.
 //
-// [InMemoryDatabase] answers nineteen of the twenty four and cannot answer
+// [InMemoryDatabase] answers twenty of the twenty six and cannot answer
 // these, and the reason is not laziness: isolation, reset, and what a branch
 // actually holds are claims about bytes. A fake with no bytes can only agree
 // with whatever it was told, which is the same thing as not checking. So this

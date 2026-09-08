@@ -559,6 +559,27 @@ func (h *harness) capabilitiesAreSelfConsistent() {
 	if h.p.Name() == "" {
 		h.t.Fatal("a provider must have a name, which is what a manifest refers to")
 	}
+	// CopyOnWrite is deliberately not checked HERE, and the two suites reading
+	// the same field differently is worth explaining rather than leaving to
+	// look like an oversight.
+	//
+	// The datastore suite's two copy on write rules are self consistency
+	// rules: it refuses copy on write declared without branching, and copy on
+	// write declared without a golden. Neither has a subject on this side. A
+	// database provider that does not declare Branching has already been
+	// refused four lines above, because the interface says a provider without
+	// it is not a database provider; and provider.Caps has no Golden field
+	// because RefreshGolden is a method every database provider implements,
+	// so there is no configuration in which a database provider has no golden
+	// to share storage with. Restating either rule here would be a branch no
+	// input can reach, and an unreachable check is indistinguishable from a
+	// check that works right up until somebody relies on it.
+	//
+	// What the field needed was not another self consistency rule but a way to
+	// be FALSIFIED, which is CopyOnWrite_BranchTimeMatchesTheDeclaration in
+	// cow.go. Self consistency asks whether a declaration contradicts its
+	// neighbours. It cannot ask whether the declaration is true, and copy on
+	// write is a claim about the world rather than about the struct.
 }
 
 func (h *harness) refreshProducesAVerifiedGolden(ctx context.Context) {
