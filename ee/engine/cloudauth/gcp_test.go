@@ -77,7 +77,12 @@ func TestGCPAssertionFallsBackToTheCloudPlatformScope(t *testing.T) {
 		Scope string `json:"scope"`
 	}
 	requireSegment(t, strings.Split(assertion, ".")[1], &claims)
-	require.Equal(t, ScopeGoogleCloudPlatform, claims.Scope)
+	// The literal, for the same reason the Azure scope is pinned to one: this
+	// string was a constant in ee/engine/secrets before the credential path
+	// moved, and comparing the default against the constant that defines it
+	// would prove nothing about whether the value changed.
+	require.Equal(t, "https://www.googleapis.com/auth/cloud-platform", claims.Scope)
+	require.Equal(t, "https://www.googleapis.com/auth/cloud-platform", ScopeGoogleCloudPlatform)
 }
 
 func TestGCPDropsThePrivateKeyPEMOnceItIsParsed(t *testing.T) {

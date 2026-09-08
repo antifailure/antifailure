@@ -63,7 +63,13 @@ func TestAzureDefaultsTheResourceToKeyVault(t *testing.T) {
 	}
 	_, err := source.Token(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, AzureKeyVaultResource+"/.default", gotScope)
+	// The literal, not AzureKeyVaultResource+"/.default", which would compare
+	// the derivation against itself. This exact string was a constant in
+	// ee/engine/secrets before the credential path moved, and the extraction is
+	// only behaviour preserving if it still comes out byte for byte.
+	require.Equal(t, "https://vault.azure.net/.default", gotScope)
+	require.Equal(t, "https://vault.azure.net", AzureKeyVaultResource)
+	require.Equal(t, "https://login.microsoftonline.com", PublicAzureAuthority)
 }
 
 func TestAzureReportsARefusalAsARejectedCredential(t *testing.T) {
