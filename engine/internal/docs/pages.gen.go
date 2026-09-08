@@ -4331,7 +4331,7 @@ somebody's bucket.
 ### syslog over TLS
 
 ` + "`" + "`" + "`" + `sh
-export AF_AUDIT_SYSLOG_ADDRESS=collector.internal:6514
+export AF_AUDIT_SYSLOG_ADDRESS=collector.example.com:6514
 export AF_AUDIT_SYSLOG_CA_FILE=/etc/ssl/collector-ca.pem
 # Optional, for a collector that authenticates its senders:
 export AF_AUDIT_SYSLOG_CERT_FILE=/etc/ssl/engine.pem
@@ -4367,7 +4367,7 @@ entries on an open endpoint accepts audit entries from anybody, and a forged
 entry in an audit log is worse than a missing one.
 
 The dead letter file is required, and it is the reason the retry is allowed to
-be short. Three attempts, pausing 200ms and then 600ms between them, and the
+be short. Three attempts, pausing 200 ms and then 600 ms between them, and the
 entry is appended to that file and flushed before the call returns, in the same
 JSON the receiver would have been given. The measured total, round trips
 included, is in the report ` + "`" + `just benchmark` + "`" + ` writes.
@@ -4381,7 +4381,7 @@ restarts, and loses it silently. A hole you can replay is not a hole.
 export AF_AUDIT_OBJECT_STORE_URL=s3://acme-audit/antifailure
 ` + "`" + "`" + "`" + `
 
-Or a server that speaks the same API, as ` + "`" + `https://minio.internal/bucket/prefix` + "`" + `,
+Or a server that speaks the same API, as ` + "`" + `https://minio.example.com/bucket/prefix` + "`" + `,
 or an Azure Blob container URL carrying a shared access signature. The S3 form
 signs its requests with ` + "`" + `AWS_ACCESS_KEY_ID` + "`" + ` and ` + "`" + `AWS_SECRET_ACCESS_KEY` + "`" + ` read
 from the environment, by the names the AWS tools already use, so a machine set
@@ -4418,7 +4418,7 @@ reach costs you one progress line and nothing else, carrying the sink's own
 words about what went wrong:
 
 ` + "`" + "`" + "`" + `
-audit sink: forwarding to syslog over TLS at collector.internal:6514: dial tcp
+audit sink: forwarding to syslog over TLS at collector.example.com:6514: dial tcp
 10.0.0.9:6514: i/o timeout
 ` + "`" + "`" + "`" + `
 
@@ -4449,7 +4449,7 @@ the delay this product is responsible for and no more. Point it at your own
 collector and the number becomes the whole path, measured by you:
 
 ` + "`" + "`" + "`" + `sh
-AF_AUDIT_BENCHMARK_SYSLOG_ADDRESS=collector.internal:6514 \
+AF_AUDIT_BENCHMARK_SYSLOG_ADDRESS=collector.example.com:6514 \
   AF_AUDIT_BENCHMARK_SYSLOG_CA_FILE=/etc/ssl/collector-ca.pem \
   AF_AUDIT_BENCHMARK_WEBHOOK_URL=https://siem.example/ingest \
   just benchmark
