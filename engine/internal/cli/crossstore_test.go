@@ -107,6 +107,21 @@ func TestCrossStoreJSON_SaysNullRatherThanZeroWhenNothingWasCompared(t *testing.
 	require.Contains(t, out.String(), `"rows_read"`)
 }
 
+// The document a script reads, on a run that got a number AND left a store
+// unread. Both halves have to be in it: the number, so the run is not wasted,
+// and the store nobody opened, so the number is not read as covering it.
+//
+// It does NOT assert that the run succeeded, and that is deliberate rather
+// than an omission. A store left unread is a coverage gap, crossStoreFailure
+// refuses on one, and a test here requiring no error would have quietly
+// demanded the opposite of what TestCrossStoreFailure_AnUnreadStoreRefuses
+// below requires.
+//
+// The refusal is asserted as an error and a false ok rather than as a
+// catalogue code, because the JSON path returns silent(): the document has
+// already been printed, so re-printing the message under it would put a second
+// answer in a stream a script parses. The code itself is asserted on
+// crossStoreFailure directly, below.
 func TestCrossStoreJSON_CarriesTheNumberAndTheCoverage(t *testing.T) {
 	t.Parallel()
 	e, out := jsonEnv()
@@ -115,8 +130,11 @@ func TestCrossStoreJSON_CarriesTheNumberAndTheCoverage(t *testing.T) {
 	res.WithoutSource = []string{"cache"}
 	res.Report.Unread = []crossstore.Unread{{Store: "search", Engine: "elasticsearch", Why: "no route to host"}}
 
-	require.NoError(t, reportCrossStore(e, res))
+	require.Error(t, reportCrossStore(e, res),
+		"a run that got its number and still left a store unread is a coverage gap, "+
+			"and printing the document does not turn it into a pass")
 	body := out.String()
+	require.Contains(t, body, `"ok": false`)
 	require.Contains(t, body, `"percent": 100`)
 	require.Contains(t, body, `"join_keys_identical": 4`)
 	require.Contains(t, body, `"stores_without_source_url_env"`)

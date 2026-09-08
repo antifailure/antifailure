@@ -245,8 +245,7 @@ SELECT query FROM system.query_log
 WHERE type = 'QueryFinish'
   AND event_time >= toDateTime(`+quoteTime(before)+`)
   AND query NOT LIKE '%system.query_log%'
-  AND query LIKE '%system.%'
-FORMAT TSV`)
+  AND query LIKE '%system.%'`)
 	require.NotEmpty(t, strings.TrimSpace(out),
 		"the check read no catalog at all, so this proves nothing about what it did not read")
 
@@ -254,8 +253,7 @@ FORMAT TSV`)
 SELECT count() FROM system.query_log
 WHERE type = 'QueryFinish'
   AND event_time >= toDateTime(`+quoteTime(before)+`)
-  AND positionCaseInsensitive(query, 'FROM events') > 0
-FORMAT TSV`)
+  AND positionCaseInsensitive(query, 'FROM events') > 0`)
 	require.Equal(t, "0", strings.TrimSpace(rows),
 		"the cross store check selected from a data table, so it is not safe to point "+
 			"at production and the report's rows_read of zero is a lie")
