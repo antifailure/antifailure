@@ -238,3 +238,26 @@ func Names() []string {
 	sort.Strings(out)
 	return out
 }
+
+// RegisterBuiltin adds every built in emulator to a registry.
+//
+// It exists because the engine resolves an emulate rule through the registry
+// and through nothing else: a rule names an emulator, the registry supplies
+// the image, the digest, the port and the variables, and a name nothing
+// registered is refused rather than defaulted. So an emulator this repository
+// ships has to arrive the same way one written outside it does, and a
+// declaration nobody registers is a provider named and not built, which is the
+// thing this plan refuses on every other socket.
+//
+// A name already registered is left alone rather than added twice. Two
+// emulators under one name is what Registry.Validate refuses, and an
+// organization that has registered its own licensed image under the name aws
+// has made a deliberate choice that a built in registration must not undo.
+func RegisterBuiltin(r *extension.Registry) {
+	for _, e := range Builtin() {
+		if _, taken := r.EmulatorNamed(e.Name()); taken {
+			continue
+		}
+		r.AddEmulator(e)
+	}
+}
