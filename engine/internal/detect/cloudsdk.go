@@ -272,8 +272,8 @@ func unclaimedTokens(cloud string, tokens []string) []string {
 // it can be cheaply fixed is now, while somebody is reading this.
 func (d DetectedEmulator) Note() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s runs %s (%s), which answers for %s.",
-		d.Evidence, d.Service, d.Image, cloudDisplayName(d.Cloud))
+	fmt.Fprintf(&b, "%s runs %s as %s (%s), which answers for %s.",
+		d.Evidence, d.Product, d.Service, d.Image, cloudDisplayName(d.Cloud))
 	switch {
 	case len(d.Services) == 0:
 		fmt.Fprintf(&b, " It names no services, so no rules were written from it. "+
