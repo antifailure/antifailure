@@ -127,29 +127,27 @@ func TestDatabaseSuiteChild(t *testing.T) {
 	}
 
 	conformance.RunDatabase(t, factory, conformance.Options{
+		// The copy on write sizes are left at the suite's own defaults, and
+		// that is a deliberate choice rather than the absence of one.
+		//
+		// They were briefly pinned to the floor, because proving that
+		// behaviour needs four children, a provider that copies and admits
+		// it, one that copies and denies it, one that is flat and admits it,
+		// one that is flat and denies it, and each of them builds two goldens
+		// and branches them several times. On the shared cluster that was
+		// several gibibytes of transient databases on a machine other lanes
+		// are working on, and it took that cluster down twice.
+		//
+		// It is affordable at the default against a Postgres this run stood up
+		// for itself, and affordable is the whole argument: a self test run at
+		// sizes the suite does not ship proves the faults are catchable at
+		// SOME configuration, which is a weaker sentence than anybody reading
+		// a green would assume it to be. Point AF_TEST_DATABASE_URL at a
+		// server that is not carrying fifteen other worktrees.
+		//
+		// The timeout is the suite's shared one and it does not bound the copy
+		// on write behaviour, which has its own and much longer.
 		Timeout: 10 * time.Minute,
-		// The copy on write sizes, held at the suite's own floor rather than
-		// its default, and the reason is a cost this file has to pay four
-		// times over.
-		//
-		// Proving that behaviour needs four children: a provider that copies
-		// and admits it, one that copies and denies it, one that is flat and
-		// admits it, one that is flat and denies it. Each builds two goldens
-		// and branches them, and the copying ones copy the large golden once
-		// per sample while the flat ones copy it once per pool slot. The
-		// server they all share is the same scratch cluster every branch of
-		// this repository runs its database suites against, so the difference
-		// between the floor and the default is several gibibytes of transient
-		// databases on a machine other lanes are working on.
-		//
-		// What this does NOT prove is the shipped default of a gibibyte, and
-		// that is a real gap rather than a rounding: it is stated here so
-		// nobody reads a green self test as having exercised the numbers a
-		// provider actually gets. The floor is the configuration with the
-		// LEAST discriminating power the suite will accept, so a fault caught
-		// here is caught at the default as well.
-		CopyOnWriteLargeBytes: conformance.MinCopyOnWriteLargeBytes,
-		CopyOnWriteSamples:    conformance.MinCopyOnWriteSamples,
 	})
 }
 
