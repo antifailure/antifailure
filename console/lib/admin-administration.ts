@@ -243,7 +243,7 @@ export function useAdminCatalog(enabled = true) {
 }
 
 /*
- * The four operator writes.
+ * The five operator writes.
  *
  * They have existed in web/apps/api/src/admin/router.ts since 0029 and until
  * now had ZERO CALL SITES anywhere in the console: the operators page was read
@@ -281,4 +281,33 @@ export async function suspendOperator(adminUserId: string, reason: string) {
 
 export async function restoreOperator(adminUserId: string) {
   return adminMutate<{ suspended: boolean }>("admin.operators.restore", { adminUserId });
+}
+
+/**
+ * Gives an operator a password, which is what turns a created account into one
+ * that can sign in.
+ *
+ * THE PASSWORD IS NEVER PUT IN A URL, a query string or anything this console
+ * stores. It travels in the POST body that adminMutate already sends, exactly
+ * as the sign-in form's does, and the response carries no part of it back. The
+ * value exists in the field the operator typed it into until the panel closes.
+ *
+ * `currentPassword` is required by the server when, and only when, the target
+ * is the caller: setting your own password without proving you know the current
+ * one would let a stolen operator cookie, which expires in twelve hours, buy
+ * the account permanently. The page asks for it in that one case rather than
+ * always, because for every other target the caller is exercising a permission
+ * on somebody else's account and the audit chain names them for it.
+ */
+export async function setOperatorPassword(input: {
+  adminUserId: string;
+  password: string;
+  currentPassword?: string;
+}) {
+  return adminMutate<{
+    provisioned: boolean;
+    replacedAPassword: boolean;
+    sessionsRevoked: number;
+    effect: string;
+  }>("admin.operators.setPassword", input);
 }

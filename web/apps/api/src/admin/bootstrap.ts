@@ -8,7 +8,7 @@
 // loop and the operator portal is unreachable by anybody, forever.
 //
 // It is worse one level down. `admin.operators.create` writes the row with a
-// NULL password and tells the caller, in its own words, "The account exists and
+// NULL password and told the caller, in its own words, "The account exists and
 // cannot sign in. Set a password out of band before it is usable." There was no
 // out of band. Nothing anywhere in this repository ever wrote
 // `admin_users.password_hash`, so even an operator who existed could not be
@@ -21,6 +21,18 @@
 //   `set-operator-password`  gives a password to an operator that already
 //                            exists, which is what makes `operators.create`
 //                            usable at all.
+//
+// THE SECOND ONE IS NO LONGER THE ONLY WAY, and the paragraph above needs
+// reading with that in mind. `admin.operators.setPassword` now does the same
+// write from the operator portal, under a named operator session, so finishing
+// an invitation no longer needs a shell and a connection string. This command
+// stays, and stays privileged, because it is what works when NOBODY can sign
+// in: a portal route cannot recover an installation whose only operators have
+// all forgotten their passwords, and that is the case this command was written
+// for. The two differ in exactly one behaviour, and it is deliberate on both
+// sides: the route will set the root operator's password and this command
+// refuses to, because the route has a person's name attached to the act and a
+// connection string does not.
 //
 // WHY THE PASSWORD IS NOT AN ARGUMENT. A command line argument is visible in
 // `ps` to every user on the machine, lands in the shell history file, and on a
@@ -39,25 +51,22 @@
 
 import { createPool, appendAdminAudit, sql, type Pool } from '@antifailure/db'
 import { hashPassword } from './session.ts'
+import { passwordRefusal } from './password.ts'
 import { ADMIN_ROLES, type AdminRole } from './permissions.ts'
 
 export class OperatorBootstrapRefused extends Error {}
 
 /**
- * The shortest password this will write.
+ * Re-exported so that `--help`, the command's own refusal text and this
+ * module's callers keep naming one number.
  *
- * Twelve rather than eight, and it is a floor rather than a policy: what is
- * behind this credential is every tenant on the instance, and the online
- * guessing rate is already held to one attempt per two seconds by the limit on
- * POST /v1/admin/signin. Twelve characters is what makes offline guessing
- * against a leaked hash hopeless rather than merely slow, given scrypt at
- * N = 2^15.
- *
- * There is deliberately no character class rule. A rule demanding a symbol
- * produces `Password1!` and refuses a passphrase, which is the wrong trade in
- * both directions.
+ * The rule itself moved to password.ts when a SECOND thing learned to write
+ * `admin_users.password_hash`: `admin.operators.setPassword`, which an owner
+ * reaches from the operator portal rather than from a shell with a connection
+ * string. Two writers enforcing their own floor is one writer enforcing a
+ * floor, and the one that would drift is the one reachable from a browser.
  */
-export const MIN_PASSWORD_LENGTH = 12
+export { MIN_PASSWORD_LENGTH } from './password.ts'
 
 export interface BootstrapOperatorInput {
   /** A connection string row-level security does not apply to. */
@@ -353,23 +362,11 @@ function normaliseEmail(value: string): string {
 }
 
 function assertUsablePassword(password: string): void {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    throw new OperatorBootstrapRefused(
-      `That password is ${password.length} characters. It has to be at least ` +
-        `${MIN_PASSWORD_LENGTH}, because what is behind this credential is every tenant on ` +
-        'this instance. A passphrase is fine and is better than a short one with a symbol in it.',
-    )
-  }
-  if (password.trim() !== password) {
-    // Almost always a trailing newline that a heredoc or a copy and paste
-    // added, and it would be part of the password forever with no way to see
-    // it. Refusing is kinder than accepting a credential nobody can retype.
-    throw new OperatorBootstrapRefused(
-      'That password begins or ends with whitespace, which is almost always a stray newline ' +
-        'from a paste or a heredoc. It would be part of the password and invisible in every ' +
-        'attempt to type it again.',
-    )
-  }
+  // The rule is password.ts's, and the error class is this module's. Both
+  // writers refuse the same passwords in the same words; only the type of the
+  // refusal differs, because a command prints and a route becomes a status.
+  const refusal = passwordRefusal(password)
+  if (refusal) throw new OperatorBootstrapRefused(refusal)
 }
 
 /**
