@@ -638,6 +638,17 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// with the machine's load: a gate that cannot say no on a busy morning
 		// is a gate people learn to ignore.
 		"benchmark": true,
+		// Measures rather than decides, the same as benchmark above, and it
+		// takes two arguments for the reason it cannot be a gate: there is no
+		// node size that is right for every reader, so a default would be an
+		// invented figure carried into whatever the answer is quoted in. It
+		// divides one node by one environment and prints the count, and a
+		// count has no pass and no fail to contribute. What KEEPS it honest IS
+		// a gate: engine/internal/capacity/capacity_test.go asserts the
+		// arithmetic, including that an environment where any service named no
+		// size is reported UNBOUNDED rather than given a flattering number,
+		// and it runs inside `just test-engine`.
+		"capacityplan": true,
 	}
 
 	var uncalled []string
