@@ -32,7 +32,12 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
-		Timeout: 4 * time.Minute,
+		// A real Docker daemon, and the branch time this suite measures is the
+		// daemon's storage driver doing the work rather than a stand in for it.
+		// The other credential free suite, and the one on the true side of the
+		// assertion.
+		RealService: "a real Docker daemon on this machine",
+		Timeout:     4 * time.Minute,
 		// The behaviors that create several branches are the slowest, and they
 		// are also the ones that catch a provider whose branches share
 		// storage, so they run unless the environment asks otherwise.

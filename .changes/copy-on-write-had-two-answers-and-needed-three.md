@@ -1,30 +1,35 @@
 # changed
 
-The conformance suite had two answers, and the claim this whole database
-category is sold on could honestly be given neither of them.
+The conformance suite had two answers, and the claim this database category is
+sold on could honestly be given neither of them.
 
-`CopyOnWrite_BranchTimeMatchesTheDeclaration` decides by stopwatch, and the
-stopwatch is only as good as the storage under the run. Over a single local
-Postgres the only way a fake cloud control plane can hand back a branch carrying
-the golden's data is `CREATE DATABASE ... TEMPLATE`, which copies files. The
-large arm is then slower by seconds per gibibyte whatever the provider would do
-against the real service, so a provider that really does clone in constant time,
-declaring so truthfully, FAILED. Declaring false would have been green and false
-about the product; skipping the behaviour would have turned off the one
-instrument the wave was held for.
+`CopyOnWrite_BranchTimeMatchesTheDeclaration` decides by stopwatch, and over a
+fake cloud control plane on one local Postgres the stopwatch measures the
+harness. The only way such a fixture can hand back a branch carrying the
+golden's data is `CREATE DATABASE ... TEMPLATE`, which copies files, so a
+truthful `CopyOnWrite: true` failed and a `CopyOnWrite: false` passed
+comfortably. Both answers were about the harness.
 
-There is now a third verdict, `UNPROVEN`, distinct from pass and from fail. The
-measurement still runs in full and every number is still printed; what changes
-is what the readings are turned into. It is reachable only from a test fixture
-declaring, in prose, that the storage IT built copies every branch, it is
-refused unless the provider declares copy on write true, it is failed if the
-fixture's own readings contradict the declaration, and it is never rendered as a
-proved claim: `conformance.CopyOnWriteClaim` publishes the word `unproven`
-instead of the declared value.
+There is now a third verdict, `UNPROVEN`, distinct from pass and from fail and
+never called a skip. `Options.RealService` names the actual service a run
+drives, and LEAVING IT EMPTY is what produces the unproven verdict. It is an
+assertion of reality rather than an admission of simulation, because a field a
+fake sets to excuse itself is a field a fake can simply never set. Forgetting
+this one produces the safe answer.
 
-Three cells of the benchmark comparison table published `yes` for copy on write
-beside the words "not measured yet", which is the same unfalsifiable declaration
-one surface further out. They now say `unproven`, a ledger records the verdict
-for every provider that declares a value, and two sweeps check both directions:
-no declaration without a recorded verdict, and no published cell that disagrees
-with one.
+It is symmetric. An unasserted run is unproven whether the provider declares
+true or false, because the false side is the one that would otherwise ship: a
+snapshot restore provider passing comfortably against a copying fake publishes a
+certified claim about its service, and nobody rereads a green check.
+
+Six cells of the published comparison table carried a verdict beside the words
+"not measured yet". A ledger now records the verdict per provider, two sweeps
+check that no declaration lacks one and no published cell disagrees with one,
+and `conformance.CopyOnWriteClaim` renders an unproven declaration as the word
+`unproven` rather than as the declared value.
+
+Two providers were measured rather than assumed while proving this, both
+needing no account. `pgurl` declares false against a real Postgres and holds.
+`docker` declares true against a real daemon and holds, so the provider
+overview, which said its branch time grows with the database, was wrong and now
+says what the measurement says.

@@ -34,20 +34,82 @@ package conformance
 //
 // WHAT UNPROVEN IS NOT.
 //
-// It is not a skip. The measurement runs in full: two goldens are built, both
-// arms are timed, the sizes are checked, the ballast is weighed in the branch,
-// and every number is printed. Unproven changes the VERDICT the readings are
-// turned into, never whether they were taken.
-//
 // It is not a pass. Answer.Publishable is false for it, RunDatabase prints a
 // block at the end of the run naming every behaviour that reached it, and
 // CopyOnWriteClaim renders the provider's declaration as the word "unproven"
 // rather than as the value the provider declared.
 //
-// It is not something a provider can ask for. The only thing that raises it is
-// Options.HarnessCopiesEveryBranch, which is a claim by the TEST FIXTURE about
-// the storage it built, and the suite refuses that claim in three ways rather
-// than accepting the sentence. Options.HarnessCopiesEveryBranch says why.
+// It is not something a provider can ask for. Nothing on provider.Caps reaches
+// it and no method of provider.Database is consulted. The only input is
+// Options.RealService, which is the FIXTURE saying what its stopwatch is
+// pointed at.
+//
+// And it is not a flag that admits simulation, which is the shape this was
+// first written in and the shape that was wrong.
+//
+// THE DEFAULT IS UNPROVEN, AND THAT INVERSION IS THE WHOLE DESIGN.
+//
+// A field that a fake sets to excuse itself is a field a fake can simply never
+// set. The next lane writes a control plane, never learns the declaration
+// exists because nothing forced it to say anything, and collects a measured
+// verdict again, which rebuilds the silent pass one level up inside the
+// mechanism written to prevent it. So the declaration is an assertion of
+// REALITY rather than an admission of simulation. Forgetting it produces the
+// safe answer, and the only way to a decided verdict is to actively say what
+// the run drives.
+//
+// It also puts the burden where somebody is present to carry it. A credentialed
+// run against a real service has a person in the loop who can say what it is
+// pointed at. An unattended fake has nobody. Requiring the assertion from the
+// attended side is the only arrangement in which forgetting is safe.
+//
+// IT IS SYMMETRIC, AND THE SIDE THAT LOOKS SAFE IS THE DANGEROUS ONE.
+//
+// The first version of this raised the third verdict only when the measurement
+// FAILED, which reads as the cautious choice and is not. The assertion is two
+// sided: false requires the branch time to GROW with the data, and against a
+// harness that copies every branch that holds comfortably. So every snapshot
+// restore provider in the wave, every one that honestly declares CopyOnWrite
+// false, would collect a GREEN copy on write gate for a reason that has nothing
+// to do with the service it ships against, the moment it reused the wave's
+// prescribed fake. And nobody would ever look at it again, because green checks
+// do not get read.
+//
+// So an unasserted run is unproven in BOTH directions, whatever the measurement
+// would have said. A passing measurement on a simulator is not reportable as a
+// pass.
+//
+// THE MEASUREMENT IS NOT TAKEN, AND THAT IS DELIBERATE.
+//
+// The verdict is decided before the behaviour runs, so building two goldens and
+// timing six branches could not change it. Half a gibibyte of transient
+// databases per fake backed run, for a number that cannot move the answer, is
+// cost with no evidence in it.
+//
+// There is a second and better reason. Publishing the timings a simulator
+// produced invites exactly the reading the ruling forbids: somebody quotes "the
+// fake branched flat" as though it were about the product. Withholding the
+// number is the stronger position, and it is the one sitesmoke takes when it
+// says COULD NOT TELL rather than describing what it half saw.
+//
+// WHAT SEPARATES IT FROM A SKIP, since mechanically this does not run either.
+//
+// The suite already skips a behaviour a provider cannot support, by name, with
+// a stated reason, and that line is what a reviewer reads. A skip and an
+// unproven are different claims and must not share a word. A skip says this
+// provider makes no such claim, so there was nothing to check. An unproven says
+// the provider DOES make the claim and this run could not reach it. The first
+// is a fact about the provider and the second is a fact about the run, and a
+// reader who confuses them reads an unmeasured commercial claim as a supported
+// one.
+//
+// So the two are separate paths. The word "skipped" is never used for this, the
+// verdict is collected and reprinted at the end of the run where a reader of
+// the last few lines finds it, and it travels out of the test binary: the
+// ledger records it per provider and CopyOnWriteClaim renders it, so the cell
+// in the wave's published table reads unproven rather than blank. A blank cell
+// is taken for a pass by every reader in a hurry, and this whole verdict exists
+// because green and blank do not get read.
 
 import (
 	"fmt"
@@ -55,6 +117,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"testing"
 )
 
 // Answer is the verdict a behaviour reached, and there are three of them.
@@ -203,4 +266,71 @@ func CopyOnWriteClaim(declared bool, a Answer) string {
 		// publishes as unproven rather than as the declared value.
 		return notProved
 	}
+}
+
+// serviceOwnedBehaviors names the behaviours whose verdict belongs to the real
+// service rather than to the provider's code, and says why for each.
+//
+// The shape is taken from L-other-reds, which reached the same mechanism
+// independently and put the reason on the BEHAVIOUR rather than on the
+// provider. That is better than the alternative: the answer to "which
+// behaviours does a simulator invalidate" is one list somebody can read,
+// instead of a condition spread across five provider packages where the sixth
+// one copies a working file and inherits the wrong answer.
+//
+// One entry today. A second is a candidate and is deliberately NOT here.
+// Branch_IsWithinTheDeclaredLatency times a branch against a declared wall
+// clock number, and against an httptest server that number is a measurement of
+// an httptest server, which is the same defect for the same reason. It is left
+// out because adding it would change the verdict for lanes that have not been
+// told, and a gate widened at midnight without telling anybody is its own
+// failure. It is reported rather than taken.
+var serviceOwnedBehaviors = map[string]string{
+	"CopyOnWrite_BranchTimeMatchesTheDeclaration": "copy on write is a claim about " +
+		"what the vendor's storage does, and this behaviour decides it with a stopwatch. " +
+		"Over a simulator the stopwatch measures the simulator: a fake control plane over " +
+		"one local Postgres can only hand back a branch carrying the golden's data with " +
+		"CREATE DATABASE ... TEMPLATE, which copies files, so a truthful CopyOnWrite true " +
+		"is refused and a CopyOnWrite false passes comfortably. Both answers are about the " +
+		"harness and neither is about the product",
+}
+
+// unprovenReason reports why a behaviour cannot be decided by this run, or the
+// empty string when it can.
+//
+// The condition is the ABSENCE of Options.RealService, never the presence of a
+// declaration of simulation, and never anything read from the provider. It is
+// checked for every service owned behaviour before the behaviour runs, so the
+// answer does not depend on what a measurement would have said.
+func unprovenReason(b Behavior, opts Options) string {
+	why, owned := serviceOwnedBehaviors[b.Name]
+	if !owned {
+		return ""
+	}
+	if strings.TrimSpace(opts.RealService) != "" {
+		return ""
+	}
+	return why
+}
+
+// unprovenHere records the third verdict and prints it where the run's own
+// reader sees it.
+//
+// Logged through t as well as collected, because somebody running one behaviour
+// with -run reads the subtest's output and should not have to know that the
+// summary comes from the end of RunDatabase. The word "skipped" is deliberately
+// absent: the existing skip line reads "skipped: <provider> does not declare
+// <capability>", and a reader must not confuse a provider that makes no claim
+// with a run that could not reach the claim it does make.
+func unprovenHere(t *testing.T, f *findings, provider, behavior, why string) {
+	t.Helper()
+	because := why + ".\nThis run asserted no real service through Options.RealService, and " +
+		"the absence is what decides this rather than anything the provider declared or any " +
+		"reading a stopwatch took. The measurement was NOT taken, because it could not have " +
+		"changed the answer and because publishing what a simulator timed invites somebody " +
+		"to quote it as though it were about the product.\nTo decide it, point the run at " +
+		"the real service and name it in Options.RealService."
+	f.add(Finding{Provider: provider, Behavior: behavior, Answer: Unproven, Because: because})
+	t.Logf("\nUNPROVEN. %s is not decided by this run, and this is not a pass.\n%s\n",
+		behavior, because)
 }

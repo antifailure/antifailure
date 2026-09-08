@@ -56,6 +56,10 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
+		// The real Neon API, reached with a real key. This suite refuses to run
+		// without credentials rather than falling back to a fake, so asserting
+		// it here cannot be true on a run that did not have them.
+		RealService: "the real Neon API, against a real project",
 		// Every step crosses the public internet to a compute that may be
 		// starting cold, so this is generous. It is still a bound: a hung call
 		// fails the behaviour rather than the job.

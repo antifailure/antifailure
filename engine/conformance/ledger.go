@@ -14,13 +14,13 @@ package conformance
 //
 // WHY AN ENTRY THAT SAYS UNPROVEN IS THE HONEST ENTRY FOR MOST OF THESE.
 //
-// Unproven is not only "the harness copies". sitesmoke's rule is that an empty
-// set of findings is Undecided rather than Allowed, because a run that checked
-// nothing has proved nothing, and the same rule applies to a provider whose
-// instrument is armed and has never been fired. Both reach the same place: the
-// declaration is not evidence a customer facing surface may print. The Because
-// line is what tells the two apart, and it is why the ledger records prose
-// rather than a boolean.
+// Unproven is not only "this run drove a simulator". sitesmoke's rule is that an
+// empty set of findings is Undecided rather than Allowed, because a run that
+// checked nothing has proved nothing, and the same rule applies to a provider
+// whose instrument is armed against a real service and has never been fired.
+// Both reach the same place: the declaration is not evidence a customer facing
+// surface may print. The Because line is what tells the two apart, and it is why
+// the ledger records prose rather than a boolean.
 //
 // This is deliberately uncomfortable reading. Four of the six providers that
 // declare copy on write in this repository have no recorded verdict, and
@@ -63,13 +63,15 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 	},
 	"docker": {
 		Declared: true,
-		Verdict:  Unproven,
-		Because: "no run in this repository records a verdict for this provider. The " +
-			"declaration is about the daemon's storage driver rather than about anything " +
-			"the provider does, the suite's own conformance test needs a live Docker " +
-			"daemon, and the behaviour that would settle it builds two goldens as " +
-			"committed images. An instrument that exists and has not been fired has " +
-			"proved nothing.",
+		Verdict:  Proved,
+		Because: "measured against a real Docker daemon, which is the service this " +
+			"provider ships against, at the suite's own shipped sizes of 8 MiB against " +
+			"512 MiB. Branch time did not grow with the data, so the declaration held. " +
+			"The daemon's storage driver does the sharing rather than anything the " +
+			"provider does, and that is still the product: a customer branching a large " +
+			"golden waits the same time as for a small one. This entry read unproven for " +
+			"most of a day on the true grounds that nobody had fired the instrument, and " +
+			"the fix was to fire it rather than to argue about it.",
 		Evidence: "engine/internal/db/docker/conformance_test.go",
 	},
 	"neon": {

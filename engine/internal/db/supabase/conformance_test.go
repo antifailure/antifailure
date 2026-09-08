@@ -62,6 +62,11 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
+		// The real Supabase API, on a real paid project. Asserted on the false
+		// side as deliberately as on the true one: an unmeasured false is the
+		// half of this the first ruling missed, because it passes comfortably
+		// against anything that copies and nobody rereads a green check.
+		RealService: "the real Supabase API, against a real project",
 		// Every behaviour crosses the public internet, provisions at least one
 		// project, and copies a database into it. Generous, and still a bound:
 		// a hung call fails the behaviour rather than the job.

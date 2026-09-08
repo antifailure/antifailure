@@ -49,7 +49,7 @@ const (
 	urlEnv        = "AF_DB_SELFTEST_URL"
 	unverifiedEnv = "AF_DB_SELFTEST_PUBLISH_UNVERIFIED"
 	flatEnv       = "AF_DB_SELFTEST_FLAT_BRANCH"
-	copiesEnv     = "AF_DB_SELFTEST_HARNESS_COPIES"
+	simulatorEnv  = "AF_DB_SELFTEST_AS_SIMULATOR"
 )
 
 // The two providers, named so a table can say which one proved a row.
@@ -149,11 +149,20 @@ func TestDatabaseSuiteChild(t *testing.T) {
 		// The timeout is the suite's shared one and it does not bound the copy
 		// on write behaviour, which has its own and much longer.
 		Timeout: 10 * time.Minute,
-		// The fixture's declaration about its own storage, which is the only
-		// thing that can raise the third verdict. Empty on every child except
-		// the four that exist to prove it, so every other row in the table
-		// above runs against a suite that still has two answers.
-		HarnessCopiesEveryBranch: os.Getenv(copiesEnv),
+		// The self test asserts reality, and it is entitled to.
+		//
+		// fakes.PostgresDatabase is a fake PROVIDER, and the storage it drives
+		// is a real Postgres that really copies on CREATE DATABASE ...
+		// TEMPLATE. Its declared capability is derived from how it actually
+		// branches, so the stopwatch here is timing the thing the declaration
+		// is about, which is the test RealService asks. Without this the two
+		// copy on write faults in the catalogue would stop being detectable,
+		// and a self test that can no longer watch its own instrument fail is
+		// the defect this whole file exists against.
+		//
+		// The children that prove the third verdict override it to empty, and
+		// nothing else does.
+		RealService: realServiceOrNothing(),
 	})
 }
 
@@ -170,12 +179,25 @@ type child struct {
 	// which is what a copy on write provider has and Postgres does not. It is
 	// not a fault either, and it has its own control below.
 	flatBranch bool
-	// harnessCopies is the fixture's declaration that its own storage copies
-	// every branch. It is not a fault and it is not an affordance on the
-	// provider at all: it is a statement the FIXTURE makes about the storage
-	// it built, which is the whole reason the third verdict cannot be reached
-	// from a provider.
-	harnessCopies string
+	// asSimulator withholds the child's assertion of reality, which is what a
+	// fake cloud control plane does by simply not making one. It is not a
+	// fault and it is not an affordance on the provider: it is the ABSENCE of
+	// a statement by the fixture, which is the whole reason the third verdict
+	// cannot be reached from a provider.
+	asSimulator bool
+}
+
+// realServiceOrNothing is what the child asserts about its own storage.
+//
+// Written as a function rather than inline so the two states are one line
+// apart and neither can be read as the default by accident. A child asked to
+// behave as a simulator asserts NOTHING, which is exactly what a fake control
+// plane does without being asked.
+func realServiceOrNothing() string {
+	if os.Getenv(simulatorEnv) == "1" {
+		return ""
+	}
+	return "a real local Postgres, which is the storage this fake provider branches"
 }
 
 // runChild executes one behaviour in a subprocess and reports whether it
@@ -203,8 +225,8 @@ func runChild(t *testing.T, c child) (bool, string) {
 	if c.flatBranch {
 		cmd.Env = append(cmd.Env, flatEnv+"=1")
 	}
-	if c.harnessCopies != "" {
-		cmd.Env = append(cmd.Env, copiesEnv+"="+c.harnessCopies)
+	if c.asSimulator {
+		cmd.Env = append(cmd.Env, simulatorEnv+"=1")
 	}
 	if c.backend == onPG {
 		cmd.Env = append(cmd.Env, urlEnv+"="+postgresURL(), prefixEnv+"="+newPostgresPrefix(t))

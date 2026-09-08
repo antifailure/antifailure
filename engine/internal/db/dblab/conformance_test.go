@@ -51,6 +51,9 @@ func TestConformance(t *testing.T) {
 		require.NoError(t, err)
 		return p
 	}, conformance.Options{
+		// A real Database Lab Engine, with real ZFS underneath it. There is no
+		// default token, so a run reaching this line had one.
+		RealService: "a real Database Lab Engine, on real ZFS",
 		// Generous because a behaviour here is up to three clone creations,
 		// each a ZFS clone plus a container start plus a Postgres recovery,
 		// and the later ones are slower because the earlier ones are still
