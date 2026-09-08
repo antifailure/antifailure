@@ -113,6 +113,24 @@ Under an air gap it is refused outright rather than pointed somewhere else:
 publish the image to your own registry and load it, and the build is never
 reached.
 
+## Which database you may use
+
+An environment is refused before it is created when its `database.provider` has
+a control plane outside your network.
+
+| Provider | Air gapped |
+| --- | --- |
+| `docker` | permitted, a container on this machine |
+| `dblab` | permitted, a Database Lab Engine you host |
+| `pgurl` | permitted, a connection string you supplied |
+| `neon` | **refused**, creating a branch means `console.neon.tech` |
+| `supabase` | **refused**, creating a branch means `api.supabase.com` |
+
+The permitted side is the list, not the refused side. A provider added to this
+product later is refused here until somebody decides which side of the line it
+is on, which is one bad afternoon for whoever adds it and is better than an air
+gapped installation quietly reaching a cloud nobody had classified.
+
 ## What your application may do
 
 The largest outbound path in a preview environment is not the engine, it is the
@@ -154,11 +172,11 @@ or use `build.strategy: image` and supply a prebuilt image, which an air gapped
 installation usually already does.
 
 **The Postgres connection.** Connections made by the database drivers go to the
-URL you supply. If that URL names a hosted provider, the connection leaves your
-network and the guard does not sit on it. The cloud providers' own control APIs,
-which is how a Neon or Supabase branch is created in the first place, **are**
-guarded and are refused, so the ordinary way of reaching one of those is already
-closed.
+URL you supply, through a driver the guard does not sit on. Two things close the
+ordinary way of getting such a URL. The cloud providers' own control APIs, which
+is how a Neon or Supabase branch is created in the first place, are guarded and
+refused. And the environment itself is refused before it is created when its
+`database.provider` is one whose control plane is somebody else's.
 
 **The Kubernetes runtime.** `af` talks to whatever cluster your kubeconfig names.
 That is your cluster by definition, and the guard does not sit on the client.

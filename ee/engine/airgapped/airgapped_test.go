@@ -137,6 +137,7 @@ func TestTheHookRefusesEveryEgressModeThatWouldLeaveTheNetwork(t *testing.T) {
 		"synth":   "asks a model provider",
 	} {
 		err := airgapped.Hook{}.Check(ctx, extension.EnvironmentRequest{
+			Provider:    "docker",
 			EgressHosts: []string{"api.stripe.com"},
 			EgressModes: map[string]string{"api.stripe.com": mode},
 		})
@@ -155,6 +156,7 @@ func TestTheHookRefusesAManifestWithNoRulesAndAnOpenDefault(t *testing.T) {
 	// a valid manifest, the validator only warns about it, and it reaches the
 	// whole internet.
 	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped), extension.EnvironmentRequest{
+		Provider:      "docker",
 		EgressDefault: "allow",
 	})
 	require.Error(t, err, "egress default allow with no rules reaches everything")
@@ -169,7 +171,7 @@ func TestTheHookLeavesADefaultThatReachesNothing(t *testing.T) {
 	for _, mode := range []string{"", "block", "capture", "mock"} {
 		require.NoErrorf(t, airgapped.Hook{}.Check(
 			licensed(license.FeatureAirGapped),
-			extension.EnvironmentRequest{EgressDefault: mode}),
+			extension.EnvironmentRequest{Provider: "docker", EgressDefault: mode}),
 			"default %q is answered inside the environment", mode)
 	}
 }
@@ -179,6 +181,7 @@ func TestTheHookLeavesTheModesThatReachNothing(t *testing.T) {
 	airgap.Seal("a test")
 
 	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped), extension.EnvironmentRequest{
+		Provider: "docker",
 		EgressModes: map[string]string{
 			"api.stripe.com": "capture",
 			"api.openai.com": "mock",
@@ -196,6 +199,7 @@ func TestTheHookNamesEveryOffendingRuleRatherThanTheFirst(t *testing.T) {
 	airgap.Seal("a test")
 
 	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped), extension.EnvironmentRequest{
+		Provider: "docker",
 		EgressModes: map[string]string{
 			"api.stripe.com":   "allow",
 			"api.openai.com":   "synth",
@@ -214,6 +218,7 @@ func TestTheHookNamesEveryOffendingRuleRatherThanTheFirst(t *testing.T) {
 func TestTheHookDoesNothingWhenTheProcessIsNotSealed(t *testing.T) {
 	clean(t)
 	require.NoError(t, airgapped.Hook{}.Check(context.Background(), extension.EnvironmentRequest{
+		Provider:    "docker",
 		EgressModes: map[string]string{"api.stripe.com": "allow"},
 	}))
 }
@@ -226,6 +231,7 @@ func TestTheHookKeepsRefusingWhenTheLicenceLapsesUnderIt(t *testing.T) {
 	// An installation deployed behind an air gap must not start creating
 	// environments that reach the internet because a purchase order was slow.
 	err := airgapped.Hook{}.Check(context.Background(), extension.EnvironmentRequest{
+		Provider:    "docker",
 		EgressModes: map[string]string{"api.stripe.com": "allow"},
 	})
 	require.Error(t, err)
@@ -249,6 +255,7 @@ func TestTheHookIsRegisteredSoTheEngineActuallyConsultsIt(t *testing.T) {
 	// Defined, wired, effective. A hook constructed and never added to the
 	// registry is the exact shape of the gap this whole lane exists to close.
 	err = reg.CheckPolicy(context.Background(), extension.EnvironmentRequest{
+		Provider:    "docker",
 		EgressModes: map[string]string{"api.stripe.com": "allow"},
 	})
 	require.Error(t, err)
@@ -293,4 +300,62 @@ func TestTheLicenceItselfCannotPhoneHome(t *testing.T) {
 	require.Positive(t, files, "no files were read, so NOTHING was checked")
 	require.Emptyf(t, found, "licence verification is offline and %d of its files can dial: %v",
 		len(found), found)
+}
+
+func TestTheHookRefusesADatabaseProviderWhoseControlPlaneIsSomebodyElses(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	// The largest outbound path the process guard cannot see. A Postgres
+	// connection goes wherever its URL points, and a Neon branch's URL points
+	// at neon.tech, through a driver no dialer here sits on.
+	for _, provider := range []string{"neon", "supabase", "Neon", "aurora", "cloudsql"} {
+		err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
+			extension.EnvironmentRequest{Provider: provider})
+		require.Errorf(t, err, "%s reaches a control plane outside the network", provider)
+		require.Containsf(t, err.Error(), "air gapped", "%s", provider)
+	}
+}
+
+func TestTheHookPermitsADatabaseTheOperatorHosts(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	for _, provider := range []string{"docker", "dblab", "pgurl", "DOCKER"} {
+		require.NoErrorf(t, airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
+			extension.EnvironmentRequest{Provider: provider}),
+			"%s is the operator's own and refusing it would make the mode unusable", provider)
+	}
+}
+
+func TestAProviderTheHookCannotSeeIsRefusedRatherThanAssumed(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	// The orchestrator defaults this to docker and only replaces it when the
+	// manifest names one, so an empty provider does not reach here in
+	// production. It is refused rather than assumed because a provider this
+	// hook could not see is a provider it could not have refused, and a caller
+	// that forgot the field would otherwise switch the check off in silence.
+	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
+		extension.EnvironmentRequest{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "names no database provider")
+}
+
+func TestTheDatabaseIsReportedBeforeTheEgressRules(t *testing.T) {
+	clean(t)
+	airgap.Seal("a test")
+
+	// Both wrong at once. CheckPolicy returns the first refusal by design, and
+	// the database is the larger problem and a different line of the manifest,
+	// so it is the one a reader gets first.
+	err := airgapped.Hook{}.Check(licensed(license.FeatureAirGapped),
+		extension.EnvironmentRequest{
+			Provider:    "neon",
+			EgressModes: map[string]string{"api.stripe.com": "allow"},
+		})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "neon")
+	require.NotContains(t, err.Error(), "api.stripe.com")
 }

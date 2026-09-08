@@ -87,6 +87,30 @@ var reachingModes = map[string]string{
 	"synth":   "asks a model provider to invent the response, which is a call to that provider",
 }
 
+// localProviders are the database providers whose control plane is the
+// operator's own.
+//
+// A LIST OF WHAT IS PERMITTED rather than a list of what is not, because the
+// set of providers grows and the direction the mistake has to fail in is
+// refusal. A provider added next year is refused here until somebody decides
+// which side of the line it is on, which is one bad afternoon for whoever adds
+// it and the alternative is an air gapped installation quietly reaching a cloud
+// nobody had classified.
+//
+// docker is a container on this machine. dblab talks to a Database Lab Engine
+// that defaults to http://127.0.0.1:2345 and is self hosted wherever the
+// operator put it. pgurl is a connection string the operator supplied, which is
+// their own decision in the same way a kubeconfig is.
+//
+// neon and supabase are refused because reaching them means api.supabase.com
+// and console.neon.tech, which are somebody else's servers on the public
+// internet, and there is no configuration that changes that.
+var localProviders = map[string]string{
+	"docker": "a container on this machine",
+	"dblab":  "a Database Lab Engine you host",
+	"pgurl":  "a connection string you supplied",
+}
+
 // Hook refuses an environment whose egress would leave the operator's network.
 //
 // It plugs into the same extension.PolicyHook socket the organization policy
@@ -107,6 +131,14 @@ func (Hook) Name() string { return "air gapped" }
 func (Hook) Check(ctx context.Context, req extension.EnvironmentRequest) error {
 	if !airgap.Sealed() {
 		return nil
+	}
+
+	// The database first, because it is the larger problem and because the
+	// answer to it is a different line of the manifest. CheckPolicy returns the
+	// first refusal by design, so what a reader gets is one class of problem at
+	// a time with every instance of that class named.
+	if err := checkProvider(req.Provider); err != nil {
+		return err
 	}
 
 	type offence struct{ host, mode, why string }
@@ -144,6 +176,43 @@ func (Hook) Check(ctx context.Context, req extension.EnvironmentRequest) error {
 		"because an environment quietly switched from allow to block would report that it " +
 		"tested a code path it never reached.")
 	return fmt.Errorf("%s", b.String())
+}
+
+// checkProvider refuses a database whose control plane is somebody else's.
+//
+// This closes the largest outbound path the process guard cannot see. A
+// Postgres connection goes wherever its URL points, and the URL for a Neon
+// branch points at neon.tech, so the connection leaves the network through a
+// driver the guard does not sit on. What the guard DOES sit on is the control
+// API that mints that URL, so a neon environment already fails at the first
+// call. It fails there with a refused connection to console.neon.tech though,
+// three minutes into an af up, rather than with a sentence naming the manifest
+// line that has to change.
+func checkProvider(provider string) error {
+	name := strings.ToLower(strings.TrimSpace(provider))
+	if name == "" {
+		// The orchestrator defaults this to docker and only replaces it when
+		// the manifest names one, so empty is not a case that reaches here. It
+		// is refused rather than assumed because assuming would make this
+		// check silently absent for any caller that forgets to fill the field.
+		return fmt.Errorf("this installation is air gapped and the environment names no database provider, " +
+			"so there is nothing to check. That is a refusal rather than an assumption, because a " +
+			"provider this hook could not see is a provider it could not have refused")
+	}
+	if _, ok := localProviders[name]; ok {
+		return nil
+	}
+	permitted := make([]string, 0, len(localProviders))
+	for p, what := range localProviders {
+		permitted = append(permitted, p+" ("+what+")")
+	}
+	sort.Strings(permitted)
+	return fmt.Errorf(
+		"this installation is air gapped and the %s database provider reaches a control plane "+
+			"outside the operator's network. The providers an air gapped installation can use are "+
+			"%s. This list is what is permitted rather than what is not, so a provider added later "+
+			"is refused until somebody decides which side of the line it is on",
+		name, strings.Join(permitted, ", "))
 }
 
 // RegisterFromEnvironment seals this process when the operator asked for it.
