@@ -139,12 +139,17 @@ jobs:
         # Named for what it does rather than for what the next step checks.
         # Four of these are `go test <pkg> -update-something`, which runs the
         # WHOLE package, so a test in engine/internal/cli that has nothing to
-        # do with the committed reference fails here. Under the old name this
-        # step said "Generated files are current", and on 2026-09-08 it said
-        # that about three pull requests whose generated files were fine and
-        # whose cli tests were red. Three lanes went to look at the wrong
-        # thing, which is what a step name that asserts more than the step
-        # checked costs.
+        # do with the committed reference fails here.
+        #
+        # Under the old name this step said "Generated files are current", and
+        # the comparison was the LAST line of it. The shell is `bash -e`, so on
+        # 2026-09-08 three pull requests died at the cli package, which is the
+        # eighth of twelve commands, and the comparison never ran on any of
+        # them. The step did not find those trees stale. It reported staleness
+        # it had not measured, under a name that is the only thing the checks
+        # list and the jobs API return, and three lanes went to look at the
+        # wrong thing. That is what a step name asserting more than the step
+        # reached costs.
         run: |
           go run ./tools/errgen
           go run ./tools/lintgen
