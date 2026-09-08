@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/antifailure/antifailure/engine/internal/masking"
+	"github.com/antifailure/antifailure/engine/internal/secrets"
 )
 
 // The catalog reader, which is what turns a ClickHouse database into the
@@ -272,4 +273,45 @@ func countRows(ctx context.Context, c *client, name string) (int64, error) {
 		return 0, fmt.Errorf("clickhouse: the row count of %s came back as %q", name, v)
 	}
 	return n, nil
+}
+
+// Catalog reads the tables and columns of the ClickHouse the URL names, as the
+// masking planner classifies them.
+//
+// The exported twin of Scan above it, and it exists for the same reason. This
+// package is the half that can open a connection, and a caller outside it that
+// needs to know what a store's schema WOULD be masked into had no way to ask.
+// The cross store check is that caller: it compares what two stores' rules do
+// to the same identifier, which needs both catalogs and no rows at all.
+//
+// SCOPED TO THE DATABASE THE URL NAMES, which is not a detail. A ClickHouse
+// server holds the goldens of other refreshes and the branches of other
+// environments beside the one being asked about, and a reader that walked the
+// server would fold somebody else's tables into the answer. That is the same
+// scoping Scan documents, and getting it wrong here would not fail: it would
+// return a bigger number computed over the wrong stores.
+//
+// The tables it returns are the copyable ones. A view has no rows of its own
+// and a Kafka or Distributed engine is a pointer at something outside the
+// server, so neither is part of a golden and neither is a store whose masking
+// anybody can compare; skipped names the rest with the reason, so a caller can
+// say what it did not look at instead of quietly looking at less.
+func Catalog(ctx context.Context, url secrets.Value) (tables []masking.Table, skippedNames []string, err error) {
+	c, err := parseURL(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	read, skips, err := readCatalog(ctx, c)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]masking.Table, 0, len(read))
+	for _, t := range read {
+		out = append(out, t.maskingTable(c.database))
+	}
+	names := make([]string, 0, len(skips))
+	for _, s := range skips {
+		names = append(names, s.Name+": "+s.Reason)
+	}
+	return out, names, nil
 }

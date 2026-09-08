@@ -2476,13 +2476,64 @@ dialect settles.
 
 ### The check that says the two stores agree
 
-The guarantee is checked rather than argued. The check takes two stores' plans,
-finds every identifier that appears in both, masks probe values through each
-side, and reports the share that come out identical:
+The guarantee is checked rather than argued, and you run the check on your own
+stores rather than reading about ours. Give each datastore the name of the
+variable holding a read only connection string:
+
+` + "`" + "`" + "`" + `yaml
+database:
+  source_url_env: PRODUCTION_DATABASE_URL
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: CLICKHOUSE_URL
+` + "`" + "`" + "`" + `
+
+Then:
+
+` + "`" + "`" + "`" + `
+af mask crossstore
+` + "`" + "`" + "`" + `
+
+It takes both stores' plans, finds every identifier that appears in both, masks
+probe values through each side, and reports the share that come out identical:
 
 ` + "`" + "`" + "`" + `
 join keys verified identical across primary and events: 4 of 4 (100.0%)
 ` + "`" + "`" + "`" + `
+
+**It reads catalogs and no rows.** The probe values are its own, so what it
+needs from a store is the schema, which is why it is safe to point at
+production. The report says how many tables and columns it read and that it read
+no rows, as a field rather than as a promise on this page.
+
+**That is enforced by a test rather than by intent.** A live test runs the
+check against a real ClickHouse, then reads the server's OWN ` + "`" + `system.query_log` + "`" + `
+back and fails if any statement the check sent selected from a data table. A
+sentence saying no rows are read is something anybody can write; a query log
+the server keeps is something that can contradict it, and if it ever does, the
+` + "`" + `rows_read` + "`" + ` of zero in the report is a lie and the build says so.
+
+A table the reader deliberately left out is named with the reason, because a
+share of the join keys it could see is a true answer to a smaller question when
+half a schema was dropped in silence. A ClickHouse view has no rows of its own
+and a ` + "`" + `Distributed` + "`" + ` engine is a pointer at another server, so neither is a store
+whose masking can be compared. Both are left out of the comparison and named in
+the report, rather than dropped in silence.
+
+Every store it could not read is named with the reason, and a store that names
+no ` + "`" + `source_url_env` + "`" + ` is named as never read at all. A run that reached one store
+says it proved nothing rather than reporting a hundred percent of one, and that
+answer carries a different exit code from a real disagreement: one is a
+statement about your data and the other is a statement about what could be
+reached.
+
+The same question is the ` + "`" + `cross_store` + "`" + ` question of the ` + "`" + `inspect_data_masking` + "`" + `
+tool, where it answers PASS, FAIL or INCONCLUSIVE. Where two stores are present
+it is also a line in the [component inventory](/docs/concepts/inventory), and
+until something compares them that line reads unmeasured rather than passed.
 
 Anything below 100 percent is a bug, and there are three ways to get there:
 
@@ -2513,11 +2564,14 @@ different values for one field. A rule settles it:
 ### What is not built yet
 
 The dialect boundary is the classification, the statements and the verification
-scan. Nothing yet refreshes a golden for a second store, branches one, or opens
-a connection to one: there is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries
-other than ` + "`" + `primary` + "`" + ` are reported with their declared stance rather than
-measured. Said here rather than left to be discovered, because a boundary that
-looks complete from outside is how somebody ends up trusting one.
+scan. Nothing yet refreshes a golden for a second store or branches one: there
+is no ClickHouse provider, and ` + "`" + `datastores` + "`" + ` entries other than ` + "`" + `primary` + "`" + ` are
+reported with their declared stance rather than measured. ` + "`" + `af mask crossstore` + "`" + `
+opens a connection to a second store to READ ITS CATALOG and nothing else; a
+ClickHouse is read over its HTTP interface, and a URL naming the native port is
+refused with the HTTP one in the message rather than attempted. Said here rather
+than left to be discovered, because a boundary that looks complete from outside
+is how somebody ends up trusting one.
 
 ## Writing the rules from the schema
 
@@ -13263,6 +13317,7 @@ af mask plan
 Subcommands:
 
 - [` + "`" + `af mask apply` + "`" + `](#af-mask-apply) Rewrite this environment's data according to the plan.
+- [` + "`" + `af mask crossstore` + "`" + `](#af-mask-crossstore) Check that one person masks to the same person in every store.
 - [` + "`" + `af mask init` + "`" + `](#af-mask-init) Read the schema and write masking.yaml with a rule for every column.
 - [` + "`" + `af mask plan` + "`" + `](#af-mask-plan) Show what masking would do, column by column.
 - [` + "`" + `af mask preview` + "`" + `](#af-mask-preview) Show what a few rows would look like after masking.
@@ -13290,6 +13345,48 @@ af mask apply
 | Flag | Default | What it does |
 | --- | --- | --- |
 | ` + "`" + `--branch` + "`" + ` | - | Branch to mask, defaulting to the checked out one. |
+
+### ` + "`" + `af mask crossstore` + "`" + `
+
+Check that one person masks to the same person in every store.
+
+Determinism inside one store has been enforced since the beginning, by the key
+derivation. Across two stores it was a property of the construction that
+nothing checked, and a property nothing checks is a property you have somebody's
+word for.
+
+The failure it exists to catch is silent. An empty ClickHouse beside a masked
+Postgres is a twin that is visibly incomplete and somebody notices within a
+minute of opening a chart. One identity masked into two different fake people
+is a twin that is confidently wrong: every join across the two stores returns
+nothing or returns the wrong person, every report built on it is plausible, and
+nothing anywhere says so.
+
+It reads schemas and no rows. The check masks its own probe values through both
+stores' rules and compares the outputs, so what it needs from a store is the
+catalog, which is why it is safe to point at production. Every store it reads
+is named, every store it could not read is named with the reason, and a run
+that reached one store reports that it proved nothing rather than reporting a
+hundred percent of one.
+
+Each datastore says where its schema is read from with source_url_env, which
+names an environment variable and never the connection string. The primary
+takes that from database.source_url_env and does not repeat it.
+
+` + "`" + "`" + "`" + `
+af mask crossstore [flags]
+` + "`" + "`" + "`" + `
+
+` + "`" + "`" + "`" + `
+# Reads both stores' catalogs and no rows, which is what makes it safe
+# to point at production.
+af mask crossstore
+af mask crossstore --branch main
+` + "`" + "`" + "`" + `
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `--branch` + "`" + ` | - | Branch context to use, defaulting to the checked out one. |
 
 ### ` + "`" + `af mask init` + "`" + `
 
@@ -16503,6 +16600,30 @@ Verification could not read {table}.{column} ({type}), no masking rule covers it
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [concepts/verification](/docs/concepts/verification) |
 
+### AF-MSK-014
+
+The same identifier does not mask to the same value in every store: {detail}
+
+**What to do.** Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `7` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
+### AF-MSK-015
+
+The cross store check did not compare every store it was given: {detail}
+
+**What to do.** Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `1` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [concepts/masking](/docs/concepts/masking) |
+
 ## Egress
 
 ### AF-NET-001
@@ -17510,7 +17631,7 @@ datastores:
 | ` + "`" + `stance` + "`" + ` | Required. See below. |
 | ` + "`" + `because` + "`" + ` | Why that stance was chosen, carried into the fidelity report as written. Required for ` + "`" + `empty` + "`" + `. |
 | ` + "`" + `from` + "`" + ` | The store a ` + "`" + `derived` + "`" + ` one is rebuilt from. Required for ` + "`" + `derived` + "`" + ` and refused for the rest. |
-| ` + "`" + `source_url_env` + "`" + ` | The variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from. Omitted, the golden holds no rows and every refresh says so. |
+| ` + "`" + `source_url_env` + "`" + ` | The NAME of the variable holding this store's production connection string, which a ` + "`" + `golden` + "`" + ` is copied from and which the cross store check reads the schema from. Never the connection string itself, which is refused. Omitted, the golden holds no rows and every refresh says so. |
 
 The ` + "`" + `database` + "`" + ` block above is not replaced and does not move. It normalizes
 into the entry named ` + "`" + `primary` + "`" + `, so a manifest that declares only ` + "`" + `database:` + "`" + `
@@ -17557,6 +17678,34 @@ validator refuses a store with no stance and the
 [component inventory](/docs/concepts/inventory) names each one, and nothing here
 starts an ` + "`" + `empty` + "`" + ` store, runs a ` + "`" + `derived` + "`" + ` rebuild or creates a topic. A store
 whose engine this build cannot mask is REFUSED rather than published unmasked.
+
+### Checking that one person is one person in both stores
+
+The paragraph above says one customer masks to one fake customer in both
+stores. ` + "`" + `af mask crossstore` + "`" + ` is what checks it rather than asserting it:
+
+` + "`" + "`" + "`" + `
+af mask crossstore
+` + "`" + "`" + "`" + `
+
+It reads each declared store's catalog through the variable its
+` + "`" + `source_url_env` + "`" + ` names, assigns the one ` + "`" + `masking.yaml` + "`" + ` to all of them, finds
+every identifier that appears in more than one store, masks probe values
+through each side, and reports the share that come out identical.
+
+**It reads catalogs and no rows**, which is why it is safe to point at
+production: the probe values are its own, so what it needs from a store is the
+schema. ` + "`" + `rows_read` + "`" + ` is a field of the report rather than a promise on this
+page, and a live test reads the ClickHouse server's own ` + "`" + `system.query_log` + "`" + ` back
+and fails if any statement the check sent selected from a data table. See
+[masking](/docs/concepts/masking) for what it finds.
+
+Every store it could not read is named with the reason, a store that names no
+` + "`" + `source_url_env` + "`" + ` is named as never read at all, and a run that reached one store
+says it proved nothing rather than reporting a hundred percent of one. A pair
+that disagreed and a store that was never opened carry different exit codes,
+because one is a statement about your data and the other is a statement about
+what could be reached.
 
 **The fidelity report reads the branch**, not the declaration. A store declared
 ` + "`" + `golden` + "`" + ` that this environment branched is reported the way the primary
@@ -18304,7 +18453,7 @@ torn down, and there is no argument that leaves it running.
 
 ### ` + "`" + `inspect_data_masking` + "`" + `
 
-What masking does to this environment's data, without changing any of it. Three
+What masking does to this environment's data, without changing any of it. Four
 questions, chosen with ` + "`" + `question` + "`" + `.
 
 ` + "`" + `plan` + "`" + ` says what masking WOULD do, column by column, compiled from the live
@@ -18314,7 +18463,17 @@ which is the list somebody has to answer: left alone, a column called
 to show whether the rules actually fire. ` + "`" + `verify` + "`" + ` reads the data back and runs
 the same detectors that would find the data if it leaked.
 
-**No value is ever returned by any of the three.** Masking is a privacy boundary,
+` + "`" + `cross_store` + "`" + ` asks whether one person masks to the SAME person in every declared
+store, which is the question a twin holding a Postgres and a ClickHouse has and a
+twin holding one store does not. One identity masked into two people is a twin
+that is confidently wrong: every join across the two stores returns somebody
+else, and every report built on it is plausible. It reads catalogs and NO ROWS,
+so it is safe to point at production, and ` + "`" + `rows_read` + "`" + ` is a field of the answer
+rather than a promise in this page. It returns ` + "`" + `INCONCLUSIVE` + "`" + ` rather than ` + "`" + `PASS` + "`" + `
+when fewer than two stores could be read or when the two share no identifier,
+because a percentage over zero comparisons is not a pass.
+
+**No value is ever returned by any of the four.** Masking is a privacy boundary,
 and a preview that showed the values it is deciding about would leak exactly the
 data being removed, to a model, into a transcript. What comes back is the shape
 of the change: the column, the transform, whether the value changed at all, its
@@ -18858,7 +19017,7 @@ One store the environment holds. Database is a single struct and it is Postgres,
 | ` + "`" + `from` + "`" + ` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
-| ` + "`" + `source_url_env` + "`" + ` | string | no | The variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. Max length 128. |
+| ` + "`" + `source_url_env` + "`" + ` | string | no | The NAME of the variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. A connection string written here rather than a variable name is refused, and the refusal does not print it back. Max length 128, matches ` + "`" + `^[A-Za-z_][A-Za-z0-9_]*$` + "`" + `. |
 | ` + "`" + `stance` + "`" + ` | ` + "`" + `golden` + "`" + `, ` + "`" + `empty` + "`" + `, ` + "`" + `derived` + "`" + `, ` + "`" + `topics_only` + "`" + ` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
 
 ## Egress

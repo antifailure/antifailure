@@ -133,8 +133,96 @@ func datastores(obs Observation) Dimension {
 		return d
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].Name < found[j].Name })
+	// Appended after the sort, so the question about the pair reads under the
+	// stores it is about rather than alphabetically among them.
+	if c, ok := crossStoreComponent(obs, len(found)); ok {
+		found = append(found, c)
+	}
 	d.Components = found
 	return d
+}
+
+// CrossStoreComponent is the line's name in the report.
+//
+// Short deliberately. Explain renders a component name in a twelve character
+// column and trims what does not fit, so "one person, masked the same in every
+// store" would reach a reader as "one person, ..." and say nothing. The name is
+// the subject and the detail is the sentence.
+//
+// EXPORTED because it is the one component of this dimension that is not a
+// store, and something that counts stores has to be able to say so. The
+// benchmark that measures stores per environment reads len(d.Components) and
+// takes every name in it as a store, which was true until this line existed.
+// A caller left to match the string itself would be a second copy of this
+// name, kept in step with the first by nobody.
+const CrossStoreComponent = "cross store"
+
+// crossStoreComponent is the line that appears where two stores are present.
+//
+// It exists because the guarantee had no surface. Determinism across stores is
+// a property of the masking construction, so a customer's twin almost
+// certainly HAS it, and "almost certainly" is what this product refuses to
+// print. masking.CrossStoreCheck is the verifier and until it had a command it
+// was reachable by nobody, which made the honest form of the sentence "the
+// same person is masked identically in both, and you have our word for it".
+//
+// THREE states and the middle one is the whole point.
+//
+// Nothing compared them is UNMEASURED, so it is in neither half of the
+// fraction and the report carries the sentence saying how to check. A twin
+// with an unverified guarantee has not been shown to be wrong, and scoring it
+// as absent would be the report inventing a finding.
+//
+// Verified identical is REPRODUCED, and it earns its place in the numerator,
+// because something read both catalogs and compared them.
+//
+// A pair that disagreed is ABSENT with the pair named, which is the line this
+// whole thing is for: one identity masked into two people is a twin that is
+// confidently wrong, and every join across the two stores is then plausible
+// and false.
+//
+// Nothing at all when there is only one store, because the question does not
+// arise and a line saying so on every single store manifest is noise that
+// makes the real one easier to miss.
+func crossStoreComponent(obs Observation, others int) (Component, bool) {
+	if others == 0 {
+		return Component{}, false
+	}
+	c := Component{Name: CrossStoreComponent}
+	if obs.CrossStore == nil {
+		c.State = Unmeasured
+		c.Detail = obs.CrossStoreReason
+		if c.Detail == "" {
+			c.Detail = "nothing compared the stores, so whether one identity masks to one " +
+				"person across them is a property of the construction rather than a checked " +
+				"fact; check it with af mask crossstore"
+		}
+		return c, true
+	}
+	cs := *obs.CrossStore
+	stores := strings.Join(cs.Stores, " and ")
+	if cs.Checked == 0 {
+		// Zero of zero. This is the case the check itself refuses to call a
+		// pass, and it must not become one here either: a report over two
+		// stores that share no identifier has proved nothing.
+		c.State = Unmeasured
+		c.Detail = "no column identifies the same thing in more than one of " + stores +
+			", so nothing was compared and nothing is proved"
+		return c, true
+	}
+	if cs.Identical == cs.Checked {
+		c.State = Reproduced
+		c.Detail = fmt.Sprintf(
+			"%d of %d join keys mask identically across %s, read from the catalogs and no rows",
+			cs.Identical, cs.Checked, stores)
+		return c, true
+	}
+	c.State = Absent
+	c.Detail = fmt.Sprintf(
+		"%d of %d join keys mask identically across %s, so one identity becomes two people "+
+			"and every join across them returns the wrong person: %s",
+		cs.Identical, cs.Checked, stores, cs.Detail)
+	return c, true
 }
 
 // storeDataComponent answers whether one store's branch holds production's

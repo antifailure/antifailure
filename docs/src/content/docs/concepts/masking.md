@@ -112,13 +112,64 @@ dialect settles.
 
 ### The check that says the two stores agree
 
-The guarantee is checked rather than argued. The check takes two stores' plans,
-finds every identifier that appears in both, masks probe values through each
-side, and reports the share that come out identical:
+The guarantee is checked rather than argued, and you run the check on your own
+stores rather than reading about ours. Give each datastore the name of the
+variable holding a read only connection string:
+
+```yaml
+database:
+  source_url_env: PRODUCTION_DATABASE_URL
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    source_url_env: CLICKHOUSE_URL
+```
+
+Then:
+
+```
+af mask crossstore
+```
+
+It takes both stores' plans, finds every identifier that appears in both, masks
+probe values through each side, and reports the share that come out identical:
 
 ```
 join keys verified identical across primary and events: 4 of 4 (100.0%)
 ```
+
+**It reads catalogs and no rows.** The probe values are its own, so what it
+needs from a store is the schema, which is why it is safe to point at
+production. The report says how many tables and columns it read and that it read
+no rows, as a field rather than as a promise on this page.
+
+**That is enforced by a test rather than by intent.** A live test runs the
+check against a real ClickHouse, then reads the server's OWN `system.query_log`
+back and fails if any statement the check sent selected from a data table. A
+sentence saying no rows are read is something anybody can write; a query log
+the server keeps is something that can contradict it, and if it ever does, the
+`rows_read` of zero in the report is a lie and the build says so.
+
+A table the reader deliberately left out is named with the reason, because a
+share of the join keys it could see is a true answer to a smaller question when
+half a schema was dropped in silence. A ClickHouse view has no rows of its own
+and a `Distributed` engine is a pointer at another server, so neither is a store
+whose masking can be compared. Both are left out of the comparison and named in
+the report, rather than dropped in silence.
+
+Every store it could not read is named with the reason, and a store that names
+no `source_url_env` is named as never read at all. A run that reached one store
+says it proved nothing rather than reporting a hundred percent of one, and that
+answer carries a different exit code from a real disagreement: one is a
+statement about your data and the other is a statement about what could be
+reached.
+
+The same question is the `cross_store` question of the `inspect_data_masking`
+tool, where it answers PASS, FAIL or INCONCLUSIVE. Where two stores are present
+it is also a line in the [component inventory](/docs/concepts/inventory), and
+until something compares them that line reads unmeasured rather than passed.
 
 Anything below 100 percent is a bug, and there are three ways to get there:
 
@@ -149,11 +200,14 @@ different values for one field. A rule settles it:
 ### What is not built yet
 
 The dialect boundary is the classification, the statements and the verification
-scan. Nothing yet refreshes a golden for a second store, branches one, or opens
-a connection to one: there is no ClickHouse provider, and `datastores` entries
-other than `primary` are reported with their declared stance rather than
-measured. Said here rather than left to be discovered, because a boundary that
-looks complete from outside is how somebody ends up trusting one.
+scan. Nothing yet refreshes a golden for a second store or branches one: there
+is no ClickHouse provider, and `datastores` entries other than `primary` are
+reported with their declared stance rather than measured. `af mask crossstore`
+opens a connection to a second store to READ ITS CATALOG and nothing else; a
+ClickHouse is read over its HTTP interface, and a URL naming the native port is
+refused with the HTTP one in the message rather than attempted. Said here rather
+than left to be discovered, because a boundary that looks complete from outside
+is how somebody ends up trusting one.
 
 ## Writing the rules from the schema
 

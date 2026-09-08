@@ -1015,6 +1015,28 @@
       "planned": false
     },
     {
+      "code": "AF-MSK-014",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "The same identifier does not mask to the same value in every store: {detail}",
+      "resolution": "Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.",
+      "docs": "https://antifailure.dev/docs/concepts/masking",
+      "retryable": false,
+      "exitCode": 7,
+      "planned": false
+    },
+    {
+      "code": "AF-MSK-015",
+      "area": "MSK",
+      "areaName": "Masking and verification",
+      "message": "The cross store check did not compare every store it was given: {detail}",
+      "resolution": "Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.",
+      "docs": "https://antifailure.dev/docs/concepts/masking",
+      "retryable": false,
+      "exitCode": 1,
+      "planned": false
+    },
+    {
       "code": "AF-NET-001",
       "area": "NET",
       "areaName": "Egress",

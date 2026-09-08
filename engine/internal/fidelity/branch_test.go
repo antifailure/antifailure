@@ -199,6 +199,10 @@ func TestEveryBranchedStoreIsReportedSeparately(t *testing.T) {
 	require.Equal(t, map[string]int{
 		"cache": 1, "events data": 1, "events provenance": 1,
 		"search data": 1, "search provenance": 1,
+		// Two stores are present, so the dimension also carries whether one
+		// identity masks to one person across them. Once, however many stores
+		// there are: it is one question about the set and not one per store.
+		fidelity.CrossStoreComponent: 1,
 	}, seen)
 }
 

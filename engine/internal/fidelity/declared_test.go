@@ -88,7 +88,11 @@ func TestThePrimaryIsNotReportedTwice(t *testing.T) {
 		require.NotEqual(t, schema.PrimaryDatastore, c.Name,
 			"the primary is in the datastores dimension as well as the database one")
 	}
-	require.Len(t, d.Components, 3)
+	// Three stores and the question about the pair. The fourth line is named
+	// rather than absorbed into a count, because a test that only counted
+	// would go on passing if the cross store line silently replaced a store.
+	require.Len(t, d.Components, 4)
+	require.Equal(t, fidelity.CrossStoreComponent, d.Components[3].Name)
 }
 
 func TestADeclaredStoreIsNotAlsoReportedAsTheServiceRunningIt(t *testing.T) {

@@ -91,6 +91,30 @@ type Observation struct {
 	// has none. Only a store the environment actually holds appears, and only
 	// then does the dimension report what is in it.
 	Stores []Store
+
+	// CrossStore is what the cross store masking check found, and
+	// CrossStoreReason says why it could not be run. Nil with an empty reason
+	// means nothing asked, which is what an environment with one store is.
+	CrossStore       *CrossStore
+	CrossStoreReason string
+}
+
+// CrossStore is the answer to the one question a twin with two stores has that
+// a twin with one does not: is the person masked in the first store masked into
+// the SAME person in the second.
+//
+// It is here because it was nowhere. The check existed, was well tested, and
+// had zero production callers, so the clause a customer was told about their
+// own environment was the one clause of seven with no command behind it.
+type CrossStore struct {
+	// Stores are the stores that were compared.
+	Stores []string
+	// Checked and Identical are the denominator and the numerator.
+	Checked   int
+	Identical int
+	// Detail is the check's own sentence, which names the first pair that
+	// disagreed when one did.
+	Detail string
 }
 
 // Host is one third party host the egress policy names.

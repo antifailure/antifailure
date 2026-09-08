@@ -304,6 +304,12 @@ const (
 	// Verification could not read {table}.{column} ({type}), no masking
 	// rule covers it, and its name says it holds a secret.
 	AFMSK013 Code = "AF-MSK-013"
+	// The same identifier does not mask to the same value in every store:
+	// {detail}
+	AFMSK014 Code = "AF-MSK-014"
+	// The cross store check did not compare every store it was given:
+	// {detail}
+	AFMSK015 Code = "AF-MSK-015"
 
 	// Egress
 	// The request to {host} was blocked by rule {rule}.
@@ -1460,6 +1466,24 @@ var catalog = map[Code]Entry{
 		Docs:      "concepts/verification",
 		Retryable: false,
 		ExitCode:  ExitVerification,
+	},
+	AFMSK014: {
+		Code:      AFMSK014,
+		Area:      "MSK",
+		Message:   "The same identifier does not mask to the same value in every store: {detail}",
+		NextStep:  "Give the two columns one rule, or one link, so both sides derive their subkey from the same identity. Until they do, a join across the two stores returns the wrong person and every report built on it is plausible.",
+		Docs:      "concepts/masking",
+		Retryable: false,
+		ExitCode:  ExitVerification,
+	},
+	AFMSK015: {
+		Code:      AFMSK015,
+		Area:      "MSK",
+		Message:   "The cross store check did not compare every store it was given: {detail}",
+		NextStep:  "Give each datastore a source_url_env naming the variable that holds its connection string, export those variables, and make every store reachable from here. A store that was not compared is not a store that agreed.",
+		Docs:      "concepts/masking",
+		Retryable: false,
+		ExitCode:  ExitFailure,
 	},
 	AFNET001: {
 		Code:      AFNET001,

@@ -152,6 +152,11 @@ var commandExamples = map[string]string{
 	"af mask apply": "" +
 		"# Rewrites this environment's data in place.\n" +
 		"af mask apply",
+	"af mask crossstore": "" +
+		"# Reads both stores' catalogs and no rows, which is what makes it safe\n" +
+		"# to point at production.\n" +
+		"af mask crossstore\n" +
+		"af mask crossstore --branch main",
 	"af mask plan": "af mask plan",
 	"af mask preview": "" +
 		"af mask preview\n" +
