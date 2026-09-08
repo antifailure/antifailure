@@ -85,13 +85,16 @@ else
   # from one somebody else is depending on, and refuse to remove the second.
   # The password reaches docker on stdin rather than on the command line, so it
   # is not in the process table for the life of the run.
+  # Pinned by digest, because the tag moves and nothing updates it. The
+  # reasoning and the refresh procedure are in .github/workflows/ci.yml,
+  # above the af-cp-test container.
   docker run -d \
     --name "$container" \
     --label af-preview=1 \
     -p "$db_port:5432" \
     --env-file /dev/stdin \
     -e POSTGRES_DB=antifailure \
-    postgres:17-alpine >/dev/null <<ENVFILE
+    postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 >/dev/null <<ENVFILE
 POSTGRES_PASSWORD=$(cat "$pgpass_file")
 ENVFILE
   say "  created $container on $db_port"

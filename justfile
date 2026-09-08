@@ -284,10 +284,13 @@ merge pr *args:
 # one, so both `nc -z` and `pg_isready` answer yes during a window when the next
 # query fails with "the database system is shutting down". Getting this wrong is
 # how a suite ends up skipping and reporting ok.
+# Pinned by digest, because the tag moves and nothing updates it. The
+# reasoning and the refresh procedure are in .github/workflows/ci.yml,
+# above the af-cp-test container.
 db:
     @docker rm -f af-cp-test > /dev/null 2>&1 || true
     docker run -d --name af-cp-test -p 55432:5432 \
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 \
       -c shared_preload_libraries=pg_stat_statements \
       -c pg_stat_statements.track=all
     @echo "waiting for postgres"
@@ -300,7 +303,7 @@ db:
     @echo "up on 55432"
     @docker rm -f af-cp-target > /dev/null 2>&1 || true
     docker run -d --name af-cp-target -p 55433:5432 \
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     @for i in $(seq 1 90); do \
       docker exec af-cp-target psql -U postgres -d antifailure -tAc 'select 1' > /dev/null 2>&1 && break; \
       sleep 1; \
@@ -912,8 +915,11 @@ drill: _reports
     cleanup() { docker rm -f af-drill-test > /dev/null 2>&1 || true; }
     trap cleanup EXIT
     cleanup
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in .github/workflows/ci.yml,
+    # above the af-cp-test container.
     docker run -d --name af-drill-test -p 55434:5432 \
-      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine > /dev/null
+      -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 > /dev/null
     # A real query against the target database rather than pg_isready. The
     # image runs initdb against a temporary server and pg_isready answers on
     # that one, before POSTGRES_DB exists.

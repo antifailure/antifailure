@@ -81,9 +81,12 @@ jobs:
     # everything under test is what Postgres enforces: row level security, the
     # policies the masking plan has to preserve, the partitions the rules have
     # to follow, and the roles pg_dump does not carry.
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in .github/workflows/ci.yml,
+    # above the af-cp-test container.
     services:
       staging:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_PASSWORD: staging
           POSTGRES_DB: antifailure
@@ -609,9 +612,12 @@ jobs:
     # TestEveryLegCanReachTheSourceItsManifestNames in tools/dogfood, which
     # reads the manifests rather than this list and so narrows or widens with
     # them.
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in .github/workflows/ci.yml,
+    # above the af-cp-test container.
     services:
       staging:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_PASSWORD: staging
           POSTGRES_DB: antifailure

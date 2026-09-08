@@ -94,9 +94,12 @@ jobs:
     # database into a public runner would be the single worst thing this
     # repository could do, and what the masking rules are about is the shape
     # rather than the rows.
+    # Pinned by digest, because the tag moves and nothing updates it. The
+    # reasoning and the refresh procedure are in .github/workflows/ci.yml,
+    # above the af-cp-test container.
     services:
       staging:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_PASSWORD: staging
           POSTGRES_DB: antifailure

@@ -30,7 +30,14 @@ set -euo pipefail
 
 NAME="${AF_KEYCLOAK_CONTAINER:-af-keycloak}"
 PORT="${AF_KEYCLOAK_PORT:-8443}"
-IMAGE="${AF_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}"
+# The image is pinned by digest. `26.0` is a tag and a tag moves, so a suite
+# that proves single sign on works against "Keycloak 26.0" proves it against
+# whichever build carried that tag on the day it ran. The digest is quay's
+# multi architecture index, linux/amd64 and linux/arm64, so a runner and a
+# developer's Mac resolve this one line to their own image. The reasoning in
+# full, and the refresh procedure, are in .github/workflows/ci.yml above the
+# af-cp-test container.
+IMAGE="${AF_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858}"
 STATE="${TMPDIR:-/tmp}/af-keycloak-${NAME}"
 
 if [ "${1:-}" = "--down" ]; then

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1305,5 +1306,355 @@ func TestLibReachabilityCountsSiblingsButNotDeadCycles(t *testing.T) {
 		if alive[stem] {
 			t.Errorf("%s has no way in from outside lib/ and was reported alive", stem)
 		}
+	}
+}
+
+// Container images. The same supply chain argument as the action pins above,
+// one layer down. An action reference decides what CODE runs; a service
+// container image decides what the code was tested AGAINST, and this
+// repository's suites assert what a real Postgres refuses, which is a property
+// of the server rather than of us. `postgres:17-alpine` is a tag, a tag moves,
+// and the reasoning in full lives at the most authoritative of the twelve
+// sites: .github/workflows/ci.yml, above the af-cp-test container.
+
+// registryTagged matches a registry qualified image reference carrying a tag:
+// a host with at least one dot, an optional port, a path, and a tag. It has no
+// leading boundary on purpose, because the case it was written for is a shell
+// default, `${AF_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}`, where every
+// plausible boundary character is already taken.
+var registryTagged = regexp.MustCompile(
+	`[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+(?::[0-9]+)?/[a-z0-9._/-]+:[A-Za-z0-9_][A-Za-z0-9._-]*`)
+
+// imageKey matches a YAML `image:` field. Anchored on a boundary for the
+// reason the `uses:` pattern above is: without one, any word ending in the
+// five characters `image:` reads as the field.
+var imageKey = regexp.MustCompile(`(?:^|\s)image:\s*(\S+)`)
+
+// taggedImage reports whether tok, as it appears in a shell command, names a
+// container image by tag. It is deliberately narrow: the tokens that surround
+// a real `docker run` are ports, environment assignments and flags, and a
+// check that reads `-p 55432:5432` as an image called 55432 is a check that
+// gets ignored and then deleted.
+func taggedImage(tok string) bool {
+	tok = strings.Trim(tok, `"'`)
+	// A digest is the thing being asked for, a variable cannot be read here,
+	// and a URL is not an image.
+	if strings.ContainsAny(tok, "$@") || strings.Contains(tok, "://") {
+		return false
+	}
+	i := strings.LastIndex(tok, ":")
+	if i <= 0 || i == len(tok)-1 {
+		return false
+	}
+	name, tag := tok[:i], tok[i+1:]
+	// A colon with a path after it is not a tag separator.
+	if strings.Contains(tag, "/") {
+		return false
+	}
+	// `sha256:<hex>` is the digest itself written on its own, which turns up
+	// in checksum commands and in the prose of these very comments.
+	if name == "sha256" {
+		return false
+	}
+	letters := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+			letters = true
+		case r >= '0' && r <= '9', r == '.', r == '_', r == '/', r == '-':
+		default:
+			return false
+		}
+	}
+	// The name half must carry a letter. This is the whole reason a port
+	// mapping does not read as an image.
+	if !letters {
+		return false
+	}
+	for i, r := range tag {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_'
+		if i > 0 {
+			ok = ok || r == '.' || r == '-'
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// imageFinding is one image reference that names a tag and no digest.
+type imageFinding struct {
+	line int
+	ref  string
+	why  string
+}
+
+// unpinnedImages reads a file this repository controls and reports every
+// container image in it that is named by something a publisher can move.
+//
+// Three shapes, because there are three ways this repository starts a
+// container and no single pattern sees all of them: a workflow `services:`
+// block and a Kubernetes Deployment both write a YAML `image:` field, a
+// justfile recipe and a shell script both write a `docker run` command, and
+// one script carries the reference as a shell default that neither shape
+// reaches.
+//
+// WHAT THIS CANNOT SEE, said rather than implied. An image named with no tag
+// at all, `docker run alpine sh`, is one bare word in a shell command and
+// indistinguishable from a subcommand, so the third rule below refuses a
+// `docker run` that names neither a digest nor a variable rather than trying
+// to find the word. And Go source that starts a container is not read here;
+// engine/pkg/emulator/aws.go carries its own pin and its own reasoning.
+func unpinnedImages(name, body string) []imageFinding {
+	var out []imageFinding
+	yaml := strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")
+
+	// Shell continuations, so a `docker run` split over four lines is read as
+	// the one command it is. The line number stays that of the first line.
+	type logical struct {
+		line int
+		text string
+	}
+	var joined []logical
+	physical := strings.Split(body, "\n")
+	for i := 0; i < len(physical); i++ {
+		start, text := i+1, physical[i]
+		for strings.HasSuffix(text, "\\") && i+1 < len(physical) {
+			i++
+			text = strings.TrimSuffix(text, "\\") + " " + strings.TrimSpace(physical[i])
+		}
+		joined = append(joined, logical{start, text})
+	}
+
+	for _, l := range joined {
+		// 1. A YAML image field. The workflows write one in a `services:`
+		// block and control-plane-image.yml writes one inside a Deployment it
+		// pipes to kubectl, and both are the same field.
+		if yaml {
+			for _, m := range imageKey.FindAllStringSubmatch(l.text, -1) {
+				ref := m[1]
+				if strings.Contains(ref, "$") {
+					continue // An expression, resolved at run time.
+				}
+				if !strings.Contains(ref, "@sha256:") {
+					out = append(out, imageFinding{l.line, ref, "a YAML image: field names a tag"})
+				}
+			}
+		}
+
+		// 2. A registry qualified reference anywhere in the line, which is the
+		// only rule that reaches a reference held in a shell variable.
+		for _, idx := range registryTagged.FindAllStringIndex(l.text, -1) {
+			ref := l.text[idx[0]:idx[1]]
+			if idx[0] >= 2 && l.text[idx[0]-2:idx[0]] == "//" {
+				continue // Part of a URL.
+			}
+			if idx[1] < len(l.text) && l.text[idx[1]] == '@' {
+				continue // Pinned, the digest follows.
+			}
+			out = append(out, imageFinding{l.line, ref, "a registry reference names a tag"})
+		}
+
+		// 3. A docker command. Every argument is checked, and separately the
+		// command as a whole has to name its image by digest or by variable,
+		// which is what catches an image named with no tag at all.
+		if !strings.Contains(l.text, "docker run ") && !strings.Contains(l.text, "docker pull ") {
+			continue
+		}
+		fields := strings.Fields(l.text)
+		named := false
+		for _, tok := range fields {
+			if strings.Contains(tok, "@sha256:") || strings.Contains(tok, "$") {
+				named = true
+			}
+			if taggedImage(tok) {
+				out = append(out, imageFinding{l.line, tok, "a docker argument names a tag"})
+			}
+		}
+		if !named {
+			out = append(out, imageFinding{l.line, strings.TrimSpace(l.text),
+				"a docker command names neither a digest nor a variable"})
+		}
+	}
+	return out
+}
+
+// filesThatStartContainers is every file in this repository that can start
+// one. The workflows, the justfile, and every shell script, found by walking
+// rather than by a list, so a new script is covered on the day it is written
+// rather than on the day somebody remembers to add it here.
+func filesThatStartContainers(t *testing.T) []string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, filepath.Join(root, "justfile"))
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "node_modules", ".git", "testdata", "dist", "build":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".sh") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A glob or a walk that quietly stops matching reads exactly like a clean
+	// tree, which is the failure this repository keeps finding in its own
+	// instruments.
+	if len(files) < 25 {
+		t.Fatalf("only %d files were found to scan; the walk has probably stopped matching", len(files))
+	}
+	return files
+}
+
+func TestEveryContainerImageIsPinnedToADigest(t *testing.T) {
+	// A tag is a name the publisher can repoint. `postgres:17-alpine` resolved
+	// to 17.11 when this was written and will resolve to 17.12 with no commit
+	// here, so a suite that proved what Postgres refuses proved it against
+	// whatever was behind the tag that morning. A digest cannot move.
+	//
+	// Nothing else enforces this. Dependabot's docker file fetcher accepts a
+	// file only when its NAME matches /dockerfile|containerfile/i, or it is a
+	// `values*.yaml` Helm file, or its first YAML document carries both
+	// `apiVersion` and `kind`; a workflow carries `on` and `jobs` and is
+	// refused. The github-actions ecosystem reads `uses:` only. So this test
+	// is the whole of the enforcement, and the pin has to be refreshed by a
+	// person. .github/workflows/ci.yml says how.
+	checked := 0
+	for _, file := range filesThatStartContainers(t) {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked++
+		for _, f := range unpinnedImages(filepath.Base(file), string(body)) {
+			t.Errorf("%s:%d: %s: %s\n"+
+				"    Resolve the multi architecture index digest without a daemon:\n"+
+				"    TOKEN=$(curl -s 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/<image>:pull' | jq -r .token)\n"+
+				"    curl -sI -H \"Authorization: Bearer $TOKEN\" -H 'Accept: application/vnd.oci.image.index.v1+json' \\\n"+
+				"      https://registry-1.docker.io/v2/library/<image>/manifests/<tag>\n"+
+				"    Then write it as <image>:<tag>@<digest>, in every site at once.",
+				filepath.ToSlash(file), f.line, f.why, f.ref)
+		}
+	}
+	if checked < 25 {
+		t.Fatalf("only %d files were read; the scan has probably stopped matching", checked)
+	}
+}
+
+func TestEveryPinnedImageAgreesOnOneDigest(t *testing.T) {
+	// Twelve sites name the same Postgres and no mechanism holds them equal.
+	// A bump that changes eleven of them leaves one job testing against a
+	// different server, and every job still passes, which is the shape of a
+	// defect nobody finds. This is the check that a partial bump fails on.
+	pinned := regexp.MustCompile(`([a-z0-9][a-z0-9._/:-]*)@(sha256:[0-9a-f]{64})`)
+	digests := map[string]map[string][]string{}
+	for _, file := range filesThatStartContainers(t) {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range pinned.FindAllStringSubmatch(string(body), -1) {
+			name := strings.SplitN(m[1], ":", 2)[0]
+			if digests[name] == nil {
+				digests[name] = map[string][]string{}
+			}
+			digests[name][m[2]] = append(digests[name][m[2]], filepath.ToSlash(file))
+		}
+	}
+	if len(digests) == 0 {
+		t.Fatal("no pinned image was found at all; the pattern has stopped matching")
+	}
+	for name, byDigest := range digests {
+		if len(byDigest) > 1 {
+			for digest, files := range byDigest {
+				t.Errorf("%s is pinned to %s in %v", name, digest, files)
+			}
+			t.Errorf("%s is pinned to %d different digests; a bump changed some sites and not others",
+				name, len(byDigest))
+		}
+	}
+}
+
+func TestTheImagePinCheckRefusesAMovingTag(t *testing.T) {
+	// The exact cases that produced this check, each in the shape it was
+	// found in. A check that has never been shown to say no is not a check.
+	refused := []struct {
+		name, body string
+	}{
+		{"ci.yml", "    services:\n      postgres:\n        image: postgres:17-alpine\n"},
+		{"cp.yml", "                  - name: pg\n                    image: postgres:17-alpine\n"},
+		{"ci.yml", "          docker run -d --name af-cp-test -p 55432:5432 \\\n" +
+			"            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure postgres:17-alpine \\\n" +
+			"            -c shared_preload_libraries=pg_stat_statements\n"},
+		{"keycloak-up.sh", "IMAGE=\"${AF_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}\"\n"},
+		{"up.sh", "docker run -d --name x alpine sh -c true\n"},
+	}
+	for _, c := range refused {
+		if got := unpinnedImages(c.name, c.body); len(got) == 0 {
+			t.Errorf("a moving tag passed: %q", c.body)
+		}
+	}
+
+	// And the same five, pinned, which is the direction that proves the check
+	// is not simply always saying no.
+	const pg = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
+	const kc = "quay.io/keycloak/keycloak:26.0@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858"
+	accepted := []struct {
+		name, body string
+	}{
+		{"ci.yml", "    services:\n      postgres:\n        image: " + pg + "\n"},
+		{"cp.yml", "                  - name: pg\n                    image: " + pg + "\n"},
+		{"ci.yml", "          docker run -d --name af-cp-test -p 55432:5432 \\\n" +
+			"            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure " + pg + " \\\n" +
+			"            -c shared_preload_libraries=pg_stat_statements\n"},
+		{"keycloak-up.sh", "IMAGE=\"${AF_KEYCLOAK_IMAGE:-" + kc + "}\"\n"},
+		{"up.sh", "docker run -d --name x " + pg + " sh -c true\n"},
+	}
+	for _, c := range accepted {
+		if got := unpinnedImages(c.name, c.body); len(got) != 0 {
+			t.Errorf("a pinned image was reported: %q gave %v", c.body, got)
+		}
+	}
+}
+
+func TestAPortMappingIsNotAContainerImage(t *testing.T) {
+	// The false positives this narrowed against, and each of them sits inside
+	// a real `docker run` in this repository. A port mapping has a colon and
+	// digits on both sides, an environment assignment has a colon nowhere but
+	// looks like a word, a database URL has a colon three times, and an image
+	// held in a variable cannot be read at all. A check that fires on any of
+	// these is a check that gets switched off.
+	body := "          docker run -d --name af-cp-target -p 55433:5432 \\\n" +
+		"            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=antifailure \\\n" +
+		"            -e URL=postgres://postgres:test@127.0.0.1:5432/antifailure \\\n" +
+		"            \"$IMAGE\" -c pg_stat_statements.track=all\n"
+	if got := unpinnedImages("ci.yml", body); len(got) != 0 {
+		t.Errorf("a port mapping or an environment assignment was read as an image: %v", got)
+	}
+	// A URL to the registry, which these very comments contain.
+	if got := unpinnedImages("ci.yml", "        # https://registry-1.docker.io/v2/library/postgres/manifests/17-alpine\n"); len(got) != 0 {
+		t.Errorf("a registry URL was read as an image: %v", got)
+	}
+	// A workflow expression, which resolves to an image built in the same run.
+	if got := unpinnedImages("cd.yml", "        image: ${{ needs.build.outputs.image }}\n"); len(got) != 0 {
+		t.Errorf("a workflow expression was read as a moving tag: %v", got)
+	}
+	// And the boundary has not cost the pattern the thing it is for.
+	if got := unpinnedImages("ci.yml", "        image: postgres:17-alpine\n"); len(got) != 1 {
+		t.Errorf("a real moving tag stopped being found: %v", got)
 	}
 }
