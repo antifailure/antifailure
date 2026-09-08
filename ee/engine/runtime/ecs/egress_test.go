@@ -214,9 +214,11 @@ func mutations() []mutation {
 			alsoOpens: []string{"public-ipv4-through-a-gateway", "a-neighbouring-environment"},
 		},
 		{
-			path:  "the-amazon-provided-resolver",
-			what:  "a DNS firewall association that fails open",
-			apply: func(p *ecs.Plan) { p.Network.DNSFirewall.FailOpen = true },
+			path: "the-amazon-provided-resolver",
+			what: "a DNS firewall association that fails open",
+			apply: func(p *ecs.Plan) {
+				p.Network.DNSFirewall.FailOpen = ecs.FailOpenEnabled
+			},
 		},
 		{
 			path: "the-amazon-provided-resolver",
