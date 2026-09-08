@@ -1024,9 +1024,44 @@ func attributable(target string, r refusal) bool {
 			strings.HasPrefix(target, p+".") || target == "" {
 			return true
 		}
+		if starred.MatchString(target) && underWildcard(target, p) {
+			return true
+		}
 	}
 	return false
 }
+
+// underWildcard is the same comparison for a constraint on a map's VALUES.
+//
+// additionalProperties on a map is written here as a star segment, so the
+// maxLength every value under auth.table.attributes carries has the path
+// auth.table.attributes.* and the engine, refusing, names the key it actually
+// read: auth.table.attributes.sample_key. Those two are the same place and
+// compare as different strings, so all four such constraints scored
+// REFUSED-ELSEWHERE while the engine was keeping every one of them. That is
+// the defect `indexed` fixes for array subscripts, a level over: an index and
+// a map key are both a position the constraint does not name and the refusal
+// does.
+//
+// A star stands for exactly ONE segment, never a run of them, so
+// personas[].attributes.* does not claim a refusal deeper inside a value.
+func underWildcard(target, p string) bool {
+	ts := strings.Split(target, ".")
+	ps := strings.Split(p, ".")
+	if len(ps) < len(ts) {
+		return false
+	}
+	for i, seg := range ts {
+		if seg != "*" && seg != ps[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// starred is a path carrying a map key position. Matched as a whole segment so
+// that a literal star inside a name, if one ever appears, is not a wildcard.
+var starred = regexp.MustCompile(`(^|\.)\*(\.|$)`)
 
 // indexed erases array subscripts, so that the constraint path
 // services[].env[].name and the engine's services[0].env[2].name are the
@@ -1084,7 +1119,16 @@ func TestSchemaConstraintReport(t *testing.T) {
 // from that file removes a row from the published reference page that
 // tools/schemadoc generates, which is a promise withdrawn from users, and a
 // gate that only noticed additions would be half an instrument.
-const wantConstraints = 567
+//
+// 567 while this branch was open, and 569 on rebasing onto main, which is the
+// pin doing its job across two branches rather than one commit. main opened
+// runtime.provider in the same direction this branch did, so the enum it
+// removed is the enum this branch had already removed, and it left a maxLength
+// of 64 behind it. It also gave datastore.source_url_env a pattern. Two
+// constraints arrived, both from somebody else, and both are enforced without
+// anything being added here: the pass is driven by the published document, so
+// a bound written into the schema by another lane is kept the moment it lands.
+const wantConstraints = 569
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
