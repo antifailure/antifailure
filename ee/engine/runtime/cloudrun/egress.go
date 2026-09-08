@@ -111,11 +111,15 @@ func Paths() []Path {
 			Why: "It is the highest value target in the list because it turns any request forgery " +
 				"in the application into a Google credential. The container contract lists the " +
 				"path that 'Generates an OAuth2 access token for the service account of this " +
-				"Cloud Run resource', and the firewall documentation states that Google 'always " +
+				"Cloud Run resource'. The firewall documentation states that Google 'always " +
 				"allows communication between a VM instance and its corresponding metadata " +
-				"server at 169.254.169.254' and that for that traffic 'VPC firewall rules and " +
-				"hierarchical firewall policies do not apply'. The same address also serves DHCP, " +
-				"NTP and DNS, so there is no separate entry for the time service.",
+				"server at 169.254.169.254', and lists packets to and from that server under " +
+				"always allowed traffic, where it says 'For VM instances, VPC firewall rules and " +
+				"hierarchical firewall policies do not apply'. That sentence is scoped to VM " +
+				"instances and Google publishes no equivalent about Cloud Run instances in " +
+				"either direction, so the closure named below is nothing rather than a rule " +
+				"somebody forgot to write. The same address also serves DHCP, NTP and DNS, which " +
+				"is why the time service is part of this path rather than beside it.",
 			ClosedBy: "nothing. This is the sharpest difference from the ECS plan beside it, and it " +
 				"runs the other way: a Fargate task definition may carry no task role, so " +
 				"169.254.170.2 vends nothing, while Cloud Run has no way to run a service with no " +
@@ -465,9 +469,9 @@ func checkMetadataServer(p Plan) (Verdict, string) {
 	}
 	return Open, fmt.Sprintf(
 		"the endpoint answers and cannot be turned off, and it vends an access token for %s, "+
-			"which holds %s. Nothing in this plan closes it: a firewall rule cannot describe "+
-			"169.254.169.254 and Cloud Run cannot run a service with no identity, so the token "+
-			"is narrowed rather than absent", p.Identity.Email, held)
+			"which holds %s. Nothing in this plan closes it: Google documents no way to make the "+
+			"endpoint unreachable from a container and Cloud Run cannot run a service with no "+
+			"identity, so the token is narrowed rather than absent", p.Identity.Email, held)
 }
 
 // checkResolverRecursion is the path this lane was warned about by name, and it
