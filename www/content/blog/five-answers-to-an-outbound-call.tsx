@@ -87,8 +87,9 @@ export const EGRESS_MODES: Post = {
         </li>
       </ul>
       <p>
-        Two more modes exist and this post counts neither, for opposite reasons.{" "}
-        <strong>SYNTH</strong> asks a model to invent the response, which is
+        <strong>SYNTH</strong> and <strong>EMULATE</strong> are both left out
+        of the count above, for opposite reasons. SYNTH asks a model to
+        invent the response, which is
         worth having when a provider offers no sandbox and you have no fixture
         yet and the run would otherwise stop dead. It is not an answer in the
         sense the five above are. Anything that touches a synthesized response
