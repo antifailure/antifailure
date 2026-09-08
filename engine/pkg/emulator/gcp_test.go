@@ -382,3 +382,59 @@ func mustGCP(t *testing.T, name string) *emulator.Emulator {
 	require.True(t, ok, "%s is not built in", name)
 	return e
 }
+
+// The Spanner emulator is the only image here with no arm64 member, and a
+// declaration that lost that fact would send somebody looking for why their
+// laptop is slow. The test is about the comment being true rather than about
+// the digest: a bump to a future multi architecture Spanner image should make
+// this fail so the guide's table gets corrected with it.
+func TestGCP_TheThreeImagesAreTheThreeThisSurfacePulls(t *testing.T) {
+	t.Parallel()
+	byImage := map[string][]string{}
+	for _, name := range emulator.GCPNames() {
+		img := mustGCP(t, name).Container().Image
+		byImage[img] = append(byImage[img], name)
+	}
+	require.Len(t, byImage, 3,
+		"six emulators must come from three images, because the four gcloud "+
+			"ones share the CLI image and its layers are pulled once")
+	var shared []string
+	for _, names := range byImage {
+		if len(names) == 4 {
+			shared = names
+		}
+	}
+	require.ElementsMatch(t,
+		[]string{emulator.PubSubName, emulator.FirestoreName,
+			emulator.DatastoreName, emulator.BigtableName}, shared,
+		"the image shared by four emulators must be the Google Cloud CLI one")
+}
+
+// The command is what decides which emulator a gcloud container is, so a
+// missing one is four identical containers that run a shell and answer
+// nothing. An image whose entrypoint is already the emulator must NOT carry
+// one, because a command there would replace the entrypoint.
+func TestGCP_OnlyTheSharedImageNeedsACommandAndAllFourHaveOne(t *testing.T) {
+	t.Parallel()
+	needsCommand := map[string]string{
+		emulator.PubSubName:    "pubsub",
+		emulator.FirestoreName: "firestore",
+		emulator.DatastoreName: "datastore",
+		emulator.BigtableName:  "bigtable",
+	}
+	for name, want := range needsCommand {
+		cmd := mustGCP(t, name).Container().Command
+		require.NotEmpty(t, cmd,
+			"%s runs the Google Cloud CLI image, whose command is bash, so with no "+
+				"command it starts a shell and answers nothing", name)
+		require.Equal(t, "gcloud", cmd[0])
+		require.Contains(t, cmd, want, "%s does not start its own emulator", name)
+		require.Contains(t, strings.Join(cmd, " "), "--host-port=0.0.0.0:",
+			"%s binds localhost, and the sidecar forwards to the container's "+
+				"address on the inner network", name)
+	}
+	for _, name := range []string{emulator.GCSName, emulator.SpannerName} {
+		require.Empty(t, mustGCP(t, name).Container().Command,
+			"%s has the emulator as its entrypoint, and a command would replace it", name)
+	}
+}

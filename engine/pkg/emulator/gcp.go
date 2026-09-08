@@ -9,7 +9,7 @@ package emulator
 // SIX emulators rather than one, and the per environment cost of a GCP
 // manifest is the sum of the containers it asks for rather than a single
 // number. That is the unflattering half of this lane and it is measured in
-// docs/guides/gcp.md rather than estimated here.
+// docs/src/content/docs/guides/gcp.md rather than estimated here.
 //
 // The second thing it records is who ships each one. Five of the six are
 // Google's own. Cloud Storage is answered by fake-gcs-server, which is a
@@ -37,8 +37,15 @@ const (
 // is the plain CLI plus a JRE and the emulator bundles. FOUR of the six
 // emulators are this one image started with a different command, so the layers
 // are pulled once and the per environment cost is four JVMs rather than four
-// downloads. The digest is the multi architecture index, so an arm64 laptop
+// downloads.
+//
+// Two of the three digests are multi architecture indexes, so an arm64 laptop
 // and an amd64 runner resolve the same declaration to their own image.
+// spannerImage is NOT. Google publishes the Cloud Spanner emulator as a single
+// linux/amd64 image with no arm64 member, so on Apple Silicon it runs under
+// emulation. That is recorded here rather than found later, because it is the
+// one entry whose start time and memory will not resemble what a reader
+// measures on a Linux runner.
 const (
 	gcsImage = "fsouza/fake-gcs-server@sha256:" +
 		"797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef"
@@ -109,6 +116,9 @@ var gcs = &Emulator{
 	Official:     false,
 	Image:        gcsImage,
 	Port:         GCSPort,
+	// No Command. The image's entrypoint is /bin/fake-gcs-server, so the
+	// emulator is what a bare container runs, and everything below is set
+	// through its FAKE_GCS_ environment variables instead.
 	Env: map[string]string{
 		// Plain HTTP inside the environment. The sidecar is the thing holding
 		// a certificate the application trusts.
@@ -324,6 +334,9 @@ var spanner = &Emulator{
 	Official:     true,
 	Image:        spannerImage,
 	Port:         SpannerGRPCPort,
+	// No Command. The image already runs ./gateway_main --hostname 0.0.0.0,
+	// read from its published config rather than assumed, so it binds every
+	// interface without being told to.
 	Services: []Service{
 		{
 			Name:   "Cloud Spanner",
