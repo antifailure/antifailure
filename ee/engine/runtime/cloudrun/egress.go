@@ -145,19 +145,27 @@ func Paths() []Path {
 		{
 			ID:   "the-restricted-google-api-range",
 			Name: "199.36.153.4/30, the one public range the plan has to allow once an environment has more than one service",
-			Why: "Cloud Run services reach each other over their own https URLs and the Direct VPC " +
-				"page states that services and jobs do not support direct VPC ingress, so there " +
-				"is no address inside the network to call instead. Google's own instructions for " +
+			Why: "Cloud Run services reach each other over their own https URLs, and the Direct " +
+				"VPC page states that services and jobs do not support direct VPC ingress, so an " +
+				"instance has no address of its own inside the network to be called at. Google's " +
+				"own instructions for " +
 				"Cloud Run under VPC Service Controls resolve both googleapis.com and run.app to " +
 				"this range. Allowing it is therefore the same act as allowing every Google API " +
 				"the metadata server's token can sign for, and a token that can write to Cloud " +
 				"Storage is an upload.",
-			ClosedBy: "nothing, for an environment of more than one service, without giving up " +
-				"service to service calls entirely. It is narrowed by a VPC Service Controls " +
-				"perimeter, which is an organization level resource this runtime cannot create. " +
-				"An environment of exactly one service needs no allow rule at all and this path " +
-				"closes, which is possible here and is not possible on Fargate, where the image " +
-				"pull and the log push force the equivalent allowance open",
+			ClosedBy: "an environment of exactly one service, which needs no allow rule at all. " +
+				"That is possible here and is not possible on Fargate, where the image pull and " +
+				"the log push force the equivalent allowance open. For an environment of more " +
+				"than one, this plan does not close it, and a candidate exists that this lane " +
+				"did not build: Google lists an internal Application Load Balancer both as a " +
+				"way to reach a Cloud Run service 'through an internal IP address in your VPC " +
+				"network' and as an allowed source under the internal ingress setting, so one " +
+				"load balancer per service would put a service to service call on a private " +
+				"address instead of into this range. What this lane checked is that the " +
+				"mechanism is documented, not that the objects it needs can all be scoped to " +
+				"one environment, so it is named here rather than generated and asserted. A VPC " +
+				"Service Controls perimeter only narrows which Google services answer, and it " +
+				"is an organization level resource this runtime cannot create",
 			Check: checkRestrictedGoogleAPIRange,
 		},
 		{
@@ -556,9 +564,10 @@ func checkRestrictedGoogleAPIRange(p Plan) (Verdict, string) {
 				"not closing a channel", p.Perimeter.Name)
 	}
 	return Open, fmt.Sprintf(
-		"%s allows %s, which this environment of %d services needs because Cloud Run services "+
-			"reach each other only through their own https URLs and both googleapis.com and "+
-			"run.app resolve into that range. %s",
+		"%s allows %s, which this environment of %d services needs because it reaches its own "+
+			"second service through that service's https URL and both googleapis.com and "+
+			"run.app resolve into that range. An internal Application Load Balancer per service "+
+			"is the documented candidate for closing it and this plan does not generate one. %s",
 		strings.Join(allowing, " and "), RestrictedVIPRange, len(p.Services), perimeter)
 }
 

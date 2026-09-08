@@ -31,7 +31,9 @@ The runtime is registered and it refuses, carrying the enumeration as the
 reason: ten egress paths out of a Cloud Run instance, six closed by the
 generated configuration, three open and one that neither the configuration nor
 Google's documentation decides. Seven of ten for an environment of exactly one
-service, which is a shape Fargate cannot reach at all.
+service, which is a shape Fargate cannot reach at all, because there the image
+pull and the log push hold the equivalent allowance open whatever the
+environment contains.
 
 Cloud Run is the tighter of the two clouds in the place that decided the ECS
 lane. Google states that container images "are not pulled from their container
