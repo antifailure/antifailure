@@ -51,4 +51,25 @@ requests is the fastest way to shorten a queue, and
 `af env prune` lists everything older than a day and removes nothing, and
 `af env prune --yes` removes what it listed.
 
-Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal).
+## What runs today, and what is waiting for a queue
+
+Worth being blunt about, because the sections above describe a scheduler and
+only one half of it is reachable from a command line.
+
+**Placement runs.** `af up` calls the scheduler to choose which declared target
+an environment goes to, and an unsatisfiable requirement is refused by name. See
+[multiple runtimes](/docs/enterprise/runtimes).
+
+**Fair sharing, ageing, priority and queue positions are implemented and
+tested, and nothing feeds them a queue yet.** A command line has one run, so the
+round is a round of one, ageing has nothing to promote past, and the limit is
+never reached. Those parts start deciding when a control plane dispatches
+batches rather than a person running a command, and `AF-SCH-002` above is
+reserved for that day rather than produced today.
+
+They are described here rather than left out because they are the reason the
+decision is a call into one function instead of a loop written at the call site:
+the placement a person sees on a laptop is made by the code that will make it in
+a cluster, rather than by a second implementation that agrees until it does not.
+
+Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal), [multiple runtimes](/docs/enterprise/runtimes).
