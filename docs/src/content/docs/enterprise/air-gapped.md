@@ -178,6 +178,9 @@ probe, because zero refusals out of zero observations is not a measurement.
 
 `engine/pkg/airgap` carries a second test that walks the source of both modules
 looking for an outbound client that does not go through the guard. It has its
-own test that it can say no, pointed at a file that builds five different
-unguarded things, because a walk that silently skipped every path would report a
-clean repository in exactly the same words.
+own test that it can say no, pointed at a fixture that reaches the network six
+different ways, because a walk that silently skipped every path would report a
+clean repository in exactly the same words. And a third test compares the table
+above against the guard's own source in both directions, so a site added without
+a row here, or a row here naming a refusal that does not happen, is a failure
+rather than a slow drift.
