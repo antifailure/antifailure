@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/antifailure/antifailure/engine/internal/oracle"
+	"github.com/antifailure/antifailure/engine/pkg/livekey"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
@@ -1714,6 +1715,17 @@ func looksLikeCredentialValue(v string) bool {
 		if strings.HasPrefix(v, p) {
 			return true
 		}
+	}
+	// The prefixes above read the first characters of the value, and that is
+	// exactly what an encoding moves out of the way. This repository's own
+	// manifest carried a 2048 bit RSA private key under `value:`, base64
+	// encoded, and the comment beside it named the reason: the list above
+	// refuses a literal beginning with BEGIN, and base64 does not begin with
+	// BEGIN. The detector the credential gate uses decodes before it decides,
+	// so asking it here is what makes the validator and the gate agree about
+	// what a committed credential is.
+	if len(livekey.Scan(v, "the value")) > 0 {
+		return true
 	}
 	// A connection string carrying a password.
 	if strings.Contains(v, "://") && strings.Contains(v, "@") {

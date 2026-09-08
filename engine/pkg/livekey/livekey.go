@@ -25,6 +25,7 @@
 package livekey
 
 import (
+	"encoding/base64"
 	"strings"
 )
 
@@ -130,6 +131,14 @@ func pemGap(r rune) bool {
 // one of these patterns would fail that check on the detector's own source.
 const pemPrivateKeyHeader = "-----BEGIN " + "PRIVATE KEY-----"
 
+// pemHeaderFor opens a private key of one algorithm. Assembled for the same
+// reason as the constant above, and separate from it because the algorithms
+// each get their own header line and a scanner that only knew PKCS#8 would
+// miss every key ssh-keygen and openssl ever wrote by default.
+func pemHeaderFor(algorithm string) string {
+	return "-----BEGIN " + algorithm + " PRIVATE KEY-----"
+}
+
 // patterns are live credentials only.
 //
 // Every entry here has a test mode counterpart that is deliberately absent:
@@ -187,6 +196,42 @@ var patterns = []pattern{
 	{provider: "GCP service account key", prefix: pemPrivateKeyHeader, minTail: 60,
 		tail: base64ish, skip: pemGap, also: []string{"gserviceaccount.com"}},
 
+	// A private key belonging to nobody the detector can name, which is the
+	// one shape this package used to answer nothing about.
+	//
+	// The rule above says a bare PEM is not evidence of Google, and that is
+	// still right: reporting one as a service account key sends somebody to
+	// rotate a credential their project does not have. What was wrong was the
+	// step after it. "This is not Google's" was implemented as "this is not a
+	// credential", so a 2048 bit RSA key sat in this repository's own
+	// antifailure.yaml while the required check that reads this package
+	// reported no credentials in the tree. A private key is a credential
+	// whoever issued it; the honest finding names the shape and declines to
+	// name an owner.
+	//
+	// These sit AFTER the service account entry and the first of them shares
+	// its prefix, which is what gives Google precedence: Scan records one
+	// finding per prefix, so where the corroborating marker is beside the key
+	// the finding says GCP service account key, and where it is not it says
+	// private key rather than nothing.
+	//
+	// minTail is 60 for the same reason it is 60 above. A PEM body wraps at 64
+	// characters, so one line of real key material clears it, and the redacted
+	// examples that fill documentation, REDACTED or an ellipsis where the body
+	// goes, do not.
+	{provider: "Private key", prefix: pemPrivateKeyHeader, minTail: 60,
+		tail: base64ish, skip: pemGap},
+	{provider: "Private key", prefix: pemHeaderFor("RSA"), minTail: 60,
+		tail: base64ish, skip: pemGap},
+	{provider: "Private key", prefix: pemHeaderFor("EC"), minTail: 60,
+		tail: base64ish, skip: pemGap},
+	{provider: "Private key", prefix: pemHeaderFor("DSA"), minTail: 60,
+		tail: base64ish, skip: pemGap},
+	{provider: "Private key", prefix: pemHeaderFor("OPENSSH"), minTail: 60,
+		tail: base64ish, skip: pemGap},
+	{provider: "Private key", prefix: pemHeaderFor("ENCRYPTED"), minTail: 60,
+		tail: base64ish, skip: pemGap},
+
 	// Azure. Three shapes and none of them has a prefix of its own, because
 	// Azure keys are plain base64 and are told apart by the field that carries
 	// them. The field name is the marker, and it is what the finding reports.
@@ -230,7 +275,31 @@ var patterns = []pattern{
 // Case sensitive on purpose. Every prefix here is emitted in a fixed case by
 // the provider that issues it, and folding case turns "AC" into a match for
 // the word "ac" in a URL.
+//
+// Two passes, because one of them reads what is written and the other reads
+// what was hidden. A base64 wrapped key is the same credential with the
+// markers this file matches on encoded away, and it is not a hypothetical: the
+// manifest in this repository carried one, in base64 rather than PEM, and the
+// comment beside it said the encoding was chosen because the validator refuses
+// a literal beginning with BEGIN.
 func Scan(text, where string) []Finding {
+	out := scanPatterns(text, where)
+	seen := map[string]bool{}
+	for _, f := range out {
+		seen[f.Prefix] = true
+	}
+	for _, f := range scanEncoded(text, where) {
+		if seen[f.Prefix] {
+			continue
+		}
+		seen[f.Prefix] = true
+		out = append(out, f)
+	}
+	return out
+}
+
+// scanPatterns is the literal pass, over the text exactly as it arrived.
+func scanPatterns(text, where string) []Finding {
 	var out []Finding
 	seen := map[string]bool{}
 	for _, p := range patterns {
@@ -269,6 +338,130 @@ func Scan(text, where string) []Finding {
 		}
 	}
 	return out
+}
+
+// encodedBeginMarkers are how the opening of a PEM block reads once the whole
+// block has been base64 encoded.
+//
+// Three of them, because base64 works on groups of three bytes and the reading
+// depends on where the block starts inside the group. A key encoded on its own,
+// which is the common case and the one this repository shipped, is the first.
+// The other two are the same header a few bytes into a larger blob.
+//
+// They are triggers rather than findings. What follows a hit is a decode and
+// then the ordinary pass over the result, so the length and corroboration
+// rules that keep prose out of the literal pass apply to the decoded text as
+// well, and nothing is reported on the strength of a prefix alone.
+var encodedBeginMarkers = []string{
+	"LS0tLS1CRUdJ",
+	"LS0tQkVHSU4g",
+	"LS0tLUJFR0lO",
+}
+
+// base64Rune reports whether a character can appear inside a base64 body.
+//
+// Padding is included, unlike base64ish above, because here the run is being
+// delimited rather than measured: the padding is part of the value that has to
+// be handed to the decoder.
+func base64Rune(r rune) bool { return base64ish(r) || r == '=' }
+
+// maxEncoded bounds the run that is decoded. A private key is under three
+// kilobytes encoded; this is generous and it stops a megabyte of base64 in a
+// fixture from being decoded because it happens to open with the marker.
+const maxEncoded = 1 << 16
+
+// scanEncoded finds a credential that was base64 encoded before it was written.
+//
+// The evasion this closes was not adversarial and it is worse for that. The
+// manifest in this repository held a real RSA private key as a single base64
+// literal, and the comment beside it explained the encoding as the way to get
+// past a validator that refuses a value beginning with BEGIN. Every instrument
+// that could have objected read the encoded form and saw an opaque string, and
+// the required check named "no credentials in the tree" passed over it for as
+// long as it was there.
+func scanEncoded(text, where string) []Finding {
+	var out []Finding
+	seen := map[string]bool{}
+	for _, marker := range encodedBeginMarkers {
+		for i := 0; ; {
+			idx := strings.Index(text[i:], marker)
+			if idx < 0 {
+				break
+			}
+			at := i + idx
+			i = at + len(marker)
+
+			lo, hi := base64Run(text, at)
+			if hi-lo > maxEncoded {
+				continue
+			}
+			decoded, ok := decodeRun(text[lo:hi])
+			if !ok {
+				continue
+			}
+			for _, f := range scanPatterns(decoded, where) {
+				if seen[f.Prefix] {
+					continue
+				}
+				seen[f.Prefix] = true
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// base64Run returns the bounds of the base64 run containing at.
+func base64Run(text string, at int) (int, int) {
+	lo := at
+	for lo > 0 && base64Rune(rune(text[lo-1])) {
+		lo--
+	}
+	hi := at
+	for hi < len(text) && base64Rune(rune(text[hi])) {
+		hi++
+	}
+	return lo, hi
+}
+
+// decodeRun decodes a base64 run whose start may not be the start of the
+// encoding.
+//
+// Four attempts, because the run found by walking backwards over base64
+// characters can begin up to three characters inside a group: a marker for one
+// of the two offset alignments sits behind bytes that are themselves base64
+// characters. Whichever attempt yields a PEM private key is the right one, and
+// nothing else is accepted, so a blob that decodes to arbitrary bytes is not a
+// finding.
+func decodeRun(run string) (string, bool) {
+	for k := 0; k < 4 && k < len(run); k++ {
+		body := run[k:]
+		body = body[:len(body)-len(body)%4]
+		if len(body) < 4 {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(body)
+		if err != nil {
+			// A run that carries padding in the middle, which happens when two
+			// values sit side by side, decodes up to that point. Everything
+			// before the padding is still worth reading.
+			if cut := strings.IndexByte(body, '='); cut > 0 {
+				body = body[:cut-cut%4]
+				if len(body) < 4 {
+					continue
+				}
+				decoded, err = base64.StdEncoding.DecodeString(body)
+			}
+			if err != nil {
+				continue
+			}
+		}
+		text := string(decoded)
+		if strings.Contains(text, "-----BEGIN") && strings.Contains(text, "PRIVATE KEY") {
+			return text, true
+		}
+	}
+	return "", false
 }
 
 func hasTail(s string, min int, ok func(rune) bool, skip func(rune) bool) bool {

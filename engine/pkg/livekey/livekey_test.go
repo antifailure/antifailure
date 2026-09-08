@@ -1,6 +1,7 @@
 package livekey_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -148,6 +149,60 @@ const (
 	pemFooter = "-----END " + "PRIVATE KEY-----"
 )
 
+// The certificate is the negative control for every private key vector below.
+// It is the public half of the same pair, it is committed on purpose in every
+// repository that terminates TLS, and it opens with the same dashes.
+const (
+	certHeader = "-----BEGIN " + "CERTIFICATE-----"
+	certFooter = "-----END " + "CERTIFICATE-----"
+)
+
+// algorithmHeader is what openssl and ssh-keygen write by default. PKCS#8 is
+// only one of the spellings and it is not the most common one on a laptop.
+func algorithmHeader(algorithm string) string {
+	return "-----BEGIN " + algorithm + " PRIVATE KEY-----"
+}
+
+// encoded is the shape this lane exists for: the whole block base64 encoded
+// into one line, which is how the key reached this repository's own manifest
+// and how it got past a validator that refuses a literal beginning with BEGIN.
+func encoded(pem string) string {
+	return base64.StdEncoding.EncodeToString([]byte(pem))
+}
+
+// privateKeyVector is one private key that must be refused whoever issued it.
+func privateKeyVectors() []liveVector {
+	body := fake("", 64, base64s)
+	pkcs8 := pemHeader + "\n" + body + "\n" + pemFooter
+	return []liveVector{
+		{"private key, bare pkcs8", "Private key", pkcs8},
+		{"private key, rsa header", "Private key",
+			algorithmHeader("RSA") + "\n" + body + "\n" + "-----END " + "RSA PRIVATE KEY-----"},
+		{"private key, ec header", "Private key",
+			algorithmHeader("EC") + "\n" + body + "\n" + "-----END " + "EC PRIVATE KEY-----"},
+		{"private key, openssh header", "Private key",
+			algorithmHeader("OPENSSH") + "\n" + body + "\n" + "-----END " + "OPENSSH PRIVATE KEY-----"},
+		{"private key, in a kubernetes secret", "Private key",
+			"tls.key: |\n  " + pemHeader + "\n  " + body + "\n  " + pemFooter},
+		// The reason a bare key is a finding at all. The marker that would
+		// make it Google's is five thousand characters away, so it does not
+		// corroborate, and the answer before this lane was silence rather than
+		// a finding that declined to name an owner.
+		{"private key, gcp marker too far away", "Private key",
+			pkcs8 + strings.Repeat(" ", 5000) + "af@af.iam.gserviceaccount.com"},
+
+		// The exact form this repository shipped: one base64 line, in a
+		// manifest, as the value of an environment variable.
+		{"private key, base64 wrapped", "Private key", encoded(pkcs8)},
+		{"private key, base64 wrapped in a manifest value", "Private key",
+			"      - name: AF_GITHUB_APP_PRIVATE_KEY\n        value: " + encoded(pkcs8) + "\n"},
+		{"private key, base64 wrapped mid blob", "Private key",
+			base64.StdEncoding.EncodeToString([]byte("xy" + pkcs8))},
+		{"private key, base64 wrapped with a trailing value", "Private key",
+			encoded(pkcs8) + " " + fake("", 40, base64s)},
+	}
+}
+
 // serviceAccountFile is the credential Google issues, in the form it is written
 // to disk: JSON, with the PEM line breaks escaped rather than literal. The
 // escaped break is the reason the pattern needed a skip at all, so the on disk
@@ -289,14 +344,12 @@ func benignVectors() []struct{ name, text string } {
 		{"azurite, account name after the key",
 			"AccountKey=" + fake("", 86, base64s) + "==;AccountName=devstoreaccount1"},
 
-		// A private key that is not Google's. Naming the wrong provider sends
-		// somebody to rotate a credential that has nothing to do with the
-		// finding, so a PEM with no marker beside it is not a GCP finding.
-		{"tls private key, no marker", pemHeader + "\n" + fake("", 64, base64s) + "\n" + pemFooter},
-		{"tls private key, in a kubernetes secret",
-			"tls.key: |\n  " + pemHeader + "\n  " + fake("", 64, base64s) + "\n  " + pemFooter},
-		{"gcp marker too far from the key", pemHeader + "\n" + fake("", 64, base64s) + "\n" + pemFooter +
-			strings.Repeat(" ", 5000) + "af@af.iam.gserviceaccount.com"},
+		// A certificate, which is the public half and is published on purpose.
+		// It opens with the same five dashes as the key beside it in the same
+		// file, and refusing it would refuse every TLS chain in every
+		// repository there is.
+		{"certificate, bare pem", certHeader + "\n" + fake("", 64, base64s) + "\n" + certFooter},
+		{"certificate, base64 wrapped", encoded(certHeader + "\n" + fake("", 64, base64s) + "\n" + certFooter)},
 
 		// Another provider's secret under another provider's name. Every OAuth
 		// service in existence spells it client_secret, and a finding that
@@ -360,12 +413,57 @@ func TestScan_WillNotNameGoogleForSomebodyElsesPrivateKey(t *testing.T) {
 	// A bare PEM is a private key and it is not evidence of a cloud. Reporting
 	// it as a GCP service account key would send somebody to rotate a
 	// credential their Google project does not have.
+	//
+	// What changed is the other half. Declining to name Google used to mean
+	// reporting nothing at all, and this test asserted the nothing. A private
+	// key is a credential whoever issued it, so the answer is now a finding
+	// that names the shape and no owner, and Google's marker still promotes it
+	// to the more specific one.
 	body := fake("", 64, base64s)
 	bare := pemHeader + "\n" + body + "\n" + pemFooter
-	require.Empty(t, livekey.Scan(bare, "the body"))
+
+	anonymous := livekey.Scan(bare, "the body")
+	require.Len(t, anonymous, 1, "a private key with no owner beside it is still a credential")
+	require.Equal(t, "Private key", anonymous[0].Provider)
+
 	found := livekey.Scan(bare+"\nclient_email: af@af.iam.gserviceaccount.com", "the body")
-	require.Len(t, found, 1, "the same key with Google's own marker beside it is a finding")
+	require.Len(t, found, 1, "the same key with Google's own marker beside it is one finding, not two")
 	require.Equal(t, "GCP service account key", found[0].Provider)
+}
+
+func TestScan_FindsAPrivateKeyWhoeverIssuedIt(t *testing.T) {
+	t.Parallel()
+	// The hole this closes, stated as the case that produced it: a 2048 bit
+	// RSA key sat in this repository's own antifailure.yaml, base64 encoded,
+	// and the required check that reads this package reported no credentials
+	// in the tree for as long as it was there.
+	for _, v := range privateKeyVectors() {
+		t.Run(v.name, func(t *testing.T) {
+			found := livekey.Scan(v.text, "the body")
+			require.Len(t, found, 1, "%s was not recognised, or was recognised twice", v.name)
+			require.Equal(t, v.provider, found[0].Provider)
+			require.Equal(t, "the body", found[0].Where)
+		})
+	}
+}
+
+func TestScan_TheEncodedPassAnswersOnlyForRealKeyMaterial(t *testing.T) {
+	t.Parallel()
+	// The encoded pass decodes before it decides, so everything the literal
+	// pass refuses to call a credential it refuses too. Each of these decodes
+	// cleanly and none of them is a private key.
+	body := fake("", 64, base64s)
+	for name, text := range map[string]string{
+		"a certificate":        encoded(certHeader + "\n" + body + "\n" + certFooter),
+		"a public key":         encoded("-----BEGIN " + "PUBLIC KEY-----\n" + body + "\n-----END " + "PUBLIC KEY-----"),
+		"a redacted key":       encoded(pemHeader + "\nREDACTED\n" + pemFooter),
+		"a header with no body": encoded(pemHeader),
+		"ordinary prose":       encoded("the file opens with " + pemHeader + " and we never log past it"),
+		"not base64 at all":    "LS0tLS1CRUdJ this is a sentence about the encoding",
+	} {
+		require.Empty(t, livekey.Scan(text, "the body"),
+			"%s decoded to something that is not a private key and was refused anyway", name)
+	}
 }
 
 func TestScan_MeasuresThePemBodyThroughTheLineBreak(t *testing.T) {
@@ -384,15 +482,24 @@ func TestScan_NeverEchoesACloudCredential(t *testing.T) {
 	// The Azure shapes have no prefix of their own, so the finding reports the
 	// field name that carried them. That is still a marker and it is still not
 	// the value, and this is the assertion that keeps it that way.
-	for _, v := range liveCloudVectors() {
+	for _, v := range append(liveCloudVectors(), privateKeyVectors()...) {
 		t.Run(v.name, func(t *testing.T) {
 			found := livekey.Scan(v.text, "the body")
 			require.Len(t, found, 1)
 			rendered := found[0].String() + " " + livekey.Describe(found)
 			// Every run of thirty characters in the vector, which is longer
 			// than any field name and shorter than any of these credentials.
+			//
+			// Except the marker itself, which the finding reports on purpose
+			// and which the private key headers push past thirty characters.
+			// A window that is part of the marker is the finding saying what
+			// it found, not the finding leaking what it found.
 			for i := 0; i+30 <= len(v.text); i++ {
-				require.NotContains(t, rendered, v.text[i:i+30],
+				window := v.text[i : i+30]
+				if strings.Contains(found[0].Prefix, window) {
+					continue
+				}
+				require.NotContains(t, rendered, window,
 					"the finding carried a piece of the credential")
 			}
 		})
@@ -407,7 +514,7 @@ func TestScan_NeverEchoesACloudCredential(t *testing.T) {
 // Run it with -v and the last line is the number.
 func TestScan_TheNumber(t *testing.T) {
 	t.Parallel()
-	live := liveCloudVectors()
+	live := append(liveCloudVectors(), privateKeyVectors()...)
 	benign := benignVectors()
 
 	detected := 0
@@ -424,7 +531,7 @@ func TestScan_TheNumber(t *testing.T) {
 		}
 	}
 
-	t.Logf("livekey: %d/%d live GCP and Azure credential forms refused, "+
+	t.Logf("livekey: %d/%d live credential forms refused, "+
 		"%d false positives over %d synthetic non credentials",
 		detected, len(live), positives, len(benign))
 	require.Equal(t, len(live), detected)

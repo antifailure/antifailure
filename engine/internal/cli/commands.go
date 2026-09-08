@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/internal/env"
 	"github.com/antifailure/antifailure/engine/internal/manifest"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
-	"github.com/antifailure/antifailure/engine/internal/webhook"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -147,14 +147,15 @@ func explainSecrets(ctx context.Context, e *Env, m *schema.Manifest, root string
 	// happen, which is worse than not answering. Built by one constructor for
 	// exactly that reason.
 	chain := secrets.LocalChain(root, e.Getenv, extension.Default, e.Keyring())
-	// The signing secrets af up derives, in front, exactly as the orchestrator
-	// places them. Explain has no environment yet, so the values are derived
-	// for a placeholder identifier; what it reports is the source and never
-	// the value, and the source is the same one af up will name.
+	// The values af up makes for the environment, in front, exactly as the
+	// orchestrator places them. Explain has no environment yet, so they are
+	// made for a placeholder identifier; what it reports is the source and
+	// never the value, and the source is the same one af up will name. One
+	// constructor for both, because a list assembled twice is a list that
+	// drifts and the drift is invisible until somebody is debugging a variable
+	// explain said would resolve.
 	if m.Egress != nil {
-		if provided := webhook.Secrets(m.Egress.Rules, "explain", e.Getenv); len(provided) > 0 {
-			chain = chain.Prepended(secrets.NewProvidedSource(webhook.SecretsSourceName, provided))
-		}
+		chain = chain.Prepended(env.EnvironmentSources(m.Egress.Rules, "explain", e.Getenv)...)
 	}
 
 	resolved, err := secrets.Resolve(ctx, chain, secrets.Request{
