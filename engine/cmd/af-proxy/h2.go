@@ -142,6 +142,7 @@ func (p *proxy) serveH2Conn(
 	conn net.Conn, sni string, port int, isTLS bool, via string,
 	transport *http.Transport, scheme string,
 ) {
+	ln := &oneConnListener{conn: conn, closed: make(chan struct{})}
 	srv := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The authority the client wrote, not the name in the handshake.
@@ -159,11 +160,26 @@ func (p *proxy) serveH2Conn(
 		// call is unaffected by this.
 		ReadHeaderTimeout: 20 * time.Second,
 		IdleTimeout:       90 * time.Second,
+		// The end of the connection is reported here rather than by a wrapper
+		// around it, and that is the whole reason this hook exists. net/http
+		// decides a terminated connection's protocol by asking the connection
+		// it was handed for its ConnectionState, and a struct that embeds
+		// net.Conn does not carry that method however faithfully it forwards
+		// everything else. Wrapping the connection to learn when it closed
+		// therefore left net/http unable to see that h2 had been negotiated,
+		// so it read the HTTP/2 frame stream as an HTTP/1.1 request line and
+		// forwarded the connection preface upstream as a request whose method
+		// was PRI. Nothing in the wrapper looked wrong and every gRPC call
+		// through the sidecar failed.
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			if state == http.StateClosed || state == http.StateHijacked {
+				ln.finished()
+			}
+		},
 	}
 	if !isTLS {
 		srv.Protocols = h2cPriorKnowledge()
 	}
-	ln := &oneConnListener{conn: conn, closed: make(chan struct{})}
 	// Serve returns once the listener refuses a second connection, which it
 	// does only after this one is closed, so this call spans the life of the
 	// connection exactly as the HTTP/1.1 read loop does.
@@ -430,6 +446,13 @@ var errConnectionFinished = errors.New("this connection has been served")
 // closed rather than returning at once, so Serve outlives the connection it
 // was given and the caller can wait on Serve instead of inventing its own
 // signal for when the last stream ended.
+//
+// The connection is handed over exactly as it arrived, with nothing wrapped
+// around it. What net/http is given here is a *tls.Conn and it has to stay
+// one: the protocol dispatch asserts ConnectionState on it, and both the
+// HTTP/2 server it selects on that basis and the older ALPN hook behind it
+// read the connection's own type. Serve is told the connection ended through
+// the server's ConnState hook instead.
 type oneConnListener struct {
 	conn net.Conn
 	// handed is read and written only by Serve's accept loop, which is one
@@ -442,7 +465,7 @@ type oneConnListener struct {
 func (l *oneConnListener) Accept() (net.Conn, error) {
 	if !l.handed {
 		l.handed = true
-		return &closeNotifyConn{Conn: l.conn, listener: l}, nil
+		return l.conn, nil
 	}
 	<-l.closed
 	return nil, errConnectionFinished
@@ -452,14 +475,11 @@ func (l *oneConnListener) Close() error { return nil }
 
 func (l *oneConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
-// closeNotifyConn reports when the served connection is closed.
-type closeNotifyConn struct {
-	net.Conn
-	listener *oneConnListener
-}
-
-func (c *closeNotifyConn) Close() error {
-	err := c.Conn.Close()
-	c.listener.once.Do(func() { close(c.listener.closed) })
-	return err
+// finished releases the accept loop that is waiting for this connection to
+// end.
+//
+// Guarded by a sync.Once because the caller watches two terminal states and
+// should not have to know that net/http reports exactly one of them.
+func (l *oneConnListener) finished() {
+	l.once.Do(func() { close(l.closed) })
 }

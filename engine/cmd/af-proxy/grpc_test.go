@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -594,4 +595,96 @@ func TestGRPC_AnHTTP11ClientStillGetsHTTP11(t *testing.T) {
 	})
 	require.NoError(t, client.Handshake())
 	require.Equal(t, "http/1.1", client.ConnectionState().NegotiatedProtocol)
+}
+
+// startH2Origin runs an ordinary HTTPS server that offers h2, and reports what
+// it saw, so the forwarding half can be read from the answer.
+func startH2Origin(t *testing.T, name string) (string, *x509.CertPool) {
+	t.Helper()
+	certPEM, keyPEM, err := GenerateAuthority("h2-origin-fixture", time.Now())
+	require.NoError(t, err)
+	ca, err := newCertAuthority(certPEM, keyPEM)
+	require.NoError(t, err)
+	leaf, err := ca.leaf(name)
+	require.NoError(t, err)
+
+	roots := x509.NewCertPool()
+	require.True(t, roots.AppendCertsFromPEM([]byte(certPEM)))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "the origin was asked HTTP/%d %s %s", r.ProtoMajor, r.Method, r.URL.Path)
+		}),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{*leaf},
+			MinVersion:   tls.VersionTLS12,
+			NextProtos:   []string{"h2", "http/1.1"},
+		},
+		ReadHeaderTimeout: 20 * time.Second,
+	}
+	go func() { _ = srv.ServeTLS(ln, "", "") }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return ln.Addr().String(), roots
+}
+
+// An ordinary HTTPS client that speaks HTTP/2, which is most of them.
+//
+// gRPC is not the only thing that negotiates h2 once the terminator offers it.
+// Go's own client does, and so does every runtime with a modern HTTP stack, so
+// offering h2 moved the product's ordinary inspected traffic onto this reader
+// rather than only its gRPC traffic. That is worth its own test because the
+// whole HTTP/1.1 suite in this package kept passing while this path was
+// broken: those tests write a request onto a socket by hand and negotiate
+// nothing, so not one of them ever reached the code that was wrong.
+//
+// Three claims, and they fail separately. The answer came back at all and it
+// came back framed as HTTP/2, which is the reading half. The origin was asked
+// in HTTP/2, which is the forwarding half, and an HTTP/1.1 forward here is
+// what drops the trailers a gRPC status travels in. And the request was
+// decided by name and path, which is the policy still being applied to a
+// protocol it did not previously see.
+func TestGRPC_AnOrdinaryHTTP2ClientIsCarriedAndPoliced(t *testing.T) {
+	upstream, originRoots := startH2Origin(t, grpcName)
+	s := newSidecar(t, inspectedEgress(schema.ModeAllow))
+	envRoots := environmentCA(t, s)
+	pointSidecarAt(t, s, upstream, originRoots)
+	front := frontDoor(t, s.serveTransparentTLS)
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: envRoots, MinVersion: tls.VersionTLS12},
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", front)
+		},
+		// A transport carrying its own dialer has HTTP/2 off unless it is
+		// asked for, and a client that never offers h2 would take the
+		// HTTP/1.1 path and prove nothing about this one.
+		ForceAttemptHTTP2: true,
+	}
+	t.Cleanup(tr.CloseIdleConnections)
+	client := &http.Client{Transport: tr, Timeout: 20 * time.Second}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+grpcName+"/things", nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err, "an HTTP/2 client cannot reach anything through this sidecar")
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, 2, resp.ProtoMajor,
+		"the answer was not framed as HTTP/2, so the connection was read as HTTP/1.1")
+	require.Equal(t, "the origin was asked HTTP/2 GET /things", string(body),
+		"the sidecar did not forward this request over HTTP/2")
+
+	rec := s.waitFor(t, func(r record) bool { return r.Host == grpcName && r.Path != "" })
+	require.True(t, rec.Allowed)
+	require.Equal(t, "inspect", rec.Via)
+	require.Equal(t, http.MethodGet, rec.Method,
+		"the sidecar decided about the connection preface rather than about the request")
+	require.Equal(t, "/things", rec.Path)
 }
