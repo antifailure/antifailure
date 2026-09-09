@@ -80,14 +80,17 @@ const (
 	SiteLoadTest        Site = "the load generator"
 	SiteGoldenS3        Site = "the S3 golden store"
 	SiteGoldenAzure     Site = "the Azure Blob golden store"
+	SiteGoldenGCS       Site = "the GCS golden store"
 	SiteNeon            Site = "the Neon control API"
 	SiteSupabase        Site = "the Supabase management API"
 	SiteDBLab           Site = "the Database Lab API"
+	SiteAurora          Site = "the Aurora control API"
 	SiteClickHouse      Site = "the ClickHouse HTTP interface"
 	SiteServiceProbe    Site = "the service readiness probe"
 	SiteWebhookDelivery Site = "the webhook delivery"
 	SiteDoctor          Site = "the doctor reachability check"
 	SiteCloudAuth       Site = "the cloud credential path"
+	SiteAuditSink       Site = "the audit stream sink"
 	SiteConformance     Site = "the runtime conformance suite"
 	SiteImagePull       Site = "the container image pull"
 	SiteImageBuild      Site = "the container image build"
@@ -551,7 +554,17 @@ func Client(site Site, timeout time.Duration) *http.Client {
 // silent reach for Docker Hub, which is the one that happens on a machine
 // somebody believed had no route out.
 func CheckImage(site Site, ref string) error {
-	return Check(site, "tcp", RegistryHost(ref)+":443")
+	// A registry reference may already carry a port, and registry.internal:5000
+	// with ":443" appended is an address with two ports that SplitHostPort
+	// refuses, so no allow rule could ever match it. The operator who named
+	// their internal registry would have been refused by their own allow list,
+	// which is the quietly-narrower-than-believed failure the allow list parser
+	// already refuses a typo for.
+	host := RegistryHost(ref)
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(host, "443")
+	}
+	return Check(site, "tcp", host)
 }
 
 // RegistryHost is the registry a Docker image reference names.
