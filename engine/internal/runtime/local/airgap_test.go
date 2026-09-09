@@ -27,12 +27,23 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/engine/internal/runtime/local"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 )
 
 func TestAirGapped_AFullLifecycleMakesNoConnectionOutsideTheOperatorsNetwork(t *testing.T) {
-	r := requireRuntime(t)
+	// A generous readiness budget rather than the package default, because
+	// this test is the one that produces the lane's number and it has to
+	// survive a daemon under load rather than report a machine condition as
+	// a finding. Measured on this machine while the other lanes were
+	// running: a trivial docker run took 21 seconds and a detached
+	// container with a port took 12, against 250 containers on the daemon.
+	// At those latencies the default budget expires part way through an up
+	// and the failure reads as containers/create returning a deadline,
+	// which is a timeout shorter than a measurable latency and not a
+	// refusal. The seal would never be reached and the ledger never read.
+	r := requireRuntimeWith(t, local.Options{ReadyTimeout: 8 * time.Minute})
 
 	// Built BEFORE the seal, and that is the mode rather than a convenience.
 	// An air gapped installation loads its images from a tarball or an
@@ -41,7 +52,7 @@ func TestAirGapped_AFullLifecycleMakesNoConnectionOutsideTheOperatorsNetwork(t *
 	img := tinyWebImage(t, 8080, "air gapped")
 	id := envID(t, r, "airgap1")
 
-	warm, cancelWarm := context.WithTimeout(context.Background(), 5*time.Minute)
+	warm, cancelWarm := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancelWarm()
 	spec := provider.EnvSpec{EnvID: id, Services: []provider.ServiceSpec{{
 		Name: "web", Image: img, Kind: "web", Port: 8080,
@@ -59,7 +70,7 @@ func TestAirGapped_AFullLifecycleMakesNoConnectionOutsideTheOperatorsNetwork(t *
 	t.Cleanup(airgap.Reset)
 	airgap.Seal("this test is measuring a sealed lifecycle")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
 
 	env, err := r.Up(ctx, spec)
