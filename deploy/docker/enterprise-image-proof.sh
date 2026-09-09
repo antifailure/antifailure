@@ -141,13 +141,34 @@ docker run -d --name "$pg" --network "$net" \
   -e "POSTGRES_PASSWORD=${password_migrator}" \
   postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73 >/dev/null
 
+# OVER TCP, AND THE -h IS THE WHOLE FIX.
+#
+# This image's own entrypoint runs a TEMPORARY server to apply initdb, then
+# shuts it down and starts the real one. The temporary one is started with
+# listen_addresses='' so it answers the Unix socket and nothing else. A
+# `pg_isready` with no host asks over the socket, so it says yes to the
+# BOOTSTRAP server, the loop breaks early, and the confirming probe below lands
+# in the gap while that server is shutting down. That is how this failed on
+# f065f64c: the loop broke and `the database never became ready` was printed
+# 1.4 seconds later, with the container's own log showing `received fast
+# shutdown request` 9 milliseconds before the probe.
+#
+# Measured rather than reasoned. Polling both every 400ms against this exact
+# digest, the socket answered a full interval before TCP did:
+#   t=3 socket=down tcp=down
+#   t=4 socket=UP   tcp=down     <- the bootstrap server, and the old bug
+#   t=5 socket=UP   tcp=UP       <- the real one
+# So asking over TCP cannot see the temporary server, and the first yes is the
+# server the rest of this proof actually talks to. A readiness check that can
+# be satisfied by a server which is about to disappear is not a readiness
+# check.
 for _ in $(seq 1 60); do
-  if docker exec "$pg" pg_isready -U af_migrator -d antifailure >/dev/null 2>&1; then
+  if docker exec "$pg" pg_isready -h 127.0.0.1 -U af_migrator -d antifailure >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-docker exec "$pg" pg_isready -U af_migrator -d antifailure >/dev/null \
+docker exec "$pg" pg_isready -h 127.0.0.1 -U af_migrator -d antifailure >/dev/null \
   || fail "the database never became ready"
 
 echo "== the enterprise image bootstraps its own schema"
