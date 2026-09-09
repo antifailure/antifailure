@@ -133,7 +133,7 @@
         },
         "command": {
           "type": "string",
-          "maxLength": 1024,
+          "maxLength": 4096,
           "description": "Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell."
         },
         "port": {
@@ -259,7 +259,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$",
           "maxLength": 128
         },
         "required": {

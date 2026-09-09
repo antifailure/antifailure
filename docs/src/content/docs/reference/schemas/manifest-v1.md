@@ -165,7 +165,7 @@ One variable a service needs. The manifest declares the name and where the value
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `from` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
-| `name` | string | **yes** | Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `name` | string | **yes** | Max length 128, matches `^[A-Za-z_][A-Za-z0-9_.]*$`. |
 | `required` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to `true`. |
 | `sandbox` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to `false`. |
 | `value` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
@@ -432,7 +432,7 @@ One process the environment runs. A service is built from the repository, given 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `build` | [Build](#build) | no | How to turn the service directory into an image. |
-| `command` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 1024. |
+| `command` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
 | `depends_on` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | `env` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
 | `health_path` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to `/`. Max length 512. |
