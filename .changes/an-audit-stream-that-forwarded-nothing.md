@@ -37,3 +37,34 @@ A sink that cannot be reached is reported and does not stop anything. That is
 the interface's own contract and it matters most on teardown: a forwarding
 outage that stopped an environment being destroyed would turn a logging problem
 into a resource leak.
+
+Here is one `environment.created` entry as each of the three sinks actually
+puts it on the wire, captured from the sinks themselves rather than described.
+The webhook and the object store carry the same bytes:
+
+```json
+{"occurred_at":"2026-09-08T19:04:11.082Z","forwarded_at":"2026-09-08T19:04:11.328Z","org":"acme","actor":"dana@acme.example","action":"environment.created","target_type":"environment","target_id":"env_7c31a8","origin":"engine","detail":{"branch":"add-checkout-retry","outcome":"created","project":"shop","repository":"acme/shop","seconds":41.7}}
+```
+
+The two timestamps are the point of carrying both: the action happened at
+`.082` and forwarding succeeded at `.328`, and only the first is a fact about
+the environment.
+
+Syslog wraps exactly those bytes in an RFC 5424 header, with the action as the
+message id so a collector can route on it without parsing the payload, and the
+byte order mark that declares the payload UTF-8:
+
+```
+<110>1 2026-09-08T19:04:11.082Z host antifailure 5799 environment.created - {"occurred_at":"2026-09-08T19:04:11.082Z", ...}
+```
+
+The object store writes one object per entry, under a key partitioned by the
+day the action OCCURRED rather than the day it was forwarded, so a retention
+rule expires entries by when they happened:
+
+```
+s3://acme-audit/antifailure/2026/09/08/190411.082000000-environment.created-cafebabe.json
+```
+
+It is sent with `If-None-Match: *`, so an entry can never replace one already
+there, and signed with SigV4 over the request the store actually receives.
