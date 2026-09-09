@@ -42,12 +42,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
+	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
 	"github.com/antifailure/antifailure/ee/engine/secrets"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
+	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/secret"
 )
 
 // withEverythingExcept grants every feature the licence sells but one.
@@ -437,6 +440,50 @@ func entryPoints() []proof {
 			},
 		},
 		{
+			feature: license.FeatureCloudDatabase,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				// The wrapper is what enforces, so the proof goes through it
+				// rather than around it. cloudgate.Wrap REPLACES a registration,
+				// and a provider registered after the wrap is not covered, which
+				// that package says about itself; registering first and wrapping
+				// after is therefore the arrangement the binary uses and the one
+				// worth exercising.
+				db := openedCloudDatabase(t, ctx)
+				_, err := db.Branch(ctx, "gv_1", "env-1")
+				if err == nil {
+					return true, "the provider branched the database"
+				}
+				var refusal *cloudgate.Refusal
+				require.ErrorAsf(t, err, &refusal,
+					"Branch failed with something that is not a licensing refusal: %v. A "+
+						"provider that is merely down would look like this and must not be "+
+						"counted as a gate.", err)
+				require.Equal(t, license.FeatureCloudDatabase, refusal.Feature,
+					"the refusal names the wrong feature, so one entitlement is answering "+
+						"for another")
+				return false, "the gate refused Branch: " + refusal.Error()
+			},
+		},
+		{
+			feature: license.FeatureCloudRuntime,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				rt := openedCloudRuntime(t, ctx)
+				_, err := rt.Up(ctx, provider.EnvSpec{EnvID: "env-1"})
+				if err == nil {
+					return true, "the provider brought the environment up"
+				}
+				var refusal *cloudgate.Refusal
+				require.ErrorAsf(t, err, &refusal,
+					"Up failed with something that is not a licensing refusal: %v", err)
+				require.Equal(t, license.FeatureCloudRuntime, refusal.Feature,
+					"the refusal names the wrong feature, so one entitlement is answering "+
+						"for another")
+				return false, "the gate refused Up: " + refusal.Error()
+			},
+		},
+		{
 			feature: license.FeatureCompliance,
 			run: func(t *testing.T, ctx context.Context) (bool, string) {
 				t.Helper()
@@ -565,4 +612,134 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return digits
+}
+
+// ---------------------------------------------------------------------------
+// The cloud provider proofs need a provider to gate, and a real one would need
+// a cloud account. These are the smallest thing cloudgate can wrap.
+//
+// Deliberately NOT shared with ee/engine/cloudgate's own fakes, which are
+// unexported and belong to that package's tests. A test that reached into
+// another package's fixtures would couple the proof to the shape of the code it
+// is meant to be independent evidence about.
+
+type gateFakeDatabase struct{}
+
+func (gateFakeDatabase) Name() string                { return "aurora" }
+func (gateFakeDatabase) Capabilities() provider.Caps { return provider.Caps{Branching: true} }
+
+func (gateFakeDatabase) RefreshGolden(
+	context.Context, provider.GoldenSpec,
+) (provider.GoldenVersion, error) {
+	return provider.GoldenVersion{ID: "gv_1", Verified: true}, nil
+}
+
+func (gateFakeDatabase) ListGoldens(context.Context) ([]provider.GoldenVersion, error) {
+	return []provider.GoldenVersion{{ID: "gv_1", Verified: true}}, nil
+}
+
+func (gateFakeDatabase) DestroyGolden(context.Context, string) error { return nil }
+
+func (gateFakeDatabase) Branch(_ context.Context, version, envID string) (provider.Branch, error) {
+	return provider.Branch{EnvID: envID, From: version}, nil
+}
+
+func (gateFakeDatabase) Reset(context.Context, provider.Branch) error   { return nil }
+func (gateFakeDatabase) Destroy(context.Context, provider.Branch) error { return nil }
+
+func (gateFakeDatabase) ConnString(
+	context.Context, provider.Branch, provider.ConnMode,
+) (secret.Value, error) {
+	return secret.New("postgres://example"), nil
+}
+
+func (gateFakeDatabase) Inventory(context.Context) ([]provider.Resource, error) {
+	return []provider.Resource{{ID: "cluster-1"}}, nil
+}
+
+func (gateFakeDatabase) Health(context.Context, provider.Branch) (provider.Health, error) {
+	return provider.Health{}, nil
+}
+
+func (gateFakeDatabase) Close() error { return nil }
+
+type gateFakeDatabaseProvider struct{}
+
+func (gateFakeDatabaseProvider) Name() string { return "aurora" }
+
+func (gateFakeDatabaseProvider) Open(
+	context.Context, extension.DatabaseConfig,
+) (provider.Database, error) {
+	return gateFakeDatabase{}, nil
+}
+
+type gateFakeRuntime struct{}
+
+func (gateFakeRuntime) Name() string { return "ecs" }
+
+func (gateFakeRuntime) Capabilities() provider.RuntimeCaps {
+	return provider.RuntimeCaps{Logs: true}
+}
+
+func (gateFakeRuntime) Up(context.Context, provider.EnvSpec) (provider.Env, error) {
+	return provider.Env{EnvID: "env-1"}, nil
+}
+
+func (gateFakeRuntime) Down(context.Context, string) (provider.Teardown, error) {
+	return provider.Teardown{}, nil
+}
+
+func (gateFakeRuntime) Status(context.Context, string) (provider.Env, error) {
+	return provider.Env{EnvID: "env-1"}, nil
+}
+
+func (gateFakeRuntime) Inventory(context.Context) ([]provider.Resource, error) {
+	return []provider.Resource{{ID: "service-1"}}, nil
+}
+
+func (gateFakeRuntime) Close() error { return nil }
+
+type gateFakeRuntimeProvider struct{}
+
+func (gateFakeRuntimeProvider) Name() string { return "ecs" }
+
+func (gateFakeRuntimeProvider) Open(
+	context.Context, extension.RuntimeConfig,
+) (provider.Runtime, error) {
+	return gateFakeRuntime{}, nil
+}
+
+// openedCloudDatabase is a gated database, opened through the wrapper.
+//
+// Wrap is asserted to have wrapped exactly one, because a Wrap that found
+// nothing returns zero and every assertion afterwards would then be made about
+// an UNGATED provider, which permits everything and would read as "the licence
+// decided" in the granted direction and as a broken gate in the other.
+func openedCloudDatabase(t *testing.T, ctx context.Context) provider.Database {
+	t.Helper()
+	reg := extension.NewRegistry()
+	reg.AddDatabaseProvider(gateFakeDatabaseProvider{})
+	require.Equal(t, 1, cloudgate.Wrap(reg),
+		"cloudgate wrapped no provider, so what follows would be testing an ungated one")
+	p, ok := reg.DatabaseProviderNamed("aurora")
+	require.True(t, ok, "wrapping removed the provider instead of replacing it")
+	db, err := p.Open(ctx, extension.DatabaseConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, db)
+	return db
+}
+
+// openedCloudRuntime is openedCloudDatabase for the runtime half.
+func openedCloudRuntime(t *testing.T, ctx context.Context) provider.Runtime {
+	t.Helper()
+	reg := extension.NewRegistry()
+	reg.AddRuntimeProvider(gateFakeRuntimeProvider{})
+	require.Equal(t, 1, cloudgate.Wrap(reg),
+		"cloudgate wrapped no provider, so what follows would be testing an ungated one")
+	p, ok := reg.RuntimeProviderNamed("ecs")
+	require.True(t, ok, "wrapping removed the provider instead of replacing it")
+	rt, err := p.Open(ctx, extension.RuntimeConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, rt)
+	return rt
 }

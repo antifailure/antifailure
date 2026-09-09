@@ -2,7 +2,7 @@
 
 There were two entitlement systems and they did not know about each other.
 
-The engine has `license.Feature`, twelve names a signed license may carry. The
+The engine has `license.Feature`, fourteen names a signed license may carry. The
 control plane has `organizations.plan` and `entitlements.ts`, which is real,
 tested, and about quotas. Nothing reconciled them, so "what does this customer
 get" had no single answer, and a self hosted license and a hosted plan could
@@ -14,25 +14,28 @@ which reason applies: it is refused by the control plane rather than the engine,
 it is implemented and deliberately free, it is built and loaded by no binary, or
 the capability does not exist.
 
-Of the twelve, seven are refused when a license does not name them, five by the
-engine and two by the control plane. Five change nothing whatever when they are
-absent, and the page says so.
+Of the fourteen, nine are refused when a license does not name them, seven by
+the engine and two by the control plane. Five change nothing whatever when they
+are absent, and the page says so.
 
-THAT NUMBER MOVED WHILE THIS WAS BEING WRITTEN, from five to seven, and it moved
-because the product changed rather than because the measurement was wrong. Two
-features were filed as not built on a measurement that was true when it was
-taken and that named its own expiry in its own text: `audit_stream` had a socket
-in the community engine with nothing plugged into it, and `multi_runtime` had a
-scheduler with no caller, no way for a manifest to ask for a placement, and no
-importable home for a check. Both shipped afterwards. The catalogue is
-regenerated from the code rather than restated from the last time somebody
-counted, so the page now reads seven, and the two rows that moved say what they
-used to claim and why that stopped being true.
+THAT NUMBER MOVED THREE TIMES WHILE THIS WAS BEING WRITTEN, from five to seven
+to nine, and every move was the product changing rather than the measurement
+being wrong. Two features were filed as not built on a measurement that was true
+when it was taken and that named its own expiry in its own text: `audit_stream`
+had a socket in the community engine with nothing plugged into it, and
+`multi_runtime` had a scheduler with no caller, no way for a manifest to ask for
+a placement, and no importable home for a check. Both shipped afterwards. Then
+`cloud_database` and `cloud_runtime` arrived as two new names in the license
+with `ee/engine/cloudgate` already refusing them per call, so they were gated
+before this catalogue had a row for either. The catalogue is regenerated from
+the code rather than restated from the last time somebody counted, so the page
+now reads nine, and every row that moved says what it used to claim and why that
+stopped being true.
 
-THE FIRST VERSION OF THIS CATALOGUE PUT FOUR OF THE TWELVE IN THE WRONG PLACE,
-and the four are worth recording because they failed in two opposite directions
-with one cause. Every one of them found real code and never asked who that code
-served.
+THE FIRST VERSION OF THIS CATALOGUE PUT FOUR OF THE TWELVE THEN SELLABLE IN THE
+WRONG PLACE, and the four are worth recording because they failed in two
+opposite directions with one cause. Every one of them found real code and never
+asked who that code served.
 
 Two were UNDER claimed, because the measurement read one language. Enforcement
 lives in Go and in TypeScript; the count was of `feature.Enabled` call sites,

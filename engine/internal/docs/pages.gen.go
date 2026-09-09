@@ -5323,11 +5323,11 @@ license leaves you with it rather than with nothing.
 ## What is in ` + "`" + `ee/` + "`" + `
 
 <!-- entitlement-names:start -->
-The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `.
+The features a license can name are ` + "`" + `air_gapped` + "`" + `, ` + "`" + `audit_stream` + "`" + `, ` + "`" + `billing` + "`" + `, ` + "`" + `cloud_database` + "`" + `, ` + "`" + `cloud_runtime` + "`" + `, ` + "`" + `compliance_packs` + "`" + `, ` + "`" + `enterprise_dashboard` + "`" + `, ` + "`" + `enterprise_secrets` + "`" + `, ` + "`" + `multi_runtime` + "`" + `, ` + "`" + `policy_enforcement` + "`" + `, ` + "`" + `rbac` + "`" + `, ` + "`" + `scim` + "`" + `, ` + "`" + `sso` + "`" + ` and ` + "`" + `support_access` + "`" + `.
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 12 features a license can carry, **7 are refused when the license does not name them**, 5 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **9 are refused when the license does not name them**, 7 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from ` + "`" + `ee/engine/feature/catalogue.go` + "`" + `, which is the one
@@ -5338,9 +5338,11 @@ engine gates, ` + "`" + `edition.Permits` + "`" + ` for one the community engine
 row cannot claim an enforcement it does not have. Which of the two is required
 is decided by the row's own state and never by the shape of the path, because a
 check that guessed from the path would accept an enterprise file for a community
-gate and never notice that the mechanism claimed is not the mechanism there. Rows that say nothing changes are the honest
-answer rather than an omission: a feature that is sold and never checked is a
-gap worth publishing, and this page is where it gets published.
+gate and never notice that the mechanism claimed is not the mechanism there.
+
+Rows that say nothing changes are the honest answer rather than an omission: a
+feature that is sold and never checked is a gap worth publishing, and this page
+is where it gets published.
 
 <!-- entitlements:start -->
 | Feature | What it is | Without it |
@@ -5348,6 +5350,8 @@ gap worth publishing, and this page is where it gets published.
 | ` + "`" + `air_gapped` + "`" + ` | An installation that reaches nothing outside the operator's own network. | Nothing changes, because the capability is not built yet. |
 | ` + "`" + `audit_stream` + "`" + ` | Privileged actions forwarded to the organization's own SIEM. | Withheld. ` + "`" + `auditsink/auditsink.go:auditsink.permitted` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `billing` + "`" + ` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
+| ` + "`" + `cloud_database` + "`" + ` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedDatabase.Branch` + "`" + ` asks the license, and the feature is off when the answer is no. |
+| ` + "`" + `cloud_runtime` + "`" + ` | Managed cloud runtime providers, on the same rule as the databases. | Withheld. ` + "`" + `cloudgate/cloudgate.go:gatedRuntime.Up` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `compliance_packs` + "`" + ` | SOC 2 and ISO 27001 evidence gathered from the control plane's own records. | Withheld. ` + "`" + `compliance/command.go:Command` + "`" + ` asks the license, and the feature is off when the answer is no. |
 | ` + "`" + `enterprise_dashboard` + "`" + ` | The console: environments, masking, egress, audit and workloads. | Nothing changes, because the capability is not built yet. |
 | ` + "`" + `enterprise_secrets` + "`" + ` | Declared variables resolved from Vault or a cloud secret manager. | Withheld. ` + "`" + `secrets/source.go:Source.Available` + "`" + ` asks the license, and the feature is off when the answer is no. |

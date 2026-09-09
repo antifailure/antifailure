@@ -271,6 +271,32 @@ var catalogue = []Entitlement{
 			"refuses THIS, and billingRouter does neither.",
 	},
 	{
+		Feature: license.FeatureCloudDatabase,
+		Summary: "Managed cloud database providers, the ones that need an organization behind " +
+			"them rather than a developer's own card.",
+		EnforcedAt: "cloudgate/cloudgate.go:gatedDatabase.Branch",
+		State:      StateGated,
+		Because: "One site named where there are two gated methods, and the choice is the same " +
+			"one auditsink's entry makes: RefreshGolden and Branch are refused by the same " +
+			"question, so naming both would read as two independent controls. Branch is named " +
+			"because it is the one an environment cannot be created without. The gate is on " +
+			"the methods that CREATE and never on teardown or inventory, which cloudgate " +
+			"argues for and which this row repeats because it is the part a customer feels: " +
+			"a lapsed licence that stopped somebody removing an Aurora cluster would leave " +
+			"them paying for it.",
+	},
+	{
+		Feature: license.FeatureCloudRuntime,
+		Summary: "Managed cloud runtime providers, on the same rule as the databases.",
+		EnforcedAt: "cloudgate/cloudgate.go:gatedRuntime.Up",
+		State:      StateGated,
+		Because: "Up and not Down, for the reason the database row gives about teardown. The " +
+			"two cloud features are separate entries rather than one, because they are " +
+			"separate names in the licence and cloudgate proves in its own suite that one " +
+			"does not grant the other; merging them here would publish a single answer for " +
+			"two things a customer can buy independently.",
+	},
+	{
 		Feature:    license.FeatureCompliance,
 		Summary:    "SOC 2 and ISO 27001 evidence gathered from the control plane's own records.",
 		EnforcedAt: "compliance/command.go:Command",
