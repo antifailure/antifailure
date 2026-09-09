@@ -267,8 +267,29 @@ func TestRegisterBuiltin_LeavesAnOutsideRegistrationOfTheSameNameAlone(t *testin
 	r.AddEmulator(theirs)
 	emulator.RegisterBuiltin(r)
 
-	require.Equal(t, []string{"aws"}, r.EmulatorNames(),
+	// Exactly one aws, rather than the whole list of names. This build also
+	// ships the Azure emulators, and an assertion that spelled out every
+	// builtin would fail the next time one is added, for a reason that has
+	// nothing to do with what this test is about.
+	names := r.EmulatorNames()
+	aws := 0
+	for _, n := range names {
+		if n == "aws" {
+			aws++
+		}
+	}
+	require.Equal(t, 1, aws,
 		"the built in registration was added beside theirs, and the registry refuses that")
+
+	// The premise, so that this cannot pass by RegisterBuiltin having
+	// registered nothing at all: every other builtin did arrive.
+	for _, e := range emulator.Builtin() {
+		if e.Name() == "aws" {
+			continue
+		}
+		require.Contains(t, names, e.Name(),
+			"RegisterBuiltin skipped %s as well, so the aws skip proves nothing", e.Name())
+	}
 	found, ok := r.EmulatorNamed("aws")
 	require.True(t, ok)
 	require.Equal(t, "example.invalid/localstack@sha256:"+strings.Repeat("a", 64),
