@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -350,4 +351,65 @@ func contains(files []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// An excluded file is not scanned, and an untracked one still is.
+//
+// BOTH DIRECTIONS, because only the second says the filter did not open a hole.
+// This gate walks the filesystem and CI checks out from git, so a file present
+// on a working copy and absent from the repository is read here and invisible
+// there. `PROGRESS.md` is exactly that, and it carries `git grep "x" -- path`
+// lines written by earlier handovers, which are end of options markers and are
+// correct. The local gate reported five findings and CI reported none, on the
+// same tree, permanently.
+//
+// The fix skips what git IGNORES rather than what it does not yet track. A file
+// git ignores can never be committed and so can never ship. A merely untracked
+// file is one `git add` from shipping, and skipping it would pass a new page
+// locally and fail it in CI, which is the same disagreement pointing the other
+// way. The second case below is what holds that line.
+func TestAnExcludedFileIsSkippedAndAnUntrackedOneIsNot(t *testing.T) {
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q")
+
+	// The same defect in three files: one ignored through .gitignore, one
+	// ignored through .git/info/exclude, which is how PROGRESS.md is hidden,
+	// and one merely untracked.
+	body := []byte("A sentence -- with punctuation nobody wrote.\n")
+	for _, name := range []string{"ignored.md", "excluded.md", "untracked.md"} {
+		if err := os.WriteFile(filepath.Join(root, name), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte("excluded.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := markdown(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, f := range files {
+		got[f] = true
+	}
+	if got["ignored.md"] {
+		t.Error("a .gitignore'd file was scanned; it can never ship, so styling it is a red nobody can fix")
+	}
+	if got["excluded.md"] {
+		t.Error("a .git/info/exclude'd file was scanned; this is the PROGRESS.md case the filter exists for")
+	}
+	if !got["untracked.md"] {
+		t.Error("an untracked file was skipped; it is one git add from shipping, so this gate would pass it locally and CI would refuse it")
+	}
 }

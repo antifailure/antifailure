@@ -34,11 +34,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -423,7 +425,65 @@ func collect(root string, dirs []string, keep func(string) bool) ([]string, erro
 		}
 	}
 	sort.Strings(out)
-	return out, nil
+	return ignoreExcluded(root, out), nil
+}
+
+// ignoreExcluded drops the paths git refuses to track.
+//
+// WHY THIS EXISTS, and it is the reverse of the disagreement `gatecheck`
+// catches. This walks the FILESYSTEM and CI checks out from GIT, so a file that
+// exists on a working copy and not in the repository is scanned here and
+// invisible there. `PROGRESS.md` is exactly that: it sits at the repository
+// root, it is excluded through `.git/info/exclude` so it never appears in a
+// diff, and earlier handovers wrote `git grep "x" -- path` into it. Those are
+// end of options markers and they are correct as written, so the local gate
+// reported five findings and CI reported none, on the same tree, permanently.
+// A person running the gate before pushing then gets a red that is not theirs,
+// on a file they cannot commit, and the two obvious reactions, editing the
+// handover or believing their own change broke it, are both wrong.
+//
+// IGNORED RATHER THAN UNTRACKED, which is the whole of the distinction. A file
+// git ignores can never be committed, so it can never ship, so styling it is
+// meaningless. A file that is merely untracked is one `git add` from shipping
+// and MUST still be read, or this gate would pass a new page locally and fail
+// it in CI, which is the same defect pointing the other way.
+//
+// Outside a work tree, and if git cannot be run at all, everything is kept.
+// This gate's own tests drive it with temporary directories that are not
+// repositories, and a check that silently stopped looking there would be worse
+// than one that occasionally reads a file it need not.
+func ignoreExcluded(root string, paths []string) []string {
+	if len(paths) == 0 {
+		return paths
+	}
+	cmd := exec.Command("git", "-C", root, "check-ignore", "--stdin")
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n") + "\n")
+	var found bytes.Buffer
+	cmd.Stdout = &found
+	// Exit 1 means nothing matched and is the ordinary answer; any other
+	// failure means git could not tell us, and then we keep everything.
+	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+			return paths
+		}
+	}
+	excluded := map[string]bool{}
+	for _, line := range strings.Split(found.String(), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			excluded[filepath.ToSlash(line)] = true
+		}
+	}
+	if len(excluded) == 0 {
+		return paths
+	}
+	kept := paths[:0:0]
+	for _, p := range paths {
+		if !excluded[p] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // plural picks the word for a count, so a failing run does not report
