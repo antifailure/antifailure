@@ -662,13 +662,19 @@ type tuning struct {
 // defaultTuning is the base corpus the gate runs on. AF_SCHEMA_TUNING points
 // it at a file instead, which is how it is developed without recompiling.
 //
-// Two bases rather than one because the manifest has mutually exclusive
-// fields, and a document carrying all of them at once is refused by twenty
-// four of the engine's own cross field rules: a database is built from a
-// source or from a seed and never both, an egress rule in block mode may not
-// carry a credential, a web service may not carry a cron schedule. The second
-// base is the other side of every one of those pairs, so nothing is left
-// unmeasured because it could not share a document with its opposite.
+// More than one base because the manifest has mutually exclusive fields, and a
+// document carrying all of them at once is refused by twenty four of the
+// engine's own cross field rules: a database is built from a source or from a
+// seed and never both, an egress rule in block mode may not carry a
+// credential, a web service may not carry a cron schedule. The second base is
+// the other side of every one of those pairs, so nothing is left unmeasured
+// because it could not share a document with its opposite.
+//
+// The third exists because a datastore stance is a three way exclusion rather
+// than a pair. topics belongs to topics_only and rebuild to derived, each is
+// refused on every other stance, and golden takes neither, so no two documents
+// can carry all three. Without it the sixteen constraints under topics were
+// reported unmeasured, which this gate correctly refuses to call a pass.
 const defaultTuning = `{
   "bases": [
     {
@@ -703,6 +709,8 @@ const defaultTuning = `{
       "prune": [
         "database.seed",
         "datastores[].from",
+        "datastores[].topics",
+        "datastores[].rebuild",
         "egress.rules[].fixtures",
         "services[].schedule",
         "services[].resources",
@@ -750,6 +758,7 @@ const defaultTuning = `{
       },
       "prune": [
         "database.source_url_env",
+        "datastores[].topics",
         "egress.rules[].credential",
         "egress.rules[].rate_limit",
         "services[].port",
@@ -759,6 +768,56 @@ const defaultTuning = `{
         "load.thresholds.query_count_increase",
         "services[].env[].value"
       ]
+    },
+    {
+      "name": "topics",
+      "why": "the third side the other two cannot carry: a topics_only broker, whose topics key is refused on every other stance",
+      "overrides": {
+        "database.golden.schedule": "0 3 * * *",
+        "database.golden.max_age": "720h",
+        "database.volume.max_age": "720h",
+        "database.subset.virtual_relationships[].from": "orders.user_id",
+        "database.subset.virtual_relationships[].to": "users.id",
+        "datastores[].stance": "topics_only",
+        "egress.rules[].mode": "sandbox",
+        "explore.goals[].name": "explore-goal",
+        "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
+        "load.source": "otel",
+        "load.traffic.max_age": "336h",
+        "load.unsafe_routes": [
+          "/admin"
+        ],
+        "oracle.ignore.fields[]": "$.field",
+        "oracle.probes[].method": "POST",
+        "personas[].email": "person@example.com",
+        "services[].build.strategy": "image",
+        "services[].depends_on": [
+          "dep"
+        ],
+        "services[].env[].value": "http://example.com",
+        "load.source_config": {
+          "path": "telemetry/traces.json"
+        }
+      },
+      "prune": [
+        "database.seed",
+        "datastores[].from",
+        "datastores[].rebuild",
+        "egress.rules[].fixtures",
+        "services[].schedule",
+        "services[].resources",
+        "load.thresholds.query_count_increase",
+        "services[].env[].from",
+        "services[].env[].sandbox"
+      ],
+      "append": {
+        "services": [
+          {
+            "name": "dep",
+            "kind": "worker"
+          }
+        ]
+      }
     }
   ],
   "refused_fields": {
@@ -1144,7 +1203,13 @@ func TestSchemaConstraintReport(t *testing.T) {
 // either. So the pin held a figure nobody had been able to check for as long as
 // the fixture was broken, which is the failure mode of a gate that stops at its
 // first assertion: everything below it looks alive and is unreachable.
-const wantConstraints = 600
+//
+// It is 625 rather than 600 because this branch gave the datastore key two of
+// its own, topics and rebuild, and the two definitions they point at. Those
+// twenty five sit on top of the seven above, so this is the first number here
+// in some time that was measured against a fixture the engine accepts rather
+// than inherited from a run that stopped before it got here.
+const wantConstraints = 625
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
