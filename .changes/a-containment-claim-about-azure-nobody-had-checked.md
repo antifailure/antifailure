@@ -14,11 +14,12 @@ sends it somewhere else first.
 A network security group that denies cannot exist here either. The Container
 Apps firewall guidance requires `mcr.microsoft.com`,
 `*.data.mcr.microsoft.com`, `packages.aks.azure.com` and
-`acs-mirror.azureedge.net` under the scenario "All scenarios", and none of the
-four has a private endpoint. That is worse than the AWS answer rather than the
-same one: on Fargate the registry, layer and log dependencies are all reachable
-through endpoints inside the VPC, so a task can start in a subnet with no route
-out, and a Container Apps replica cannot. Microsoft states the rest plainly:
+`acs-mirror.azureedge.net` under the scenario "All scenarios", and offers the
+private endpoint escape only for your own registry and key vault, never for
+those four. That is worse than the AWS answer rather than the same one: on
+Fargate the registry, layer and log dependencies are all reachable through
+endpoints inside the VPC, so a task can start in a subnet with no route out,
+and a Container Apps replica cannot. Microsoft states the rest plainly:
 "Don't explicitly deny the Azure DNS address 168.63.129.16 in the outgoing NSG
 rules. If you do, your Container Apps environment doesn't function."
 

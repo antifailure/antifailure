@@ -69,11 +69,12 @@ func (p *Provider) Name() string { return Name }
 // The first is that a Container Apps environment cannot exist without a route
 // to the public internet. Microsoft's firewall guidance requires
 // mcr.microsoft.com, *.data.mcr.microsoft.com, packages.aks.azure.com and
-// acs-mirror.azureedge.net in every scenario, and no private endpoint exists
-// for any of them. This is worse than the ECS answer rather than the same one:
-// on Fargate the registry, layer and log dependencies are all reachable through
-// endpoints inside the VPC, so a task can start in a subnet with no route out,
-// and a Container Apps replica cannot. An internal environment does not change
+// acs-mirror.azureedge.net in every scenario, and offers a private endpoint
+// only for the customer's own registry and key vault, never for those four.
+// This is worse than the ECS answer rather than the same one: on Fargate the
+// registry, layer and log dependencies are all reachable through endpoints
+// inside the VPC, so a task can start in a subnet with no route out, and a
+// Container Apps replica cannot. An internal environment does not change
 // this, because internal governs ingress: Microsoft bills a virtual network
 // integrated environment for "one standard static public IP for egress if
 // you're using an internal or external environment".

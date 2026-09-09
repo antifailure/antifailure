@@ -13,9 +13,10 @@
 // The first is that a Container Apps environment cannot be built without a
 // route to the public internet. Microsoft's own firewall guidance requires
 // mcr.microsoft.com, *.data.mcr.microsoft.com, packages.aks.azure.com and
-// acs-mirror.azureedge.net to be reachable in every scenario, and none of those
-// four has a private endpoint offering. That is strictly worse than ECS on the
-// same question: on AWS the ECR, logs and S3 dependencies are all satisfiable
+// acs-mirror.azureedge.net to be reachable in every scenario, and offers the
+// private endpoint escape only for the customer's own registry and key vault,
+// never for those four. That is strictly worse than ECS on the same question:
+// on AWS the ECR, logs and S3 dependencies are all satisfiable
 // by endpoints inside the VPC, so a Fargate task can start with no route out at
 // all, while a Container Apps replica cannot.
 //
@@ -395,11 +396,15 @@ type NetworkRule struct {
 
 // PrivateEndpoint is one private endpoint in the virtual network.
 //
-// It is the mechanism that makes the registry path closable on Azure, and it
-// has no equivalent for the platform's own image sources. Microsoft's Container
-// Apps firewall page states that a registry configured with private endpoints
-// needs no security group rule at all, and states nothing of the kind about
-// Microsoft Artifact Registry, because there is no private endpoint for it.
+// It is the mechanism that makes the registry path closable on Azure, and the
+// same page that offers it offers nothing like it for the platform's own image
+// sources. Microsoft's Container Apps firewall page states that a registry
+// configured with private endpoints needs no security group rule at all, and
+// the only other private endpoint it names is for a key vault. Microsoft
+// Artifact Registry and the two AKS binary mirrors appear on that page as names
+// to allow through a firewall and nowhere as a resource an endpoint can front,
+// which is a statement about the guidance rather than a proof about Azure, and
+// it is the honest version of the claim.
 type PrivateEndpoint struct {
 	// Name is the endpoint name.
 	Name string

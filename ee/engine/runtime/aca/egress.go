@@ -99,8 +99,9 @@ func Paths() []Path {
 			Name: "Microsoft Artifact Registry and the AKS binary mirrors, which every environment must reach",
 			Why: "Microsoft's Container Apps firewall guidance lists mcr.microsoft.com, " +
 				"*.data.mcr.microsoft.com, packages.aks.azure.com and acs-mirror.azureedge.net " +
-				"under the scenario \"All scenarios\", and none of the four has a private " +
-				"endpoint offering. This is where Container Apps is strictly worse than " +
+				"under the scenario \"All scenarios\", and the same page offers the private " +
+				"endpoint escape only for your own registry and key vault, never for those " +
+				"four. This is where Container Apps is strictly worse than " +
 				"Fargate: an ECS task's registry, log and layer dependencies are all " +
 				"reachable through endpoints inside the VPC, so the task can start with no " +
 				"route to the internet, and a Container Apps replica cannot.",
@@ -449,7 +450,7 @@ func checkPlatformImages(p Plan) (Verdict, string) {
 	sort.Strings(names)
 	detail := fmt.Sprintf("the replica's subnet reaches %s by service tag and %s by name, "+
 		"because Microsoft requires all four artifact and mirror names in every scenario and "+
-		"none of them has a private endpoint",
+		"Microsoft's guidance offers a private endpoint for none of them",
 		joinOrNone(tags), joinOrNone(names))
 	if len(wildcards) > 0 {
 		sort.Strings(wildcards)
