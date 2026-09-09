@@ -18,9 +18,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types/image"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/proxyimage"
 	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
@@ -42,8 +44,27 @@ func TestAirGapped_TheSidecarImageIsRequiredRatherThanBuiltOnDemand(t *testing.T
 	t.Cleanup(func() { delete(proxyimage.Sources, key) })
 	absent := proxyimage.Tag()
 
-	if _, err := r.cli.ImageInspect(context.Background(), absent); err == nil {
-		t.Fatalf("%s already exists, so this test would have proved nothing", absent)
+	// Asked through ImagePresent rather than inline, because the inline form
+	// read EVERY error as absence and this precondition is the only thing
+	// standing between a poisoned daemon and a test that proves nothing. It
+	// waved exactly that through once: the image was present, a busy daemon
+	// answered the inspect with something that was not a not found, the
+	// precondition read it as absence, and the assertion below failed nine
+	// lines later saying an error was expected.
+	present, err := dockerutil.ImagePresent(context.Background(), r.cli, absent)
+	require.NoError(t, err,
+		"the daemon could not say whether %s exists, so this test was NOT run rather "+
+			"than passed", absent)
+	if present {
+		// Removed rather than refused. A previous mutation run that deleted the
+		// refusal would have BUILT this image, and restoring the source does not
+		// remove what the broken code made, so a bare failure here leaves every
+		// later run failing for a reason that has nothing to do with the code.
+		// The tag is content addressed over a marker only this test injects, so
+		// nothing else can own it.
+		t.Logf("%s exists, which only a previous run of this test can have built; removing it", absent)
+		_, rmErr := r.cli.ImageRemove(context.Background(), absent, image.RemoveOptions{Force: true})
+		require.NoErrorf(t, rmErr, "%s exists and could not be removed, so this test would have proved nothing", absent)
 	}
 
 	airgap.Reset()
@@ -77,7 +98,15 @@ func TestAirGapped_TheIngressForwarderImageIsRequiredToo(t *testing.T) {
 	// never built it. When it is present the assertion is that the refusal
 	// exists on the path rather than that it fired, and the test says so
 	// rather than reporting a pass it did not earn.
-	if _, err := r.cli.ImageInspect(context.Background(), ingressImage); err == nil {
+	// The same two valued read, and the same fix. Here the consequence of
+	// guessing is a SKIP, which is the quieter of the two failures: a daemon
+	// that could not answer would report this test as not applicable rather
+	// than as not run, and a skip reads like a pass in every summary view.
+	present, err := dockerutil.ImagePresent(context.Background(), r.cli, ingressImage)
+	require.NoError(t, err,
+		"the daemon could not say whether %s exists, so this test was NOT run rather "+
+			"than skipped for a known reason", ingressImage)
+	if present {
 		t.Skipf("skipped: %s is already on this daemon, so the build is not reached", ingressImage)
 	}
 
