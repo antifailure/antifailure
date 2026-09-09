@@ -35,6 +35,7 @@ import {
   type ControlState,
   type EmailStatus,
   type EventRow,
+  type FailureStoreView,
   type FirewallSummary,
   type Finding,
   type FleetTeardownResult,
@@ -158,6 +159,33 @@ export function useEventStream(hours: string, type: string, orgId: string) {
       return { rows: page.rows, next: page.nextCursor };
     },
     [hours, type, orgId],
+  );
+}
+
+/* -------------------------------------------------------------------------
+ * The control plane's own failures
+ * ---------------------------------------------------------------------- */
+
+/**
+ * The grouped record of what the control plane caught in itself.
+ *
+ * `useApi` and not `useLive`, and that is a decision rather than an oversight.
+ * `useLive` was written because `useApi` blanked a populated screen to a
+ * skeleton on every reload; `useApi` no longer does. It keeps the held data
+ * across a reload with the same dependencies, puts the failure in
+ * `refreshError` instead of throwing the rows away, and it carries a sequence
+ * guard that `useLive` does not, so two polls landing out of order cannot let
+ * the older answer overwrite the newer. On a page that polls, that last one is
+ * the difference between a count going up and a count flickering.
+ *
+ * So there is still exactly one polling hook in play here and no second one was
+ * written: this is `useApi` driven by `useInterval` from the same module
+ * `useLive` lives in, which is the composition the run detail already uses.
+ */
+export function useFailureStore(hours: string) {
+  return useApi<FailureStoreView>(
+    () => query("admin.operations.failures.store", { hours: Number(hours) }),
+    [hours],
   );
 }
 

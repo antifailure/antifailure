@@ -57,6 +57,7 @@ import type { Db } from '@antifailure/db'
 import { router } from '../trpc.ts'
 import { adminProcedure, type AdminContext } from './trpc.ts'
 import { RecordingMailer, ResendMailer } from '../auth/mail.ts'
+import { failureStoreConfig, statusOf } from '../failures.ts'
 
 /**
  * How far back a page looks.
@@ -527,6 +528,149 @@ const logsRouter = router({
     }),
 })
 
+/* -------------------------------------------------------------------------
+ * The control plane's own failures
+ * ---------------------------------------------------------------------- */
+
+/**
+ * One group of failures the control plane caught in itself.
+ *
+ * Every field is one the two error handlers in server.ts already decided was
+ * safe to write to a log line. There is no message, no stack, no payload and no
+ * organization. See migration 0042 and src/failures.ts for why, and for what
+ * this deliberately cannot answer.
+ */
+export interface ControlPlaneFailure {
+  fingerprint: string
+  source: string
+  route: string
+  method: string
+  kind: string
+  providerCode: string | null
+  occurrences: number
+  firstSeen: string
+  lastSeen: string
+  /** The build running the first and the most recent time this was seen. Equal
+   *  means the group has only ever been produced by one build, which is the
+   *  answer to "did it start when we deployed" that needs no deploy table. */
+  firstSeenVersion: string
+  lastSeenVersion: string
+  /** The id the 500 response handed the caller, for the most recent
+   *  occurrence. It is the join to a line in `af logs web`. */
+  lastRequestId: string | null
+}
+
+/**
+ * What the store itself is doing, returned beside the rows.
+ *
+ * This is the half that stops the page lying. A list of groups with no context
+ * looks complete whether or not it is, and every one of these fields names a
+ * way it might not be: a store switched off, a store at its cap, a store nobody
+ * sweeps. An operator reading a short list during an incident has to be able to
+ * tell "nothing else failed" from "nothing else was recorded".
+ */
+export interface FailureStoreStatus {
+  /** Whether THIS replica writes. A rolling deploy can have one revision
+   *  writing and another not, so this is the answering replica's answer and the
+   *  page says so. */
+  recording: boolean
+  /** Groups in the table, across all time rather than the window. */
+  groups: number
+  /** The most groups the table will hold. */
+  cap: number
+  /** True when a new kind of failure is being refused a row right now. */
+  atCap: boolean
+  /** Days a group survives past its last occurrence, or null when nothing on
+   *  this installation is configured to sweep. */
+  retentionDays: number | null
+}
+
+const failuresRouter = router({
+  /**
+   * The groups, newest occurrence first, with the store's own state.
+   *
+   * One route rather than two, for the same reason `overview` is one route: a
+   * page that fetches the rows and the cap separately can render a full list
+   * beside a stale "not at cap", which is the combination that reads as an
+   * answer and is not one.
+   *
+   * No cursor. This is capped at GROUP_LIMIT like the other aggregates on this
+   * page, and unlike them the cap is not the real bound: the table itself holds
+   * at most `cap` rows, so the count beside the list says exactly how much is
+   * not shown.
+   */
+  store: adminProcedure('admin.logs.read')
+    .input(z.object({ hours: windowHours }).optional())
+    .query(async ({ ctx, input }) => {
+      const c = ctx as AdminContext
+      const now = c.clock.now()
+      const hours: WindowHours = input?.hours ?? 24
+      const from = since(now, hours)
+      const config = failureStoreConfig(process.env)
+
+      return c.adminDb(async (db) => {
+        const [rows, totals] = await Promise.all([
+          db.execute<{
+            fingerprint: string
+            source: string
+            route: string
+            method: string
+            kind: string
+            provider_code: string | null
+            occurrences: string | number
+            first_seen_at: Date | string
+            last_seen_at: Date | string
+            first_seen_version: string
+            last_seen_version: string
+            last_request_id: string | null
+          }>(sql`
+            SELECT fingerprint, source, route, method, kind, provider_code,
+                   occurrences, first_seen_at, last_seen_at,
+                   first_seen_version, last_seen_version, last_request_id
+            FROM control_plane_failures
+            WHERE last_seen_at >= ${from.toISOString()}::timestamptz
+            ORDER BY last_seen_at DESC
+            LIMIT ${GROUP_LIMIT + 1}`),
+          // Counted across all time rather than the window on purpose: this is
+          // what the cap applies to, so a window count could read as "far from
+          // the cap" while the table is full of groups that stopped happening.
+          db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM control_plane_failures`),
+        ])
+
+        const groups = Number(totals[0]?.n ?? 0)
+        const truncated = rows.length > GROUP_LIMIT
+        const visible = truncated ? rows.slice(0, GROUP_LIMIT) : rows
+
+        const status: FailureStoreStatus = statusOf(groups, config)
+
+        return {
+          hours,
+          from: from.toISOString(),
+          at: now.toISOString(),
+          status,
+          truncated,
+          limit: GROUP_LIMIT,
+          failures: visible.map(
+            (r): ControlPlaneFailure => ({
+              fingerprint: r.fingerprint,
+              source: r.source,
+              route: r.route,
+              method: r.method,
+              kind: r.kind,
+              providerCode: r.provider_code,
+              occurrences: Number(r.occurrences),
+              firstSeen: iso(r.first_seen_at),
+              lastSeen: iso(r.last_seen_at),
+              firstSeenVersion: r.first_seen_version,
+              lastSeenVersion: r.last_seen_version,
+              lastRequestId: r.last_request_id,
+            }),
+          ),
+        }
+      })
+    }),
+})
+
 const emailRouter = router({
   /**
    * Whether this installation can send email at all, and what it has tried to
@@ -675,5 +819,6 @@ const emailRouter = router({
  */
 export const operationsRouter = router({
   logs: logsRouter,
+  failures: failuresRouter,
   email: emailRouter,
 })
