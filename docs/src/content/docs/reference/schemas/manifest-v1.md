@@ -487,7 +487,7 @@ The committed record of what production actually serves, which is the denominato
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to `336h`. Max length 32. |
+| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to `336h`. Max length 32, matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 | `profile` | string | **yes** | The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier. Max length 512. |
 
 ## Volume
@@ -496,7 +496,7 @@ The committed record of what production holds, which is the denominator every ro
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data. Defaults to `720h`. Max length 32. |
+| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data. Defaults to `720h`. Max length 32, matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 | `profile` | string | **yes** | The profile file, relative to the repository root. Written by af volume record from a read only connection to production or a replica, and committed, because the machine that reads it on a pull request cannot reach production. It carries counts, sizes, partition shape and key cardinality, and no data. Max length 512. |
 
 ## Workflow

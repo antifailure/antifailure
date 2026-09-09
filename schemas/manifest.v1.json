@@ -557,6 +557,7 @@
         "max_age": {
           "type": "string",
           "maxLength": 32,
+          "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "720h",
           "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Thirty days by default rather than the golden's seven, because a profile is the shape of the data rather than the data."
         }
@@ -1979,6 +1980,7 @@
         "max_age": {
           "type": "string",
           "maxLength": 32,
+          "pattern": "^[0-9]+(ms|s|m|h|d)$",
           "default": "336h",
           "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows."
         }

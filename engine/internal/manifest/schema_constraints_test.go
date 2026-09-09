@@ -1209,7 +1209,7 @@ func TestSchemaConstraintReport(t *testing.T) {
 // twenty five sit on top of the seven above, so this is the first number here
 // in some time that was measured against a fixture the engine accepts rather
 // than inherited from a run that stopped before it got here.
-const wantConstraints = 625
+const wantConstraints = 627
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
