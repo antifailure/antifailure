@@ -230,6 +230,12 @@ func removeReceipt(root string) error {
 // The three refusals say different things because they are different facts,
 // and this repository has been bitten every time two of those were printed
 // under one sentence.
+//
+// Reading the exit status of this tool through a pipe defeats all three, and
+// that is worth knowing before trusting a report that quotes one. `gendrift
+// -strict . | head -3` exits 0 while gendrift exits 1, because the status
+// belongs to the last stage. Measure it unpiped, or the refusal below is read
+// as the pass it was written to replace.
 func requireReceipt(root string) error {
 	body, err := os.ReadFile(filepath.Join(root, receiptName))
 	if err != nil {
@@ -329,6 +335,59 @@ func main() {
 // 2026-09-08, and it is the reason this is a separate mode rather than a step
 // folded into the comparison: the two answer different questions and must be
 // able to fail with different words.
+//
+// # What the one list costs, measured rather than guessed
+//
+// Fifteen generators in one invocation is the direct consequence of the
+// consolidation above, and it is worth knowing the price before anybody
+// reverses it. This machine serializes Go builds behind one lock, and on
+// 2026-09-09 a single `-generate` held that lock for 12 minutes 33.63 seconds
+// with seven lanes waiting.
+//
+// That run FAILED rather than completing, so the figure is a floor and not a
+// total: the cost of a SUCCESSFUL sweep on this machine has not been measured,
+// and a number that says so is worth more than one that quietly reads as a
+// total. An earlier 8m23s reading of the same run was a snapshot taken while
+// it was still going, reported as if it were the end. Both numbers are of the
+// same run and neither is its duration.
+//
+// The obvious repair is for this function to take and release the lock around
+// each generator, so the fifteen interleave with other lanes instead of
+// blocking them. Do not, and the reason is in the paragraph above rather than
+// in simplicity. Interleaving lets another lane's `go test` observe the tree
+// between generator eight and generator nine, and the tree at that instant is
+// precisely the half written one whose misreading sent three lanes to the
+// wrong file. A stated cost is cheaper than a window in which the tree is
+// briefly a lie.
+//
+// # A generator can HANG, which is a third answer
+//
+// The 2026-09-09 failure above was `cd engine && go test ./internal/masking
+// -update-transforms`, and the shape of it belongs here because the mode
+// reports it as a generator that did not finish, which is right, and because
+// the reason it did not finish is one this repository had not yet catalogued.
+//
+// That package holds tests that start real containers. Docker was wedged, not
+// absent. Both tests are written to SKIP when no daemon answers, and against a
+// wedged daemon they never reach the skip: the pull is allowed five minutes
+// and the server is then allowed ninety seconds to answer, while the Go
+// toolchain panics the whole package at ten. So a test that intended to say
+// "skipped, nothing was reachable" emitted a panic trace and FAIL instead.
+//
+// A skip that has not finished deciding to skip is indistinguishable from a
+// test that failed. That is the same sentence as the one this tool exists for,
+// one layer down: "I could not look" and "I looked and it is broken" arriving
+// under one word. AF_SKIP_DOCKER=1 is the mitigation and the reason it was not
+// set is the point, because the daemon looked alive. `docker ps | head -3`
+// exits 0 on a wedged daemon, since the status belongs to `head`, and #370 is
+// the same confusion again in a precondition that read "the daemon did not
+// answer" as "no image".
+//
+// The pipeline half of that was hit by the person writing this comment, in the
+// session whose whole subject was a tool printing a clean answer about a check
+// it had not made. Not an apology, evidence: the reader most primed to see it
+// did not, which is the argument for a tool that CANNOT say it over a person
+// asked to remember.
 func generateAll(root string, out io.Writer) error {
 	// Before anything, so that there is no window in which a stale receipt
 	// vouches for a tree this run is part way through rewriting.
