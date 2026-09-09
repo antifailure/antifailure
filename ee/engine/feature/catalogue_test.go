@@ -106,8 +106,25 @@ func TestAnEntryThatIsNotGatedSaysWhyOutLoud(t *testing.T) {
 		case feature.StateGated:
 			require.NotEmptyf(t, e.EnforcedAt,
 				"%s is marked gated and names no enforcement site", e.Feature)
-		case feature.StatePlanWide, feature.StateFree, feature.StateAbsent,
-			feature.StateUnmounted:
+		case feature.StateControlPlaneGated:
+			// Refused, and not by anything this suite can open. The engine has
+			// no site for it by definition, so requiring one here would refuse
+			// the state; what is required instead is the name of a site the
+			// TypeScript registry declared, which the catalogue test in
+			// ee/web/features compares against that registry in both
+			// directions. This assertion is the half that can be made from Go.
+			require.Emptyf(t, e.EnforcedAt,
+				"%s is refused by the control plane and names an ENGINE enforcement site, "+
+					"which would mean the engine refuses it too and it should be gated",
+				e.Feature)
+			require.NotEmptyf(t, e.ControlPlaneAt,
+				"%s is marked refused by the control plane and names no site there, so the "+
+					"claim cannot be checked against the registry from either language",
+				e.Feature)
+			require.NotEmptyf(t, e.Because,
+				"%s is refused in a language this suite cannot read and does not say why",
+				e.Feature)
+		case feature.StateFree, feature.StateAbsent, feature.StateUnmounted:
 			require.Emptyf(t, e.EnforcedAt,
 				"%s names an engine enforcement site and is not marked gated, which is the "+
 					"one combination that cannot be true: a site that refuses IS a gate",
@@ -116,9 +133,56 @@ func TestAnEntryThatIsNotGatedSaysWhyOutLoud(t *testing.T) {
 				"%s is not gated and does not say why, so a reader cannot tell a deliberate "+
 					"decision from a missing check", e.Feature)
 		default:
-			t.Fatalf("%s has state %q, which is not one of the four", e.Feature, e.State)
+			t.Fatalf("%s has state %q, which is not one of the five", e.Feature, e.State)
 		}
 	}
+}
+
+func TestAFeatureThatCannotBeSoldIsNotDescribedAsSomethingCustomersHave(t *testing.T) {
+	t.Parallel()
+	// THE CHECK THAT WOULD HAVE CAUGHT TWO ROWS AT ONCE, and neither of them was
+	// found by any instrument. A person read the catalogue's own notShipped map
+	// and asked, of code this file had already located correctly, "real code for
+	// WHOM".
+	//
+	// billing read free because billingRouter is real, mounted and ungated. It
+	// bills the customer FOR Antifailure; the licensed feature would meter on
+	// the CUSTOMER'S behalf and does not exist. enterprise_dashboard read plan
+	// wide because orgProcedure really does refuse the console below the
+	// enterprise plan. That is our own funnel enforcing our own plans, keyed on
+	// organizations.plan rather than on this licence name. Both entries were
+	// TRUE about the code they named and false about the feature they described.
+	//
+	// license.go's notShipped is the one place that records what cannot be sold,
+	// and its own comment says it is the only thing that has to change when one
+	// of these is built. So it is the right authority to hold the catalogue to:
+	// a feature nobody can buy cannot be free, which claims we give it away;
+	// cannot be gated or control plane gated, which claim we refuse it to
+	// somebody who did not pay; and cannot be unmounted, which claims it is
+	// built. Absent is the only state that is not a sentence about a product
+	// that exists.
+	notShipped := license.NotShippedFeatures()
+	require.NotEmpty(t, notShipped,
+		"nothing is marked unsellable, so this test is asserting nothing")
+
+	for _, f := range notShipped {
+		entry, ok := feature.Of(f)
+		require.Truef(t, ok, "%s cannot be sold and has no catalogue entry", f)
+		require.Equalf(t, feature.StateAbsent, entry.State,
+			"%s cannot be sold, and the catalogue calls it %q. Every state but absent is a "+
+				"claim about a capability customers can have: free says we give it away, "+
+				"gated and control plane gated say we refuse it to somebody who did not pay, "+
+				"and unmounted says it is built. license.go says this one does not exist. "+
+				"Reason recorded there: %s",
+			f, entry.State, license.NotShippedBecause(f))
+		require.Emptyf(t, entry.ControlPlaneAt,
+			"%s cannot be sold and the catalogue names %s as where the control plane does it. "+
+				"That field means where this feature is implemented or refused, and a "+
+				"capability that does not exist has no such place. Naming a real file that "+
+				"serves a DIFFERENT subject is exactly how this row came to be wrong.",
+			f, entry.ControlPlaneAt)
+	}
+	t.Logf("features that cannot be sold, all absent: %v", notShipped)
 }
 
 func TestAGatedEntryNamesAFileThatChecksThatExactFeature(t *testing.T) {
@@ -193,7 +257,7 @@ func TestEveryControlPlaneSiteNamesSomethingThatIsStillThere(t *testing.T) {
 	// web/apps/api/test/licensed-features.test.ts and reads this same catalogue,
 	// so a control plane developer who renames a symbol and never runs the Go
 	// suite still sees it fail.
-	src := filepath.Join(repoRoot(t), "web", "apps", "api", "src")
+	src := repoRoot(t)
 	for _, e := range feature.Catalogue() {
 		if e.ControlPlaneAt == "" {
 			continue
@@ -239,14 +303,14 @@ func TestTheMeasuredNumberIsPublishedRatherThanAsserted(t *testing.T) {
 			t.Logf("  %-9s %-22s %s", e.State, e.Feature, firstSentence(e.Because))
 		}
 	}
-	t.Logf("gated %d, plan wide %d, free %d, unmounted %d, absent %d",
-		byState[feature.StateGated], byState[feature.StatePlanWide],
+	t.Logf("engine gated %d, control plane gated %d, free %d, unmounted %d, absent %d",
+		byState[feature.StateGated], byState[feature.StateControlPlaneGated],
 		byState[feature.StateFree], byState[feature.StateUnmounted],
 		byState[feature.StateAbsent])
 
-	require.Equal(t, total, byState[feature.StateGated]+byState[feature.StatePlanWide]+
-		byState[feature.StateFree]+byState[feature.StateUnmounted]+
-		byState[feature.StateAbsent],
+	require.Equal(t, total, byState[feature.StateGated]+
+		byState[feature.StateControlPlaneGated]+byState[feature.StateFree]+
+		byState[feature.StateUnmounted]+byState[feature.StateAbsent],
 		"the states do not account for every licensed feature")
 }
 

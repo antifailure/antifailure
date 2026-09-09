@@ -67,13 +67,20 @@ func effect(e feature.Entitlement) string {
 		// which is the opposite of what happens.
 		return "Withheld. `" + e.EnforcedAt + "` asks the license, and the feature is off " +
 			"when the answer is no."
-	case feature.StatePlanWide:
-		return "Not refused by this name. The hosted control plane refuses the capability on " +
-			"the plan as a whole; a self hosted installation with no license keeps it."
 	case feature.StateFree:
 		return "Nothing changes. It is implemented and deliberately available to everyone."
 	case feature.StateAbsent:
 		return "Nothing changes, because the capability is not built yet."
+	case feature.StateControlPlaneGated:
+		// Named as a refusal, like StateGated, because to a customer the two
+		// are the same event: they asked for something and were told no on the
+		// strength of what they bought. Which process said no is our detail,
+		// not theirs. The code is named because 402 rather than 404 is the
+		// whole point of gate.ts, and a reader who greps the engine for this
+		// feature and finds nothing needs the sentence that explains why.
+		return "Withheld by the control plane. `" + e.ControlPlaneAt + "` asks the license, " +
+			"and an unlicensed installation is answered 402 naming the feature rather " +
+			"than 404."
 	case feature.StateUnmounted:
 		return "Nothing changes, and not because it is unbuilt. It is implemented and no " +
 			"binary loads it, so nobody has it, paid or not."
@@ -128,14 +135,21 @@ func namesSentence() string {
 // holds is not prose, whatever it looks like, and left by hand beside a
 // generated table it is how a page comes to contradict itself.
 func countSentence() string {
-	gated := len(feature.GatedFeatures())
+	engine := len(feature.GatedFeatures())
+	plane := len(feature.ControlPlaneGatedFeatures())
 	total := len(license.AllFeatures())
+	// Split, because one number hid the error this page was corrected for.
+	// Counting only the engine's gates reported three of twelve and read as
+	// "nine of these do nothing", when two of the nine were being refused by
+	// name in another language. The total is the honest headline and the split
+	// is what stops the next reader drawing the old conclusion from it.
 	return fmt.Sprintf(
 		"Of the %d features a license can carry, **%d are refused when the license does not "+
-			"name them**. The rest are listed here anyway, with what actually happens without "+
-			"each one, because a feature that is sold and never checked is worth knowing about "+
-			"and the number is only useful if it can come back unflattering.\n",
-		total, gated)
+			"name them**, %d by the engine and %d by the control plane. The rest are listed "+
+			"here anyway, with what actually happens without each one, because a feature that "+
+			"is sold and never checked is worth knowing about and the number is only useful "+
+			"if it can come back unflattering.\n",
+		total, engine+plane, engine, plane)
 }
 
 // splice replaces the block between one pair of markers.

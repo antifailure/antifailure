@@ -134,7 +134,7 @@ describe('the entitlement catalogue and this control plane still agree', () => {
       const [file = '', symbol = ''] = (entry.controlPlaneAt ?? '').split(':')
       assert.ok(file !== '' && symbol !== '',
         `${entry.constant} has ControlPlaneAt ${entry.controlPlaneAt}, which is not file:symbol`)
-      const source = await readFile(path.join(apiSrc, file), 'utf8')
+      const source = await readFile(path.join(root, file), 'utf8')
       assert.match(
         source,
         new RegExp(`\\b${symbol}\\b`),

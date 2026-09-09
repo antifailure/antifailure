@@ -61,17 +61,19 @@ const (
 	// measured by.
 	StateGated State = "gated"
 
-	// StatePlanWide is a capability the control plane does refuse, but on the
-	// plan as a whole rather than on this feature.
-	//
-	// The distinction is the whole finding. On a hosted plane, trpc.ts refuses
-	// every permission outside HOSTED_GATE_EXEMPT unless the organization is on
-	// the enterprise plan. That is a real refusal and it is one boolean, while
-	// the licence carries twelve, so a licence naming a feature and a plan that
-	// does not are not reconcilable by anything. Counting these as enforced
-	// would flatter the product: the same refusal covers a customer who bought
-	// the feature and one who did not.
-	StatePlanWide State = "plan wide"
+	// THERE WAS A StatePlanWide HERE AND ITS REMOVAL IS THE POINT, so the
+	// reasoning is kept rather than deleted with it. It meant "the control
+	// plane refuses this, but on the plan as a whole rather than on this
+	// feature", and enterprise_dashboard was its only member for exactly the
+	// wrong reason: somebody reached for a state meaning "refused on the plan"
+	// and put OUR OWN funnel in it. A plan wide refusal is us enforcing our own
+	// pricing tiers, not a licence granting a capability, so it does not
+	// describe anything sellable and has no business being one of the states a
+	// catalogue of sellable things can take. Leaving the slot in place would
+	// leave the same invitation for the next author, on the page that says what
+	// customers buy. The distinction it recorded is real and now lives in
+	// enterprise_dashboard's own Because, which is where a reader meets it in
+	// context instead of as an available category.
 
 	// StateFree is implemented, available to everyone, and deliberately so.
 	// The licence sells it and nothing withholds it.
@@ -102,6 +104,31 @@ const (
 	// the worse of the two: absent looks unfinished from every direction, while
 	// unmounted looks finished from every direction except the running process.
 	StateUnmounted State = "unmounted"
+
+	// StateControlPlaneGated is refused, by name, by the control plane, on a
+	// licence check written in TypeScript that this package cannot see.
+	//
+	// ADDED BECAUSE THIS CATALOGUE DESCRIBED A TWO LANGUAGE PRODUCT BY LOOKING
+	// IN ONE LANGUAGE, and that is a worse error than either of the two rows it
+	// got wrong. Enforcement here lives in Go and in TypeScript. This file
+	// measured `feature.Enabled` call sites, which only the engine has, and
+	// read a zero as "nothing refuses this". A zero in that count means NOT
+	// ENFORCED BY THE ENGINE, which is a different fact from not enforced, and
+	// collapsing the two is how sso and scim came to be published as features
+	// nobody has, paid or not, while the enterprise control plane was refusing
+	// them by name with a 402.
+	//
+	// It is separate from StateGated because the two are checked by different
+	// instruments and neither can see the other's evidence. A gated entry names
+	// an engine file and a Go test opens it and requires an Enabled call for
+	// that exact feature. A control plane gated entry names a site the
+	// TypeScript registry declared, and only the TypeScript suite can confirm
+	// it, because the declaration is made at module scope by the package that
+	// enforces it and a package nothing imports declares nothing.
+	//
+	// So the honest count is two numbers rather than one. See GatedFeatures for
+	// the engine's and ControlPlaneGatedFeatures for this one.
+	StateControlPlaneGated State = "control_plane_gated"
 )
 
 // Entitlement is one licensed feature and what this product does about it.
@@ -126,12 +153,32 @@ type Entitlement struct {
 	// ControlPlaneAt is where the control plane implements or refuses this, as
 	// `path/from/web/apps/api/src:symbol`, or empty.
 	//
-	// Present for StatePlanWide and StateFree as well as StateGated, because
+	// Present for StateFree as well as StateGated and StateControlPlaneGated,
+	// because
 	// the useful answer to "where does this live" is the same either way and
 	// State is what says whether the licence is consulted. A test in each build
 	// system opens the file and looks for the symbol, so a TypeScript rename
 	// fails the TypeScript suite rather than only the Go one that a control
 	// plane developer never runs.
+	//
+	// ONE PATH CONVENTION: from the REPOSITORY ROOT, always.
+	//
+	// It was briefly two, and the bug that produced is the reason this comment
+	// is emphatic. These paths used to be relative to web/apps/api/src, which
+	// is fine while every entry lives there, and the enterprise packages do
+	// not: a control plane gated entry has to name the site the TypeScript
+	// registry declared, byte for byte, and those are repository relative. So a
+	// second convention was introduced and DOCUMENTED HERE AND TAUGHT TO
+	// NOTHING, and both readers promptly tried to open
+	// web/apps/api/src/ee/web/scim/src/routes.ts. A comment describing a rule
+	// that no code implements is the same defect as a licensed feature nothing
+	// enforces, which is the subject of this entire file.
+	//
+	// One convention costs three longer strings and removes the branch from
+	// both readers, and there are two: the Go test in this package and
+	// web/apps/api/test/licensed-features.test.ts, which is deliberately in the
+	// other build system so a control plane developer who renames a symbol and
+	// never runs the Go suite still sees it fail.
 	ControlPlaneAt string
 
 	// State is what a customer without this feature gets.
@@ -157,11 +204,16 @@ var catalogue = []Entitlement{
 		Feature: license.FeatureAirGapped,
 		Summary: "An installation that reaches nothing outside the operator's own network.",
 		State:   StateAbsent,
-		Because: "air_gapped has no reference in any Go code outside the constant itself and " +
-			"tools/licensegen's copy of the name list. There is no " +
-			"offline verification path, no refusal at any call site, and nothing that would " +
-			"change if a licence named it. Wave 7's L7.2 defines it and builds the lifecycle " +
-			"test that fails on any attempted connection.",
+		Because: "The only row where the question the others turn on does not arise, and it is " +
+			"worth saying so rather than leaving the silence to be read as an oversight. " +
+			"There is no code serving ANY subject here: air_gapped has no reference in any Go " +
+			"code outside the constant itself and tools/licensegen's copy of the name list, " +
+			"no offline verification path, and no refusal at any call site. billing and " +
+			"enterprise_dashboard were classified wrongly because real code existed and " +
+			"nobody asked who it served; here there is nothing to attribute to anybody, so " +
+			"absent is the whole answer. Wave 7's L7.2 would define it and build the " +
+			"lifecycle test that fails on any attempted connection, and that is a statement " +
+			"about a lane which has NOT landed as of 88627d7f rather than about this tree.",
 	},
 	{
 		Feature:        license.FeatureAuditStream,
@@ -176,19 +228,27 @@ var catalogue = []Entitlement{
 			"ee/engine/cmd/af/main.go warns about in its own header, and L0.2 measured it from " +
 			"the other side as one of three sockets not consulted. ee/web/audit holds sink " +
 			"implementations for the control plane and no file under web/apps/api/src imports " +
-			"those either. L7.1 builds the engine sinks and L7.6 the entry point that would " +
-			"load the others.",
+			"those either. L7.6's entry point has since landed and mounts sso and scim only, " +
+			"which is checked above rather than assumed. L7.1 would build the engine sinks " +
+			"and has NOT landed as of 88627d7f, so this row is true of that sha and is the " +
+			"one entry in this catalogue with a known expiry: see #309.",
 	},
 	{
-		Feature:        license.FeatureBilling,
-		Summary:        "Subscriptions, invoices and the plan an organization is on.",
-		ControlPlaneAt: "routers/billing.ts:billingRouter",
-		State:          StateFree,
-		Because: "Every organization on every installation reaches billing, and that is deliberate " +
-			"rather than an oversight. billing.manage is in HOSTED_GATE_EXEMPT, so even the " +
-			"hosted plan gate refuses it under no condition: gating the path that RESOLVES a " +
-			"refusal would leave a lapsed customer with no exit, which hosted.ts calls a legal " +
-			"exposure and not a courtesy. Nothing here consults a licence and nothing should.",
+		Feature: license.FeatureBilling,
+		Summary: "Subscriptions, invoices and the plan an organization is on.",
+		State:   StateAbsent,
+		Because: "REAL CODE FOR THE WRONG SUBJECT, and this entry read free on the strength of " +
+			"it. billingRouter exists at routers/billing.ts:132 and is mounted at " +
+			"index.ts:1390, so a reader who greps for billing finds a working, ungated " +
+			"feature and concludes we built it and do not charge for it. That code bills the " +
+			"customer FOR ANTIFAILURE. The licensed feature of this name would meter, rate " +
+			"and charge on the CUSTOMER'S OWN behalf, and nothing in the engine or the " +
+			"control plane does that; there is no billing hook in engine/pkg/extension for an " +
+			"enterprise implementation to plug into either. license.go's notShipped map is " +
+			"the authority and says exactly this, which is why billing cannot be sold at all. " +
+			"ControlPlaneAt is deliberately EMPTY: naming billingRouter here is what caused " +
+			"the mistake, because that field means where the control plane implements or " +
+			"refuses THIS, and billingRouter does neither.",
 	},
 	{
 		Feature:    license.FeatureCompliance,
@@ -197,21 +257,26 @@ var catalogue = []Entitlement{
 		State:      StateGated,
 	},
 	{
-		Feature:        license.FeatureDashboard,
-		Summary:        "The console: environments, masking, egress, audit and workloads.",
-		ControlPlaneAt: "trpc.ts:orgProcedure",
-		State:          StatePlanWide,
-		Because: "The console is the only interface this product has and a self hosted install " +
-			"with no licence at all keeps every page of it. On a hosted plane orgProcedure " +
-			"refuses environments.view, and every other permission outside HOSTED_GATE_EXEMPT, " +
-			"unless the organization is on the enterprise plan. That refusal is real and it is " +
-			"keyed on the plan, not on this feature, so a licence naming enterprise_dashboard " +
-			"changes nothing about whether the console loads.",
+		Feature: license.FeatureDashboard,
+		Summary: "The console: environments, masking, egress, audit and workloads.",
+		State:   StateAbsent,
+		Because: "THE SAME MISTAKE AS billing, and it is worth having both written down " +
+			"because seeing the pair is what teaches the question. This entry read plan wide " +
+			"on the strength of orgProcedure refusing environments.view to an organization " +
+			"that is not on the enterprise plan. That refusal is real, and it is OUR OWN " +
+			"funnel enforcing OUR OWN plans, keyed on organizations.plan and not on this " +
+			"licence name, which the previous wording of this entry already admitted without " +
+			"drawing the conclusion. There is no enterprise dashboard to sell: the name " +
+			"appears in this catalogue, in licensegen's copy, in the feature name lists and " +
+			"in the documentation, and in no implementation anywhere, which is what " +
+			"notShipped records and why it cannot be sold. The Summary maps the name onto " +
+			"the console, and the console is the whole product rather than a licensed part " +
+			"of it. ControlPlaneAt is EMPTY for the reason billing's is.",
 	},
 	{
 		Feature:        license.FeatureMultiRuntime,
 		Summary:        "Placing an environment across several runtimes at once, by requirement and by tag.",
-		ControlPlaneAt: "routers/runtimes.ts:runtimesRouter",
+		ControlPlaneAt: "web/apps/api/src/routers/runtimes.ts:runtimesRouter",
 		State:          StateAbsent,
 		Because: "Three separate things have to be true before this can be gated and none of them " +
 			"is. engine/internal/scheduler implements placement completely, including " +
@@ -235,7 +300,7 @@ var catalogue = []Entitlement{
 	{
 		Feature:        license.FeatureRBAC,
 		Summary:        "Roles, and a permission on every route.",
-		ControlPlaneAt: "permissions.ts:PERMISSIONS",
+		ControlPlaneAt: "web/apps/api/src/permissions.ts:PERMISSIONS",
 		State:          StateFree,
 		Because: "Free rather than unmounted, and it is the only feature where BOTH are true " +
 			"of different code. The roles and permissions in web/apps/api/src/permissions.ts " +
@@ -251,28 +316,37 @@ var catalogue = []Entitlement{
 	{
 		Feature:        license.FeatureSCIM,
 		Summary:        "Directory provisioning, so joiners and leavers arrive from the identity provider.",
-		ControlPlaneAt: "",
-		State:          StateUnmounted,
-		Because: "ee/web/scim implements the protocol, including the filter grammar and PATCH, " +
-			"and nothing under web/apps/api/src imports it, so not one of its routes is " +
-			"served. admin/platform.ts independently records the other half: scim_tokens has " +
-			"existed since migration 0014 and nothing reads it, so a SCIM token authenticates " +
-			"nothing, which is why the operator portal deliberately leaves those tokens off " +
-			"the credential list rather than showing a row that cannot be revoked from.",
+		ControlPlaneAt: "ee/web/scim/src/routes.ts:guard",
+		State:          StateControlPlaneGated,
+		Because: "Refused by the control plane rather than by the engine, which is why the " +
+			"engine's own count of Enabled call sites reports zero for it. ee/web/scim " +
+			"implements the protocol, including the filter grammar and PATCH, its guard asks " +
+			"the licence at routes.ts:198, and ee/web/server/src/register.ts mounts it, so an " +
+			"unlicensed installation is answered 402 naming scim rather than 404. " +
+			"THIS ENTRY READ absent AND THEN unmounted, and both were measured by asking " +
+			"whether anything under web/apps/api/src reads scim_tokens. That is true and it " +
+			"is a statement about the hosted tree, not about the product: the enterprise " +
+			"control plane is a different entry point. The token half of the finding still " +
+			"stands, and admin/platform.ts records it, so the operator portal leaves those " +
+			"tokens off the credential list rather than showing a row nothing can revoke.",
 	},
 	{
 		Feature:        license.FeatureSSO,
 		Summary:        "Single sign on against the organization's own identity provider.",
-		ControlPlaneAt: "",
-		State:          StateUnmounted,
-		Because: "ee/web/sso is a complete implementation, SAML and OIDC, domain binding, " +
-			"assertion replay protection and break glass codes, and NOTHING LOADS IT. No file " +
-			"under web/apps/api/src imports it, so its install() has no caller outside tests " +
-			"and none of its routes is ever registered. Separately, migration 0014's tables " +
-			"have no writer: writers.test.ts records sso_connections under UNWIRED, and the " +
-			"only reads anywhere are two count queries in the operator portal. So a customer " +
-			"who buys sso gets the same product as one who does not, and the reason is one " +
-			"missing import rather than any missing work. L7.6 builds the entry point.",
+		ControlPlaneAt: "ee/web/sso/src/store.ts:connectionByHandle",
+		State:          StateControlPlaneGated,
+		Because: "Refused by the control plane rather than by the engine, which is why the " +
+			"engine's own count of Enabled call sites reports zero for it. ee/web/sso is a " +
+			"complete implementation, SAML and OIDC, domain binding, assertion replay " +
+			"protection and break glass codes; it asks the licence in three places, " +
+			"enforce.ts:167 and store.ts:133 and :202; and ee/web/server/src/register.ts " +
+			"mounts it, so an unlicensed installation is answered 402 naming sso. " +
+			"THIS ENTRY READ absent AND THEN unmounted, and the second was written the day " +
+			"before the entry point it said did not exist was already on main. Both readings " +
+			"came from asking what web/apps/api/src imports, which is the hosted tree and not " +
+			"the only one: the enterprise image runs ee/web/server. The schema half of the " +
+			"older finding still stands, since writers.test.ts records sso_connections under " +
+			"UNWIRED, and that is a gap in the HOSTED plane rather than in this feature.",
 	},
 	{
 		Feature:    license.FeatureSecrets,
@@ -283,7 +357,7 @@ var catalogue = []Entitlement{
 	{
 		Feature:        license.FeatureSupportAccess,
 		Summary:        "A supported way for the vendor to see what a customer sees.",
-		ControlPlaneAt: "admin/customers.ts:registerImpersonationRoutes",
+		ControlPlaneAt: "web/apps/api/src/admin/customers.ts:registerImpersonationRoutes",
 		State:          StateFree,
 		Because: "Free rather than absent, and the correction is worth recording because the " +
 			"two say different things to a buyer: absent says we did not build it, free says " +
@@ -358,12 +432,31 @@ func SplitSite(site string) (file, symbol string, ok bool) {
 	return file, symbol, true
 }
 
+// ControlPlaneGatedFeatures is every feature the CONTROL PLANE refuses by name.
+//
+// A second list rather than more entries in the first, because the two are
+// confirmed by different suites and a caller that merges them silently loses
+// which instrument is standing behind each name. GatedFeatures is what the
+// engine's own entry point test exercises twice, once with the entitlement and
+// once without; these cannot be exercised from Go at all, and the TypeScript
+// catalogue test is what holds them to the registry.
+func ControlPlaneGatedFeatures() []license.Feature {
+	out := []license.Feature{}
+	for _, e := range catalogue {
+		if e.State == StateControlPlaneGated {
+			out = append(out, e.Feature)
+		}
+	}
+	return out
+}
+
 // GatedFeatures is every feature a missing entitlement actually refuses.
 //
 // The number this lane is measured by is len(GatedFeatures()) over
 // len(license.AllFeatures()), and it is deliberately the smaller of the two
-// numbers that could be reported. See StatePlanWide for the other one and why
-// it does not count.
+// numbers that could be reported. The larger one would count a refusal made on
+// the hosted plan as a whole, which covers a customer who bought the feature
+// and one who did not identically and therefore says nothing about the licence.
 func GatedFeatures() []license.Feature {
 	out := []license.Feature{}
 	for _, e := range catalogue {

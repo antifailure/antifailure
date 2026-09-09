@@ -55,6 +55,8 @@ const repo = path.resolve(here, '..', '..', '..', '..')
 
 const licenseGo = await readFile(path.join(repo, 'ee/engine/license/license.go'), 'utf8')
 const licensegenGo = await readFile(path.join(repo, 'tools/licensegen/main.go'), 'utf8')
+const catalogueGo = await readFile(
+  path.join(repo, 'ee/engine/feature/catalogue.go'), 'utf8')
 const licensingDoc = await readFile(
   path.join(repo, 'docs/src/content/docs/enterprise/licensing.md'), 'utf8')
 const issuingDoc = await readFile(
@@ -409,5 +411,145 @@ describe('every feature a licence can grant is accounted for somewhere', () => {
         `licensing.md lists ${feature} and never says the licence does not enforce it`,
       )
     }
+  })
+})
+
+
+/**
+ * The Go catalogue's own claim about each feature, as feature name to state.
+ *
+ * Parsed rather than duplicated, for the reason every other reader in this file
+ * is: the catalogue is a fifth copy of the answer and a copy with no gate is a
+ * copy that drifts. Read through the Feature constants so that renaming a
+ * constant cannot silently drop a row, and taken from the literal `State:` on
+ * each entry rather than from a hand kept list.
+ */
+function goCatalogueStates(catalogueSource: string, licenseSource: string): Map<string, string> {
+  const featureNames = new Map<string, string>()
+  for (const line of licenseSource.split('\n')) {
+    const m = /^\s*(Feature[A-Za-z]+)\s+Feature\s*=\s*"([a-z_]+)"\s*$/.exec(line)
+    if (m?.[1] && m[2]) featureNames.set(m[1], m[2])
+  }
+  const stateValues = new Map<string, string>()
+  for (const m of catalogueSource.matchAll(
+    /^\s*(State[A-Za-z]+)\s+State\s*=\s*"([a-z_]+)"\s*$/gm)) {
+    stateValues.set(m[1]!, m[2]!)
+  }
+  const body = /var catalogue = \[\]Entitlement\{([\s\S]*)\n\}/.exec(catalogueSource)
+  assert.ok(body?.[1], 'no catalogue literal was found in catalogue.go')
+
+  const out = new Map<string, string>()
+  const starts = [...body[1].matchAll(/Feature:\s*license\.(Feature[A-Za-z]+)/g)]
+  for (let i = 0; i < starts.length; i += 1) {
+    const at = starts[i]!.index!
+    const until = i + 1 < starts.length ? starts[i + 1]!.index! : body[1].length
+    const entry = body[1].slice(at, until)
+    const name = featureNames.get(starts[i]![1]!)
+    assert.ok(name, `the catalogue names ${starts[i]![1]}, which is not a Feature constant`)
+    const state = /State:\s*(State[A-Za-z]+)/.exec(entry)
+    assert.ok(state?.[1], `the catalogue entry for ${name} names no State`)
+    const value = stateValues.get(state[1]!)
+    assert.ok(value, `${name} has state ${state[1]}, which is not a State constant`)
+    out.set(name, value)
+  }
+  return out
+}
+
+/** The `ControlPlaneAt` string on one catalogue entry, or null. */
+function goControlPlaneAt(catalogueSource: string, licenseSource: string, feature: string): string | null {
+  const featureConstant = [...licenseSource.matchAll(
+    /^\s*(Feature[A-Za-z]+)\s+Feature\s*=\s*"([a-z_]+)"\s*$/gm)]
+    .find((m) => m[2] === feature)?.[1]
+  assert.ok(featureConstant, `${feature} has no Feature constant`)
+  const body = /var catalogue = \[\]Entitlement\{([\s\S]*)\n\}/.exec(catalogueSource)
+  assert.ok(body?.[1], 'no catalogue literal was found in catalogue.go')
+  const starts = [...body[1].matchAll(/Feature:\s*license\.(Feature[A-Za-z]+)/g)]
+  for (let i = 0; i < starts.length; i += 1) {
+    if (starts[i]![1] !== featureConstant) continue
+    const at = starts[i]!.index!
+    const until = i + 1 < starts.length ? starts[i + 1]!.index! : body[1].length
+    const m = /ControlPlaneAt:\s*"([^"]*)"/.exec(body[1].slice(at, until))
+    return m?.[1] ?? null
+  }
+  return null
+}
+
+const CONTROL_PLANE_GATED = 'control_plane_gated'
+
+describe('the two languages agree about who refuses what', () => {
+  // THE GAP THIS CLOSES, and it had already shipped a false sentence onto the
+  // pricing page by the time it was written.
+  //
+  // Enforcement in this product lives in two languages. The engine gates three
+  // features in Go. The enterprise control plane gates two in TypeScript, in
+  // packages the Go catalogue cannot import and the Go registry cannot see. The
+  // catalogue measured `feature.Enabled` call sites, found none for sso and
+  // scim, and published "it is implemented and no binary loads it, so nobody
+  // has it, paid or not" about two features that ee/web/server mounts and that
+  // answer 402 by name to an unlicensed caller.
+  //
+  // Nothing caught it. The Go side asserts that a non gated entry has no
+  // declared site, and it reads the GO registry, which a TypeScript declare()
+  // never reaches. The checks above compare NAMES across the four copies and
+  // never compare the Go catalogue's STATE claims to this registry. So both
+  // halves were internally consistent and the product's own description of what
+  // a customer gets for their money was wrong, with every gate green.
+  //
+  // This is the comparison neither language could make alone, and it is made
+  // here because this is the only suite that has both: the Go source as text,
+  // and the registry as a live object populated by importing the packages that
+  // do the enforcing.
+  it('every feature declared here is called control plane gated by the Go catalogue', () => {
+    const states = goCatalogueStates(catalogueGo, licenseGo)
+    assert.ok(states.size > 0, 'no catalogue entries were parsed, so this test proves nothing')
+    for (const feature of declared()) {
+      assert.equal(
+        states.get(feature), CONTROL_PLANE_GATED,
+        `${feature} declares an enforcement site in this process and the Go catalogue calls ` +
+          `it ${states.get(feature)}. A feature this control plane refuses by name is being ` +
+          'published as one nobody is refused, which is what the catalogue exists to prevent.',
+      )
+    }
+  })
+
+  it('every feature the Go catalogue calls control plane gated is declared here', () => {
+    // The other direction, and the one a missing import breaks. If a package
+    // stops being imported at the top of this file its declare() never runs,
+    // the registry goes quiet, and a catalogue entry claiming a refusal would
+    // otherwise stand with nothing behind it.
+    const states = goCatalogueStates(catalogueGo, licenseGo)
+    const claimed = [...states.entries()]
+      .filter(([, state]) => state === CONTROL_PLANE_GATED)
+      .map(([feature]) => feature)
+      .sort()
+    assert.ok(
+      claimed.length > 0,
+      'the Go catalogue calls nothing control plane gated, so this direction proves nothing',
+    )
+    assert.deepEqual(
+      claimed, declared(),
+      'the Go catalogue and this registry disagree about which features the control plane ' +
+        'refuses. Either an entry claims a refusal no package declares, or a package ' +
+        'declares one the catalogue has not been told about.',
+    )
+  })
+
+  it('the site the Go catalogue names is one this registry actually declared', () => {
+    // Byte for byte against the registry rather than merely resolvable on
+    // disk. A path that exists and is not the declared site is the same defect
+    // one level down as a state that is right about the feature and wrong about
+    // the file, which is the failure the engine already shipped once.
+    let checked = 0
+    for (const feature of declared()) {
+      const named = goControlPlaneAt(catalogueGo, licenseGo, feature)
+      assert.ok(named, `${feature} is refused here and the Go catalogue names no site for it`)
+      assert.ok(
+        sites(feature).includes(named),
+        `the Go catalogue says ${feature} is refused at ${named} and this registry declared ` +
+          `${JSON.stringify(sites(feature))}. The catalogue is naming a place nothing declared.`,
+      )
+      checked += 1
+    }
+    assert.ok(checked >= 2, `only ${checked} sites were compared, and there are at least two`)
   })
 })
