@@ -1484,13 +1484,24 @@ fuzz-engine seconds="60":
 # refuses a changed path no generator claims, and can do that because it runs
 # on a clean checkout. The property either way is the same: what is generated
 # matches what it is generated from.
+# docsembed runs LAST of these on purpose.
+#
+# It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
+# and six of those pages are themselves generated: errors.md by errgen,
+# lint-findings.md by lintgen, the schemas pages by schemadoc, cli.md by
+# -update-reference, transforms.md by -update-transforms and dashboard.md by
+# -update-frames. Run it before any of those and it embeds the previous
+# wording, so a single pass cannot converge and gendrift refuses a tree where
+# every generator just reported success. Measured rather than reasoned: with
+# docsembed before schemadoc, a one line schema edit left pages.gen.go with a
+# different checksum than a second docsembed produced. After it, the two
+# match.
 _generated:
     #!/usr/bin/env bash
     set -euo pipefail
     go run ./tools/errgen
     go run ./tools/lintgen
     go run ./tools/proxysrc
-    go run ./tools/docsembed
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     (cd engine && go test ./internal/policy -update-vectors)
@@ -1501,6 +1512,7 @@ _generated:
     go run ./tools/eventcheck -freeze .
     (cd engine && go test ./internal/masking -update-transforms)
     (cd engine && go test ./internal/hud -update-frames)
+    go run ./tools/docsembed
     # The OpenAPI artifact is generated too, and its generator is TypeScript
     # rather than Go. Its own --check mode is the comparison, so it is run in
     # the same form and the same directory CI runs it in: a gate is the command
@@ -1566,13 +1578,24 @@ capacityplan cpu memory manifest="antifailure.yaml":
       -node-cpu "{{cpu}}" -node-memory "{{memory}}"
 
 # Regenerate and keep the result.
+# docsembed runs LAST of these on purpose.
+#
+# It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
+# and six of those pages are themselves generated: errors.md by errgen,
+# lint-findings.md by lintgen, the schemas pages by schemadoc, cli.md by
+# -update-reference, transforms.md by -update-transforms and dashboard.md by
+# -update-frames. Run it before any of those and it embeds the previous
+# wording, so a single pass cannot converge and gendrift refuses a tree where
+# every generator just reported success. Measured rather than reasoned: with
+# docsembed before schemadoc, a one line schema edit left pages.gen.go with a
+# different checksum than a second docsembed produced. After it, the two
+# match.
 generate:
     go run ./tools/errgen
     go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
     go run ./tools/proxysrc
-    go run ./tools/docsembed
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
     cd engine && go test ./internal/policy -update-vectors
@@ -1583,6 +1606,7 @@ generate:
     go run ./tools/eventcheck -freeze .
     cd engine && go test ./internal/masking -update-transforms
     cd engine && go test ./internal/hud -update-frames
+    go run ./tools/docsembed
 
 # This machine's own credential store, against the real thing.
 #

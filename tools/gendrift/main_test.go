@@ -212,3 +212,110 @@ func TestTheLocalGateNamesTheDriftedArtifactAndNotYourEdits(t *testing.T) {
 	require.NotContains(t, err.Error(), "engine/internal/env/env.go")
 	require.NotContains(t, err.Error(), "no generator in tools/gendrift")
 }
+
+// The generator that EMBEDS the documentation runs after every generator that
+// WRITES a documentation page.
+//
+// docsembed packs every page under docs/ into
+// engine/internal/docs/pages.gen.go, and six of those pages are themselves
+// generated. Run it before one of them and it embeds the PREVIOUS wording, so
+// a single pass of `just generate` cannot converge: the tree it leaves behind
+// fails gendrift while every generator in it has just reported success. That
+// is the worst shape a gate failure can take, because the obvious reading is
+// that a generated file is corrupt rather than that the recipe is ordered
+// wrong.
+//
+// This is a real ordering that was wrong. docsembed sat sixth, ahead of
+// schemadoc, -update-reference, -update-transforms and -update-frames, and it
+// went unnoticed because it is INVISIBLE until one of those pages actually
+// changes. A lane adding two manifest keys found it.
+//
+// The rule is derived from the ledger rather than written down twice: anything
+// the ledger says writes under docs/ has to come first. So adding a seventh
+// generated page is enough to extend this, and no one has to remember the
+// list.
+func TestDocsembedRunsAfterEveryGeneratorThatWritesADocsPage(t *testing.T) {
+	const embedder = "go run ./tools/docsembed"
+
+	var writers []string
+	for _, g := range ledger {
+		if g.command == embedder {
+			continue
+		}
+		for _, p := range g.paths {
+			if strings.HasPrefix(p, "docs/") {
+				writers = append(writers, g.command)
+				break
+			}
+		}
+	}
+	// A rule with nothing to compare passes for the wrong reason. Six pages
+	// under docs/ are generated today and the ledger is where they are
+	// declared, so finding fewer than that means this test stopped seeing the
+	// thing it exists to order.
+	require.GreaterOrEqual(t, len(writers), 5,
+		"the ledger should name at least five generators writing under docs/, found %d", len(writers))
+
+	body, err := os.ReadFile(filepath.Join("..", "..", "justfile"))
+	require.NoError(t, err)
+
+	for _, recipe := range []string{"generate:", "_generated:"} {
+		t.Run(recipe, func(t *testing.T) {
+			lines := recipeBody(t, string(body), recipe)
+
+			embedAt := -1
+			for i, l := range lines {
+				if strings.Contains(l, embedder) {
+					embedAt = i
+					break
+				}
+			}
+			require.NotEqual(t, -1, embedAt, "%s never runs %s", recipe, embedder)
+
+			found := 0
+			for _, w := range writers {
+				for i, l := range lines {
+					if !strings.Contains(l, w) {
+						continue
+					}
+					found++
+					require.Less(t, i, embedAt,
+						"%s runs %q at line %d of the recipe, after %s at line %d.\n"+
+							"docsembed embeds the page that generator writes, so this pass embeds the previous wording.\n"+
+							"Move %s below every generator that writes under docs/.",
+						recipe, w, i, embedder, embedAt, embedder)
+					break
+				}
+			}
+			require.GreaterOrEqual(t, found, 5,
+				"%s should run at least five of the ledger's docs writers, found %d", recipe, found)
+		})
+	}
+}
+
+// recipeBody returns the indented lines of one justfile recipe.
+func recipeBody(t *testing.T, justfile, header string) []string {
+	t.Helper()
+	all := strings.Split(justfile, "\n")
+	start := -1
+	for i, l := range all {
+		if l == header {
+			start = i + 1
+			break
+		}
+	}
+	require.NotEqual(t, -1, start, "recipe %s not found in the justfile", header)
+
+	var out []string
+	for _, l := range all[start:] {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			break
+		}
+		out = append(out, l)
+	}
+	require.NotEmpty(t, out, "recipe %s is empty", header)
+	return out
+}
