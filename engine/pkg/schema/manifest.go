@@ -233,6 +233,7 @@ const (
 	StorageLocal     GoldenStorage = "local"
 	StorageAzureBlob GoldenStorage = "azure_blob"
 	StorageS3        GoldenStorage = "s3"
+	StorageGCS       GoldenStorage = "gcs"
 )
 
 // Golden configures the masked, verified copy environments branch from.

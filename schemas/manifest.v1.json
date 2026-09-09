@@ -521,7 +521,8 @@
           "enum": [
             "local",
             "azure_blob",
-            "s3"
+            "s3",
+            "gcs"
           ],
           "default": "local",
           "description": "Where dumps and attestations live."

@@ -77,8 +77,48 @@ var hypothetical = regexp.MustCompile(`(?i)\b(when|whenever|if|unless|because|si
 // findings, because the caller reports what was examined. A rule that has
 // stopped matching anything reports zero findings, and zero findings is what a
 // clean tree looks like too.
+// numericFrontmatterScalar is a YAML key whose whole value is a number, in the
+// frontmatter block a content file opens with.
+//
+// It is blanked before the prose is read, and the reason is the sentence
+// splitter rather than the number. A colon ends a sentence here, so
+// "sidebar:\n  order: 2\n---\n\nA database provider is what creates the copy of
+// production" splits into "order:" and then a sentence BEGINNING "2" and
+// carrying the page's subject noun, which is a claim that there are two
+// database providers. Every page in the site sets order next to a heading that
+// names its own subject, so this is a collision the next new page hits too.
+//
+// It blanks the line rather than dropping it, because flatten maps an offset
+// back to a line number by counting lines and a removed line moves every
+// finding below it.
+//
+// Only numeric scalars, and only inside the frontmatter. title and description
+// are prose that this tool must keep reading: the overview page's description
+// says "The five things a build can add without forking the engine", which is
+// a counted claim about a real closed set and a page somebody could get wrong.
+var numericFrontmatterScalar = regexp.MustCompile(`^\s*[A-Za-z_][A-Za-z0-9_-]*:\s*-?[0-9]+(?:\.[0-9]+)?\s*$`)
+
+// blankNumericFrontmatter empties the numeric scalar lines of a leading
+// frontmatter block and leaves everything else, including the line count,
+// exactly as it was.
+func blankNumericFrontmatter(body string) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return body
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			break
+		}
+		if numericFrontmatterScalar.MatchString(lines[i]) {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func checkCounts(name, body string, members map[string][]string, reached map[string]int) []finding {
-	flat, lineAt := flatten(body)
+	flat, lineAt := flatten(blankNumericFrontmatter(body))
 	var out []finding
 	seen := map[string]bool{}
 

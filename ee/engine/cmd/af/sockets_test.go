@@ -188,7 +188,7 @@ func TestEverySocketCanBeImplementedFromOutsideTheEngineModule(t *testing.T) {
 	require.NoError(t, r.Validate(map[string][]string{
 		extension.SocketDatabaseProvider: {"docker", "neon", "supabase", "dblab"},
 		extension.SocketRuntimeProvider:  {"local", "kubernetes"},
-		extension.SocketGoldenStore:      {"local", "azure_blob", "s3"},
+		extension.SocketGoldenStore:      {"local", "azure_blob", "s3", "gcs"},
 	}))
 
 	found, ok := r.DatabaseProviderNamed("outside")

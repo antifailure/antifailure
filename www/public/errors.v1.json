@@ -338,7 +338,7 @@
       "areaName": "Database",
       "message": "The source database at {host} could not be reached.",
       "resolution": "Check that the host is reachable from this machine and that the connection string names the right port.",
-      "docs": "https://antifailure.dev/docs/providers/overview",
+      "docs": "https://antifailure.dev/docs/providers/databases",
       "retryable": true,
       "exitCode": 5,
       "planned": false
@@ -349,7 +349,7 @@
       "areaName": "Database",
       "message": "The source database is Postgres {found}, and this provider supports {supported}.",
       "resolution": "Set database.version to one of {supported} if the source is one of those, or point database.provider at one that handles Postgres {found}. The docker provider builds a golden in the stock postgres image, so it handles every major that image is published for.",
-      "docs": "https://antifailure.dev/docs/providers/overview",
+      "docs": "https://antifailure.dev/docs/providers/databases",
       "retryable": false,
       "exitCode": 3,
       "planned": false
@@ -404,7 +404,7 @@
       "areaName": "Database",
       "message": "The database provider {provider} at {endpoint} rejected the configured credential.",
       "resolution": "Check the value of the variable named by database.api_key_env; the provider answered 401, so the credential reached it and was refused rather than being missing.",
-      "docs": "https://antifailure.dev/docs/providers/overview",
+      "docs": "https://antifailure.dev/docs/providers/databases",
       "retryable": false,
       "exitCode": 4,
       "planned": false
@@ -748,6 +748,17 @@
       "docs": "https://antifailure.dev/docs/enterprise/runtimes",
       "retryable": false,
       "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-EE-012",
+      "area": "EE",
+      "areaName": "Enterprise",
+      "message": "The provider {provider} needs the {feature} feature: {reason}",
+      "resolution": "Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.",
+      "docs": "https://antifailure.dev/docs/enterprise/licensing",
+      "retryable": false,
+      "exitCode": 6,
       "planned": false
     },
     {

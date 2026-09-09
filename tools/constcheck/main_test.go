@@ -128,6 +128,28 @@ func TestHyphenatedNumberIsNotACount(t *testing.T) {
 	}
 }
 
+// A page's sidebar order is configuration and not a claim about the page's
+// subject, which is the false alarm providers/databases.md produced: a colon
+// ends a sentence here, so "order: 2" left a sentence beginning "2" carrying
+// the first noun of the body.
+func TestFrontmatterOrderIsNotACount(t *testing.T) {
+	const frontmatter = "---\ntitle: Lint rules\nsidebar:\n  order: 3\n---\n\n"
+
+	if f := found(t, frontmatter+"A lint rule is what a migration is measured against."); len(f) != 0 {
+		t.Fatalf("a sidebar order was read as a count: %s", f[0].why)
+	}
+	// The guard must not blind the file it appears in. A wrong count in the
+	// body of a page that has frontmatter is still a wrong count.
+	if f := found(t, frontmatter+"There are 3 lint rules."); len(f) != 1 {
+		t.Fatalf("got %d findings, want 1: the frontmatter guard swallowed a count in the body", len(f))
+	}
+	// And only numeric scalars are blanked, because description is prose that
+	// states counts. The overview page's says "The five things a build can add".
+	if f := found(t, "---\ntitle: Lint rules\ndescription: There are 3 lint rules.\n---\n\nBody."); len(f) != 1 {
+		t.Fatalf("got %d findings, want 1: a counted claim in a description went unread", len(f))
+	}
+}
+
 func TestCorrectCountIsSilent(t *testing.T) {
 	for _, text := range []string{
 		"Any of the seventeen migration lint rules.",

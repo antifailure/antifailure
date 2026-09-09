@@ -69,6 +69,20 @@ const (
 	FeatureSupportAccess Feature = "support_access"
 	FeatureCompliance    Feature = "compliance_packs"
 	FeatureAirGapped     Feature = "air_gapped"
+	// FeatureCloudDatabase and FeatureCloudRuntime cover the managed cloud
+	// providers, and the editions rule is what puts them here rather than in
+	// the engine. A provider is licensed when it needs an ORGANIZATION to
+	// exist: an IAM role somebody with authority grants, a billing account
+	// somebody signed for, a network somebody else runs. Every provider a
+	// developer can use with their own account and their own card is built
+	// into the engine and is MIT, which is docker, neon, supabase, dblab and
+	// pgurl for databases and local and kubernetes for runtimes.
+	//
+	// Enforced per call in ee/engine/cloudgate, which refuses creation and
+	// never refuses a teardown, because a lapsed licence that stopped somebody
+	// removing an Aurora cluster would leave them paying for it.
+	FeatureCloudDatabase Feature = "cloud_database"
+	FeatureCloudRuntime  Feature = "cloud_runtime"
 )
 
 // notShipped names every feature that nothing in this product enforces, and
@@ -144,6 +158,7 @@ func AllFeatures() []Feature {
 		FeatureSSO, FeatureSCIM, FeatureRBAC, FeatureAuditStream, FeaturePolicy,
 		FeatureMultiRuntime, FeatureSecrets, FeatureBilling, FeatureDashboard,
 		FeatureSupportAccess, FeatureCompliance, FeatureAirGapped,
+		FeatureCloudDatabase, FeatureCloudRuntime,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out

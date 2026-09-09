@@ -410,7 +410,7 @@ The source database at {host} could not be reached.
 | --- | --- |
 | Exit code | `5` |
 | Retryable | Yes. The engine retries automatically where it can. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-003
 
@@ -422,7 +422,7 @@ The source database is Postgres {found}, and this provider supports {supported}.
 | --- | --- |
 | Exit code | `3` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-004
 
@@ -482,7 +482,7 @@ The database provider {provider} at {endpoint} rejected the configured credentia
 | --- | --- |
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
-| More | [providers/overview](/docs/providers/overview) |
+| More | [providers/databases](/docs/providers/databases) |
 
 ### AF-DB-009
 
@@ -859,6 +859,18 @@ This manifest declares {count} placement targets and {feature} is not licensed h
 | Exit code | `4` |
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
+### AF-EE-012
+
+The provider {provider} needs the {feature} feature: {reason}
+
+**What to do.** Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.
+
+| | |
+| --- | --- |
+| Exit code | `6` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/licensing](/docs/enterprise/licensing) |
 
 ## Extensions
 

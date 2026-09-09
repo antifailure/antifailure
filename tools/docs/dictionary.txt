@@ -6,6 +6,7 @@ antifailure
 autocapture
 autocaptured
 autovacuum
+Backblaze
 blockable
 branchable
 bubbletea
@@ -32,6 +33,7 @@ goldens
 goleak
 gosec
 govulncheck
+hardlinks
 kubeconfig
 kubelet
 llms
@@ -77,6 +79,7 @@ trufflehog
 unfilterable
 unmask
 unmasked
+upsell
 vale
 versionless
 vhs

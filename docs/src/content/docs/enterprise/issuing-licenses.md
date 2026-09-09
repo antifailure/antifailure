@@ -96,9 +96,10 @@ A JSON file describing what was bought.
 | `grace_days` | How long after expiry features keep working. Defaults to 14. |
 | `trial` | Marks an evaluation license, which shows a banner. |
 
-The features are `air_gapped`, `audit_stream`, `billing`, `compliance_packs`,
-`enterprise_dashboard`, `enterprise_secrets`, `multi_runtime`,
-`policy_enforcement`, `rbac`, `scim`, `sso` and `support_access`. Anything else
+The features are `air_gapped`, `audit_stream`, `billing`, `cloud_database`,
+`cloud_runtime`, `compliance_packs`, `enterprise_dashboard`,
+`enterprise_secrets`, `multi_runtime`, `policy_enforcement`, `rbac`, `scim`,
+`sso` and `support_access`. Anything else
 is refused at issue time, because the verifier cannot refuse it: a license
 issued for a newer release names features an older binary has never heard of,
 and rejecting the whole license over one unknown name would take away the
