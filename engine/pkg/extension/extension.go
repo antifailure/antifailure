@@ -538,10 +538,13 @@ type EmulatorContainer struct {
 	// fsouza/fake-gcs-server carries the entrypoint /bin/fake-gcs-server
 	// -data /data and gcr.io/cloud-spanner-emulator/emulator carries the
 	// command ./gateway_main --hostname 0.0.0.0, so a command on either
-	// replaces a working entrypoint. All three read out of the registry by
-	// L3.3 rather than taken from documentation. And Azurite binds to loopback unless it is told otherwise, and
-	// an emulator listening on 127.0.0.1 answers nothing from the sidecar
-	// while looking perfectly healthy in its own logs.
+	// replaces a working entrypoint. All three were read out of the registry
+	// rather than taken from documentation.
+	//
+	// Azurite needs a command for a smaller reason with the same shape: it
+	// binds to loopback unless it is told otherwise, and an emulator
+	// listening on 127.0.0.1 answers nothing from the sidecar while looking
+	// perfectly healthy in its own logs.
 	//
 	// LocalStack is the reason neither of those was noticed first: it is one
 	// image whose entrypoint is the emulator, so it needs none of this. One
