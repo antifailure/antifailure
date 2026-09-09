@@ -44,14 +44,29 @@ const emulatorPort = 8080
 // refusal and no error page could contain.
 const emulatorBody = "AF-EMULATOR-ANSWERED-ListBucketResult"
 
-// emulatorCommand serves one fixed answer with busybox httpd.
+// emulatorCommand serves one fixed answer with busybox nc.
 //
 // A stand-in rather than LocalStack, because this lane builds the routing and
 // the Wave 3 lanes supply the emulators. What is being measured is the path,
 // and a path that carries this carries anything.
+//
+// nc rather than httpd, and the reason is measured rather than assumed:
+// alpine's busybox is built WITHOUT the httpd applet. `command -v httpd` in
+// alpine:3.20 answers nothing while `command -v wget` answers /usr/bin/wget,
+// which is how the first version of this file came to rely on one and reach
+// for the other. The shell then exits at "httpd: not found", the container
+// stops, nothing is listening on the port, and the sidecar answers 502. That
+// failure arrives looking exactly like broken routing, and this test said so
+// in as many words while the routing was fine.
+//
+// apk add busybox-extras is not the alternative it looks like. An emulator
+// joins the inner network and nothing else, deliberately, so it has no route
+// out and cannot fetch a package. A stand-in that needed the network to start
+// would be testing the opposite of the containment this mode promises.
 var emulatorCommand = []string{"/bin/sh", "-c", fmt.Sprintf(
-	"mkdir -p /www && printf '%%s' '%s' > /www/index.html && httpd -f -p %d -h /www",
-	emulatorBody, emulatorPort)}
+	"while true; do printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"+
+		"Content-Length: %d\r\nConnection: close\r\n\r\n%s' | nc -l -p %d; done",
+	len(emulatorBody), emulatorBody, emulatorPort)}
 
 // theApplication is the unmodified application, built once.
 //
@@ -113,9 +128,18 @@ func TestEmulate_TheSameApplicationReachesTheEmulatorAndIsRefusedWithoutIt(t *te
 	})
 	require.NoError(t, err)
 	withOut := waitForAppOutput(t, ctx, r, withID)
-	require.Contains(t, withOut, emulatorBody,
-		"the application did not reach the emulator. It was not changed between the two "+
-			"runs, so this is the routing and not the application.\n%s", withOut)
+	if !strings.Contains(withOut, emulatorBody) {
+		// The sidecar's words, because the application cannot carry them.
+		// busybox wget prints "server returned error" and DISCARDS the body on
+		// a non-200, and the body is the only place the sidecar says which
+		// failure this is: an emulator this environment is not running, or one
+		// it is running but could not reach. Those are different bugs in
+		// different files and they were the same three words on the terminal.
+		t.Fatalf("the application did not reach the emulator. It is identical in both "+
+			"runs, so the difference is in the environment, and the sidecar below says "+
+			"where.\napplication:\n%s\nsidecar:\n%s",
+			withOut, sidecarLog(t, ctx, r, withID))
+	}
 
 	// THE MEASUREMENT. Everything the application is, compared between the two
 	// runs. Equal means the number is zero.
@@ -136,6 +160,24 @@ func TestEmulate_TheSameApplicationReachesTheEmulatorAndIsRefusedWithoutIt(t *te
 	require.Empty(t, withApp.Env,
 		"the application is given %d variables; the claim is that it needs none",
 		len(withApp.Env))
+}
+
+// sidecarLog is what the sidecar said, for a failure the application cannot
+// explain. Empty rather than fatal when it cannot be read, because it is a
+// diagnostic on a path that has already failed and a second failure here would
+// replace the first one's message with its own.
+func sidecarLog(t *testing.T, ctx context.Context, r *local.Runtime, id string) string {
+	t.Helper()
+	lines, err := r.Logs(ctx, id, local.ProxyAlias, 200)
+	if err != nil {
+		return "could not be read: " + err.Error()
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l.Text)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // waitForAppOutput reads the application's log until it says it finished.
