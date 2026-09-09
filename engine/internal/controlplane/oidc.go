@@ -38,6 +38,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // WorkflowAudience is the audience a workflow has to ask for.
@@ -117,7 +119,7 @@ func TokenFromWorkflowIdentity(ctx context.Context, opts WorkflowIdentityOptions
 		// Bounded on purpose. This runs on the path that brings an environment
 		// up, and a control plane that accepts a connection and then never
 		// answers must not hold a build open indefinitely.
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = airgap.Client(airgap.SiteControlPlaneID, 30*time.Second)
 	}
 
 	identity, err := requestWorkflowIdentity(ctx, opts.Lookup, httpClient)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // The ClickHouse the engine runs when a manifest names no server, which is the
@@ -243,6 +244,9 @@ func createLocalServer(
 func ensureImage(ctx context.Context, cli *dockerclient.Client, ref string) error {
 	if _, err := cli.ImageInspect(ctx, ref); err == nil {
 		return nil
+	}
+	if err := airgap.CheckImage(airgap.SiteImagePull, ref); err != nil {
+		return fmt.Errorf("datastore.clickhouse: %s is not present locally and cannot be pulled: %w", ref, err)
 	}
 	rc, err := cli.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {

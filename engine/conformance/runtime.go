@@ -13,6 +13,7 @@ import (
 	"time"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
@@ -1794,10 +1795,15 @@ func (h *rtHarness) logsReturnWhatAServiceWrote(ctx context.Context) {
 // behaviour passed and the package still failed, which is a confusing way to
 // learn that a test helper left a socket open.
 func shortLivedClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: &http.Transport{DisableKeepAlives: true},
-	}
+	t := airgap.Transport(airgap.SiteConformance)
+	t.DisableKeepAlives = true
+	// And HTTP/2 off with it. airgap.Transport clones the standard library's
+	// default, which attempts h2 over TLS, and an h2 connection keeps its own
+	// goroutines regardless of DisableKeepAlives. That is the exact leak the
+	// paragraph above is about, so the clone's one inherited difference from
+	// the transport this replaced is undone here rather than discovered later.
+	t.ForceAttemptHTTP2 = false
+	return &http.Client{Timeout: timeout, Transport: t}
 }
 
 // requireInternet skips when this machine cannot reach what an egress behavior

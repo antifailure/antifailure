@@ -48,6 +48,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -150,7 +151,7 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 		sleep:  cfg.sleep,
 	}
 	if w.client == nil {
-		w.client = &http.Client{Timeout: webhookTimeout}
+		w.client = airgap.Client(airgap.SiteAuditSink, webhookTimeout)
 	}
 	if w.sleep == nil {
 		w.sleep = time.Sleep

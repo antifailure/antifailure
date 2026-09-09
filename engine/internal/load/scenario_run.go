@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/clock"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // ScenarioRun is one scenario and how much of it to run.
@@ -142,26 +143,31 @@ func RunScenarios(ctx context.Context, opts ScenarioOptions) ([]ScenarioResult, 
 		plans[i] = PlanScenario(run.Scenario, run.Sessions, run.Iterations, opts.Seed, run.StartAfter)
 	}
 
+	transport := airgap.Transport(airgap.SiteLoadTest)
+	transport.MaxIdleConnsPerHost = opts.Concurrency
+	// Compression off, so the numbers measure the application rather than the
+	// transport's ability to compress its output.
+	transport.DisableCompression = true
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		// A response cannot authorize traffic outside the selected safe route.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			MaxIdleConnsPerHost: opts.Concurrency,
-			// Compression off, so the numbers measure the application rather
-			// than the transport's ability to compress its output.
-			DisableCompression: true,
-		},
+		Transport:     transport,
 	}
 
 	// A finished run does not keep its sockets. Both transports here are
-	// private to the run and set no IdleConnTimeout, so every keep alive
-	// connection the run opened stays open after the last request, with its
-	// readLoop and writeLoop goroutines still parked on it. In production that
-	// is a run holding file descriptors it no longer uses. In the tests it is
-	// why this package goes red at random: `goleak.VerifyTestMain` in
-	// goleak_test.go sees those two goroutines per connection and cannot know
-	// they are idle.
+	// private to the run, so every keep alive connection the run opened stays
+	// open after the last request, with its readLoop and writeLoop goroutines
+	// still parked on it. In production that is a run holding file descriptors
+	// it no longer uses. In the tests it is why this package goes red at
+	// random: `goleak.VerifyTestMain` in goleak_test.go sees those two
+	// goroutines per connection and cannot know they are idle.
+	//
+	// The transport now comes from airgap.Transport, which clones the standard
+	// library's default and therefore does carry a 90 second IdleConnTimeout
+	// where the hand built transport this replaced carried none. That shortens
+	// the window rather than closing it, and 90 seconds is long after a run has
+	// returned, so the explicit close below stays.
 	//
 	// WHAT IS PROVEN AND WHAT IS NOT. Proven: the CI failure is
 	// nondeterministic rather than caused by the commit it appeared on. The

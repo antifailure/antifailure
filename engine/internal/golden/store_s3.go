@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // s3Store keeps goldens in an S3 bucket, or in anything that speaks the same
@@ -55,7 +57,7 @@ func newS3Store(raw string, getenv func(string) string) (Store, error) {
 	}
 
 	s := &s3Store{
-		client:    &http.Client{Timeout: 30 * time.Minute},
+		client:    airgap.Client(airgap.SiteGoldenS3, 30*time.Minute),
 		accessKey: getenv("AWS_ACCESS_KEY_ID"),
 		secretKey: getenv("AWS_SECRET_ACCESS_KEY"),
 		session:   getenv("AWS_SESSION_TOKEN"),

@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/antifailure/antifailure/ee/engine/airgapped"
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
@@ -68,6 +69,27 @@ func main() {
 	// licence, and the command needs rendered text it can print without
 	// importing any enterprise code.
 	ctx = edition.With(ctx, describe(status))
+
+	// The air gap is sealed FIRST, before anything else registers and before
+	// any command runs, because everything below this line can open a
+	// connection: a secret source reaches its store at startup to report
+	// whether it is usable, and the policy file could name a host. A seal
+	// applied after them would be a seal with a hole in it exactly at the
+	// moment nobody is watching, which is the shape of every failure this
+	// feature exists to prevent.
+	//
+	// It exits rather than warning. AF_AIR_GAPPED set without a licence for it
+	// would otherwise produce an installation that reaches the internet while
+	// its operator believes it does not, and the belief is the part that does
+	// the damage.
+	if _, notes, err := airgapped.RegisterFromEnvironment(ctx, extension.Default, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "af: %v\n", err)
+		os.Exit(3)
+	} else {
+		for _, note := range notes {
+			fmt.Fprintf(os.Stderr, "af: %s\n", note)
+		}
+	}
 
 	registered, err := secrets.RegisterFromEnvironment(extension.Default, os.Getenv)
 	if err != nil {

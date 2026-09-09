@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // client talks to one ClickHouse over its HTTP interface.
@@ -89,7 +90,7 @@ func parseURL(v secrets.Value) (*client, error) {
 		user:     u.User.Username(),
 		password: password,
 		database: db,
-		http:     &http.Client{Timeout: defaultHTTPTimeout},
+		http:     airgap.Client(airgap.SiteClickHouse, defaultHTTPTimeout),
 	}, nil
 }
 

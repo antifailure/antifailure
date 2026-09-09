@@ -193,13 +193,6 @@ var unenforced = map[Feature]string{
 		"one, no loader reads one. Gating it would declare an enforcement site that " +
 		"never runs, which is why it is recorded here instead. Building it means a " +
 		"table, a route and a loader, and then a real site to declare.",
-	FeatureAirGapped: "Air gapped operation is not gated and cannot usefully be. " +
-		"Licence verification is a signature check against keys stamped into the " +
-		"binary, so it needs no network for any installation, licensed or not, and " +
-		"tools/proxysrc exists so that an air gapped user needs no release either. No " +
-		"code path behaves differently when this is granted, so selling it sells " +
-		"something every installation already has. Building it means deciding what an " +
-		"air gapped MODE would refuse that the ordinary one permits, and gating that.",
 }
 
 // Unenforced reports whether this build ships a feature and gates it nowhere.

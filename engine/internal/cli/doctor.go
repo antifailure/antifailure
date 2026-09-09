@@ -22,6 +22,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/state"
 
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // CheckStatus is the outcome of one doctor check.
@@ -103,14 +104,16 @@ func (p systemProber) DockerInfo(ctx context.Context) (string, string, error) {
 }
 
 func (p systemProber) DialTimeout(network, address string, timeout time.Duration) error {
-	c, err := net.DialTimeout(network, address, timeout)
+	c, err := airgap.Dial(airgap.SiteDoctor, network, address, timeout)
 	if err != nil {
 		return err
 	}
 	return c.Close()
 }
 
-func (p systemProber) LookupHost(host string) ([]string, error) { return net.LookupHost(host) }
+func (p systemProber) LookupHost(host string) ([]string, error) {
+	return airgap.LookupHost(airgap.SiteDoctor, host)
+}
 
 func (p systemProber) ListenTCP(port int) error {
 	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))

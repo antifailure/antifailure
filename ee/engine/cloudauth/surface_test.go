@@ -54,15 +54,17 @@ func TestTheCredentialPathCarriesNoVendorSDK(t *testing.T) {
 		for _, spec := range parsed.Imports {
 			path := strings.Trim(spec.Path.Value, `"`)
 			imports++
-			if strings.Contains(strings.Split(path, "/")[0], ".") {
-				foreign = append(foreign, name+" imports "+path)
+			if permittedImport(path) {
+				continue
 			}
+			foreign = append(foreign, name+" imports "+path)
 		}
 	}
 
 	require.NotZero(t, files, "no source files were read, so nothing was checked")
-	require.Empty(t, foreign, "the credential path must be standard library only")
-	t.Logf("credential path: %d files, %d imports, %d outside the standard library",
+	require.Empty(t, foreign,
+		"the credential path carries the standard library and engine/pkg, and nothing else")
+	t.Logf("credential path: %d files, %d imports, %d outside what is permitted",
 		files, imports, len(foreign))
 }
 
@@ -156,4 +158,56 @@ func markerIsInThisPackage(t *testing.T, marker string) bool {
 		}
 	}
 	return false
+}
+
+// permittedImport reports whether the credential path may import this path.
+//
+// The standard library, whose first path segment has no dot because a module
+// path begins with a domain, plus one first party exception that is narrow on
+// purpose: engine/pkg, which is the socket surface the enterprise module is
+// built on top of, and nothing else.
+//
+// The exception was added when the air gapped mode routed this client through
+// engine/pkg/airgap so that a sealed installation refuses a call to
+// sts.amazonaws.com instead of making it. Refusing that import would have left
+// the one client holding every cloud credential as the only unguarded outbound
+// path in the product, which is worse than what this test was written to stop.
+//
+// THE NUMBER THIS TEST PUBLISHES IS UNCHANGED: zero vendor SDKs in the
+// credential path, and engine/pkg is not a vendor SDK. The assertion's message
+// used to say "standard library only", which was stricter than the lane's own
+// claim and stricter than this test's name. Everything else outside the
+// standard library is still refused, including every other part of this
+// repository, so reaching into engine/internal or into another ee package from
+// here still fails.
+func permittedImport(path string) bool {
+	if !strings.Contains(strings.Split(path, "/")[0], ".") {
+		return true
+	}
+	return strings.HasPrefix(path, "github.com/antifailure/antifailure/engine/pkg/")
+}
+
+// TestTheImportRuleStillRefusesWhatItWasWrittenFor points the decision at the
+// paths that must fail, because a rule loosened to admit one import is a rule
+// that has to be shown still refusing the rest.
+func TestTheImportRuleStillRefusesWhatItWasWrittenFor(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"context", "encoding/json", "net/http", "crypto/hmac",
+		"github.com/antifailure/antifailure/engine/pkg/airgap",
+		"github.com/antifailure/antifailure/engine/pkg/secret",
+	} {
+		require.Truef(t, permittedImport(path), "%s is permitted here", path)
+	}
+	for _, path := range []string{
+		"github.com/aws/aws-sdk-go-v2/service/sts",
+		"cloud.google.com/go/storage",
+		"github.com/Azure/azure-sdk-for-go/sdk/azidentity",
+		"github.com/antifailure/antifailure/engine/internal/secrets",
+		"github.com/antifailure/antifailure/ee/engine/license",
+		"github.com/stretchr/testify/require",
+	} {
+		require.Falsef(t, permittedImport(path),
+			"%s must still be refused in the credential path", path)
+	}
 }

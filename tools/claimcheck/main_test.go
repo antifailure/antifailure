@@ -31,6 +31,9 @@ func TestIgnoresThingsThatAreNotPaths(t *testing.T) {
 		"clock.Clock",                  // a Go identifier with no path separator
 		"any",                          // a bare word
 		"",                             // nothing
+		"10.0.0.0/8",                   // a CIDR, which the air gapped page names
+		"192.168.0.0/16",               // and another, so the rule is not one address
+		"::1/128",                      // rejected earlier for its colons, asserted here anyway
 	} {
 		if looksLikeAPath(tok) {
 			t.Errorf("%q should not be treated as a path claim", tok)

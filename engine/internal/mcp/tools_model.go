@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/controlplane"
 	"github.com/antifailure/antifailure/engine/internal/model"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -488,7 +488,7 @@ func (f *orchestratorFactory) probeModel(
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	result := model.Probe(ctx, &http.Client{Timeout: timeout}, *cfg, f.cfg.Clock.Now)
+	result := model.Probe(ctx, airgap.Client(airgap.SiteModelProbe, timeout), *cfg, f.cfg.Clock.Now)
 	// Detail is the provider's own words about a key it just rejected, which
 	// is the one place in this file most likely to quote the key back. The
 	// model package already removes it; this is what still holds if it stops.

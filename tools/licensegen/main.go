@@ -183,18 +183,24 @@ var notShipped = []string{
 // A WARNING RATHER THAN A REFUSAL, and the difference from notShipped above is
 // the whole point of having a separate list. Those two names have nothing
 // behind them and never have, so signing one is selling nothing and is refused
-// outright. These two name capabilities that are real: the custom roles library
-// is written and tested, and air gapped operation is a property every
-// installation already has. Refusing to sell them would be refusing a customer
+// outright. This one names a capability that is real: the custom roles library
+// is written and tested. Refusing to sell it would be refusing a customer
 // something they can have. What is wrong is only that the licence is not what
 // makes it so, and the person who needs to know that is the one issuing the
 // key, before they answer a question about it.
+//
+// air_gapped was the second entry here until the mode was built. It was listed
+// on the grounds that air gapped operation was a property every installation
+// already had, which was true while nothing refused anything: licence
+// verification needs no network for any installation, so a licence granting it
+// changed no behaviour. There is now a mode that refuses, so the entry would
+// have told whoever issues a key that they were selling something the customer
+// already had.
 //
 // So this prints and does not stop. A refusal here would be overridden within a
 // week by whoever had already promised it, and an override flag is a refusal
 // that has agreed in advance to be ignored.
 var unenforced = []string{
-	"air_gapped",
 	"rbac",
 }
 

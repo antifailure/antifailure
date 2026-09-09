@@ -30,6 +30,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // Outcome is what a probe found.
@@ -83,7 +85,7 @@ func (r Result) OK() bool { return r.Outcome == OutcomeOK }
 // key that was revoked this morning passes every shape check there is.
 func Probe(ctx context.Context, client *http.Client, cfg Config, now func() time.Time) Result {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = airgap.Client(airgap.SiteModelProbe, 30*time.Second)
 	}
 
 	body, err := json.Marshal(requestFor(cfg))

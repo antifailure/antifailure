@@ -44,6 +44,15 @@ type EnvironmentRequest struct {
 	EgressHosts []string
 	// EgressModes is the mode each host is permitted in, keyed by host.
 	EgressModes map[string]string
+	// EgressDefault is the mode a host with no rule gets. Empty means block.
+	//
+	// Separate from EgressModes, and its absence was a hole rather than a
+	// simplification. A manifest can reach the whole internet with no rules at
+	// all: `egress: {default: allow}` and an empty rule list is valid, the
+	// validator only warns about it, and a hook reading only EgressModes sees
+	// an empty map and finds nothing to refuse. The organization policy's
+	// allowed_modes rule had the same blind spot.
+	EgressDefault string
 	// Provider is the database provider the environment will use.
 	Provider string
 	// Region is where it will run, when the runtime reports one.

@@ -222,9 +222,16 @@ func TestUnenforcedMatchesTheVerifier(t *testing.T) {
 // hidden by the loud one passing.
 func TestTheReceiptWarnsAboutAFeatureNothingGates(t *testing.T) {
 	// Named, so the reason reaches whoever reads the receipt.
-	warning := warnUnenforced([]string{"sso", "air_gapped"})
-	if !strings.Contains(warning, "air_gapped") {
-		t.Errorf("a licence naming air_gapped produced no warning naming it: %q", warning)
+	//
+	// rbac rather than air_gapped. This fixture named air_gapped until the air
+	// gapped mode was built and the feature left the unenforced list, at which
+	// point the test failed for the best possible reason: the thing it was
+	// asserting nobody gated had been gated. The fixture has to be a feature
+	// that is genuinely still unenforced or the test asserts nothing, so it
+	// follows the list rather than naming a feature of its own.
+	warning := warnUnenforced([]string{"sso", "rbac"})
+	if !strings.Contains(warning, "rbac") {
+		t.Errorf("a licence naming rbac produced no warning naming it: %q", warning)
 	}
 	if !strings.Contains(warning, "gates nowhere") {
 		t.Errorf("the warning does not say what is wrong: %q", warning)

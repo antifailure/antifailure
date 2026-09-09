@@ -16,6 +16,8 @@ package main_test
 // was already there.
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -24,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -168,4 +171,101 @@ func TestAnUnreadablePolicyStopsTheBinary(t *testing.T) {
 	require.ErrorAs(t, err, &exit)
 	require.Equal(t, 3, exit.ExitCode())
 	require.Contains(t, stderr.String(), "AF_ORG_POLICY_FILE")
+}
+
+// mintLicence signs a licence the way tools/licensegen does and returns the
+// token together with the environment that makes this binary trust it.
+//
+// It builds the wire form rather than calling a helper, for the same reason the
+// licence package's own tests do: the thing being exercised is what the binary
+// parses, and a convenient shape would prove the binary parses that instead.
+func mintLicence(t *testing.T, features ...string) map[string]string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+
+	f := make([]string, 0, len(features))
+	f = append(f, features...)
+	claims := map[string]any{
+		"id": "lic-airgap", "org": "acme", "plan": "enterprise",
+		"features":   f,
+		"issued_at":  time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+		"expires_at": time.Now().AddDate(1, 0, 0).UTC().Format(time.RFC3339),
+		"kid":        "k1",
+	}
+	payload, err := json.Marshal(claims)
+	require.NoError(t, err)
+	token := "aflic_" + base64.RawURLEncoding.EncodeToString(payload) +
+		"." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload))
+
+	return map[string]string{
+		"AF_LICENSE_KEY":         token,
+		"AF_ORG":                 "acme",
+		"AF_LICENSE_PUBLIC_KEYS": "k1=" + base64.RawURLEncoding.EncodeToString(pub),
+	}
+}
+
+// The refusal that is the whole safety property of the mode.
+//
+// An operator who sets AF_AIR_GAPPED on an installation whose licence does not
+// include the feature must not get a running engine with the network open. The
+// belief is what does the damage, so the binary stops instead. Tested here
+// rather than only in the package, because what was missing everywhere else in
+// this directory was a line in main, and a package test would have been written
+// against the function that was already there.
+func TestTheBinaryRefusesToStartAirGappedWithoutTheLicence(t *testing.T) {
+	t.Parallel()
+	cmd := exec.Command(enterpriseBinary(t), "--help")
+	cmd.Env = append(os.Environ(), "GOWORK=off", "AF_AIR_GAPPED=1")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit,
+		"the binary started with the network open while its configuration asked for an air gap")
+	require.Equal(t, 3, exit.ExitCode())
+	require.Contains(t, stderr.String(), "air_gapped")
+	require.Contains(t, stderr.String(), "believing it was sealed")
+}
+
+func TestTheBinarySealsItselfWhenTheLicenceAllowsIt(t *testing.T) {
+	t.Parallel()
+	env := mintLicence(t, "air_gapped")
+	env["AF_AIR_GAPPED"] = "1"
+	env["AF_AIR_GAPPED_ALLOW"] = "registry.internal:5000"
+
+	out := run(t, env, "--help")
+	require.Contains(t, out, "air gapped: nothing outside the operator's own network is reachable",
+		"the enterprise binary started without saying the air gap was in force")
+	require.Contains(t, out, "registry.internal:5000",
+		"an operator needs to see what their own allow list resolved to, not just that one exists")
+}
+
+func TestWithoutTheVariableTheBinarySaysNothingAboutAnAirGap(t *testing.T) {
+	t.Parallel()
+	out := run(t, mintLicence(t, "air_gapped"), "--help")
+	require.NotContains(t, out, "air gapped",
+		"a banner on every invocation is a banner people stop reading")
+}
+
+func TestAnAirGapAllowListWithATypoStopsTheBinary(t *testing.T) {
+	t.Parallel()
+	env := mintLicence(t, "air_gapped")
+	env["AF_AIR_GAPPED"] = "1"
+	env["AF_AIR_GAPPED_ALLOW"] = "https://registry.internal/v2/"
+
+	cmd := exec.Command(enterpriseBinary(t), "--help")
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit,
+		"an allow list entry that can never match must not be accepted in silence")
+	require.Equal(t, 3, exit.ExitCode())
 }
