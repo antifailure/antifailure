@@ -175,6 +175,8 @@ func main() {
 		// facts and only one of them is visible from the receiving end.
 		fmt.Fprintf(os.Stderr, "af: audit sink: configured, and audit_stream is not licensed "+
 			"on this installation, so nothing is forwarded\n")
+	}
+
 	// The licence gate on the managed cloud providers, and it goes LAST,
 	// after every registration above, because it wraps what is registered at
 	// the moment it runs and cannot see a registration made after it. Every
