@@ -373,23 +373,41 @@ func (s *Sidecar) decide(req *http.Request) (*http.Response, error) {
 	return client.Do(out)
 }
 
-// refusal is what a host outside the surface gets.
+// refusal is what a host outside the surface gets, and it is the shape the
+// SHIPPED sidecar already writes rather than a better one invented here.
 //
-// AWS's own error shape, which is XML with a Code and a Message, because the
-// SDK making the call parses that shape and an application's error handling is
-// written against it. A refusal that arrives as an HTML error page or a bare
-// connection reset is a refusal the application reports as something else.
+// engine/cmd/af-proxy/transparent.go answers a blocked host with 403,
+// text/plain, an X-Antifailure-Decision header and a sentence a person can
+// read in a stack trace. This mirrors that, because a stand in whose refusal
+// is nicer than the real one is a stand in that proves the wrong thing.
+//
+// It used to write AWS's XML error shape, on the reasoning that the SDK
+// parses that and an application's error handling is written against it. The
+// reasoning was right and the premise was false: AWS HAS NO SINGLE ERROR
+// SHAPE. S3 and the Query services are XML with a Code and a Message; Lambda,
+// DynamoDB, Kinesis, Secrets Manager and Parameter Store are JSON, with the
+// code in an x-amzn-errortype header. Measured on 2026-09-09 in CI, the first
+// run of this suite anywhere: the Go SDK's Lambda client received the XML and
+// reported `deserialization failed, failed to decode response body, invalid
+// character '<' looking for beginning of value`, which is precisely the "a
+// refusal the application reports as something else" the old comment set out
+// to avoid. One shape cannot serve both halves of AWS, and choosing per host
+// would mean this stand in carrying a protocol table for services it
+// deliberately does not know about.
+//
+// So it refuses the way the engine refuses. The guarantee that survives is
+// the one the guide states: an uncovered host is not answered, and it does
+// not reach the emulator.
 func refusal(req *http.Request) *http.Response {
-	body := `<?xml version="1.0" encoding="UTF-8"?>
-<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code>` +
-		`<Message>` + req.Host + ` is outside the emulated AWS surface, so this ` +
-		`environment refuses it rather than answering it.</Message></Error></ErrorResponse>`
+	body := req.Host + " is outside the emulated AWS surface, so this environment " +
+		"refuses it rather than answering it.\n"
 	return &http.Response{
 		StatusCode: http.StatusForbidden,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1, ProtoMinor: 1,
 		Header: http.Header{
-			"Content-Type": []string{"text/xml"},
+			"Content-Type":           []string{"text/plain; charset=utf-8"},
+			"X-Antifailure-Decision": []string{"block"},
 		},
 		Body:          io.NopCloser(strings.NewReader(body)),
 		ContentLength: int64(len(body)),

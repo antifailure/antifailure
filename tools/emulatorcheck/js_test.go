@@ -185,6 +185,24 @@ func installNodeModules(t *testing.T, dir string) {
 	}
 	cmd := exec.Command("npm", "ci", "--no-audit", "--no-fund")
 	cmd.Dir = dir
+	// Without the environment the SDK suite installed. TestMain sets
+	// HTTPS_PROXY, HTTP_PROXY and AWS_CA_BUNDLE with os.Setenv, process wide,
+	// deliberately, because that is what an environment does to a process it
+	// runs. npm is not that process. It is a build tool on the HOST, fetching
+	// from the public registry, and inheriting those variables sent it through
+	// the sidecar, which terminates TLS with an authority it minted for itself.
+	// Measured in CI on 2026-09-09, the first run of this suite anywhere:
+	// `npm error code SELF_SIGNED_CERT_IN_CHAIN ... request to
+	// https://registry.npmjs.org/strnum/-/strnum-2.4.2.tgz failed`.
+	//
+	// The general shape is worth more than the fix. An environment built for
+	// the code under test is not a global, and a process wide os.Setenv makes
+	// it one for every tool the test shells out to afterwards. Anything the
+	// harness runs that is NOT the application has to be handed an environment
+	// explicitly.
+	cmd.Env = withoutEnvironment(os.Environ(),
+		"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+		"AWS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "installing the JavaScript SDK: %s", out)
 }
@@ -268,4 +286,24 @@ func mustRun(t *testing.T, name string, args ...string) string {
 func tryRun(t *testing.T, name string, args ...string) {
 	t.Helper()
 	_ = exec.Command(name, args...).Run()
+}
+
+// withoutEnvironment returns env with the named variables removed.
+//
+// By exact name rather than by prefix, so that removing the proxy settings
+// cannot quietly remove something else a future reader added beside them.
+func withoutEnvironment(env []string, drop ...string) []string {
+	unwanted := make(map[string]bool, len(drop))
+	for _, k := range drop {
+		unwanted[k] = true
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, found := strings.Cut(kv, "=")
+		if found && unwanted[name] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

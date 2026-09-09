@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dynamodbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -33,7 +35,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/antifailure/antifailure/tools/emulatorcheck"
@@ -349,17 +350,39 @@ func TestSSM_ReadsBackAParameterItWrote(t *testing.T) {
 
 // The half that decides whether any of the above is worth anything. An
 // emulator that answers everything is as useless as one that refuses
-// everything, and a service outside the declared surface has to be refused in
-// a shape the SDK's own error handling understands.
-func TestLambda_IsOutsideTheSurfaceAndIsRefusedInAWSsOwnErrorShape(t *testing.T) {
+// everything.
+//
+// What this asserts is deliberately narrower than what an earlier version of
+// it asserted, and the narrowing is the finding. It used to require the
+// refusal to arrive as a smithy.APIError with the code AccessDenied, on the
+// reasoning that a refusal an application cannot parse is a refusal it reports
+// as something else. That reasoning is right; the premise underneath it was
+// not. AWS has no single error shape, Lambda is JSON where S3 is XML, and the
+// first CI run of this suite proved it by having the SDK fail to deserialise
+// the XML rather than surface an AccessDenied. The shipped sidecar does not
+// write an AWS error shape either: it answers 403 text/plain with an
+// X-Antifailure-Decision header, and this stand in now does the same.
+//
+// So the guarantee under test is the one that is actually true and actually
+// load bearing: the call FAILS, it fails with 403 rather than with anything
+// that could be mistaken for a service answer, and it never reached the
+// emulator. Whether an application can pattern match the error code is a
+// separate question about the shipped sidecar, and asserting it here against a
+// shape this file invented would have been a test of its own fixture.
+func TestLambda_IsOutsideTheSurfaceAndIsRefusedRatherThanAnswered(t *testing.T) {
 	c := lambda.NewFromConfig(live.cfg)
 	_, err := c.ListFunctions(ctx(t), &lambda.ListFunctionsInput{})
 	require.Error(t, err, "Lambda is outside the surface and must not be answered")
 
-	var api smithy.APIError
-	require.True(t, errors.As(err, &api),
-		"the refusal did not arrive as an API error the SDK could parse: %v", err)
-	require.Equal(t, "AccessDenied", api.ErrorCode())
+	// 403 and not merely "an error". A connection reset, a DNS failure or a
+	// timeout would also satisfy require.Error, and none of them would show
+	// that anything decided anything. The status is what says a refusal
+	// happened.
+	var status *awshttp.ResponseError
+	require.True(t, errors.As(err, &status),
+		"the refusal did not arrive as an HTTP response the SDK could report: %v", err)
+	require.Equal(t, http.StatusForbidden, status.HTTPStatusCode(),
+		"an uncovered host answered something other than a refusal")
 
 	for _, o := range live.sidecar.Observed() {
 		if strings.HasPrefix(o.Host, "lambda.") {

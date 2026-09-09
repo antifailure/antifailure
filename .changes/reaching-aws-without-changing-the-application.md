@@ -21,8 +21,9 @@ The AWS SDK for JavaScript reads no proxy variable at all, so it is driven the
 other way, through DNS on an internal Docker network, which is the mechanism
 that does not depend on a library choosing to honour a variable. Neither
 application names an endpoint. An AWS host outside the surface is refused rather
-than answered, in AWS's own XML error shape, because a wrong answer from an
-emulator is worse than a refusal: it will be trusted.
+than answered, with the same 403 the sidecar already writes for a blocked host,
+because a wrong answer from an emulator is worse than a refusal: it will be
+trusted.
 
 Read docs/guides/aws.md for the surface and the measurements behind it. It
 opens by saying which half of this is built, and that is worth reading first:
