@@ -316,7 +316,7 @@ func TestEventBridge_PutsAnEventOnTheBus(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, int32(0), aws.ToInt32(out.FailedEntryCount))
+	require.Equal(t, int32(0), out.FailedEntryCount)
 }
 
 func TestSecretsManager_ReadsBackASecretItWrote(t *testing.T) {
