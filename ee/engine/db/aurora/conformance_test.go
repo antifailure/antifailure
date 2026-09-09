@@ -50,14 +50,26 @@ func TestConformance(t *testing.T) {
 		p, err := aurora.New(context.Background(), options(t, server))
 		require.NoError(t, err)
 		return p
-	}, conformance.Options{
+	}, conformanceOptions())
+}
+
+// conformanceOptions is what this suite runs with, in a function rather than
+// inline so that the assertion below can read the field that decides the
+// service owned verdicts.
+func conformanceOptions() conformance.Options {
+	return conformance.Options{
 		// Generous but bounded. Every behaviour here is a clone, which against
 		// this fake is a server side file copy on a Postgres other suites are
 		// using at the same time, and a hung call must fail the behaviour
 		// rather than the job.
 		Timeout:  4 * time.Minute,
 		SkipSlow: os.Getenv("AF_SKIP_SLOW") != "",
-	})
+		// RealService is deliberately NOT set, and its absence is the whole of
+		// what makes CopyOnWrite_BranchTimeMatchesTheDeclaration report
+		// unproven rather than a measured verdict. See verdict_test.go, which
+		// carries the evidence that setting it here would be false, and
+		// engine/conformance/verdict.go, which carries the ruling.
+	}
 }
 
 // TestSweepLeftovers removes what a killed run left on the shared server.

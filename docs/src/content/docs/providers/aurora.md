@@ -157,3 +157,12 @@ signature and refuses one that does not match.
 It does not prove that AWS accepts those requests, and it cannot produce a wall
 clock for a real clone. The benchmark says `UNMEASURED` in those cells rather
 than carrying a number from somewhere else.
+
+Copy on write itself is therefore reported as `UNPROVEN` rather than as a pass.
+The conformance suite decides that claim with a stopwatch, and over a fake
+control plane on one local Postgres the only way to hand back a branch carrying
+the golden's data is `CREATE DATABASE ... TEMPLATE`, which copies files. A
+stopwatch pointed at that is timing Postgres, so the suite withholds the verdict
+instead of publishing either answer. `UNPROVEN` is not a pass and the run prints
+it as its own line. Deciding it needs a run against a real Aurora, and the same
+suite produces a measured verdict there without changing.
