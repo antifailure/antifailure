@@ -172,15 +172,24 @@ func TestEveryDeclaredSiteBelongsToAGatedCatalogueEntry(t *testing.T) {
 // string, is the wrong one, because a feature may one day have two genuinely
 // independent gates in two files and forbidding that is a guess about the
 // future. This is the third option and it forbids nothing real: two independent
-// gates both pass, because each file really does contain its own Enabled call.
-// The only thing rejected is a site naming a file that does not check this
-// feature, which is precisely the unverifiable string, rejected by the same
-// rule as everything else rather than by a count.
+// gates both pass, because each file really does contain its own check. The
+// only thing rejected is a site naming a file that does not check this feature,
+// which is precisely the unverifiable string, rejected by the same rule as
+// everything else rather than by a count.
 //
-// It rejects nothing today. All three current Declares name a file holding
-// their own literal, including compliance, whose Declare sits in pack.go and
-// names command.go. A site does not have to name the file it is declared in;
-// what is verified is the file it NAMES.
+// WHICH check is required is read from the catalogue's state and never from the
+// path, and the two are not interchangeable: a gated site must hold a
+// feature.Enabled call for this feature and resolves under ee/engine, while an
+// edition gated site must hold an edition.Permits call for the constant whose
+// VALUE is this feature's wire name and resolves under the repository root.
+// Sniffing the path instead would accept an ee/engine file for an edition gated
+// row and prove only that some licence check is in it.
+//
+// It rejects nothing today. All five current Declares name a file holding their
+// own check, including compliance, whose Declare sits in pack.go and names
+// command.go, and multi_runtime, whose Declare sits in this module and names a
+// file in the community engine. A site does not have to name the file it is
+// declared in; what is verified is the file it NAMES.
 //
 // It lives here rather than beside the catalogue for the reason everything else
 // in this file does: in ee/engine/feature the registry is empty, so the loop

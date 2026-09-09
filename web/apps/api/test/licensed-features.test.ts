@@ -145,47 +145,72 @@ describe('the entitlement catalogue and this control plane still agree', () => {
   })
 })
 
-describe('the two facts the catalogue asserts about the plan gate', () => {
+describe('the claims the catalogue makes about billing, the dashboard and the plan gate', () => {
   // These are prose in the catalogue and behaviour here, and prose that
   // describes behaviour is worth nothing until something checks it. Three
   // people in this repository once agreed a thing was cross site when
   // SameSite=Strict had already made it same site only. A claim needs its
   // mitigation checked, not just described.
+  //
+  // THE FIRST VERSION OF THIS BLOCK CHECKED THE PREVIOUS ANSWER AND STAYED
+  // GREEN, which is worth leaving written down because it is the same defect
+  // the whole lane is about. It held two tests named "billing is free because
+  // the plan gate exempts it" and "the dashboard is plan wide", against rows
+  // that now read absent, through a state called plan_wide that has since been
+  // deleted. Both passed, because both asserted true things about hosted.ts and
+  // trpc.ts. What had gone false was the REASON, and a green test whose failure
+  // message would teach the next person a deleted classification is worse than
+  // no test at all.
 
-  test('billing is free because the plan gate exempts it, and it still does', async () => {
-    // `billing` is marked free rather than plan wide, and the whole reason is
-    // that `billing.manage` is exempt from the hosted gate: gating the path
-    // that RESOLVES a refusal would leave a lapsed customer with no exit, which
-    // hosted.ts calls a legal exposure rather than a courtesy. Remove it from
-    // the exempt set and the catalogue's answer for `billing` becomes wrong.
-    const source = await readFile(path.join(apiSrc, 'hosted.ts'), 'utf8')
-    const set = source.match(/HOSTED_GATE_EXEMPT[^=]*=\s*new Set\(\[([^\]]+)\]\)/)?.[1] ?? ''
-    assert.notEqual(set, '', 'hosted.ts no longer declares HOSTED_GATE_EXEMPT as a Set literal')
-    assert.match(
-      set,
-      /'billing\.manage'/,
-      "the catalogue says billing is free because billing.manage is exempt from the hosted " +
-        'plan gate, and it is no longer in HOSTED_GATE_EXEMPT',
-    )
+  test('neither names a control plane site, because the code that looked like theirs serves us', async () => {
+    // The fact both rows assert in their own words, and the exact regression
+    // that produced the original error. billing read free because billingRouter
+    // is real, mounted and ungated, and that code bills the customer FOR
+    // Antifailure rather than metering on the customer's own behalf.
+    // enterprise_dashboard read as covered by the plan because orgProcedure
+    // really does refuse the console below the enterprise tier, which is our
+    // own funnel enforcing our own pricing. Putting either path back into
+    // ControlPlaneAt is how the mistake gets made again, so it fails here.
+    const entries = await catalogue()
+    for (const constant of ['FeatureBilling', 'FeatureDashboard']) {
+      const entry = entries.find((e) => e.constant === constant)
+      assert.ok(entry, `the catalogue has no entry for ${constant}, so this test proves nothing`)
+      assert.equal(
+        entry.state, 'absent',
+        `the catalogue calls ${constant} ${entry.state}. It is named in license.go's ` +
+          'notShipped map, which is the authority on what cannot be sold at all, and a ' +
+          'catalogue that calls it anything else is describing a capability that does not exist.',
+      )
+      assert.equal(
+        entry.controlPlaneAt, null,
+        `the catalogue says ${constant} is implemented at ${entry.controlPlaneAt} in the ` +
+          'control plane. That field means where the control plane implements or refuses ' +
+          'THIS feature, and naming code that serves us rather than the customer is the ' +
+          'precise mistake both of these rows were corrected for.',
+      )
+    }
   })
 
-  test('the dashboard is plan wide because orgProcedure asks the plan, and it still does', async () => {
-    // `enterprise_dashboard` is marked plan wide rather than gated because the
-    // refusal that exists is keyed on the plan as a whole and knows nothing
-    // about the twelve names a licence carries. That is the finding, and it
-    // stops being true the day this call changes.
+  test('the console refusal that misled the catalogue is still real and still keyed on the plan', async () => {
+    // The other half of the enterprise_dashboard row, and it is a claim about
+    // this tree rather than about the catalogue. The row says the refusal that
+    // exists here is our own funnel, keyed on organizations.plan and knowing
+    // nothing about the twelve names a licence carries. If trpc.ts stopped
+    // asking the plan, that sentence would be describing something that is gone
+    // and the row would need rewriting for the opposite reason it was rewritten
+    // last time.
     const source = await readFile(path.join(apiSrc, 'trpc.ts'), 'utf8')
     assert.match(
       source,
       /hasHostedAccess\(/,
-      'the catalogue says orgProcedure refuses on the plan and trpc.ts no longer calls ' +
-        'hasHostedAccess, so what the dashboard is gated on has changed',
+      'the catalogue says the console refusal is keyed on the plan and trpc.ts no longer ' +
+        'calls hasHostedAccess, so what the console is gated on has changed',
     )
     assert.match(
       source,
       /HOSTED_GATE_EXEMPT\.has\(/,
-      'trpc.ts no longer consults HOSTED_GATE_EXEMPT, so the exemption the catalogue relies ' +
-        'on for billing is not applied on the request path',
+      'trpc.ts no longer consults HOSTED_GATE_EXEMPT, so the plan gate the catalogue ' +
+        'describes is not the gate applied on the request path',
     )
   })
 

@@ -126,9 +126,11 @@ engine gates, `edition.Permits` for one the community engine gates by name. So a
 row cannot claim an enforcement it does not have. Which of the two is required
 is decided by the row's own state and never by the shape of the path, because a
 check that guessed from the path would accept an enterprise file for a community
-gate and never notice that the mechanism claimed is not the mechanism there. Rows that say nothing changes are the honest
-answer rather than an omission: a feature that is sold and never checked is a
-gap worth publishing, and this page is where it gets published.
+gate and never notice that the mechanism claimed is not the mechanism there.
+
+Rows that say nothing changes are the honest answer rather than an omission: a
+feature that is sold and never checked is a gap worth publishing, and this page
+is where it gets published.
 
 <!-- entitlements:start -->
 | Feature | What it is | Without it |
