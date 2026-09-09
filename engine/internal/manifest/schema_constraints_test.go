@@ -832,6 +832,7 @@ const defaultTuning = `{
         "database.subset.virtual_relationships[].to": "users.id",
         "egress.rules[].mode": "emulate",
         "egress.rules[].emulator": "localstack",
+        "load.traffic.max_age": "336h",
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
