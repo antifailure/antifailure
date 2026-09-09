@@ -23,6 +23,7 @@ dedupe
 depguard
 DMARC
 eastus
+Firestore
 Fulcio
 geolocates
 gitleaks
@@ -41,6 +42,7 @@ lychee
 millicores
 ndjson
 neon
+partitionable
 pgbouncer
 pgurl
 pgvector
@@ -57,6 +59,7 @@ semgrep
 SIEM
 signups
 Sigstore
+Souza
 starlight
 subprocessor
 subsetted
@@ -71,6 +74,7 @@ TOTP
 tripwire
 tripwires
 trufflehog
+unfilterable
 unmask
 unmasked
 vale

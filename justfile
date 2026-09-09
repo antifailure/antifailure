@@ -497,6 +497,24 @@ test-ee:
 # the pitch: "here is the number, here is the harness, run it on your data" is
 # a claim a slide cannot make. A number older than the code that produced it is
 # withdrawn rather than rounded, so each run writes a dated report.
+# The GCP emulator surface: what an unmodified vendor SDK reaches, which hosts
+# it needs before its first call, and what each pinned image costs to pull.
+#
+# Separate from `benchmark` above because it needs node and python rather than
+# a database, and because the half of it that needs Docker can be run on its
+# own. CONTAINERS=1 runs the storage half against the real fake-gcs-server
+# instead of against the observer that only records what the client asked for.
+# Without it, the container half is NOT measured and the report says so rather
+# than filling the row with an estimate.
+benchmark-emulators:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stamp=$(date -u +%Y-%m-%d)
+    out="$(pwd)/benchmarks/${stamp}-gcp-emulator-probe.md"
+    mkdir -p benchmarks
+    AF_PROBE_OUT="$out" engine/pkg/emulator/testdata/probe/run.sh
+    echo "wrote benchmarks/${stamp}-gcp-emulator-probe.md"
+
 benchmark:
     #!/usr/bin/env bash
     set -euo pipefail

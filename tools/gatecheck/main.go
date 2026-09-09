@@ -666,6 +666,18 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// size is reported UNBOUNDED rather than given a flattering number,
 		// and it runs inside `just test-engine`.
 		"capacityplan": true,
+		// The same rule as `benchmark`, for the same reason and with one of
+		// its own. It measures what an unmodified vendor SDK reaches and what
+		// each emulator image costs to start, and a measurement has no pass
+		// and no fail to contribute to a gate. Its own half is separate
+		// because it needs node, python and a working Docker daemon rather
+		// than a database, and a gate that goes red because the daemon on
+		// somebody's laptop is busy is a gate people learn to ignore. What
+		// keeps IT honest is a gate: the surface it measures is asserted in
+		// engine/pkg/emulator/gcp_test.go, which runs inside `just
+		// test-engine`, so a declaration that stopped matching what the
+		// harness measures goes red there.
+		"benchmark-emulators": true,
 	}
 
 	var uncalled []string
