@@ -1257,12 +1257,27 @@ func TestSchemaConstraintReport(t *testing.T) {
 // the fixture was broken, which is the failure mode of a gate that stops at its
 // first assertion: everything below it looks alive and is unreachable.
 //
-// It is 625 rather than 600 because this branch gave the datastore key two of
-// its own, topics and rebuild, and the two definitions they point at. Those
-// twenty five sit on top of the seven above, so this is the first number here
-// in some time that was measured against a fixture the engine accepts rather
-// than inherited from a run that stopped before it got here.
-const wantConstraints = 627
+// It is 630. The twenty five before that were the datastore key gaining topics
+// and rebuild with the two definitions they point at, and two more came from
+// the bounds #367 published. This branch adds the last three:
+// egress.rules[].emulator declares a type, a pattern and a maxLength.
+//
+// COUNTED, NEVER INCREMENTED, because adding to a number you have read is how
+// 593 came to stand for as long as it did with nobody able to check it. The
+// walk behind 630 is a separate implementation of the rules enumerate uses,
+// resolving only #/$defs/ the way cnode.resolve does and stopping at the same
+// depth. The control is that it returns exactly 627 on 6081cee0, the figure
+// main arrived at independently and for different reasons, and that its
+// inventory diff against that tree carries three added rows and not one
+// removed row. A counter that reproduces a known number on one tree and
+// differs by exactly the keywords this branch adds on the other is measuring
+// what it claims to.
+//
+// The paragraph above used to say 625 while the constant under it said 627,
+// because #367 moved the fact and left the sentence about it alone. Corrected
+// here rather than carried, since a comment that disagrees with its own
+// constant teaches the next reader to trust neither.
+const wantConstraints = 630
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
