@@ -94,6 +94,26 @@ var CopyOnWriteLedger = map[string]LedgerEntry{
 			"and costs nothing but disk, which makes this the cheapest of these to close.",
 		Evidence: "engine/internal/db/dblab/conformance_test.go",
 	},
+	"aurora": {
+		Declared: true,
+		Verdict:  Unproven,
+		Because: "the instrument WAS fired for this provider and could not decide, which " +
+			"is a different unproven from the three below it and the difference is the " +
+			"reason this field is prose. Its conformance test drives a fake RDS control " +
+			"plane over one local Postgres, where the only way to hand back a branch " +
+			"carrying the golden's data is CREATE DATABASE ... TEMPLATE, so the stopwatch " +
+			"times Postgres copying half a gibibyte whatever Aurora would have done. That " +
+			"is the copying harness case, and it is not settleable by finding a " +
+			"credential: it needs a run against real Aurora, which section 10 of the plan " +
+			"says no test in this repository may require. What the suite CAN settle " +
+			"without an account is settled and green, that the clone is requested copy on " +
+			"write and never any other way and that a branch does identical control plane " +
+			"work at a gibibyte and at a tebibyte, and neither of those is this claim. " +
+			"ee/engine/db/aurora/verdict_test.go reads the fake's own byte counter across " +
+			"one branch and requires it to move, so that the reason this run asserts no " +
+			"real service is a test rather than a comment.",
+		Evidence: "ee/engine/db/aurora/conformance_test.go",
+	},
 	"supabase": {
 		Declared: false,
 		Verdict:  Unproven,
