@@ -12721,7 +12721,7 @@ wildcard subdomains, is a hostname that does not resolve.
 | --- | --- | --- |
 | Amazon S3 | ` + "`" + `s3://your-bucket/goldens` + "`" + ` | your region |
 | Cloudflare R2 | ` + "`" + `https://<account>.r2.cloudflarestorage.com/your-bucket/goldens` + "`" + ` | ` + "`" + `auto` + "`" + ` |
-| MinIO | ` + "`" + `http://minio.internal:9000/your-bucket/goldens` + "`" + ` | ` + "`" + `us-east-1` + "`" + ` |
+| MinIO | ` + "`" + `http://<minio-host>:9000/your-bucket/goldens` + "`" + ` | ` + "`" + `us-east-1` + "`" + ` |
 | Backblaze B2 | ` + "`" + `https://s3.<region>.backblazeb2.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-west-004` + "`" + ` |
 | DigitalOcean Spaces | ` + "`" + `https://<region>.digitaloceanspaces.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `nyc3` + "`" + ` |
 | Wasabi | ` + "`" + `https://s3.<region>.wasabisys.com/your-bucket/goldens` + "`" + ` | that region, such as ` + "`" + `us-east-2` + "`" + ` |
