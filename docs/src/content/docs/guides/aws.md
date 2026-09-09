@@ -60,10 +60,10 @@ S3.
 
 | Not answered | Why |
 | --- | --- |
-| Lambda, ECS, EKS, Batch, Step Functions | LocalStack runs these by starting further containers through the Docker socket. An environment does not hand a container the Docker socket, so this is refused rather than half answered. |
-| RDS, Aurora, ElastiCache, OpenSearch | A datastore is not emulated. Postgres is branched from a golden, and a second store is declared in the manifest with a stance. An emulator with an empty schema in it is a worse answer than either. |
-| SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox/), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
-| API Gateway, CloudFormation, IAM, CloudWatch, and the rest of AWS | Outside the surface, and refused by the egress policy rather than answered. |
+| AWS Lambda, ECS, EKS, Batch and Step Functions | LocalStack runs these by starting further containers through the Docker socket. An environment does not hand a container the Docker socket, so this is refused rather than half answered. |
+| Amazon RDS, Aurora, ElastiCache and OpenSearch | A datastore is not emulated. Postgres is branched from a golden, and a second store is declared in the manifest with a stance. An emulator with an empty schema in it is a worse answer than either. |
+| Amazon SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox/), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
+| Amazon API Gateway, CloudFormation, IAM, CloudWatch and everything else AWS runs | Outside the surface, and refused by the egress policy rather than answered. |
 | S3 dualstack, transfer acceleration and S3 Express One Zone | Further spellings of the S3 endpoint that resolve under different names. They reach nothing, and the refusal says no rule matches rather than naming S3. |
 
 ### Where the refusal actually happens
