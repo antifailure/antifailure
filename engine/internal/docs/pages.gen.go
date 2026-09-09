@@ -4798,6 +4798,26 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, ` + "`" + `"features": ["ssoo"]` + "`" + ` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
+## Features that are issued with a warning
+
+` + "`" + `rbac` + "`" + ` and ` + "`" + `air_gapped` + "`" + ` are issued, and the generator prints a warning naming
+them beside the key. Both are real: the custom roles library is written and
+tested, and air gapped operation is a property every installation already has.
+What is not true of either is that the license is what grants it, so withdrawing
+the license would not withdraw the capability, and a renewal conversation that
+treats one of them as a thing being bought is a conversation about nothing.
+
+That is a warning rather than a refusal on purpose. Refusing would refuse a
+customer something they can have, and a refusal placed where somebody has
+already promised the feature is a refusal that acquires an override flag within
+a week. The person who needs the sentence is the one issuing the key, before
+they answer a question about it, which is where it prints.
+
+The two lists are different answers and the generator keeps them apart.
+` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are not built, so they cannot be sold.
+These two are built and are not gated, so they can be sold and should not be
+described as something the license turns on.
+
 ## Features that cannot be issued
 
 ` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` are in the set above, and a request naming
@@ -5063,16 +5083,39 @@ working feature from every direction and is harder to find than the gap it
 covers. A feature nobody can buy and nobody can be granted cannot be mistaken
 for one that ships.
 
-` + "`" + `rbac` + "`" + ` is a third case and a different one. The custom roles library is complete
-and tested, and nothing stores a role model, so an organization has no way to
-have one. It is reported and not enforced, and it is written down here rather
-than gated for the same reason: a check on a path nothing reaches is worse than
-no check.
+### Two more are not enforced
 
-Both lists are held to the code by a test rather than by a habit. ` + "`" + `notShipped` + "`" + `
-in ` + "`" + `ee/engine/license/license.go` + "`" + ` is the single place either statement lives,
-and this page, the generator and the enterprise feature registry are all checked
-against it in both directions.
+A third case, and a different one from the two above: ` + "`" + `rbac` + "`" + ` and ` + "`" + `air_gapped` + "`" + `.
+Both name something real, and in neither case is the license what provides it.
+
+The custom roles library is complete and tested, and nothing stores a role
+model, so an organization has no way to have one. Air gapped operation is a
+property every installation already has, licensed or not: verification is a
+signature check against keys stamped into the binary, so it needs no network
+whichever features a license names.
+
+They are reported and not enforced, and that is written down rather than gated,
+for the reason the paragraph above gives: a check on a path nothing reaches is
+worse than no check. Unlike ` + "`" + `billing` + "`" + ` and ` + "`" + `enterprise_dashboard` + "`" + ` they are not
+refused at issue, because refusing them would refuse a customer a capability
+they can have. ` + "`" + `tools/licensegen` + "`" + ` prints a warning naming them beside the key it
+signs instead, so that whoever issues it reads what the license does and does
+not grant before a customer asks.
+
+` + "`" + `air_gapped` + "`" + ` was in this state and said so nowhere until 2026-09-08. Every
+occurrence of the name in the repository was a copy of the catalogue, the
+license vectors, a line of documentation, or a test, so a license naming it
+verified, reported itself active, printed in ` + "`" + `af license status` + "`" + `, and granted
+nothing. That is the same failure the two refused names above exist to prevent,
+reached through the case they do not cover.
+
+All three lists are held to the code by a test rather than by a habit.
+` + "`" + `notShipped` + "`" + ` and ` + "`" + `unenforced` + "`" + ` in ` + "`" + `ee/engine/license/license.go` + "`" + ` are the single
+place each statement lives, and this page, the generator and the enterprise
+feature registry are all checked against them in both directions. A fourth
+check asks the question none of those could: that every feature a license can
+grant is refused, recorded as unenforced, or gated at a real site in one half of
+the product or the other.
 
 ## Contributing
 
