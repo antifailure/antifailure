@@ -106,6 +106,19 @@ func TestAnEntryThatIsNotGatedSaysWhyOutLoud(t *testing.T) {
 		case feature.StateGated:
 			require.NotEmptyf(t, e.EnforcedAt,
 				"%s is marked gated and names no enforcement site", e.Feature)
+		case feature.StateEditionGated:
+			// EnforcedAt is REQUIRED and points outside this module, which is
+			// the one combination the other states forbid. It names a file in
+			// the community engine, and the check that it really refuses lives
+			// in ee/engine/cmd/af, because only that binary has both the
+			// registry and a path to the engine tree.
+			require.NotEmptyf(t, e.EnforcedAt,
+				"%s is refused by the community engine and names no site there", e.Feature)
+			require.NotEmptyf(t, e.Because,
+				"%s is refused through a mechanism this module does not contain and does "+
+					"not say why, so a reader who greps ee/engine for it finds nothing and "+
+					"has no sentence explaining the absence",
+				e.Feature)
 		case feature.StateControlPlaneGated:
 			// Refused, and not by anything this suite can open. The engine has
 			// no site for it by definition, so requiring one here would refuse
@@ -133,7 +146,7 @@ func TestAnEntryThatIsNotGatedSaysWhyOutLoud(t *testing.T) {
 				"%s is not gated and does not say why, so a reader cannot tell a deliberate "+
 					"decision from a missing check", e.Feature)
 		default:
-			t.Fatalf("%s has state %q, which is not one of the five", e.Feature, e.State)
+			t.Fatalf("%s has state %q, which is not one of the six", e.Feature, e.State)
 		}
 	}
 }
@@ -303,12 +316,13 @@ func TestTheMeasuredNumberIsPublishedRatherThanAsserted(t *testing.T) {
 			t.Logf("  %-9s %-22s %s", e.State, e.Feature, firstSentence(e.Because))
 		}
 	}
-	t.Logf("engine gated %d, control plane gated %d, free %d, unmounted %d, absent %d",
-		byState[feature.StateGated], byState[feature.StateControlPlaneGated],
-		byState[feature.StateFree], byState[feature.StateUnmounted],
-		byState[feature.StateAbsent])
+	t.Logf("engine gated %d, edition gated %d, control plane gated %d, free %d, "+
+		"unmounted %d, absent %d",
+		byState[feature.StateGated], byState[feature.StateEditionGated],
+		byState[feature.StateControlPlaneGated], byState[feature.StateFree],
+		byState[feature.StateUnmounted], byState[feature.StateAbsent])
 
-	require.Equal(t, total, byState[feature.StateGated]+
+	require.Equal(t, total, byState[feature.StateGated]+byState[feature.StateEditionGated]+
 		byState[feature.StateControlPlaneGated]+byState[feature.StateFree]+
 		byState[feature.StateUnmounted]+byState[feature.StateAbsent],
 		"the states do not account for every licensed feature")

@@ -129,6 +129,32 @@ const (
 	// So the honest count is two numbers rather than one. See GatedFeatures for
 	// the engine's and ControlPlaneGatedFeatures for this one.
 	StateControlPlaneGated State = "control_plane_gated"
+
+	// StateEditionGated is refused by the COMMUNITY engine, through
+	// edition.Permits, with the licence crossing the module boundary as
+	// strings rather than the code crossing it as packages.
+	//
+	// The sixth state exists because "not enforced by the engine" is a
+	// different fact from "not enforced". This is that sentence a third time
+	// with a different subject: not enforced by feature.Enabled IN ee/engine is
+	// a different fact from not enforced, and reading the first as the second
+	// is what would file multi_runtime as absent while
+	// engine/internal/env/env.go refuses a second placement target.
+	//
+	// It is not StateGated, and widening StateGated to swallow it would erase
+	// the distinction the sixth state was created to draw. A gated entry is
+	// confirmed by opening an ee/engine file and requiring a feature.Enabled
+	// call for that exact feature; this one is confirmed by opening an engine/
+	// file and requiring an edition.Permits call. A test that accepted either
+	// mechanism to stay green would have stopped testing both.
+	//
+	// Why the enforcement is there rather than here is ee/engine/cmd/af/
+	// placement.go's argument and it is a good one: the manifest's targets, the
+	// scheduler, the runtime constructors and every command that agrees on
+	// where an environment went would all have to move, and a second copy of
+	// that in the enterprise module would be a second answer to where an
+	// environment is.
+	StateEditionGated State = "edition_gated"
 )
 
 // Entitlement is one licensed feature and what this product does about it.
@@ -216,22 +242,16 @@ var catalogue = []Entitlement{
 			"about a lane which has NOT landed as of 88627d7f rather than about this tree.",
 	},
 	{
-		Feature:        license.FeatureAuditStream,
-		Summary:        "Privileged actions forwarded to the organization's own SIEM.",
-		ControlPlaneAt: "",
-		State:          StateAbsent,
-		Because: "Absent in the engine and unmounted in the control plane, which is why it is " +
-			"filed under the worse of the two. extension.AuditSink and Registry.Audit exist in " +
-			"the community engine and NOTHING registers a sink or calls Audit outside " +
-			"extension_test.go, verified by grep on this tree: two hits, both in that test. " +
-			"The socket was built and nothing was plugged into it, which is the gap " +
-			"ee/engine/cmd/af/main.go warns about in its own header, and L0.2 measured it from " +
-			"the other side as one of three sockets not consulted. ee/web/audit holds sink " +
-			"implementations for the control plane and no file under web/apps/api/src imports " +
-			"those either. L7.6's entry point has since landed and mounts sso and scim only, " +
-			"which is checked above rather than assumed. L7.1 would build the engine sinks " +
-			"and has NOT landed as of 88627d7f, so this row is true of that sha and is the " +
-			"one entry in this catalogue with a known expiry: see #309.",
+		Feature: license.FeatureAuditStream,
+		Summary: "Privileged actions forwarded to the organization's own SIEM.",
+		// The literal rather than auditsink.AuditStreamSite, because auditsink
+		// imports THIS package to ask the licence, so importing it back is a
+		// cycle. The constant exists precisely so the two cannot drift, and the
+		// import that would have enforced that is the one the dependency
+		// forbids, so a test in ee/engine/cmd/af asserts they are equal from a
+		// binary that links both. See TestTheAuditSiteIsTheOneAuditsinkDeclares.
+		EnforcedAt: "auditsink/auditsink.go:auditsink.permitted",
+		State:      StateGated,
 	},
 	{
 		Feature: license.FeatureBilling,
@@ -274,22 +294,25 @@ var catalogue = []Entitlement{
 			"of it. ControlPlaneAt is EMPTY for the reason billing's is.",
 	},
 	{
-		Feature:        license.FeatureMultiRuntime,
-		Summary:        "Placing an environment across several runtimes at once, by requirement and by tag.",
-		ControlPlaneAt: "web/apps/api/src/routers/runtimes.ts:runtimesRouter",
-		State:          StateAbsent,
-		Because: "Three separate things have to be true before this can be gated and none of them " +
-			"is. engine/internal/scheduler implements placement completely, including " +
-			"requirements, tags, the unsatisfiable versus queued distinction and health aware " +
-			"placement, and Plan has ZERO callers outside scheduler_test.go; " +
-			"controlplane/sink.go already records that nothing emits environment.queued. It " +
-			"lives under engine/internal, which is unimportable from this module, so a licence " +
-			"check cannot be put there from here at all. And schema.Runtime carries no " +
-			"placement requirement, so no manifest can ask for one. The control plane's runtime " +
-			"registry is real and is refused on the plan when the plane is hosted, but " +
-			"routers/runtimes.ts says in its own header that it deliberately never sends a " +
-			"runtime name to the engine. Gating a pure function nobody calls would be a check " +
-			"that cannot fire.",
+		Feature:    license.FeatureMultiRuntime,
+		Summary:    "Placing an environment across several runtimes at once, by requirement and by tag.",
+		EnforcedAt: "engine/internal/env/env.go:Orchestrator.placement",
+		State:      StateEditionGated,
+		Because: "Refused by the COMMUNITY engine rather than by this module, which is why a " +
+			"count of feature.Enabled call sites in ee/engine reports zero for it. " +
+			"engine/internal/env/env.go:898 refuses a second placement target unless " +
+			"edition.Permits says otherwise, and scheduler.Plan is called from env.go:924. " +
+			"THIS ENTRY READ absent, on a measurement that was true when it was taken and " +
+			"named its own expiry: the scheduler had no caller, no manifest could express a " +
+			"placement requirement, and gating a pure function nobody calls would have been a " +
+			"check that cannot fire. All three of those changed under it. The licence crosses " +
+			"the module boundary as strings and the engine reads them, rather than the code " +
+			"crossing as packages, and ee/engine/cmd/af/placement.go argues for that " +
+			"arrangement: moving the manifest's targets, the scheduler and the runtime " +
+			"constructors into this module would be a second answer to where an environment " +
+			"is. The control plane's runtime registry is a different subject again, real and " +
+			"refused on the hosted plan, and routers/runtimes.ts deliberately never sends a " +
+			"runtime name to the engine.",
 	},
 	{
 		Feature:    license.FeaturePolicy,
@@ -444,6 +467,21 @@ func ControlPlaneGatedFeatures() []license.Feature {
 	out := []license.Feature{}
 	for _, e := range catalogue {
 		if e.State == StateControlPlaneGated {
+			out = append(out, e.Feature)
+		}
+	}
+	return out
+}
+
+// EditionGatedFeatures is every feature the COMMUNITY engine refuses by name.
+//
+// A third list for the reason there is a second: the three are confirmed by
+// three different instruments, and a caller that merged them would lose which
+// one is standing behind each name.
+func EditionGatedFeatures() []license.Feature {
+	out := []license.Feature{}
+	for _, e := range catalogue {
+		if e.State == StateEditionGated {
 			out = append(out, e.Feature)
 		}
 	}

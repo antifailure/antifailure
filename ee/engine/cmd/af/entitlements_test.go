@@ -28,16 +28,20 @@ package main_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
@@ -110,6 +114,24 @@ func TestEveryGatedFeatureIsDeclaredWhereTheCatalogueSaysItIs(t *testing.T) {
 	}
 }
 
+func TestTheAuditSiteIsTheOneAuditsinkDeclares(t *testing.T) {
+	// The import that would have made this impossible to get wrong is a cycle:
+	// auditsink asks feature for the licence, so feature cannot import
+	// auditsink to reuse its constant. This binary links both, so it is the
+	// only place the two strings can be compared at all.
+	//
+	// Not a duplicate of the site checks below. Those prove the catalogue's
+	// string names a real file and a real symbol that really asks about this
+	// feature; a string can satisfy every one of them and still not be the
+	// string the enforcing package publishes as its own site.
+	entry, ok := feature.Of(license.FeatureAuditStream)
+	require.True(t, ok, "audit_stream has no catalogue entry")
+	require.Equal(t, auditsink.AuditStreamSite, entry.EnforcedAt,
+		"the catalogue names a different audit site from the one auditsink declares. The "+
+			"constant exists so these cannot drift and the import that would enforce it is a "+
+			"cycle, so this assertion is what stands in for it.")
+}
+
 func TestEveryDeclaredSiteBelongsToAGatedCatalogueEntry(t *testing.T) {
 	// The reverse, and the one that catches the next lane rather than the last.
 	// A feature gated in code and absent from the catalogue is a feature the
@@ -124,9 +146,13 @@ func TestEveryDeclaredSiteBelongsToAGatedCatalogueEntry(t *testing.T) {
 		entry, ok := feature.Of(f)
 		require.Truef(t, ok,
 			"%s is declared at %v and has no catalogue entry", f, sites)
-		require.Equalf(t, feature.StateGated, entry.State,
+		require.Containsf(t,
+			[]feature.State{feature.StateGated, feature.StateEditionGated}, entry.State,
 			"%s is declared at %v and the catalogue calls it %q. A site that refuses IS a "+
-				"gate, so either the state is stale or the Declare is.",
+				"gate, so either the state is stale or the Declare is. The two accepted "+
+				"states are the two kinds of ENGINE side refusal: this module asking "+
+				"feature.Enabled, and the community engine asking edition.Permits with the "+
+				"licence crossing the boundary as strings.",
 			f, sites, entry.State)
 		require.Containsf(t, sites, entry.EnforcedAt,
 			"%s is declared at %v and the catalogue names %s", f, sites, entry.EnforcedAt)
@@ -170,7 +196,19 @@ func TestEveryRegisteredSiteNamesAFileThatChecksThatFeature(t *testing.T) {
 			require.Truef(t, ok,
 				"%s is declared at %q, which is not path:symbol", f, site)
 
-			source, err := os.ReadFile(filepath.Join(root, file))
+			// Which root the site resolves against, and which call has to be in
+			// it, are decided by the catalogue's STATE rather than by the shape
+			// of the path. A check that sniffed the path would accept an
+			// ee/engine file for an edition gated entry and never notice that
+			// the mechanism it claims is not the mechanism it has.
+			entry, ok := feature.Of(f)
+			require.Truef(t, ok, "%s is declared at %s and has no catalogue entry", f, site)
+			base := root
+			if entry.State == feature.StateEditionGated {
+				base = repoRoot(t)
+			}
+
+			source, err := os.ReadFile(filepath.Join(base, file))
 			require.NoErrorf(t, err,
 				"%s is declared at %s and that file cannot be read", f, site)
 
@@ -178,6 +216,19 @@ func TestEveryRegisteredSiteNamesAFileThatChecksThatFeature(t *testing.T) {
 				regexp.MustCompile(`func (\([^)]*\) )?`+regexp.QuoteMeta(symbol)+`\(`),
 				string(source),
 				"%s is declared at %s and %s does not DEFINE %s", f, site, file, symbol)
+
+			if entry.State == feature.StateEditionGated {
+				ec := editionConstants(t, repoRoot(t))[f]
+				require.NotEmptyf(t, ec, "no constant in edition.go has the value %q", f)
+				require.Containsf(t, string(source),
+					"edition.Permits(ctx, edition."+ec+")",
+					"%s is edition gated at %s and %s contains no "+
+						"edition.Permits(ctx, edition.%s) call, so that site is a string "+
+						"nothing can verify",
+					f, site, file, ec)
+				checked++
+				continue
+			}
 
 			constant := constants[f]
 			require.NotEmptyf(t, constant, "no constant in license.go has the value %q", f)
@@ -219,6 +270,32 @@ func featureConstants(t *testing.T, root string) map[license.Feature]string {
 		out[license.Feature(m[2])] = m[1]
 	}
 	require.NotEmpty(t, out, "license.go declares no feature constants, so the parse is wrong")
+	return out
+}
+
+// repoRoot is the tree above ee/, for the sites that are not in this module.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Dir(filepath.Dir(eeEngineRoot(t)))
+}
+
+// editionConstants is featureConstants for the COMMUNITY engine's own list.
+//
+// A second reader of a second source of truth, and the two lists are separate
+// on purpose: engine/pkg/edition cannot import ee/engine/license, which is the
+// whole reason the licence crosses the boundary as strings. So the wire name is
+// the only thing they share, and this is what checks that the string an
+// edition gated site tests is the one this feature actually is.
+func editionConstants(t *testing.T, root string) map[license.Feature]string {
+	t.Helper()
+	source, err := os.ReadFile(filepath.Join(root, "engine", "pkg", "edition", "edition.go"))
+	require.NoError(t, err)
+	out := map[license.Feature]string{}
+	for _, m := range regexp.MustCompile(`(Feature\w+)\s+=\s+"([a-z_]+)"`).
+		FindAllStringSubmatch(string(source), -1) {
+		out[license.Feature(m[2])] = m[1]
+	}
+	require.NotEmpty(t, out, "edition.go declares no feature constants, so the parse is wrong")
 	return out
 }
 
@@ -301,6 +378,53 @@ func entryPoints() []proof {
 					return true, "Source.Available reported the store usable"
 				}
 				return false, "Source.Available refused: " + firstLine(why)
+			},
+		},
+		{
+			feature: license.FeatureAuditStream,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				// DELIVERY, not an opinion about delivery. auditsink exports
+				// Unlicensed(), which would have been one line here and would
+				// have proved only that the package agrees with itself. What a
+				// customer buys is that the entry ARRIVES, so the proof is a
+				// real sink posting to a real listener and the observable is
+				// whether anything showed up.
+				var got int32
+				// TLS, because the sink refuses a plaintext URL outright:
+				// the body IS the audit record, and posting it over http is
+				// the thing the record exists to prove is not happening. The
+				// test server's own client trusts its certificate.
+				srv := httptest.NewTLSServer(http.HandlerFunc(
+					func(w http.ResponseWriter, r *http.Request) {
+						atomic.AddInt32(&got, 1)
+						w.WriteHeader(http.StatusOK)
+					}))
+				defer srv.Close()
+
+				sink, err := auditsink.NewWebhook(auditsink.WebhookConfig{
+					URL: srv.URL,
+					// Required, and required for a reason worth keeping: an
+					// entry that cannot be delivered and leaves nothing behind
+					// is an audit stream with an invisible hole in it.
+					DeadLetterFile: filepath.Join(t.TempDir(), "dead.jsonl"),
+					Client:         srv.Client(),
+				})
+				require.NoError(t, err, "the webhook sink could not be built")
+
+				err = sink.Write(ctx, extension.AuditEntry{
+					Action:     "environment.created",
+					OccurredAt: time.Now(),
+				})
+				// Not an error either way: an unlicensed sink accepts the entry
+				// and forwards nothing, which auditsink argues for deliberately
+				// so an expired licence does not read as a broken deployment.
+				require.NoError(t, err, "the sink returned an error rather than declining")
+
+				if atomic.LoadInt32(&got) > 0 {
+					return true, "the webhook sink delivered the entry"
+				}
+				return false, "the webhook sink accepted the entry and forwarded nothing"
 			},
 		},
 		{
@@ -393,7 +517,7 @@ func TestTheFeaturesThatRefuseNothingAreTheOnesTheCatalogueNames(t *testing.T) {
 	// this fails until somebody moves it in the catalogue, and the day a tenth
 	// quietly loses one, this fails too.
 	for _, e := range feature.Catalogue() {
-		if e.State == feature.StateGated {
+		if e.State == feature.StateGated || e.State == feature.StateEditionGated {
 			continue
 		}
 		require.Emptyf(t, feature.Sites(e.Feature),

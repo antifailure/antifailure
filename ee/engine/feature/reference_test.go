@@ -71,6 +71,13 @@ func effect(e feature.Entitlement) string {
 		return "Nothing changes. It is implemented and deliberately available to everyone."
 	case feature.StateAbsent:
 		return "Nothing changes, because the capability is not built yet."
+	case feature.StateEditionGated:
+		// Named as a refusal like the other two, because to a customer all
+		// three are the same event: they asked for something and were told no
+		// on the strength of what they bought. Which process said no, and
+		// through which mechanism, is our detail and not theirs.
+		return "Withheld. `" + e.EnforcedAt + "` asks the license, and the feature is off " +
+			"when the answer is no."
 	case feature.StateControlPlaneGated:
 		// Named as a refusal, like StateGated, because to a customer the two
 		// are the same event: they asked for something and were told no on the
@@ -135,7 +142,7 @@ func namesSentence() string {
 // holds is not prose, whatever it looks like, and left by hand beside a
 // generated table it is how a page comes to contradict itself.
 func countSentence() string {
-	engine := len(feature.GatedFeatures())
+	engine := len(feature.GatedFeatures()) + len(feature.EditionGatedFeatures())
 	plane := len(feature.ControlPlaneGatedFeatures())
 	total := len(license.AllFeatures())
 	// Split, because one number hid the error this page was corrected for.

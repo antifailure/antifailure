@@ -14,9 +14,20 @@ which reason applies: it is refused by the control plane rather than the engine,
 it is implemented and deliberately free, it is built and loaded by no binary, or
 the capability does not exist.
 
-Of the twelve, five are refused when a license does not name them, three by the
-engine and two by the control plane. Seven change nothing whatever when they
-are absent, and the page says so.
+Of the twelve, seven are refused when a license does not name them, five by the
+engine and two by the control plane. Five change nothing whatever when they are
+absent, and the page says so.
+
+THAT NUMBER MOVED WHILE THIS WAS BEING WRITTEN, from five to seven, and it moved
+because the product changed rather than because the measurement was wrong. Two
+features were filed as not built on a measurement that was true when it was
+taken and that named its own expiry in its own text: `audit_stream` had a socket
+in the community engine with nothing plugged into it, and `multi_runtime` had a
+scheduler with no caller, no way for a manifest to ask for a placement, and no
+importable home for a check. Both shipped afterwards. The catalogue is
+regenerated from the code rather than restated from the last time somebody
+counted, so the page now reads seven, and the two rows that moved say what they
+used to claim and why that stopped being true.
 
 THE FIRST VERSION OF THIS CATALOGUE PUT FOUR OF THE TWELVE IN THE WRONG PLACE,
 and the four are worth recording because they failed in two opposite directions
@@ -58,8 +69,8 @@ anything a license sells.
 
 The rest of the scaffolding stands. A feature in the license and not the
 catalogue fails. A `feature.Declare` with no catalogue entry fails. A row
-claiming enforcement at a file with no `feature.Enabled` call for that exact
-feature fails, which is how `compliance_packs` was found to have spent its whole
+claiming enforcement at a file with no call refusing that exact feature fails,
+which is how `compliance_packs` was found to have spent its whole
 life declared at `compliance.Pack.Evaluate`, a function that takes no context
 and therefore cannot ask about a license at all. For each feature the catalogue
 calls enforced in the engine, the real entry point is called twice, once with a
