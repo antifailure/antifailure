@@ -129,8 +129,29 @@ One store the environment holds. Database is a single struct and it is Postgres,
 | `from` | string | no | The datastore a derived store is rebuilt from, named. Required for the derived stance and refused for the others. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `name` | string | **yes** | Unique within the manifest. The name primary is reserved for the entry the database: block normalizes into. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
 | `provider` | string | no | Which implementation provides the engine, for an engine more than one thing can provide. Omit it for the engine's own default. Max length 64. |
+| `rebuild` | [Datastore rebuild](#datastore-rebuild) | no | How a derived store is built from the one named in from. Required for that stance and refused for the others. |
 | `source_url_env` | string | no | The NAME of the variable holding this store's production connection string, which is what a golden of it is copied from. A variable name rather than a URL, because the value is a credential for production and a manifest is checked in. Omitted, the golden is EMPTY and every refresh says so: that is the same answer database.source_url_env gives a project that has not connected production yet, and it is not a refusal because a store whose tables are made by migrations is still worth branching. A connection string written here rather than a variable name is refused, and the refusal does not print it back. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `stance` | `golden`, `empty`, `derived`, `topics_only` | **yes** | What happens to this store's contents. golden is a masked, verified copy environments branch from. empty starts it with nothing, on purpose, and because says why. derived rebuilds it from the store named in from, once that one is ready, which is how a search index is built from the Postgres branch rather than cloned and left stale against it. topics_only creates topics and consumer groups with no messages. There is no default: a datastore that declares no stance is refused, because a silent default is how somebody ends up trusting a blank ClickHouse. |
+| `topics` | list of [Datastore topic](#datastore-topic) | no | The topics a topics_only broker is created with, and the consumer groups created against them. Required for that stance and refused for the others. Declared rather than discovered, because there is nothing to discover: a broker's topics live in production and copying the messages in them is what this stance exists to refuse. What a twin needs is the SHAPE, and the shape is something only the person writing the manifest knows. Max items 200. |
+
+## Datastore rebuild
+
+How a derived store is built from the one it reads. A command rather than a copy, and that is the whole argument for the stance: a search index cloned from production is stale against the branch the moment the branch is masked, because the documents in it name people who do not exist in the twin's Postgres. An index BUILT from the branch cannot be stale against it.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `command` | string | **yes** | What rebuilds the store. It runs once, to completion, inside the environment, after every service is up, and a non-zero exit fails the environment rather than leaving an index nobody built. Max length 1024. |
+| `service` | string | **yes** | The service whose image the command runs in, and whose variables it receives. It is the application's own in almost every case, because the code that knows how to index this product's rows is the product's code. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+
+## Datastore topic
+
+One topic a topics_only broker is created with. An empty broker is not a twin of a broker: a consumer subscribing to a name that is not there reads nothing and reports nothing, and the run goes green having tested one poll loop against a name that will only exist in production.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `consumer_groups` | list of string | no | The groups created against this topic, with their offsets committed to the earliest message and nothing behind them. Created rather than left to appear on their own, because a consumer joining a group nobody created reads from the END by default, so the twin's first run of a consumer silently skips everything the twin's own producers wrote before it started. Max items 100. |
+| `name` | string | **yes** | The topic, named the way production names it. Unique within the store. Max length 249, matches `^[a-zA-Z0-9._-]{1,249}$`. |
+| `partitions` | integer | no | How many partitions the topic is created with. Not cosmetic: ordering is per partition and a consumer group with more members than partitions leaves members idle, so a twin whose topic has one partition where production has twelve cannot reproduce a reordering bug at all. Defaults to `1`. Minimum 1, maximum 10000. |
 
 ## Egress
 

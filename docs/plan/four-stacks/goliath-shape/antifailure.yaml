@@ -51,6 +51,22 @@ services:
       strategy: image
       image: hashicorp/http-echo:1.0
 
+  # The store the datastores block below declares, running as an ordinary
+  # service under the store's own name. The engine provides a container for a
+  # golden and for nothing else, so a store declared with any other stance is
+  # brought up the way every compose file in the world already brings one up.
+  # Without this the manifest declared a ClickHouse and the environment came up
+  # with no ClickHouse in it, which is the failure the stance key exists to
+  # remove. The image is the real one rather than the echo stand in the four
+  # application services carry, because an empty store still has to answer.
+  - name: events
+    kind: web
+    port: 8123
+    health_path: /ping
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-server:latest
+
 database:
   provider: docker
   version: 17
@@ -63,7 +79,9 @@ datastores:
       The shape of the second store is a question for the call and not an
       answer. Declaring it empty says so in the fidelity report, which is the
       only thing that tells an empty store somebody chose apart from an empty
-      store nobody noticed.
+      store nobody noticed. The service named events above is what starts it:
+      empty is a statement about the contents, never about whether anything
+      runs.
 
 egress:
   default: block

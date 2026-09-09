@@ -44,8 +44,11 @@ func TestTheFourStacksStillParse(t *testing.T) {
 			"supabase/supabase, docker/docker-compose.yml"},
 		{"posthog-hobby", 37,
 			"PostHog/posthog, docker-compose.hobby.yml over docker-compose.base.yml"},
-		{"goliath-shape", 4,
-			"a shape proved instead of a twin, because nothing is published"},
+		{"goliath-shape", 5,
+			"a shape proved instead of a twin, because nothing is published. " +
+				"The fifth service is the ClickHouse the datastores block declares: " +
+				"the engine provides a container for a golden and for no other " +
+				"stance, so the store is run the way a compose file runs one"},
 	} {
 		t.Run(tc.dir, func(t *testing.T) {
 			t.Parallel()

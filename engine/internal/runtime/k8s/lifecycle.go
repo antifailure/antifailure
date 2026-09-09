@@ -149,7 +149,112 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 			return env, err
 		}
 	}
+	// Every service is up, so every store a stance job talks to is listening.
+	//
+	// Here rather than beside the service that runs it: a rebuild reads one
+	// store and writes another, and a topic creation needs a broker that has
+	// finished starting. Ordering it against a single service would be
+	// guessing which of the two it meant.
+	if err := r.runStanceJobs(ctx, spec, namespace, proxyIP, journal, progress); err != nil {
+		return env, err
+	}
 	return env, nil
+}
+
+// runStanceJobs brings every declared datastore to the state its stance asks
+// for, once every service is up.
+//
+// The same contract the local runtime keeps, kept here rather than left out. A
+// runtime that accepted StanceJobs and ignored them would be the worst of the
+// three possible answers: the environment comes up green, the report reads the
+// journal and finds no job, and the difference between the two runtimes is a
+// broker with no topics that nothing says out loud.
+func (r *Runtime) runStanceJobs(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	namespace, resolverIP string,
+	journal func(string, string) error,
+	progress func(string),
+) error {
+	for _, job := range spec.StanceJobs {
+		s, ok := serviceNamed(spec.Services, job.Service)
+		if !ok {
+			// Named and not running. The manifest's own validation refuses a
+			// rebuild naming a service that does not exist, so reaching here
+			// means the service was dropped between the two, and saying which
+			// store is now unrealizable beats a Job that sits in
+			// ImagePullBackOff on an image nobody declared.
+			return aferrors.Coded(aferrors.AFRUN040, "detail", fmt.Sprintf(
+				"the %s datastore declares the stance %s, whose command runs in the image of "+
+					"a service called %s, and this environment is not running one",
+				job.Store, job.Stance, job.Service))
+		}
+		if err := r.runStanceJob(ctx, spec, s, job, namespace, resolverIP, journal, progress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runStanceJob runs one stance Job to completion and fails if it did not
+// succeed.
+func (r *Runtime) runStanceJob(
+	ctx context.Context,
+	spec provider.EnvSpec,
+	s provider.ServiceSpec,
+	job provider.StanceJob,
+	namespace, resolverIP string,
+	journalIntent func(string, string) error,
+	progress func(string),
+) error {
+	obj := r.stanceJob(spec, s, job, namespace, resolverIP)
+	// Recorded before it is created, like every other resource, and the
+	// fidelity report reads this back to say whether this environment's own
+	// run did what the stance asks.
+	if err := journalIntent(kindDeployment, namespace+"/"+obj.Name); err != nil {
+		return err
+	}
+	if _, err := r.cli.BatchV1().Jobs(namespace).Create(ctx, obj, metav1.CreateOptions{}); err != nil &&
+		!apierrors.IsAlreadyExists(err) {
+		return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
+	}
+	progress(fmt.Sprintf("%s: %s", job.Store, job.Line()))
+
+	role := "the " + job.Store + " datastore's " + job.Stance + " stance"
+	deadline := time.Now().Add(r.readyWait)
+	for {
+		got, err := r.cli.BatchV1().Jobs(namespace).Get(ctx, obj.Name, metav1.GetOptions{})
+		if err != nil {
+			return aferrors.Wrap(err, aferrors.AFRUN002, "endpoint", r.rest.Host)
+		}
+		if got.Status.Succeeded > 0 {
+			return nil
+		}
+		if got.Status.Failed > 0 {
+			return aferrors.Coded(aferrors.AFRUN005, "service", role,
+				"code", strconv.Itoa(r.jobExitCode(ctx, namespace, obj.Name)))
+		}
+		if time.Now().After(deadline) {
+			return aferrors.Coded(aferrors.AFRUN004, "service", role,
+				"timeout", r.readyWait.Round(time.Second).String(),
+				"health", "the stance job never finished")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// serviceNamed finds one service in a spec.
+func serviceNamed(services []provider.ServiceSpec, name string) (provider.ServiceSpec, bool) {
+	for _, s := range services {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return provider.ServiceSpec{}, false
 }
 
 // ensureNamespace creates the environment's namespace, or leaves an existing
@@ -447,7 +552,7 @@ func (r *Runtime) runMigration(
 			return nil
 		}
 		if got.Status.Failed > 0 {
-			code := r.migrationExitCode(ctx, namespace, job.Name)
+			code := r.jobExitCode(ctx, namespace, job.Name)
 			return aferrors.Coded(aferrors.AFRUN005,
 				"service", s.Name, "code", strconv.Itoa(code))
 		}
@@ -464,8 +569,13 @@ func (r *Runtime) runMigration(
 	}
 }
 
-// migrationExitCode reads what the migration container exited with.
-func (r *Runtime) migrationExitCode(ctx context.Context, namespace, job string) int {
+// jobExitCode reads what a one shot Job's container exited with.
+//
+// Named for the Job rather than for the migration since a migration stopped
+// being the only one. Nothing in it was ever migration specific: it finds the
+// pod by the label Kubernetes puts on every Job's pods and reads the
+// terminated state.
+func (r *Runtime) jobExitCode(ctx context.Context, namespace, job string) int {
 	pods, err := r.cli.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "job-name=" + job,
 	})
@@ -846,7 +956,14 @@ func (r *Runtime) Status(ctx context.Context, envID string) (provider.Env, error
 	troubled := map[string]bool{}
 	for _, pod := range sorted {
 		name := pod.Labels[LabelService]
-		if name == "" || strings.HasSuffix(name, "-migrate") {
+		// The pods of the one shot jobs are excluded, both of them. A
+		// migration and a stance job run in a service's image, exit, and are
+		// left behind so their logs still explain what happened; reporting
+		// either as a running service would put a container that has already
+		// finished into af status and into the count of what came up.
+		if name == "" ||
+			strings.HasSuffix(name, "-migrate") ||
+			strings.HasSuffix(name, provider.StanceJobSuffix) {
 			continue
 		}
 		rs, seen := byService[name]

@@ -13,6 +13,7 @@ import (
 
 	"github.com/antifailure/antifailure/engine/internal/crossstore"
 	"github.com/antifailure/antifailure/engine/internal/fidelity"
+	"github.com/antifailure/antifailure/engine/internal/journal"
 	"github.com/antifailure/antifailure/engine/internal/mockpack"
 	"github.com/antifailure/antifailure/engine/internal/personas"
 	"github.com/antifailure/antifailure/engine/internal/traffic"
@@ -52,6 +53,7 @@ func (o *Orchestrator) Fidelity(ctx context.Context) (fidelity.Inventory, error)
 	o.observeRuntime(ctx, &obs)
 	o.observeDatabase(ctx, s, &obs)
 	o.observeDatastores(ctx, s, &obs)
+	o.observeStances(ctx, s, &obs)
 	o.observeHosts(&obs)
 	o.observeTraffic(&obs)
 	o.observeCrossStore(ctx, s, &obs)
@@ -314,6 +316,163 @@ func (o *Orchestrator) observeDatastores(
 		if store, branched := o.observeDatastore(ctx, h); branched {
 			obs.Stores = append(obs.Stores, store)
 		}
+	}
+}
+
+// observeStances asks what this environment did about every store the manifest
+// declares with a stance other than golden.
+//
+// Two questions, and neither of them is answered by the manifest. Is a service
+// of the store's name running, and did the run that brought this environment
+// up record the job the stance asks for.
+//
+// The second is the one that costs something to ask and is the reason this
+// exists. A manifest declaring a broker topics_only is the same file whether
+// the environment in front of somebody was brought up by a build that creates
+// topics or by one that did not: same services, same images, same names, and a
+// broker with nothing in it. The journal is the only thing in this product
+// that records what a particular run actually did, so it is what is read.
+//
+// Reading an intent rather than a completion, and the report says so in those
+// words. A run journals what it is about to create before it creates it,
+// because a resource created before it was recorded is a resource teardown
+// cannot find. What the record proves on its own is that this environment's
+// run reached the job. What makes that enough is the other half: a stance job
+// that fails fails the environment, so a recorded job beside a store that is
+// up is a job that finished.
+func (o *Orchestrator) observeStances(
+	ctx context.Context, s *session, obs *fidelity.Observation,
+) {
+	declared := make([]schema.Datastore, 0, len(o.opts.Manifest.Datastores))
+	for _, ds := range datastoreDeclarations(o.opts.Manifest) {
+		if ds.Stance != schema.StanceGolden {
+			declared = append(declared, ds)
+		}
+	}
+	if len(declared) == 0 {
+		return
+	}
+
+	running := make(map[string]bool, len(obs.Running))
+	for _, svc := range obs.Running {
+		running[svc.Name] = true
+	}
+	ran, ranReason := o.stanceJobsRecorded(ctx, s)
+
+	for _, ds := range declared {
+		st := fidelity.Stance{Store: ds.Name, RunningReason: obs.ServicesReason}
+		switch {
+		case ds.Provider != "" && !manifestRunsAServiceCalled(o.opts.Manifest, ds.Name):
+			// A store left to a provider, which validation allows and this
+			// build does nothing about. A datastore provider is what
+			// refreshes, masks, verifies and branches a GOLDEN, so nothing
+			// here opens one for any other stance, and nothing here started
+			// this store either. Said out loud rather than reported as
+			// absent, which would be this claiming to know that a managed
+			// store somebody else supplies is not there.
+			st.RunningReason = "it names the provider " + ds.Provider +
+				", so this build neither starts it nor asks that provider about it, " +
+				"and nothing here can say what it holds"
+		case obs.ServicesReason == "":
+			st.Running = running[ds.Name]
+		}
+		switch {
+		case ds.Stance == schema.StanceEmpty:
+			// No job to have recorded. The store running IS the stance, so
+			// asking the journal about it would produce an absence that means
+			// nothing and would read as one that means something.
+		case ranReason != "":
+			st.RanReason = ranReason
+		case ran[ds.Name]:
+			st.Ran = true
+		default:
+			st.RanReason = "this environment's run recorded no " + string(ds.Stance) +
+				" job for it, so either it was brought up by a build that did not run one " +
+				"or the stance was added to the manifest after it came up. Run af up again"
+		}
+		obs.Stances = append(obs.Stances, st)
+	}
+}
+
+// manifestRunsAServiceCalled reports whether the environment starts a container
+// of that name itself.
+//
+// The same question validation asks, asked again here because the answer
+// decides which of two honest sentences the report carries. A store with both
+// a provider and a service of its own name IS started by this environment, so
+// it is observed like any other; one with a provider and no service is not.
+func manifestRunsAServiceCalled(m *schema.Manifest, name string) bool {
+	if m == nil {
+		return false
+	}
+	for i := range m.Services {
+		if m.Services[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// stanceJobsRecorded reads back which stores this environment's own run
+// journalled a stance job for.
+//
+// Matched on the name the runtime journals, which pkg/provider composes for
+// exactly this reason: the runtime writes it and this reads it, and two ends
+// composing the same string separately would drift apart in a way no test
+// catches, leaving a report that says unmeasured forever about an environment
+// that is fine.
+func (o *Orchestrator) stanceJobsRecorded(
+	ctx context.Context, s *session,
+) (map[string]bool, string) {
+	j := s.journal
+	if j == nil {
+		// openReading builds no journal, because every other observation in
+		// this file goes to a provider or to the branch. One is built here
+		// rather than threaded through openReading so that a read only
+		// command does not acquire anything it does not use.
+		j = journal.New(s.db, o.opts.Clock, nil)
+	}
+	recs, err := j.All(ctx, o.envID)
+	if err != nil {
+		return nil, "the run journal could not be read, so nothing here can say what this " +
+			"environment's own run did about it: " + oneLine(err)
+	}
+	out := map[string]bool{}
+	for _, rec := range recs {
+		if rec.Kind != journal.KindContainer && rec.Kind != journal.KindDeployment {
+			continue
+		}
+		for _, ds := range datastoreDeclarations(o.opts.Manifest) {
+			if namesTheStanceJob(rec.IdemKey, ds.Name) {
+				out[ds.Name] = true
+			}
+		}
+	}
+	return out, ""
+}
+
+// namesTheStanceJob reports whether one journalled name is the stance job of
+// one store.
+//
+// A suffix match rather than equality, because each runtime prefixes its own
+// naming onto the job: the local one composes af-svc-<env>-<store>-stance and
+// the Kubernetes one composes <namespace>/<store>-stance. What is checked
+// beyond the suffix is the character in front of it, and that is not
+// decoration. Without it a store called e matches the job of a store called
+// cache, and one store's report carries another's evidence.
+func namesTheStanceJob(idemKey, store string) bool {
+	want := provider.StanceJobName(store)
+	if !strings.HasSuffix(idemKey, want) {
+		return false
+	}
+	if len(idemKey) == len(want) {
+		return true
+	}
+	switch idemKey[len(idemKey)-len(want)-1] {
+	case '-', '/':
+		return true
+	default:
+		return false
 	}
 }
 
