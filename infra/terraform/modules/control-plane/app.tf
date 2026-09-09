@@ -527,6 +527,31 @@ resource "azurerm_container_app" "this" {
         }
       }
 
+      # The grouped store of the control plane's own failures.
+      #
+      # Emitted only when it is being turned OFF, because on is the image's
+      # default and an env var restating a default is one more place for the two
+      # to disagree. The variable is a bool rather than the string the process
+      # reads, so a deployment cannot half turn it off with a spelling the
+      # process does not recognise.
+      dynamic "env" {
+        for_each = var.failure_store ? [] : ["off"]
+        content {
+          name  = "AF_FAILURE_STORE"
+          value = env.value
+        }
+      }
+
+      # How long a grouped failure survives past its LAST occurrence. Null takes
+      # the image's default of 30 days, for the same reason as above.
+      dynamic "env" {
+        for_each = var.failure_retention_days == null ? [] : [var.failure_retention_days]
+        content {
+          name  = "AF_FAILURE_RETENTION_DAYS"
+          value = tostring(env.value)
+        }
+      }
+
       # Every origin the marketing site is served from, for the beacon, the
       # enterprise lead form and the careers application form.
       #

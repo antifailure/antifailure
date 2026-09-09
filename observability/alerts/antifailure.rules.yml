@@ -186,3 +186,52 @@ groups:
           description: >-
             The statement timeout is fifteen seconds, so this is well short of failing and
             well past comfortable. Usually the database rather than the process.
+
+  - name: antifailure-failure-store
+    interval: 30s
+    rules:
+      # The store that answers "what is failing" has to be able to say when it
+      # is the thing that is failing. Three of the four outcomes on this counter
+      # mean the Logs page is counting fewer failures than actually happened,
+      # and a store that under-reports without saying so is worse than none: an
+      # operator reads a small number during an incident and stops looking.
+      #
+      # `capped` and `dropped` are grouped into one alert because the operator
+      # action is the same. Both mean the installation is producing more
+      # distinct kinds of failure than the store will hold, which is either a
+      # genuinely broken deploy or a route label that has stopped being bounded.
+      - alert: TheFailureStoreIsLosingFailures
+        expr: |
+          sum(rate(af_control_plane_failures_total{outcome=~"capped|dropped"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The grouped failure store is refusing to record new kinds of failure.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            The control plane is producing more distinct kinds of failure than the store
+            will hold, so the Logs page is now showing fewer than are happening. The store
+            is bounded by the code, so reaching the cap normally means a route label has
+            stopped being bounded rather than that the day is going badly. Compare
+            af_control_plane_failures_total by outcome against the observed count.
+
+      # Separated from the one above because the operator action is different.
+      # This one is the database, not the store, and it is self healing: the
+      # occurrences go back in the buffer and are written when Postgres returns.
+      # It firing and then stopping is the recovery, which is worth being able
+      # to see rather than being told about only while it is broken.
+      - alert: TheFailureStoreCannotWrite
+        expr: |
+          sum(rate(af_control_plane_failures_total{outcome="failed"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The control plane cannot write down what is failing in it.
+          runbook: https://antifailure.dev/docs/self-hosting/operations
+          description: >-
+            The flush into control_plane_failures is raising. The occurrences are held in
+            memory and written when the database returns, so nothing is lost yet, but the
+            Logs page is behind by however long this has been true. Usually the same cause
+            as whatever is producing the failures being recorded.

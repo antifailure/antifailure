@@ -51,6 +51,18 @@ export interface MaintenanceConfig {
    * and the counts stay.
    */
   analyticsRetentionDays?: number
+  /**
+   * Delete grouped control plane failures whose most recent occurrence is older
+   * than this many days. Undefined never deletes, which is the default for the
+   * same reason retentionMonths is.
+   *
+   * This bounds STALENESS, not size. Size is bounded by the group cap in
+   * failures.ts, which holds whether or not anything ever sweeps, so an
+   * installation with no administrative connection string configured keeps a
+   * bounded table of groups whose last occurrence may be old. The page prints
+   * the date rather than implying the failure is current.
+   */
+  failureRetentionDays?: number
   /** How often to run. */
   intervalMs?: number
   log?: (line: string) => void
@@ -67,6 +79,8 @@ export interface MaintenanceRun {
   /** Raw analytics events deleted by retention. */
   analyticsPruned: number
   usageOrganizations: number
+  /** Grouped control plane failures deleted by retention. */
+  failuresPruned: number
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -165,6 +179,28 @@ export async function runMaintenance(
     const usage = await admin<{ count: string }[]>`
       SELECT roll_up_environment_usage(${now.toISOString()}::timestamptz) AS count`
 
+    // The grouped record of the control plane's own failures.
+    //
+    // HERE RATHER THAN IN THE APPLICATION, because 0042 grants the application
+    // role no DELETE on purpose: a role reached through a request path should
+    // not be able to erase the record of what it did to get there. This
+    // connection owns the table.
+    //
+    // By last_seen_at and never by first_seen_at. A group first seen four
+    // months ago and last seen this morning is the most interesting row on the
+    // page, and sweeping by its age would delete exactly the long running
+    // failure an operator is trying to date.
+    let failuresPruned = 0
+    if (config.failureRetentionDays !== undefined) {
+      const gone = await admin<{ fingerprint: string }[]>`
+        DELETE FROM control_plane_failures
+        WHERE last_seen_at < ${new Date(
+          now.getTime() - config.failureRetentionDays * DAY_MS,
+        ).toISOString()}::timestamptz
+        RETURNING fingerprint`
+      failuresPruned = gone.length
+    }
+
     // Recruitment is separate from analytics and tenant usage. Personal
     // application details expire even if no operator has reviewed the queue.
     await admin`DELETE FROM recruitment_applications WHERE created_at < ${new Date(now.getTime() - 180 * DAY_MS).toISOString()}::timestamptz`
@@ -177,6 +213,7 @@ export async function runMaintenance(
       rolledUp: rolled.days,
       analyticsPruned: rolled.pruned,
       usageOrganizations: Number(usage[0]?.count ?? 0),
+      failuresPruned,
     }
   } finally {
     await admin.end({ timeout: 10 })

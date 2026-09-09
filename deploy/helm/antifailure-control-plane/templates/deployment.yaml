@@ -246,6 +246,18 @@ spec:
             - name: AF_ANALYTICS_RETENTION_DAYS
               value: {{ .Values.analytics.retentionDays | quote }}
             {{- end }}
+            # The grouped store of the control plane's own failures. Emitted
+            # only when it is being turned off, because on is the image's
+            # default and an env var restating a default is one more place for
+            # the two to disagree.
+            {{- if not .Values.failureStore.enabled }}
+            - name: AF_FAILURE_STORE
+              value: "off"
+            {{- end }}
+            {{- if .Values.failureStore.retentionDays }}
+            - name: AF_FAILURE_RETENTION_DAYS
+              value: {{ .Values.failureStore.retentionDays | quote }}
+            {{- end }}
             # AF_MIGRATE is deliberately absent. Migrations are the bootstrap
             # Job's work, once, and not something every replica races to do on
             # startup.

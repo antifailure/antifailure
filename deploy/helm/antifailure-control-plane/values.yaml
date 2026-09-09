@@ -251,6 +251,25 @@ stripe:
     secretKey: AF_STRIPE_SECRET_KEY
     webhookSecret: AF_STRIPE_WEBHOOK_SECRET
 
+# The grouped record of the control plane's OWN failures, which the operator
+# portal's Logs page reads.
+#
+# Both of these have a working default in the image, so neither is here to make
+# the feature run. They are here because a value a chart cannot set is a switch
+# an operator cannot reach.
+failureStore:
+  # One row per kind of failure, never one per occurrence, so the table's size is
+  # set by the code rather than by how badly the day is going, and it holds at
+  # most 500 groups. False writes nothing, and the Logs page says nothing is
+  # being recorded rather than showing an empty list that reads as a quiet day.
+  enabled: true
+  # Delete a group this many days after its LAST occurrence, not its first: a
+  # failure first seen in March and last seen this morning is the most
+  # interesting row on the page. Empty takes the image's default of 30. Applied
+  # only when the maintenance pass can run, because the application role is
+  # deliberately granted no DELETE on that table.
+  retentionDays: ""
+
 # The analytics the marketing site's beacon feeds.
 analytics:
   # 64 hex characters, which is 32 bytes, from `openssl rand -hex 32`. The key

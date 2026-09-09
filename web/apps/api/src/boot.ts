@@ -38,6 +38,7 @@ import { serve } from '@hono/node-server'
 import { createPool, createAdminPool, migrate, type AdminPool, type Pool } from '@antifailure/db'
 import postgres from 'postgres'
 import { createServer } from './server.ts'
+import { failureRetentionFrom } from './failures.ts'
 import { registeredExtensions } from './extensions.ts'
 import { describeTrustedProxyHops, trustedProxyHopsFrom } from './clientaddress.ts'
 import { RealGitHubClient } from './auth/github.ts'
@@ -134,6 +135,16 @@ export interface ControlPlane {
   port: number
   close(): Promise<void>
 }
+
+/**
+ * How often the grouped failure store writes what it accumulated.
+ *
+ * Ten seconds, matching the Logs page's poll, so a failure reaches the screen
+ * within about two ticks. Shorter would put a write on the error path in all
+ * but name; longer would leave an operator watching a page that says nothing is
+ * wrong while it is.
+ */
+const FAILURE_FLUSH_MS = 10_000
 
 export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlPlane> {
 
@@ -547,7 +558,7 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
     }
   }
 
-  const { app, ingestLimiter, authLimiter } = createServer({
+  const { app, ingestLimiter, authLimiter, failures } = createServer({
     pool,
     adminPool,
     github,
@@ -608,6 +619,11 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
         // and writes one it can only select from. A second scheduler would be a
         // second thing to notice had stopped.
         analyticsRetentionDays: analyticsRetentionFromEnv(process.env),
+        // The grouped failure store's retention rides the same pass, on the
+        // same credential, for the same reason: 0042 gives the application role
+        // no DELETE, and a second scheduler is a second thing to notice had
+        // stopped.
+        failureRetentionDays: failureRetentionFrom(process.env),
         log: (line) => console.log(line),
       },
       systemClock,
@@ -621,6 +637,28 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
 
   // Housekeeping, not enforcement: expiry is checked when a session is resolved,
   // so a sweeper that is late costs table size and nothing else.
+  // The failure store's flush.
+  //
+  // ON ITS OWN TIMER, and much faster than the five minute housekeeping pass,
+  // because this is the one thing on that list a person is watching. Ten
+  // seconds is the interval the Logs page polls at, so a failure is on screen
+  // within about two ticks of happening.
+  //
+  // Separate from housekeeping for a second reason: every sweep in that pass is
+  // about table size and being late costs rows. This one is about a number an
+  // operator is reading during an incident, and being five minutes late means
+  // the page says nothing is wrong for five minutes after it started going
+  // wrong.
+  //
+  // `void` with a catch, and the catch is not decoration. `flush` already puts
+  // failed groups back in the buffer and increments a counter, so an
+  // unhandled rejection here would be a second report of something already
+  // reported, on the path least able to afford one.
+  const failureFlush = setInterval(() => {
+    void failures.flush().catch((err) => console.error('failure store flush', err))
+  }, FAILURE_FLUSH_MS)
+  failureFlush.unref()
+
   const housekeeping = setInterval(
     () => {
       void sweepSessions(pool, systemClock).catch((err) => console.error('session sweep', err))
@@ -754,8 +792,13 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
         // It swallows its own failures, so a vendor being unreachable delays this
         // by its own timeout and never turns a clean shutdown into a bad exit
         // status.
-        void postHogSink
-          .shutdown()
+        // Flushed before the pool closes, for the same reason the sink is:
+        // whatever the last ten seconds grouped is otherwise lost on every
+        // deploy, and a deploy is exactly when an operator is looking.
+        void failures
+          .flush()
+          .catch((err) => console.error('failure store flush on shutdown', err))
+          .then(() => postHogSink.shutdown())
           .then(() => pool.close())
           .then(() => process.exit(0))
       })
@@ -776,8 +819,10 @@ export async function startControlPlane(hooks: BootHooks = {}): Promise<ControlP
             reject(err)
             return
           }
-          void postHogSink
-            .shutdown()
+          void failures
+            .flush()
+            .catch((err) => console.error('failure store flush on close', err))
+            .then(() => postHogSink.shutdown())
             .then(() => pool.close())
             .then(() => resolve())
             .catch(reject)

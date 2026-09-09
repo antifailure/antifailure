@@ -231,6 +231,7 @@ export interface ControlPlaneMetrics {
   runVerdicts: Counter
   analyticsEvents: Counter
   analyticsRejections: Counter
+  controlPlaneFailures: Counter
 }
 
 export function createMetrics(version = 'dev'): ControlPlaneMetrics {
@@ -330,6 +331,29 @@ export function createMetrics(version = 'dev'): ControlPlaneMetrics {
         'Analytics events refused, by which rule refused them. The closed schema is only a '
         + 'guarantee if somebody can see it firing, and unknown_field is the one worth watching: '
         + 'it means a producer started sending something nobody declared.',
+      ),
+    ),
+
+    // The failure store's own view of itself, which is the only thing that can
+    // say the store is lying. Three of the four outcomes mean a number on the
+    // Logs page is lower than the truth, and a store that under-reports without
+    // saying so is worse than no store: an operator reads a small count during
+    // an incident and stops looking, which is the exact defect the Logs page
+    // header exists to prevent.
+    //
+    //   observed  every failure the two handlers saw, whether or not a store is
+    //             configured. Counted before anything else, so it is the
+    //             denominator the other three are read against.
+    //   dropped   the in-process buffer was full of other groups.
+    //   capped    the table is at its group cap, so a new group was refused.
+    //   failed    the write raised. These occurrences are retried, so this one
+    //             firing and then stopping is a database that came back.
+    controlPlaneFailures: registry.register(
+      new Counter(
+        'af_control_plane_failures_total',
+        'Failures the control plane caught in its own handlers, by what became of them: '
+        + 'observed, dropped, capped, or failed. Anything but observed means the grouped '
+        + 'store on the Logs page is counting fewer than actually happened.',
       ),
     ),
   }

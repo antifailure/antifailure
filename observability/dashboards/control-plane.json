@@ -633,6 +633,87 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 500,
+      "type": "row",
+      "title": "The failure store",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Failures the handlers caught",
+      "description": "Every failure the control plane's own two error handlers saw, whether or not the grouped store recorded it. The denominator the other series here are read against.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(af_control_plane_failures_total{outcome=\"observed\"}[5m]))",
+          "legendFormat": "observed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Failures the store did NOT record",
+      "description": "Anything above zero here means the Logs page in the operator portal is counting fewer failures than actually happened. capped is the group cap, dropped is the in-process buffer, failed is a write that raised and will be retried.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(af_control_plane_failures_total{outcome=~\"capped|dropped|failed\"}[5m])) by (outcome)",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {}
+        },
+        "overrides": []
+      }
     }
   ],
   "description": "Every metric on this dashboard is exported by web/apps/api/src/metrics.ts, and a test fails if one is not. A panel querying a metric that does not exist draws an empty graph, which reads as a quiet system rather than as a broken dashboard."
