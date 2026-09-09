@@ -818,6 +818,56 @@ const defaultTuning = `{
           }
         ]
       }
+    },
+    {
+      "name": "emulate",
+      "why": "the third side of the egress mode pair: a rule answered by an emulator inside the environment, which is the only mode that may carry an emulator and may carry neither a credential nor a rate limit",
+      "overrides": {
+        "database.golden.schedule": "0 3 * * *",
+        "database.golden.max_age": "720h",
+        "database.volume.max_age": "720h",
+        "database.subset.virtual_relationships[].from": "orders.user_id",
+        "database.subset.virtual_relationships[].to": "users.id",
+        "egress.rules[].mode": "emulate",
+        "egress.rules[].emulator": "localstack",
+        "explore.goals[].name": "explore-goal",
+        "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
+        "load.source": "otel",
+        "load.unsafe_routes": [
+          "/admin"
+        ],
+        "oracle.ignore.fields[]": "$.field",
+        "oracle.probes[].method": "POST",
+        "personas[].email": "person@example.com",
+        "services[].build.strategy": "image",
+        "services[].depends_on": [
+          "dep"
+        ],
+        "services[].env[].value": "http://example.com",
+        "load.source_config": {
+          "path": "telemetry/traces.json"
+        }
+      },
+      "prune": [
+        "database.seed",
+        "datastores[].from",
+        "egress.rules[].fixtures",
+        "egress.rules[].credential",
+        "egress.rules[].rate_limit",
+        "services[].schedule",
+        "services[].resources",
+        "load.thresholds.query_count_increase",
+        "services[].env[].from",
+        "services[].env[].sandbox"
+      ],
+      "append": {
+        "services": [
+          {
+            "name": "dep",
+            "kind": "worker"
+          }
+        ]
+      }
     }
   ],
   "refused_fields": {
