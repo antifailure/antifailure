@@ -104,6 +104,27 @@ var aws = &Emulator{
 		// reproducible only by accident.
 		"PERSISTENCE": "0",
 
+		// The emulator must not name itself in an answer, and by default it
+		// does. LocalStack's standard SQS endpoint strategy returns a queue
+		// URL on ITS OWN domain, sqs.<region>.localhost.localstack.cloud,
+		// whatever host the CreateQueue arrived on. An application then sends
+		// its next message to that name, which is the whole claim of this
+		// work failing from the other end: the code named no endpoint and the
+		// emulator handed it one anyway.
+		//
+		// Measured in CI on 2026-09-09. The Node application on the inner
+		// network died with `getaddrinfo EAI_AGAIN
+		// sqs.us-east-1.localhost.localstack.cloud`, because that name is not
+		// one the environment resolves and the network has no route out to
+		// look it up. On a machine where it DID resolve the failure would be
+		// worse: it is a public name pointing at 127.0.0.1, so the message
+		// would leave the surface and land somewhere nobody declared.
+		//
+		// `off` makes the queue URL carry the Host the request was made to,
+		// which for an application reaching sqs.us-east-1.amazonaws.com is
+		// exactly what real SQS returns.
+		"SQS_ENDPOINT_STRATEGY": "off",
+
 		// Listen on every interface inside the container, because the address
 		// the sidecar forwards to is the container's address on the inner
 		// network and not localhost.
