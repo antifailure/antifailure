@@ -527,6 +527,15 @@ benchmark:
     AF_VOLUME_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-volume-share.md" \
       go test ./internal/fidelity -run TestBenchmarkTheShareOfProductionInTheTwin -count=1
     echo "wrote benchmarks/${stamp}-volume-share.md"
+    # The share of production's traffic a load run actually sends. Its before
+    # half is the report the instrument at bfa35d94 printed for the same
+    # observation, which called four hand written routes a reproduction of
+    # production's traffic while a migration held nine relations locked
+    # underneath a run that reported nothing wrong. It writes into benchmarks/
+    # for the same reason the volume half does.
+    AF_TRAFFIC_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-traffic-coverage.md" \
+      go test ./internal/fidelity -run TestBenchmarkTheShareOfProductionTheRunSends -count=1
+    echo "wrote benchmarks/${stamp}-traffic-coverage.md"
     # The database providers, which is a different question and a different
     # report: how long the first golden takes per gigabyte and how long a
     # branch takes, per provider. It is slow on purpose, because it creates

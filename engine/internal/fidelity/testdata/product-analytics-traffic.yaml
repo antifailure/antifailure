@@ -1,0 +1,73 @@
+version: 1
+name: product-analytics-traffic
+
+# The stack section 4 of the plan is written about, and the one this lane's
+# number is measured on. A web tier behind three instances, a worker behind
+# two, the primary Postgres, and two stores beside it: the ClickHouse every
+# event lives in, which is the product, and a Redis that is correct to start
+# empty and says so.
+#
+# No egress rules, so the third party dimension is excluded whole. The load
+# block is the difference from product-analytics.yaml beside it, and it is
+# copied from this repository's own antifailure.yaml: four safe routes written
+# by hand, source none, scale one. That is the configuration the plan describes
+# as "4 hand written routes out of an unknown total", and it is the one a
+# migration held nine relations locked underneath while the run reported 0.0
+# percent failed.
+
+services:
+  - name: web
+    port: 8000
+    replicas: 3
+  - name: worker
+    kind: worker
+    replicas: 2
+  - name: events
+    kind: worker
+    build:
+      strategy: image
+      image: clickhouse/clickhouse-server:24.3
+  - name: cache
+    kind: worker
+    build:
+      strategy: image
+      image: redis:7
+
+database:
+  provider: docker
+  version: 17
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: golden
+    # The variable holding production's address, because a store that names
+    # none gets a golden of production's shape with none of its rows, and this
+    # stack is the one whose events ARE the product. The report says which of
+    # the two a branch is, so the fixture has to choose.
+    source_url_env: PRODUCTION_CLICKHOUSE_URL
+
+  - name: cache
+    engine: redis
+    stance: empty
+    because: a cache is rebuilt from the primary and a copy would be noise
+
+personas:
+  - name: buyer
+    email: buyer@example.test
+
+load:
+  enabled: true
+  source: none
+  scale: 1
+  duration: 30s
+  # Four pages somebody thought of. None of them is the ingest endpoint that
+  # carries two requests in three, which is the whole finding.
+  # Concrete paths rather than templates, because a generator cannot send
+  # /api/projects/{id}/dashboards at anything. Both sides of the comparison
+  # collapse an identifier to {id}, so these meet production's own templates.
+  safe_routes:
+    - GET /health
+    - GET /api/projects/1/dashboards
+    - GET /api/organizations/1/members
+    - GET /shared_dashboard/9f3c2a7b41e84d6a

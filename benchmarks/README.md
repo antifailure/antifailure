@@ -161,3 +161,46 @@ quoting a lock timing taken against it, which is why the same sentence carries
 Run `af volume record` against your own database and the table is yours. It
 reads no row: every figure comes from `pg_class`, `pg_stats` and the partition
 catalogs, so a read only role on a replica is enough.
+
+## The share of production's traffic a load run sends
+
+The other denominator, and the one that decides whether a green load run means
+anything. **Of the requests production served, how many go to a route this run
+actually sends?**
+
+| Environment | Routes sent | Routes production served | Requests covered | Run |
+| --- | --- | --- | --- | --- |
+| The analytics twin in `engine/internal/fidelity/testdata` | 4 | 14 | 0.41% | `2026-09-08` |
+
+Measured on this repository on 2026-09-06, which is the failure the number
+exists for. A migration was made to hold `ACCESS EXCLUSIVE` on `events` and its
+partitions, `pg_locks` confirmed nine relations locked at once for the whole
+window, and `af load smoke` ran straight through it reporting **0.0 percent
+failed, with p95 improving from 41ms to 17ms**. None of the four hand written
+`safe_routes` in this repository's own manifest reads that table. It was not a
+weak result. It was a green one.
+
+The instrument was worse than silent about it. Any shape a source produced was
+reported `reproduced`, so four routes somebody wrote from memory carried the
+same verdict as a mix read from a week of production telemetry. The same run
+publishes what the report said before, recorded from the instrument at
+`bfa35d94` rather than recomputed.
+
+**The production side of this table is a written fixture**, at the shape and
+scale of an analytics product's week, and it is not a recording of any real
+production. No traffic profile of a real production is committed here. What is
+real is the instrument: `af traffic record` produces exactly that document from
+an OpenTelemetry export or an access log, a test holds the fixture to the
+recorder's own output, and the arithmetic is the arithmetic a customer's export
+gets.
+
+**And on this repository's own manifest the honest answer is that the number
+cannot be measured at all.** The four routes are real; the total is unknown,
+because the Antifailure control plane records no per request telemetry. Checked
+on 2026-09-07 against both Log Analytics workspaces: `AzureDiagnostics` carries
+`PostgreSQLLogs` and nothing else, and `ContainerAppConsoleLogs_CL` carries
+lifecycle lines. There is no access log and no trace export to record a profile
+from. The report now says `unmeasured` with that reason instead of
+`reproduced`, which is the whole point of the dimension.
+
+Run `af traffic record` against your own export and the table is yours.

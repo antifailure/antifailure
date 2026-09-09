@@ -264,6 +264,7 @@ Traffic shaped like production, compared between the base branch and this one. R
 | `source` | `none`, `otel`, `access_log` | no | Where the endpoint mix comes from. An OpenTelemetry trace export or a combined format access log, both read from a file named in source_config.path. Defaults to `none`. |
 | `source_config` | object | no | Adapter specific settings. Both sources take a path: the OTLP/JSON trace export, or the access log. Credentials come from the secrets subsystem. Max properties 20. |
 | `thresholds` | object | no | Deltas that fail the run. Applied to the difference against the base branch, never to absolute numbers. |
+| `traffic` | [Traffic](#traffic) | no | The committed record of what production actually serves, which is the denominator every route in a load run is measured against. |
 | `unsafe_routes` | list of string | no | Routes that mutate state destructively. They are included only against a fresh branch that is reset afterwards. Max items 500. |
 
 ## Load scenario
@@ -458,6 +459,15 @@ Take a production shaped slice rather than the whole database. The closure is co
 | `seed_table` | string | no | Table the selection starts from, for example the tenant or account table. Max length 128. |
 | `seed_where` | string | no | A SQL predicate selecting the seed rows, for example created_at > now() - interval '90 days'. Max length 2048. |
 | `virtual_relationships` | list of object | no | Relationships the schema does not declare as foreign keys but the application relies on. Without these, a subset can look complete and still break the application. Max items 200. |
+
+## Traffic
+
+The committed record of what production actually serves, which is the denominator every route in a load run is measured against. Without one safe_routes is a list written from memory and nothing says how much of production it misses. Measured on this repository on 2026-09-06: a migration held an exclusive lock on nine relations for thirty seconds and the run over four hand written routes reported 0.0 percent failed, because none of the four reads the locked table.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `max_age` | string | no | How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows. Defaults to `336h`. Max length 32. |
+| `profile` | string | **yes** | The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier. Max length 512. |
 
 ## Volume
 

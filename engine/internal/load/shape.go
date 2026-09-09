@@ -249,22 +249,51 @@ func ShapeFromSafeRoutes(safe []string) (Shape, bool) {
 	return shape, true
 }
 
+// AccessLogRead is what reading an access log found, including what it could
+// not answer.
+//
+// The shape alone was enough for a generator, which only needs relative
+// weights and a rate. A traffic profile needs the counts themselves and the
+// window they were counted over, because it is production's side of a
+// comparison somebody quotes rather than an input to a picker.
+type AccessLogRead struct {
+	Shape Shape
+	// Requests is how many lines each route carried, keyed by the same
+	// "METHOD /path" a Route renders as.
+	Requests map[string]int
+	// Lines is how many were read as requests, and Unreadable how many were
+	// not. A log full of lines this parser cannot read produces an empty shape
+	// either way, and only one of those two says so.
+	Lines      int
+	Unreadable int
+	// First and Last are the timestamps the log spanned, zero when no line
+	// carried a readable one.
+	First, Last time.Time
+}
+
 // FromAccessLog reads a shape out of a combined format access log.
 //
 // The commonest source by far, because every reverse proxy writes one and
 // nobody has to install anything. Paths are normalised so that /users/4821 and
 // /users/9130 count as one route rather than as two with a weight of one each,
 // which would produce a shape with ten thousand routes and no signal in it.
-func FromAccessLog(lines []string) Shape {
+func FromAccessLog(lines []string) Shape { return ReadAccessLog(lines).Shape }
+
+// ReadAccessLog reads an access log and reports the counts behind the shape.
+func ReadAccessLog(lines []string) AccessLogRead {
 	counts := map[string]int{}
 	methods := map[string]string{}
 	paths := map[string]string{}
 	total := 0
 	var first, last time.Time
 
+	unreadable := 0
 	for _, line := range lines {
 		method, path, ok := parseAccessLine(line)
 		if !ok {
+			if strings.TrimSpace(line) != "" {
+				unreadable++
+			}
 			continue
 		}
 		normalised := NormalisePath(path)
@@ -296,7 +325,10 @@ func FromAccessLog(lines []string) Shape {
 		}
 		return shape.Routes[i].String() < shape.Routes[j].String()
 	})
-	return shape
+	return AccessLogRead{
+		Shape: shape, Requests: counts, Lines: total, Unreadable: unreadable,
+		First: first, Last: last,
+	}
 }
 
 // accessRate is the arrival rate the log observed.

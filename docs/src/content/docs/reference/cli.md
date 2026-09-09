@@ -2191,6 +2191,106 @@ af token rm afe_1a2b3c4d
 | --- | --- | --- |
 | `--control-plane` | - | The control plane to use (default: AF_CONTROL_PLANE_URL, or the hosted instance). |
 
+### `af traffic`
+
+What production serves, and how much of it a load run actually sends.
+
+A load run sends the routes safe_routes names. Without a traffic profile
+nothing says how much of production that is, so four routes written by hand
+report in the same words and with the same verdict as a mix read from a week of
+production telemetry.
+
+That is not a cosmetic gap. Measured on this repository on 2026-09-06: a
+migration held an exclusive lock on nine relations for thirty seconds and the
+load run over four hand written routes reported 0.0 percent failed, because
+none of the four reads the locked table. A hand written route list cannot know
+which routes touch which tables.
+
+A profile is the endpoint mix, the arrival rate, the peak concurrency and the
+per route p95, counted from telemetry a team already has. It carries no request
+body, no header, no query string and no identifier. It is a count per route,
+which is what makes it safe to commit beside the manifest, and committing it is
+the point: the check running on a pull request cannot reach production.
+
+Declare where it lives under load.traffic.profile, and how old it may be under
+load.traffic.max_age. A profile past that age is refused rather than quoted.
+
+```
+af traffic
+```
+
+```
+af traffic show
+```
+
+Subcommands:
+
+- [`af traffic record`](#af-traffic-record) Count what production served from a trace export or an access log.
+- [`af traffic show`](#af-traffic-show) Print what production serves and which of it this run sends.
+
+### `af traffic record`
+
+Count what production served from a trace export or an access log.
+
+Reads the file load.source_config.path names, which --from overrides, and
+writes the profile to the path load.traffic.profile names, which --out
+overrides.
+
+Two sources, both of them a file. An OpenTelemetry trace export in OTLP/JSON
+answers every question the profile asks, because a span carries a start and an
+end: the mix, the rate, the per route p95 a threshold compares against, and the
+peak concurrency. A combined format access log answers the mix and the rate,
+and says in the profile that it could answer neither of the others.
+
+Nothing here opens a socket, and there is no agent to install. The file is one
+a collector or a reverse proxy already wrote.
+
+```
+af traffic record [flags]
+```
+
+```
+# Counts an OpenTelemetry export or an access log a collector already
+# wrote. Nothing here opens a socket and there is no agent to install.
+af traffic record
+af traffic record --from telemetry/traces.json --out .antifailure/traffic.json
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+| `--from` | - | Read this file instead of the one load.source_config.path names. |
+| `--out` | - | Write the profile here instead of where the manifest says. |
+
+### `af traffic show`
+
+Print what production serves and which of it this run sends.
+
+Reads the profile the manifest names and prints it, busiest route first, with a
+mark against every route a load run would actually send.
+
+The routes with no mark are the finding. They are what production serves and
+this run never touches, so they are what a green run says nothing about, and
+the safe_routes lines that would cover them are printed at the end for somebody
+to read and paste. Nothing is written for you: this measures and states, and
+the manifest confirms it.
+
+A profile older than load.traffic.max_age is REFUSED rather than printed with a
+warning beside it. A stale denominator is not a smaller number, it is an
+unknown one.
+
+```
+af traffic show [flags]
+```
+
+```
+af traffic show
+```
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--branch` | - | Branch context to use, defaulting to the checked out one. |
+
 ### `af up`
 
 Create an environment for the current branch.

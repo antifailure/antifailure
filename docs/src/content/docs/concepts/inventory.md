@@ -31,7 +31,7 @@ anybody.
 | `third_party` | The hosts the egress policy names, the mode each is in, and which mock pack answers for the ones in mock mode. |
 | `auth` | Whether each declared persona actually has a row in the branch, and whether the way it signs in can be carried out here. |
 | `runtime` | Where the environment runs. |
-| `traffic` | Where the endpoint mix comes from, through the same code the load run uses. |
+| `traffic` | Which routes a load run would actually send, measured against the committed traffic profile of what production served, and how fast it sends against production's own rate. With no profile both are `unmeasured` and say so: four routes somebody wrote by hand used to report as a reproduction of production's traffic. |
 | `datastores` | Every datastore in the environment other than the primary database, and whether anything reproduced its contents. One the manifest declares `golden` and this environment branched reports what the branch holds and which golden it came from, the way `database` does. One declared `golden` that nothing branched is `absent`. The others are `unmeasured` by name. |
 | `topology` | How many instances of each service are running, against how many the manifest asked for. |
 

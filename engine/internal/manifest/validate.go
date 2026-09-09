@@ -1330,6 +1330,23 @@ func (v *validator) load(m *schema.Manifest) {
 			fmt.Sprintf("The load source is %s and no path is configured.", l.Source),
 			"Set source_config.path to the file the traffic is read from.")
 	}
+	if t := l.Traffic; t != nil {
+		if strings.TrimSpace(t.Profile) == "" {
+			v.add("load.traffic.profile",
+				"The traffic block names no profile.",
+				"Give the path to the committed profile, relative to the repository root, "+
+					"for example .antifailure/traffic.json. Record one with af traffic record.")
+		} else if c, ok := confine(t.Profile); !ok || c == "" {
+			v.add("load.traffic.profile",
+				fmt.Sprintf("The traffic profile %q is not a file inside the repository.", t.Profile),
+				"Use a path relative to the repository root, not the root itself and not a path outside it.")
+		}
+		if _, err := ParseDuration(t.MaxAge); err != nil {
+			v.add("load.traffic.max_age",
+				fmt.Sprintf("The maximum age %q is not a duration.", t.MaxAge),
+				"Use a number of hours or days, for example 336h or 14d.")
+		}
+	}
 	v.loadThresholds(l)
 
 	for i := range l.Scenarios {
@@ -1374,27 +1391,35 @@ func (v *validator) loadThresholds(l *schema.Load) {
 		return
 	}
 
-	// p95_increase divides a measured p95 by a per route baseline, and only a
-	// trace export carries one. A combined format log line has no duration in
-	// it, and the default shape has no production behind it, so under either
-	// every route arrives with HasBaseline false and Breaches skips all of
-	// them.
-	if t.P95Increase > 0 && declaredAt(v.doc, "load.thresholds.p95_increase") {
+	// p95_increase divides a measured p95 by a per route baseline, and the
+	// shape carries one only under a trace export. A combined format log line
+	// has no duration in it, and the default shape has no production behind
+	// it, so under either every route used to arrive with HasBaseline false
+	// and Breaches skipped all of them.
+	//
+	// A declared traffic profile is the second place a baseline can come from,
+	// and it is why this refusal is now conditional rather than absolute. The
+	// profile carries production's own p95 per route, recorded from a trace
+	// export once and committed, so a run reading an access log or no source
+	// at all can still be compared against production. Refusing the threshold
+	// there would refuse a comparison that now works.
+	hasProfile := l.Traffic != nil && strings.TrimSpace(l.Traffic.Profile) != ""
+	if t.P95Increase > 0 && !hasProfile && declaredAt(v.doc, "load.thresholds.p95_increase") {
 		switch l.Source {
 		case schema.LoadAccessLog:
 			v.add("load.thresholds.p95_increase",
 				"The load source is access_log and p95_increase is set.",
 				"A combined format log line carries no duration, so every route read from one "+
 					"arrives with no baseline and this threshold can never fire. Read the traffic "+
-					"with source: otel, which carries production's own p95 for each route, or "+
-					"remove the threshold and judge the run on error_rate.")
+					"with source: otel, or declare load.traffic.profile so the baseline comes from "+
+					"a recorded profile, or remove the threshold and judge the run on error_rate.")
 		case "", schema.LoadNone:
 			v.add("load.thresholds.p95_increase",
 				"The load source is none and p95_increase is set.",
 				"With no source the shape is a default that exercises the root, and there is no "+
 					"production behind it to be a baseline, so this threshold can never fire. Set "+
-					"source: otel to read production's own p95 for each route, or remove the "+
-					"threshold and judge the run on error_rate.")
+					"source: otel, or declare load.traffic.profile so the baseline comes from a "+
+					"recorded profile, or remove the threshold and judge the run on error_rate.")
 		}
 	}
 
