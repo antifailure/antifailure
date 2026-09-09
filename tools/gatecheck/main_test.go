@@ -578,8 +578,156 @@ func TestTheRealRepositoryAgrees(t *testing.T) {
 				"so the exemption is describing a gate that is not there", g)
 		}
 	}
+
+	// And the same comparison the other way round, which is the direction the
+	// failure that earned it lived in: `just _generated` ran the `cp` that
+	// writes engine/internal/manifest/manifest.v1.json and ci.yml did not, so
+	// the embedded schema sat stale on main for thirteen commits while every
+	// required context passed. Nothing here asked this question at all.
+	for key, e := range jg {
+		if !anyReachable(e.blocks, reach) {
+			continue
+		}
+		if _, exempt := exemptFromCI[key]; exempt {
+			continue
+		}
+		if how, _ := pairedWith(e.gate, ci, nil); how == notPaired {
+			t.Errorf("`just gate` runs %q (in %s) and no pull request workflow does: %s",
+				key, strings.Join(e.blocks, ", "), reverseReason(e.gate, ci))
+		}
+	}
+	for g := range exemptFromCI {
+		e, ok := jg[g]
+		if !ok || !anyReachable(e.blocks, reach) {
+			t.Errorf("%q is exempt from CI but `just gate` does not run it either, "+
+				"so the exemption is describing a gate that is not there", g)
+		}
+	}
+
 	if u := uncalledByGate(recipes, reach); len(u) > 0 {
 		t.Errorf("these recipes are gates that `just gate` never calls: %v", u)
+	}
+}
+
+func TestAGateOnlyTheJustfileRunsIsReported(t *testing.T) {
+	// The failure that earned the reverse direction. Every comparison in this
+	// tool started from a CI gate and asked whether the justfile covered it,
+	// so a gate the justfile ran and no workflow ran was not a question
+	// anybody asked. `cp schemas/manifest.v1.json
+	// engine/internal/manifest/manifest.v1.json` was in exactly that state.
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: go run ./tools/errcheck .\n")
+	src := "gate:\n    just errcheck\n    just onlyhere\n    just nowhere\n\nerrcheck:\n    go run ./tools/errcheck .\n\nonlyhere:\n    go run ./tools/onlyhere .\n\nnowhere:\n    cd elsewhere && go test ./internal/x\n"
+	just := justGates(t, src)
+	reach := reachableFromGate(justRecipes(src))
+
+	e, ok := just["tool onlyhere"]
+	if !ok {
+		t.Fatalf("the fixture does not run the gate under test; the set is %v", keys(just))
+	}
+	if !anyReachable(e.blocks, reach) {
+		t.Fatal("the fixture does not reach the gate from `just gate`, so it is not a case this asks about")
+	}
+	if how, _ := pairedWith(gateOf(t, just, "tool onlyhere"), ci, nil); how != notPaired {
+		t.Error("a gate no workflow runs was reported as covered by one")
+	}
+	// A gate that CARRIES a directory, because the two take different routes
+	// through pairedWith and only one of them was asserted here at first. A
+	// `go run ./tools/X` has no directory and returns at the top; anything
+	// with one walks the whole function and returns at the bottom. Mutating
+	// that bottom return to `pairedExactly` left this test green, which is a
+	// surviving mutation understood rather than papered over: the assertion
+	// above cannot reach the line.
+	if how, _ := pairedWith(gateOf(t, just, "gotest ./internal/x in elsewhere"), ci, nil); how != notPaired {
+		t.Error("a gate with a directory that no workflow runs was reported as covered")
+	}
+	// The direction that already worked must keep working, or this test would
+	// pass against a tool that reports everything.
+	if how, _ := pairedWith(gateOf(t, just, "tool errcheck"), ci, nil); how != pairedExactly {
+		t.Error("a gate both sides run was reported as uncovered")
+	}
+	if r := reverseReason(gateOf(t, just, "tool onlyhere"), ci); !strings.Contains(r, "no workflow") {
+		t.Errorf("the message does not say what is wrong: %q", r)
+	}
+}
+
+func TestAGateInARecipeTheGateNeverCallsIsNotHeldToCI(t *testing.T) {
+	// The reverse direction must not report a recipe `just gate` never calls.
+	// `just vuln` needs the network and is deliberately outside the one
+	// command; requiring CI to run it would be reporting drift that is not
+	// there, and worse, it would make the reverse check noisy enough to delete.
+	src := "gate:\n    just errcheck\n\nerrcheck:\n    go run ./tools/errcheck .\n\nvuln:\n    go run ./tools/vulncheck .\n"
+	just := justGates(t, src)
+	reach := reachableFromGate(justRecipes(src))
+
+	e, ok := just["tool vulncheck"]
+	if !ok {
+		t.Fatalf("the fixture does not define the gate under test; the set is %v", keys(just))
+	}
+	if anyReachable(e.blocks, reach) {
+		t.Error("a recipe `just gate` never calls was treated as one it runs")
+	}
+}
+
+func TestARelativeToolsPathIsTheSameGate(t *testing.T) {
+	// ci.yml runs `cd engine && go run ../tools/scanrepo ..`. Against a
+	// pattern anchored on `./tools/` that line matched nothing at all, so the
+	// only credential scan this repository runs was invisible to the tool
+	// whose whole job is to notice a gate on one side and not the other. It
+	// then showed up as a justfile gate no workflow ran, which is a false
+	// positive produced by a blind spot rather than by a real gap.
+	got := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: cd engine && go run ../tools/scanrepo ..\n")
+	if _, ok := got["tool scanrepo"]; !ok {
+		t.Fatalf("`go run ../tools/scanrepo` was not read as a gate; the set is %v", keys(got))
+	}
+}
+
+func TestTheWholeModuleTargetCoversAPackageUnderIt(t *testing.T) {
+	// `just docexamples` runs `go test ./internal/cli -run ...` in engine and
+	// CI runs `go test ./...` there, which runs that package. Refusing to pair
+	// them would report a gap that is not one. Pairing them as EQUAL would be
+	// a different lie, because the narrow target does not cover the wide one,
+	// so it is its own tier and the passing output says which part was not
+	// compared.
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: cd engine && go test ./... -race\n")
+	src := "gate:\n    just docexamples\n\ndocexamples:\n    cd engine && go test ./internal/cli -run TestX -count=1\n"
+	just := justGates(t, src)
+
+	how, where := pairedWith(gateOf(t, just, "gotest ./internal/cli in engine"), ci, nil)
+	if how != pairedByWholeModule {
+		t.Fatalf("expected a whole module pair, got %v (CI has %v)", how, keys(ci))
+	}
+	if !strings.Contains(where, "gotest ./... in engine") {
+		t.Errorf("the pair does not say what it paired against: %q", where)
+	}
+
+	// The other way round is not coverage: running one package does not run
+	// the module. Without this the tier would be a blanket pass on any two
+	// `go test` gates in one directory.
+	if how, _ := pairedWith(gateOf(t, ci, "gotest ./... in engine"), just, reachableFromGate(justRecipes(src))); how != notPaired {
+		t.Error("a narrow target was counted as covering the whole module")
+	}
+}
+
+func TestTheWholeModuleTierDoesNotReachAcrossDirectories(t *testing.T) {
+	// A gate is the command AND the directory, and the new tier must not be
+	// the hole that forgets it: `go test ./...` in tools does not run
+	// engine/internal/cli.
+	ci := ciGates(t, "jobs:\n  one:\n    steps:\n      - run: cd tools && go test ./...\n")
+	src := "gate:\n    just docexamples\n\ndocexamples:\n    cd engine && go test ./internal/cli -run TestX\n"
+	just := justGates(t, src)
+	if how, _ := pairedWith(gateOf(t, just, "gotest ./internal/cli in engine"), ci, nil); how != notPaired {
+		t.Error("a whole module run in another directory was counted as coverage")
+	}
+}
+
+func TestEveryCIExemptionStatesWhy(t *testing.T) {
+	// The mirror of TestEveryExemptionStatesWhy. An exemption with no reason
+	// is a gate quietly dropped, and this map drops it from the run that
+	// actually blocks a pull request.
+	for g, why := range exemptFromCI {
+		if len(strings.TrimSpace(why)) < 80 {
+			t.Errorf("the exemption for %q does not say why: %q", g, why)
+		}
 	}
 }
 

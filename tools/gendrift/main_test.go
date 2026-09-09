@@ -237,18 +237,29 @@ func TestTheLocalGateNamesTheDriftedArtifactAndNotYourEdits(t *testing.T) {
 func TestDocsembedRunsAfterEveryGeneratorThatWritesADocsPage(t *testing.T) {
 	const embedder = "go run ./tools/docsembed"
 
-	var writers []string
-	for _, g := range ledger {
+	// The order is asserted on the LEDGER now, and not on two copies of it in
+	// the justfile. It used to read the `generate` and `_generated` recipes,
+	// which each wrote the generators out in full, and it could say nothing at
+	// all about ci.yml, which wrote them out a third time and ran docsembed
+	// FOURTH of twelve. Every caller runs the ledger through `-generate`, so
+	// the ledger's order is the order all three of them use, and that is what
+	// this holds.
+	embedAt := -1
+	var writers []int
+	for i, g := range ledger {
 		if g.command == embedder {
+			embedAt = i
 			continue
 		}
 		for _, p := range g.paths {
 			if strings.HasPrefix(p, "docs/") {
-				writers = append(writers, g.command)
+				writers = append(writers, i)
 				break
 			}
 		}
 	}
+	require.NotEqual(t, -1, embedAt, "the ledger does not run %s at all", embedder)
+
 	// A rule with nothing to compare passes for the wrong reason. Six pages
 	// under docs/ are generated today and the ledger is where they are
 	// declared, so finding fewer than that means this test stopped seeing the
@@ -256,41 +267,143 @@ func TestDocsembedRunsAfterEveryGeneratorThatWritesADocsPage(t *testing.T) {
 	require.GreaterOrEqual(t, len(writers), 5,
 		"the ledger should name at least five generators writing under docs/, found %d", len(writers))
 
-	body, err := os.ReadFile(filepath.Join("..", "..", "justfile"))
+	for _, i := range writers {
+		require.Less(t, i, embedAt,
+			"the ledger runs %q at position %d, after %s at position %d.\n"+
+				"docsembed embeds the page that generator writes, so this pass embeds the previous wording.\n"+
+				"Move %s below every generator that writes under docs/.",
+			ledger[i].command, i, embedder, embedAt, embedder)
+	}
+}
+
+// TestTheLedgerIsTheOnlyPlaceTheGeneratorsAreListed is the gate on the failure
+// that produced -generate.
+//
+// The list was written out three times. The ledger named fifteen generators,
+// `just _generated` ran fifteen and ci.yml ran twelve, so three generated
+// files were rewritten by nothing on a clean checkout and could never be
+// reported by a tool whose only question is `git status`.
+// engine/internal/manifest/manifest.v1.json was one of them and sat stale on
+// main for thirteen commits with the step called "Generated files are current"
+// green on every one of them.
+//
+// A second copy of the list is what has to become impossible, so this refuses
+// one. It reads every caller and requires that each reaches the generators
+// through the ledger and spells none of them out itself.
+func TestTheLedgerIsTheOnlyPlaceTheGeneratorsAreListed(t *testing.T) {
+	root := filepath.Join("..", "..")
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	require.NoError(t, err)
+	justfile, err := os.ReadFile(filepath.Join(root, "justfile"))
 	require.NoError(t, err)
 
-	for _, recipe := range []string{"generate:", "_generated:"} {
-		t.Run(recipe, func(t *testing.T) {
-			lines := recipeBody(t, string(body), recipe)
+	callers := map[string]string{
+		// Comments removed first. ci.yml explains this very defect in prose
+		// and names `go run ./tools/docsembed` while doing so, and a check
+		// that cannot tell a command from a sentence about a command would
+		// have to be deleted for being unsatisfiable.
+		".github/workflows/ci.yml": withoutComments(string(workflow)),
+		"justfile _generated":      withoutComments(strings.Join(recipeBody(t, string(justfile), "_generated:"), "\n")),
+		"justfile generate":        withoutComments(strings.Join(recipeBody(t, string(justfile), "generate:"), "\n")),
+	}
 
-			embedAt := -1
-			for i, l := range lines {
-				if strings.Contains(l, embedder) {
-					embedAt = i
-					break
-				}
-			}
-			require.NotEqual(t, -1, embedAt, "%s never runs %s", recipe, embedder)
+	for name, body := range callers {
+		t.Run(name, func(t *testing.T) {
+			require.Contains(t, body, "go run ./tools/gendrift -generate .",
+				"%s does not run the ledger, so it is running some other list of generators", name)
 
-			found := 0
-			for _, w := range writers {
-				for i, l := range lines {
-					if !strings.Contains(l, w) {
-						continue
-					}
-					found++
-					require.Less(t, i, embedAt,
-						"%s runs %q at line %d of the recipe, after %s at line %d.\n"+
-							"docsembed embeds the page that generator writes, so this pass embeds the previous wording.\n"+
-							"Move %s below every generator that writes under docs/.",
-						recipe, w, i, embedder, embedAt, embedder)
-					break
-				}
+			for _, g := range ledger {
+				// gendrift's own row is `go run ./tools/docsembed` and so on;
+				// a caller naming one of them is a caller keeping a second
+				// copy of the list, which is the defect.
+				require.NotContains(t, body, g.command,
+					"%s spells out %q itself. That is a second copy of the ledger, and the\n"+
+						"two copies disagreed for thirteen commits with every check green.\n"+
+						"Add the generator to the ledger in tools/gendrift and let -generate run it.",
+					name, g.command)
 			}
-			require.GreaterOrEqual(t, found, 5,
-				"%s should run at least five of the ledger's docs writers, found %d", recipe, found)
 		})
 	}
+}
+
+// TestGenerateRunsEveryLedgerCommandInOrder proves -generate does the thing its
+// callers now trust it to do.
+//
+// A mode that named the commands and ran none of them would be the same defect
+// one layer down, and it would look identical from CI: a step that passes
+// having done nothing, followed by a comparison of a tree nobody rewrote.
+func TestGenerateRunsEveryLedgerCommandInOrder(t *testing.T) {
+	root := t.TempDir()
+
+	restore := ledger
+	t.Cleanup(func() { ledger = restore })
+	ledger = []generator{
+		{"echo first >> ran.txt", []string{"ran.txt"}},
+		{"echo second >> ran.txt", []string{"ran.txt"}},
+		{"echo third >> ran.txt", []string{"ran.txt"}},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, generateAll(root, &out))
+
+	body, err := os.ReadFile(filepath.Join(root, "ran.txt"))
+	require.NoError(t, err, "no generator wrote anything, so none of them ran")
+	require.Equal(t, "first\nsecond\nthird\n", string(body),
+		"the generators did not all run, or did not run in the ledger's order")
+	require.Contains(t, out.String(), "ran 3 generators",
+		"the summary does not say how many generators ran")
+}
+
+// TestAFailingGeneratorSaysNothingWasCompared is the distinction that cost
+// three lanes an afternoon.
+//
+// A step named for a comparison, which died in a generator before reaching it,
+// reported staleness it had never measured. Running the generators and
+// comparing them are two questions and they have to be able to fail with
+// different words, which is why -generate is a separate mode rather than a
+// line folded into the comparison.
+func TestAFailingGeneratorSaysNothingWasCompared(t *testing.T) {
+	root := t.TempDir()
+
+	restore := ledger
+	t.Cleanup(func() { ledger = restore })
+	ledger = []generator{
+		{"echo first >> ran.txt", []string{"ran.txt"}},
+		{"exit 3", []string{"ran.txt"}},
+		{"echo third >> ran.txt", []string{"ran.txt"}},
+	}
+
+	var out bytes.Buffer
+	err := generateAll(root, &out)
+	require.Error(t, err, "a generator exiting 3 was reported as success")
+	require.Contains(t, err.Error(), "`exit 3` failed",
+		"the failure does not name the generator that failed")
+	require.Contains(t, out.String(), "Nothing\nhas been compared",
+		"the output does not say that this is a generator failure and not a stale file")
+
+	body, err := os.ReadFile(filepath.Join(root, "ran.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "first\n", string(body),
+		"it carried on past a failed generator, so the tree it leaves is half written")
+}
+
+// withoutComments drops whole line comments, in both YAML and just, which use
+// the same `#`.
+//
+// It is deliberately whole line only. A trailing comment on a `run:` line
+// would survive, and that is the safe direction: this feeds a NotContains, so
+// keeping too much can only fail a tree that is fine, which somebody would
+// then fix, while dropping too much would pass a tree that is not.
+func withoutComments(body string) string {
+	var out []string
+	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
 }
 
 // recipeBody returns the indented lines of one justfile recipe.

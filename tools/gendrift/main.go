@@ -115,16 +115,86 @@ var ledger = []generator{
 func main() {
 	strict := flag.Bool("strict", false,
 		"also fail on a changed path no generator owns, for a clean checkout")
+	generate := flag.Bool("generate", false,
+		"run every generator in the ledger, in order, and compare nothing")
 	flag.Parse()
 	root := "."
 	if args := flag.Args(); len(args) > 0 {
 		root = args[0]
 	}
 
+	if *generate {
+		if err := generateAll(root, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "gendrift: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := run(root, *strict, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "gendrift: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// generateAll runs every generator the ledger names, in the order it names
+// them, and compares nothing.
+//
+// This mode exists because the list of generators was written out three times.
+// The ledger below named fifteen; `just _generated` ran fifteen; ci.yml ran
+// TWELVE. Three of the ledger's rows had no generator on the CI side, so on a
+// clean checkout the files those rows name were never rewritten, never showed
+// as changed, and could never be reported. `engine/internal/manifest/manifest.v1.json`
+// was one of them, and it sat stale on main for thirteen commits while the
+// step called "Generated files are current" passed on every one of them: the
+// ledger row was decorative, because gendrift only ever asked `git status` and
+// something else had to have done the writing.
+//
+// A ledger that names a generator and a workflow that runs a different set is
+// the disagreement no gate here could see, and the way to make it unsayable is
+// to stop saying it twice. Both callers run this now, so a row added to the
+// ledger is a generator BOTH of them run, and the only remaining way to have a
+// generated file nothing compares is to leave it out of the ledger entirely,
+// which -strict is what catches.
+//
+// It stops at the first failure and says which command failed, because a
+// generator that did not finish leaves a tree the comparison would read as
+// drift. That is the reading that sent three lanes to the wrong file on
+// 2026-09-08, and it is the reason this is a separate mode rather than a step
+// folded into the comparison: the two answer different questions and must be
+// able to fail with different words.
+func generateAll(root string, out io.Writer) error {
+	for _, g := range ledger {
+		if _, err := fmt.Fprintf(out, "  %s\n", g.command); err != nil {
+			return err
+		}
+		cmd := exec.Command("bash", "-c", g.command)
+		cmd.Dir = root
+		cmd.Stdout = out
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			// The explanation goes to the writer and the error stays one
+			// line. staticcheck's ST1005 refuses an error string that ends in
+			// punctuation or a newline, and main prints this as
+			// `gendrift: <err>`, which a paragraph does not sit under anyway.
+			//
+			// The write is returned rather than discarded, for the reason the
+			// clean case below gives: the whole value of this sentence is that
+			// somebody reads it, so a write that did not arrive has to be
+			// noticed rather than swallowed.
+			if _, werr := fmt.Fprintf(out,
+				"\nThat is a generator that did not finish, and NOT a stale file. Nothing\n"+
+					"has been compared. Fix the failure above and run this again before\n"+
+					"reading anything into what the tree looks like now.\n\n"); werr != nil {
+				return werr
+			}
+			return fmt.Errorf("the generator `%s` failed: %w", g.command, err)
+		}
+	}
+	_, err := fmt.Fprintf(out, "gendrift: ran %d %s over %d generated %s\n",
+		len(ledger), plural(len(ledger), "generator", "generators"),
+		countPaths(), plural(countPaths(), "path", "paths"))
+	return err
 }
 
 // run compares the working tree against HEAD and reports drift.
