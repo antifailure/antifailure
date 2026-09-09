@@ -343,6 +343,18 @@ func runEmulatorBehavior(
 	}
 }
 
+// emulatorAnswer is what a probe answered, once its body has been read and
+// closed.
+//
+// The behaviours read a status and a content type and nothing else, so handing
+// them a live *http.Response would hand every call site a body it has to
+// remember to close, six times over, in a suite whose whole job is to be the
+// thing other people copy. The response is consumed in one place instead.
+type emulatorAnswer struct {
+	StatusCode int
+	Header     http.Header
+}
+
 // emulatorSend builds the probe as an application would and sends it.
 //
 // The URL is https://<host><path>, built from the emulator's OWN declared
@@ -350,12 +362,12 @@ func runEmulatorBehavior(
 // hostname unmodified. Nothing here knows the emulator's address and nothing
 // here may learn it.
 //
-// It returns a nil response when it has already failed the test, so a caller
+// It returns a nil answer when it has already failed the test, so a caller
 // can return rather than repeat the error.
 func emulatorSend(
 	ctx context.Context, t *testing.T, em provider.Emulator,
 	probe provider.EmulatorProbe, authorization string,
-) (*http.Response, []byte) {
+) (*emulatorAnswer, []byte) {
 	t.Helper()
 	host := probe.Host
 	if host == "" {
@@ -406,7 +418,7 @@ func emulatorSend(
 		t.Fatalf("reading the response to %s %s: %v", method, url, err)
 		return nil, nil
 	}
-	return resp, read
+	return &emulatorAnswer{StatusCode: resp.StatusCode, Header: resp.Header}, read
 }
 
 // emulatorProbeString renders a probe the way the failure messages quote it.

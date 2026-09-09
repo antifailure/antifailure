@@ -110,8 +110,13 @@ type EmulatorCaps struct {
 	// that works against the real provider, for the tripwire behaviour.
 	//
 	// It is a TEST vector shaped like a live key and never a live key. AWS
-	// publishes AKIAIOSFODNN7EXAMPLE for exactly this purpose, and the
-	// detector recognises the shape rather than the account.
+	// publishes a documented example access key for exactly this purpose, and
+	// the detector recognises the shape rather than the account.
+	//
+	// The literal is deliberately not written here. A scanner that reads source
+	// cannot tell a documented example from a leak, so the repository's own
+	// tools/scanrepo refuses the shape wherever it appears, comments included.
+	// Assemble it at run time, the way the detector's own tests do.
 	LiveCredential string
 }
 

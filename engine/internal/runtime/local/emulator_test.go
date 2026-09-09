@@ -3,6 +3,7 @@ package local_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -243,7 +244,7 @@ func copyDemuxed(w io.Writer, r *bufio.Reader) (int64, error) {
 	header := make([]byte, 8)
 	for {
 		if _, err := io.ReadFull(r, header); err != nil {
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return total, nil
 			}
 			return total, err
@@ -252,7 +253,7 @@ func copyDemuxed(w io.Writer, r *bufio.Reader) (int64, error) {
 		n, err := io.CopyN(w, r, size)
 		total += n
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return total, nil
 			}
 			return total, err
