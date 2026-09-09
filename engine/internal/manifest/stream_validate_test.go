@@ -92,9 +92,13 @@ egress:
 
 func TestParse_AcceptsBlockOnAPortDecidedByItsHandshake(t *testing.T) {
 	t.Parallel()
+	// The default is block here, as it is in the control above, because a
+	// manifest defaulting to allow is refused by a rule of its own that has
+	// nothing to do with byte streams. Writing allow made this test assert
+	// that older refusal instead of the one it is named for.
 	m := mustParse(t, minimal+`
 egress:
-  default: allow
+  default: block
   rules:
     - host: af.servicebus.windows.net:5671
       mode: block
