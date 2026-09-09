@@ -320,6 +320,19 @@ web/apps/api/zzserve.ts
 # tools/preview.
 /preview
 
+# The receipt `go run ./tools/gendrift -generate .` leaves to say that it ran,
+# read by the comparison that follows it and by nothing else. It names the
+# commit and a hash of the generator ledger, so the comparison can tell a tree
+# whose generators just ran from one where none did, which printed the same
+# sentence until it existed.
+#
+# Never committed. A receipt inside the tree is a receipt that vouches for that
+# tree by being in it, and the whole value of the file is that it is evidence
+# about one run on one machine. tools/gendrift skips it in the comparison as
+# well, so a deletion of this line is noise in a diff rather than a gate that
+# starts passing.
+/.gendrift-receipt.json
+
 # `go build ./tools/prmerge` writes ./prmerge at the repository root, for the
 # same reason /preview is here: tools/gatecheck refuses any tools directory
 # whose name is not ignored, because the next `git add -A` would otherwise
