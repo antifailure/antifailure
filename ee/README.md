@@ -16,9 +16,41 @@ your agents, and tears everything down, and it does that completely, forever,
 for free, self hosted. What lives here is the set of things a large company
 asks for before a rollout, which is also the set of things a large company is
 willing to pay for: single sign on, SCIM provisioning, custom roles and
-approvals, SIEM streaming with a tamper evident hash chain, organization wide
+approvals, SIEM streaming of the engine's privileged actions, organization wide
 policy enforcement, customer owned runtime clusters, enterprise secret
 managers, billing and metering, and support tooling.
+
+### What that sentence used to claim, and what actually ships
+
+It said "SIEM streaming with a tamper evident hash chain". Both halves are real
+and they are not joined to each other, so the conjunction was false in the way
+that is hardest to notice: each half can be pointed at.
+
+What ships is `ee/engine/auditsink`. It is registered in
+`ee/engine/cmd/af/main.go`, it asks the licence per call, and it forwards the
+five actions that `docs/enterprise/audit-stream.md` lists, to Splunk, Event
+Hubs, an object store or a webhook. The webhook carries an HMAC over the exact
+bytes posted, which makes one delivery tamper evident. There is no chain across
+entries in it.
+
+The chain exists in two places and neither is streamed. `audit_entries` carries
+`prev_hash` and `entry_hash` and is written by the control plane regardless of
+any licence, which is MIT and is not sold. `ee/web/audit` implements the
+forwarder that would carry that chain to a sink, with a bounded queue, four
+sinks and signed batch manifests over the chain head, and **nothing imports
+it**. It is not a declared dependency of any package in this workspace,
+including `ee/web/server`, so it could not be imported without a package.json
+change, while its own suite runs and passes in CI on every pull request. Tested,
+green, and unreachable is the most convincing possible disguise for dead code.
+
+So the control plane's audit log is not forwarded anywhere. Single sign on
+logins, directory provisioning, operator impersonation and every admin action
+are in `audit_entries` and reach no sink. `docs/enterprise/audit-stream.md` was
+already accurate about this and says so in its second paragraph; it was this
+summary line that sold more than the product does. Wiring the control plane half
+is enterprise side work, since `ee/web/server/src/register.ts` already does non
+route work and is handed the pool and the clock, and when it lands this
+paragraph is what gets deleted.
 
 ## How the boundary is enforced
 
