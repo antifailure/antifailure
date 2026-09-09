@@ -139,16 +139,73 @@ func TestTheGeneratedProseStaysInsideItsWidth(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(render(many, nil), "\n") {
-		// A line that is one unbreakable token has no wrap point, and a
-		// sha256 digest is 71 characters of exactly that. The rule is
-		// about prose the reader has to scan, not about a value that
-		// would be wrong if it were shortened.
-		if !strings.Contains(strings.TrimSpace(line), " ") {
+		if unbreakableValue(line) {
 			continue
 		}
 		if len(line) > 74 {
 			t.Errorf("a generated line is %d characters: %q", len(line), line)
 		}
+	}
+}
+
+// unbreakableValue reports whether a line carries a single value with no wrap
+// point, which the width rule does not apply to. The rule is about prose the
+// reader has to scan, not about a value that would be wrong if it were
+// shortened.
+//
+// Removing the list marker is the whole of this function, and it is the repair
+// rather than a widening. A licence URL is one unbreakable token, the
+// generator writes it as a list item because that is what it is, and the four
+// characters of "  - " put a space on the line that made every such value look
+// like prose. So the exemption could not see the thing it was written to
+// cover: a sha256 digest is 71 characters of exactly that value and was
+// exempt, while the same digest wearing a bullet was not. Cloud Spanner
+// Emulator's licence URL is 81 characters and was the first to reach the
+// limit, but any licence URL over 70 would have.
+//
+// Only the marker is removed, which is what keeps a bulleted SENTENCE
+// refusable: its words still have spaces between them afterwards, so it is
+// prose and the rule still applies to it.
+func unbreakableValue(line string) bool {
+	content := strings.TrimSpace(line)
+	content = strings.TrimSpace(strings.TrimPrefix(content, "-"))
+	return !strings.Contains(content, " ")
+}
+
+// TestTheWidthExemptionCoversValuesAndNotSentences is the direction nobody
+// checks. Widening an exemption until the failing case passes is easy, and an
+// exemption that cannot refuse a long bulleted sentence is not an exemption
+// for unbreakable values, it is a hole shaped like a bullet. Both halves are
+// asserted here so the repair cannot quietly become the hole later.
+//
+// Every case is longer than the width, so the exemption is the only thing
+// deciding the outcome and a case that stopped reaching the limit would be
+// proving nothing.
+func TestTheWidthExemptionCoversValuesAndNotSentences(t *testing.T) {
+	const (
+		url      = "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator/blob/master/LICENSE"
+		sentence = "The instance metadata endpoint, which hands out the node's own cloud credentials."
+		image    = "gcr.io/cloud-spanner-emulator/emulator@sha256:" +
+			"4987860c9f8ecf1fffbbcdac115cb88cb9d1a42bd966c235a9ab843aea34fbd1"
+	)
+	for _, c := range []struct {
+		name   string
+		line   string
+		exempt bool
+	}{
+		{"a bulleted URL is a value with no wrap point", "  - " + url, true},
+		{"a bulleted sentence is prose and stays refusable", "  - " + sentence, false},
+		{"an unbulleted value was exempt before this repair and still is", image, true},
+		{"an unbulleted sentence was refusable before this repair and still is", sentence, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if len(c.line) <= 74 {
+				t.Fatalf("the case is %d characters, does not reach the width, and proves nothing", len(c.line))
+			}
+			if got := unbreakableValue(c.line); got != c.exempt {
+				t.Errorf("unbreakableValue(%q) = %v, want %v", c.line, got, c.exempt)
+			}
+		})
 	}
 }
 
