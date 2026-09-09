@@ -7627,17 +7627,40 @@ shared address for them, or a record across repositories.
 `,
 	"guides/aws.md": `---
 title: AWS
-description: The AWS surface an environment answers for itself, and the surface it refuses.
+description: The AWS surface an environment will answer for itself, the surface it refuses, and how much of it is built.
 sidebar:
   order: 22
 ---
 
-An environment can answer AWS calls itself, with **no endpoint override in the
+An environment answers AWS calls itself, with **no endpoint override in the
 application**. Every name resolves to the sidecar, the sidecar terminates TLS
 with the certificate authority the environment already trusts, and it answers
 for ` + "`" + `s3.amazonaws.com` + "`" + ` itself. The code that runs is the code that ships: no
 ` + "`" + `AWS_ENDPOINT_URL` + "`" + `, no client constructed differently in tests, no branch on an
-environment variable.
+environment variable. That is the design, and the section immediately below
+says how much of it a manifest can ask for today, which is none of it yet.
+
+## What is built, before you plan around any of this
+
+**The surface below is declared and proved. It is not yet reachable from a
+manifest.** Read this page as the surface an environment will answer for, and
+as the measurements behind it, rather than as something ` + "`" + `af up` + "`" + ` does today.
+
+What exists: ` + "`" + `engine/pkg/emulator` + "`" + ` holds the declaration, with the hosts, the
+pinned digest and the licence; a build registers it into the extension registry
+at startup, which is the only place the engine ever resolves an emulator from;
+` + "`" + `THIRD_PARTY_NOTICES.md` + "`" + ` is generated from that same declaration; and
+` + "`" + `tools/emulatorcheck` + "`" + ` drives the AWS SDK for Go and the AWS SDK for JavaScript
+at the pinned image on every run of CI, with zero endpoint overrides, which is
+what makes the numbers on this page measurements rather than claims.
+
+What does not: ` + "`" + `egress.rules[].mode` + "`" + ` has no ` + "`" + `emulate` + "`" + ` value, so a manifest
+cannot ask for this. Nothing in the engine starts the emulator container or
+tells the sidecar about it, and the sidecar the suite drives is a stand in that
+carries only the rerouting and the two preserved headers. Until that half
+lands, this surface is ` + "`" + `proved` + "`" + ` rather than ` + "`" + `reachable` + "`" + `, and the honest reading
+of every table below is what an environment will answer for and not what one
+answers for now.
 
 The emulator behind it is [LocalStack](https://github.com/localstack/localstack).
 Antifailure does not write emulators. S3 alone has a decade of edge cases in it,
@@ -7689,7 +7712,7 @@ S3.
 | --- | --- |
 | AWS Lambda, ECS, EKS, Batch and Step Functions | LocalStack runs these by starting further containers through the Docker socket. An environment does not hand a container the Docker socket, so this is refused rather than half answered. |
 | Amazon RDS, Aurora, ElastiCache and OpenSearch | A datastore is not emulated. Postgres is branched from a golden, and a second store is declared in the manifest with a stance. An emulator with an empty schema in it is a worse answer than either. |
-| Amazon SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox/), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
+| Amazon SES and SESv2 | Mail is captured into the environment's [inbox](/docs/guides/inbox), where an agent can read it and no real address receives anything. An emulator would swallow it instead. |
 | Amazon API Gateway, CloudFormation, IAM, CloudWatch and everything else AWS runs | Outside the surface, and refused by the egress policy rather than answered. |
 | S3 dualstack, transfer acceleration and S3 Express One Zone | Further spellings of the S3 endpoint that resolve under different names. They reach nothing, and the refusal says no rule matches rather than naming S3. |
 
@@ -7750,7 +7773,7 @@ The credential cannot escape regardless of what the header holds, and that is a
 property of the network rather than a promise: the emulator is attached to the
 environment's inner network only, which Docker creates with ` + "`" + `internal` + "`" + ` set, so
 it has no route out. The sidecar refuses a request signed with a key that
-[livekey](/docs/concepts/egress/) recognises as a live one, so a real ` + "`" + `AKIA` + "`" + ` key does
+[livekey](/docs/concepts/egress) recognises as a live one, so a real ` + "`" + `AKIA` + "`" + ` key does
 not reach the emulator either.
 
 ## The LocalStack image, and a fact worth reading before you plan around it
