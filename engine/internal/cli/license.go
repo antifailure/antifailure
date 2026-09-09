@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/antifailure/antifailure/engine/pkg/edition"
+	"github.com/antifailure/antifailure/engine/pkg/emulator"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
@@ -95,13 +96,52 @@ func declaredEdition(ctx context.Context) (edition.Status, bool) {
 	return status, true
 }
 
+// pluggedIn names what somebody ADDED to this build, which is not the same
+// question as what is registered.
+//
+// The failure: a stock community build reported an extension. The engine
+// resolves an emulate rule through the registry and through nothing else, so
+// the emulators this repository ships have to register themselves at startup
+// exactly like one written outside it. That is correct for resolution and
+// wrong here, because this list is read as evidence that the binary is not the
+// one the project publishes. A build that has always carried an AWS emulator
+// has had nothing added to it, and telling an operator otherwise sends them
+// looking for a modification nobody made.
+//
+// Filtered by IDENTITY and not by name, and the difference is the whole point.
+// An organization that registered its own licensed image under a name this
+// build also ships is the one case where the entry really is something they
+// plugged in, and it is the case a filter on the name would hide. So the
+// registration is compared against the built in value it would have to BE in
+// order to be the shipped one.
+//
+// Everything at every other socket is reported unchanged. This build registers
+// nothing at them, so a policy hook, a masking hook, an audit sink or a runtime
+// provider is by construction something somebody attached.
+func pluggedIn(r *extension.Registry) []string {
+	shipped := make(map[string]bool, len(emulator.Builtin()))
+	for _, e := range emulator.Builtin() {
+		if got, ok := r.EmulatorNamed(e.Name()); ok && got == extension.Emulator(e) {
+			shipped["emulator:"+e.Name()] = true
+		}
+	}
+	var out []string
+	for _, name := range r.Registered() {
+		if shipped[name] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
 func newLicenseStatusCommand(e *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "What this installation is licensed for",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			registered := extension.Default.Registered()
+			registered := pluggedIn(extension.Default)
 			status, declared := declaredEdition(cmd.Context())
 
 			if e.Out.Format == FormatJSON {
