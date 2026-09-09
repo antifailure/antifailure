@@ -1,4 +1,4 @@
-# fixed
+# security
 
 An environment could carry HTTP and nothing else, and every other protocol
 failed identically whether its host was allowed or blocked.
@@ -21,3 +21,21 @@ request, so a rule using one of them on such a port is refused at validation
 when the rule names the port and at the connection otherwise. Sandbox is the
 one that would have been worst to accept, because forwarding without replacing
 the credential sends the application's own key to the real provider.
+
+The set of ports the sidecar opens is the manifest's, not the protocol table's.
+The first version of this seeded the listeners from the table, so every
+environment answered on all sixteen ports whether a manifest had asked for one
+or not. That is not an idle listener. A connection accepted on this path is
+decided on the name in its TLS handshake, and a rule that spells no port
+matches every port, so a manifest that allowed one host for HTTP silently
+carried that host's Redis and its mail as well, forwarded. The listeners are
+now opened only for ports a rule names, which is the bargain the rest of the
+manifest already makes, and the escape probe that found this reports nothing.
+
+On Kubernetes the NetworkPolicy is the union of the table and the ports the
+rules name, which is wider than the listeners on purpose. Permitting a port
+there grants nothing, because the packet still arrives at the sidecar and the
+sidecar still decides; a port permitted with nothing listening is refused in a
+millisecond, while a port the policy omits is DROPPED and the application hangs
+until its own connect timeout. Without the rules in that union, declaring a
+broker on an unusual port would work on Docker and hang on a cluster.

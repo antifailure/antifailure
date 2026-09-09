@@ -3778,10 +3778,18 @@ var ByteStreamProtocols = []StreamProtocol{
 // two listeners on one port is a startup failure and because a request on 80
 // or 443 is one this sidecar can read properly.
 func StreamPorts(rules []EgressRule) []StreamProtocol {
-	byPort := map[int]StreamProtocol{}
+	known := map[int]StreamProtocol{}
 	for _, p := range ByteStreamProtocols {
-		byPort[p.Port] = p
+		known[p.Port] = p
 	}
+	// Seeded from the rules rather than from the table, because the manifest
+	// is the authority on what an environment may reach and the table is only
+	// a list of names for ports. Seeding the table made every environment
+	// answer on sixteen ports nobody asked for, and an accepted connection
+	// here is forwarded on the strength of the name in its handshake: a rule
+	// that spells no port matches every port, so a manifest naming a host for
+	// HTTP also carried that host's Redis and its SMTP.
+	byPort := map[int]StreamProtocol{}
 	for _, r := range rules {
 		_, portText, err := net.SplitHostPort(r.Host)
 		if err != nil {
@@ -3791,7 +3799,8 @@ func StreamPorts(rules []EgressRule) []StreamProtocol {
 		if err != nil || port <= 0 || port > 65535 {
 			continue
 		}
-		if _, known := byPort[port]; known {
+		if p, isKnown := known[port]; isKnown {
+			byPort[port] = p
 			continue
 		}
 		byPort[port] = StreamProtocol{Port: port, Name: "the protocol on port " + portText}

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ import (
 // than only where somebody remembered to run it.
 
 func TestDefaultDenyHasNoRules(t *testing.T) {
-	policies := networkPolicies("e1", "af-env-e1", false)
+	policies := networkPolicies("e1", "af-env-e1", false, nil)
 	deny := findPolicy(t, policies, "af-default-deny")
 
 	// This is the single most important assertion in the package. A
@@ -51,7 +52,7 @@ func TestDefaultDenyHasNoRules(t *testing.T) {
 }
 
 func TestOnlyTheSidecarMayLeave(t *testing.T) {
-	policies := networkPolicies("e1", "af-env-e1", false)
+	policies := networkPolicies("e1", "af-env-e1", false, nil)
 	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
 
 	require.Len(t, egress.Spec.Egress, 1,
@@ -67,7 +68,7 @@ func TestOnlyTheSidecarMayLeave(t *testing.T) {
 }
 
 func TestTheEscapeProbeIsGovernedLikeAService(t *testing.T) {
-	policies := networkPolicies("e1", "af-env-e1", false)
+	policies := networkPolicies("e1", "af-env-e1", false, nil)
 	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
 
 	// The probe's verdict is only evidence about services if the probe is
@@ -84,7 +85,7 @@ func TestTheEscapeProbeIsGovernedLikeAService(t *testing.T) {
 }
 
 func TestTheSidecarCannotReachTheMetadataEndpointEither(t *testing.T) {
-	policies := networkPolicies("e1", "af-env-e1", false)
+	policies := networkPolicies("e1", "af-env-e1", false, nil)
 	proxy := findPolicy(t, policies, "af-proxy-egress")
 
 	var excepted []string
@@ -108,8 +109,8 @@ func TestTheSidecarCannotReachTheMetadataEndpointEither(t *testing.T) {
 }
 
 func TestNoIngressPolicyWithoutADomain(t *testing.T) {
-	without := networkPolicies("e1", "af-env-e1", false)
-	with := networkPolicies("e1", "af-env-e1", true)
+	without := networkPolicies("e1", "af-env-e1", false, nil)
+	with := networkPolicies("e1", "af-env-e1", true, nil)
 	require.Len(t, with, len(without)+1)
 	// Opening a namespace to every other namespace on the cluster for a route
 	// that nothing serves would be weakening isolation for nothing.
@@ -329,7 +330,7 @@ func TestTheSidecarIsGivenAnEndpoint(t *testing.T) {
 func netParse(s string) net.IP { return net.ParseIP(s) }
 
 func TestAClientThatIgnoresProxyVariablesCanStillReachTheSidecar(t *testing.T) {
-	policies := networkPolicies("e1", "af-env-e1", false)
+	policies := networkPolicies("e1", "af-env-e1", false, nil)
 	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
 
 	ports := map[int32]bool{}
@@ -359,10 +360,121 @@ func TestAClientThatIgnoresProxyVariablesCanStillReachTheSidecar(t *testing.T) {
 	// the sidecar's decision log stays empty, which reads as an application
 	// fault rather than as a policy one. Asserting against a copied list here
 	// would make the two lists two lists again.
-	for _, proto := range schema.StreamPorts(nil) {
+	for _, proto := range schema.ByteStreamProtocols {
 		require.True(t, ports[int32(proto.Port)], //nolint:gosec // every port in the table is below 65536
 			"egress to the sidecar must permit port %d, which it listens on for %s",
 			proto.Port, proto.Name)
+	}
+}
+
+// TestAPolicyPermittedPortIsNotAGrant is the cell behind the claim that the
+// NetworkPolicy may be wider than the listeners at no cost.
+//
+// The claim is easy to write and it is narrower than it sounds, so it is worth
+// stating exactly what holds it up. Permitting a port here grants nothing
+// BECAUSE NOTHING IN THE ENVIRONMENT ANSWERS ON IT, and not because the
+// sidecar would refuse a connection that arrived. There is no second layer:
+// serveStream evaluates the host and the port and forwards on Allowed with no
+// port check anywhere in the path, and the address guard in destination.go
+// checks address ranges rather than ports. So the guarantee holds exactly as
+// long as the listener set stays narrow, and the moment anything opens a
+// listener on one of these ports the permission stops being inert and becomes
+// a grant, with nothing in between to refuse it.
+//
+// That is the invariant this test exists to keep: the ports the policy permits
+// and the manifest did not name must have no listener. Anyone widening the
+// listener set is also changing what this policy permits, and this is where
+// they find out.
+func TestAPolicyPermittedPortIsNotAGrant(t *testing.T) {
+	// One host, one port, which is what a manifest that means to reach a
+	// broker looks like.
+	const named = 5671 // AMQP over TLS, and in the table
+	rules := []schema.EgressRule{{Host: "broker.internal:5671", Mode: schema.ModeAllow}}
+
+	policies := networkPolicies("e1", "af-env-e1", false, rules)
+	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
+	permitted := map[int32]bool{}
+	for _, p := range egress.Spec.Egress[0].Ports {
+		if p.Port != nil {
+			permitted[p.Port.IntVal] = true
+		}
+	}
+
+	served := map[int]bool{}
+	for _, proto := range schema.StreamPorts(rules) {
+		served[proto.Port] = true
+	}
+
+	// The control, and it has to come first. A test whose every assertion is
+	// that something is absent passes against a policy that permits nothing
+	// and a sidecar that serves nothing, which is the environment this lane
+	// was fixing.
+	require.True(t, permitted[named],
+		"the port the manifest named is not permitted, so nothing below is measuring anything")
+	require.True(t, served[named],
+		"the port the manifest named has no listener, so the feature does not work at all")
+
+	// The claim. Every other port in the table is permitted by the policy and
+	// answered by nothing.
+	for _, proto := range schema.ByteStreamProtocols {
+		if proto.Port == named {
+			continue
+		}
+		require.True(t, permitted[int32(proto.Port)], //nolint:gosec // every port in the table is below 65536
+			"port %d dropped out of the NetworkPolicy, so a connection to it hangs "+
+				"rather than being refused", proto.Port)
+		require.False(t, served[proto.Port],
+			"port %d is permitted by the NetworkPolicy AND the sidecar opens a listener for it, "+
+				"which is what turns the permission into a grant: a connection accepted there is "+
+				"forwarded on the name in its handshake, and this manifest named only port %d",
+			proto.Port, named)
+	}
+}
+
+// TestAPortOnlyAManifestNamesReachesTheSidecar is the other half of the drift
+// gate above, and it is about the ports that are not in the table.
+//
+// A manifest may name a broker on a port nobody standardised, and stream.go
+// promises that writing it down is what makes it reachable. On Docker there is
+// no NetworkPolicy and the promise keeps itself. On Kubernetes the sidecar
+// opens the listener and the cluster drops the packet on its way there, so the
+// application hangs until its own connect timeout and the sidecar's log stays
+// empty: the failure looks like the broker is down, and the manifest that was
+// supposed to fix it is the thing that is being ignored.
+//
+// The port here is deliberately one ByteStreamProtocols does not carry, so a
+// policy built from the table alone cannot pass this by accident.
+func TestAPortOnlyAManifestNamesReachesTheSidecar(t *testing.T) {
+	const declared = 15672 // the RabbitMQ management port, and not in the table
+	for _, proto := range schema.ByteStreamProtocols {
+		require.NotEqual(t, declared, proto.Port,
+			"this test is only meaningful for a port the table does not already carry")
+	}
+
+	rules := []schema.EgressRule{
+		{Host: fmt.Sprintf("broker.internal:%d", declared), Mode: schema.ModeAllow},
+	}
+	policies := networkPolicies("e1", "af-env-e1", false, rules)
+	egress := findPolicy(t, policies, "af-service-egress-to-proxy")
+
+	ports := map[int32]bool{}
+	for _, p := range egress.Spec.Egress[0].Ports {
+		if p.Port != nil {
+			ports[p.Port.IntVal] = true
+		}
+	}
+	require.True(t, ports[declared],
+		"a port the manifest names must reach the sidecar, or declaring it changes nothing on a cluster")
+
+	// And the table is still whole. Narrowing this list to the ports the
+	// sidecar actually listens on would be the tempting simplification and it
+	// is the wrong one: a permitted port nothing listens on answers with a
+	// reset at once, while an unpermitted one is dropped and hangs. The
+	// cheaper failure is the one worth keeping.
+	for _, proto := range schema.ByteStreamProtocols {
+		require.True(t, ports[int32(proto.Port)], //nolint:gosec // every port in the table is below 65536
+			"a rule naming one port must not narrow the policy to it, and port %d was lost",
+			proto.Port)
 	}
 }
 

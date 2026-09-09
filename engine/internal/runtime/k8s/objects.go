@@ -71,7 +71,9 @@ func (r *Runtime) namespaceObject(envID string) *corev1.Namespace {
 // everything in both directions, which is the state an environment would be
 // in if the rest failed to apply: unreachable rather than unrestricted. The
 // rest add back exactly what an environment needs and nothing else.
-func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.NetworkPolicy {
+func networkPolicies(
+	envID, namespace string, hasIngress bool, rules []schema.EgressRule,
+) []*networkingv1.NetworkPolicy {
 	serviceSelector := metav1.LabelSelector{
 		MatchLabels: map[string]string{LabelComponent: ComponentService},
 	}
@@ -117,12 +119,37 @@ func networkPolicies(envID, namespace string, hasIngress bool) []*networkingv1.N
 	// failure as leaving out 80 and 443, and it is a worse one to debug: a
 	// NetworkPolicy that does not permit a port DROPS the packet rather than
 	// rejecting it, so the application does not fail, it hangs until its own
-	// connect timeout. The list is the schema's, shared with the sidecar that
-	// listens on it, because two copies of it is how one of them ends up
-	// wrong.
-	streamPorts := make([]networkingv1.NetworkPolicyPort, 0, len(schema.ByteStreamProtocols))
-	for _, proto := range schema.StreamPorts(nil) {
-		port := intstr.FromInt32(int32(proto.Port)) //nolint:gosec // every port in the table is below 65536
+	// connect timeout. The list is the schema's, because a second copy of it
+	// here is how the two end up disagreeing.
+	//
+	// It is the whole table AND the ports this environment's rules name,
+	// which is a wider set than the sidecar listens on and deliberately so.
+	// The two answer different questions. The sidecar opens a listener only
+	// where a rule granted one, because a connection it accepts is forwarded
+	// on the strength of the name in its handshake, so a listener nobody
+	// asked for is reach nobody asked for. This list decides what the cluster
+	// DROPS before the sidecar is ever consulted, and permitting a port here
+	// grants nothing at all: the packet arrives at the sidecar, which is the
+	// thing that decides, and a port the sidecar is not listening on answers
+	// with a reset in a millisecond. Narrowing this list to match the
+	// listeners would trade that reset for a drop, and a drop is the failure
+	// this comment exists to prevent.
+	//
+	// The rules are added on top of the table because the manifest may name a
+	// port the table never heard of. That is the promise stream.go makes:
+	// a broker on a port nobody standardised is reachable by writing it down.
+	// Without this the promise would hold on Docker, which has no such
+	// policy, and hang on Kubernetes.
+	stream := append([]schema.StreamProtocol{}, schema.ByteStreamProtocols...)
+	stream = append(stream, schema.StreamPorts(rules)...)
+	streamPorts := make([]networkingv1.NetworkPolicyPort, 0, len(stream))
+	seenPort := make(map[int]bool, len(stream))
+	for _, proto := range stream {
+		if seenPort[proto.Port] {
+			continue
+		}
+		seenPort[proto.Port] = true
+		port := intstr.FromInt32(int32(proto.Port)) //nolint:gosec // a port is checked below 65536 before it reaches here
 		streamPorts = append(streamPorts, networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &port})
 	}
 

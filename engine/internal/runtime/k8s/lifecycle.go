@@ -18,6 +18,7 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/dockerutil"
 	aferrors "github.com/antifailure/antifailure/engine/internal/errors"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
+	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
 // Up creates the environment and returns once every service that declares
@@ -87,7 +88,7 @@ func (r *Runtime) Up(ctx context.Context, spec provider.EnvSpec) (provider.Env, 
 	if err := r.ensureNamespace(ctx, spec.EnvID); err != nil {
 		return env, err
 	}
-	if err := r.applyPolicies(ctx, spec.EnvID, namespace); err != nil {
+	if err := r.applyPolicies(ctx, spec.EnvID, namespace, egressRules(spec.Egress)); err != nil {
 		return env, err
 	}
 
@@ -183,9 +184,23 @@ func (r *Runtime) ensureNamespace(ctx context.Context, envID string) error {
 	return nil
 }
 
+// egressRules is the policy's rules, for a spec that may carry no policy at
+// all.
+//
+// A nil policy is an environment with no rules rather than an environment that
+// cannot be described, and the NetworkPolicy below still needs the table.
+func egressRules(e *schema.Egress) []schema.EgressRule {
+	if e == nil {
+		return nil
+	}
+	return e.Rules
+}
+
 // applyPolicies writes every NetworkPolicy the environment needs.
-func (r *Runtime) applyPolicies(ctx context.Context, envID, namespace string) error {
-	for _, policy := range networkPolicies(envID, namespace, r.domain != "") {
+func (r *Runtime) applyPolicies(
+	ctx context.Context, envID, namespace string, rules []schema.EgressRule,
+) error {
+	for _, policy := range networkPolicies(envID, namespace, r.domain != "", rules) {
 		_, err := r.cli.NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			continue

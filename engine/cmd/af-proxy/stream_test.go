@@ -216,10 +216,14 @@ func runProbe(t *testing.T, p protocolProbe) outcome {
 	// being unable to attribute the connection rather than the policy saying
 	// no. Measuring under default block would report every row as refused and
 	// prove nothing about which ones can be decided.
-	s := newSidecar(t, &schema.Egress{Default: schema.ModeAllow})
+	// The port is named by a rule, because naming it is what opens the
+	// listener now. The host is not one the corpus uses, so every decision
+	// below still falls to the default and the measurement is unchanged.
+	rules := []schema.EgressRule{{Host: fmt.Sprintf("probe.test:%d", p.port)}}
+	s := newSidecar(t, &schema.Egress{Default: schema.ModeAllow, Rules: rules})
 
 	listening := false
-	for _, proto := range schema.StreamPorts(nil) {
+	for _, proto := range schema.StreamPorts(rules) {
 		if proto.Port == p.port {
 			listening = true
 		}
@@ -465,6 +469,40 @@ func TestStream_ThePortSetDoesNotCollideWithTheHTTPListeners(t *testing.T) {
 		require.NotContains(t, []int{80, 443, schema.ProxyListenPort, 53}, proto.Port,
 			"the byte stream path would try to listen on a port an HTTP listener already owns")
 	}
+}
+
+// A host allowed with no port opens no byte stream listener at all.
+//
+// This is the other direction of the rule above and it is the one that decides
+// containment. The set used to be SEEDED from ByteStreamProtocols, so every
+// environment answered on all sixteen ports whether or not a manifest had
+// asked for one, and that is not merely an idle listener. A connection
+// accepted here is decided on the name in its TLS handshake, and a rule that
+// spells no port matches every port, so an allowed host's 6379 and its 25 were
+// evaluated as allow and FORWARDED to that host. A manifest that named one
+// host for HTTP silently carried that host's Redis and its mail.
+//
+// The escape probe in engine/internal/runtime/local found it as
+// raw-socket-to-an-allowed-host and smtp-to-an-allowed-host, and it is worth
+// saying why the fix belongs here rather than there. That probe's only signal
+// is whether a connect succeeded, so widening the ports it tolerates would
+// destroy its ability to say no about every port, for every future change,
+// silently. The invariant it enforces is that a port nothing granted does not
+// accept a connection, and this function is what grants one.
+func TestStream_AHostAllowedWithNoPortOpensNoStreamListener(t *testing.T) {
+	// The policy the escape probe runs under: a default of block and one host
+	// allowed, naming no port.
+	opened := schema.StreamPorts([]schema.EgressRule{
+		{Host: "example.com", Mode: schema.ModeAllow},
+	})
+	ports := make([]int, 0, len(opened))
+	for _, p := range opened {
+		ports = append(ports, p.Port)
+	}
+	require.Empty(t, ports,
+		"a manifest that named no port opened listeners on %v, and a connection "+
+			"accepted on one of them is forwarded on the name in its handshake",
+		ports)
 }
 
 // A port nobody standardised is reachable by declaring it.

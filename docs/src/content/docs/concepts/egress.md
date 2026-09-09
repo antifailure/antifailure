@@ -266,12 +266,31 @@ mail relay and a cache are all outbound calls, and none of them is HTTP.
 
 Those connections reach the sidecar the same way an HTTPS call does. The
 environment's resolver answers every external name with the sidecar's own
-address, so the client connects to it believing it reached the broker, and the
-sidecar answers on the ports those protocols use: 5671 and 5672 for AMQP, 9092
-and 9093 for Kafka, 27017 for MongoDB, 6379 and 6380 for Redis, 5432 for
+address, so the client connects to it believing it reached the broker.
+
+Which ports it answers on is the manifest's decision, and only the manifest's.
+A rule that spells out a port opens a listener for that port. A rule that names
+a host and no port opens none:
+
+```yaml
+    - host: broker.example.com:5671
+      mode: allow
+```
+
+That is stricter than it looks and it is deliberate. A connection accepted on
+this path is forwarded on the strength of the name in its handshake, and a rule
+that names no port applies to every port, so answering on a port nobody asked
+for would carry an allowed host's cache and its mail alongside its website.
+Writing the port down is the consent, in the same way that naming a private
+address is.
+
+Antifailure still knows what these ports usually carry: 5671 and 5672 for AMQP,
+9092 and 9093 for Kafka, 27017 for MongoDB, 6379 and 6380 for Redis, 5432 for
 PostgreSQL, 3306 for MySQL, 25, 465 and 587 for mail, 8883 for MQTT, 636 for
-LDAP, 4222 for NATS and 22 for SSH. A port a rule names is answered too, so a
-broker on an unusual port is reachable by writing it down.
+LDAP, 4222 for NATS and 22 for SSH. That table is what lets a refusal name the
+protocol you were probably speaking, and what lets a rule be refused at
+validation rather than at the connection. It is not what decides which ports
+are answered.
 
 The decision is made on the server name in the TLS handshake, which is what the
 client wrote. Nothing inside the connection is read, and nothing about the
