@@ -1,0 +1,140 @@
+# A commit on main that CI never judged, noticed by something other than a
+# person scrolling the Actions tab.
+#
+# WHAT WENT WRONG. On 2026-09-08 four pull requests merged inside four minutes
+# and two of the resulting commits ended with no CI verdict at all. Nothing said
+# so. `cancelled` is not red, it renders in a list exactly as a pass does, and
+# the two runs in question carried an empty job list, so not one check ran on
+# either commit. It was found the next morning by reading the API by hand.
+#
+# ci.yml now keys its concurrency group on the commit, so a push to main is a
+# group of one and no main run can supersede another. That removes the cause
+# this incident had. It does not remove the condition: a run can be cancelled by
+# hand, a job can hit its own timeout-minutes, GitHub can report `stale`, and
+# the concurrency expression can be edited back by somebody who reads it as
+# noise. The fix and the watchdog answer different questions, and shipping only
+# the fix would leave the next instance of this as silent as the last.
+#
+# WHY IT IS NOT A JOB INSIDE ci.yml. A job there judging main's earlier commits
+# would turn a hole behind this commit into a red CI run on this commit, and
+# cd.yml gates on CI, so a commit whose own tests passed would stop deploying
+# because of somebody else's cancelled run. That punishes the wrong commit. Here
+# the answer is loud, assignable and blocks nothing that was ever green.
+#
+# WHY IT LEAVES AN ISSUE. Same reasoning as security-watch.yml, which watches
+# the daily scan: an issue is assignable and cannot be filtered into a folder
+# nobody opens, and one issue reopened beats one issue a day, which is a
+# watchdog people mute on the third day.
+#
+# WHAT IT WILL SAY ON THE DAY IT LANDS, so nobody reads the first red as a bug
+# in the watchdog: it will refuse, and it will name `39a771ff` and `f5e2ef68`,
+# because those two commits really do carry no verdict and no longer can. It
+# goes quiet when they leave the window.
+name: ci-watch
+
+on:
+  # The immediate half. A completed CI run on main triggers this with its
+  # conclusion already recorded, so a cancelled run is reported within a minute
+  # rather than at tomorrow's check.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  # The dead man's switch, for the states no CI completion announces: a run that
+  # never started at all, and a commit whose run is still queued hours later.
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+# CANCELLING A SUPERSEDED RUN IS RIGHT HERE, and saying why is the point of
+# writing it down in this file of all files. Everything ci.yml's group avoids is
+# about a run that is the only answer about ONE COMMIT, which nothing else can
+# provide once the commit is behind you. This run's answer is about main's
+# current state, so a newer run answers the same question better and the older
+# one is obsolete rather than lost.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verdicts:
+    name: every commit on main was judged
+    # A CI run on a pull request also completes, and this asks nothing about
+    # pull requests. Without this the watchdog runs on every branch's CI and
+    # says the same thing about main every time.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Reading workflow runs other than this one, and leaving the issue.
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+
+      - name: Every recent commit on main carries a CI verdict
+        id: check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: go run ./tools/mainverdict -branch main -window 20
+
+      - name: Leave one issue open until main is whole again
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="A commit on main carries no CI verdict"
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" \
+            --json number --jq '.[0].number // empty')
+
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "mainverdict refused. The commits and the reason for each are in the run below." \
+            "Run: ${RUN_URL}" \
+            "A commit with no verdict cannot be released from, was never deployed, and makes a red on any later commit ambiguous across every commit behind it. Re-run CI on the named commits, or accept them by letting them leave the window.")
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi
+
+      # The job goes red as well as leaving the issue. A red check is visible
+      # without opening a notification. It blocks nothing: this workflow is not
+      # a required context and cd.yml does not read it.
+      - name: Fail loudly
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error title=A commit on main carries no CI verdict::mainverdict refused. See the step above for which commits and why."
+          exit 1
+
+      # THE CLOSING HALF, WITHOUT WHICH THE ISSUE IS A PERMANENT SCAR. An alert
+      # that never clears is one people stop believing.
+      - name: Close the issue once main is whole again
+        if: steps.check.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="A commit on main carries no CI verdict"
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue close "${existing}" \
+              --comment "Every commit in the window now carries a CI verdict. Closed by ci-watch."
+          fi

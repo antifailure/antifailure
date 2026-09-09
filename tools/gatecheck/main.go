@@ -557,6 +557,23 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		// is the moment a lapsed certificate is worth knowing about. Run it by
 		// hand with `just check-tls`.
 		"check-tls": true,
+		// Whether every recent commit on main carries a CI verdict. Out for
+		// the same reason as check-tls: its answer is not a function of the
+		// tree. It asks the GitHub API what CI concluded on each of main's
+		// last commits, so the same commit is clean this hour and not clean
+		// the next time somebody cancels a run, and it needs both the network
+		// and a token. It runs in ci-watch.yml on every completed CI run on
+		// main and daily, which is where a watchdog over a branch's history
+		// belongs. It gets no exemptFromGate entry because ci-watch.yml does
+		// not run on pull requests, so it is not a gate this comparison sees
+		// on the CI side at all, and an exemption naming it would be reported
+		// stale. What IS a function of the tree is every decision the command
+		// makes, and `go test ./tools/mainverdict` covers that inside
+		// `just test-tools`, which `gate` runs: every conclusion GitHub can
+		// report, the two that are verdicts and the eight that are not, a
+		// running commit inside and outside the grace, and a commit past the
+		// edge of the page reported as unread rather than as clean.
+		"mainverdict": true,
 		// The deployed route contract. The same shape as check-tls and out for
 		// the same reason: its answer is not a function of the tree. It asks
 		// the control plane that is running right now whether it serves the

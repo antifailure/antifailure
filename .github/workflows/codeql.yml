@@ -32,9 +32,17 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Same reasoning as `security.yml`: a run on main is the verdict the security
-  # tab is read against, so it is never cancelled. On a branch nothing depends
-  # on the superseded answer, so cancelling stays.
+  # Same reasoning as `security.yml`: a run that has already STARTED on main is
+  # never cancelled, because the security tab is read against it. On a branch
+  # nothing depends on the superseded answer, so cancelling stays.
+  #
+  # GitHub still cancels a merely PENDING run when a newer one queues behind the
+  # one in progress, so a burst of merges to main skips the analyses in the
+  # middle of it. That is accepted here and it is not accepted in ci.yml, which
+  # keys its group on the commit for exactly this reason. The difference is what
+  # the missing answer costs: a skipped CI run leaves a commit that can never be
+  # released from, while a skipped analysis leaves the security tab reporting
+  # the commit before it, and the next push to main brings it forward again.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Read at the top level. The one job that needs to write does so below, which

@@ -858,6 +858,32 @@ check-tls:
 check-origins:
     go run ./tools/origincheck all --api https://app.antifailure.dev
 
+# Every recent commit on main carries a CI verdict, meaning a run that
+# COMPLETED and concluded something about it.
+#
+# Not in `just gate`, for the same reason as `check-tls` and `check-origins`.
+# Its answer is not a function of the tree: it asks the GitHub API what CI
+# concluded on each of main's last commits, so the same commit is clean this
+# hour and not clean the next time somebody cancels a run. It needs the network,
+# which `just gate` must not, and a token, which a contributor may not have.
+#
+# It exits 2, not 0, when the run history it read does not reach as far back as
+# the commits it was asked about. A check that reports success for a question it
+# never asked is the defect this repository keeps finding in its own
+# instruments, and here it would report a whole branch clean on having read the
+# top of it.
+#
+# `success` and `failure` both PASS. A red main is already the loudest thing in
+# the repository and a second instrument shouting about it teaches people to
+# silence both. What this catches is the silent one: `cancelled` and `skipped`
+# render in a list exactly as a pass does, and on 2026-09-08 two commits landed
+# on main with cancelled runs that had started no jobs at all.
+#
+# It runs unattended in .github/workflows/ci-watch.yml, on every completed CI
+# run on main and daily. Look further back with -window.
+mainverdict:
+    go run ./tools/mainverdict -repo antifailure/antifailure -branch main
+
 # The getting started path, run in order and timed.
 #
 # Not in `just gate`. It needs a Docker daemon and it takes minutes, because it

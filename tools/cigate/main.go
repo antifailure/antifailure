@@ -33,12 +33,20 @@
 // of them is a verdict about the commit, and a thing that is not a verdict is
 // not a pass.
 //
-// ci.yml no longer cancels a superseded run on main or on a tag, and the reason
-// it was changed is this one: six merges landed inside one run's length on
-// 2026-09-02 and each cancelled the one before it, so main went hours with no
-// completed run and no commit a release could have been cut from. Superseding
-// is still why the word appears on a branch. On main it now means something
-// else, and something worth reading before re-running anything.
+// SUPERSEDING IS NOW THE ONE CAUSE THIS CANNOT BE, and that took two goes to
+// arrange. ci.yml stopped cancelling a RUNNING run on main after 2026-09-02,
+// when six merges landed inside one run's length and each cancelled the one
+// before it, leaving main with no commit a release could have been cut from.
+// That was only half of it: GitHub holds exactly one PENDING run per
+// concurrency group, so on 2026-09-08 four merges inside four minutes still
+// left two commits with runs that were cancelled before a single job started.
+// ci.yml now keys its group on the commit for a push to main, so no main run
+// can supersede another at all.
+//
+// So a cancelled run on main is worth reading rather than assuming: what is
+// left is a run somebody stopped by hand, a job that hit its own
+// timeout-minutes, and the concurrency expression having been edited back.
+// Superseding is still why the word appears on a branch.
 //
 // `skipped` refuses for the same reason and is easier to get wrong, because a
 // skipped run and a passing run render as the same absence of red in a list. A
@@ -148,8 +156,10 @@ var refusals = map[string]string{
 	"cancelled": "CI on this commit was cancelled, so it never reached a verdict. Several " +
 		"unrelated things are spelled that way: a job that hit its own timeout-minutes, a run " +
 		"somebody stopped by hand, and a run superseded by a newer push on the same branch. " +
-		"None of them says the commit is good. ci.yml no longer cancels a superseded run on " +
-		"main or on a tag, so a cancelled run here is worth reading rather than assuming. " +
+		"None of them says the commit is good. ci.yml gives each push to main its own " +
+		"concurrency group, so superseding is the one cause this cannot be on main, and a " +
+		"cancelled run here is worth reading rather than assuming. Check whether the " +
+		"concurrency group in ci.yml still carries the commit. " +
 		"Re-run CI on this commit, and re-run this release once it is green.",
 	"timed_out":       "CI on this commit ran out of time and never reached a verdict.",
 	"startup_failure": "CI on this commit never started, so nothing was checked.",
