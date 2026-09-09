@@ -115,7 +115,7 @@ The features a license can name are `air_gapped`, `audit_stream`, `billing`, `cl
 <!-- entitlement-names:end -->
 
 <!-- entitlement-count:start -->
-Of the 14 features a license can carry, **9 are refused when the license does not name them**, 7 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
+Of the 14 features a license can carry, **10 are refused when the license does not name them**, 8 by the engine and 2 by the control plane. The rest are listed here anyway, with what actually happens without each one, because a feature that is sold and never checked is worth knowing about and the number is only useful if it can come back unflattering.
 <!-- entitlement-count:end -->
 
 The table is generated from `ee/engine/feature/catalogue.go`, which is the one
@@ -135,7 +135,7 @@ is where it gets published.
 <!-- entitlements:start -->
 | Feature | What it is | Without it |
 | --- | --- | --- |
-| `air_gapped` | An installation that reaches nothing outside the operator's own network. | Nothing changes, because the capability is not built yet. |
+| `air_gapped` | An installation that reaches nothing outside the operator's own network. | Withheld. `airgapped/airgapped.go:RegisterFromEnvironment` asks the license, and the feature is off when the answer is no. |
 | `audit_stream` | Privileged actions forwarded to the organization's own SIEM. | Withheld. `auditsink/auditsink.go:auditsink.permitted` asks the license, and the feature is off when the answer is no. |
 | `billing` | Subscriptions, invoices and the plan an organization is on. | Nothing changes, because the capability is not built yet. |
 | `cloud_database` | Managed cloud database providers, the ones that need an organization behind them rather than a developer's own card. | Withheld. `cloudgate/cloudgate.go:gatedDatabase.Branch` asks the license, and the feature is off when the answer is no. |
@@ -153,8 +153,8 @@ is where it gets published.
 
 The distinction in the third column between a feature that is refused and one
 the hosted control plane covers under its plan is the one worth reading twice. A
-license carries twelve names and the hosted plan gate carries one boolean, so a
-license naming a feature and a plan that does not are not reconcilable by
+license carries fourteen names and the hosted plan gate carries one boolean, so
+a license naming a feature and a plan that does not are not reconcilable by
 anything. Both are real refusals and only the first is keyed on what was bought.
 
 ### Two of those cannot be sold
@@ -172,31 +172,32 @@ working feature from every direction and is harder to find than the gap it
 covers. A feature nobody can buy and nobody can be granted cannot be mistaken
 for one that ships.
 
-### Two more are not enforced
+### One more is not enforced
 
-A third case, and a different one from the two above: `rbac` and `air_gapped`.
-Both name something real, and in neither case is the license what provides it.
+A third case, and a different one from the two above: `rbac`. It names something
+real, and the license is not what provides it.
 
 The custom roles library is complete and tested, and nothing stores a role
-model, so an organization has no way to have one. Air gapped operation is a
-property every installation already has, licensed or not: verification is a
-signature check against keys stamped into the binary, so it needs no network
-whichever features a license names.
+model, so an organization has no way to have one.
 
-They are reported and not enforced, and that is written down rather than gated,
-for the reason the paragraph above gives: a check on a path nothing reaches is
-worse than no check. Unlike `billing` and `enterprise_dashboard` they are not
-refused at issue, because refusing them would refuse a customer a capability
-they can have. `tools/licensegen` prints a warning naming them beside the key it
-signs instead, so that whoever issues it reads what the license does and does
-not grant before a customer asks.
+It is reported and not enforced, and that is written down rather than gated, for
+the reason the paragraph above gives: a check on a path nothing reaches is worse
+than no check. Unlike `billing` and `enterprise_dashboard` it is not refused at
+issue, because refusing it would refuse a customer a capability they can have.
+`tools/licensegen` prints a warning naming it beside the key it signs instead,
+so that whoever issues it reads what the license does and does not grant before
+a customer asks.
 
 `air_gapped` was in this state and said so nowhere until 2026-09-08. Every
 occurrence of the name in the repository was a copy of the catalogue, the
 license vectors, a line of documentation, or a test, so a license naming it
 verified, reported itself active, printed in `af license status`, and granted
-nothing. That is the same failure the two refused names above exist to prevent,
-reached through the case they do not cover.
+nothing. It is no longer in this state and this page said it was for a day
+longer than it was true: the paragraph naming it stayed here while the gate that
+made it false landed in another pull request, which is the same stale sentence
+this catalogue exists to refuse and is why the row above is generated from the
+code rather than written beside it. The table now reads Withheld for
+`air_gapped`, and the site it names is the one that asks.
 
 All three lists are held to the code by a test rather than by a habit.
 `notShipped` and `unenforced` in `ee/engine/license/license.go` are the single

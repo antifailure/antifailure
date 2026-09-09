@@ -195,7 +195,7 @@ describe('the claims the catalogue makes about billing, the dashboard and the pl
     // The other half of the enterprise_dashboard row, and it is a claim about
     // this tree rather than about the catalogue. The row says the refusal that
     // exists here is our own funnel, keyed on organizations.plan and knowing
-    // nothing about the twelve names a licence carries. If trpc.ts stopped
+    // nothing about the fourteen names a licence carries. If trpc.ts stopped
     // asking the plan, that sentence would be describing something that is gone
     // and the row would need rewriting for the opposite reason it was rewritten
     // last time.

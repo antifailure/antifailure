@@ -14,23 +14,33 @@ which reason applies: it is refused by the control plane rather than the engine,
 it is implemented and deliberately free, it is built and loaded by no binary, or
 the capability does not exist.
 
-Of the fourteen, nine are refused when a license does not name them, seven by
-the engine and two by the control plane. Five change nothing whatever when they
+Of the fourteen, ten are refused when a license does not name them, eight by
+the engine and two by the control plane. Four change nothing whatever when they
 are absent, and the page says so.
 
-THAT NUMBER MOVED THREE TIMES WHILE THIS WAS BEING WRITTEN, from five to seven
-to nine, and every move was the product changing rather than the measurement
-being wrong. Two features were filed as not built on a measurement that was true
-when it was taken and that named its own expiry in its own text: `audit_stream`
-had a socket in the community engine with nothing plugged into it, and
-`multi_runtime` had a scheduler with no caller, no way for a manifest to ask for
-a placement, and no importable home for a check. Both shipped afterwards. Then
-`cloud_database` and `cloud_runtime` arrived as two new names in the license
-with `ee/engine/cloudgate` already refusing them per call, so they were gated
-before this catalogue had a row for either. The catalogue is regenerated from
-the code rather than restated from the last time somebody counted, so the page
-now reads nine, and every row that moved says what it used to claim and why that
-stopped being true.
+THAT NUMBER MOVED FOUR TIMES WHILE THIS WAS BEING WRITTEN, from five to seven
+to nine to ten, and every move was the product changing rather than the
+measurement being wrong. Three features were filed as not built on a measurement
+that was true when it was taken and that named its own expiry in its own text.
+`audit_stream` had a socket in the community engine with nothing plugged into
+it. `multi_runtime` had a scheduler with no caller, no way for a manifest to ask
+for a placement, and no importable home for a check. `air_gapped` had no
+reference in any Go code outside the constant and the generator's copy of the
+name list, and its reason said in so many words that the lane which would build
+it had not landed. All three shipped afterwards. Then `cloud_database` and
+`cloud_runtime` arrived as two new names in the license with `ee/engine/cloudgate`
+already refusing them per call, so they were gated before this catalogue had a
+row for either.
+
+That last move is the one worth reading, because the rule it broke is written in
+this same change. A reason may describe the tree and may name a commit it is
+true of, and it must NOT describe a future: a forward reference is unverifiable
+when it is written and silently false afterwards. The `air_gapped` row named a
+lane that had not landed, the lane landed, and nothing in the repository could
+tell. The count itself cannot drift, because the sentence on the page is
+generated from the catalogue rather than restated from the last time somebody
+counted, so the page now reads ten. The prose beside it is what needed a rule,
+and now has one.
 
 THE FIRST VERSION OF THIS CATALOGUE PUT FOUR OF THE TWELVE THEN SELLABLE IN THE
 WRONG PLACE, and the four are worth recording because they failed in two

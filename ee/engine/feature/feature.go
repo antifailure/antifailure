@@ -56,7 +56,7 @@ func StatusFrom(ctx context.Context) license.Status {
 // above a check that cannot say no, is exactly what a licensed feature that
 // enforces nothing looks like from the inside.
 //
-// The claim was also wrong on its own terms. Nine of the twelve features have
+// The claim was also wrong on its own terms. Four of the fourteen features have
 // no call site and that is the measured, published state of this product rather
 // than a bug to be asserted away; see catalogue.go. What is actually true, and
 // what is actually tested:

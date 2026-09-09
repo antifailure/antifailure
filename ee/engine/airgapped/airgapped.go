@@ -56,8 +56,15 @@ func init() {
 	// Recorded so that a feature which is sold and never checked shows up as
 	// such. This registry held three of twelve features and air_gapped was one
 	// of the nine that were sold and enforced nowhere.
-	feature.Declare(license.FeatureAirGapped, "ee/engine/airgapped.RegisterFromEnvironment")
-	feature.Declare(license.FeatureAirGapped, "ee/engine/airgapped.Hook")
+	//
+	// SPELLED path:symbol, relative to ee/engine, because that is the one
+	// format feature.SplitSite parses and the entitlement checks in
+	// ee/engine/cmd/af open the named file and require the licence question to
+	// be in it. A dotted package qualifier reads the same to a person and is
+	// unverifiable to an instrument, which is the whole defect the catalogue
+	// exists to refuse: a site nothing can open is a claim nothing can check.
+	feature.Declare(license.FeatureAirGapped, "airgapped/airgapped.go:RegisterFromEnvironment")
+	feature.Declare(license.FeatureAirGapped, "airgapped/airgapped.go:Hook.Check")
 }
 
 const (

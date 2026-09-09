@@ -241,7 +241,12 @@ func TestTheFeatureNowHasADeclaredEnforcementSite(t *testing.T) {
 	sites := feature.Sites(license.FeatureAirGapped)
 	require.NotEmpty(t, sites,
 		"air_gapped was one of nine features the licence sold and nothing enforced")
-	require.Contains(t, sites, "ee/engine/airgapped.Hook")
+	// path:symbol, relative to ee/engine, which is what feature.SplitSite
+	// parses and what the entitlement checks in ee/engine/cmd/af open. The
+	// earlier spelling was a dotted package qualifier: it reads the same to a
+	// person and names no file, so nothing could confirm it.
+	require.Contains(t, sites, "airgapped/airgapped.go:RegisterFromEnvironment")
+	require.Contains(t, sites, "airgapped/airgapped.go:Hook.Check")
 }
 
 func TestTheHookIsRegisteredSoTheEngineActuallyConsultsIt(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 // The one answer to what a customer is entitled to.
 //
 // There were two entitlement systems and they did not know about each other.
-// The engine has license.Feature, twelve names a signed licence may carry. The
+// The engine has license.Feature, fourteen names a signed licence may carry. The
 // control plane has organizations.plan and web/apps/api/src/entitlements.ts,
 // which is real, tested and about quotas rather than features. Nothing
 // reconciled them, so "what does this customer get" had no single answer and a
@@ -33,12 +33,23 @@ import (
 //	ENTITLEMENT THAT CLAIMS TO BE ENFORCED AND IS NOT IS A LIE THE TEST
 //	REFUSES TO LET SHIP.
 //
-// That is why State exists and why it has four values rather than a boolean.
-// Nine of the twelve features are not enforced, and they are not unenforced for
-// the same reason: some are not built at all, one is built and deliberately
-// free, and some are refused by the hosted control plane on the plan as a whole
-// rather than on the feature. A boolean would flatten those into one word and
-// the word would be wrong for most of them.
+// That is why State exists and why it has six values rather than a boolean.
+// Four of the fourteen features are not enforced, and they are not unenforced
+// for the same reason: two are not built at all and two are built and
+// deliberately free. The ten that ARE enforced are not enforced by one
+// mechanism either: the enterprise engine asks feature.Enabled, the community
+// engine asks edition.Permits with the licence crossing the module boundary as
+// strings, and the control plane asks in TypeScript this package cannot see. A
+// boolean would flatten all of that into one word and the word would be wrong
+// for most of them.
+
+// THE NUMBER IN THE PARAGRAPH ABOVE IS THE ONE THING HERE NOT HELD BY A CHECK,
+// which is said out loud because this file's whole subject is a sentence going
+// false with nothing able to notice. The count a customer reads is generated
+// from this catalogue by ee/engine/feature's reference test and cannot drift;
+// this one is prose, and it is a summary of the same catalogue rather than an
+// independent claim, so a reader who wants the current number should take it
+// from the generated sentence on the licensing page.
 //
 // WHAT A NEW FEATURE COSTS. An entry here, and the two tests are the gate. A
 // license.Feature with no entry fails TestEveryLicensedFeatureIsInTheCatalogue.
@@ -227,19 +238,23 @@ type Entitlement struct {
 // quote.
 var catalogue = []Entitlement{
 	{
-		Feature: license.FeatureAirGapped,
-		Summary: "An installation that reaches nothing outside the operator's own network.",
-		State:   StateAbsent,
-		Because: "The only row where the question the others turn on does not arise, and it is " +
-			"worth saying so rather than leaving the silence to be read as an oversight. " +
-			"There is no code serving ANY subject here: air_gapped has no reference in any Go " +
-			"code outside the constant itself and tools/licensegen's copy of the name list, " +
-			"no offline verification path, and no refusal at any call site. billing and " +
-			"enterprise_dashboard were classified wrongly because real code existed and " +
-			"nobody asked who it served; here there is nothing to attribute to anybody, so " +
-			"absent is the whole answer. Wave 7's L7.2 would define it and build the " +
-			"lifecycle test that fails on any attempted connection, and that is a statement " +
-			"about a lane which has NOT landed as of 88627d7f rather than about this tree.",
+		Feature:    license.FeatureAirGapped,
+		Summary:    "An installation that reaches nothing outside the operator's own network.",
+		EnforcedAt: "airgapped/airgapped.go:RegisterFromEnvironment",
+		State:      StateGated,
+		Because: "This row read absent, on a measurement that was true when it was taken and " +
+			"that named its own expiry in its own text, which is the one thing this " +
+			"catalogue had already forbidden itself: it said the lane that would build this " +
+			"had NOT landed. A reason may describe the tree and may name a sha it is true " +
+			"of, and it must not describe a future, because a forward reference is " +
+			"unverifiable when written and silently false afterwards. #312 landed " +
+			"ee/engine/airgapped, and the sentence went false with nothing able to notice, " +
+			"exactly as predicted by the rule this branch wrote down and then broke. " +
+			"RegisterFromEnvironment is the site named rather than Hook.Check, because it is " +
+			"the one that ASKS: the licence decides once, at startup, whether the process " +
+			"may seal, and an installation that asked to be air gapped without a licence for " +
+			"it does not start. The hook that refuses an environment exists only because " +
+			"that answer was yes, so it is a second declared site and not a second gate.",
 	},
 	{
 		Feature: license.FeatureAuditStream,
@@ -286,8 +301,8 @@ var catalogue = []Entitlement{
 			"them paying for it.",
 	},
 	{
-		Feature: license.FeatureCloudRuntime,
-		Summary: "Managed cloud runtime providers, on the same rule as the databases.",
+		Feature:    license.FeatureCloudRuntime,
+		Summary:    "Managed cloud runtime providers, on the same rule as the databases.",
 		EnforcedAt: "cloudgate/cloudgate.go:gatedRuntime.Up",
 		State:      StateGated,
 		Because: "Up and not Down, for the reason the database row gives about teardown. The " +
@@ -360,7 +375,10 @@ var catalogue = []Entitlement{
 			"organizations that have them today. Separately, ee/web/rbac adds approvals and a " +
 			"policy file on top, and nothing under web/apps/api/src imports it, so that half " +
 			"is unmounted in the sense the state above describes. The entry is free because " +
-			"what a customer gets today is the working ungated one.",
+			"what a customer gets today is the working ungated one. license.go's unenforced " +
+			"map records the same feature for that second half, and this row is held to it: " +
+			"a row calling rbac refused while license.go says it is gated nowhere is two " +
+			"answers to one question, which is the whole reason this file exists.",
 	},
 	{
 		Feature:        license.FeatureSCIM,

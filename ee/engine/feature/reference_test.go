@@ -113,11 +113,11 @@ func entitlementTable() string {
 // page against the licence by reading a bounded window under this heading,
 // because reading the whole page would pick up every name mentioned in prose
 // anywhere on it and would pass a page that had stopped listing the catalogue
-// at all. The table does not fit in that window and cannot be made to: twelve
-// rows are two thousand characters. So the window needs a list, and a list
-// typed by hand under a generated table is a fourth copy of the twelve names,
-// sitting inside the one document whose subject is what happens when the copies
-// disagree.
+// at all. The table does not fit in that window and cannot be made to:
+// fourteen rows are just under three thousand characters. So the window needs a
+// list, and a list typed by hand under a generated table is a fourth copy of
+// the fourteen names, sitting inside the one document whose subject is what
+// happens when the copies disagree.
 
 func namesSentence() string {
 	all := license.AllFeatures()

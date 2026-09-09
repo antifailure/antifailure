@@ -41,6 +41,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antifailure/antifailure/ee/engine/airgapped"
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
@@ -48,6 +49,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
 	"github.com/antifailure/antifailure/ee/engine/secrets"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/secret"
@@ -356,6 +358,63 @@ type proof struct {
 func entryPoints() []proof {
 	return []proof{
 		{
+			feature: license.FeatureAirGapped,
+			run: func(t *testing.T, ctx context.Context) (bool, string) {
+				t.Helper()
+				// THE ONE PROOF WITH A PROCESS WIDE SIDE EFFECT, and it is
+				// bracketed rather than tidied away. A licensed run SEALS this
+				// process, which is what the feature is, and airgapped's own
+				// documentation says nothing unseals it: airgap.Reset exists
+				// for tests and is the only way back. Reset runs before the
+				// call as well as after it, because a proof that inherited a
+				// seal from something earlier would report the licensed answer
+				// without the licence having decided anything.
+				//
+				// Safe in this binary because this test is sequential and
+				// every parallel test in the package is paused until the
+				// sequential ones finish, so nothing else can dial inside the
+				// window. That is a property of the package rather than of
+				// this function, so it is written down here where somebody
+				// adding t.Parallel above will meet it.
+				airgap.Reset()
+				t.Cleanup(airgap.Reset)
+
+				reg := extension.NewRegistry()
+				on, notes, err := airgapped.RegisterFromEnvironment(ctx, reg,
+					func(k string) string {
+						if k == airgapped.ModeEnv {
+							return "1"
+						}
+						return ""
+					})
+				if err != nil {
+					require.False(t, on,
+						"RegisterFromEnvironment refused and reported the installation sealed")
+					require.False(t, airgap.Sealed(),
+						"the refusal sealed the process anyway, so the failure mode is the "+
+							"one this feature exists to prevent with the licence reversed")
+					return false, "RegisterFromEnvironment refused: " + firstLine(err.Error())
+				}
+				// Not merely "no error". The observable a customer buys is the
+				// sealed process and a policy hook the engine will consult, so
+				// both are required here: a licensed run that returned cleanly
+				// and sealed nothing would pass a check written as "did it
+				// error" and would leave the installation open.
+				require.True(t, on, "RegisterFromEnvironment returned no error and reported off")
+				require.True(t, airgap.Sealed(),
+					"RegisterFromEnvironment reported the installation air gapped and the "+
+						"process is not sealed")
+				require.NotEmpty(t, notes, "the installation sealed and said nothing about it")
+				require.Error(t,
+					reg.CheckPolicy(context.Background(), extension.EnvironmentRequest{
+						Provider:    "docker",
+						EgressModes: map[string]string{"api.stripe.com": "allow"},
+					}),
+					"the hook was not added to the registry, so the engine would never consult it")
+				return true, "the process sealed and the registry refuses an outward environment"
+			},
+		},
+		{
 			feature: license.FeaturePolicy,
 			run: func(t *testing.T, ctx context.Context) (bool, string) {
 				t.Helper()
@@ -568,10 +627,10 @@ func TestTheEntitlementIsWhatDecides(t *testing.T) {
 func TestTheFeaturesThatRefuseNothingAreTheOnesTheCatalogueNames(t *testing.T) {
 	// The unflattering half, asserted rather than left to a reader.
 	//
-	// Nine of twelve features change nothing when they are absent. That is the
-	// finding, and pinning it here means the day one of them gains a real gate,
-	// this fails until somebody moves it in the catalogue, and the day a tenth
-	// quietly loses one, this fails too.
+	// Four of fourteen features change nothing when they are absent. That is
+	// the finding, and pinning it here means the day one of them gains a real
+	// gate, this fails until somebody moves it in the catalogue, and the day one
+	// of the ten quietly loses one, this fails too.
 	for _, e := range feature.Catalogue() {
 		if e.State == feature.StateGated || e.State == feature.StateEditionGated {
 			continue
