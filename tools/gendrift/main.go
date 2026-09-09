@@ -73,9 +73,6 @@ var ledger = []generator{
 	{"go run ./tools/proxysrc", []string{
 		"engine/internal/proxyimage/sources.gen.go",
 	}},
-	{"go run ./tools/docsembed", []string{
-		"engine/internal/docs/pages.gen.go",
-	}},
 	{"go run ./tools/schemadoc .", []string{
 		"docs/src/content/docs/reference/schemas",
 	}},
@@ -106,6 +103,9 @@ var ledger = []generator{
 	{"cd engine && go test ./internal/hud -update-frames", []string{
 		"engine/internal/hud/testdata",
 		"docs/src/content/docs/guides/dashboard.md",
+	}},
+	{"go run ./tools/docsembed", []string{
+		"engine/internal/docs/pages.gen.go",
 	}},
 }
 
