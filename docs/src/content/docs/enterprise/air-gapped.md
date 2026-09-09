@@ -2,7 +2,7 @@
 title: Air gapped
 description: An installation that reaches nothing outside your own network, with the list of every call site it refuses and what is deliberately not covered.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 An air gapped installation reaches nothing outside your own network. Not the
