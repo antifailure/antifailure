@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -115,7 +116,7 @@ func newGCSStore(raw string, getenv func(string) string) (Store, error) {
 	s := &gcsStore{
 		// The same half hour the other two remote stores allow, because the
 		// thing being moved is a database dump and not a web page.
-		client: &http.Client{Timeout: 30 * time.Minute},
+		client: airgap.Client(airgap.SiteGoldenGCS, 30*time.Minute),
 		getenv: getenv,
 	}
 

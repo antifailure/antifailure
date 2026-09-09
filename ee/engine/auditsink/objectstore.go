@@ -37,6 +37,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -123,7 +124,7 @@ func NewObjectStore(cfg ObjectStoreConfig) (*ObjectStore, error) {
 		suffix: cfg.suffix,
 	}
 	if s.client == nil {
-		s.client = &http.Client{Timeout: objectTimeout}
+		s.client = airgap.Client(airgap.SiteAuditSink, objectTimeout)
 	}
 	if s.suffix == nil {
 		s.suffix = randomSuffix

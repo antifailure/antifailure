@@ -56,6 +56,7 @@ var exempt = map[string]string{
 	"engine/cmd/af-proxy/synth.go":       "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/destination.go": "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/dns.go":         "the sidecar cannot import engine/pkg",
+	"engine/cmd/af-proxy/h2.go":          "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/mitm.go":        "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/transparent.go": "the sidecar cannot import engine/pkg",
 	"engine/cmd/af-proxy/capture.go":     "the sidecar cannot import engine/pkg",

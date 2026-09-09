@@ -35,6 +35,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"net"
 	"os"
 	"strings"
@@ -317,8 +318,23 @@ func (s *Syslog) connect(ctx context.Context) (net.Conn, error) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, syslogDialTimeout)
 	defer cancel()
-	dialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: s.tls}
-	return dialer.DialContext(dialCtx, "tcp", s.cfg.Address)
+	// The TCP connection is opened through the guard and the TLS handshake is
+	// run over it, rather than handing the address to tls.Dialer. A tls.Dialer
+	// resolves and connects inside itself, so the guard could only have been
+	// asked before it as a separate question, and a check that sits beside the
+	// dial rather than on it is a check the next edit can walk past. s.tls
+	// already carries ServerName, set from this same address where the config
+	// is built, so verification is against the host that was asked for.
+	raw, err := airgap.DialContext(airgap.SiteAuditSink)(dialCtx, "tcp", s.cfg.Address)
+	if err != nil {
+		return nil, err
+	}
+	conn := tls.Client(raw, s.tls)
+	if err := conn.HandshakeContext(dialCtx); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // drop closes and forgets the connection so the next send opens a new one.

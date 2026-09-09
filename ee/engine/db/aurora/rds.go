@@ -21,6 +21,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -175,7 +176,10 @@ func (c *client) httpClient() *http.Client {
 	if c.http != nil {
 		return c.http
 	}
-	return http.DefaultClient
+	// Not http.DefaultClient. The RDS control API is the outbound path by
+	// which a branch is created, and the default client dials outside the
+	// guard, so an air gapped installation would have reached AWS here.
+	return airgap.Client(airgap.SiteAurora, 0)
 }
 
 // encodeSorted encodes a form with its keys sorted.

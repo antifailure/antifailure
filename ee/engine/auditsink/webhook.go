@@ -40,6 +40,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -150,7 +151,7 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 		sleep:  cfg.sleep,
 	}
 	if w.client == nil {
-		w.client = &http.Client{Timeout: webhookTimeout}
+		w.client = airgap.Client(airgap.SiteAuditSink, webhookTimeout)
 	}
 	if w.sleep == nil {
 		w.sleep = time.Sleep
