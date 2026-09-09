@@ -67,7 +67,7 @@ writes.
 | `storage.<location>.rep.googleapis.com` | The regional and dual region Cloud Storage endpoints. fake-gcs-server matches on the Host header against exactly one public host, so routing a second spelling here produces a 404 from inside the emulated surface, which reads as a missing object rather than as an unsupported endpoint. |
 | `<location>-pubsub.googleapis.com` | The Pub/Sub regional endpoints. The emulator has no notion of a region, so answering for a regional spelling would emulate a property it does not have. |
 | `secretmanager.googleapis.com`, `cloudtasks.googleapis.com`, `bigquery.googleapis.com`, `run.googleapis.com`, `cloudfunctions.googleapis.com`, `logging.googleapis.com`, `compute.googleapis.com` and every other Google API | Outside the surface. No emulator, so a refusal. |
-| `metadata.google.internal` and `169.254.169.254` | Link local, and refused by the sidecar's destination guard before any rule is consulted. See "Containment" below. |
+| `169.254.169.254` | The instance metadata endpoint, which hands out the node's own credentials. Link local, so the sidecar's destination guard refuses it before any rule is consulted, and a name that resolves there is refused with it. See "Containment" below. |
 
 Firestore's emulator is the `gcloud` one and not the Firebase Local Emulator
 Suite. Security rules, indexes, Firebase Authentication, the Realtime Database
