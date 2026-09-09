@@ -11,8 +11,11 @@ The community edition is complete rather than a demo. Masking, verification,
 every database provider, the egress and mocking layer, the agent runner,
 insights, load, and the control plane are MIT and stay MIT. What is in `ee/` is
 the set of things a large company requires before a rollout and an individual
-developer never uses: single sign on, SCIM, custom roles, SIEM streaming,
-policy enforcement, customer owned runtimes, and billing.
+developer never uses: single sign on, SCIM, custom roles, SIEM streaming of
+the engine's privileged actions, policy enforcement, customer owned runtimes,
+and billing. `ee/README.md` says exactly which actions those are and which
+audit log is not forwarded, because a one word summary of a feature is where a
+product oversells itself first.
 
 The reasoning behind the split, including the alternatives that were rejected,
 is in [ADR 0002](./docs/adr/0002-license-model.md).
