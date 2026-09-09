@@ -145,6 +145,7 @@ runner/artifacts/
 /errgen
 /eventcheck
 /execcheck
+/extdoc
 /fieldsweep
 /figurecheck
 /gatecheck
