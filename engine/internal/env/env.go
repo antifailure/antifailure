@@ -1600,6 +1600,20 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 	}
 
 	if err := registry.CheckPolicy(ctx, req); err != nil {
+		// Recorded before it is returned, and this is the entry a security team
+		// came for. Everything else in the audit stream says what somebody was
+		// allowed to do; this one says what they were stopped from doing, which
+		// is the only kind of entry that shows a control holding. It is also the
+		// one action here that reaches a sink with nothing created yet, so a
+		// refusal costs a forwarded entry and no resources at all.
+		detail := o.auditDetail()
+		detail["refusal"] = err.Error()
+		o.audit(ctx, extension.AuditEntry{
+			Action:     "environment.refused",
+			TargetType: "environment",
+			TargetID:   o.envID,
+			Detail:     detail,
+		})
 		// Returned as it came. A policy hook's message names the policy and
 		// what would satisfy it, and wrapping it in "environment creation
 		// failed" would bury the only sentence that helps.
@@ -1695,6 +1709,26 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 			EnvID:      o.envID,
 			Kind:       "environment.created",
 			Seconds:    o.opts.Clock.Since(started).Seconds(),
+		})
+		// Beside the meter and not instead of it, because the two answer
+		// different questions: the meter counts capacity consumed and the audit
+		// entry says an environment holding a masked copy of production came
+		// into being, for whom, and whether it worked. A failed creation is
+		// recorded too, with the outcome, for the same reason the meter counts
+		// one: a run that got far enough to fail got far enough to be worth
+		// asking about.
+		detail := o.auditDetail()
+		detail["seconds"] = o.opts.Clock.Since(started).Seconds()
+		detail["outcome"] = "created"
+		if rerr != nil {
+			detail["outcome"] = "failed"
+			detail["code"] = string(codeOf(rerr))
+		}
+		o.audit(ctx, extension.AuditEntry{
+			Action:     "environment.created",
+			TargetType: "environment",
+			TargetID:   o.envID,
+			Detail:     detail,
 		})
 	}()
 
@@ -2766,6 +2800,22 @@ func (o *Orchestrator) Down(ctx context.Context) (*Teardown, error) {
 		Repository: o.opts.Manifest.Name,
 		EnvID:      o.envID,
 		Kind:       "environment.torn_down",
+	})
+	// After the teardown rather than before it, and its failures are swallowed
+	// by o.audit rather than returned. Both halves of that are the contract the
+	// AuditSink interface states: a sink observes and cannot alter, and a
+	// forwarding outage that stopped an environment being destroyed would turn
+	// a logging problem into a resource leak. The pending count travels with
+	// the entry because a teardown that left resources behind is the thing
+	// somebody reading this log later will want to have been told.
+	detail := o.auditDetail()
+	detail["removed"] = td.Removed
+	detail["pending"] = len(td.Pending)
+	o.audit(ctx, extension.AuditEntry{
+		Action:     "environment.torn_down",
+		TargetType: "environment",
+		TargetID:   o.envID,
+		Detail:     detail,
 	})
 	return td, nil
 }

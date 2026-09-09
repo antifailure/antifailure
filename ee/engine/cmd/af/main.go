@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
@@ -130,6 +131,36 @@ func main() {
 	// ee/engine/runtime/ecs/runtime.go for why there is no runtime behind it.
 	extension.Default.AddRuntimeProvider(ecs.NewProvider())
 
+	// The audit sinks, into the same registry and refused at startup for the
+	// same reason. This registration is the whole of what the audit_stream
+	// feature does, and until it existed there was nothing to register: the
+	// interface, the registry and Registry.Audit were all written and the only
+	// two callers of Registry.Audit in the entire repository were in its own
+	// test file, with no implementation of the interface anywhere. So a
+	// customer who bought audit_stream got a licence that granted a feature, a
+	// documented list of what is audited, and not one entry forwarded anywhere.
+	//
+	// Registered unconditionally rather than only under a licence, and every
+	// sink asks the licence per call, for the reason the policy hook does: a
+	// licence that lapses mid-process must stop forwarding without a restart,
+	// and gating here instead would mean an installation started before its
+	// licence renews never forwards again.
+	sinks, err := auditsink.RegisterFromEnvironment(extension.Default, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "af: %v\n", err)
+		os.Exit(3)
+	}
+	for _, line := range auditsink.Describe(sinks) {
+		fmt.Fprintf(os.Stderr, "af: audit sink: %s\n", line)
+	}
+	if auditsink.Unlicensed(ctx, sinks) {
+		// Said once, at startup, because the alternative is an operator
+		// watching an empty SIEM dashboard and concluding the engine is not
+		// taking any privileged actions. Configured and licensed are different
+		// facts and only one of them is visible from the receiving end.
+		fmt.Fprintf(os.Stderr, "af: audit sink: configured, and audit_stream is not licensed "+
+			"on this installation, so nothing is forwarded\n")
+	}
 	if warning := status.Warning; warning != "" {
 		fmt.Fprintf(os.Stderr, "af: %s\n", warning)
 	}

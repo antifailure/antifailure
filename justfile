@@ -569,6 +569,21 @@ benchmark:
     AF_DOCS_BENCHMARK_OUT="$(cd .. && pwd)/benchmarks/${stamp}-documentation-context.md" \
       go test ./internal/docs -run TestBenchmarkTheContextOneAnswerCosts -count=1
     echo "wrote benchmarks/${stamp}-documentation-context.md"
+    # How long a privileged action takes to reach the organization's SIEM, and
+    # how long an undeliverable one takes to become durable on disk while the
+    # receiver is down. It lives in the enterprise module, so GOWORK=off and a
+    # separate cd: ee/engine is deliberately outside the workspace and building
+    # it with the workspace on gives a misleading result.
+    #
+    # With no receiver configured it measures loopback, which is the delay this
+    # product is responsible for and nothing else. Set
+    # AF_AUDIT_BENCHMARK_SYSLOG_ADDRESS and AF_AUDIT_BENCHMARK_WEBHOOK_URL to
+    # measure the whole path against your own collector; the report says which
+    # of the two it did, per row, rather than mixing them.
+    cd ../ee/engine && GOWORK=off AF_BENCHMARK=1 \
+      AF_AUDIT_BENCHMARK_OUT="$(cd ../.. && pwd)/benchmarks/${stamp}-audit-stream-latency.md" \
+      go test ./auditsink -run TestBenchmarkTheDelayFromAnActionToItsArrival -count=1
+    echo "wrote benchmarks/${stamp}-audit-stream-latency.md"
 
 # The fast ones, for a tight loop.
 test-short:
