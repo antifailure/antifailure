@@ -1,5 +1,7 @@
 package emulator
 
+import "github.com/antifailure/antifailure/engine/pkg/extension"
+
 // The Azure surface, and why it is five registrations rather than one.
 //
 // Azurite is ONE IMAGE THAT LISTENS ON THREE PORTS, blob 10000, queue 10001
@@ -91,9 +93,11 @@ var azureBlob = &Emulator{
 	Vendor:       "Azure",
 	Project:      "Azurite",
 	ProjectURL:   "https://github.com/Azure/Azurite",
-	Image:        azuriteImage,
-	Port:         AzureBlobPort,
-	Env:          azuriteEnv(),
+	// Azure publishes Azurite, so the vendor whose API is emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      azuriteImage,
+	Port:       AzureBlobPort,
+	Env:        azuriteEnv(),
 	Services: []Service{
 		{
 			Name: "Azure Blob Storage",
@@ -137,9 +141,11 @@ var azureQueue = &Emulator{
 	Vendor:       "Azure",
 	Project:      "Azurite",
 	ProjectURL:   "https://github.com/Azure/Azurite",
-	Image:        azuriteImage,
-	Port:         AzureQueuePort,
-	Env:          azuriteEnv(),
+	// Azure publishes Azurite, so the vendor whose API is emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      azuriteImage,
+	Port:       AzureQueuePort,
+	Env:        azuriteEnv(),
 	Services: []Service{
 		{
 			Name:   "Azure Queue Storage",
@@ -164,9 +170,11 @@ var azureTable = &Emulator{
 	Vendor:       "Azure",
 	Project:      "Azurite",
 	ProjectURL:   "https://github.com/Azure/Azurite",
-	Image:        azuriteImage,
-	Port:         AzureTablePort,
-	Env:          azuriteEnv(),
+	// Azure publishes Azurite, so the vendor whose API is emulated.
+	Maintainer: extension.MaintainerVendor,
+	Image:      azuriteImage,
+	Port:       AzureTablePort,
+	Env:        azuriteEnv(),
 	Services: []Service{
 		{
 			Name:   "Azure Table Storage",
