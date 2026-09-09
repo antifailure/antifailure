@@ -111,14 +111,63 @@ func TestInitClouds_TheReportNamesEveryStoreIncludingTheOnesLeftOut(t *testing.T
 		"a store this build cannot provide must be reported rather than dropped or declared")
 }
 
+// datastoreRow returns the one row of the Datastores table whose STORE column
+// is name, matched on the row's own leading field.
+//
+// It is a leading field rather than a substring because a substring cannot
+// tell the STORE column from the rest of the row, and every word this test
+// wants is in the rest of the row. Each store's reason is rendered in its own
+// row's WHY column, and each of these reasons happens to contain the compose
+// service's name: ClickHouse's reason opens "the events are here", Redis's
+// says "a cache is rebuilt from the primary", Kafka's says "a broker wants its
+// topics". So a row printing the ENGINE in the STORE column still contains
+// every word, on that same row, and only the position separates the two.
+//
+// Exactly one row must match. Two would mean the search found the table and
+// something else, and returning the first would be a check reading whichever
+// one came out on top.
+func datastoreRow(t *testing.T, stdout, name string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(stdout, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if field, _, ok := strings.Cut(trimmed, " "); ok && field == name {
+			found = append(found, trimmed)
+		}
+	}
+	require.Len(t, found, 1,
+		"want exactly one summary row whose first column is %q, got %d: %v", name, len(found), found)
+	return found[0]
+}
+
 func TestInitClouds_TheSummaryPrintsTheStoresAndTheirStances(t *testing.T) {
 	dir := cloudsFixture(t)
 	got := runCLI(t, dir, nil, "init", "--non-interactive")
 	require.Equal(t, 0, got.code, got.stderr)
 
-	// The table, by the developer's own names for the stores.
-	for _, want := range []string{"events", "clickhouse", "golden", "cache", "redis", "empty", "broker", "kafka"} {
-		require.Contains(t, got.stdout, want, "the summary does not mention %q", want)
+	// The table, by the developer's own names for the stores, read a row at a
+	// time and anchored on the STORE column.
+	//
+	// This asserted Contains over the whole summary until a mutation proved it
+	// could not fail: printing the ENGINE in the STORE column, which deletes
+	// the developer's own name for every store, left all eight words on the
+	// page and the test green. "clickhouse", "redis" and "kafka" came back
+	// from the ENGINE column, "events" from ClickHouse's reason, and "cache"
+	// and "broker" from the sentences about the two stores left out. The
+	// richer the rendered page, the weaker a Contains against it, and this
+	// page is deliberately rich.
+	for _, want := range []struct{ store, engine, stance, where string }{
+		{"events", "clickhouse", "golden", "manifest"},
+		{"cache", "redis", "empty", "not declared"},
+		{"broker", "kafka", "topics_only", "not declared"},
+	} {
+		row := datastoreRow(t, got.stdout, want.store)
+		require.Contains(t, row, want.engine,
+			"the row for %q does not name the engine it runs", want.store)
+		require.Contains(t, row, want.stance,
+			"the row for %q does not carry the stance, which is the decision", want.store)
+		require.Contains(t, row, want.where,
+			"the row for %q does not say whether it reached the manifest", want.store)
 	}
 	// And the sentence for the two it did not declare, each with the stance it
 	// would have taken, because the stance is the decision.
