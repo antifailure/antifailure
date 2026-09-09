@@ -269,7 +269,7 @@ async function filesUnder(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true, recursive: true })
   return entries
     .filter((e) => e.isFile())
-    .map((e) => path.join(e.parentPath ?? e.path, e.name))
+    .map((e) => path.join(e.parentPath, e.name))
 }
 
 /**
