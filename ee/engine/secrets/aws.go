@@ -113,18 +113,68 @@ func (a *AWSBackend) Describe() string {
 	}
 }
 
-// Reach checks that there are credentials to sign with.
+// Reach finds credentials and then proves Secrets Manager itself answers.
 //
-// A configuration check rather than a call, and that is a deliberate trade
-// rather than a shortcut. Secrets Manager has no free health endpoint: every
-// probe is a signed, billed, rate-limited API call, and making one per af up to
+// The second half is new and the argument that kept it out was wrong in a way
+// worth recording, because the same argument will be made again for the next
+// adapter. It said: "Secrets Manager has no free health endpoint: every probe
+// is a signed, billed, rate-limited API call, and making one per af up to
 // discover something the first real lookup discovers anyway is a cost with no
-// return. What it does check is the thing that is actually usually wrong, which
-// is that no credentials could be found at all, and it says which places were
-// looked in.
+// return." Two of its three clauses do not survive contact with the code.
+//
+// It is not one call per af up. Source.Available guards the probe with a
+// sync.Once, so Reach runs AT MOST ONCE PER PROCESS PER SOURCE, not once per
+// lookup: twenty declared variables against this store make one probe, not
+// twenty. And it need not be signed, so it is not a billed API call and it
+// spends no credential. An unsigned request is answered by the service with
+// MissingAuthenticationTokenException, and that answer is the entire proof
+// being sought, because what is in question is whether the host is there.
+//
+// What the check was missing is what the first live Key Vault run found in the
+// Azure adapter, and this store had it worse. Azure at least proved that
+// Microsoft Entra answered; on the environment-credential path this made no
+// network call whatsoever, so a wholly unreachable Secrets Manager, a VPC
+// endpoint pointed at the wrong place, or a typo in Endpoint reported the
+// source perfectly usable, and AF-SEC-001 listed it as a place the value could
+// have come from while nothing there could be read. On the ECS and instance
+// metadata paths it did make a call, to the credential endpoint, which is a
+// different host from secretsmanager.<region>.amazonaws.com and proves nothing
+// about it.
+//
+// Finding no credentials at all is still the thing most often actually wrong
+// and it is still reported first, with the places that were looked in named.
+//
+// ANY answer from the endpoint proves it is reachable, including a refusal. The
+// target header is sent so that the answer comes from Secrets Manager rather
+// than from whatever else might be listening on a mistyped address.
 func (a *AWSBackend) Reach(ctx context.Context) error {
-	_, err := a.chain.Credentials(ctx)
-	return err
+	if _, err := a.chain.Credentials(ctx); err != nil {
+		return err
+	}
+	if _, err := cloudauth.Do(ctx, cloudauth.Request{
+		Method: "POST",
+		URL:    a.endpoint(),
+		Body:   []byte(`{"MaxResults":1}`),
+		Headers: map[string]string{
+			"Content-Type": "application/x-amz-json-1.1",
+			"X-Amz-Target": "secretsmanager.ListSecrets",
+		},
+	}); err != nil {
+		return fmt.Errorf("cannot be reached: %s", err)
+	}
+	return nil
+}
+
+// endpoint is the address this store's calls go to.
+//
+// Shared by Reach and the lookup so that a probe can never prove a different
+// host from the one a value is read from, which would be a check that reports
+// on something other than what it guards.
+func (a *AWSBackend) endpoint() string {
+	if a.cfg.Endpoint != "" {
+		return a.cfg.Endpoint
+	}
+	return "https://secretsmanager." + a.cfg.Region + ".amazonaws.com/"
 }
 
 // Refresh discards the credentials so the next lookup finds new ones.
@@ -190,10 +240,7 @@ func (a *AWSBackend) getSecret(ctx context.Context, id string) (string, bool, er
 	if err != nil {
 		return "", false, err
 	}
-	endpoint := a.cfg.Endpoint
-	if endpoint == "" {
-		endpoint = "https://secretsmanager." + a.cfg.Region + ".amazonaws.com/"
-	}
+	endpoint := a.endpoint()
 
 	headers := map[string]string{
 		"Content-Type": "application/x-amz-json-1.1",
