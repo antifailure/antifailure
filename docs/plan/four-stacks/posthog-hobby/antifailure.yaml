@@ -1,0 +1,799 @@
+version: 1
+name: posthog-hobby
+services:
+- name: db
+  kind: worker
+  build:
+    strategy: image
+    image: postgres:15.12-alpine
+  env:
+  - name: POSTGRES_USER
+    value: posthog
+  - name: POSTGRES_DB
+    value: posthog
+  - name: POSTGRES_PASSWORD
+    value: posthog
+- name: redis7
+  kind: worker
+  command: redis-server --maxmemory-policy allkeys-lru --maxmemory 200mb
+  build:
+    strategy: image
+    image: redis:7.2-alpine
+- name: valkey
+  kind: worker
+  command: valkey-server --maxmemory-policy allkeys-lru --maxmemory 200mb
+  build:
+    strategy: image
+    image: valkey/valkey:8.1-alpine
+- name: clickhouse
+  kind: worker
+  depends_on:
+  - kafka
+  - zookeeper
+  build:
+    strategy: image
+    image: clickhouse/clickhouse-server:26.6.2.158
+  env:
+  - name: CLICKHOUSE_SKIP_USER_SETUP
+    value: '1'
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+- name: zookeeper
+  kind: worker
+  build:
+    strategy: image
+    image: zookeeper:3.7.0
+  env:
+  - name: ZOO_AUTOPURGE_PURGEINTERVAL
+    value: '1'
+  - name: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+    value: '3'
+- name: kafka
+  kind: worker
+  command: redpanda start --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092 --advertise-kafka-addr
+    internal://kafka:9092,external://localhost:19092 --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+    --advertise-pandaproxy-addr internal://kafka:8082,external://localhost:18082 --schema-registry-addr
+    internal://0.0.0.0:8081,external://0.0.0.0:18081 --rpc-addr kafka:33145 --advertise-rpc-addr kafka:33145
+    --mode dev-container --smp 2 --memory 3G --reserve-memory 500M --overprovisioned --set redpanda.empty_seed_starts_cluster=false
+    --seeds kafka:33145 --set redpanda.auto_create_topics_enabled=true
+  depends_on:
+  - zookeeper
+  build:
+    strategy: image
+    image: docker.io/redpandadata/redpanda:v25.1.9
+  env:
+  - name: KAFKA_LOG_RETENTION_MS
+    value: '3600000'
+  - name: KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS
+    value: '300000'
+  - name: KAFKA_LOG_RETENTION_HOURS
+    value: '1'
+- name: worker
+  kind: worker
+  command: ./bin/docker-worker-celery --with-scheduler
+  depends_on:
+  - db
+  - redis7
+  - clickhouse
+  - kafka
+  - web
+  - personhog-router
+  - browserless
+  build:
+    strategy: image
+    image: ':'
+  env:
+  - name: SITE_URL
+    value: https://
+  - name: SECRET_KEY
+    value: ''
+  - name: OBJECT_STORAGE_ACCESS_KEY_ID
+  - name: OBJECT_STORAGE_SECRET_ACCESS_KEY
+  - name: OBJECT_STORAGE_ENDPOINT
+    value: http://objectstorage:19000
+  - name: OBJECT_STORAGE_PUBLIC_ENDPOINT
+    value: https://
+  - name: SESSION_RECORDING_V2_S3_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: SESSION_RECORDING_V2_S3_ACCESS_KEY_ID
+    value: any
+  - name: SESSION_RECORDING_V2_S3_SECRET_ACCESS_KEY
+    value: any
+  - name: OBJECT_STORAGE_ENABLED
+    value: 'True'
+  - name: RECORDING_API_URL
+    value: http://recording-api:6738
+  - name: INTERNAL_API_SECRET
+    value: ''
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: POSTHOG_SKIP_MIGRATION_CHECKS
+    value: '1'
+  - name: PERSONHOG_ADDR
+    value: personhog-router:50052
+  - name: PERSONHOG_ENABLED
+    value: 'true'
+  - name: BROWSERLESS_CDP_URL
+    value: ws://browserless:3000
+  - name: BROWSERLESS_TOKEN
+    value: ''
+  - name: HEATMAP_BROWSERLESS_URL
+    value: http://browserless:3000
+  - name: HEATMAP_BROWSERLESS_TOKEN
+    value: ''
+  - name: FEATURE_FLAGS_SERVICE_URL
+    value: http://feature-flags:3001
+  - name: CLICKHOUSE_LOGS_CLUSTER_HOST
+    value: clickhouse
+  - name: CLICKHOUSE_LOGS_CLUSTER_SECURE
+    value: 'false'
+  - name: ANTHROPIC_API_KEY
+    value: ''
+  - name: OPENAI_API_KEY
+    value: ''
+- name: web
+  kind: worker
+  command: /compose/start
+  depends_on:
+  - db
+  - redis7
+  - clickhouse
+  - kafka
+  - objectstorage
+  - seaweedfs
+  - personhog-router
+  build:
+    strategy: image
+    image: ':'
+  env:
+  - name: SITE_URL
+    value: https://
+  - name: LIVESTREAM_HOST
+    value: https:///livestream
+  - name: SECRET_KEY
+    value: ''
+  - name: OBJECT_STORAGE_ACCESS_KEY_ID
+  - name: OBJECT_STORAGE_SECRET_ACCESS_KEY
+  - name: SESSION_RECORDING_V2_S3_ACCESS_KEY_ID
+    value: any
+  - name: SESSION_RECORDING_V2_S3_SECRET_ACCESS_KEY
+    value: any
+  - name: OBJECT_STORAGE_ENDPOINT
+    value: http://objectstorage:19000
+  - name: OBJECT_STORAGE_PUBLIC_ENDPOINT
+    value: https://
+  - name: SESSION_RECORDING_V2_S3_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: OBJECT_STORAGE_ENABLED
+    value: 'True'
+  - name: RECORDING_API_URL
+    value: http://recording-api:6738
+  - name: INTERNAL_API_SECRET
+    value: ''
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: OTEL_SERVICE_NAME
+    value: posthog
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: ''
+  - name: OTEL_SDK_DISABLED
+    value: 'true'
+  - name: OPT_OUT_CAPTURE
+    value: 'false'
+  - name: CSP_REPORT_ENDPOINT
+    value: ''
+  - name: DEPLOYMENT
+    value: hobby
+  - name: PERSONHOG_ADDR
+    value: personhog-router:50052
+  - name: PERSONHOG_ENABLED
+    value: 'true'
+  - name: FEATURE_FLAGS_SERVICE_URL
+    value: http://feature-flags:3001
+  - name: CLICKHOUSE_LOGS_CLUSTER_HOST
+    value: clickhouse
+  - name: CLICKHOUSE_LOGS_CLUSTER_SECURE
+    value: 'false'
+  - name: ANTHROPIC_API_KEY
+    value: ''
+  - name: OPENAI_API_KEY
+    value: ''
+- name: plugins
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - valkey
+  - clickhouse
+  - kafka
+  - objectstorage
+  - seaweedfs
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: SITE_URL
+    value: https://
+  - name: SECRET_KEY
+    value: ''
+  - name: OBJECT_STORAGE_ACCESS_KEY_ID
+  - name: OBJECT_STORAGE_SECRET_ACCESS_KEY
+  - name: OBJECT_STORAGE_ENDPOINT
+    value: http://objectstorage:19000
+  - name: OBJECT_STORAGE_PUBLIC_ENDPOINT
+    value: https://
+  - name: OBJECT_STORAGE_ENABLED
+    value: 'True'
+  - name: CDP_REDIS_HOST
+    value: redis7
+  - name: CDP_REDIS_PORT
+    value: '6379'
+  - name: LOGS_REDIS_HOST
+    value: redis7
+  - name: LOGS_REDIS_PORT
+    value: '6379'
+  - name: LOGS_REDIS_TLS
+    value: 'false'
+  - name: TRACES_REDIS_HOST
+    value: redis7
+  - name: TRACES_REDIS_PORT
+    value: '6379'
+  - name: TRACES_REDIS_TLS
+    value: 'false'
+  - name: CDP_VALKEY_HOST
+    value: valkey
+  - name: CDP_VALKEY_PORT
+    value: '6379'
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: PERSONS_DATABASE_URL
+  - name: BEHAVIORAL_COHORTS_DATABASE_URL
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: ''
+- name: ingestion-general
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - clickhouse
+  - kafka
+  - objectstorage
+  - personhog-router
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: PERSONS_DATABASE_URL
+  - name: BEHAVIORAL_COHORTS_DATABASE_URL
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: PERSONHOG_ADDR
+    value: personhog-router:50052
+  - name: PERSONHOG_ENABLED
+    value: 'true'
+- name: ingestion-sessionreplay
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - kafka
+  - seaweedfs
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: SESSION_RECORDING_V2_S3_ACCESS_KEY_ID
+    value: any
+  - name: SESSION_RECORDING_V2_S3_SECRET_ACCESS_KEY
+    value: any
+  - name: SESSION_RECORDING_V2_S3_TIMEOUT_MS
+    value: '120000'
+  - name: SESSION_RECORDING_V2_S3_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+- name: recording-api
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - clickhouse
+  - seaweedfs
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: SESSION_RECORDING_V2_S3_ACCESS_KEY_ID
+    value: any
+  - name: SESSION_RECORDING_V2_S3_SECRET_ACCESS_KEY
+    value: any
+  - name: SESSION_RECORDING_V2_S3_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: INTERNAL_API_SECRET
+    value: ''
+- name: ingestion-error-tracking
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - kafka
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: ENCRYPTION_SALT_KEYS
+    value: ''
+  - name: ERROR_TRACKING_CYMBAL_BASE_URL
+    value: http://cymbal:3302
+- name: ingestion-logs
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - kafka
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: LOGS_REDIS_TLS
+    value: 'false'
+- name: ingestion-traces
+  kind: worker
+  command: node nodejs/dist/index.js
+  depends_on:
+  - db
+  - redis7
+  - kafka
+  build:
+    strategy: image
+    image: -node:latest
+  env:
+  - name: TRACES_REDIS_TLS
+    value: 'false'
+- name: proxy
+  kind: web
+  port: 80
+  command: -c 'set -x && echo "$CADDYFILE" > /etc/caddy/Caddyfile && echo "$CADDY_EXTRA_CONFIG" >> /etc/caddy/Caddyfile
+    && exec caddy run -c /etc/caddy/Caddyfile'
+  depends_on:
+  - web
+  - livestream
+  build:
+    strategy: image
+    image: caddy
+  env:
+  - name: CADDY_TLS_BLOCK
+    value: ''
+  - name: CADDY_HOST
+    value: ', http://, https://'
+- name: objectstorage
+  kind: web
+  port: 19000
+  command: -c 'mkdir -p /data/posthog /data/ducklake-dev /data/ai-blobs && minio server --address ":19000"
+    --console-address ":19001" /data'
+  build:
+    strategy: image
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+  env:
+  - name: MINIO_ROOT_USER
+    value: object_storage_root_user
+  - name: MINIO_ROOT_PASSWORD
+- name: seaweedfs
+  kind: web
+  port: 8333
+  command: server -s3 -s3.port=8333 -dir=/data -volume.max=1000
+  build:
+    strategy: image
+    image: chrislusf/seaweedfs:4.29
+- name: browserless
+  kind: worker
+  build:
+    strategy: image
+    image: ghcr.io/browserless/chromium:v2.51.2
+  env:
+  - name: TOKEN
+    value: ''
+- name: asyncmigrationscheck
+  kind: worker
+  command: python manage.py run_async_migrations --check
+  build:
+    strategy: image
+    image: ':'
+  env:
+  - name: SITE_URL
+    value: https://
+  - name: SECRET_KEY
+    value: ''
+  - name: SKIP_ASYNC_MIGRATIONS_SETUP
+    value: '0'
+- name: temporal
+  kind: web
+  port: 7233
+  depends_on:
+  - db
+  - elasticsearch
+  build:
+    strategy: image
+    image: temporalio/auto-setup:1.26.2
+  env:
+  - name: DB
+    value: postgres12
+  - name: DB_PORT
+    value: '5432'
+  - name: POSTGRES_USER
+    value: posthog
+  - name: POSTGRES_PWD
+    value: posthog
+  - name: POSTGRES_SEEDS
+    value: db
+  - name: DYNAMIC_CONFIG_FILE_PATH
+    value: config/dynamicconfig/development-sql.yaml
+  - name: ENABLE_ES
+    value: 'false'
+  - name: ES_SEEDS
+    value: elasticsearch
+  - name: ES_VERSION
+    value: v7
+- name: elasticsearch
+  kind: worker
+  build:
+    strategy: image
+    image: elasticsearch:7.17.28
+  env:
+  - name: cluster.routing.allocation.disk.threshold_enabled
+    value: 'true'
+  - name: cluster.routing.allocation.disk.watermark.low
+    value: 512mb
+  - name: cluster.routing.allocation.disk.watermark.high
+    value: 256mb
+  - name: cluster.routing.allocation.disk.watermark.flood_stage
+    value: 128mb
+  - name: discovery.type
+    value: single-node
+  - name: ES_JAVA_OPTS
+    value: -Xms256m -Xmx256m
+  - name: xpack.security.enabled
+    value: 'false'
+- name: temporal-admin-tools
+  kind: worker
+  depends_on:
+  - temporal
+  build:
+    strategy: image
+    image: temporalio/admin-tools:1.26.2
+  env:
+  - name: TEMPORAL_CLI_ADDRESS
+    value: temporal:7233
+- name: temporal-ui
+  kind: web
+  port: 8080
+  depends_on:
+  - temporal
+  - db
+  build:
+    strategy: image
+    image: temporalio/ui:2.47.2
+  env:
+  - name: TEMPORAL_ADDRESS
+    value: temporal:7233
+  - name: TEMPORAL_CORS_ORIGINS
+    value: http://localhost:3000
+  - name: TEMPORAL_CSRF_COOKIE_INSECURE
+    value: 'true'
+  - name: TEMPORAL_CODEC_ENDPOINT
+    value: http://localhost:8000
+- name: temporal-django-worker
+  kind: worker
+  command: /compose/temporal-django-worker
+  depends_on:
+  - db
+  - redis7
+  - clickhouse
+  - kafka
+  - objectstorage
+  - seaweedfs
+  - temporal
+  - browserless
+  build:
+    strategy: image
+    image: ':'
+  env:
+  - name: SITE_URL
+    value: https://
+  - name: SECRET_KEY
+    value: ''
+  - name: BROWSERLESS_CDP_URL
+    value: ws://browserless:3000
+  - name: BROWSERLESS_TOKEN
+    value: ''
+  - name: HEATMAP_BROWSERLESS_URL
+    value: http://browserless:3000
+  - name: HEATMAP_BROWSERLESS_TOKEN
+    value: ''
+  - name: FEATURE_FLAGS_SERVICE_URL
+    value: http://feature-flags:3001
+  - name: CLICKHOUSE_LOGS_CLUSTER_HOST
+    value: clickhouse
+  - name: CLICKHOUSE_LOGS_CLUSTER_SECURE
+    value: 'false'
+  - name: ANTHROPIC_API_KEY
+    value: ''
+  - name: OPENAI_API_KEY
+    value: ''
+- name: capture
+  kind: worker
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/capture:master
+  env:
+  - name: ADDRESS
+    value: 0.0.0.0:3000
+  - name: KAFKA_TOPIC
+    value: events_plugin_ingestion
+  - name: KAFKA_ERROR_TRACKING_TOPIC
+    value: ingestion-errortracking-main
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+  - name: REDIS_URL
+    value: redis://redis7:6379/
+  - name: CAPTURE_MODE
+    value: events
+  - name: RUST_LOG
+    value: info,rdkafka=warn
+  - name: CAPTURE_V1_SINKS
+    value: msk
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_HOSTS
+    value: kafka:9092
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_MAIN
+    value: events_plugin_ingestion
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_HISTORICAL
+    value: events_plugin_ingestion_historical
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_OVERFLOW
+    value: events_plugin_ingestion_overflow
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_DLQ
+    value: events_plugin_ingestion_dlq
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_EXCEPTION
+    value: ingestion-errortracking-main
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_HEATMAP
+    value: heatmaps_ingestion
+  - name: CAPTURE_V1_SINK_MSK_KAFKA_TOPIC_CLIENT_INGESTION_WARNING
+    value: ingestion-clientwarnings-main-1
+- name: capture-logs
+  kind: worker
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/capture-logs:master
+  env:
+  - name: BIND_HOST
+    value: 0.0.0.0
+  - name: BIND_PORT
+    value: '4318'
+  - name: RUST_LOG
+    value: info,rdkafka=warn
+  - name: RUST_BACKTRACE
+    value: '1'
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+  - name: JWT_SECRET
+  - name: KAFKA_TOPIC
+    value: logs_ingestion
+  - name: KAFKA_METRICS_TOPIC
+    value: metrics_ingestion
+- name: replay-capture
+  kind: worker
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/capture:master
+  env:
+  - name: ADDRESS
+    value: 0.0.0.0:3000
+  - name: KAFKA_TOPIC
+    value: session_recording_snapshot_item_events
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+  - name: REDIS_URL
+    value: redis://redis7:6379/
+  - name: CAPTURE_MODE
+    value: recordings
+- name: property-defs-rs
+  kind: worker
+  depends_on:
+  - kafka-init
+  - db
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/property-defs-rs:master
+  env:
+  - name: DATABASE_URL
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+  - name: SKIP_WRITES
+    value: 'false'
+  - name: SKIP_READS
+    value: 'false'
+  - name: FILTER_MODE
+    value: opt-out
+- name: livestream
+  kind: worker
+  depends_on:
+  - kafka
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/livestream:master
+  env:
+  - name: LIVESTREAM_JWT_SECRET
+    value: ''
+- name: personhog-replica
+  kind: worker
+  depends_on:
+  - db
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/personhog-replica:master
+  env:
+  - name: PRIMARY_DATABASE_URL
+- name: personhog-router
+  kind: worker
+  depends_on:
+  - personhog-replica
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/personhog-router:master
+  env:
+  - name: GRPC_ADDRESS
+    value: 0.0.0.0:50052
+  - name: REPLICA_URL
+    value: http://personhog-replica:50051
+  - name: BACKEND_TIMEOUT_MS
+    value: '5000'
+  - name: RUST_LOG
+    value: info
+  - name: METRICS_PORT
+    value: '9101'
+- name: feature-flags
+  kind: worker
+  depends_on:
+  - db
+  - redis7
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/feature-flags:master
+  env:
+  - name: WRITE_DATABASE_URL
+  - name: READ_DATABASE_URL
+  - name: PERSONS_WRITE_DATABASE_URL
+  - name: PERSONS_READ_DATABASE_URL
+  - name: MAXMIND_DB_PATH
+    value: /share/GeoLite2-City.mmdb
+  - name: REDIS_URL
+    value: redis://redis7:6379/
+  - name: ADDRESS
+    value: 0.0.0.0:3001
+  - name: RUST_LOG
+    value: info
+  - name: COOKIELESS_REDIS_HOST
+    value: redis7
+  - name: COOKIELESS_REDIS_PORT
+    value: '6379'
+- name: hypercache-server
+  kind: worker
+  depends_on:
+  - redis7
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/hypercache-server:master
+  env:
+  - name: REDIS_URL
+    value: redis://redis7:6379/
+  - name: ADDRESS
+    value: 0.0.0.0:3002
+  - name: RUST_LOG
+    value: info
+- name: kafka-init
+  kind: worker
+  command: "-c set -x\necho \"Waiting for Kafka broker to accept connections...\"\nTIMEOUT=60\nELAPSED=0\n\
+    # Use rpk topic list as the readiness check - it's a simple operation\n# that confirms the broker\
+    \ is accepting Kafka protocol requests\nuntil rpk topic list --brokers kafka:9092 2>/dev/null; do\n\
+    \    echo \"Kafka broker not ready yet (elapsed: ${ELAPSED}s)...\"\n    sleep 2\n    ELAPSED=$((ELAPSED\
+    \ + 2))\n    if [ $ELAPSED -ge $TIMEOUT ]; then\n        echo \"Timeout waiting for Kafka broker after\
+    \ ${TIMEOUT}s\"\n        echo \"Final attempt to list topics:\"\n        rpk topic list --brokers\
+    \ kafka:9092 || true\n        exit 1\n    fi\ndone\necho \"Kafka broker is accepting requests, creating\
+    \ topics...\"\n# Create topics needed by rust services and the combined analytics ingestion\n# consumer,\
+    \ which checks topic existence at startup for every output it produces\n# to (see analytics/outputs/registry.ts).\
+    \ Auto-create only fires on producer-first\n# writes, so pre-create them here.\n# Note: $ escapes\
+    \ $ for docker-compose variable substitution\nTOPICS=\"clickhouse_events_json \\\n    clickhouse_ai_events_json\
+    \ \\\n    clickhouse_heatmap_events \\\n    clickhouse_flag_evaluations \\\n    clickhouse_ingestion_warnings\
+    \ \\\n    events_plugin_ingestion_ai \\\n    events_plugin_ingestion_dlq \\\n    events_plugin_ingestion_overflow\
+    \ \\\n    events_plugin_ingestion_async \\\n    ingestion-clientwarnings-main-1 \\\n    heatmaps_ingestion\
+    \ \\\n    clickhouse_groups \\\n    clickhouse_person \\\n    clickhouse_person_distinct_id \\\n \
+    \   clickhouse_app_metrics2 \\\n    log_entries \\\n    clickhouse_tophog\"\nfor topic in $TOPICS;\
+    \ do\n    if rpk topic create \"$topic\" --brokers kafka:9092 -p 1 -r 1 2>&1; then\n        echo \"\
+    Topic $topic created successfully\"\n    else\n        if rpk topic list --brokers kafka:9092 | grep\
+    \ -q \"$topic\"; then\n            echo \"Topic $topic already exists, continuing\"\n        else\n\
+    \            echo \"Failed to create topic $topic\"\n            exit 1\n        fi\n    fi\ndone\n\
+    echo \"Final topic list:\"\nrpk topic list --brokers kafka:9092\necho \"Topics ready\"\n"
+  depends_on:
+  - kafka
+  build:
+    strategy: image
+    image: docker.io/redpandadata/redpanda:v25.1.9
+- name: cymbal
+  kind: worker
+  depends_on:
+  - kafka-init
+  - seaweedfs
+  - db
+  - redis7
+  - cymbal-resolution
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/cymbal:master
+  env:
+  - name: KAFKA_HOSTS
+    value: kafka:9092
+  - name: OBJECT_STORAGE_BUCKET
+    value: posthog
+  - name: OBJECT_STORAGE_ACCESS_KEY_ID
+    value: any
+  - name: OBJECT_STORAGE_SECRET_ACCESS_KEY
+    value: any
+  - name: OBJECT_STORAGE_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: OBJECT_STORAGE_FORCE_PATH_STYLE
+    value: 'true'
+  - name: BIND_HOST
+    value: 0.0.0.0
+  - name: BIND_PORT
+    value: '3302'
+  - name: DATABASE_URL
+  - name: PERSONS_URL
+  - name: MAXMIND_DB_PATH
+    value: /share/GeoLite2-City.mmdb
+  - name: REDIS_URL
+    value: redis://redis7:6379/
+  - name: ISSUE_BUCKETS_REDIS_URL
+    value: redis://redis7:6379/
+  - name: RUST_LOG
+    value: info
+  - name: CYMBAL_REMOTE_RESOLUTION_HOST
+    value: cymbal-resolution
+  - name: INTERNAL_API_SECRET
+    value: ''
+- name: cymbal-resolution
+  kind: worker
+  depends_on:
+  - seaweedfs
+  - db
+  build:
+    strategy: image
+    image: ghcr.io/posthog/posthog/cymbal:master
+  env:
+  - name: CYMBAL_MODE
+    value: resolution
+  - name: GRPC_ADDRESS
+    value: 0.0.0.0:50061
+  - name: OBJECT_STORAGE_BUCKET
+    value: posthog
+  - name: OBJECT_STORAGE_ACCESS_KEY_ID
+    value: any
+  - name: OBJECT_STORAGE_SECRET_ACCESS_KEY
+    value: any
+  - name: OBJECT_STORAGE_ENDPOINT
+    value: http://seaweedfs:8333
+  - name: OBJECT_STORAGE_FORCE_PATH_STYLE
+    value: 'true'
+  - name: DATABASE_URL
+  - name: INTERNAL_API_SECRET
+    value: ''
+  - name: RUST_LOG
+    value: info
+egress:
+  default: block

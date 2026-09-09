@@ -479,6 +479,39 @@ func hostComponent(h Host) Component {
 		c.State = Substituted
 		c.Detail = "the provider's own sandbox, with test credentials substituted at the sidecar"
 	case schema.ModeCapture:
+		if strings.HasPrefix(h.Name, "*") {
+			// A rule covering a domain rather than naming a host cannot be
+			// classified from the rule, and saying either thing would be
+			// wrong for half the hosts it matches.
+			//
+			// A LEADING star, which is the same predicate the mock branch
+			// below uses and the same one the policy uses to decide
+			// Decision.NamesHost. An interior star, as in
+			// email.*.amazonaws.com, pins the service label and the label
+			// count, so it can only ever reach one service, the policy counts
+			// it as naming the host, and the sidecar captures it. Widening
+			// this to every pattern would report those as unknown when they
+			// are not.
+			//
+			// The sidecar captures such a request only when this build has a
+			// handler for whatever host actually arrives, and refuses it with
+			// a 403 otherwise: *.resend.com is captured because there is a
+			// Resend handler, and *.zapier.com is refused because there is
+			// not. This ran as Substituted with the sentence about the
+			// provider's documented success shape, for both, so a delivery
+			// path written as *.zapier.com read here as recorded into the
+			// inbox and was refused at run time having recorded nothing.
+			//
+			// Unmeasured rather than a guess in either direction, which is
+			// what the mock branch below already does with the same rule shape
+			// through PackReason. It is excluded from the score and named,
+			// rather than counted as an answer nobody checked.
+			c.State = Unmeasured
+			c.Detail = "a rule covering a domain rather than naming a host, so whether the " +
+				"sidecar captures a request or refuses it depends on which host arrives and " +
+				"whether this build has a handler for that provider, which the rule does not say"
+			break
+		}
 		c.State = Substituted
 		c.Detail = "recorded into the inbox and answered with the provider's documented success shape"
 	case schema.ModeMock:

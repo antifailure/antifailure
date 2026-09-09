@@ -1,0 +1,88 @@
+version: 1
+name: goliath-shape
+
+# NOT A TWIN OF GOLIATH DATA'S APPLICATION.
+#
+# Goliath Data publishes no compose file, no Helm chart and no self hosting
+# guide, so there is nothing to convert and a manifest that pretended otherwise
+# would be a fabrication that happens to compile. What is written down below is
+# the SHAPE that everything readable about the company from the outside
+# describes: a Postgres record store, a continuously ingested external feed, an
+# inference step over it, and outbound delivery to third party CRMs through
+# Zapier. Every field is a question for the call, and the five that matter are
+# in QUESTIONS.md beside this file.
+#
+# The reason it is worth writing anyway is the egress block. The CRM and Zapier
+# endpoints are the case where a rule covering a domain rather than naming a
+# host makes the difference between a rehearsal that records a delivery and one
+# that is refused, and the answer turned out to depend on whether this build has
+# a handler for the provider. Every rule below therefore NAMES its host, and a
+# test in engine/internal/manifest keeps it that way. What the report said about
+# these three rules before this branch is F0 in the README beside this file.
+
+services:
+  - name: api
+    kind: web
+    port: 8080
+    health_path: /health
+    build:
+      strategy: image
+      image: hashicorp/http-echo:1.0
+
+  - name: feed-ingest
+    kind: worker
+    build:
+      strategy: image
+      image: hashicorp/http-echo:1.0
+
+  - name: scorer
+    kind: worker
+    depends_on:
+      - feed-ingest
+    build:
+      strategy: image
+      image: hashicorp/http-echo:1.0
+
+  - name: crm-delivery
+    kind: worker
+    depends_on:
+      - scorer
+    build:
+      strategy: image
+      image: hashicorp/http-echo:1.0
+
+database:
+  provider: docker
+  version: 17
+
+datastores:
+  - name: events
+    engine: clickhouse
+    stance: empty
+    because: >-
+      The shape of the second store is a question for the call and not an
+      answer. Declaring it empty says so in the fidelity report, which is the
+      only thing that tells an empty store somebody chose apart from an empty
+      store nobody noticed.
+
+egress:
+  default: block
+  rules:
+    # Each of these NAMES a host. F0 and F14 in the README are what happens
+    # when they do not, one seen from the fidelity report and one from
+    # af net explain, and neither instrument could tell the difference.
+    - host: hooks.zapier.com
+      mode: capture
+      note: >-
+        The outbound hook, recorded rather than fired at somebody's real
+        automation. Named rather than written as a pattern, because a pattern
+        is refused by the sidecar when no handler matches the host that
+        arrives. This build has no Zapier handler either, so the body it
+        answers with is the generic empty object and not Zapier's own success
+        shape, which is a stated limit rather than a thing to discover later.
+    - host: api.hubapi.com
+      mode: mock
+      note: "HubSpot's API, answered from a fixture or refused, never invented"
+    - host: api.salesforce.com
+      mode: block
+      note: "named and blocked, so a call to it reads as a refusal rather than as a timeout"

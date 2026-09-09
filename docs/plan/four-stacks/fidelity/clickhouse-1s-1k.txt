@@ -1,0 +1,41 @@
+
+Fidelity of clickhouse-1-ch-1s-1k-307ef8
+services       unmeasured (2 unmeasured)
+  clickhouse-… unmeasured   nothing is running for this environment; bring it up with af up first
+  clickhouse   unmeasured   nothing is running for this environment; bring it up with af up first
+
+database       unmeasured (2 unmeasured)
+  data         unmeasured   the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-clickhouse-1-ch-1s-1k-307ef8/json": context canceled
+  provenance   unmeasured   the provider could not be asked which golden this branch came from: db.docker: list containers: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/json?all=1&filters=%7B%22label%22%3A%7B%22dev.antifailure.managed%22%3Atrue…
+
+third_party    not measured: the manifest names no third party hosts, and everything else is in block mode
+
+auth           not measured: the manifest declares no personas
+
+runtime        not measured: the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+
+traffic        not measured: the manifest does not ask for traffic, so there is none to reproduce
+
+datastores     unmeasured (2 unmeasured)
+  clickhouse   unmeasured   a clickhouse running clickhouse/clickhouse-server:latest that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  clickhouse-… unmeasured   a clickhouse running clickhouse/clickhouse-keeper:latest-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+
+topology       not measured: no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+
+Nothing in this environment could be measured, so there is no score.
+A component is production's own when the environment reaches the real thing.
+A substitution, a refusal and an absence are all counted and none of them
+counts as reproduced. Nothing unmeasured is counted either way.
+
+Not measured, and so not counted:
+  auth           the manifest declares no personas
+  database       data: the branch could not be read: db.docker: resolve the branch connection: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/af-db-clickhouse-1-ch-1s-1k-307ef8/json": context canceled
+  database       provenance: the provider could not be asked which golden this branch came from: db.docker: list containers: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.51/containers/json?all=1&filters=%7B%22label%22%3A%7B%22dev.antifailure.managed%22%3Atrue…
+  datastores     clickhouse: a clickhouse running clickhouse/clickhouse-server:latest that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  datastores     clickhouse-keeper: a clickhouse running clickhouse/clickhouse-keeper:latest-alpine that nothing in the manifest's datastores list names, so nobody chose a stance for it, nothing here copied anything into it, and nothing here can say whether it holds production's data or came up empty
+  runtime        the environment runs on the local runtime, which publishes an address this machine can reach, and nothing in the manifest says what production runs on, so there is nothing to compare it against
+  services       clickhouse: nothing is running for this environment; bring it up with af up first
+  services       clickhouse-keeper: nothing is running for this environment; bring it up with af up first
+  third_party    the manifest names no third party hosts, and everything else is in block mode
+  topology       no service says how many instances it runs, so this environment runs one of each and nothing in the manifest says whether production runs one
+  traffic        the manifest does not ask for traffic, so there is none to reproduce
