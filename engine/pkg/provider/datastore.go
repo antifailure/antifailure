@@ -115,3 +115,34 @@ type Datastore interface {
 // declared stance rather than a failure. A cache is rebuilt from the primary
 // and a copy of one would be noise.
 var ErrNoGolden = errors.New("provider: this datastore holds no golden")
+
+// BuiltInDatastoreEngines names the datastore engines this build can bring up
+// without a registered provider, in the order they should be listed to a
+// person.
+//
+// It is here rather than beside the switch that consults it because two places
+// need the same answer and they used to disagree by construction. The engine
+// refuses a datastore whose engine it has no provider for, naming the engines
+// it does have; detection proposes datastores from a compose file and must not
+// write one the engine will then refuse, because af init promises the manifest
+// it writes is one af up accepts. A list in each file is two records of one
+// fact, and the second is wrong the moment a provider lands.
+//
+// A registered provider is NOT here and that is deliberate. Registration is
+// per process and detection runs before any of it, so a list including
+// registrations would be a different list in af init than in af up, which is
+// the disagreement this exists to prevent.
+func BuiltInDatastoreEngines() []string {
+	return []string{"clickhouse"}
+}
+
+// ProvidesDatastoreEngine reports whether this build can bring up an engine
+// with no registered provider.
+func ProvidesDatastoreEngine(engine string) bool {
+	for _, e := range BuiltInDatastoreEngines() {
+		if e == engine {
+			return true
+		}
+	}
+	return false
+}

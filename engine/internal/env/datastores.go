@@ -186,9 +186,10 @@ func (o *Orchestrator) newDatastoreProvider(
 			"path", o.opts.Root+"/antifailure.yaml",
 			"detail", fmt.Sprintf(
 				"the datastore %q declares the engine %q and this build has no provider for "+
-					"it. The engines it can provide are: clickhouse. Remove the datastore, or "+
+					"it. The engines it can provide are: %s. Remove the datastore, or "+
 					"register a provider for %q and name it in the datastore's provider key",
-				ds.Name, ds.Engine, ds.Engine))
+				ds.Name, ds.Engine,
+				strings.Join(provider.BuiltInDatastoreEngines(), ", "), ds.Engine))
 	}
 }
 

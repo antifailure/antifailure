@@ -41,6 +41,20 @@ type ThirdParty struct {
 	WebhookPath string
 	// Credential is the variable holding its key, when there is a convention.
 	Credential string
+	// Cloud names the cloud this entry belongs to: aws, gcp or azure, and
+	// empty for everything else. It is what lets an emulator running in the
+	// repository's own compose file select the entries for the cloud it
+	// answers for.
+	Cloud string
+	// Tokens are the names this service goes by inside its cloud: the client
+	// suffix in an SDK package, and the word an emulator's own configuration
+	// uses. @aws-sdk/client-secrets-manager, LocalStack's
+	// SERVICES=secretsmanager and the endpoint prefix secretsmanager are the
+	// same service under three spellings, and a table is the only thing that
+	// knows that. Deriving the endpoint from the package name mechanically
+	// gets sfn, sesv2 and cloudwatch-logs wrong, and a silently wrong host is
+	// worse than a refusal, because the refusal is read.
+	Tokens []string
 }
 
 // thirdParties is the catalog. It is a data table rather than code so that
@@ -86,6 +100,7 @@ var thirdParties = []ThirdParty{
 		Why:      "Mail is captured into the inbox so that agents can read it and no real address receives anything.",
 		Packages: []string{"@aws-sdk/client-ses", "@aws-sdk/client-sesv2"},
 		EnvHints: []string{"AWS_SES_REGION"},
+		Cloud:    "aws", Tokens: []string{"ses", "sesv2", "email"},
 	},
 	{
 		Name: "Amazon SES over SMTP", Hosts: []string{"email-smtp.*.amazonaws.com"}, Mode: "block",
@@ -93,6 +108,7 @@ var thirdParties = []ThirdParty{
 			"Mail sent this way would not reach the inbox, and an environment able to open it could " +
 			"send to a real address.",
 		EnvHints: []string{"SES_SMTP_USERNAME", "SES_SMTP_PASSWORD"},
+		Cloud:    "aws", Tokens: []string{"ses-smtp"},
 	},
 	{
 		Name: "Twilio", Hosts: []string{"api.twilio.com", "verify.twilio.com"}, Mode: "capture",
@@ -242,6 +258,7 @@ var thirdParties = []ThirdParty{
 		Packages: []string{"@aws-sdk/client-s3", "@aws-sdk/lib-storage", "aws-sdk", "boto3",
 			"aws-sdk-go", "aws-sdk-go-v2", "aws-sdk-s3", "fog-aws"},
 		EnvHints: []string{"AWS_S3_BUCKET", "S3_BUCKET", "AWS_BUCKET_NAME"},
+		Cloud:    "aws", Tokens: []string{"s3"},
 	},
 	{
 		Name: "Amazon SQS", Hosts: []string{"sqs.*.amazonaws.com"}, Mode: "block",
@@ -249,6 +266,7 @@ var thirdParties = []ThirdParty{
 			"environment reaching into production through the back door.",
 		Packages: []string{"@aws-sdk/client-sqs", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"SQS_QUEUE_URL", "AWS_SQS_QUEUE_URL"},
+		Cloud:    "aws", Tokens: []string{"sqs"},
 	},
 	{
 		Name: "Amazon SNS", Hosts: []string{"sns.*.amazonaws.com"}, Mode: "block",
@@ -256,6 +274,7 @@ var thirdParties = []ThirdParty{
 			"number and an email address.",
 		Packages: []string{"@aws-sdk/client-sns", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"SNS_TOPIC_ARN", "AWS_SNS_TOPIC_ARN"},
+		Cloud:    "aws", Tokens: []string{"sns"},
 	},
 	{
 		Name:  "Amazon DynamoDB",
@@ -266,6 +285,7 @@ var thirdParties = []ThirdParty{
 		Packages: []string{"@aws-sdk/client-dynamodb", "@aws-sdk/lib-dynamodb", "dynamoose",
 			"aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"DYNAMODB_TABLE", "AWS_DYNAMODB_TABLE"},
+		Cloud:    "aws", Tokens: []string{"dynamodb", "dynamodbstreams"},
 	},
 	{
 		Name: "Amazon Kinesis", Hosts: []string{"kinesis.*.amazonaws.com"}, Mode: "block",
@@ -273,6 +293,7 @@ var thirdParties = []ThirdParty{
 			"back off it.",
 		Packages: []string{"@aws-sdk/client-kinesis", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"KINESIS_STREAM_NAME"},
+		Cloud:    "aws", Tokens: []string{"kinesis"},
 	},
 	{
 		Name: "Amazon EventBridge", Hosts: []string{"events.*.amazonaws.com"}, Mode: "block",
@@ -280,6 +301,7 @@ var thirdParties = []ThirdParty{
 			"targets are whatever those rules point at.",
 		Packages: []string{"@aws-sdk/client-eventbridge", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"EVENT_BUS_NAME", "EVENTBRIDGE_BUS_NAME"},
+		Cloud:    "aws", Tokens: []string{"eventbridge", "events"},
 	},
 	{
 		Name: "AWS Secrets Manager", Hosts: []string{"secretsmanager.*.amazonaws.com"}, Mode: "block",
@@ -287,6 +309,7 @@ var thirdParties = []ThirdParty{
 			"against a copy of production data, which is the one thing this product exists to stop.",
 		Packages: []string{"@aws-sdk/client-secrets-manager", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"AWS_SECRET_NAME", "SECRETS_MANAGER_SECRET_ID"},
+		Cloud:    "aws", Tokens: []string{"secrets-manager", "secretsmanager"},
 	},
 	{
 		Name: "AWS Systems Manager Parameter Store", Hosts: []string{"ssm.*.amazonaws.com"}, Mode: "block",
@@ -294,6 +317,7 @@ var thirdParties = []ThirdParty{
 			"credentials, so it is refused for the same reason Secrets Manager is.",
 		Packages: []string{"@aws-sdk/client-ssm", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"SSM_PARAMETER_PATH", "AWS_SSM_PATH"},
+		Cloud:    "aws", Tokens: []string{"ssm"},
 	},
 	{
 		Name: "AWS STS", Hosts: []string{"sts.amazonaws.com", "sts.*.amazonaws.com"}, Mode: "block",
@@ -301,6 +325,7 @@ var thirdParties = []ThirdParty{
 			"an hour, and no rule about any other host applies to what it does with one.",
 		Packages: []string{"@aws-sdk/client-sts", "aws-sdk", "boto3", "aws-sdk-go", "aws-sdk-go-v2"},
 		EnvHints: []string{"AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"},
+		Cloud:    "aws", Tokens: []string{"sts"},
 	},
 	{
 		Name: "Google Cloud Storage", Hosts: []string{"storage.googleapis.com"}, Mode: "block",
@@ -308,18 +333,21 @@ var thirdParties = []ThirdParty{
 			"official Cloud Storage emulator, which is why this is a refusal rather than a redirect.",
 		Packages: []string{"@google-cloud/storage", "google-cloud-storage", "gcs-resumable-upload"},
 		EnvHints: []string{"GCS_BUCKET", "GOOGLE_CLOUD_STORAGE_BUCKET"},
+		Cloud:    "gcp", Tokens: []string{"storage"},
 	},
 	{
 		Name: "Google Cloud Pub/Sub", Hosts: []string{"pubsub.googleapis.com"}, Mode: "block",
 		Why:      "A message published to a real topic is delivered to production subscribers.",
 		Packages: []string{"@google-cloud/pubsub", "google-cloud-pubsub"},
 		EnvHints: []string{"PUBSUB_TOPIC", "GOOGLE_PUBSUB_TOPIC"},
+		Cloud:    "gcp", Tokens: []string{"pubsub"},
 	},
 	{
 		Name: "Google Cloud Firestore", Hosts: []string{"firestore.googleapis.com"}, Mode: "block",
 		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
 		Packages: []string{"@google-cloud/firestore", "google-cloud-firestore", "firebase-admin"},
 		EnvHints: []string{"FIRESTORE_PROJECT_ID", "FIRESTORE_EMULATOR_HOST"},
+		Cloud:    "gcp", Tokens: []string{"firestore"},
 	},
 	{
 		Name: "Google Secret Manager", Hosts: []string{"secretmanager.googleapis.com"}, Mode: "block",
@@ -327,6 +355,7 @@ var thirdParties = []ThirdParty{
 			"against a copy of production data.",
 		Packages: []string{"@google-cloud/secret-manager", "google-cloud-secret-manager"},
 		EnvHints: []string{"GOOGLE_SECRET_NAME", "SECRET_MANAGER_PROJECT"},
+		Cloud:    "gcp", Tokens: []string{"secret-manager", "secretmanager"},
 	},
 	{
 		Name: "Google Cloud Tasks", Hosts: []string{"cloudtasks.googleapis.com"}, Mode: "block",
@@ -334,6 +363,7 @@ var thirdParties = []ThirdParty{
 			"is watching for it.",
 		Packages: []string{"@google-cloud/tasks", "google-cloud-tasks"},
 		EnvHints: []string{"CLOUD_TASKS_QUEUE", "GOOGLE_CLOUD_TASKS_QUEUE"},
+		Cloud:    "gcp", Tokens: []string{"tasks", "cloudtasks"},
 	},
 	{
 		Name: "Azure Blob Storage", Hosts: []string{"*.blob.core.windows.net"}, Mode: "block",
@@ -341,12 +371,14 @@ var thirdParties = []ThirdParty{
 			"tells it apart from production data afterwards.",
 		Packages: []string{"@azure/storage-blob", "azure-storage-blob", "azure-storage"},
 		EnvHints: []string{"AZURE_STORAGE_ACCOUNT", "AZURE_STORAGE_CONNECTION_STRING"},
+		Cloud:    "azure", Tokens: []string{"storage-blob", "blob"},
 	},
 	{
 		Name: "Azure Queue Storage", Hosts: []string{"*.queue.core.windows.net"}, Mode: "block",
 		Why:      "A message sent to a real queue is picked up by production workers.",
 		Packages: []string{"@azure/storage-queue", "azure-storage-queue"},
 		EnvHints: []string{"AZURE_QUEUE_NAME"},
+		Cloud:    "azure", Tokens: []string{"storage-queue", "queue"},
 	},
 	{
 		Name: "Azure Service Bus", Hosts: []string{"*.servicebus.windows.net"}, Mode: "block",
@@ -355,12 +387,14 @@ var thirdParties = []ThirdParty{
 			"environment pays for on purpose rather than by default.",
 		Packages: []string{"@azure/service-bus", "azure-servicebus"},
 		EnvHints: []string{"SERVICEBUS_CONNECTION_STRING", "AZURE_SERVICEBUS_NAMESPACE"},
+		Cloud:    "azure", Tokens: []string{"service-bus", "servicebus", "eventhubs", "event-hubs"},
 	},
 	{
 		Name: "Azure Table Storage", Hosts: []string{"*.table.core.windows.net"}, Mode: "block",
 		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
 		Packages: []string{"@azure/data-tables", "azure-data-tables"},
 		EnvHints: []string{"AZURE_TABLE_NAME"},
+		Cloud:    "azure", Tokens: []string{"data-tables", "table"},
 	},
 	{
 		Name: "Azure Files", Hosts: []string{"*.file.core.windows.net"}, Mode: "block",
@@ -368,12 +402,14 @@ var thirdParties = []ThirdParty{
 			"it apart from production data afterwards.",
 		Packages: []string{"@azure/storage-file-share", "azure-storage-file-share"},
 		EnvHints: []string{"AZURE_FILE_SHARE_NAME"},
+		Cloud:    "azure", Tokens: []string{"storage-file-share", "file"},
 	},
 	{
 		Name: "Azure Cosmos DB", Hosts: []string{"*.documents.azure.com"}, Mode: "block",
 		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
 		Packages: []string{"@azure/cosmos", "azure-cosmos"},
 		EnvHints: []string{"COSMOS_ENDPOINT", "AZURE_COSMOS_CONNECTION_STRING"},
+		Cloud:    "azure", Tokens: []string{"cosmos"},
 	},
 	{
 		Name: "Azure Key Vault", Hosts: []string{"*.vault.azure.net"}, Mode: "block",
@@ -381,6 +417,262 @@ var thirdParties = []ThirdParty{
 			"against a copy of production data.",
 		Packages: []string{"@azure/keyvault-secrets", "@azure/keyvault-keys", "azure-keyvault-secrets"},
 		EnvHints: []string{"AZURE_KEY_VAULT_URL", "KEY_VAULT_NAME"},
+		Cloud:    "azure", Tokens: []string{"keyvault-secrets", "keyvault-keys", "keyvault"},
+	},
+
+	// The rest of each cloud, added because the nine, five and seven above
+	// were the services one lane could name in one pass and an application
+	// touches more than that.
+	//
+	// A repository depending on @aws-sdk/client-lambda got no rule at all, so
+	// the invoke was refused with "no rule matches" rather than "this is
+	// Lambda". That refusal is correct and it is unreadable, and the whole
+	// argument for a per service catalog is that the sentence can be acted on.
+	// Every entry here is still block, for the same reason as the ones above:
+	// block is the honest answer until an emulator answers for the service,
+	// and this build has none.
+	//
+	// The endpoint is written out rather than derived from the package name.
+	// AWS spells three of these differently in the two places, sfn against
+	// states and cloudwatch-logs against logs among them, and a host guessed
+	// wrong is worse than a host not named: the wrong pattern matches nothing,
+	// the request falls through, and the catalog looks like it covered a
+	// service it never did.
+	{
+		Name: "AWS Lambda", Hosts: []string{"lambda.*.amazonaws.com"}, Mode: "block",
+		Why: "Invoking a real function runs production code, with production's own permissions, " +
+			"at a time nobody is watching for it.",
+		Packages: []string{"@aws-sdk/client-lambda", "aws-lambda"},
+		EnvHints: []string{"LAMBDA_FUNCTION_NAME", "AWS_LAMBDA_FUNCTION_NAME"},
+		Cloud:    "aws", Tokens: []string{"lambda"},
+	},
+	{
+		Name: "Amazon CloudWatch Logs", Hosts: []string{"logs.*.amazonaws.com"}, Mode: "block",
+		Why: "A preview environment's log lines land in the production log group, where an on " +
+			"call engineer reads them as production and an alarm counts them as production.",
+		Packages: []string{"@aws-sdk/client-cloudwatch-logs", "watchtower"},
+		EnvHints: []string{"CLOUDWATCH_LOG_GROUP", "AWS_LOG_GROUP"},
+		Cloud:    "aws", Tokens: []string{"cloudwatch-logs", "logs"},
+	},
+	{
+		Name: "Amazon CloudWatch", Hosts: []string{"monitoring.*.amazonaws.com"}, Mode: "block",
+		Why: "Metrics from a preview environment distort the production dashboards and the " +
+			"alarms wired to them.",
+		Packages: []string{"@aws-sdk/client-cloudwatch"},
+		EnvHints: []string{"CLOUDWATCH_NAMESPACE"},
+		Cloud:    "aws", Tokens: []string{"cloudwatch", "monitoring"},
+	},
+	{
+		Name: "AWS KMS", Hosts: []string{"kms.*.amazonaws.com"}, Mode: "block",
+		Why: "A decrypt turns production ciphertext into plaintext inside an environment running " +
+			"unreviewed code, which is the same exposure a secret store is refused for.",
+		Packages: []string{"@aws-sdk/client-kms"},
+		EnvHints: []string{"KMS_KEY_ID", "AWS_KMS_KEY_ID"},
+		Cloud:    "aws", Tokens: []string{"kms"},
+	},
+	{
+		Name: "AWS Step Functions", Hosts: []string{"states.*.amazonaws.com"}, Mode: "block",
+		Why: "Starting a real execution runs every step of a production workflow, and the steps " +
+			"are whatever that state machine points at.",
+		Packages: []string{"@aws-sdk/client-sfn"},
+		EnvHints: []string{"STATE_MACHINE_ARN", "SFN_STATE_MACHINE_ARN"},
+		Cloud:    "aws", Tokens: []string{"sfn", "stepfunctions", "states"},
+	},
+	{
+		Name: "Amazon Athena", Hosts: []string{"athena.*.amazonaws.com"}, Mode: "block",
+		Why: "A query reads the production data lake unmasked, and it is billed by the volume it " +
+			"scans, so a loop in a preview environment is a bill as well as a leak.",
+		Packages: []string{"@aws-sdk/client-athena", "pyathena"},
+		EnvHints: []string{"ATHENA_WORKGROUP", "ATHENA_DATABASE"},
+		Cloud:    "aws", Tokens: []string{"athena"},
+	},
+	{
+		Name: "Amazon Bedrock",
+		Hosts: []string{
+			"bedrock.*.amazonaws.com", "bedrock-runtime.*.amazonaws.com",
+		},
+		Mode: "block",
+		Why: "Model calls are billed per token and answer differently every run, so reaching " +
+			"them costs money and makes the run non repeatable.",
+		Packages: []string{"@aws-sdk/client-bedrock", "@aws-sdk/client-bedrock-runtime"},
+		EnvHints: []string{"BEDROCK_MODEL_ID", "AWS_BEDROCK_MODEL_ID"},
+		Cloud:    "aws", Tokens: []string{"bedrock", "bedrock-runtime"},
+	},
+	{
+		Name: "Amazon Cognito",
+		Hosts: []string{
+			"cognito-idp.*.amazonaws.com", "cognito-identity.*.amazonaws.com",
+		},
+		Mode: "block",
+		Why: "A sign up writes a real user into the production pool, and that user can then sign " +
+			"in to production. Personas exist so this does not have to happen.",
+		Packages: []string{"@aws-sdk/client-cognito-identity-provider",
+			"@aws-sdk/client-cognito-identity", "amazon-cognito-identity-js"},
+		EnvHints: []string{"COGNITO_USER_POOL_ID", "AWS_COGNITO_USER_POOL_ID"},
+		Cloud:    "aws", Tokens: []string{"cognito-identity-provider", "cognito-idp", "cognito"},
+	},
+	{
+		Name: "Amazon API Gateway",
+		Hosts: []string{
+			"apigateway.*.amazonaws.com", "*.execute-api.*.amazonaws.com",
+		},
+		Mode: "block",
+		Why: "A call to a deployed API reaches the production service behind it, and the " +
+			"management endpoint can change what that API does for everyone.",
+		Packages: []string{"@aws-sdk/client-api-gateway", "@aws-sdk/client-apigatewayv2"},
+		EnvHints: []string{"API_GATEWAY_ID", "APIGATEWAY_ENDPOINT"},
+		Cloud:    "aws", Tokens: []string{"api-gateway", "apigateway", "apigatewayv2", "execute-api"},
+	},
+	{
+		Name: "Amazon Data Firehose", Hosts: []string{"firehose.*.amazonaws.com"}, Mode: "block",
+		Why: "Records put onto a real delivery stream are written to whatever it delivers to, " +
+			"usually a production bucket or warehouse, and cannot be taken back out.",
+		Packages: []string{"@aws-sdk/client-firehose"},
+		EnvHints: []string{"FIREHOSE_STREAM_NAME"},
+		Cloud:    "aws", Tokens: []string{"firehose"},
+	},
+	{
+		Name: "Google BigQuery",
+		Hosts: []string{
+			"bigquery.googleapis.com", "bigquerystorage.googleapis.com",
+		},
+		Mode: "block",
+		Why: "A query reads production's warehouse unmasked and is billed by the bytes it scans, " +
+			"and an insert lands in a table the business reports from.",
+		Packages: []string{"@google-cloud/bigquery", "google-cloud-bigquery"},
+		EnvHints: []string{"BIGQUERY_DATASET", "GOOGLE_BIGQUERY_DATASET"},
+		Cloud:    "gcp", Tokens: []string{"bigquery", "bigquerystorage"},
+	},
+	{
+		Name: "Google Cloud Logging", Hosts: []string{"logging.googleapis.com"}, Mode: "block",
+		Why: "A preview environment's log lines land in the production project, where they are " +
+			"read and alerted on as production.",
+		Packages: []string{"@google-cloud/logging", "@google-cloud/logging-winston", "google-cloud-logging"},
+		EnvHints: []string{"GOOGLE_CLOUD_LOG_NAME"},
+		Cloud:    "gcp", Tokens: []string{"logging", "logging-winston"},
+	},
+	{
+		Name: "Google Cloud Monitoring", Hosts: []string{"monitoring.googleapis.com"}, Mode: "block",
+		Why:      "Metrics from a preview environment distort the production dashboards and alerting policies.",
+		Packages: []string{"@google-cloud/monitoring", "google-cloud-monitoring"},
+		EnvHints: []string{"GOOGLE_CLOUD_METRIC_PREFIX"},
+		Cloud:    "gcp", Tokens: []string{"monitoring"},
+	},
+	{
+		Name: "Google Cloud Bigtable",
+		Hosts: []string{
+			"bigtable.googleapis.com", "bigtableadmin.googleapis.com",
+		},
+		Mode:     "block",
+		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
+		Packages: []string{"@google-cloud/bigtable", "google-cloud-bigtable"},
+		EnvHints: []string{"BIGTABLE_INSTANCE_ID", "BIGTABLE_EMULATOR_HOST"},
+		Cloud:    "gcp", Tokens: []string{"bigtable", "bigtableadmin"},
+	},
+	{
+		Name: "Google Cloud Spanner", Hosts: []string{"spanner.googleapis.com"}, Mode: "block",
+		Why:      "This is a production datastore, and an environment writing to it is writing to production.",
+		Packages: []string{"@google-cloud/spanner", "google-cloud-spanner"},
+		EnvHints: []string{"SPANNER_INSTANCE_ID", "SPANNER_EMULATOR_HOST"},
+		Cloud:    "gcp", Tokens: []string{"spanner"},
+	},
+	{
+		Name: "Google Vertex AI", Hosts: []string{"aiplatform.googleapis.com"}, Mode: "block",
+		// The regional spelling is us-central1-aiplatform.googleapis.com and
+		// it is NOT here. A star in a rule stands for one whole label, and
+		// us-central1-aiplatform is not one, so the only pattern that would
+		// cover it is *.googleapis.com, which is the wildcard this catalog was
+		// rewritten to remove. A regional endpoint therefore still reaches
+		// nothing, because the default is block, and its refusal says no rule
+		// matches rather than naming Vertex. A stated gap, not an oversight.
+		Why: "Model calls are billed per token and answer differently every run, so reaching " +
+			"them costs money and makes the run non repeatable.",
+		Packages: []string{"@google-cloud/aiplatform", "@google-cloud/vertexai", "google-cloud-aiplatform"},
+		EnvHints: []string{"VERTEX_AI_LOCATION", "GOOGLE_VERTEX_PROJECT"},
+		Cloud:    "gcp", Tokens: []string{"aiplatform", "vertexai"},
+	},
+	{
+		Name: "Google Cloud Run", Hosts: []string{"run.googleapis.com"}, Mode: "block",
+		Why: "The admin API deploys and scales real services, so an environment that can reach " +
+			"it can change what production runs.",
+		Packages: []string{"@google-cloud/run", "google-cloud-run"},
+		EnvHints: []string{"CLOUD_RUN_SERVICE", "K_SERVICE"},
+		Cloud:    "gcp", Tokens: []string{"run"},
+	},
+	{
+		Name: "Google OAuth token endpoint",
+		Hosts: []string{
+			"oauth2.googleapis.com", "accounts.google.com", "iamcredentials.googleapis.com",
+		},
+		Mode: "block",
+		// The one every other Google entry depends on. A client library
+		// exchanges a service account key here before it calls anything at
+		// all, so an unnamed refusal at this host is the FIRST thing a Google
+		// application sees and it says nothing about Google.
+		Why: "This is where a service account key is exchanged for an access token. An " +
+			"environment holding one holds production's identity for an hour, and no rule about " +
+			"any other host applies to what it does with it.",
+		Packages: []string{"google-auth-library", "google-auth", "@google-cloud/local-auth",
+			"googleapis", "google-api-python-client"},
+		EnvHints: []string{"GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_SERVICE_ACCOUNT_KEY"},
+		Cloud:    "gcp", Tokens: []string{"auth", "local-auth", "iamcredentials"},
+	},
+	{
+		Name: "Microsoft Entra ID",
+		Hosts: []string{
+			"login.microsoftonline.com", "login.windows.net",
+		},
+		Mode: "block",
+		// The Azure peer of the entry above, and the same reasoning: every
+		// @azure/* client asks DefaultAzureCredential for a token first, and
+		// that request goes here.
+		Why: "This is where a client credential is exchanged for a token in the production " +
+			"tenant. An environment that can reach it holds production's identity, and every " +
+			"other Azure rule is downstream of that.",
+		Packages: []string{"@azure/identity", "@azure/msal-node", "azure-identity", "msal"},
+		EnvHints: []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"},
+		Cloud:    "azure", Tokens: []string{"identity", "msal-node", "msal"},
+	},
+	{
+		Name: "Azure OpenAI", Hosts: []string{"*.openai.azure.com"}, Mode: "mock",
+		// Mock rather than block, matching OpenAI and Anthropic above. What
+		// this one costs is money and a different answer every run, not a
+		// write to production, and a mock keeps the run repeatable where a
+		// refusal only makes it fail.
+		Why:      "Model calls are mocked so that a preview run costs nothing and returns the same answer twice.",
+		Packages: []string{"@azure/openai", "@azure/ai-openai"},
+		EnvHints: []string{"AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY"},
+		Cloud:    "azure", Tokens: []string{"openai", "ai-openai"},
+	},
+	{
+		Name: "Azure AI Search", Hosts: []string{"*.search.windows.net"}, Mode: "block",
+		Why: "An index write changes what production search returns, and a query reads " +
+			"production's documents unmasked.",
+		Packages: []string{"@azure/search-documents", "azure-search-documents"},
+		EnvHints: []string{"AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_INDEX_NAME"},
+		Cloud:    "azure", Tokens: []string{"search-documents", "search"},
+	},
+	{
+		Name: "Azure Monitor and Application Insights",
+		Hosts: []string{
+			"dc.services.visualstudio.com", "*.in.applicationinsights.azure.com",
+			"*.livediagnostics.monitor.azure.com",
+		},
+		Mode: "block",
+		Why: "Telemetry from a preview environment drowns the production error feed and moves " +
+			"the availability numbers somebody is judged on.",
+		Packages: []string{"@azure/monitor-opentelemetry", "applicationinsights",
+			"azure-monitor-opentelemetry"},
+		EnvHints: []string{"APPLICATIONINSIGHTS_CONNECTION_STRING", "APPINSIGHTS_INSTRUMENTATIONKEY"},
+		Cloud:    "azure", Tokens: []string{"monitor-opentelemetry", "monitor"},
+	},
+	{
+		Name: "Azure App Configuration", Hosts: []string{"*.azconfig.io"}, Mode: "block",
+		Why: "It holds production configuration and, through its Key Vault references, " +
+			"production credentials, so it is refused for the same reason Key Vault is.",
+		Packages: []string{"@azure/app-configuration", "azure-appconfiguration"},
+		EnvHints: []string{"AZURE_APPCONFIG_ENDPOINT", "APP_CONFIGURATION_CONNECTION_STRING"},
+		Cloud:    "azure", Tokens: []string{"app-configuration", "appconfiguration", "appconfig"},
 	},
 }
 
@@ -427,6 +719,9 @@ func (a *ThirdPartyAnalyzer) Analyze(_ context.Context, r *Repo) ([]Finding, err
 			})
 		}
 	}
+	// The gap, named. A cloud SDK the catalog does not claim produces no rule
+	// at all, and a missing rule is invisible in the manifest by definition.
+	out = append(out, unnamedCloudServices(deps)...)
 	return out, nil
 }
 
