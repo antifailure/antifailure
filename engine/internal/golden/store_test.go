@@ -335,6 +335,31 @@ func TestGCSStore(t *testing.T) {
 	})
 }
 
+// TestGCSStore_TheObjectNameIsOnePathSegment is the one check that the slash
+// in an object name is percent encoded, and it needs no server.
+//
+// The round trip suite cannot make this claim. fake-gcs-server resolves
+// /o/prefix/gv_01/dump.pgcustom and /o/prefix%2Fgv_01%2Fdump.pgcustom to the
+// same object, so deleting the url.PathEscape in objectURL leaves TestGCSStore
+// entirely green. Google does not: the JSON API reads everything after /o/ as
+// ONE object name, so the raw form addresses a resource that does not exist and
+// the store reports every golden missing. That is a defect the emulator is
+// structurally unable to show, which is exactly when a test has to stop asking
+// the server and read the URL.
+func TestGCSStore_TheObjectNameIsOnePathSegment(t *testing.T) {
+	s, err := golden.OpenStore(golden.KindGCS,
+		"http://gcs.example/afgoldens/goldens-1", nil, nil)
+	require.NoError(t, err)
+
+	got, err := golden.ObjectURLForTest(s, "gv_01/dump.pgcustom")
+	require.NoError(t, err)
+
+	require.Contains(t, got, "/o/goldens-1%2Fgv_01%2Fdump.pgcustom",
+		"the object name is one path segment, so both slashes must arrive percent encoded")
+	require.NotContains(t, got, "/o/goldens-1/gv_01/dump.pgcustom",
+		"a raw slash addresses a different resource on Google, and every golden reads as missing")
+}
+
 // TestGCSStore_ReadsWithoutAltMediaWouldReturnMetadata is the negative that
 // makes the round trip above worth having.
 //

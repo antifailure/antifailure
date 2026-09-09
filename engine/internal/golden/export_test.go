@@ -37,3 +37,30 @@ type notAnS3Store struct{}
 func (*notAnS3Store) Error() string {
 	return "golden: this store is not the s3 store, so there is no S3 request to build"
 }
+
+// ObjectURLForTest returns the URL a gcs store addresses one object with,
+// without sending anything.
+//
+// A seam for the same reason SignedRequestForTest is one, and for a hazard the
+// emulator cannot show. objectURL percent encodes the object name because the
+// JSON API reads it as ONE path segment, so the slash in gv_01/dump.pgcustom
+// has to arrive as %2F or the request addresses a resource that does not exist
+// and every golden reports missing. fake-gcs-server routes the raw form to the
+// same object, so the round trip suite passes either way: removing the escape
+// leaves TestGCSStore green. That makes this the only place the rule is
+// actually checked, and it is checked with no server at all.
+func ObjectURLForTest(s Store, name string) (string, error) {
+	store, ok := s.(*gcsStore)
+	if !ok {
+		return "", errNotAGCSStore
+	}
+	return store.objectURL(name, nil), nil
+}
+
+var errNotAGCSStore = &notAGCSStore{}
+
+type notAGCSStore struct{}
+
+func (*notAGCSStore) Error() string {
+	return "golden: this store is not the gcs store, so there is no object URL to build"
+}
