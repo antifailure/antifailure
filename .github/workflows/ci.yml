@@ -205,6 +205,14 @@ jobs:
         # does not claim means something writes an artifact that nothing
         # compares. `just gate` runs the same tool without it, because a
         # developer is always in the middle of an edit.
+        #
+        # It also refuses to answer at all unless the step above actually ran.
+        # That step leaves a receipt naming the commit and the ledger it ran,
+        # and without a matching one this fails saying nothing was compared.
+        # Delete or reorder the step above and this goes red rather than
+        # printing "21 generated paths match their generators" about a tree
+        # nobody rebuilt, which is the sentence that covered thirteen stale
+        # commits.
         run: go run ./tools/gendrift -strict .
 
       - name: The engine's parsers survive arbitrary input

@@ -1619,6 +1619,11 @@ _generated:
     #
     # No -strict here, unlike CI. You are always in the middle of an edit, and
     # a gate that fails on your uncommitted work is a gate you learn to skip.
+    #
+    # This refuses unless the -generate above ran in this checkout, which is
+    # why running it on its own now fails rather than reporting a clean tree.
+    # Without that step it compares the committed bytes against themselves and
+    # prints the sentence a rebuilt tree prints.
     go run ./tools/gendrift .
 
 # Every manifest field either does something or is refused.

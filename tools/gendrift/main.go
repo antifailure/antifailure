@@ -33,6 +33,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -112,6 +115,169 @@ var ledger = []generator{
 	}},
 }
 
+// receiptName is the file `-generate` leaves behind to say it ran, and the
+// only evidence `run` will accept that anything was rebuilt.
+//
+// The failure it exists for is the one that survived #363. That change made
+// both callers run the ledger, so the three lists cannot disagree any more.
+// It did not couple the two halves: `go run ./tools/gendrift .` on its own
+// still ran no generator and still printed "N generated paths match their
+// generators", which is a sentence about committed bytes compared against
+// themselves. Drop or reorder the `-generate` step in ci.yml and the gate
+// goes back to printing that line about a tree nobody rebuilt, which is
+// exactly the state main was in for the thirteen commits
+// engine/internal/manifest/manifest.v1.json sat stale.
+//
+// So "I could not check" is now a different answer from "I checked and it is
+// clean", and it is a failure rather than a pass. A gate whose reassuring
+// sentence can be true of a tree it never looked at is worse than no gate,
+// because the sentence is what stops anybody asking.
+//
+// It is ignored by git and skipped by changedPaths, for two independent
+// reasons that would each be enough: a receipt in a diff is noise, and a
+// receipt reported as drift by the tool that wrote it is a gate arguing with
+// itself.
+const receiptName = ".gendrift-receipt.json"
+
+// receiptVersion invalidates every receipt written by an older shape of this
+// file. A field added here without it would be read as its zero value out of
+// an old receipt and compared as if somebody had checked it.
+const receiptVersion = 1
+
+// receipt is what one complete run of `-generate` attests to.
+//
+// Head and Ledger are what make it about THIS tree rather than about some
+// earlier one. A receipt left by a run at another commit says nothing about
+// this one, and a ledger that gained a row since is a ledger whose new
+// generator has never run, which is the whole defect one layer up.
+type receipt struct {
+	Version int    `json:"version"`
+	Head    string `json:"head"`
+	Ledger  string `json:"ledger"`
+}
+
+// ledgerFingerprint is a hash over every command and every path, in order.
+//
+// Order is included on purpose. docsembed has to run last or a single pass
+// cannot converge, so a reordered ledger is a ledger that produces different
+// bytes, and a receipt from before the reorder is not evidence about after it.
+func ledgerFingerprint() string {
+	var lines []string
+	for _, g := range ledger {
+		lines = append(lines, g.command)
+		for _, p := range g.paths {
+			lines = append(lines, "\t"+p)
+		}
+	}
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+// headSHA is the commit the generators ran against.
+//
+// A failure to read it is returned rather than swallowed. A receipt carrying
+// an empty head would match another receipt carrying an empty head, so
+// "git could not answer" would quietly become a passing comparison, which is
+// the shape of every defect this tool is about.
+func headSHA(root string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("reading HEAD, which a receipt has to name: %w", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("git named no commit, so there is nothing a receipt could be about")
+	}
+	return sha, nil
+}
+
+// writeReceipt records a completed run of every generator in the ledger.
+func writeReceipt(root string) error {
+	head, err := headSHA(root)
+	if err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(receipt{
+		Version: receiptVersion,
+		Head:    head,
+		Ledger:  ledgerFingerprint(),
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, receiptName), append(body, '\n'), 0o644)
+}
+
+// removeReceipt drops any earlier receipt.
+//
+// It runs BEFORE the generators rather than after a failure, and the ordering
+// is the point. A run that dies at the eighth of fifteen generators leaves a
+// half written tree, and if an earlier receipt survived that, the comparison
+// would answer with full confidence about it. There is no ordering in which
+// this file exists and the generators have not just finished.
+func removeReceipt(root string) error {
+	err := os.Remove(filepath.Join(root, receiptName))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clearing the previous receipt: %w", err)
+	}
+	return nil
+}
+
+// requireReceipt refuses to compare a tree no generator has rebuilt.
+//
+// The three refusals say different things because they are different facts,
+// and this repository has been bitten every time two of those were printed
+// under one sentence.
+func requireReceipt(root string) error {
+	body, err := os.ReadFile(filepath.Join(root, receiptName))
+	if err != nil {
+		return fmt.Errorf("no generator has run in this checkout, so NOTHING has been compared.\n" +
+			"      `go run ./tools/gendrift -generate .` leaves a receipt naming the commit and\n" +
+			"      the ledger it ran against, and this refuses to answer without one. Run it,\n" +
+			"      or `just generate`, and then run this again.\n" +
+			"      Without that step the comparison is the committed bytes against themselves,\n" +
+			"      and it prints the same sentence a rebuilt clean tree prints. That sentence\n" +
+			"      was printed on thirteen commits while\n" +
+			"      engine/internal/manifest/manifest.v1.json sat stale on main")
+	}
+
+	var r receipt
+	if err := json.Unmarshal(body, &r); err != nil {
+		return fmt.Errorf("the receipt at %s is not readable, so it says nothing about this tree: %w",
+			receiptName, err)
+	}
+	if r.Version != receiptVersion {
+		return fmt.Errorf("the receipt at %s was written by version %d of this tool and this is version %d,\n"+
+			"      so what it attests to is not what is being asked. Run `-generate` again",
+			receiptName, r.Version, receiptVersion)
+	}
+
+	head, err := headSHA(root)
+	if err != nil {
+		return err
+	}
+	if r.Head != head {
+		return fmt.Errorf("the generators last ran against commit %s and this tree is at %s,\n"+
+			"      so the receipt is about a different tree. Run `-generate` again",
+			short(r.Head), short(head))
+	}
+	if r.Ledger != ledgerFingerprint() {
+		return fmt.Errorf("the ledger has changed since the generators last ran, so at least one\n" +
+			"      generator in it has never run here and the file it writes has never been\n" +
+			"      compared. Run `-generate` again")
+	}
+	return nil
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func main() {
 	strict := flag.Bool("strict", false,
 		"also fail on a changed path no generator owns, for a clean checkout")
@@ -164,6 +330,11 @@ func main() {
 // folded into the comparison: the two answer different questions and must be
 // able to fail with different words.
 func generateAll(root string, out io.Writer) error {
+	// Before anything, so that there is no window in which a stale receipt
+	// vouches for a tree this run is part way through rewriting.
+	if err := removeReceipt(root); err != nil {
+		return err
+	}
 	for _, g := range ledger {
 		if _, err := fmt.Fprintf(out, "  %s\n", g.command); err != nil {
 			return err
@@ -191,9 +362,15 @@ func generateAll(root string, out io.Writer) error {
 			return fmt.Errorf("the generator `%s` failed: %w", g.command, err)
 		}
 	}
-	_, err := fmt.Fprintf(out, "gendrift: ran %d %s over %d generated %s\n",
+	// Only now, with every generator finished. This is what the comparison
+	// reads, and it is the difference between "I checked and it is clean" and
+	// "I could not check", which printed the same sentence until it existed.
+	if err := writeReceipt(root); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "gendrift: ran %d %s over %d generated %s, receipt in %s\n",
 		len(ledger), plural(len(ledger), "generator", "generators"),
-		countPaths(), plural(countPaths(), "path", "paths"))
+		countPaths(), plural(countPaths(), "path", "paths"), receiptName)
 	return err
 }
 
@@ -208,6 +385,18 @@ func generateAll(root string, out io.Writer) error {
 // could previously ask different questions, and naming it is what keeps them
 // asking the same one.
 func run(root string, strict bool, out io.Writer) error {
+	// First, because every other answer below is a statement about a tree the
+	// generators have just rewritten, and without this there is nothing
+	// saying they did. checkLedger and the comparison both go on producing
+	// confident output on a checkout where no generator ever ran.
+	//
+	// In both modes. A developer running this by hand is comparing committed
+	// bytes against themselves exactly as CI would be, and a local pass that
+	// means less than the CI pass is how the two gates start disagreeing
+	// again.
+	if err := requireReceipt(root); err != nil {
+		return err
+	}
 	if err := checkLedger(root); err != nil {
 		return err
 	}
@@ -313,7 +502,16 @@ func changedPaths(root string) ([]string, error) {
 		if i := strings.Index(p, " -> "); i >= 0 {
 			p = p[i+4:]
 		}
-		paths = append(paths, strings.Trim(p, `"`))
+		p = strings.Trim(p, `"`)
+		// The tool's own receipt is not an artifact anybody generated, and
+		// -strict would otherwise report it as a changed path no generator
+		// claims. It is in .gitignore as well, so this is the second of two
+		// independent reasons it stays out of the comparison rather than the
+		// only one.
+		if p == receiptName {
+			continue
+		}
+		paths = append(paths, p)
 	}
 	return paths, nil
 }
