@@ -806,6 +806,7 @@ const defaultTuning = `{
         "datastores[].from",
         "datastores[].rebuild",
         "egress.rules[].fixtures",
+        "egress.rules[].emulator",
         "services[].schedule",
         "services[].resources",
         "load.thresholds.query_count_increase",
@@ -854,6 +855,8 @@ const defaultTuning = `{
       "prune": [
         "database.seed",
         "datastores[].from",
+        "datastores[].topics",
+        "datastores[].rebuild",
         "egress.rules[].fixtures",
         "egress.rules[].credential",
         "egress.rules[].rate_limit",
