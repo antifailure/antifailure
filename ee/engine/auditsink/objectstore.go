@@ -37,7 +37,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -47,6 +46,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 

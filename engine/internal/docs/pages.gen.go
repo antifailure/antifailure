@@ -4446,14 +4446,17 @@ recorded with the site that made it.
 | the load generator | the application under test |
 | the S3 golden store | AWS |
 | the Azure Blob golden store | Azure |
+| the GCS golden store | Google Cloud Storage |
 | the Neon control API | ` + "`" + `console.neon.tech` + "`" + ` |
 | the Supabase management API | ` + "`" + `api.supabase.com` + "`" + ` |
 | the Database Lab API | your DBLab server |
+| the Aurora control API | AWS, to create and branch an Aurora cluster |
 | the ClickHouse HTTP interface | your ClickHouse server |
 | the service readiness probe | the environment, over loopback |
 | the webhook delivery | a service in the environment |
 | the doctor reachability check | whatever it was asked about |
 | the cloud credential path | AWS, GCP, Azure or Vault, for every secret store and every managed database provider |
+| the audit stream sink | your syslog receiver, your webhook endpoint, or the object store the audit stream is dropped into |
 | the runtime conformance suite | the internet, on purpose, which is why it is here |
 | the container image pull | the registry the image reference names |
 | the container image build | Docker Hub, for the sidecar's base image |

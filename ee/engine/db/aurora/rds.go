@@ -21,7 +21,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,6 +31,7 @@ import (
 	"time"
 
 	"github.com/antifailure/antifailure/ee/engine/cloudauth"
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 )
 
 // apiVersion is the RDS query API version. It is a date and it does not move;

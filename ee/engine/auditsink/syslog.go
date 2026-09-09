@@ -35,13 +35,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/antifailure/antifailure/engine/pkg/airgap"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 )
 
