@@ -1120,15 +1120,18 @@ func TestSchemaConstraintReport(t *testing.T) {
 // tools/schemadoc generates, which is a promise withdrawn from users, and a
 // gate that only noticed additions would be half an instrument.
 //
-// 567 while this branch was open, and 569 on rebasing onto main, which is the
-// pin doing its job across two branches rather than one commit. main opened
-// runtime.provider in the same direction this branch did, so the enum it
-// removed is the enum this branch had already removed, and it left a maxLength
-// of 64 behind it. It also gave datastore.source_url_env a pattern. Two
-// constraints arrived, both from somebody else, and both are enforced without
-// anything being added here: the pass is driven by the published document, so
-// a bound written into the schema by another lane is kept the moment it lands.
-const wantConstraints = 569
+// The number moves whenever anybody edits the schema, which is the pin working
+// rather than the pin being a nuisance: it was 567 while this branch was
+// written and is 593 against the main it landed on. Two lanes changed the
+// published contract in between. One opened runtime.provider in the same
+// direction this branch did, trading an enum for a maxLength, and gave
+// datastore.source_url_env a pattern. The other added the placement feature,
+// runtime.targets and runtime.requires, which is most of the difference. Not
+// one of them needed anything added here to be enforced, because the pass is
+// driven by the published document: a bound another lane writes into the
+// schema is kept the moment it lands, and the only thing this constant does is
+// refuse to let one leave without somebody saying so.
+const wantConstraints = 593
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
