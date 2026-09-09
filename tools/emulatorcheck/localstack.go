@@ -58,7 +58,12 @@ func StartAWS(port int) (*Container, error) {
 
 	start := time.Now()
 	if out, err := exec.Command("docker", args...).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("starting %s: %v: %s", spec.Image, err, out)
+		// %w rather than %v: the caller decides what to do about a docker
+		// failure, and errors.Is on exec.ExitError is how it tells "docker is
+		// not there" from "the daemon refused this image". The combined output
+		// is beside it because docker puts the reason there and not in the
+		// error.
+		return nil, fmt.Errorf("starting %s: %w: %s", spec.Image, err, out)
 	}
 
 	c := &Container{Name: name, Address: fmt.Sprintf("127.0.0.1:%d", port)}

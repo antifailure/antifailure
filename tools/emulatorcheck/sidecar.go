@@ -230,7 +230,12 @@ func (s *Sidecar) record(o Observation) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(s.Log, "%s%s\n", ObservationPrefix, line)
+	// Discarded on purpose, and assigned rather than dropped so that is
+	// visible. This is the decision log, and a test that could not write a
+	// line of it has still made the observation: it is already in s.seen,
+	// which is what every assertion reads. Failing a routing test because a
+	// log write failed would report the wrong defect.
+	_, _ = fmt.Fprintf(s.Log, "%s%s\n", ObservationPrefix, line)
 }
 
 // ObservationPrefix marks a decision in the router's output, so a test reading
