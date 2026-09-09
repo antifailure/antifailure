@@ -3058,7 +3058,28 @@ requests is the fastest way to shorten a queue, and
 ` + "`" + `af env prune` + "`" + ` lists everything older than a day and removes nothing, and
 ` + "`" + `af env prune --yes` + "`" + ` removes what it listed.
 
-Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal).
+## What runs today, and what is waiting for a queue
+
+Worth being blunt about, because the sections above describe a scheduler and
+only one half of it is reachable from a command line.
+
+**Placement runs.** ` + "`" + `af up` + "`" + ` calls the scheduler to choose which declared target
+an environment goes to, and an unsatisfiable requirement is refused by name. See
+[multiple runtimes](/docs/enterprise/runtimes).
+
+**Fair sharing, ageing, priority and queue positions are implemented and
+tested, and nothing feeds them a queue yet.** A command line has one run, so the
+round is a round of one, ageing has nothing to promote past, and the limit is
+never reached. Those parts start deciding when a control plane dispatches
+batches rather than a person running a command, and ` + "`" + `AF-SCH-002` + "`" + ` above is
+reserved for that day rather than produced today.
+
+They are described here rather than left out because they are the reason the
+decision is a call into one function instead of a loop written at the call site:
+the placement a person sees on a laptop is made by the code that will make it in
+a cluster, rather than by a second implementation that agrees until it does not.
+
+Related: [provider limits](/docs/providers/limits), [the journal](/docs/concepts/journal), [multiple runtimes](/docs/enterprise/runtimes).
 `,
 	"concepts/subsetting.md": `---
 title: Subsetting
@@ -4948,17 +4969,40 @@ sidebar:
   order: 5
 ---
 
-*Requires an enterprise license with the ` + "`" + `multi_runtime` + "`" + ` feature.*
+*More than one placement target requires an enterprise license with the
+` + "`" + `multi_runtime` + "`" + ` feature. One target needs no license.*
 
 With one runtime there is nothing to decide. With several, an environment has to
 go somewhere, and where is a policy question: a region for data residency, a
 pool with more memory for a heavy repository, an isolated pool for repositories
 that handle regulated data.
 
+` + "`" + "`" + "`" + `yaml
+runtime:
+  provider: kubernetes
+  domain: preview.example.com
+  requires:
+    region: eu-west-1
+  targets:
+    - name: frankfurt
+      kubeconfig_context: eu-prod
+      domain: eu.preview.example.com
+      tags:
+        region: eu-west-1
+    - name: virginia
+      kubeconfig_context: us-prod
+      domain: us.preview.example.com
+      tags:
+        region: us-east-1
 ` + "`" + "`" + "`" + `
-AF-SCH-001 No runtime satisfies the placement requirement region=eu-west.
-  Next: Register a runtime that meets it, or relax the requirement in the
-  placement rules.
+
+That repository is placed in Frankfurt. Every command that has to find the
+environment afterwards works it out the same way, from the same file.
+
+` + "`" + "`" + "`" + `
+AF-SCH-001 No runtime satisfies the placement requirement region=eu-west-2.
+  Next: Declare a target under runtime.targets carrying that tag, or relax
+  runtime.requires. Nothing was created.
 ` + "`" + "`" + "`" + `
 
 ## Why it refuses rather than falls back
@@ -4967,31 +5011,67 @@ Placing an EU repository's environment in a US pool because the EU pool was full
 is the kind of helpfulness that ends a compliance audit badly. A requirement
 that can be silently ignored is not a requirement.
 
-A run that cannot be placed is queued and reported, with its position, the same
-as any other run waiting for capacity.
+The same reasoning is why a requirement nothing can satisfy is refused when the
+manifest is read rather than at dispatch. The requirement and the targets are in
+one file,
+so the contradiction is decidable before anything runs, and the person looking at
+it is the person who wrote both lines. A scheduler in a cluster reporting the
+same thing an hour later is reporting it to somebody who cannot fix it.
 
-## Requirements
+## Requirements and tags
 
-Attributes, matched against what each registered runtime declares: region,
-instance class, isolation level, whatever your organisation decides matters.
+Attributes, matched by equality against what each target declares: region,
+instance class, isolation level, whatever your organization decides matters.
+Every requirement must be met; empty requires means any target will do, and the
+first one listed wins.
 
-The scheduler treats an unsatisfiable requirement as different from a full
-queue, because the fixes are different. A full queue resolves itself. An
-unsatisfiable requirement never will, and saying "queued" would be a lie that
-lasts until somebody investigates.
+**The tags are declared in the manifest, not discovered from the cluster.** A
+kubeconfig context is a name on somebody's laptop and it does not say which
+region the cluster is in. Writing the claim in the repository puts it under
+review next to the requirement that reads it, and it is one fewer thing that can
+be changed by anyone with access to a cluster.
+
+## What placement does not decide
+
+**Capacity and health are not inputs.** The engine places one environment from a
+command line and holds no capacity ledger, so it has nothing to report for either
+and does not invent one. ` + "`" + `engine/internal/scheduler` + "`" + ` carries the fair share
+round, the aging that stops a nightly job starving behind pull requests, the per
+organization limit and the queue position for the day a control plane dispatches
+batches; the engine calls the same function with the one run it has, so the
+decision on a laptop is made by the code that will make it in a cluster rather
+than by a second implementation that agrees until it does not.
+
+The consequence worth stating plainly: **this does not fail over.** A target that
+is unreachable is an error, not a reason to place somewhere else. Placement is a
+pure function of the manifest, and it has to be, because ` + "`" + `af up` + "`" + `, ` + "`" + `af status` + "`" + `,
+` + "`" + `af logs` + "`" + ` and ` + "`" + `af down` + "`" + ` each decide independently. A placement that varied with a
+cluster's health would have ` + "`" + `af status` + "`" + ` asking the wrong cluster and reporting
+that your environment does not exist.
+
+## Residency
+
+A target's ` + "`" + `region` + "`" + ` tag is what fills the region an organization policy's
+` + "`" + `allowed_regions` + "`" + ` rule compares against. Before targets existed nothing in the
+product knew where an environment ran, so that rule had no value to read. A
+target that carries a region can be refused by a residency policy; one that does
+not carry a region cannot be, and the policy says so rather than passing.
+
+See [policy](/docs/enterprise/policy).
 
 ## The community edition
 
-Two runtimes, both built. ` + "`" + `runtime.provider` + "`" + ` in the manifest names ` + "`" + `local` + "`" + ` and
-` + "`" + `kubernetes` + "`" + `, and this page said for a long time that only ` + "`" + `local` + "`" + ` existed.
-That was stale rather than cautious: the Kubernetes runtime builds a Deployment,
-a Service and an Ingress per web service and has been selectable the whole time.
-Any other name is refused with a message rather than quietly substituted, and
-the message lists the two this build has.
+Two runtimes, both built. ` + "`" + `runtime.provider` + "`" + ` names ` + "`" + `local` + "`" + ` or ` + "`" + `kubernetes` + "`" + `, and
+any other name is refused with a message that lists what this build has rather
+than quietly substituting one. The Kubernetes runtime builds a Deployment, a
+Service and an Ingress per web service and has been selectable the whole time.
 
-What the enterprise edition adds here is not a third runtime. It is placement
-across several of them at once: the requirements, the tags and the scheduling
-described above.
+One target is community too. It decides nothing: it labels the single runtime
+you already had so a residency policy has something to read, and charging for a
+label would be charging for the community edition.
+
+What the enterprise edition adds is not a third runtime. It is the choice between
+several at once: the requirements, the tags and the refusal described above.
 
 ## Why there is no ECS runtime
 
@@ -5103,7 +5183,7 @@ VPC to find out. A seventh, ` + "`" + `AF_ECS_PROBE_IMAGE` + "`" + `, is optiona
 image the containment probe container would run; with it unset the plan carries
 no probe container and the instance metadata path says so.
 
-Related: [scheduling](/docs/concepts/scheduling), [licensing](/docs/enterprise/licensing).
+Related: [scheduling](/docs/concepts/scheduling), [manifest reference](/docs/reference/manifest#placement), [licensing](/docs/enterprise/licensing).
 `,
 	"enterprise/scim.md": `---
 title: SCIM provisioning
@@ -15582,7 +15662,7 @@ Scripts can branch on these. They are stable.
 | ` + "`" + `9` + "`" + ` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
 | ` + "`" + `10` + "`" + ` | Interrupted, or a teardown left resources recorded. Run ` + "`" + `af down` + "`" + ` again. |
 
-28 further codes are reserved for features this version does not have. They are in ` + "`" + `engine/internal/errors/catalog.yaml` + "`" + ` and are left out here because this page is for looking up an error you have actually seen.
+27 further codes are reserved for features this version does not have. They are in ` + "`" + `engine/internal/errors/catalog.yaml` + "`" + ` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -16402,6 +16482,18 @@ Organization policy {policy} refuses this environment: {detail}
 | Retryable | No. Retrying the same operation unchanged will fail the same way. |
 | More | [enterprise/policy](/docs/enterprise/policy) |
 
+### AF-EE-011
+
+This manifest declares {count} placement targets and {feature} is not licensed here.
+
+**What to do.** Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `4` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
 ## Extensions
 
 ### AF-EXT-001
@@ -17141,6 +17233,32 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Exit code | ` + "`" + `1` + "`" + ` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
+
+## Scheduling
+
+### AF-SCH-001
+
+No runtime satisfies the placement requirement {requirement}.
+
+**What to do.** Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `5` + "`" + ` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
+### AF-SCH-003
+
+No placement target could take this environment: {detail}
+
+**What to do.** The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | ` + "`" + `5` + "`" + ` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
 
 ## Secrets
 
@@ -17905,8 +18023,79 @@ name.
 | --- | --- |
 | ` + "`" + `provider` + "`" + ` | Which runtime places the environment. ` + "`" + `local` + "`" + ` and ` + "`" + `kubernetes` + "`" + ` are built in, and a build registers any others it carries. The schema keeps no list, the way ` + "`" + `datastore.engine` + "`" + ` keeps none: a name this build has no runtime for is refused by name, against the runtimes that build actually has, rather than substituted. |
 | ` + "`" + `ttl` + "`" + ` | How long an environment lives. |
+| ` + "`" + `max_ttl` + "`" + ` | The furthest ` + "`" + `af env extend` + "`" + ` may push an environment's expiry, measured from creation. |
 | ` + "`" + `idle_sleep` + "`" + ` | Suspend after this long with no traffic. |
 | ` + "`" + `domain` + "`" + ` | Wildcard domain for preview URLs. |
+| ` + "`" + `namespace_prefix` + "`" + ` | Prefix for Kubernetes namespaces. |
+| ` + "`" + `kubeconfig_context` + "`" + ` | Which cluster. Naming it stops an environment landing on whatever context happened to be current. |
+| ` + "`" + `requires` + "`" + ` | What a target must offer for this repository, as tag equals value. See below. |
+| ` + "`" + `targets` + "`" + ` | The places an environment may be placed, in preference order. See below. |
+
+### Placement
+
+Most repositories have one place environments run, name it in ` + "`" + `provider` + "`" + `, and
+never write either of the last two keys. ` + "`" + `targets` + "`" + ` is for the case where there
+is more than one: two clusters in two regions, a pool with more memory, an
+isolated pool for repositories that handle regulated data.
+
+` + "`" + "`" + "`" + `yaml
+runtime:
+  provider: kubernetes
+  domain: preview.example.com
+  requires:
+    region: eu-west-1
+  targets:
+    - name: frankfurt
+      kubeconfig_context: eu-prod
+      domain: eu.preview.example.com
+      tags:
+        region: eu-west-1
+        class: standard
+    - name: virginia
+      kubeconfig_context: us-prod
+      domain: us.preview.example.com
+      tags:
+        region: us-east-1
+        class: standard
+` + "`" + "`" + "`" + `
+
+A target inherits ` + "`" + `provider` + "`" + `, ` + "`" + `domain` + "`" + `, ` + "`" + `namespace_prefix` + "`" + ` and
+` + "`" + `kubeconfig_context` + "`" + ` from the block above it, so a fleet of clusters is one
+provider line and a list of contexts rather than the same four settings written
+out per target. ` + "`" + `af explain` + "`" + ` prints each target with its tags and marks the one
+this manifest would be placed on.
+
+**The tags are declared here rather than discovered from the cluster**, and that
+is deliberate. A kubeconfig context is a name on somebody's laptop and it does
+not say which region the cluster is in. Putting the claim in the repository puts
+it under review, next to the requirement that reads it.
+
+**Placement is a pure function of this file.** The first target satisfying every
+requirement wins, every time, on every machine. ` + "`" + `af up` + "`" + `, ` + "`" + `af status` + "`" + `, ` + "`" + `af logs` + "`" + `
+and ` + "`" + `af down` + "`" + ` each decide independently and have to agree: a placement that
+consulted a cluster's health would send ` + "`" + `af up` + "`" + ` to one cluster and ` + "`" + `af status` + "`" + ` to
+another the moment one of them was unreachable, and the second command would
+report that your environment does not exist.
+
+**A requirement nothing can satisfy is refused rather than ignored**, when the
+manifest is read, before anything is dispatched:
+
+- ` + "`" + `requires` + "`" + ` with no ` + "`" + `targets` + "`" + `. There is one runtime, it carries no tags, and so
+  nothing could ever match.
+- A requirement no declared target offers. The message names what the targets do
+  offer, because the fix is usually a typo in the value.
+- Two targets with one name, or two Kubernetes targets resolving to one cluster.
+  Choosing between two targets on one cluster decides nothing.
+
+**The ` + "`" + `region` + "`" + ` tag is read by more than placement.** It is what fills the region
+an organization policy's ` + "`" + `allowed_regions` + "`" + ` rule compares against, so a target
+that carries one can be refused by a residency policy and a target that carries
+none cannot be. See [policy](/docs/enterprise/policy).
+
+**More than one target requires an enterprise license** carrying ` + "`" + `multi_runtime` + "`" + `;
+see [multiple runtimes](/docs/enterprise/runtimes). One target needs no license.
+It decides nothing, it only says where the runtime you already had is, which is
+what a residency policy reads.
 
 ## ` + "`" + `github` + "`" + `
 
@@ -19412,7 +19601,22 @@ Where and how long the environment runs. The provider decides the machinery; the
 | ` + "`" + `max_ttl` + "`" + ` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to ` + "`" + `168h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
 | ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces. Defaults to ` + "`" + `af` + "`" + `. Max length 40. |
 | ` + "`" + `provider` + "`" + ` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to ` + "`" + `local` + "`" + `. Max length 64. |
+| ` + "`" + `requires` + "`" + ` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
+| ` + "`" + `targets` + "`" + ` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
 | ` + "`" + `ttl` + "`" + ` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to ` + "`" + `24h` + "`" + `. Matches ` + "`" + `^[0-9]+(h\|d)$` + "`" + `. |
+
+## Runtime target
+
+One place an environment may be placed. A runtime plus the facts about where it is, and the second half is the part no runtime supplies for itself: a kubeconfig context is a name on somebody's laptop and it does not say which region the cluster is in.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| ` + "`" + `domain` + "`" + ` | string | no | Wildcard domain for environments placed here. Omitted inherits runtime.domain. Max length 253. |
+| ` + "`" + `kubeconfig_context` + "`" + ` | string | no | Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing. Max length 253. |
+| ` + "`" + `name` + "`" + ` | string | **yes** | Unique within the manifest. It names the target in the placement decision and in the refusal when none will do. Max length 40, matches ` + "`" + `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` + "`" + `. |
+| ` + "`" + `namespace_prefix` + "`" + ` | string | no | Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix. Max length 40. |
+| ` + "`" + `provider` + "`" + ` | ` + "`" + `local` + "`" + `, ` + "`" + `kubernetes` + "`" + ` | no | The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts. |
+| ` + "`" + `tags` + "`" + ` | object | no | What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check. Max properties 16. |
 
 ## Service
 

@@ -408,7 +408,22 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
 | `provider` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to `local`. Max length 64. |
+| `requires` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
+| `targets` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
 | `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
+
+## Runtime target
+
+One place an environment may be placed. A runtime plus the facts about where it is, and the second half is the part no runtime supplies for itself: a kubeconfig context is a name on somebody's laptop and it does not say which region the cluster is in.
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `domain` | string | no | Wildcard domain for environments placed here. Omitted inherits runtime.domain. Max length 253. |
+| `kubeconfig_context` | string | no | Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing. Max length 253. |
+| `name` | string | **yes** | Unique within the manifest. It names the target in the placement decision and in the refusal when none will do. Max length 40, matches `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`. |
+| `namespace_prefix` | string | no | Prefix for Kubernetes namespaces on this target. Omitted inherits runtime.namespace_prefix. Max length 40. |
+| `provider` | `local`, `kubernetes` | no | The runtime this target uses. Omitted inherits runtime.provider, which is what lets a fleet of clusters be one provider line and a list of contexts. |
+| `tags` | object | no | What this target offers, matched against runtime.requires. The region tag is also what fills the organization policy hook's residency check. Max properties 16. |
 
 ## Service
 

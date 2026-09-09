@@ -1694,11 +1694,155 @@ func (v *validator) runtime(m *schema.Manifest) {
 			"Set max_ttl to at least ttl. It is the furthest af env extend may push an "+
 				"environment's expiry, so a value below ttl leaves nothing to extend.")
 	}
-	if r.Provider == schema.RuntimeKubernetes && r.Domain == DefaultDomain {
+	if len(r.Targets) == 0 && r.Provider == schema.RuntimeKubernetes && r.Domain == DefaultDomain {
 		v.add("runtime.domain",
 			"The runtime is Kubernetes and the domain is still localhost.",
 			"Set a wildcard domain that resolves to the cluster's ingress, so preview URLs work from a browser.")
 	}
+	v.placement(r)
+}
+
+// placement checks the targets an environment may be placed on.
+//
+// Every rule here refuses something that would otherwise be decided at
+// dispatch, in a cluster, by a scheduler whose only honest answer would be
+// that nothing satisfies the requirement. The targets and the requirement are
+// in the same file, so the contradiction is visible before anything runs and
+// the author is looking at both lines while they fix it.
+func (v *validator) placement(r *schema.Runtime) {
+	// A requirement with nowhere to place is the one shape that can never come
+	// true. Without targets the engine has exactly one runtime, that runtime
+	// carries no tags, and so a non-empty requirement fails every time. Silently
+	// ignoring it is how a residency rule ends up written down and not enforced,
+	// which is the failure this whole block exists for.
+	if len(r.Requires) > 0 && len(r.Targets) == 0 {
+		v.add("runtime.requires",
+			"There is a placement requirement and no targets to place on, so nothing can satisfy it.",
+			"Declare the pools under runtime.targets with the tags they offer, or remove the requirement.")
+	}
+
+	seenName := map[string]string{}
+	seenCluster := map[string]string{}
+	for i, t := range r.Targets {
+		base := fmt.Sprintf("runtime.targets[%d]", i)
+		if t.Name == "" {
+			v.add(base+".name",
+				"A placement target has no name.",
+				"Give it a name. It is what the placement decision reports and what the refusal names when no target will do.")
+			continue
+		}
+		if !validTargetName(t.Name) {
+			v.add(base+".name",
+				fmt.Sprintf("The target name %q is not usable.", t.Name),
+				"Use lower case letters, digits and hyphens, starting and ending with a letter or a digit.")
+		}
+		if first, ok := seenName[t.Name]; ok {
+			v.add(base+".name",
+				fmt.Sprintf("Two placement targets are called %q.", t.Name),
+				fmt.Sprintf("Rename one of them. %s carries the same name, and a decision that names a target has to name one target.", first))
+		} else {
+			seenName[t.Name] = base
+		}
+
+		// Two targets on one cluster is the specific mistake a fleet written by
+		// copy and paste makes: the contexts are inherited from the runtime
+		// block and every target resolves to whatever cluster is current.
+		// Placement between them decides nothing while looking like it decided
+		// something, which is worse than one target and honest about it.
+		if t.Provider == schema.RuntimeKubernetes {
+			key := t.KubeconfigContext
+			if first, ok := seenCluster[key]; ok {
+				where := fmt.Sprintf("kubeconfig context %q", key)
+				if key == "" {
+					where = "whichever kubeconfig context is current"
+				}
+				v.add(base+".kubeconfig_context",
+					fmt.Sprintf("Targets %q and %q both resolve to %s.", first, t.Name, where),
+					"Name a different context on each target. Choosing between two targets on one cluster decides nothing.")
+			} else {
+				seenCluster[key] = t.Name
+			}
+			if t.Domain == DefaultDomain {
+				v.add(base+".domain",
+					fmt.Sprintf("Target %q is Kubernetes and its domain is still localhost.", t.Name),
+					"Set a wildcard domain that resolves to that cluster's ingress, so preview URLs work from a browser.")
+			}
+		}
+	}
+
+	// The requirement checked against the targets that exist. This is the rule
+	// the enterprise runtimes page promises: an unsatisfiable requirement is a
+	// different thing from a full queue, because a full queue resolves itself
+	// and this never will.
+	if len(r.Requires) == 0 || len(r.Targets) == 0 {
+		return
+	}
+	for _, key := range sortedKeys(r.Requires) {
+		want := r.Requires[key]
+		var offered []string
+		satisfied := false
+		for _, t := range r.Targets {
+			if got, ok := t.TargetTags[key]; ok {
+				if got == want {
+					satisfied = true
+					break
+				}
+				offered = append(offered, got)
+			}
+		}
+		if satisfied {
+			continue
+		}
+		detail := "no target declares that tag at all"
+		if len(offered) > 0 {
+			sort.Strings(offered)
+			detail = "the targets offer " + strings.Join(dedupe(offered), ", ")
+		}
+		v.add("runtime.requires."+key,
+			fmt.Sprintf("No placement target satisfies %s=%s, and %s.", key, want, detail),
+			"Tag a target with it, or relax the requirement. An environment this manifest asks for could never be placed.")
+	}
+}
+
+// sortedKeys orders a requirement map, so that a manifest breaking two rules is
+// told about the same one first every time rather than whichever the map
+// reached first.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// dedupe removes repeats from a sorted list, so a fleet of eight targets in one
+// region reports that region once.
+func dedupe(in []string) []string {
+	out := in[:0:0]
+	for i, s := range in {
+		if i == 0 || s != in[i-1] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// validTargetName accepts the same shape a datastore name takes.
+func validTargetName(s string) bool {
+	if s == "" || len(s) > 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' && i > 0 && i < len(s)-1:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ParseRate parses a token bucket rate such as 10/s.

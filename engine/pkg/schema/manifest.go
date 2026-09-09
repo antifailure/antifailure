@@ -935,7 +935,71 @@ type Runtime struct {
 	Domain            string `json:"domain,omitempty" yaml:"domain,omitempty"`
 	NamespacePrefix   string `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
 	KubeconfigContext string `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
+	// Requires is what a target must offer for this repository to be placed on
+	// it, as attribute equals value matched against a target's Tags.
+	//
+	// Empty means anywhere, which is what every manifest that declares no
+	// placement says. A requirement no declared target satisfies is refused at
+	// validation rather than at dispatch, because the targets are in the same
+	// file and an author who wrote region=eu-west-2 for a fleet that only has
+	// eu-west-1 should be told while they are looking at both lines.
+	Requires map[string]string `json:"requires,omitempty" yaml:"requires,omitempty"`
+	// Targets are the places an environment may be placed, in preference
+	// order. Empty is the ordinary case and means the single runtime Provider
+	// names, which is every manifest that existed before placement did.
+	//
+	// A target is a runtime plus the facts about WHERE it is, and the second
+	// half is the part no runtime can supply for itself: a kubeconfig context
+	// is a name on somebody's laptop and it does not say which region the
+	// cluster is in. So the tags are declared here, in the repository, under
+	// review, rather than discovered from a cluster that could be relabelled
+	// by anyone with access to it.
+	Targets []RuntimeTarget `json:"targets,omitempty" yaml:"targets,omitempty"`
 }
+
+// RuntimeTarget is one place an environment may be placed.
+//
+// It carries the settings that differ between two pools of the same kind, and
+// nothing else. Lifetime is not here: how long an environment lives is a
+// property of the repository and it does not change because the environment
+// landed in Frankfurt rather than Virginia.
+type RuntimeTarget struct {
+	// Name identifies the target in a placement decision and in the refusal
+	// when none will do. Unique within the manifest.
+	Name string `json:"name" yaml:"name"`
+	// Provider is the runtime this target uses. Empty inherits the runtime
+	// block's own provider, which is what lets a fleet of clusters be written
+	// as one provider line and a list of contexts.
+	Provider RuntimeProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	// TargetTags are what this target offers, matched against Requires.
+	//
+	// Named TargetTags rather than Tags because tools/fieldsweep resolves a
+	// reader by field NAME rather than by type, and workflows[].tags is exempt
+	// there as a label nothing reads. A second Tags with real readers would
+	// make that exemption unable to fail, which is a check that has stopped
+	// being able to say no. The manifest key is still tags.
+	TargetTags map[string]string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	// Domain is the wildcard domain for environments placed here. Empty
+	// inherits the runtime block's.
+	Domain string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	// NamespacePrefix is the Kubernetes namespace prefix for this target.
+	// Empty inherits the runtime block's.
+	NamespacePrefix string `json:"namespace_prefix,omitempty" yaml:"namespace_prefix,omitempty"`
+	// KubeconfigContext is which cluster this target is. Empty inherits the
+	// runtime block's, which for a list of clusters is almost never what the
+	// author meant, so validation says so when two targets would resolve to
+	// the same cluster.
+	KubeconfigContext string `json:"kubeconfig_context,omitempty" yaml:"kubeconfig_context,omitempty"`
+}
+
+// RegionTag is the tag a target uses to say where it is.
+//
+// Named rather than spelled at each use because the organization policy hook's
+// residency rule reads it: a target tagged with this key is what fills
+// EnvironmentRequest.Region, and before placement existed nothing filled that
+// field at all, so the rule could not fire. A rename that touched one of the
+// two sites and not the other would put it back.
+const RegionTag = "region"
 
 // GitHubMode is how the GitHub integration runs.
 type GitHubMode string

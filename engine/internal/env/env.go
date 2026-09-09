@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,10 +49,12 @@ import (
 	"github.com/antifailure/antifailure/engine/internal/redact"
 	"github.com/antifailure/antifailure/engine/internal/runtime/k8s"
 	"github.com/antifailure/antifailure/engine/internal/runtime/local"
+	"github.com/antifailure/antifailure/engine/internal/scheduler"
 	"github.com/antifailure/antifailure/engine/internal/secrets"
 	"github.com/antifailure/antifailure/engine/internal/state"
 	"github.com/antifailure/antifailure/engine/internal/telemetry"
 	"github.com/antifailure/antifailure/engine/internal/webhook"
+	"github.com/antifailure/antifailure/engine/pkg/edition"
 	"github.com/antifailure/antifailure/engine/pkg/extension"
 	"github.com/antifailure/antifailure/engine/pkg/provider"
 	"github.com/antifailure/antifailure/engine/pkg/schema"
@@ -843,6 +846,224 @@ func (o *Orchestrator) newRuntime(ctx context.Context) (provider.Runtime, error)
 			kind = cfg.Provider
 		}
 	}
+
+	// A manifest that declares where it may be placed is placed, and one that
+	// does not is built exactly as it was before any of this existed. The two
+	// paths converge on openRuntime one line later, so there is still one
+	// runtime aware constructor and the agreement this function's comment is
+	// about still holds.
+	if cfg != nil && len(cfg.Targets) > 0 {
+		target, err := o.placement(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return o.openRuntime(ctx, target.Provider, resolveTarget(cfg, target))
+	}
+	return o.openRuntime(ctx, kind, cfg)
+}
+
+// placement decides which declared target this environment goes to.
+//
+// A pure function of the manifest, and that is the property that matters
+// rather than an implementation detail. af up, af status, af logs, af down and
+// the reaper each ask independently, and they have to agree: a placement that
+// consulted a cluster's health would send af up to one cluster and af status
+// to another the moment one of them was unreachable, and the second command
+// would report that the environment does not exist. The failure this function's
+// caller is documented against is exactly that, one field over.
+//
+// So health and capacity are not inputs here. They are the control plane's, and
+// scheduler.Runtime carries them for the day something has a queue to plan; a
+// command line placing one environment has neither a queue nor a capacity
+// ledger, and inventing a number for either would be a claim nothing measured.
+// What this decides is the half the engine does know: which declared target
+// satisfies the declared requirement.
+func (o *Orchestrator) placement(ctx context.Context) (schema.RuntimeTarget, error) {
+	cfg := o.opts.Manifest.Runtime
+	// Every caller checks this before asking, and it is checked again here
+	// because the alternative to a refusal is a nil dereference in the middle
+	// of bringing an environment up. Normalization fills the block in on any
+	// parsed manifest, so this is the in-memory caller that skipped it.
+	if cfg == nil {
+		return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFSCH003,
+			"detail", "this manifest has no runtime block, so it declares no targets")
+	}
+
+	// The licence gate, at the only point either path can reach a target, and
+	// on the count rather than on the block. One target is a label on the
+	// single runtime this build already had; it says where that runtime is so
+	// that an organization residency policy has something to read. Two is a
+	// choice between places, which is the thing being sold, and it is the count
+	// that decides because the count is what the customer is buying.
+	if len(cfg.Targets) > 1 && !edition.Permits(ctx, edition.FeatureMultiRuntime) {
+		return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFEE011,
+			"count", strconv.Itoa(len(cfg.Targets)),
+			"feature", edition.FeatureMultiRuntime)
+	}
+
+	runtimes := make([]scheduler.Runtime, 0, len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		runtimes = append(runtimes, scheduler.Runtime{
+			Name: t.Name, Tags: t.TargetTags,
+			// One environment's worth, and healthy, because those are the two
+			// facts this caller has: it is placing one environment and it has
+			// nothing that reports otherwise. They are constants rather than
+			// guesses at a fleet's capacity, and the comment above says why.
+			Free: 1, Healthy: true,
+		})
+	}
+
+	// The queue is this one run. Everything Plan does beyond placement, the
+	// fair share round, the aging, the supersede, the per organization limit,
+	// is inert on a queue of one and on a zero Config, and that is the point:
+	// this is the same function the control plane will call with a hundred
+	// runs, called with the one run a command line has, so the decision a
+	// person sees on their laptop is made by the code that will make it in a
+	// cluster rather than by a second implementation that agrees until it does
+	// not.
+	decisions := scheduler.Plan(
+		[]scheduler.Run{{
+			ID:       o.envID,
+			Repo:     o.opts.Manifest.Name,
+			Branch:   o.opts.Branch,
+			Lane:     scheduler.LaneInteractive,
+			QueuedAt: o.opts.Clock.Now(),
+			Requires: cfg.Requires,
+		}},
+		runtimes, scheduler.Held{}, scheduler.Config{}, o.opts.Clock.Now())
+
+	dispatched := scheduler.Dispatched(decisions)
+	if len(dispatched) == 0 {
+		// The scheduler's own sentence, which names the unmet requirement
+		// rather than saying no runtime is available. Those are different
+		// problems fixed by different people, and flattening them here would
+		// throw away the distinction the enterprise runtimes page promises.
+		reason := "no target was eligible"
+		if len(decisions) > 0 && decisions[0].Reason != "" {
+			reason = decisions[0].Reason
+		}
+		if requirement, ok := unmetRequirement(cfg); ok {
+			return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFSCH001,
+				"requirement", requirement)
+		}
+		return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFSCH003, "detail", reason)
+	}
+	for _, t := range cfg.Targets {
+		if t.Name == dispatched[0].Runtime {
+			return t, nil
+		}
+	}
+	// Unreachable while Plan only ever names a runtime it was given, and
+	// returned as an error rather than as a zero target because a zero target
+	// would be placed on the local runtime with no domain and no context,
+	// which is a silent wrong answer where this is a loud one.
+	return schema.RuntimeTarget{}, aferrors.Coded(aferrors.AFSCH003,
+		"detail", fmt.Sprintf("the scheduler named %q, which is not a declared target",
+			dispatched[0].Runtime))
+}
+
+// runtimeIdentity is where this environment came up, as the control plane
+// records it.
+//
+// It was the literal "local", which readyFields' own comment says was going to
+// stop being true, and it had already stopped: a Kubernetes environment
+// reported that it came up on the local runtime, and the control plane's
+// runtime registry writes this string into the environments row. That registry
+// exists to answer the registry AGAINST REALITY, listing the runtimes
+// environments are actually running on that nobody registered, and a constant
+// makes the second half of that answer a constant too. An environment running
+// somewhere the organization never agreed to is exactly what it is for, and it
+// could not see one.
+//
+// The target's name when the manifest declares placement, because that is the
+// question the registry is asking: not what KIND of runtime, which is the same
+// word for every cluster a fleet has, but WHICH ONE. The name shape validation
+// enforces is the same one the registry accepts, so a target called frankfurt
+// matches a runtime registered as frankfurt without anything translating
+// between them.
+//
+// The runtime's own name otherwise, which is what an unplaced manifest has and
+// is at least true.
+func (o *Orchestrator) runtimeIdentity(ctx context.Context, s *session) string {
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil && len(m.Runtime.Targets) > 0 {
+		// Placement has already run and succeeded to reach here, and it is a
+		// pure function of the manifest, so asking it again is asking the same
+		// question and getting the same answer rather than a second opinion.
+		//
+		// The run's own context, not a background one. The licence gate lives
+		// inside placement, and a context with no edition attached would refuse
+		// a fleet that had just been placed successfully, so the identity would
+		// quietly fall back to the runtime kind on exactly the installations
+		// that paid for the distinction.
+		if target, err := o.placement(ctx); err == nil {
+			return target.Name
+		}
+	}
+	if s != nil && s.runtime != nil {
+		return s.runtime.Name()
+	}
+	// No session, which is the reader that has not built a runtime. The
+	// manifest's own provider rather than a constant, because a constant here
+	// is the defect this function was written to remove and putting a smaller
+	// one back at the bottom of it would be the same mistake in a quieter
+	// place.
+	if m := o.opts.Manifest; m != nil && m.Runtime != nil && m.Runtime.Provider != "" {
+		return string(m.Runtime.Provider)
+	}
+	return string(schema.RuntimeLocal)
+}
+
+// unmetRequirement names the first requirement no target satisfies.
+//
+// Validation refuses this manifest before it reaches placement, so this is the
+// answer for a manifest that never went through the validator: the MCP server
+// and the library callers both build one in memory. It reports the same
+// requirement the validator would, in the same order.
+func unmetRequirement(cfg *schema.Runtime) (string, bool) {
+	keys := make([]string, 0, len(cfg.Requires))
+	for k := range cfg.Requires {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		satisfied := false
+		for _, t := range cfg.Targets {
+			if t.TargetTags[k] == cfg.Requires[k] {
+				satisfied = true
+				break
+			}
+		}
+		if !satisfied {
+			return k + "=" + cfg.Requires[k], true
+		}
+	}
+	return "", false
+}
+
+// resolveTarget renders a target as the runtime block the constructors read.
+//
+// A copy with the target's answers written over the block's, so that everything
+// below this line is the code that ran before targets existed, reading one
+// runtime configuration. Normalization has already resolved what each target
+// inherits, so nothing here has to know the inheritance rules a second time.
+func resolveTarget(cfg *schema.Runtime, t schema.RuntimeTarget) *schema.Runtime {
+	out := *cfg
+	out.Provider = t.Provider
+	out.Domain = t.Domain
+	out.NamespacePrefix = t.NamespacePrefix
+	out.KubeconfigContext = t.KubeconfigContext
+	return &out
+}
+
+// openRuntime builds one runtime, named.
+//
+// Split out of newRuntime so that a placed environment and an unplaced one are
+// constructed by the same code. A second construction path for placement would
+// be the way a placed environment silently gets a different sidecar, a
+// different TTL or a different state directory from an unplaced one.
+func (o *Orchestrator) openRuntime(
+	ctx context.Context, kind schema.RuntimeProvider, cfg *schema.Runtime,
+) (provider.Runtime, error) {
 	switch kind {
 	case schema.RuntimeLocal:
 		return local.New(local.Options{
@@ -1348,6 +1569,25 @@ func (o *Orchestrator) checkPolicy(ctx context.Context) error {
 		EnvID:      o.envID,
 		Provider:   "docker",
 	}
+
+	// Where this environment is about to run, for the residency rule.
+	//
+	// The field had no writer at all until placement existed, so an
+	// organization policy naming allowed_regions could never fire: it guards on
+	// Region being non-empty, and nothing ever set it. The policy was written,
+	// tested, documented and dead. A target's region tag is the first thing in
+	// the product that knows the answer, and this is where it is asked.
+	//
+	// The same pure function newRuntime used, so the region reported is the
+	// region the environment is actually being built on rather than a second
+	// opinion about it. An error is ignored because newRuntime has already
+	// returned it and the run stopped there; reaching this line means placement
+	// succeeded.
+	if m.Runtime != nil && len(m.Runtime.Targets) > 0 {
+		if target, err := o.placement(ctx); err == nil {
+			req.Region = target.TargetTags[schema.RegionTag]
+		}
+	}
 	if m.Database != nil && m.Database.Provider != "" {
 		req.Provider = string(m.Database.Provider)
 	}
@@ -1436,7 +1676,8 @@ func (o *Orchestrator) Up(ctx context.Context) (result *Result, rerr error) {
 		}
 		o.event(s, events.EnvReady, o.envID+" is ready",
 			append(append(o.identity(), startedField(started)),
-				readyFields(result, "local", o.opts.Clock.Since(started).Seconds())...)...)
+				readyFields(result, o.runtimeIdentity(ctx, s),
+					o.opts.Clock.Since(started).Seconds())...)...)
 	}()
 
 	// Before anything is created, so that a refusal costs nothing. Checking

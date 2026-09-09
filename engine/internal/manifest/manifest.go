@@ -528,6 +528,7 @@ var knownKeys = []string{
 	"masking", "cleanup",
 	"p95_increase", "error_rate", "query_count_increase", "require",
 	"ttl", "max_ttl", "idle_sleep", "domain", "namespace_prefix", "kubeconfig_context",
+	"requires", "targets",
 	"comment", "fork_policy", "teardown_on",
 	"adapter", "token_env", "url", "connection", "table", "sessions", "password",
 	"schema", "id", "json", "timestamps", "min_length", "symbols", "forbid",

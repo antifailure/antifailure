@@ -65,3 +65,56 @@ func From(ctx context.Context) (Status, bool) {
 	s, ok := ctx.Value(contextKey{}).(Status)
 	return s, ok
 }
+
+// The feature names the engine itself gates on.
+//
+// Strings rather than an import of the licence's own type, for the reason this
+// package exists: the community build cannot resolve the enterprise module. The
+// enterprise module carries a test that these spellings match its own
+// constants, because a rename on one side and not the other would detach the
+// gate silently and the symptom would be a feature that became free.
+const (
+	// FeatureMultiRuntime is placing an environment across more than one
+	// runtime target, matched on tags.
+	FeatureMultiRuntime = "multi_runtime"
+)
+
+// Permits reports whether the licence on this context turns a feature on.
+//
+// This is the engine side of a licence check, and it is deliberately the only
+// shape one takes here. The enterprise binary decides what is permitted at
+// startup and attaches the answer; everything below reads it. A build that
+// attaches nothing permits nothing, so the community edition and an expired
+// licence and a licence for another organization all arrive at the same no
+// without this package knowing the difference between them.
+//
+// WHAT THIS DOES NOT DO, said here because the enterprise policy hook's comment
+// next door reads as though it does. The status is evaluated once, in the
+// enterprise binary's main, and attached to a context that then lives as long
+// as the process. So a licence that lapses between one command and the next is
+// caught, and one that lapses during a long running process is not, by this or
+// by ee/engine/feature.Enabled: both read a set of features computed at
+// startup. Fixing that means re-evaluating the licence, which is a decision
+// about the licence and not about this check, and claiming it here would be a
+// guarantee nothing implements.
+func Permits(ctx context.Context, feature string) bool {
+	s, ok := From(ctx)
+	if !ok {
+		return false
+	}
+	return s.Permits(feature)
+}
+
+// Permits reports whether a status carries a feature.
+//
+// A method as well as the function, because the two callers are different: a
+// command that has already read the status asks the value, and code deep in a
+// lifecycle asks the context.
+func (s Status) Permits(feature string) bool {
+	for _, f := range s.Features {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}

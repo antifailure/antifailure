@@ -201,6 +201,9 @@ const (
 	AFEE004 Code = "AF-EE-004"
 	// Organization policy {policy} refuses this environment: {detail}
 	AFEE010 Code = "AF-EE-010"
+	// This manifest declares {count} placement targets and {feature} is
+	// not licensed here.
+	AFEE011 Code = "AF-EE-011"
 
 	// Extensions
 	// This build cannot honor one of its own extension registrations:
@@ -414,6 +417,8 @@ const (
 	// The organization is at its concurrent environment limit ({limit});
 	// this run is queued at position {position}.
 	AFSCH002 Code = "AF-SCH-002"
+	// No placement target could take this environment: {detail}
+	AFSCH003 Code = "AF-SCH-003"
 
 	// Secrets
 	// The variables {names} are declared in the manifest but were not
@@ -1143,6 +1148,15 @@ var catalog = map[Code]Entry{
 		Retryable: false,
 		ExitCode:  ExitPolicyDenied,
 	},
+	AFEE011: {
+		Code:      AFEE011,
+		Area:      "EE",
+		Message:   "This manifest declares {count} placement targets and {feature} is not licensed here.",
+		NextStep:  "Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.",
+		Docs:      "enterprise/runtimes",
+		Retryable: false,
+		ExitCode:  ExitAuth,
+	},
 	AFEXT001: {
 		Code:      AFEXT001,
 		Area:      "EXT",
@@ -1840,7 +1854,7 @@ var catalog = map[Code]Entry{
 		Code:      AFSCH001,
 		Area:      "SCH",
 		Message:   "No runtime satisfies the placement requirement {requirement}.",
-		NextStep:  "Register a runtime that meets it, or relax the requirement in the placement rules.",
+		NextStep:  "Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.",
 		Docs:      "enterprise/runtimes",
 		Retryable: false,
 		ExitCode:  ExitProvider,
@@ -1851,6 +1865,15 @@ var catalog = map[Code]Entry{
 		Message:   "The organization is at its concurrent environment limit ({limit}); this run is queued at position {position}.",
 		NextStep:  "It will start automatically. Tear down an unused environment to start sooner.",
 		Docs:      "concepts/scheduling",
+		Retryable: true,
+		ExitCode:  ExitProvider,
+	},
+	AFSCH003: {
+		Code:      AFSCH003,
+		Area:      "SCH",
+		Message:   "No placement target could take this environment: {detail}",
+		NextStep:  "The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.",
+		Docs:      "enterprise/runtimes",
 		Retryable: true,
 		ExitCode:  ExitProvider,
 	},

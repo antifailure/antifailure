@@ -5,17 +5,40 @@ sidebar:
   order: 5
 ---
 
-*Requires an enterprise license with the `multi_runtime` feature.*
+*More than one placement target requires an enterprise license with the
+`multi_runtime` feature. One target needs no license.*
 
 With one runtime there is nothing to decide. With several, an environment has to
 go somewhere, and where is a policy question: a region for data residency, a
 pool with more memory for a heavy repository, an isolated pool for repositories
 that handle regulated data.
 
+```yaml
+runtime:
+  provider: kubernetes
+  domain: preview.example.com
+  requires:
+    region: eu-west-1
+  targets:
+    - name: frankfurt
+      kubeconfig_context: eu-prod
+      domain: eu.preview.example.com
+      tags:
+        region: eu-west-1
+    - name: virginia
+      kubeconfig_context: us-prod
+      domain: us.preview.example.com
+      tags:
+        region: us-east-1
 ```
-AF-SCH-001 No runtime satisfies the placement requirement region=eu-west.
-  Next: Register a runtime that meets it, or relax the requirement in the
-  placement rules.
+
+That repository is placed in Frankfurt. Every command that has to find the
+environment afterwards works it out the same way, from the same file.
+
+```
+AF-SCH-001 No runtime satisfies the placement requirement region=eu-west-2.
+  Next: Declare a target under runtime.targets carrying that tag, or relax
+  runtime.requires. Nothing was created.
 ```
 
 ## Why it refuses rather than falls back
@@ -24,31 +47,67 @@ Placing an EU repository's environment in a US pool because the EU pool was full
 is the kind of helpfulness that ends a compliance audit badly. A requirement
 that can be silently ignored is not a requirement.
 
-A run that cannot be placed is queued and reported, with its position, the same
-as any other run waiting for capacity.
+The same reasoning is why a requirement nothing can satisfy is refused when the
+manifest is read rather than at dispatch. The requirement and the targets are in
+one file,
+so the contradiction is decidable before anything runs, and the person looking at
+it is the person who wrote both lines. A scheduler in a cluster reporting the
+same thing an hour later is reporting it to somebody who cannot fix it.
 
-## Requirements
+## Requirements and tags
 
-Attributes, matched against what each registered runtime declares: region,
-instance class, isolation level, whatever your organisation decides matters.
+Attributes, matched by equality against what each target declares: region,
+instance class, isolation level, whatever your organization decides matters.
+Every requirement must be met; empty requires means any target will do, and the
+first one listed wins.
 
-The scheduler treats an unsatisfiable requirement as different from a full
-queue, because the fixes are different. A full queue resolves itself. An
-unsatisfiable requirement never will, and saying "queued" would be a lie that
-lasts until somebody investigates.
+**The tags are declared in the manifest, not discovered from the cluster.** A
+kubeconfig context is a name on somebody's laptop and it does not say which
+region the cluster is in. Writing the claim in the repository puts it under
+review next to the requirement that reads it, and it is one fewer thing that can
+be changed by anyone with access to a cluster.
+
+## What placement does not decide
+
+**Capacity and health are not inputs.** The engine places one environment from a
+command line and holds no capacity ledger, so it has nothing to report for either
+and does not invent one. `engine/internal/scheduler` carries the fair share
+round, the aging that stops a nightly job starving behind pull requests, the per
+organization limit and the queue position for the day a control plane dispatches
+batches; the engine calls the same function with the one run it has, so the
+decision on a laptop is made by the code that will make it in a cluster rather
+than by a second implementation that agrees until it does not.
+
+The consequence worth stating plainly: **this does not fail over.** A target that
+is unreachable is an error, not a reason to place somewhere else. Placement is a
+pure function of the manifest, and it has to be, because `af up`, `af status`,
+`af logs` and `af down` each decide independently. A placement that varied with a
+cluster's health would have `af status` asking the wrong cluster and reporting
+that your environment does not exist.
+
+## Residency
+
+A target's `region` tag is what fills the region an organization policy's
+`allowed_regions` rule compares against. Before targets existed nothing in the
+product knew where an environment ran, so that rule had no value to read. A
+target that carries a region can be refused by a residency policy; one that does
+not carry a region cannot be, and the policy says so rather than passing.
+
+See [policy](/docs/enterprise/policy).
 
 ## The community edition
 
-Two runtimes, both built. `runtime.provider` in the manifest names `local` and
-`kubernetes`, and this page said for a long time that only `local` existed.
-That was stale rather than cautious: the Kubernetes runtime builds a Deployment,
-a Service and an Ingress per web service and has been selectable the whole time.
-Any other name is refused with a message rather than quietly substituted, and
-the message lists the two this build has.
+Two runtimes, both built. `runtime.provider` names `local` or `kubernetes`, and
+any other name is refused with a message that lists what this build has rather
+than quietly substituting one. The Kubernetes runtime builds a Deployment, a
+Service and an Ingress per web service and has been selectable the whole time.
 
-What the enterprise edition adds here is not a third runtime. It is placement
-across several of them at once: the requirements, the tags and the scheduling
-described above.
+One target is community too. It decides nothing: it labels the single runtime
+you already had so a residency policy has something to read, and charging for a
+label would be charging for the community edition.
+
+What the enterprise edition adds is not a third runtime. It is the choice between
+several at once: the requirements, the tags and the refusal described above.
 
 ## Why there is no ECS runtime
 
@@ -160,4 +219,4 @@ VPC to find out. A seventh, `AF_ECS_PROBE_IMAGE`, is optional and names the
 image the containment probe container would run; with it unset the plan carries
 no probe container and the instance metadata path says so.
 
-Related: [scheduling](/docs/concepts/scheduling), [licensing](/docs/enterprise/licensing).
+Related: [scheduling](/docs/concepts/scheduling), [manifest reference](/docs/reference/manifest#placement), [licensing](/docs/enterprise/licensing).
