@@ -184,6 +184,20 @@ func (t *schemaTree) valuesFor(prop any) []string {
 	if vals := literals(m["enum"]); vals != nil {
 		return vals
 	}
+	// An OPEN set that still publishes its members, which is how
+	// database.provider is declared. It was an enum of five until the engine
+	// began enforcing the schema's own bounds and a closed list was found to
+	// make a documented extension point unusable from a manifest: providers
+	// are a registry, and a build can carry one this file has never heard of.
+	// The list stayed, as examples, and this check went dark on it the moment
+	// the keyword changed. That is the failure worth naming: a page saying
+	// "docker or neon" about a key with five published providers is exactly
+	// what this tool exists to catch, and whether the sixth is possible does
+	// not excuse omitting the four that ship. Open about what else may exist
+	// is not permission to be silent about what does.
+	if vals := literals(m["examples"]); vals != nil {
+		return vals
+	}
 	// An array of a closed set, which is how fidelity.require is declared.
 	if items, has := m["items"]; has {
 		if im, ok := t.deref(items).(map[string]any); ok {
