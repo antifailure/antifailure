@@ -28,7 +28,7 @@ Scripts can branch on these. They are stable.
 | `9` | Nothing was measured. No workflow reached a verdict, or a workload did not finish. |
 | `10` | Interrupted, or a teardown left resources recorded. Run `af down` again. |
 
-28 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
+27 further codes are reserved for features this version does not have. They are in `engine/internal/errors/catalog.yaml` and are left out here because this page is for looking up an error you have actually seen.
 
 ## Agents
 
@@ -850,6 +850,18 @@ Organization policy {policy} refuses this environment: {detail}
 
 ### AF-EE-011
 
+This manifest declares {count} placement targets and {feature} is not licensed here.
+
+**What to do.** Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.
+
+| | |
+| --- | --- |
+| Exit code | `4` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
+### AF-EE-012
+
 The provider {provider} needs the {feature} feature: {reason}
 
 **What to do.** Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.
@@ -1599,6 +1611,32 @@ This runtime cannot place the sizes the manifest asks for: {detail}
 | Exit code | `1` |
 | Retryable | Yes. The engine retries automatically where it can. |
 | More | [reference/manifest](/docs/reference/manifest) |
+
+## Scheduling
+
+### AF-SCH-001
+
+No runtime satisfies the placement requirement {requirement}.
+
+**What to do.** Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | No. Retrying the same operation unchanged will fail the same way. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
+
+### AF-SCH-003
+
+No placement target could take this environment: {detail}
+
+**What to do.** The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.
+
+| | |
+| --- | --- |
+| Exit code | `5` |
+| Retryable | Yes. The engine retries automatically where it can. |
+| More | [enterprise/runtimes](/docs/enterprise/runtimes) |
 
 ## Secrets
 

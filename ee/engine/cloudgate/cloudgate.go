@@ -83,7 +83,7 @@ type Refusal struct {
 }
 
 func (r *Refusal) Error() string {
-	return fmt.Sprintf("AF-EE-011: the provider %s needs the %s feature: %s",
+	return fmt.Sprintf("AF-EE-012: the provider %s needs the %s feature: %s",
 		r.Provider, r.Feature, r.Reason)
 }
 

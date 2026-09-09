@@ -743,6 +743,17 @@
       "code": "AF-EE-011",
       "area": "EE",
       "areaName": "Enterprise",
+      "message": "This manifest declares {count} placement targets and {feature} is not licensed here.",
+      "resolution": "Reduce runtime.targets to one, or install a license carrying {feature}. Nothing was created, and every setting in the manifest is preserved.",
+      "docs": "https://antifailure.dev/docs/enterprise/runtimes",
+      "retryable": false,
+      "exitCode": 4,
+      "planned": false
+    },
+    {
+      "code": "AF-EE-012",
+      "area": "EE",
+      "areaName": "Enterprise",
       "message": "The provider {provider} needs the {feature} feature: {reason}",
       "resolution": "Install a licence that includes {feature}, or use a provider built into the engine. Nothing was created, and removing what already exists is never refused for this reason.",
       "docs": "https://antifailure.dev/docs/enterprise/licensing",
@@ -1408,6 +1419,28 @@
       "docs": "https://antifailure.dev/docs/reference/manifest",
       "retryable": true,
       "exitCode": 1,
+      "planned": false
+    },
+    {
+      "code": "AF-SCH-001",
+      "area": "SCH",
+      "areaName": "Scheduling",
+      "message": "No runtime satisfies the placement requirement {requirement}.",
+      "resolution": "Declare a target under runtime.targets carrying that tag, or relax runtime.requires. Nothing was created.",
+      "docs": "https://antifailure.dev/docs/enterprise/runtimes",
+      "retryable": false,
+      "exitCode": 5,
+      "planned": false
+    },
+    {
+      "code": "AF-SCH-003",
+      "area": "SCH",
+      "areaName": "Scheduling",
+      "message": "No placement target could take this environment: {detail}",
+      "resolution": "The detail says which targets were tried and why each was refused. Fix the one you expect to work, or add a target that can take it. Nothing was created.",
+      "docs": "https://antifailure.dev/docs/enterprise/runtimes",
+      "retryable": true,
+      "exitCode": 5,
       "planned": false
     },
     {

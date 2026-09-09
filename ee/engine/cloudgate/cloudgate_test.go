@@ -240,7 +240,7 @@ func TestAnUnlicensedInstallationCannotCreateAndCanAlwaysRemove(t *testing.T) {
 	require.True(t, errors.As(err, &refusal))
 	require.Equal(t, "aurora", refusal.Provider)
 	require.Equal(t, license.FeatureCloudDatabase, refusal.Feature)
-	require.Contains(t, err.Error(), "AF-EE-011")
+	require.Contains(t, err.Error(), "AF-EE-012")
 	require.Contains(t, err.Error(), "no licence is installed")
 
 	// Everything that removes, enumerates or reports is never refused.
@@ -315,7 +315,7 @@ func TestARuntimeIsGatedOnUpAndNeverOnDown(t *testing.T) {
 	_, err := rt.Up(ctx, provider.EnvSpec{EnvID: "env-1"})
 	require.Error(t, err)
 	require.False(t, rec.ran("Up"))
-	require.Contains(t, err.Error(), "AF-EE-011")
+	require.Contains(t, err.Error(), "AF-EE-012")
 
 	_, err = rt.Down(ctx, "env-1")
 	require.NoError(t, err)
