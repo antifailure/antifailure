@@ -684,6 +684,7 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.traffic.max_age": "336h",
         "load.unsafe_routes": [
           "/admin"
         ],
@@ -731,6 +732,7 @@ const defaultTuning = `{
         "explore.goals[].name": "explore-goal",
         "invariants[].sql": "SELECT id FROM orders WHERE id IS NULL",
         "load.source": "otel",
+        "load.traffic.max_age": "336h",
         "load.unsafe_routes": [
           "/admin"
         ],
