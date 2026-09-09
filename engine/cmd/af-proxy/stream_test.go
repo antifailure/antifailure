@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -307,6 +308,12 @@ func TestStream_AnAllowedHostIsReachedAndABlockedOneIsNot(t *testing.T) {
 		return []net.IP{net.ParseIP(broker.host)}, nil
 	}
 	proto := protocolAt(5671)
+	// The sidecar dials the port it is serving, so a fixture that is not on
+	// that port is never reached and the control below can only ever fail.
+	// The protocol keeps AMQPS's name, which is what its refusals read, and
+	// takes the fixture's port. Binding 5671 itself would trade this bug for
+	// a test that fails whenever anything else on the machine holds the port.
+	proto.Port = broker.port
 
 	// The control. An allowed name reaches the broker and the broker says so.
 	client, server := net.Pipe()
@@ -480,6 +487,7 @@ func TestStream_APortNamedByARuleIsListenedOn(t *testing.T) {
 // touches it.
 type recordingBroker struct {
 	host string
+	port int
 	ln   net.Listener
 	seen chan struct{}
 }
@@ -490,9 +498,11 @@ func newRecordingBroker(t *testing.T) *recordingBroker {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 
-	host, _, err := net.SplitHostPort(ln.Addr().String())
+	host, portText, err := net.SplitHostPort(ln.Addr().String())
 	require.NoError(t, err)
-	b := &recordingBroker{host: host, ln: ln, seen: make(chan struct{}, 32)}
+	port, err := strconv.Atoi(portText)
+	require.NoError(t, err)
+	b := &recordingBroker{host: host, port: port, ln: ln, seen: make(chan struct{}, 32)}
 	go func() {
 		for {
 			c, aErr := ln.Accept()
