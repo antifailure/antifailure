@@ -389,8 +389,8 @@ func TestGCSStore_TokenPaths(t *testing.T) {
 	var seenAssertion, seenAuthorization string
 	var sawAuthorizationHeader bool
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/token":
+		switch r.URL.Path {
+		case "/token":
 			require.NoError(t, r.ParseForm())
 			seenAssertion = r.Form.Get("assertion")
 			w.Header().Set("Content-Type", "application/json")
@@ -610,8 +610,14 @@ func TestS3StoreAddressesEveryServiceThatSpeaksTheAPI(t *testing.T) {
 		t.Run(c.service, func(t *testing.T) {
 			env := func(name string) string {
 				switch name {
+				// Not AKIA followed by sixteen base32 characters, which is
+				// the real shape and is what tools/scanrepo refuses: it read
+				// this fixture as a live AWS key committed to the repository,
+				// and it was right to, because nothing in a file can say it is
+				// a fixture. Nothing here depends on the length, only on the
+				// same string reaching the credential scope below.
 				case "AWS_ACCESS_KEY_ID":
-					return "AKIAEXAMPLEEXAMPLE00"
+					return "AKIA-not-a-real-key-id"
 				case "AWS_SECRET_ACCESS_KEY":
 					return "not-a-real-secret-and-never-sent-anywhere"
 				case "AWS_REGION":
@@ -634,7 +640,7 @@ func TestS3StoreAddressesEveryServiceThatSpeaksTheAPI(t *testing.T) {
 			// defaulted to us-east-1 for every vendor would sign something the
 			// vendor refuses with a 403 that reads like a permissions problem.
 			auth := req.Header.Get("Authorization")
-			require.Contains(t, auth, "AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEEXAMPLE00/")
+			require.Contains(t, auth, "AWS4-HMAC-SHA256 Credential=AKIA-not-a-real-key-id/")
 			require.Contains(t, auth, "/"+c.region+"/s3/aws4_request",
 				"%s was signed for the wrong region", c.service)
 			require.Contains(t, auth, "SignedHeaders=host;x-amz-content-sha256;x-amz-date")

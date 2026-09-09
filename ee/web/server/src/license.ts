@@ -66,6 +66,8 @@ export type Feature =
   | 'support_access'
   | 'compliance_packs'
   | 'air_gapped'
+  | 'cloud_database'
+  | 'cloud_runtime'
 
 /** Every feature a licence can carry, sorted, matching license.AllFeatures.
  *
@@ -77,6 +79,8 @@ export const ALL_FEATURES: readonly Feature[] = [
   'air_gapped',
   'audit_stream',
   'billing',
+  'cloud_database',
+  'cloud_runtime',
   'compliance_packs',
   'enterprise_dashboard',
   'enterprise_secrets',

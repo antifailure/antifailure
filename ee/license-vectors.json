@@ -5,6 +5,8 @@
     "air_gapped",
     "audit_stream",
     "billing",
+    "cloud_database",
+    "cloud_runtime",
     "compliance_packs",
     "enterprise_dashboard",
     "enterprise_secrets",
