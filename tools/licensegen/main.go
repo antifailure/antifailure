@@ -173,6 +173,29 @@ var notShipped = []string{
 	"enterprise_dashboard",
 }
 
+// unenforced is the subset of knownFeatures that this product ships and gates
+// nowhere, and it is a third COPY for the reason the two above are copies: this
+// tool is MIT and ee/engine/license is not. Held to the original by
+// TestUnenforcedMatchesTheVerifier, which parses the map out of license.go.
+//
+// A WARNING RATHER THAN A REFUSAL, and the difference from notShipped above is
+// the whole point of having a separate list. Those two names have nothing
+// behind them and never have, so signing one is selling nothing and is refused
+// outright. These two name capabilities that are real: the custom roles library
+// is written and tested, and air gapped operation is a property every
+// installation already has. Refusing to sell them would be refusing a customer
+// something they can have. What is wrong is only that the licence is not what
+// makes it so, and the person who needs to know that is the one issuing the
+// key, before they answer a question about it.
+//
+// So this prints and does not stop. A refusal here would be overridden within a
+// week by whoever had already promised it, and an override flag is a refusal
+// that has agreed in advance to be ignored.
+var unenforced = []string{
+	"air_gapped",
+	"rbac",
+}
+
 func issue(args []string) error {
 	fs := flag.NewFlagSet("issue", flag.ContinueOnError)
 	file := fs.String("request", "", "path to the issuance request, or - for standard input")
@@ -276,6 +299,9 @@ func issue(args []string) error {
 	// be done before the key is sent.
 	fmt.Fprintf(os.Stderr, "signed %s for %s: %d seats, %d months, features %s\n",
 		*id, req.Org, *req.Seats, req.Months, describeFeatures(req.Features))
+	if warning := warnUnenforced(req.Features); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 	fmt.Fprintf(os.Stderr,
 		"key id %s must name this public key in the verifier: %s\n",
 		*keyID, base64.RawURLEncoding.EncodeToString(priv.Public().(ed25519.PublicKey)))
@@ -335,6 +361,31 @@ func checkFeatures(features []string) error {
 			strings.Join(absent, ", "))
 	}
 	return nil
+}
+
+// warnUnenforced is the line printed beside a licence that names a feature
+// nothing gates, or empty when it names none.
+//
+// Named for what it does rather than folded into describeFeatures, because the
+// receipt line has to stay readable as a receipt: this is a second sentence
+// about the same licence, not a decoration on the first.
+func warnUnenforced(features []string) string {
+	var named []string
+	for _, f := range features {
+		for _, u := range unenforced {
+			if f == u {
+				named = append(named, f)
+			}
+		}
+	}
+	if len(named) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"WARNING: this licence names %s, which this product ships and gates nowhere. The "+
+			"licence is not what grants it and withdrawing the licence will not withdraw it. "+
+			"Say so before it is described to a customer as something they are buying",
+		strings.Join(named, ", "))
 }
 
 // describeFeatures renders the feature list for the receipt.

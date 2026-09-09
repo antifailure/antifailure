@@ -137,6 +137,84 @@ func NotShippedFeatures() []Feature {
 	return out
 }
 
+// unenforced names every feature this build ships, permits, and gates nowhere,
+// and says so where the catalogue is for the same reason notShipped does.
+//
+// A THIRD ANSWER, and the reason there has to be one. notShipped divides the
+// catalogue in two: a feature is either enforced somewhere or it is a name that
+// can never be sold. Two features fit neither half. The custom roles library is
+// complete and reaches nothing, and air gapped operation is a real property of
+// every installation that no code consults. Both were invisible, because a
+// catalogue with two buckets records a feature belonging to neither by saying
+// nothing about it, and saying nothing is exactly what "enforced somewhere"
+// already looks like from the outside.
+//
+// air_gapped is the one that shows the gap was structural rather than an
+// oversight. Every occurrence of the name in this repository is a copy of the
+// catalogue, the licence vectors, two lines of documentation, or a test. No
+// engine site declares it, no control plane route asks for it, and the
+// entitlement catalogue has no key for it. A licence naming it verifies,
+// reports active, prints in af license status, and changes nothing, which is
+// the failure notShipped exists to close arriving through the door notShipped
+// does not cover.
+//
+// WHY THESE ARE STILL PERMITTED AND notShipped IS NOT. Shipped's own comment
+// draws the line: absent says we did not build it, ungated says we built it and
+// do not charge for it, and only the first is a reason not to sell. Refusing to
+// permit air gapped operation would be refusing a customer a capability they
+// already have. So this map changes no runtime behaviour at all. It is a
+// declaration, read by licensegen so that whoever issues a licence naming one
+// of these reads what they are actually selling, and read by the catalogue test
+// so that a feature can no longer be enforced nowhere and recorded nowhere at
+// the same time.
+//
+// The reason is stored beside the name because "unenforced" alone is
+// indistinguishable from an oversight, and because the sentence has to be
+// deletable: gating one of these means removing the entry, and the entry says
+// what gating it would mean.
+var unenforced = map[Feature]string{
+	FeatureRBAC: "Custom roles exist as a library and not as a feature. ee/web/rbac " +
+		"validates a role model, resolves scopes and decides approvals, and nothing " +
+		"outside its own tests imports it: no table stores a model, no route defines " +
+		"one, no loader reads one. Gating it would declare an enforcement site that " +
+		"never runs, which is why it is recorded here instead. Building it means a " +
+		"table, a route and a loader, and then a real site to declare.",
+	FeatureAirGapped: "Air gapped operation is not gated and cannot usefully be. " +
+		"Licence verification is a signature check against keys stamped into the " +
+		"binary, so it needs no network for any installation, licensed or not, and " +
+		"tools/proxysrc exists so that an air gapped user needs no release either. No " +
+		"code path behaves differently when this is granted, so selling it sells " +
+		"something every installation already has. Building it means deciding what an " +
+		"air gapped MODE would refuse that the ordinary one permits, and gating that.",
+}
+
+// Unenforced reports whether this build ships a feature and gates it nowhere.
+//
+// A different question from Shipped, which asks whether the capability exists
+// at all. A feature can be shipped and unenforced, which is the ungated case,
+// and the two have different answers for a buyer: one is a capability we built
+// and do not charge for, the other is a name with nothing behind it.
+func Unenforced(f Feature) bool {
+	_, yes := unenforced[f]
+	return yes
+}
+
+// UnenforcedBecause is why a feature is gated nowhere, or the empty string when
+// it is enforced somewhere. Printed beside the licence licensegen just signed,
+// so the reason reaches whoever is selling it.
+func UnenforcedBecause(f Feature) string { return unenforced[f] }
+
+// UnenforcedFeatures is every feature this build ships and gates nowhere,
+// sorted.
+func UnenforcedFeatures() []Feature {
+	out := make([]Feature, 0, len(unenforced))
+	for f := range unenforced {
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 // AllFeatures is every feature a license can carry, sorted, for the comparison
 // page and for the entitlement matrix test.
 func AllFeatures() []Feature {

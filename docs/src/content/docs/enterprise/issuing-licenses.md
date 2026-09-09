@@ -108,6 +108,26 @@ acting on it, and the generator is the only place the set can be closed.
 Before that check existed, `"features": ["ssoo"]` signed cleanly, verified
 cleanly, reported the license active, and permitted nothing.
 
+## Features that are issued with a warning
+
+`rbac` and `air_gapped` are issued, and the generator prints a warning naming
+them beside the key. Both are real: the custom roles library is written and
+tested, and air gapped operation is a property every installation already has.
+What is not true of either is that the license is what grants it, so withdrawing
+the license would not withdraw the capability, and a renewal conversation that
+treats one of them as a thing being bought is a conversation about nothing.
+
+That is a warning rather than a refusal on purpose. Refusing would refuse a
+customer something they can have, and a refusal placed where somebody has
+already promised the feature is a refusal that acquires an override flag within
+a week. The person who needs the sentence is the one issuing the key, before
+they answer a question about it, which is where it prints.
+
+The two lists are different answers and the generator keeps them apart.
+`billing` and `enterprise_dashboard` are not built, so they cannot be sold.
+These two are built and are not gated, so they can be sold and should not be
+described as something the license turns on.
+
 ## Features that cannot be issued
 
 `billing` and `enterprise_dashboard` are in the set above, and a request naming
