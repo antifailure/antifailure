@@ -75,7 +75,21 @@ jobs:
   engine:
     name: engine
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Raised from 30 when this job gained a step that starts a container and
+    # pulls an image. Measured rather than guessed: the five most recent
+    # successful runs of this job on main took 18m14s, 18m40s, 18m46s, 18m51s
+    # and 20m39s, so the job's own work is about 21 minutes at its worst and
+    # 30 left it nine minutes of headroom for a step whose Go timeout is
+    # twenty.
+    #
+    # The pair matters more than either number. A step whose own timeout is
+    # longer than the job it lives in can never fire: the JOB dies first, and
+    # a job timeout reports `cancelled`, which is the same word a concurrency
+    # kill reports and carries no stack, no test name and no log. A Go
+    # `-timeout` firing inside the budget prints every goroutine's stack and
+    # names the test that hung. So the job is always the outer bound and never
+    # the thing that fires.
+    timeout-minutes: 45
     steps:
       # Full history, for the same reason the secrets job takes it. `just
       # test-tools` below runs claimcheck's own tests, and two of them resolve
@@ -723,7 +737,16 @@ jobs:
         # nothing about where to send a request, and it reaches LocalStack.
         # A separate step because it starts a container and pulls an image,
         # which does not belong inside the tools suite's five minute budget.
-        run: cd tools && AF_EMULATOR_SDK=1 go test ./emulatorcheck/ -count=1 -timeout 40m
+        #
+        # 20m and not the justfile's 40m, and the difference is deliberate. It
+        # has to be strictly less than what this job has left, so that a hang
+        # fails as a Go timeout naming the test rather than as a job timeout
+        # reporting `cancelled`. 21 minutes of measured job plus 20 is under
+        # the 45 above. The recipe keeps 40 because a developer's first run
+        # pulls half a gigabyte over a home connection, which is the slow case
+        # a runner does not have. gatecheck pairs the two on the command and
+        # the package, not on the flags, so they are free to differ here.
+        run: cd tools && AF_EMULATOR_SDK=1 go test ./emulatorcheck/ -count=1 -timeout 20m
         env:
           GOTOOLCHAIN: local
           # An absent daemon fails here rather than skipping, for the same

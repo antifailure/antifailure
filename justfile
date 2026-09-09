@@ -437,6 +437,13 @@ test-tools:
 # time, so it cannot live inside a five minute timeout; and it is gated on
 # AF_EMULATOR_SDK so that a run without a Docker daemon says it did not run
 # rather than reporting ok having skipped itself.
+#
+# 40m here and 20m in ci.yml, on purpose. This is the cold case: a first run on
+# a laptop pulls half a gigabyte over a home connection. A runner has neither
+# that connection nor that much of its job's clock left, and a step whose
+# timeout outlasts the job it lives in can never fire, because the job dies
+# first and reports `cancelled` with no stack and no test name. ci.yml holds a
+# number that fits inside its job and says so there.
 test-emulator:
     cd tools && AF_EMULATOR_SDK=1 go test ./emulatorcheck/ -count=1 -timeout 40m
 
