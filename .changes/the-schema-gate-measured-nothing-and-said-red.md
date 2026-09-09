@@ -24,3 +24,10 @@ failure that was never theirs.
 
 The override is the field's own documented default of 336h, beside the two
 `max_age` overrides already present for the same reason.
+
+The pinned constraint count moves from 593 to 600 in the same change, and it is
+the same defect one layer down. `require` stops at the first failure, so once
+the base manifest was refused the count assertion below it was never reached.
+593 was written down by a lane that could not have run it, and the seven that
+were missing are exactly `load.traffic`: `profile` and `max_age` with a type and
+a maxLength each, plus the block's own type, additionalProperties and required.

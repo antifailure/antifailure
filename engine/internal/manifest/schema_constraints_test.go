@@ -1133,7 +1133,18 @@ func TestSchemaConstraintReport(t *testing.T) {
 // driven by the published document: a bound another lane writes into the
 // schema is kept the moment it lands, and the only thing this constant does is
 // refuse to let one leave without somebody saying so.
-const wantConstraints = 593
+//
+// It is 600 rather than 593 because #315 added load.traffic, whose seven
+// constraints are profile and max_age with a type and a maxLength each, plus
+// the block's own type, additionalProperties and required. 593 was never
+// measured against a working fixture. #315 also omitted the tuning override for
+// load.traffic.max_age, so the base manifest this test builds was itself
+// refused from that commit onward and execution never reached this assertion.
+// The number was then written down by a later lane that could not have run it
+// either. So the pin held a figure nobody had been able to check for as long as
+// the fixture was broken, which is the failure mode of a gate that stops at its
+// first assertion: everything below it looks alive and is unreachable.
+const wantConstraints = 600
 
 // wantExceptions is how many constraints schemabounds.go deliberately does not
 // enforce. Every one is a published row that is wrong rather than a gap, and
