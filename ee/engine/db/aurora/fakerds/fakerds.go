@@ -489,7 +489,7 @@ func (s *Server) verifySignature(r *http.Request, action string) error {
 	if authorization == "" {
 		return fmt.Errorf("%s was sent unsigned", action)
 	}
-	if !strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 ") {
+	if !strings.HasPrefix(authorization, cloudauth.SigV4Algorithm+" ") {
 		return fmt.Errorf("%s was signed with %q rather than Signature Version 4", action, authorization)
 	}
 	stamp := r.Header.Get("X-Amz-Date")

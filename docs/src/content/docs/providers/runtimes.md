@@ -2,7 +2,7 @@
 title: Runtimes
 description: Where an environment's containers actually run, what each runtime declares it can do, and why a runtime says no rather than reporting an address that does not resolve.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 A runtime is where an environment's containers actually run. Everything above

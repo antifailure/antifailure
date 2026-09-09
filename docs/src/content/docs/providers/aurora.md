@@ -2,7 +2,7 @@
 title: Amazon Aurora
 description: Cloning an Aurora PostgreSQL cluster for each environment, what it costs, and the half of the speed claim that is not the clone.
 sidebar:
-  order: 6
+  order: 7
 ---
 
 Aurora can clone a cluster. The clone shares the source's storage volume and
