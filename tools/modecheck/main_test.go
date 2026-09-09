@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// six is the real list, in schema order. The tests pass it explicitly rather
+// modes is the real list, in schema order. The tests pass it explicitly rather
 // than reading the schema, so that a test failure means the rules changed and
 // not that somebody edited the enum.
-var six = []string{"block", "allow", "capture", "mock", "sandbox", "synth"}
+var modes = []string{"block", "allow", "capture", "mock", "emulate", "sandbox", "synth"}
 
 func check(t *testing.T, body string) []finding {
 	t.Helper()
-	return Check("x.tsx", body, six)
+	return Check("x.tsx", body, modes)
 }
 
 func only(t *testing.T, body string) finding {
@@ -47,18 +47,18 @@ func TestTheHistoricalFirewallTitleIsFound(t *testing.T) {
 // fix is a gate somebody switches off.
 func TestTheCorrectedFirewallTitleIsSilent(t *testing.T) {
 	none(t, `title="<strong>Every outbound attempt is recorded.</strong> `+
-		`Six per-host modes, from refusing outright to answering from an offline pack."`)
+		`Seven per-host modes, from refusing outright to answering from an offline pack."`)
 }
 
 func TestAWrongCountIsFound(t *testing.T) {
 	f := only(t, `summary: "The five per-host egress modes and what happens to a request."`)
-	if !strings.Contains(f.why, "There are 6") {
+	if !strings.Contains(f.why, "There are 7") {
 		t.Errorf("the finding should say the real count: %s", f.why)
 	}
 }
 
 func TestTheRightCountIsSilent(t *testing.T) {
-	none(t, `summary: "The six per-host egress modes and what happens to a request."`)
+	none(t, `summary: "The seven per-host egress modes and what happens to a request."`)
 }
 
 // The root cause of eight of the ten historical findings: synth was added to
@@ -66,7 +66,8 @@ func TestTheRightCountIsSilent(t *testing.T) {
 func TestAPromisedSetMissingSynthIsFound(t *testing.T) {
 	f := only(t, "Each host gets a mode: BLOCK refuses with a decision you can read, "+
 		"ALLOW lets it through with a rate limit, SANDBOX swaps in test credentials, "+
-		"CAPTURE records the email into an inbox, and MOCK answers from an offline pack.")
+		"CAPTURE records the email into an inbox, EMULATE answers from an emulator on "+
+		"the provider's own hostname, and MOCK answers from an offline pack.")
 	if !strings.Contains(f.why, "Missing: synth") {
 		t.Errorf("the finding should name what is missing: %s", f.why)
 	}
@@ -75,8 +76,9 @@ func TestAPromisedSetMissingSynthIsFound(t *testing.T) {
 func TestACompletePromisedSetIsSilent(t *testing.T) {
 	none(t, "Each host gets a mode: BLOCK refuses, ALLOW lets it through with a rate "+
 		"limit, SANDBOX swaps in test credentials, CAPTURE records the email into an "+
-		"inbox, MOCK answers from an offline pack, and SYNTH asks a model to invent a "+
-		"response and marks the result unverified.")
+		"inbox, MOCK answers from an offline pack, EMULATE answers from an emulator on "+
+		"the provider's own hostname, and SYNTH asks a model to invent a response and "+
+		"marks the result unverified.")
 }
 
 func TestARuleLabelNamingANonModeIsFound(t *testing.T) {
@@ -133,7 +135,7 @@ func TestTextThatIsNotAClaimIsSilent(t *testing.T) {
 		"correct English": "Unknown destinations are denied and written to the ledger. " +
 			"A denied destination is denied inside the twin.",
 
-		// Code, not prose. The console switches on all six.
+		// Code, not prose. The console switches on all seven.
 		"a switch over the modes": `if (m === "capture" || m === "mock" || m === "synth" || ` +
 			`m === "sandbox") return "warn" as const;`,
 	} {
@@ -146,7 +148,7 @@ func TestTextThatIsNotAClaimIsSilent(t *testing.T) {
 func TestAFencedManifestIsNotAClaim(t *testing.T) {
 	body := "Set the rule:\n\n```yaml\negress:\n  rules:\n    - host: api.stripe.com\n" +
 		"      mode: mock\n    - host: api.resend.com\n      mode: capture\n```\n"
-	if got := Check("x.md", body, six); len(got) != 0 {
+	if got := Check("x.md", body, modes); len(got) != 0 {
 		t.Fatalf("a fenced manifest is data, got %+v", got)
 	}
 }
@@ -172,7 +174,7 @@ func TestModesComeFromTheSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Join(six, ",")
+	want := strings.Join(modes, ",")
 	if strings.Join(got, ",") != want {
 		t.Fatalf("the schema's egress modes are %q, this test expected %q. If the enum "+
 			"really changed, the prose describing it has to change too", strings.Join(got, ","), want)
