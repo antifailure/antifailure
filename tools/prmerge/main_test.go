@@ -1302,3 +1302,61 @@ func TestTheReadbackRunsAgainstAMergedPullRequest(t *testing.T) {
 		}
 	})
 }
+
+// The punctuation rule tells a mention from a use, as the attribution rule
+// already did.
+//
+// BOTH DIRECTIONS, because only the second says the exemption did not disarm
+// the rule. The comment on `fenced` and `code` says both are removed before a
+// text is judged and cites prosecheck's punctuation exemption as its precedent,
+// but only attributionIn stripped them. So this tool refused a pull request
+// whose subject was the double hyphen gate, for four characters inside a code
+// span that CLAUDE.md permits in as many words.
+func TestTheDoubleHyphenRuleExemptsCodeSpansAndStillRefusesProse(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		text    string
+		refused bool
+	}{
+		{
+			name:    "an end of options marker inside a code span",
+			text:    "handovers wrote `git grep \"install(\" -- ee/web web` into it.\n",
+			refused: false,
+		},
+		{
+			name:    "the same marker inside a fenced block",
+			text:    "Run this:\n\n```\ngit grep \"install(\" -- ee/web web\n```\n",
+			refused: false,
+		},
+		{
+			name:    "a double hyphen as punctuation in prose",
+			text:    "The gate was red locally -- and green in CI.\n",
+			refused: true,
+		},
+		{
+			name:    "prose punctuation on a line that also carries a code span",
+			text:    "The `--stdin` flag is fine -- the punctuation is not.\n",
+			refused: true,
+		},
+		{
+			name:    "an em dash in prose",
+			text:    "The gate was red locally — and green in CI.\n",
+			refused: true,
+		},
+		{
+			name:    "a markdown table separator, which is three hyphens",
+			text:    "| a | b |\n| --- | --- |\n| 1 | 2 |\n",
+			refused: false,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			problems := prose("body", c.text)
+			if c.refused && len(problems) == 0 {
+				t.Fatalf("this should have been refused and was not: %q", c.text)
+			}
+			if !c.refused && len(problems) != 0 {
+				t.Fatalf("this should have been allowed and was refused as %q: %q", problems[0], c.text)
+			}
+		})
+	}
+}
