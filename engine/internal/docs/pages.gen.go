@@ -16658,6 +16658,21 @@ rather than held idle between them.
 | ` + "`" + `AF_MAINTENANCE_DATABASE_URL` + "`" + ` | falls back to ` + "`" + `AF_MIGRATION_DATABASE_URL` + "`" + ` | The role that creates and drops partitions. When neither is set, this process logs a warning at startup and does not keep the partitions ahead. Something else must. |
 | ` + "`" + `AF_EVENT_RETENTION_MONTHS` + "`" + ` | unset | Drop event partitions entirely older than this many whole months. Unset keeps everything forever, which is the default because retention is an operator's decision. A value that is not a whole number of months at least 1 stops the process at startup rather than silently keeping everything. |
 | ` + "`" + `AF_EVENT_ARCHIVE_DIR` + "`" + ` | unset | Write a month out as newline delimited JSON here before dropping it. |
+| ` + "`" + `AF_FAILURE_RETENTION_DAYS` + "`" + ` | 30 | How long a group in ` + "`" + `control_plane_failures` + "`" + ` survives past its LAST occurrence, not its first: a failure first seen in March and last seen this morning is the most interesting row on the page, and sweeping by its age would delete exactly the long running failure an operator is trying to date. Applied only when this maintenance pass can run, because the application role is granted no ` + "`" + `DELETE` + "`" + ` on that table on purpose. A value that is not a whole number of days at least 1 stops the process at startup. |
+
+### The store of the control plane's own failures
+
+Both error handlers write what they caught to standard output and to a grouped
+table, so an installation with no log aggregation can still answer "what is
+failing right now" from the operator portal. A row is a fingerprint over the
+declared route, the method, the error class and the driver code, with a count,
+so the table's size is set by the code and not by traffic. It holds at most 500
+groups and never a message, a stack, a payload or an organization. See
+[operations](/docs/self-hosting/operations) for what it can and cannot answer.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `AF_FAILURE_STORE` + "`" + ` | on | ` + "`" + `off` + "`" + `, ` + "`" + `0` + "`" + ` or ` + "`" + `false` + "`" + ` records nothing. The Logs page then says nothing is being recorded, rather than showing an empty list that reads as a healthy day. The default is on because the table is bounded by the code, the writes are one statement per distinct group per ten seconds rather than one per failure, and a healthy installation writes nothing at all. |
 
 ### What a pass does, in order
 
@@ -23726,6 +23741,13 @@ down by ` + "`" + `code` + "`" + ` answers this. One error code across many orga
 platform fault. Many codes in one organization is that organization's
 repository, and is not your problem tonight.
 
+**And what actually failed?** Open **Operations, Logs & Error Explorer** in the
+operator portal. The first card is the control plane's own failures, grouped, in
+a table it writes to its own Postgres. You need no Prometheus, no Grafana and no
+log aggregation to read it, which is the point: without it, a 5xx count going up
+is the whole of what a self hosted installation can see. See [What the control
+plane records about its own failures](#what-the-control-plane-records-about-its-own-failures).
+
 ## What the alerts mean
 
 Every rule in ` + "`" + `observability/alerts/antifailure.rules.yml` + "`" + ` links back here. They
@@ -24126,6 +24148,82 @@ per-caller rate limits did, for a single caller sending across every route at
 once. An operator sizing a real deployment should raise ` + "`" + `AF_POOL_MAX` + "`" + ` to match
 expected concurrent callers rather than assuming the rate limiter is the only
 ceiling in the system.
+
+## What the control plane records about its own failures
+
+The control plane catches every unexpected failure of its own in two handlers,
+one for HTTP and one for tRPC procedures. Both write a line to standard output.
+On a deployment with log aggregation that line is searchable; on a self hosted
+one it is a line in ` + "`" + `docker logs` + "`" + `, which is no count, no first seen and no
+grouping. So the same fields are also written to a table, and the operator
+portal reads it.
+
+**What a row is.** One GROUP, not one occurrence. The fingerprint is the
+declared route key, the HTTP method, the error class name and the driver's own
+code, and it carries a count, the first and last time it was seen, the build
+running at each of those, and the request id of the most recent occurrence.
+
+**What bounds it.** The cardinality of a row's five fields is set by the code
+rather than by traffic: the routes come from the endpoint table that ships in
+the container, the procedure paths from the router, and a class name is a
+JavaScript identifier. A bad day adds occurrences to existing rows and no rows.
+On top of that the table holds at most 500 groups, and the page says out loud
+when it is at that cap rather than quietly showing you fewer failures than are
+happening.
+
+**What it costs in storage.** At most 500 rows of about 200 bytes, so on the
+order of 100 kilobytes, whatever happens. The writes are one statement per
+distinct group per ten seconds rather than one per failure, and an installation
+that is not failing writes nothing at all.
+
+**What never goes in it.** No error message, no stack, no request body, no query
+string, no parameters, no payload, no organization, no user and no email. That
+is a boundary and not an oversight: a query failure from this stack renders as
+the whole statement with its parameters after it, so an error message here can
+carry a tenant's data. It is enforced by the signature of ` + "`" + `recordFailure` + "`" + ` in
+` + "`" + `web/apps/api/src/failures.ts` + "`" + `, which takes five bounded strings and has no
+parameter that could carry one of those values.
+
+**What it therefore cannot tell you.** How many tenants a control plane failure
+touched. Answering that means writing an organization identifier next to a
+failure, which turns a small operational table into tenant data. The Failures by
+code card on the same page answers the per tenant question for the engine side,
+where it is normally asked.
+
+**What you configure.**
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| ` + "`" + `AF_FAILURE_STORE` + "`" + ` | on | Set to ` + "`" + `off` + "`" + ` to record nothing. The page then says nothing is being recorded, rather than showing an empty list that reads as a healthy day. |
+| ` + "`" + `AF_FAILURE_RETENTION_DAYS` + "`" + ` | 30 | How long a group survives past its LAST occurrence. Only applied when the maintenance pass can run. |
+
+Retention rides the daily maintenance pass, which needs
+` + "`" + `AF_MAINTENANCE_DATABASE_URL` + "`" + ` or ` + "`" + `AF_MIGRATION_DATABASE_URL` + "`" + `. The application
+role is deliberately granted no ` + "`" + `DELETE` + "`" + ` on this table, so a role reached
+through a request path cannot erase the record of what it did to get there. With
+no administrative connection string configured, nothing sweeps: the table stays
+bounded by the cap regardless, and the portal says that no retention is in
+force so you read the dates rather than assuming a row is current.
+
+The page updates itself every ten seconds while the tab is in front. It polls
+rather than holding a stream open, because the control plane runs more than one
+replica behind one ingress and a held connection pins you to one of them and
+dies on every deploy, which is exactly when you are watching. A refresh that
+does not land leaves the last good numbers on screen and says how old they are.
+
+Three counters say when the store itself is the thing that is failing, and two
+alert rules watch them:
+` + "`" + `af_control_plane_failures_total{outcome="capped"}` + "`" + ` for a new group refused,
+` + "`" + `{outcome="dropped"}` + "`" + ` for the in-process buffer full, and ` + "`" + `{outcome="failed"}` + "`" + `
+for a write that raised and will be retried. Anything above zero on those means
+the page is counting fewer failures than happened.
+
+### What is still not recorded
+
+Nothing records an exception, a stack trace or a log line from a customer's
+RUN. Those happen in the engine, in an environment the control plane does not
+own, and would need the engine to report them. ` + "`" + `af logs web` + "`" + ` and the run
+outcomes on the same page are what you have for that side.
 
 ## Where the numbers come from
 
