@@ -1576,7 +1576,8 @@ fuzz-engine seconds="60":
 # refuses a changed path no generator claims, and can do that because it runs
 # on a clean checkout. The property either way is the same: what is generated
 # matches what it is generated from.
-# docsembed runs LAST of these on purpose.
+# docsembed runs LAST of these on purpose, and the order now lives in the
+# ledger in tools/gendrift rather than in this recipe.
 #
 # It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
 # and six of those pages are themselves generated: errors.md by errgen,
@@ -1587,28 +1588,21 @@ fuzz-engine seconds="60":
 # every generator just reported success. Measured rather than reasoned: with
 # docsembed before schemadoc, a one line schema edit left pages.gen.go with a
 # different checksum than a second docsembed produced. After it, the two
-# match.
+# match. ci.yml ran docsembed FOURTH of twelve while this recipe ran it last,
+# which is the same disagreement as the missing generators and was invisible
+# for the same reason.
 _generated:
     #!/usr/bin/env bash
     set -euo pipefail
-    go run ./tools/errgen
-    go run ./tools/lintgen
-    go run ./tools/proxysrc
-    go run ./tools/schemadoc .
-    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
-    # The engine enforces the schema's own bounds at parse time, and go:embed
-    # cannot reach outside the engine module, so it embeds a copy. A stale copy
-    # would enforce yesterday's contract while the site published today's.
-    cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json
-    (cd engine && go test ./internal/policy -update-vectors)
-    (cd engine && go test ./internal/mockpack -update-vectors)
-    (cd engine && go test ./internal/webhook -update-vectors)
-    (cd engine && go test ./internal/cli -update-reference)
-    (cd engine && go test ./internal/events -update-schema)
-    go run ./tools/eventcheck -freeze .
-    (cd engine && go test ./internal/masking -update-transforms)
-    (cd engine && go test ./internal/hud -update-frames)
-    go run ./tools/docsembed
+    # The generators are NOT written out here any more, and that is the point.
+    # They were written out three times: in tools/gendrift's ledger, here, and
+    # in ci.yml. The ledger named fifteen, this recipe ran fifteen, and ci.yml
+    # ran twelve, so three generated files could only ever be compared by
+    # somebody running this command on a laptop. One of them,
+    # engine/internal/manifest/manifest.v1.json, sat stale on main for thirteen
+    # commits with CI green throughout. Both callers run the ledger now, so the
+    # two lists cannot disagree because there is one list.
+    go run ./tools/gendrift -generate .
     # The OpenAPI artifact is generated too, and its generator is TypeScript
     # rather than Go. Its own --check mode is the comparison, so it is run in
     # the same form and the same directory CI runs it in: a gate is the command
@@ -1674,7 +1668,8 @@ capacityplan cpu memory manifest="antifailure.yaml":
       -node-cpu "{{cpu}}" -node-memory "{{memory}}"
 
 # Regenerate and keep the result.
-# docsembed runs LAST of these on purpose.
+# docsembed runs LAST of these on purpose, and the order now lives in the
+# ledger in tools/gendrift rather than in this recipe.
 #
 # It EMBEDS every documentation page into engine/internal/docs/pages.gen.go,
 # and six of those pages are themselves generated: errors.md by errgen,
@@ -1685,25 +1680,16 @@ capacityplan cpu memory manifest="antifailure.yaml":
 # every generator just reported success. Measured rather than reasoned: with
 # docsembed before schemadoc, a one line schema edit left pages.gen.go with a
 # different checksum than a second docsembed produced. After it, the two
-# match.
+# match. ci.yml ran docsembed FOURTH of twelve while this recipe ran it last,
+# which is the same disagreement as the missing generators and was invisible
+# for the same reason.
 generate:
-    go run ./tools/errgen
-    go run ./tools/lintgen
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
     npm --prefix web run openapi --workspace apps/api
-    go run ./tools/proxysrc
-    go run ./tools/schemadoc .
-    go run ./tools/notices -out THIRD_PARTY_NOTICES.md
-    cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json
-    cd engine && go test ./internal/policy -update-vectors
-    cd engine && go test ./internal/mockpack -update-vectors
-    cd engine && go test ./internal/webhook -update-vectors
-    cd engine && go test ./internal/cli -update-reference
-    cd engine && go test ./internal/events -update-schema
-    go run ./tools/eventcheck -freeze .
-    cd engine && go test ./internal/masking -update-transforms
-    cd engine && go test ./internal/hud -update-frames
-    go run ./tools/docsembed
+    # Every Go generator, from the one ledger, in the one order. It is not a
+    # list here for the same reason it is not a list in ci.yml: three copies of
+    # it disagreed and nothing could say so.
+    go run ./tools/gendrift -generate .
 
 # This machine's own credential store, against the real thing.
 #

@@ -62,8 +62,14 @@ const cmd = "(?:^|[\\s;&|(])"
 // became invisible here the day it started deriving its projects from the tree
 // instead of naming them. A gate this cannot see is a gate it silently stops
 // pairing, which is the failure this tool exists to prevent.
+//
+// `\.{1,2}/tools/` because ci.yml spells one of them `cd engine && go run
+// ../tools/scanrepo ..`. Against `\./tools/` that line matched nothing at all,
+// so the only credential scan this repository runs was invisible to the tool
+// whose job is to notice a gate on one side and not the other. A gate this
+// cannot see is a gate it silently stops pairing.
 var gatePatterns = []*regexp.Regexp{
-	regexp.MustCompile(cmd + `go run \./tools/(\w+)`),
+	regexp.MustCompile(cmd + `go run \.{1,2}/tools/(\w+)`),
 	regexp.MustCompile(cmd + `go (test|vet|build) ([^\s|;&]+)`),
 	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?(test|tsc)\b`),
 	regexp.MustCompile(cmd + `(npm|npx) [\w\s./"$-]*?run ([\w:.-]+)`),
@@ -190,7 +196,11 @@ func main() {
 		case pairedExactly:
 			// Nothing to say. This is the ordinary case.
 		case pairedByRuntimeDir:
-			loose = append(loose, key+"  <-  "+where)
+			loose = append(loose, key+"  <-  justfile: "+where+
+				"\n        (the justfile works its directory out at run time, so the directory was not compared)")
+		case pairedByWholeModule:
+			loose = append(loose, key+"  <-  justfile: "+where+
+				"\n        (the wider target runs this package, so the pattern was not compared)")
 		default:
 			missing = append(missing, gapFor(ciGates[key].gate, key, justGates, reachable))
 		}
@@ -205,12 +215,71 @@ func main() {
 		}
 	}
 
+	// The same comparison the other way round, which is the direction the
+	// failure that earned it lived in.
+	//
+	// `just _generated` ran `cp schemas/manifest.v1.json
+	// engine/internal/manifest/manifest.v1.json` and ci.yml did not, so the
+	// embedded schema could only ever be compared by somebody running the
+	// gate on a laptop. It sat stale on main for thirteen commits. Both sides
+	// reported under the words "generated files are current", and this tool,
+	// which exists precisely to fail the build when the local recipe and the
+	// CI gate disagree, could not see it: every comparison here started from a
+	// CI gate and asked whether the justfile covered it, so a gate the
+	// justfile ran and no workflow ran was not a question anybody asked.
+	//
+	// It is worth failing over for the reason the forward direction is worth
+	// failing over, pointed the other way. CI is the mandatory run; `just
+	// gate` is the one a contributor may or may not remember. A gate only the
+	// justfile runs does not block a pull request, so the property it guards
+	// is guarded by habit. Three of them were in that state when this was
+	// written, and one of them had already let a stale file onto main.
+	var unenforced []gap
+	var looseReverse []string
+	usedCIExemption := map[string]bool{}
+	for _, key := range sortedEntries(justGates) {
+		e := justGates[key]
+		if !anyReachable(e.blocks, reachable) {
+			continue
+		}
+		if _, ok := exemptFromCI[key]; ok {
+			usedCIExemption[key] = true
+			continue
+		}
+		switch how, where := pairedWith(e.gate, ciGates, nil); how {
+		case pairedExactly:
+			// Nothing to say. This is the ordinary case.
+		case pairedByRuntimeDir:
+			looseReverse = append(looseReverse, key+"  ->  workflow: "+where+
+				"\n        (a directory worked out at run time, so the directory was not compared)")
+		case pairedByWholeModule:
+			looseReverse = append(looseReverse, key+"  ->  workflow: "+where+
+				"\n        (the wider target runs this package, so the pattern was not compared)")
+		default:
+			unenforced = append(unenforced, gap{
+				ci:     key + " in " + strings.Join(e.blocks, ", "),
+				reason: reverseReason(e.gate, ciGates),
+			})
+		}
+	}
+	// An exemption in the other map goes stale the same way and for the same
+	// reason: it reads as a considered decision about a gate `just gate` no
+	// longer runs, and it would silently cover the next gate to take the name.
+	var staleCI []string
+	for _, g := range sortedCIExemptions() {
+		if !usedCIExemption[g] {
+			staleCI = append(staleCI, g)
+		}
+	}
+
 	// The `gate` recipe has to actually invoke the individual recipes, or the
 	// justfile could define every gate and run none of them.
 	uncalled := uncalledByGate(recipes, reachable)
 
-	if len(missing) == 0 && len(uncalled) == 0 && len(stale) == 0 {
-		report(len(workflows.paths), ciGates, len(usedExemption), loose)
+	if len(missing) == 0 && len(unenforced) == 0 && len(uncalled) == 0 &&
+		len(stale) == 0 && len(staleCI) == 0 {
+		report(len(workflows.paths), ciGates, len(usedExemption), loose,
+			len(justGates), len(usedCIExemption), looseReverse)
 		return
 	}
 
@@ -225,6 +294,18 @@ func main() {
 			"in engine and in tools are two gates, and so is `npm test` in web and in\n"+
 			"ee/web. Add a recipe that runs it where CI runs it, and call it from `gate`.\n")
 	}
+	if len(unenforced) > 0 {
+		fmt.Fprintf(os.Stderr, "\ngatecheck: `just gate` runs %d %s no pull request workflow runs:\n",
+			len(unenforced), plural(len(unenforced), "gate", "gates"))
+		for _, u := range unenforced {
+			fmt.Fprintf(os.Stderr, "  %s\n", u.ci)
+			fmt.Fprintf(os.Stderr, "      %s\n", u.reason)
+		}
+		fmt.Fprintf(os.Stderr, "\nA gate only the justfile runs does not block a pull request. Add it to a\n"+
+			"workflow that runs on one, or add it to exemptFromCI with the reason it\n"+
+			"cannot run there. `cp schemas/manifest.v1.json engine/...` was in exactly\n"+
+			"this state and let a stale file sit on main for thirteen commits.\n")
+	}
 	if len(stale) > 0 {
 		fmt.Fprintf(os.Stderr, "\ngatecheck: these gates are exempt from `just gate` but no workflow runs them:\n")
 		for _, g := range stale {
@@ -232,6 +313,14 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "\nRemove the exemption. A reason to skip a gate that is gone "+
 			"describes nothing, and it would quietly cover the next gate to take that name.\n")
+	}
+	if len(staleCI) > 0 {
+		fmt.Fprintf(os.Stderr, "\ngatecheck: these gates are exempt from CI but `just gate` does not run them:\n")
+		for _, g := range staleCI {
+			fmt.Fprintf(os.Stderr, "  %s\n", g)
+		}
+		fmt.Fprintf(os.Stderr, "\nRemove the exemption. A reason why a gate cannot run in CI describes "+
+			"nothing\nonce nothing runs it locally either.\n")
 	}
 	if len(uncalled) > 0 {
 		fmt.Fprintf(os.Stderr, "\ngatecheck: these recipes exist and `just gate` never calls them:\n")
@@ -260,21 +349,48 @@ func hasRunStep(source string) bool { return runStep.MatchString(source) }
 // never held to the second, so the line claimed a property it did not test.
 // This one names the number of workflows read, the fact that the directory is
 // part of the pairing, the gates that are exempt rather than paired, and the
-// gates whose directory could not be compared because the justfile works it
-// out at run time. A reader should not be able to come away believing anything
-// stronger than what ran.
-func report(workflows int, ciGates map[string]*entry, exempt int, loose []string) {
+// gates whose directory or whose package pattern could not be compared, and
+// the same three numbers for the reverse direction. A reader should not be
+// able to come away believing anything stronger than what ran.
+func report(workflows int, ciGates map[string]*entry, exempt int, loose []string,
+	justGates, ciExempt int, looseReverse []string) {
 	fmt.Printf("gatecheck: %d gates in %d pull request workflows.\n", len(ciGates), workflows)
 	fmt.Printf("  %d paired by command and directory to a recipe `just gate` calls.\n",
 		len(ciGates)-exempt-len(loose))
 	if len(loose) > 0 {
-		fmt.Printf("  %d paired by command only, against a justfile command whose directory\n"+
-			"    is computed at run time, so for these the directory was not compared:\n", len(loose))
+		fmt.Printf("  %d paired more weakly than by command AND directory, and each says\n"+
+			"    which part of it was not compared:\n", len(loose))
 		for _, l := range loose {
 			fmt.Printf("      %s\n", l)
 		}
 	}
 	fmt.Printf("  %d exempt by name in exemptFromGate, with the reason recorded there.\n", exempt)
+	fmt.Printf("And the other way: %d gates in the justfile, of which the ones `just gate`\n"+
+		"  reaches all run in a pull request workflow, bar %d exempt by name in\n"+
+		"  exemptFromCI. That direction is separate because a gate only the justfile\n"+
+		"  runs does not block a pull request.\n", justGates, ciExempt)
+	if len(looseReverse) > 0 {
+		fmt.Printf("  %d of those paired more weakly than by command AND directory:\n", len(looseReverse))
+		for _, l := range looseReverse {
+			fmt.Printf("      %s\n", l)
+		}
+	}
+}
+
+// reverseReason says HOW a justfile gate is not covered by CI, in the same
+// three shapes the forward direction uses, so that a failure names the thing to
+// go and look at rather than only the thing that is missing.
+func reverseReason(g gate, ciGates map[string]*entry) string {
+	var elsewhere []string
+	for _, k := range sortedEntries(ciGates) {
+		if ciGates[k].gate.same(g) {
+			elsewhere = append(elsewhere, k)
+		}
+	}
+	if len(elsewhere) > 0 {
+		return "the workflows run this only in " + strings.Join(elsewhere, ", ")
+	}
+	return "no workflow that runs on a pull request runs this"
 }
 
 // pairing is how a CI gate was matched on the justfile side.
@@ -284,6 +400,7 @@ const (
 	notPaired pairing = iota
 	pairedExactly
 	pairedByRuntimeDir
+	pairedByWholeModule
 )
 
 // pairedWith looks for the justfile command that covers a CI gate.
@@ -294,15 +411,15 @@ const (
 // tsconfig files in the tree rather than naming them. That match is real
 // coverage and refusing it would report drift that does not exist, but it is
 // weaker than the other, so it is counted and printed rather than folded in.
-func pairedWith(g gate, justGates map[string]*entry, reachable map[string]bool) (pairing, string) {
-	if e, ok := justGates[g.String()]; ok && anyReachable(e.blocks, reachable) {
+func pairedWith(g gate, others map[string]*entry, reachable map[string]bool) (pairing, string) {
+	if e, ok := others[g.String()]; ok && anyReachable(e.blocks, reachable) {
 		return pairedExactly, ""
 	}
 	if g.dir == "" {
 		return notPaired, ""
 	}
-	for _, key := range sortedEntries(justGates) {
-		e := justGates[key]
+	for _, key := range sortedEntries(others) {
+		e := others[key]
 		if !e.gate.same(g) || !anyReachable(e.blocks, reachable) {
 			continue
 		}
@@ -310,8 +427,28 @@ func pairedWith(g gate, justGates map[string]*entry, reachable map[string]bool) 
 		// be this one, or CI's is and the justfile's is a literal. Either way
 		// there is nothing left to compare.
 		if e.gate.dir == unknownDir || g.dir == unknownDir {
-			return pairedByRuntimeDir, "justfile: " + key + ", in " + strings.Join(e.blocks, ", ")
+			return pairedByRuntimeDir, key + ", in " + strings.Join(e.blocks, ", ")
 		}
+	}
+	// Last: `go test ./...` in a directory runs every package under it, so it
+	// covers `go test ./internal/cli` in the same directory. `just docexamples`
+	// is that case, and CI's engine job runs the whole module.
+	//
+	// A third tier rather than a normalization, because normalizing the two
+	// targets to one key would say they are the SAME gate in both directions,
+	// which they are not: the narrow one does not cover the wide one. It is
+	// counted and printed for the same reason pairedByRuntimeDir is. It is
+	// real coverage and weaker than an exact match, and a reader should be
+	// able to see which of the two they were given.
+	for _, key := range sortedEntries(others) {
+		e := others[key]
+		if e.gate.kind != "gotest" || g.kind != "gotest" {
+			continue
+		}
+		if e.gate.arg != "./..." || e.gate.dir != g.dir || !anyReachable(e.blocks, reachable) {
+			continue
+		}
+		return pairedByWholeModule, key + ", in " + strings.Join(e.blocks, ", ")
 	}
 	return notPaired, ""
 }
@@ -355,7 +492,17 @@ func plural(n int, one, many string) string {
 	return many
 }
 
+// anyReachable reports whether any of the blocks a gate was found in is one
+// `just gate` runs.
+//
+// A nil set means the question does not apply, which is the CI side: a step in
+// a workflow that runs on a pull request runs, and there is no equivalent of a
+// recipe nothing calls. Returning false there would make every CI gate look
+// unreachable and the reverse comparison would report the entire justfile.
 func anyReachable(blocks []string, reachable map[string]bool) bool {
+	if reachable == nil {
+		return true
+	}
 	for _, b := range blocks {
 		if reachable[b] {
 			return true
@@ -427,7 +574,13 @@ func gatesIn(raw, dir string) []gate {
 			// "npx", "gofmt" or "node".
 			whole := strings.TrimLeft(m[0], " \t;&|($")
 			switch {
-			case strings.HasPrefix(whole, "go run ./tools/"):
+			// Both spellings, because ci.yml runs one of these as
+			// `cd engine && go run ../tools/scanrepo ..`. Testing only the
+			// `./` prefix here sent that line to the npm branch below, which
+			// reads m[2] out of a match that has one group, and the tool
+			// panicked rather than reporting anything at all.
+			case strings.HasPrefix(whole, "go run ./tools/"),
+				strings.HasPrefix(whole, "go run ../tools/"):
 				out = append(out, gate{kind: "tool", arg: m[1]})
 			case strings.HasPrefix(whole, "go test"):
 				out = append(out, gate{"gotest", normalizeTarget(m[2]), goDir(raw, dir)})
@@ -897,6 +1050,64 @@ var exemptFromGate = map[string]string{
 		"It runs on every pull request touching infra/ in infra.yml, against both " +
 		"the staging and the production plan produced there, and only when those " +
 		"plans were made against the real state.",
+}
+
+// exemptFromCI lists gates that `just gate` runs and that no pull request
+// workflow runs, each with the reason it cannot.
+//
+// The bar is the mirror of exemptFromGate's and it is just as high. A gate here
+// is one a pull request is NOT held to, so the property it guards is guarded by
+// whoever remembered to run the command. What qualifies is a gate whose answer
+// is not a function of what CI has: a check on a developer's own working copy,
+// or one that needs an artifact CI has no way to produce inside the run.
+//
+// An exemption naming a gate `just gate` does not run fails the build. See the
+// loop that fills `staleCI`.
+var exemptFromCI = map[string]string{
+	"tool installcheck": "" +
+		"On CI it could only ever be a tautology. tools/installcheck compares a " +
+		"working copy's node_modules against the lockfile beside it, and every " +
+		"job that has a node_modules got it from `npm ci` against that same " +
+		"lockfile minutes earlier, so the answer on a runner is yes by " +
+		"construction. It runs with --drift-only in `gate` for the same reason: " +
+		"a workspace nobody has installed is reported and does not fail, and on a " +
+		"fresh checkout that is all of them. " +
+		"The failure it exists for is a laptop's, not a runner's: a week of www " +
+		"work was verified with www/node_modules holding Next 15.5.23 against a " +
+		"lockfile pinning 16.3.3, and every build, every SEO assertion and a whole " +
+		"prose sweep answered in good faith about the wrong major version. That " +
+		"cannot happen on a runner that installs from the lockfile each time. " +
+		"What IS a function of the tree is whether the lockfile and package.json " +
+		"agree, and CI checks that on every job by running `npm ci`, which fails " +
+		"when they have drifted.",
+
+	"tool coverage": "" +
+		"Its INPUT cannot be produced inside a pull request run, and that is a " +
+		"cost decision rather than a property of the tree, so this exemption is " +
+		"recording a real hole rather than explaining it away. " +
+		"tools/coverage reads .gate-reports/coverage.out, which `just " +
+		"coverage-profile` writes by running the whole engine suite with " +
+		"-coverpkg over the module, against a Docker daemon and a Postgres, for " +
+		"the better part of an hour. No pull request workflow produces that " +
+		"profile, so no pull request workflow can run this, and the per package " +
+		"thresholds in the build plan's C.5 are therefore NOT enforced on a " +
+		"branch: they are enforced by whoever runs `just coverage-profile` and " +
+		"`just coverage` by hand. " +
+		"Wiring it in means paying for that hour on every push, which is a " +
+		"maintainer's call and not this tool's. Until somebody makes it, this " +
+		"entry is the only place that says out loud which gate a green pull " +
+		"request does not include.",
+}
+
+// sortedCIExemptions keeps the failure output stable, as sortedExemptions does
+// for the other direction.
+func sortedCIExemptions() []string {
+	out := make([]string, 0, len(exemptFromCI))
+	for k := range exemptFromCI {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // workflowSet is the workflows that run on a pull request, kept with their
