@@ -364,6 +364,20 @@ func (s *Sidecar) decide(req *http.Request) (*http.Response, error) {
 	out.URL.Host = s.Emulator
 	out.Host = req.Host
 
+	// One header ADDED, and it is the standard one every TLS terminating
+	// proxy adds. The application spoke https; this hop to the emulator is
+	// plain http because the emulator has no certificate for a name it does
+	// not own, and without being told, an API that builds a URL for the
+	// client to call next builds an http one.
+	//
+	// Measured in CI on 2026-09-09. With SQS_ENDPOINT_STRATEGY=dynamic the
+	// emulator returned the right HOST and the wrong SCHEME, so the Node
+	// application resolved the name correctly and then died with `connect
+	// ECONNREFUSED 172.18.0.3:80` against a router that answers on 443. The
+	// name was right and the port was wrong, which is why this is the third
+	// different error in three runs rather than the same one.
+	out.Header.Set("X-Forwarded-Proto", "https")
+
 	client := &http.Client{
 		Timeout: 5 * time.Minute,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
