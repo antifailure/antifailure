@@ -141,7 +141,7 @@ func TestAReachProbeCarriesNoCredential(t *testing.T) {
 		ok, why := source.Available(licensed)
 		require.True(t, ok, why)
 
-		seen := probeHeaders(t, server, "secretsmanager.ListSecrets")
+		seen := probeHeaders(t, server, awsListProbe)
 		require.Empty(t, seen.Get("Authorization"),
 			"the probe signed itself, so a mistyped endpoint receives a usable signature")
 	})
