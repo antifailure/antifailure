@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1633,41 +1632,50 @@ func unpinnedImages(name, body string) []imageFinding {
 }
 
 // filesThatStartContainers is every file in this repository that can start
-// one. The workflows, the justfile, and every shell script, found by walking
-// rather than by a list, so a new script is covered on the day it is written
-// rather than on the day somebody remembers to add it here.
+// one: the workflows, the justfile, and every shell script.
+//
+// TRACKED FILES ONLY, and that is the whole of what changed here. This walked
+// the WORKING TREE when it landed in #338, which meant it read files git has
+// never heard of. The harness that mutation tested this very gate is an
+// untracked shell script in a lane's worktree, it carries `postgres:17-alpine`
+// in a variable and a deliberately wrong digest in another, and the gate read
+// both and refused a tree whose every real declaration was pinned.
+//
+// CI WAS GREEN THROUGH ALL OF IT, which is the half worth keeping. A clean
+// checkout has no scratch file, so the required contexts saw nothing wrong.
+// The only person who could ever hit it is somebody running `just gate` with a
+// scratch script open, and from there it reads as the gate being broken rather
+// than as the gate looking at the wrong thing. That is how a real gate gets
+// switched off, and this one is four commits old.
+//
+// What this repository declares is what git tracks. An untracked file is not a
+// declaration, it is somebody's afternoon.
 func filesThatStartContainers(t *testing.T) []string {
 	t.Helper()
 	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	cmd := exec.Command("git", "ls-files", "-z")
+	cmd.Dir = root
+	listed, err := cmd.Output()
 	if err != nil {
-		t.Fatal(err)
+		// Not a skip. "I could not look" and "there was nothing to find" are
+		// different answers and only one of them is a pass, so a listing this
+		// gate cannot obtain fails it.
+		t.Fatalf("git ls-files could not enumerate the tree, so nothing was checked: %v", err)
 	}
-	files = append(files, filepath.Join(root, "justfile"))
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	var files []string
+	for _, name := range strings.Split(strings.TrimRight(string(listed), "\x00"), "\x00") {
+		switch {
+		case strings.HasPrefix(name, ".github/workflows/") && strings.HasSuffix(name, ".yml"),
+			name == "justfile",
+			strings.HasSuffix(name, ".sh"):
+			files = append(files, filepath.Join(root, filepath.FromSlash(name)))
 		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "node_modules", ".git", "testdata", "dist", "build":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), ".sh") {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	// A glob or a walk that quietly stops matching reads exactly like a clean
-	// tree, which is the failure this repository keeps finding in its own
+	// A listing that quietly stops matching reads exactly like a clean tree,
+	// which is the failure this repository keeps finding in its own
 	// instruments.
 	if len(files) < 25 {
-		t.Fatalf("only %d files were found to scan; the walk has probably stopped matching", len(files))
+		t.Fatalf("only %d files were found to scan; the listing has probably stopped matching", len(files))
 	}
 	return files
 }
@@ -1896,5 +1904,36 @@ func TestAPortMappingIsNotAContainerImage(t *testing.T) {
 	// And the boundary has not cost the pattern the thing it is for.
 	if got := unpinnedImages("ci.yml", "        image: postgres:17-alpine\n"); len(got) != 1 {
 		t.Errorf("a real moving tag stopped being found: %v", got)
+	}
+}
+
+func TestAnUntrackedScratchFileIsNotScanned(t *testing.T) {
+	// The defect this gate had against itself for four commits, found by the
+	// mutation harness that was testing it rather than by anything in the
+	// tree. The harness is an untracked shell script naming a moving tag; the
+	// walk read it and the gate refused a fully pinned repository, while every
+	// required context stayed green because a clean checkout has no such file.
+	//
+	// The fixture is a real `docker run` rather than an assignment, because an
+	// earlier version of this test used `IMAGE=postgres:17-alpine` on its own
+	// line, which the checker correctly does not refuse: a variable assignment
+	// is not a command and the image may still be pinned where it is used. The
+	// second assertion is what caught that, and it is why it is here.
+	scratch := filepath.Join("..", "..", ".gatecheck-scratch-for-a-test.sh")
+	body := "#!/usr/bin/env bash\ndocker run -d --name x postgres:17-alpine\n"
+	if err := os.WriteFile(scratch, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(scratch) })
+
+	for _, f := range filesThatStartContainers(t) {
+		if filepath.Base(f) == ".gatecheck-scratch-for-a-test.sh" {
+			t.Fatalf("an untracked scratch file was scanned: %s", f)
+		}
+	}
+	// And it really would have been refused had it been tracked, so the
+	// assertion above is about tracking and not about a harmless fixture.
+	if got := unpinnedImages("scratch.sh", body); len(got) == 0 {
+		t.Error("the fixture does not name a moving tag, so this test proves nothing")
 	}
 }
