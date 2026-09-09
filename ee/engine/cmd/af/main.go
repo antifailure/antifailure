@@ -215,6 +215,19 @@ func main() {
 	// definition of "cloud" here rather than a list of vendor names somebody
 	// has to keep in step.
 	//
+	// NOTHING IN THIS REPOSITORY CATCHES THE WRONG ORDER, which is why this
+	// paragraph exists rather than the sentence above being left to carry it.
+	// A registration placed BELOW this call is silently ungated: the binary
+	// compiles, go vet is clean, every symbol still appears exactly once with
+	// its import so a keep both merge resolution reviews as correct, and the
+	// registration tests still pass, because the provider genuinely IS
+	// registered. Only the gating is gone, and no gate here can see the
+	// difference between the two orders. It was found resolving a conflict
+	// between a new provider's registration and this call, where the right
+	// answer and a licence bypass were both green on every instrument in the
+	// tree. TestTheCloudGateWrapsLast is the only thing that says no, so put
+	// a new registration ABOVE this call.
+	//
 	// Unconditional rather than under a licence, for the reason the policy
 	// hook above gives: the gate asks the licence per call, so a licence that
 	// lapses mid process stops enforcement without a restart, and gating the
