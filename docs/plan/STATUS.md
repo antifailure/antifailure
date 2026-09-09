@@ -27,7 +27,7 @@ other word and on a `mixed` row whose prose names fewer than two states.
 README described `proven` as "it runs and its tests pass in CI"; this table has
 always described it as exercised end to end against the real thing. The
 difference is not academic. Nothing in `.github/` sets `AF_NEON_API_KEY`,
-`AF_SUPABASE_ACCESS_TOKEN` or the Database Lab credentials, so the suites
+`AF_SUPABASE_TOKEN` or the Database Lab credentials, so the suites
 behind 3.7, 3.8 and 3.9 skip on every pull request, and under README's wording
 all three rows were false while under this one all three are true. This table's
 wording is the one that survives, because a suite that needs a real account
@@ -461,7 +461,7 @@ environment ending at the right sequence, and `af env pull` reading it back.
 | 13.4 Advanced access control and approvals | proven | The role model and scopes, approval policies that one person cannot complete alone, and the model as a reviewable file with a dry run that refuses a file leaving a required approval unreachable. |
 | 13.2 Single sign-on (SAML 2.0 and OIDC) | mixed | Signature verification with the negative-vector suite green: a tampered assertion, a response signed by an unrelated key, that same key shipping its own certificate in KeyInfo, both classic signature-wrapping shapes, a stray signature, RSA-SHA1, a SHA-1 digest, an XPath transform, a DOCTYPE, and a connection with no certificate are all refused, with three positive controls so the file cannot pass vacuously. OIDC refuses `alg: none` and HS256 signed with the provider's own published public key. Audience, recipient, validity window with skew in both directions, replay, and all four InResponseTo orderings. Proven end to end through the real routes against a real Postgres: a new person signs in and becomes a member, a provider-initiated assertion cannot be replayed, a failed signature does not burn the login state, an unverified domain is refused, the seat limit refuses the addition and evicts nobody, and break-glass spends a code once and is audited. `written` and not `proven` because it has not yet run against a real identity provider. A conformance suite for one exists, gated behind `AF_KEYCLOAK_URL`, and on first attempting to run it I found it could never have passed: it documented a plain HTTP provider, which the product correctly refuses in two places, and the harness stubbed the fetch the token exchange needs. Both are fixed and `ee/web/sso/test/keycloak-up.sh` now boots a provider over TLS, but the row stays `written` until somebody has watched that suite go green.  PROVEN AGAINST MICROSOFT ENTRA ID on 2026-08-28. A real person signed in through a real Entra tenant to a control plane published on the internet: the assertion Entra issued was verified against Entra's own signing certificate, recorded in the replay cache (sso_assertions_seen), and produced a session and a member with identity_source `sso`. OIDC against a hosted provider is still only exercised against a fixture, so the OIDC half of this row rests on the offline suite. THE RUN FOUND THREE DEFECTS NO FIXTURE COULD HAVE. (1) The product could not read Entra's SAML metadata AT ALL: Microsoft serves federationmetadata.xml with a UTF-8 byte order mark, and a parser that makes every warning fatal reported Microsoft's document as malformed. (2) A person deprovisioned by SCIM who then signed in through SAML got a SECOND users row, because the lookup joins through `members` and they had none, after which the directory managed one row and sign-in the other and an Entra offboard reported Success while the person kept a live session. (3) Deactivation only revoked on the active-to-inactive transition, so a repeat deactivation was a silent no-op, and Entra answers a repeat with `RedundantSoftDelete` and never sends the call that would have cleaned up. All three fixed, with migration 0014 and ee/web/sso/test/seam.test.ts, which is the first suite here to register BOTH extensions because every one of these lived between them. |
 | 13.3 SCIM 2.0 provisioning | mixed | Every test runs against the real server and real policies. One per ordering: created then updated, updated then created, deleted then re-added, deleted twice, and group membership arriving before the user (kept as a pending reference and resolved when they appear). All three provider deactivation shapes: Okta's pathless replace, Entra ID's capitalised op with the string `"False"`, and Entra ID's array-wrapped value. `members[value eq "id"]` removes one member and not all of them. Filters are parsed to a syntax tree and never concatenated into SQL, with a closed attribute list and escaped LIKE wildcards; an unanswerable filter is refused rather than ignored. Deprovisioning deletes the membership and revokes live sessions in the same transaction. `proven` against the real control plane, the real server and the real row level policies, and `written` for the same reason as 13.2: no run against a hosted provider yet.  PROVEN AGAINST MICROSOFT ENTRA ID on 2026-08-28, not against a fake: a real tenant (ec62bd72-7eb4-4593-9450-bec9577e267a) with a real enterprise application pushed a real user over the internet to this control plane, and both directions were verified in the database rather than read off a status code. CREATE: Entra reported EntryExportAdd Success, "User was created in customappsso", and the SCIM resource id it recorded as its target (ff2d4cbf-1458-4d70-abab-51a86e4d23bc) is the id this server generated; the row landed with identity_source `scim`, and the address Entra sent capitalised came back lowercased, which is the normalisation the code was written for and had only ever been shown against a fixture. DEPROVISION: removing the application assignment produced EntryExportUpdateSoftDelete Success, and the effect was structural rather than cosmetic, the membership row DELETED and every session revoked, not a flag set. Entra also READ back through the filter endpoint ("Retrieved 'virrsanghavi@gmail.com' from customappsso"), which is the half a suite that only writes never exercises. Reproduce with ee/web/sso/test/live-server.ts behind a tunnel. Okta remains unrun, so this row rests on one hosted provider, not two. |
-| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. Two of the four are `proven` against the real service. HashiCorp Vault: every conformance behaviour against a real Vault in a container, nothing skipped, on every pull request. Azure Key Vault: the same suite against a real vault in a real subscription, nothing skipped, and the first live run failed and found a real fault described below. AWS is `mixed`: its Signature Version 4 implementation is `proven` against the worked example AWS publishes, and everything needing an account is `written`. Google is `written`: the service account assertion is signed with a real RSA key and verified with its public half, but it has never been run against Secret Manager. See the note below. |
+| 13.8 Enterprise secret stores | mixed | The contract, the conformance suite, and four adapters. Two of the four are `proven` against the real service. HashiCorp Vault: every conformance behaviour against a real Vault in a container, nothing skipped, on every pull request. Azure Key Vault: the same suite against a real vault in a real subscription, nothing skipped, and the first live run failed and found a real fault described below. AWS and Google are `written`. Each now drives the whole conformance suite against a local server speaking its documented wire format, and neither has ever spoken to the real service. AWS had no conformance run of any kind until 2026-09-09, which is the direct reason its `Reach` reported an unreachable store as usable; its Signature Version 4 implementation remains `proven` against the worked example AWS publishes, and Google's service account assertion remains `proven` by signing with a real RSA key and verifying with its public half. Live harnesses for both now exist and NEITHER HAS RUN. See the note below. |
 | 13.12 Compliance packs | proven | SOC 2 and HIPAA. `ee/engine/compliance/postgres_test.go` creates a database of its own on a real Postgres, applies every migration in `web/packages/db/migrations` with the control plane's own runner, seeds a tenant with the fixture the tenancy suite uses, and appends every audit entry through `appendAudit` in `web/packages/db/src/audit.ts`, which is the implementation that wrote every hash anybody will ever verify. It then runs both packs through `Command`, the entry point the enterprise binary contributes, and writes `soc2.md`, `hipaa.md`, their JSON forms and a coverage note into `AF_COMPLIANCE_EVIDENCE_DIR`. The `enterprise` job runs it on every pull request against the Postgres that job already had, fails when any of the five documents is missing or empty, and keeps them as an artifact. `just compliance` is the same run on a laptop. **This row previously said `proven` about a run nobody could repeat.** No test in the package opened a database connection, the word `compliance` appeared in no workflow and in no justfile recipe, and the doc comment on the chain verifier said in the present tense that a test ran a chain written by the control plane through it. **Four negative arms, each pointed at the case it exists to catch**: an entry altered with a privileged connection is named at its own sequence number, a deleted one at the sequence that followed it, a table carrying an `org_id` with row level security off is named in the failing control, and an application role granted UPDATE on the audit log fails the append only control. Each is restored afterwards, so no arm depends on running before another. **No count is asserted anywhere.** The number of tables carrying an `org_id` is a property of the schema on the day it runs, which is how `seventeen tables` came to be wrong after 0014, 0019 and 0020 landed. What is asserted is that none of them has row level security disabled, and the number is published as an observation. What this does NOT show is written into `coverage.md` beside the reports: the evidence is read out of a database the suite seeded rather than a customer's, so every number in the two reports is the fixture's; `policy-decisions` has no table to read on any installation; retention is what the operator states rather than something the rows can confirm; and no claim is made about authentication, with the method the run saw named in the note. |
 | 13.7, 13.9 to 13.11, 13.13, 13.14 | planned | Multi-cluster, billing, dashboard, support tooling, deployment. |
 
@@ -482,13 +482,74 @@ contract exists to prevent. The fake could not have caught it, because it is one
 process serving the token endpoint and the vault, so a dead address broke them
 together and the token failure hid the vault failure.
 
-AWS and Google are both blocked on a payment method rather than on work, and it
-is worth naming which so nobody re-derives it. There is no AWS account here at
-all. Google is authenticated and a throwaway project exists, but Secret Manager
-refuses to enable without billing (`UREQ_PROJECT_BILLING_NOT_FOUND`), and the
-one billing account on the tenant reports `open: false`, so linking it leaves
-`billingEnabled: false`. Both rows become `proven` the day there are credentials
-to run them with; the suites are written and the setup is scripted.
+AWS and Google are blocked on a payment method for the LIVE half, and it is
+worth naming which so nobody re-derives it. There is no AWS account on this
+machine at all. Google is authenticated as `virrsanghavi@gmail.com` and the
+throwaway project `af-ee-secrets-b2968e` exists, but Secret Manager refuses to
+enable without billing (`UREQ_PROJECT_BILLING_NOT_FOUND`), and the one billing
+account on the tenant reports `open: false`, so linking it leaves
+`billingEnabled: false`. Both re-measured on 2026-09-09.
+
+THIS PARAGRAPH USED TO END "both rows become `proven` the day there are
+credentials to run them with; the suites are written and the setup is scripted",
+AND BOTH HALVES OF THAT WERE FALSE. There was no AWS live suite, no Google live
+suite, and no setup script for either. `ee/engine/secrets/testdata` held exactly
+one directory, `azure-live`. So on the day the credentials arrived, nothing
+would have run, and the sentence is the reason nobody had noticed: it described
+the work as already finished, so nobody looked. The measurement takes a minute
+and needs a positive control to be worth anything, which is that `azure-live`
+matches a file while `aws-live` and `gcp-live` matched nothing anywhere.
+
+They exist now: `ee/engine/secrets/aws_live_test.go`,
+`ee/engine/secrets/testdata/aws-live/setup.sh`,
+`ee/engine/secrets/gcp_live_test.go` and
+`ee/engine/secrets/testdata/gcp-live/setup.sh`. Each drives the same `Run`
+conformance suite that Vault and Key Vault drive, each takes one environment
+variable naming a mode 700 credential directory rather than several naming
+credentials, each skips for exactly one reason, that the directory is absent,
+and each FAILS rather than skips when the directory is present and a file is
+missing. NEITHER HAS RUN, and that is not a form of words: the AWS script has
+never been executed even once because there is no account, and the Google script
+stops at its first step. Both say so in their own opening comment rather than
+only here, because the file somebody opens is the one that has to be honest.
+
+AND LOOKING FOR THE HARNESS FOUND THE FAULT IT WAS MEANT TO CATCH. The Azure
+defect described above was never fixed in the other two adapters, because the
+thing that found it was a live run and neither of those has ever had one.
+Google's `Reach` acquired an OAuth token from Google's token host and never
+spoke to Secret Manager, so a project with the API not enabled, a Service
+Controls perimeter, or a typo in the project id all handed back a good token and
+reported the source usable. AWS had it worse: on the environment credential path
+it made no network call whatsoever, so NO unreachable store could fail it, and
+on the container and instance paths it called the credential endpoint, which is
+a different host from the one secrets are read from. Both now reach the store,
+and both probe it UNSIGNED, because the address being wrong is precisely the
+case the check exists to detect and signing the probe would hand a working
+credential to whoever owns the mistyped name. None of this needed an account to
+find or to fix, which is the part the old sentence had wrong: it was not all
+blocked on billing.
+
+AWS had also never been run through the conformance suite at all. Vault, Key
+Vault and Secret Manager each had a run against a local server; AWS had four
+unit tests about what it says when it cannot be built. That is the direct reason
+its `Reach` could report an unreachable store as usable for as long as it did.
+The behaviour named "is unavailable with a reason when the store cannot be
+reached" was written and passing for three adapters, and no harness had ever
+pointed it at the fourth. It has one now.
+
+NO GATE COULD HAVE CAUGHT THE FALSE SENTENCE, and which ones were checked is
+worth recording so nobody re-checks them. `tools/statuscheck` reads this file and
+says in its own header that it deliberately does not decide whether a `proven`
+row is really proven, because no gate can read a sentence; it enforces the
+vocabulary, and that sentence used the vocabulary correctly. `tools/docscheck`
+is about the rendered documentation site's head tags and never opens this file.
+`tools/claimcheck` is the closest of the three and still could not: it requires
+that a backticked path which looks like it points into this repository exists,
+which is exactly the right rule, but it reads only README.md, CONTRIBUTING.md
+and SECURITY.md, and the sentence named no path at all. That second half is the
+general shape and it is the useful lesson. A claim written as prose with no path
+is unfalsifiable by construction, and the remedy is not a cleverer gate but
+naming the files, which is why the paragraph above names all four.
 
 ## The enterprise binary
 

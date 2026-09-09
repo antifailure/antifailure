@@ -394,14 +394,37 @@ func tokenEndpoint(t *testing.T, base string) *cloudauth.GCPServiceAccount {
 	return account
 }
 
-func fakeSecretManager(t *testing.T) *httptest.Server {
+// gcpListProbe is the key the fake files Reach's list request under.
+const gcpListProbe = "secretmanager.ListSecrets"
+
+func fakeSecretManager(t *testing.T) *fakeServer {
 	t.Helper()
 	values := map[string]string{"DATABASE_URL": "postgres://google", "BLANK": ""}
+	fake := newFakeServer()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"access_token":"a-token","expires_in":3600}`))
+			return
+		}
+
+		// The list Reach probes with. Served separately from the access path
+		// because the two prove different things and a fake that answered both
+		// from one branch could not tell a harness which one it received.
+		if project, ok := parseListPath(r.URL.Path); ok {
+			fake.record(gcpListProbe, r.Header)
+			if project == "denied" {
+				// A refusal is still an answer and still proves the host is
+				// there, which is the whole point of the second call. A
+				// principal holding secretAccessor and not viewer cannot list,
+				// so this is the NORMAL state of a correct configuration.
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"status":"PERMISSION_DENIED","message":"..."}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"secrets":[]}`))
 			return
 		}
 
@@ -436,7 +459,22 @@ func fakeSecretManager(t *testing.T) *httptest.Server {
 		})
 	}))
 	t.Cleanup(server.Close)
-	return server
+	fake.URL = server.URL
+	return fake
+}
+
+// parseListPath reads /v1/projects/{p}/secrets, which is the list Reach probes
+// with and is not the access path.
+func parseListPath(path string) (project string, ok bool) {
+	rest, found := strings.CutPrefix(path, "/v1/projects/")
+	if !found {
+		return "", false
+	}
+	project, rest, found = strings.Cut(rest, "/secrets")
+	if !found || rest != "" || project == "" {
+		return "", false
+	}
+	return project, true
 }
 
 // parseAccessPath reads /v1/projects/{p}/secrets/{s}/versions/{v}:access.
