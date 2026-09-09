@@ -79,6 +79,9 @@ var ledger = []generator{
 	{"go run ./tools/notices -out THIRD_PARTY_NOTICES.md", []string{
 		"THIRD_PARTY_NOTICES.md",
 	}},
+	{"cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json", []string{
+		"engine/internal/manifest/manifest.v1.json",
+	}},
 	{"cd engine && go test ./internal/policy -update-vectors", []string{
 		"schemas/policy-vectors.json",
 	}},

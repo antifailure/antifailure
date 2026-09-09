@@ -1528,6 +1528,10 @@ _generated:
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
+    # The engine enforces the schema's own bounds at parse time, and go:embed
+    # cannot reach outside the engine module, so it embeds a copy. A stale copy
+    # would enforce yesterday's contract while the site published today's.
+    cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json
     (cd engine && go test ./internal/policy -update-vectors)
     (cd engine && go test ./internal/mockpack -update-vectors)
     (cd engine && go test ./internal/webhook -update-vectors)
@@ -1622,6 +1626,7 @@ generate:
     go run ./tools/proxysrc
     go run ./tools/schemadoc .
     go run ./tools/notices -out THIRD_PARTY_NOTICES.md
+    cp schemas/manifest.v1.json engine/internal/manifest/manifest.v1.json
     cd engine && go test ./internal/policy -update-vectors
     cd engine && go test ./internal/mockpack -update-vectors
     cd engine && go test ./internal/webhook -update-vectors

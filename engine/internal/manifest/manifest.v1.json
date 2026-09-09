@@ -1390,7 +1390,7 @@
               "type": "number",
               "minimum": 0,
               "default": 0.25,
-              "description": "How much slower than production a route may get, as a ratio. It divides a measured p95 by production's own p95 for that route, so it needs a source that carries one: the default applies under source otel, and the engine refuses this key under access_log or none unless load.traffic.profile is declared, because a route then arrives with no baseline and the threshold could never fire. A declared traffic profile supplies production's own p95 per route, which is the second place a baseline can come from."
+              "description": "How much slower than production a route may get, as a ratio. It divides a measured p95 by production's own p95 for that route, so it needs a source that carries one: the default applies under source otel, and the engine refuses this key under access_log or none, where a route arrives with no baseline and the threshold could never fire."
             },
             "error_rate": {
               "type": "number",
@@ -1406,9 +1406,6 @@
               "description": "Not read by anything, and refused by the engine. A load run counts requests, not statements. The check that compares statement counts against the base branch is insights.query_regression, and how much growth fails it is insights.regression_factor."
             }
           }
-        },
-        "traffic": {
-          "$ref": "#/$defs/traffic"
         }
       }
     },
@@ -1888,28 +1885,6 @@
           "type": "string",
           "maxLength": 253,
           "description": "Which cluster this target is. Two targets resolving to the same cluster are refused, because a placement decision between them decides nothing."
-        }
-      }
-    },
-    "traffic": {
-      "title": "Traffic",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "profile"
-      ],
-      "description": "The committed record of what production actually serves, which is the denominator every route in a load run is measured against. Without one safe_routes is a list written from memory and nothing says how much of production it misses. Measured on this repository on 2026-09-06: a migration held an exclusive lock on nine relations for thirty seconds and the run over four hand written routes reported 0.0 percent failed, because none of the four reads the locked table.",
-      "properties": {
-        "profile": {
-          "type": "string",
-          "maxLength": 512,
-          "description": "The profile file, relative to the repository root. Written by af traffic record from an OpenTelemetry trace export or a combined format access log, and committed, because the machine that reads it on a pull request cannot reach production. It carries the endpoint mix, the arrival rate, the peak concurrency and the per route p95, and no request body, header, query string or identifier."
-        },
-        "max_age": {
-          "type": "string",
-          "maxLength": 32,
-          "default": "336h",
-          "description": "How old the profile may be before it is refused. A stale profile is not a smaller number, it is an unknown one, so it is refused the way a stale golden is rather than quoted. Fourteen days by default rather than the volume profile's thirty, because an endpoint mix moves at the rate a team ships rather than at the rate a business grows."
         }
       }
     }

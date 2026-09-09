@@ -49,6 +49,9 @@ func validate(m *schema.Manifest, doc *yaml.Node, root string) []Problem {
 	v.change(m)
 	v.github(m)
 
+	// Last, so that a hand written message wins wherever both would speak.
+	v.boundsPass()
+
 	if v.suppressed > 0 {
 		v.problems = append(v.problems, Problem{
 			Message: fmt.Sprintf("There are %d more problems, not listed.", v.suppressed),

@@ -519,7 +519,7 @@ workflows:
   # names the two controls by their visible labels, which is how the planner
   # without a model knows what to press on a page whose shape it does not
   # share with every application.
-  - name: an-operator-who-is-also-a-customer-can-mark-an-application-reviewed
+  - name: an-operator-who-is-also-a-customer-marks-an-application-reviewed
     description: >-
       Sign in to the console as the owner, then sign in to the operator portal
       in the same browser, open the applications queue, open the application

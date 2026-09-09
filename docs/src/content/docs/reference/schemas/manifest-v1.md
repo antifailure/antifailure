@@ -30,7 +30,7 @@ This page is generated from `schemas/manifest.v1.json`. Edit the schema, then ru
 | `policy` | [Policy](#policy) | no | What each class of finding does to the pull request check. |
 | `runtime` | [Runtime](#runtime) | no | Where and how long the environment runs. |
 | `services` | list of [Service](#service) | no | Every process the environment runs: web servers, API servers, background workers, and scheduled jobs. Min items 1, max items 50. |
-| `version` | `1` | **yes** | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
+| `version` | `1` | no | The manifest schema version. Increment only for a breaking change; the engine refuses a version it does not understand rather than guessing. |
 | `workflows` | list of [Workflow](#workflow) | no | What the agents do, written as sentences. A workflow is a goal, not a script: the runner decides the actions and verifies the outcome. Max items 200. |
 
 ## auth
@@ -110,7 +110,7 @@ Where the environment's Postgres comes from, and how the production copy is made
 | `max_branches` | integer | no | The plan's concurrent branch limit, where the provider has one it cannot read from its own API. Reaching it fails with AF-DB-006 rather than hanging. Minimum 1. |
 | `migrations` | [Migrations](#migrations) | no | Where the project's own SQL migrations live, for a project whose migrate command is its own script rather than a tool the rehearsal recognises. |
 | `project` | string | no | The account-side project a hosted provider creates branches in, such as a Neon project. Not a secret, which is why it lives here and the key that reaches it does not. |
-| `provider` | `docker`, `neon`, `supabase`, `dblab`, `pgurl` | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to `docker`. |
+| `provider` | string | no | Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. Defaults to `docker`. |
 | `seed` | string | no | Command that fills the golden with data, for a project with no production database yet. It runs once per refresh with DATABASE_URL set, and every branch is a copy of what it made, so the cost is paid once rather than per environment. Mutually exclusive with source_url_env. Max length 1024. |
 | `source_url_env` | string | no | Name of the environment variable holding the read only connection string of the production database. The value is read once, during a golden refresh, on the operator's machine or runner, and never stored. Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
 | `subset` | [Subset](#subset) | no | Take a production shaped slice rather than the whole database. |
@@ -165,7 +165,7 @@ One variable a service needs. The manifest declares the name and where the value
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `from` | string | no | Where to read the value: a secrets adapter name, or the name of a different variable to copy. Max length 256. |
-| `name` | string | **yes** | Max length 128, matches `^[A-Za-z_][A-Za-z0-9_]*$`. |
+| `name` | string | **yes** | Max length 128, matches `^[A-Za-z_][A-Za-z0-9_.]*$`. |
 | `required` | boolean | no | Whether the environment fails to start without it. Defaults to true, because a service silently missing configuration is the failure this product exists to prevent. Defaults to `true`. |
 | `sandbox` | boolean | no | Marks a credential that must be a sandbox one. The secrets subsystem refuses a value carrying a known live prefix, and the proxy trips a wire if one reaches the network anyway. Defaults to `false`. |
 | `value` | string | no | A literal value for a variable that is configuration rather than a secret, such as a feature flag or a public URL. A value that looks like a credential is rejected. Max length 2048. |
@@ -219,7 +219,7 @@ The masked, verified copy every environment branches from.
 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
-| `max_age` | string | no | How stale a golden may be before af up refreshes it first. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
+| `max_age` | string | no | How stale a golden may be before af up refreshes it first. Defaults to `168h`. Matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 | `retain` | integer | no | How many versions to keep. A referenced version is never collected regardless of this. Defaults to `5`. Minimum 1, maximum 100. |
 | `schedule` | string | no | Cron expression for automatic refreshes, with an optional CRON_TZ prefix. A refresh that would overlap a running one is skipped with an event rather than queued. Max length 128. |
 | `storage` | `local`, `azure_blob`, `s3` | no | Where dumps and attestations live. Defaults to `local`. |
@@ -406,12 +406,12 @@ Where and how long the environment runs. The provider decides the machinery; the
 | `domain` | string | no | Wildcard domain for environment hostnames. Defaults to localhost, which needs no DNS at all. Defaults to `localhost`. Max length 253. |
 | `idle_sleep` | string | no | How long an environment may sit idle before it is scaled to zero. It wakes on the next request. Defaults to `30m`. Matches `^[0-9]+(m\|h)$`. |
 | `kubeconfig_context` | string | no | Which kubeconfig context to use. Naming it prevents an environment landing on whatever cluster happened to be current. Max length 253. |
-| `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(h\|d)$`. |
+| `max_ttl` | string | no | The furthest af env extend may push an environment's expiry, measured from when it was created. A lifetime that can be extended forever is not a lifetime, and this is the bound. Defaults to `168h`. Matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 | `namespace_prefix` | string | no | Prefix for Kubernetes namespaces. Defaults to `af`. Max length 40. |
 | `provider` | string | no | Which runtime places the environment. local and kubernetes are built in. Open rather than a fixed list, for the reason datastore.engine is: a build registers the runtimes it carries, so a manifest naming one this build has no runtime for is refused by the provider lookup, by name, against the runtimes that build actually has, which says more than an unknown value would. Defaults to `local`. Max length 64. |
 | `requires` | object | no | What a target must offer for this repository to be placed on it, as attribute equals value matched against a target's tags. Empty means anywhere. A requirement no declared target satisfies is refused at validation, because both are in this file. Max properties 16. |
 | `targets` | list of [Runtime target](#runtime-target) | no | The places an environment may be placed, in preference order. Empty means the single runtime the provider names, which is every manifest written before placement existed. Max items 32. |
-| `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(h\|d)$`. |
+| `ttl` | string | no | How long an environment lives before the reaper tears it down. Extend one you are still using with af env extend, up to max_ttl. Defaults to `24h`. Matches `^[0-9]+(ms\|s\|m\|h\|d)$`. |
 
 ## Runtime target
 
@@ -433,7 +433,7 @@ One process the environment runs. A service is built from the repository, given 
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `build` | [Build](#build) | no | How to turn the service directory into an image. |
-| `command` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 1024. |
+| `command` | string | no | Command that starts the service, overriding the image's own. Executed with an argument vector, never through a shell. Max length 4096. |
 | `depends_on` | list of string | no | Services that must be ready first. A cycle is rejected at validation. Max items 50. |
 | `env` | list of [Environment variable](#environment-variable) | no | Names of environment variables this service needs. Names only. Values come from the secrets subsystem, and a name with no value anywhere fails with AF-SEC-001 rather than starting a service that will misbehave. Max items 200. |
 | `health_path` | string | no | HTTP path that reports readiness. A service is not considered up until this returns a 2xx or 3xx status. Defaults to `/`. Max length 512. |
