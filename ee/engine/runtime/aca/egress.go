@@ -785,8 +785,17 @@ func byPriority(rules []SecurityRule) []SecurityRule {
 	return out
 }
 
-// hasDenyAllOutbound reports whether the group's last word is a deny that
-// covers a destination no earlier rule named.
+// hasDenyAllOutbound reports whether the group denies every destination no
+// other rule names, at any priority rather than as its last rule.
+//
+// At any priority, and that is weaker than the first match wins rule Azure
+// actually applies only if this function is read on its own. A deny that sits
+// after a broad allow decides nothing, and the single caller has already
+// enumerated every broad allow at every priority as its own reason the path is
+// open, so the case where ordering would matter is refused before this is
+// asked. What is left for this to answer is whether an address nobody named at
+// all falls through to Azure's own default outbound allow, and no reordering of
+// the rules changes that answer.
 func hasDenyAllOutbound(g NetworkSecurityGroup) bool {
 	for _, rule := range byPriority(g.Outbound) {
 		if rule.Access != Deny {

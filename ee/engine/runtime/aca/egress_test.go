@@ -578,6 +578,49 @@ func TestTheChecksReadPriorityRatherThanPosition(t *testing.T) {
 	}
 }
 
+// TestTheReportNamesRulesInThePriorityAzureReadsThem is the assertion the test
+// above cannot make, and it exists because a mutation showed that.
+//
+// Reversing the slices leaves every verdict where it was, and it would do that
+// for a build with no sort in it at all: every check in this file is a
+// quantifier over the whole rule set rather than a walk that stops at the first
+// match, so position cannot reach a verdict. Disabling the sort in byPriority
+// leaves the entire package green, which makes that line something no test
+// could say no about. What the sort actually buys is the order of the
+// enumeration a person reads after a refusal, so that is what this pins: two
+// rules that open the same path, handed over in the order Azure would evaluate
+// them second, are still reported first things first.
+func TestTheReportNamesRulesInThePriorityAzureReadsThem(t *testing.T) {
+	const id = "an-arbitrary-public-address"
+
+	plan := referencePlan()
+	// Appended late before early, so that slice order and priority order
+	// disagree. Both destinations are public, so both are reasons this path is
+	// open and both have to appear.
+	plan.Network.NSG.Outbound = append(plan.Network.NSG.Outbound,
+		aca.SecurityRule{
+			Name: "allow-late", Priority: 2900, Access: aca.Allow, Protocol: "*",
+			SourceAddressPrefix: "10.30.1.0/27", DestinationAddressPrefix: "203.0.113.0/24",
+			DestinationPortRange: "*",
+		},
+		aca.SecurityRule{
+			Name: "allow-early", Priority: 2800, Access: aca.Allow, Protocol: "*",
+			SourceAddressPrefix: "10.30.1.0/27", DestinationAddressPrefix: "198.51.100.0/24",
+			DestinationPortRange: "*",
+		})
+
+	report := aca.Evaluate(plan)
+	require.Equal(t, aca.Open, verdictsByID(report)[id],
+		"two allow rules to public ranges have to open this path")
+
+	detail := detailByID(report)[id]
+	require.Contains(t, detail, `"allow-early"`, "the rule at priority 2800 is not named")
+	require.Contains(t, detail, `"allow-late"`, "the rule at priority 2900 is not named")
+	require.Less(t,
+		strings.Index(detail, `"allow-early"`), strings.Index(detail, `"allow-late"`),
+		"the reasons are listed in slice order, so a reader is sent to priority 2900 first")
+}
+
 func reversed(rules []aca.SecurityRule) []aca.SecurityRule {
 	out := make([]aca.SecurityRule, 0, len(rules))
 	for i := len(rules) - 1; i >= 0; i-- {
