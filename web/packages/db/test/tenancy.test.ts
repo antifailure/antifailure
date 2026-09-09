@@ -188,6 +188,22 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
       ['analytics_actives', 'distinct counts over a window, with no identifier in them'],
       ['analytics_retention_cohorts', 'a cohort grid of counts, with no identifier in it'],
       ['analytics_funnel_weeks', 'counts of how far subjects got, with no identifier in them'],
+      [
+        'control_plane_failures',
+        'what the CONTROL PLANE caught in itself, grouped: one row per fingerprint over the ' +
+          'declared route key, the HTTP method, the error class and the driver code, with a ' +
+          'count. It has no org_id because it holds nothing belonging to a tenant, and that is ' +
+          'a boundary rather than an omission. The reason is on app.onError already: Drizzle ' +
+          'renders a query failure as the whole statement with its parameters after it, so an ' +
+          'error message from this stack can carry a tenant\'s event payload, and the store ' +
+          'therefore keeps no message, no stack, no payload and no organization. Adding an ' +
+          'org_id to answer "how many tenants did this touch" would turn a small operational ' +
+          'table into tenant data, so the page says it cannot answer that instead. The same ' +
+          'shape as platform_controls: reading is open to the application role on purpose, ' +
+          'because the flush has to know whether a group already exists before the cap can ' +
+          'decide, and DELETE is not granted to it at all, which the test below proves. See ' +
+          'migrations/0042.',
+      ],
     ])
 
     // Partitions are excluded because a partition is storage for its parent
@@ -229,6 +245,63 @@ describe('cross-tenant isolation', { skip: hasDatabase ? false : 'no Postgres at
    * would mean the table IS reachable and simply happened to be empty, which
    * is the state this suite exists to distinguish from isolation.
    */
+  /**
+   * The claim the classification makes about the failure store, tested.
+   *
+   * The sentence in the list above says the application role cannot erase the
+   * record of what it did, and a sentence is not a mechanism. What enforces it
+   * is that migration 0042 grants the application role SELECT, INSERT and
+   * UPDATE and no DELETE, and writes no FOR DELETE policy, so a statement it
+   * constructs is refused by the database before any policy is consulted.
+   *
+   * The reason that matters more than tidiness: this table is the record of
+   * every failure the control plane had, and the request path is exactly where
+   * a compromised application role would be reached from. A role that can erase
+   * that record can erase the evidence of how it got there.
+   *
+   * Asserted as 42501 specifically, and then the row is counted again. A DELETE
+   * that merely affected no rows would pass a weaker assertion and would mean
+   * the opposite thing: that the table IS writable and the WHERE happened to
+   * match nothing.
+   */
+  it('the application role can count the failure store and cannot erase it', async () => {
+    const fingerprint = 'f'.repeat(64)
+    await h.admin`
+      INSERT INTO control_plane_failures (
+        fingerprint, source, route, method, kind, occurrences,
+        first_seen_at, last_seen_at, first_seen_version, last_seen_version)
+      VALUES (${fingerprint}, 'http', 'GET other', 'GET', 'TypeError', 1,
+              now(), now(), 'test', 'test')`
+
+    // Reading IS allowed, and is asserted rather than assumed: the flush's cap
+    // check is a read, so a migration that revoked SELECT to look tidy would
+    // stop the cap working and the failure would be a store that silently
+    // records nothing new.
+    const read = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`SELECT count(*) FROM control_plane_failures`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(read, null, 'the application role cannot count the store, so the cap cannot work')
+
+    const erase = await h.pool
+      .withTenant({ orgId: alice.orgId, userId: alice.userId }, async (db) => {
+        await db.execute(sql`DELETE FROM control_plane_failures WHERE fingerprint = ${fingerprint}`)
+      })
+      .then(() => null, (e: unknown) => pgError(e))
+    assert.equal(
+      erase?.code,
+      '42501',
+      'the application role could delete the record of what the control plane had failed at',
+    )
+
+    const [left] = await h.admin<{ n: string }[]>`
+      SELECT count(*) AS n FROM control_plane_failures WHERE fingerprint = ${fingerprint}`
+    assert.equal(Number(left!.n), 1, 'the refusal above was a statement that matched nothing')
+
+    await h.admin`DELETE FROM control_plane_failures WHERE fingerprint = ${fingerprint}`
+  })
+
   it('the application role cannot read or write an operator\'s notes', async () => {
     const [note] = await h.admin<{ id: string }[]>`
       INSERT INTO admin_notes (subject_type, subject_id, body, author_label)
