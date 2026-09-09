@@ -9,8 +9,7 @@ import (
 	"github.com/antifailure/antifailure/engine/pkg/schema"
 )
 
-// The three stances that are not a golden, turned into things the environment
-// does.
+// The stances that are not a golden, turned into things the environment does.
 //
 // Every one of them had a manifest key and no behaviour. A store declared
 // empty, derived or topics_only got a progress line saying that this build

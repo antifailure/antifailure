@@ -53,7 +53,7 @@ import (
 // what can be seen. That is the line that makes the score go down on exactly
 // the stack this dimension was added for.
 //
-// A store declared with one of the other three stances is SUBSTITUTED when
+// A store declared empty, derived or topics_only is SUBSTITUTED when
 // this environment did what the stance asks and the store is running, ABSENT
 // when it is not running, and UNMEASURED when the run that brought this
 // environment up recorded no such job. That was UNMEASURED in every case until
