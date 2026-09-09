@@ -2193,9 +2193,9 @@ A route list written by hand cannot know which routes touch which tables.
 Measured on the Antifailure repository on 2026-09-06: a migration held an
 ` + "`" + `ACCESS EXCLUSIVE` + "`" + ` lock on nine relations for thirty seconds, ` + "`" + `pg_locks` + "`" + `
 confirmed it from a second connection, and ` + "`" + `af load smoke` + "`" + ` ran through the
-whole window reporting 0.0 percent failed with p95 improving from 41ms to 17ms.
-None of its four ` + "`" + `safe_routes` + "`" + ` reads the locked table. It was not a weak
-result. It was a green one.
+whole window reporting 0.0 percent failed with p95 improving from 41 ms to
+17 ms. None of its four ` + "`" + `safe_routes` + "`" + ` reads the locked table. It was not a
+weak result. It was a green one.
 
 ` + "`" + `af traffic record` + "`" + ` counts what production served, from an OpenTelemetry trace
 export or a combined format access log that a collector or a reverse proxy
