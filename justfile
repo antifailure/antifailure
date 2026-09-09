@@ -479,15 +479,57 @@ test-site-beacon:
 # enterprise package added later is covered without editing this or CI. Naming
 # them by hand is how two of them ended up untested.
 test-ee:
-    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off go test ./... -race -count=1 -timeout 15m
-    # web first, because ee/web's packages resolve @antifailure/db and
-    # @antifailure/api out of web/ with file: dependencies, and `npm ci` in
-    # ee/web with web absent succeeds and leaves a tree whose typecheck fails
-    # inside web/packages/db/src/schema.ts.
+    # The control plane's dependencies BEFORE the Go tests, and that order is
+    # now load bearing rather than incidental.
+    #
+    # Two suites under ee/engine/compliance can only run with them present. The
+    # audit chain drift guard re-runs web/packages/db/src/audit.ts and requires
+    # it to still produce the recorded vectors. The pack suite seeds a real
+    # control plane, applying the real migrations and appending every audit
+    # entry through the real appendAudit, and then runs the SOC 2 and HIPAA
+    # packs against it. Both used to sit behind this line, so both skipped in
+    # the one place that has a Postgres to run them against. A suite that skips
+    # wherever it could have run is a suite nothing schedules.
+    #
+    # web comes first of the two installs because ee/web's packages resolve
+    # @antifailure/db and @antifailure/api out of web/ with file: dependencies,
+    # and `npm ci` in ee/web with web absent succeeds and leaves a tree whose
+    # typecheck fails inside web/packages/db/src/schema.ts.
     go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    cd ee/engine && GOWORK=off go build ./... && GOWORK=off go vet ./... && GOWORK=off AF_COMPLIANCE_EVIDENCE_DIR="{{justfile_directory()}}/{{reports}}/compliance" go test ./... -race -count=1 -timeout 15m
     go run ./tools/installcheck . ee/web || npm --prefix ee/web ci --no-audit --no-fund
     npm --prefix ee/web run typecheck
     npm --prefix ee/web test
+
+# The SOC 2 and HIPAA packs, run against a real Postgres, publishing what they
+# found.
+#
+# WHY THIS EXISTS SEPARATELY from `just test-ee`, which already runs it. Row
+# 13.12 of docs/plan/STATUS.md claimed a run against a real control plane that
+# nobody could repeat, and the repair is not only that a job runs it. Somebody
+# told the packs are proven needs one command to type and a document to read
+# afterwards. This is that command. It writes soc2.md, hipaa.md, their JSON
+# forms and a coverage note saying what the run did NOT check into
+# {{reports}}/compliance.
+#
+# It needs a Postgres and it needs web/'s dependencies, because the audit chain
+# it verifies has to be written by the control plane's own appendAudit rather
+# than by the verifier. Point AF_TEST_DATABASE_URL at your own server: it
+# creates a database of its own there and drops it afterwards, so it never
+# reads or writes the one you name. With no server at all it SKIPS and says so,
+# unless AF_TEST_DATABASE_URL or AF_REQUIRE_DATABASE=1 states that one was
+# supposed to be there, which turns the skip into a failure.
+#
+# The SOC 2 and HIPAA packs against a real Postgres, publishing what they found.
+compliance:
+    go run ./tools/installcheck . web || npm --prefix web ci --no-audit --no-fund
+    cd ee/engine && GOWORK=off AF_COMPLIANCE_EVIDENCE_DIR="{{justfile_directory()}}/{{reports}}/compliance" go test ./compliance -count=1 -v -timeout 10m
+    @echo
+    @if [ -f "{{reports}}/compliance/coverage.md" ]; then \
+      cat "{{reports}}/compliance/coverage.md"; \
+     else \
+      echo "No evidence was published, so the suite skipped. It says why above."; \
+     fi
 
 # The numbers this repository is allowed to quote.
 #

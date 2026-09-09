@@ -4686,6 +4686,37 @@ control it belonged to:
 
 A control reported as "not evidenced" because a query failed must not be
 mistaken for one where there was genuinely nothing to show.
+
+## How this is proved
+
+Every claim on this page is checked on every pull request, against a real
+Postgres rather than a fixture.
+
+The suite creates a database of its own, applies every control plane migration
+with the control plane's own runner, and appends every audit entry through
+` + "`" + `appendAudit` + "`" + `, which is the implementation that wrote every hash in your
+installation. The Go verifier that recomputes those hashes is therefore checked
+against a chain it did not write; a verifier checked against its own output
+agrees with itself, and a disagreement of one byte would report every clean
+audit log as tampered.
+
+It then runs both packs and requires four things to be reported, each with the
+break restored afterwards so no case depends on running before another:
+
+- an entry altered with a privileged connection, named at its own sequence
+  number;
+- an entry deleted with one, named as a broken link at the entry that followed
+  it;
+- a table carrying an ` + "`" + `org_id` + "`" + ` with row level security switched off, named in
+  the failing control, and no longer named once it is switched on;
+- an application role granted ` + "`" + `UPDATE` + "`" + ` on the audit log, naming the privilege.
+
+The number of tables carrying an ` + "`" + `org_id` + "`" + ` is never asserted. It is a property of
+the schema on the day it runs, so what is checked is that none of them has row
+level security disabled.
+
+The reports that run produces, and a note saying what it did not check, are kept
+as a build artifact. Run it yourself with ` + "`" + `just compliance` + "`" + `.
 `,
 	"enterprise/issuing-licenses.md": `---
 title: Issuing a license

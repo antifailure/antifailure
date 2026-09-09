@@ -618,6 +618,18 @@ func uncalledByGate(recipes []recipe, reachable map[string]bool) []string {
 		"default": true, "setup": true, "db": true, "db-down": true, "deps": true,
 		"build": true, "build-release": true, "test": true, "test-short": true,
 		"fmt": true, "generate": true, "clean": true, "gate": true, "leaks": true,
+		// Re-runs ONE package that `gate` already runs, and prints the note it
+		// wrote. `go test ./compliance` in ee/engine is a strict subset of the
+		// `go test ./...` that `just test-ee` runs inside `gate`, so `gate`
+		// calling this as well would decide the same thing twice and add ten
+		// minutes to every branch. It exists because the SOC 2 and HIPAA packs
+		// are something a person is told is proven, and being told that is
+		// worth one command to type and a document to read afterwards rather
+		// than a package path to remember. Kept here rather than in
+		// exemptFromGate for the reason that list records: an exemption says a
+		// workflow runs a gate that `gate` does not, and that is not true of
+		// this one. `gate` does run it.
+		"compliance": true,
 		// Produces the coverage profile that `coverage` then checks, which
 		// makes it the same kind of thing as `generate`: it writes an artifact
 		// rather than deciding anything. It is out of `gate` because it runs
