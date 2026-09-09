@@ -120,10 +120,18 @@ var aws = &Emulator{
 		// worse: it is a public name pointing at 127.0.0.1, so the message
 		// would leave the surface and land somewhere nobody declared.
 		//
-		// `off` makes the queue URL carry the Host the request was made to,
-		// which for an application reaching sqs.us-east-1.amazonaws.com is
-		// exactly what real SQS returns.
-		"SQS_ENDPOINT_STRATEGY": "off",
+		// `dynamic` is the strategy that derives the URL from the request's
+		// own Host header, which for an application reaching
+		// sqs.us-east-1.amazonaws.com returns a URL on
+		// sqs.us-east-1.amazonaws.com, exactly as real SQS does.
+		//
+		// `off` was tried first and measured, and it is not enough: it drops
+		// the `sqs.<region>.` prefix and still answers on LocalStack's own
+		// base domain, so the same run failed one name shorter, with
+		// `getaddrinfo EAI_AGAIN localhost.localstack.cloud`. Both of the
+		// other strategies name that domain too. Only `dynamic` answers with
+		// the name the caller used.
+		"SQS_ENDPOINT_STRATEGY": "dynamic",
 
 		// Listen on every interface inside the container, because the address
 		// the sidecar forwards to is the container's address on the inner
