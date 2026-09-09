@@ -315,10 +315,11 @@
             "neon",
             "supabase",
             "dblab",
-            "pgurl"
+            "pgurl",
+            "aurora"
           ],
           "default": "docker",
-          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name."
+          "description": "Which provider creates branches. docker is local and needs nothing; neon, supabase, and dblab talk to a service; pgurl is any reachable Postgres, which is where the goldens and the branches are kept as databases on a server you name. aurora clones an Amazon Aurora PostgreSQL cluster and is in the enterprise edition, so a community build names it here and refuses it when a manifest selects it."
         },
         "version": {
           "type": "integer",

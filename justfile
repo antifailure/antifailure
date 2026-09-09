@@ -630,6 +630,14 @@ benchmark:
     # AF_TEST_CLICKHOUSE_URL, it starts the machine's managed server.
     AF_BENCHMARK=1 go test ./internal/datastore/clickhouse -run TestBenchmarkEventsInTheTwin \
       -v -count=1 -timeout 60m
+    # The Aurora provider, which is a different question again: what a BRANCH
+    # costs, at a volume the control plane reports as one gigabyte and at one
+    # it reports as a terabyte. It publishes the control plane calls and the
+    # database connections, and it prints UNMEASURED for the wall clock,
+    # because that number belongs to AWS and no test here has an account. It
+    # is its own module, so GOWORK is off.
+    (cd ../ee/engine && AF_BENCHMARK=1 GOWORK=off go test ./db/aurora \
+      -run TestBenchmarkBranchIsFlatInTheSizeOfTheVolume -v -count=1 -timeout 30m)
     # What one documentation answer costs an agent, against what the whole
     # documentation set would cost it. It is the one benchmark here that needs
     # no database, no daemon and no network: the corpus is compiled into the

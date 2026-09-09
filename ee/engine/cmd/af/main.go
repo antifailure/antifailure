@@ -31,6 +31,7 @@ import (
 	"github.com/antifailure/antifailure/ee/engine/auditsink"
 	"github.com/antifailure/antifailure/ee/engine/cloudgate"
 	"github.com/antifailure/antifailure/ee/engine/compliance"
+	"github.com/antifailure/antifailure/ee/engine/db/aurora"
 	"github.com/antifailure/antifailure/ee/engine/feature"
 	"github.com/antifailure/antifailure/ee/engine/license"
 	"github.com/antifailure/antifailure/ee/engine/policyenforce"
@@ -191,6 +192,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "af: audit sink: configured, and audit_stream is not licensed "+
 			"on this installation, so nothing is forwarded\n")
 	}
+	// The database providers this edition adds, in the same registry and for
+	// the same reason as the registrations above: a provider that is written,
+	// tested and never registered is the shippable gap this file's header
+	// describes, and the engine's own switch only asks the registry for names
+	// it does not have itself.
+	//
+	// Unconditional rather than gated on the licence. Selecting one is a
+	// manifest saying database.provider is aurora, and a build whose licence
+	// lapsed should refuse at the point of use with a sentence about the
+	// licence rather than disappear from the list of providers this build has
+	// and answer "which this build does not have".
+	aurora.Register(extension.Default)
 
 	// The licence gate on the managed cloud providers, and it goes LAST,
 	// after every registration above, because it wraps what is registered at

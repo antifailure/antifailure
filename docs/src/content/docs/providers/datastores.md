@@ -2,7 +2,7 @@
 title: Datastore providers
 description: Every store an environment holds other than the primary Postgres, the stance each one declares, and why there is no default.
 sidebar:
-  order: 8
+  order: 9
 ---
 
 A datastore is a store the environment holds that is not the primary Postgres:

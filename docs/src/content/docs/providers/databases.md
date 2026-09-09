@@ -11,7 +11,7 @@ meant to be written by people outside this repository.
 
 ```yaml
 database:
-  provider: docker   # or neon, supabase, dblab, or pgurl
+  provider: docker   # or neon, supabase, dblab, pgurl, or aurora
   version: 17
 ```
 
@@ -24,6 +24,7 @@ database:
 | [`dblab`](/docs/providers/dblab) | A Database Lab Engine you run | Flat, because clones are copy on write | A Database Lab Engine, ZFS, and its verification token |
 | [`supabase`](/docs/providers/supabase) | A Supabase branch, which is a whole separate project | Grows with the database, because a Supabase branch is created empty | A Supabase project on a paid plan and an access token |
 | [`pgurl`](/docs/providers/pgurl) | A database on any Postgres server you name | Grows with the database, because a branch is a server side file copy | A reachable Postgres and a role that may create databases |
+| [`aurora`](/docs/providers/aurora) | A clone of an Amazon Aurora PostgreSQL cluster | Flat, because a clone shares the source's storage volume | An Aurora PostgreSQL cluster, an IAM role, and the enterprise edition |
 
 `docker` is the default and needs nothing. Its branch time is flat, measured
 rather than assumed: the conformance suite branches an 8 MiB golden and a 512 MiB
@@ -53,6 +54,14 @@ Branch time is not flat, because Supabase creates a branch with no data in it
 and the golden has to be copied in, but what you get back is a real Supabase
 project with the Auth, Storage and Realtime services your application is
 calling, which neither of the others can offer. A branch is billed by the hour.
+
+`aurora` is the flat one for a production that already runs on Aurora
+PostgreSQL, and it is in the enterprise edition, because it needs an IAM role
+somebody in an organization has to grant. A branch is an Aurora clone, so
+branching moves no data whatever the size. What it does not give you is
+seconds: a clone has no instances, a preview environment needs one, and
+provisioning a writer takes minutes. That number is flat in the size too, and
+the provider page says so before you buy rather than after.
 
 A provider named in the manifest and neither built into this binary nor
 registered with it is refused at startup rather than substituted. Falling back

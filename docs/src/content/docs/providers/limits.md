@@ -2,7 +2,7 @@
 title: Provider limits
 description: What happens when a provider runs out of branches, and what to do about it.
 sidebar:
-  order: 11
+  order: 12
 ---
 
 Every hosted provider has a ceiling on how many databases exist at once, and it

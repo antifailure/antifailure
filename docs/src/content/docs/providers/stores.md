@@ -2,7 +2,7 @@
 title: Golden stores
 description: Where a golden's dump and its attestation live, the four stores that ship, and exactly what is proved about the services that speak the S3 API.
 sidebar:
-  order: 7
+  order: 8
 ---
 
 A golden store is where a golden's dump and its attestation live when they
