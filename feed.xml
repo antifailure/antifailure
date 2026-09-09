@@ -8,12 +8,12 @@
   <updated>2026-09-09T04:05:04Z</updated>
   <author><name>Antifailure</name></author>
   <entry>
-    <title>Site API: 1 failed check, still failing</title>
+    <title>Site API: 1 failed check, recovered</title>
     <id>tag:antifailure.dev,2026:status/outage/site-api/2026-09-09T04:05:04Z</id>
     <link rel="alternate" type="text/html" href="https://antifailure.github.io/antifailure/"/>
     <updated>2026-09-09T04:05:04Z</updated>
-    <summary type="text">The probe recorded 1 consecutive failed check for Site API, from Sep 9, 2026 - 04:05 UTC to Sep 9, 2026 - 04:05 UTC. The first failure was: HTTP 503. It has not passed a check since. This entry is generated from the readings and is not a written incident report.</summary>
-    <content type="html">&lt;p&gt;The probe recorded 1 consecutive failed check for Site API, from Sep 9, 2026 - 04:05 UTC to Sep 9, 2026 - 04:05 UTC. The first failure was: HTTP 503. It has not passed a check since. This entry is generated from the readings and is not a written incident report.&lt;/p&gt;&lt;p&gt;Detected from the readings&lt;/p&gt;</content>
+    <summary type="text">The probe recorded 1 consecutive failed check for Site API, from Sep 9, 2026 - 04:05 UTC to Sep 9, 2026 - 04:05 UTC. The first failure was: HTTP 503. A later check passed. This entry is generated from the readings and is not a written incident report.</summary>
+    <content type="html">&lt;p&gt;The probe recorded 1 consecutive failed check for Site API, from Sep 9, 2026 - 04:05 UTC to Sep 9, 2026 - 04:05 UTC. The first failure was: HTTP 503. A later check passed. This entry is generated from the readings and is not a written incident report.&lt;/p&gt;&lt;p&gt;Detected from the readings&lt;/p&gt;</content>
   </entry>
 </feed>
 
