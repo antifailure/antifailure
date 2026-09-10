@@ -305,7 +305,8 @@ func (outsideEmulator) Name() string    { return "aws" }
 func (outsideEmulator) Hosts() []string { return []string{"s3.amazonaws.com"} }
 func (outsideEmulator) Container() extension.EmulatorContainer {
 	return extension.EmulatorContainer{
-		Image: "example.invalid/localstack@sha256:" + strings.Repeat("a", 64),
-		Port:  4566,
+		Image:      "example.invalid/localstack@sha256:" + strings.Repeat("a", 64),
+		Port:       4566,
+		Maintainer: extension.MaintainerCommercial,
 	}
 }

@@ -71,8 +71,7 @@ async function main() {
   record("sqs.SendMessage and ReceiveMessage", message);
 
   // The other half. A service outside the declared surface has to be refused,
-  // in the shape AWS refuses things in, because an application's error
-  // handling is written against that shape.
+  // with the shipped sidecar's decision, without reaching the emulator.
   const refused = await fetch("https://lambda.us-east-1.amazonaws.com/2015-03-31/functions", {
     method: "GET",
   });
@@ -80,11 +79,14 @@ async function main() {
   if (refused.status !== 403) {
     throw new Error(`lambda answered ${refused.status}, and it is outside the surface`);
   }
-  if (!(refused.headers.get("content-type") || "").includes("xml")) {
-    throw new Error(`the refusal was ${refused.headers.get("content-type")}, not AWS's own shape`);
+  if (!(refused.headers.get("content-type") || "").includes("text/plain")) {
+    throw new Error(`the refusal was ${refused.headers.get("content-type")}, not the sidecar's text response`);
   }
-  if (!text.includes("<Code>AccessDenied</Code>")) {
-    throw new Error(`the refusal carried no AWS error code: ${text}`);
+  if (refused.headers.get("x-antifailure-decision") !== "block") {
+    throw new Error("the refusal carried no block decision");
+  }
+  if (!text.includes("outside the emulated AWS surface")) {
+    throw new Error(`the refusal did not explain the uncovered destination: ${text}`);
   }
   record("lambda is refused", `${refused.status} ${refused.headers.get("content-type")}`);
 

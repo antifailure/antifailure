@@ -7629,7 +7629,7 @@ shared address for them, or a record across repositories.
 title: AWS
 description: The AWS surface an environment will answer for itself, the surface it refuses, and how much of it is built.
 sidebar:
-  order: 22
+  order: 25
 ---
 
 An environment answers AWS calls itself, with **no endpoint override in the
@@ -7637,14 +7637,25 @@ application**. Every name resolves to the sidecar, the sidecar terminates TLS
 with the certificate authority the environment already trusts, and it answers
 for ` + "`" + `s3.amazonaws.com` + "`" + ` itself. The code that runs is the code that ships: no
 ` + "`" + `AWS_ENDPOINT_URL` + "`" + `, no client constructed differently in tests, no branch on an
-environment variable. That is the design, and the section immediately below
-says how much of it a manifest can ask for today, which is none of it yet.
+environment variable. Select the emulator in the manifest's egress rules.
 
-## What is built, before you plan around any of this
+## Select the AWS emulator
 
-**The surface below is declared and proved. It is not yet reachable from a
-manifest.** Read this page as the surface an environment will answer for, and
-as the measurements behind it, rather than as something ` + "`" + `af up` + "`" + ` does today.
+` + "`" + "`" + "`" + `yaml
+egress:
+  default: block
+  rules:
+    - host: s3.amazonaws.com
+      mode: emulate
+      emulator: aws
+    - host: '*.s3.amazonaws.com'
+      mode: emulate
+      emulator: aws
+` + "`" + "`" + "`" + `
+
+Add rules for the covered hosts your application uses. The Docker runtime
+starts the registered emulator on the contained network and the sidecar routes
+matching requests to it. No live AWS account is needed for this emulator.
 
 What exists: ` + "`" + `engine/pkg/emulator` + "`" + ` holds the declaration, with the hosts, the
 pinned digest and the licence; a build registers it into the extension registry
@@ -7654,13 +7665,9 @@ at startup, which is the only place the engine ever resolves an emulator from;
 at the pinned image on every run of CI, with zero endpoint overrides, which is
 what makes the numbers on this page measurements rather than claims.
 
-What does not: ` + "`" + `egress.rules[].mode` + "`" + ` has no ` + "`" + `emulate` + "`" + ` value, so a manifest
-cannot ask for this. Nothing in the engine starts the emulator container or
-tells the sidecar about it, and the sidecar the suite drives is a stand in that
-carries only the rerouting and the two preserved headers. Until that half
-lands, this surface is ` + "`" + `proved` + "`" + ` rather than ` + "`" + `reachable` + "`" + `, and the honest reading
-of every table below is what an environment will answer for and not what one
-answers for now.
+The SDK suite uses a focused routing fixture. Separate Docker runtime tests
+prove unchanged-application routing, containment and teardown through the real
+runtime. Neither suite establishes equivalence with every live AWS API.
 
 The emulator behind it is [LocalStack](https://github.com/localstack/localstack).
 Antifailure does not write emulators. S3 alone has a decade of edge cases in it,

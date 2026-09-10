@@ -9,7 +9,7 @@
 // what the aliases point at.
 //
 // It routes a covered host to the emulator with its Host and Authorization
-// headers untouched, refuses everything else in AWS's own XML error shape, and
+// headers untouched, refuses everything else with the sidecar's block response, and
 // writes one line per decision to standard output so that the suite can assert
 // on what the SDK actually sent.
 package main
