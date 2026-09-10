@@ -3,7 +3,6 @@ package cloudsql_test
 
 import (
 	"context"
-	"github.com/antifailure/antifailure/ee/engine/db/cloudsql"
 	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
@@ -20,7 +19,7 @@ func TestCancellationAfterAcceptanceRemovesTheUnfinishedResource(t *testing.T) {
 		t.Run(map[bool]string{false: "golden", true: "branch"}[branching], func(t *testing.T) {
 			server := newFake(t, seedSQL)
 			opts := options(t, server)
-			original, err := cloudsql.New(context.Background(), opts)
+			original, err := newScoped(context.Background(), server, opts)
 			require.NoError(t, err)
 			defer func() { _ = original.Close() }()
 			version := ""
@@ -51,7 +50,7 @@ func TestCancellationAfterAcceptanceRemovesTheUnfinishedResource(t *testing.T) {
 				}
 				return response, err
 			})
-			p, err := cloudsql.New(context.Background(), opts)
+			p, err := newScoped(context.Background(), server, opts)
 			require.NoError(t, err)
 			defer func() { _ = p.Close() }()
 			if branching {
