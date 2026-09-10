@@ -1547,11 +1547,18 @@ export const environmentUsageDaily = pgTable('environment_usage_daily', {
   measuredAt: timestamp('measured_at', { withTimezone: true }).notNull(),
 }, (t) => [primaryKey({ columns: [t.orgId, t.day] })])
 
+/** Organization-owned positions, readable and writable only by the forwarder. */
+export const auditStreamPositions = pgTable('audit_stream_positions', {
+  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+})
+
 export const tenantScopedTables = [
   environmentUsage, environmentUsageDaily, usageRollupState,
   members, githubInstallations, repositories, environments, goldenVersions,
   runs, verdicts, artifacts, maskingRules, networkRules, runtimes, engineTokens,
-  events, auditEntries, providerKeys, providerBudgets,
+  events, auditEntries, auditStreamPositions, providerKeys, providerBudgets,
   ssoConnections, ssoConnectionSecrets, ssoDomains, ssoLoginStates,
   ssoAssertionsSeen, ssoBreakGlassCodes,
   scimTokens, scimResources, scimGroups, scimGroupMembers,
@@ -1659,13 +1666,6 @@ export const controlPlaneFailures = pgTable(
 
 export const auditStreamCursor = pgTable('audit_stream_cursor', {
   id: boolean('id').primaryKey().default(true),
-  deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
-})
-
-/** Delivery positions follow the writer's per organization transaction lock. */
-export const auditStreamPositions = pgTable('audit_stream_positions', {
-  orgId: uuid('org_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
   deliveredSeq: bigint('delivered_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
 })
